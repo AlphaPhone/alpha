@@ -3,6 +3,7 @@ package com.android.provision;
 import android.app.Activity;
 import android.app.role.RoleManager;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Process;
 import android.os.Handler;
@@ -18,17 +19,18 @@ import android.view.View;
 
 /** Alpha's first-run presentation; the existing provisioner owns completion. */
 final class AlphaWelcome {
+    static final int BACKGROUND = Color.rgb(5, 5, 5);
+
     private static int dp(Activity a, int value) {
         return Math.round(value * a.getResources().getDisplayMetrics().density);
     }
 
     static void show(Activity activity, Runnable completed) {
-        final int foreground = Color.WHITE;
-        activity.getWindow().setStatusBarColor(Color.rgb(5, 5, 5));
-        activity.getWindow().setNavigationBarColor(Color.rgb(5, 5, 5));
+        activity.getWindow().setStatusBarColor(BACKGROUND);
+        activity.getWindow().setNavigationBarColor(BACKGROUND);
         ScrollView scroll = new ScrollView(activity);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(Color.rgb(5, 5, 5));
+        scroll.setBackgroundColor(BACKGROUND);
         LinearLayout column = new LinearLayout(activity);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_VERTICAL);
@@ -40,7 +42,7 @@ final class AlphaWelcome {
         LinearLayout.LayoutParams markLayout = new LinearLayout.LayoutParams(dp(activity, 88), dp(activity, 88));
         markLayout.bottomMargin = dp(activity, 36);
         column.addView(mark, markLayout);
-        TextView title = text(activity, activity.getString(R.string.alpha_welcome), 34, foreground);
+        TextView title = text(activity, activity.getString(R.string.alpha_welcome), 34, Color.WHITE);
         title.setAccessibilityHeading(true);
         column.addView(title);
         TextView description = text(activity, activity.getString(R.string.alpha_setup_description), 17, Color.rgb(204, 204, 214));
@@ -48,7 +50,7 @@ final class AlphaWelcome {
         column.addView(description);
         button(activity, column, R.string.alpha_wifi, () -> open(activity, Settings.ACTION_WIFI_SETTINGS));
         button(activity, column, R.string.alpha_security, () -> open(activity, "android.app.action.SET_NEW_PASSWORD"));
-        TextView notice = text(activity, "", 16, foreground);
+        TextView notice = text(activity, "", 16, Color.WHITE);
         notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         column.addView(notice);
         Button settings = button(activity, column, R.string.alpha_home_settings,
@@ -57,7 +59,7 @@ final class AlphaWelcome {
         Button next = button(activity, column, R.string.alpha_continue, () -> {});
         Completion completion = new Completion(activity, completed, next, settings, notice);
         next.setOnClickListener(view -> completion.begin());
-        next.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.BLUE));
+        next.setBackgroundTintList(ColorStateList.valueOf(Color.BLUE));
         TextView footer = text(activity, activity.getString(R.string.alpha_setup_footer), 14, Color.rgb(180, 180, 194));
         footer.setPadding(0, dp(activity, 24), 0, 0);
         column.addView(footer);
@@ -110,7 +112,7 @@ final class AlphaWelcome {
             }
             try {
                 String palette = Settings.Secure.getString(activity.getContentResolver(), Settings.Secure.THEME_CUSTOMIZATION_OVERLAY_PACKAGES);
-                if ((palette == null || palette.isEmpty() || palette.equals("{}")) && !AlphaAppearance.applyPalette(activity)) {
+                if ((palette == null || palette.isEmpty() || palette.equals("{}")) && !AlphaFreshPresets.applyPalette(activity)) {
                     fail(R.string.alpha_appearance_preset_failed); return;
                 }
             } catch (IllegalStateException | SecurityException failure) { fail(R.string.alpha_appearance_preset_failed); return; }
@@ -139,7 +141,7 @@ final class AlphaWelcome {
         Button result = new Button(a);
         result.setText(label); result.setAllCaps(false); result.setTextColor(Color.WHITE);
         result.setTextSize(16); result.setMinHeight(dp(a, 56));
-        result.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(36, 36, 42)));
+        result.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(36, 36, 42)));
         LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
         layout.bottomMargin = dp(a, 12);
         parent.addView(result, layout);

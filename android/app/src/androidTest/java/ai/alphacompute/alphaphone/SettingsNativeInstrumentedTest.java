@@ -35,6 +35,7 @@ public final class SettingsNativeInstrumentedTest {
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();settings();
    until(ROW+"?.textContent.includes("+JSONObject.quote(expectedSummary(context))+")");
+   assertEquals("Contacts is not presented","false",js("[...document.querySelectorAll('button,div')].some(e=>e.childElementCount===0&&e.textContent.trim()==='Contacts')"));
    appPermissionsAndBack();
    InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context.getPackageName(),Manifest.permission.CAMERA);
    appPermissionsAndBack();settings();

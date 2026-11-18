@@ -163,17 +163,16 @@ test('actual closed panel ignores unaccepted native callback without opening or 
 
 const disconnectCode=stripTypeScriptTypes(ui.slice(ui.indexOf(' async function disconnect('),ui.indexOf(' /** Explicit Connect persists')),{mode:'strip'});
 function disconnectFixture(){
- const f=fixture(),operation=deferred(),cleared=[];
+ const f=fixture(),operation=deferred();
  f.globals.createGoogleAccounts=()=>({disconnect:()=>operation.promise,list:async()=>[]});
- f.globals.clearGoogleCalendarSelectionForConnection=(...args)=>cleared.push(args);
  f.globals.googleDisconnectMessage=(_outcome,label)=>'Disconnected '+label;
  vm.runInNewContext(disconnectCode,f.globals);
- return {...f,cleared,complete:()=>operation.resolve({outcome:'disconnected',accounts:[],calendarLifecycle:{calendarPause:'not-requested'}})};
+ return {...f,complete:()=>operation.resolve({outcome:'disconnected',accounts:[],calendarLifecycle:{calendarPause:'not-requested'}})};
 }
 test('a completed disconnect notice survives one same-owner account refresh',async()=>{
  const f=disconnectFixture(),pending=f.globals.disconnect({connectionId:'grant-a',label:'Synthetic account'});
  f.complete();await pending;
- assert.equal(f.notices.at(-1),'Disconnected Synthetic account');assert.equal(f.cleared.length,1);
+ assert.equal(f.notices.at(-1),'Disconnected Synthetic account');
  await f.globals.load();assert.equal(f.notices.at(-1),'Disconnected Synthetic account');
  await f.globals.load();assert.equal(f.notices.at(-1),'No Google account connected.');f.close();
 });
@@ -183,7 +182,7 @@ for(const change of ['owner','close','new-operation'])test(`a disconnect complet
  else if(change==='close')f.close();
  else f.globals.active.current=new AbortController();
  f.complete();await pending;
- assert.equal(f.cleared.length,0);assert.equal(f.globals.disconnectNotice.current,null);
+ assert.equal(f.globals.disconnectNotice.current,null);
  assert.ok(!f.notices.some(text=>text.includes('Private account label')));assert.equal(f.published.length,0);f.close();
 });
 test('a retained disconnect notice cannot cross to a replacement owner',async()=>{

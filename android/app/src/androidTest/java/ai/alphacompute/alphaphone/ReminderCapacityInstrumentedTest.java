@@ -69,7 +69,7 @@ public class ReminderCapacityInstrumentedTest {
   } finally {
    for (String id : ids) ReminderTestAccess.cancel(context, id);
    ReminderTestAccess.release(context);
-   assertTrue(base.getSharedPreferences(prefix+"_alpha-reminder-envelope-v1",0).edit().clear().commit());assertTrue(base.getSharedPreferences(prefix+"_alpha-local-reminders-v1",0).edit().clear().commit());
+   assertTrue(base.getSharedPreferences(prefix+"_"+AlphaReminders.CONFIGURATION.envelopeName,0).edit().clear().commit());assertTrue(base.getSharedPreferences(prefix+"_"+AlphaReminders.CONFIGURATION.legacyName,0).edit().clear().commit());
    base.deleteSharedPreferences(prefix+"_alpha-reminder-envelope-v1_restored_boot");
   }
  }

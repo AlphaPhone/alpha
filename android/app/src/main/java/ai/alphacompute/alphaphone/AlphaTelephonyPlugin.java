@@ -12,7 +12,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 
 /**
- * Contacts, Telecom and SMS on the Alpha AOSP image only (issues #420 and #421). The behaviour is the
+ * Contacts, Telecom and SMS on the Alpha AOSP image only. The behaviour is the
  * shared {@link TelephonyPlugin}: roles and SIMs, dialer and SMS handoffs, bounded SMS/MMS provider
  * reads and reviewed native sends journaled by the shared core. Alpha supplies its installed identity
  * ({@link AlphaTelephony}) and the bounded contact search over {@link ContactsCatalog} (shared plugin-native-contacts).
@@ -47,8 +47,9 @@ public class AlphaTelephonyPlugin extends TelephonyPlugin {
     item.put("id", row.getString("id")); item.put("lookupKey", row.getString("lookup").length() > 512 ? "" : row.getString("lookup"));
     item.put("displayName", clip(row.getString("name"))); item.put("starred", row.getBoolean("starred"));
     JSArray phones = new JSArray(), emails = new JSArray();
-    for (int j = 0; j < row.getJSONArray("phones").length(); j++) phones.put(clip(row.getJSONArray("phones").getString(j)));
-    for (int j = 0; j < row.getJSONArray("emails").length(); j++) emails.put(clip(row.getJSONArray("emails").getString(j)));
+    org.json.JSONArray phoneRows = row.getJSONArray("phones"), emailRows = row.getJSONArray("emails");
+    for (int j = 0; j < phoneRows.length(); j++) phones.put(clip(phoneRows.getString(j)));
+    for (int j = 0; j < emailRows.length(); j++) emails.put(clip(emailRows.getString(j)));
     item.put("phoneNumbers", phones); item.put("emailAddresses", emails); records.put(item);
    }
    JSObject value = new JSObject(); value.put("contacts", records);

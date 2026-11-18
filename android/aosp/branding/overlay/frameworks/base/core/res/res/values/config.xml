@@ -1,7 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <!-- Hardware invocation belongs to the Cloud-first image too, independently of the
-         optional offline listener. These are defaults; saved user settings remain authoritative. -->
+    <!-- Long-press Power opens Alpha. These are defaults; saved user settings remain authoritative. -->
     <string name="config_defaultAssistant" translatable="false">ai.alphacompute.alphaphone</string>
     <integer name="config_longPressOnPowerBehavior">5</integer>
     <bool name="config_longPressOnPowerForAssistantSettingAvailable">true</bool>

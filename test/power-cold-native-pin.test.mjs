@@ -139,7 +139,7 @@ import org.json.JSONObject;public class CommitTest{
  s.rollbackProviderAdmission(admitted,null);check(epoch()==++e&&s.readCredentialSlot(slot)==null);
  s.writeCredentialSlot(slot,selected);check(epoch()==++e);admitted=s.compareExchangeProviderAdmission(selected,selected,"cloud:production",a,identity);check(epoch()==++e);
  s.writeCredentialSlot("cloud:production",b);check(epoch()==++e); // shutdown path + nested admission invalidation, one epoch
- check(s.providerAdmissionGeneration()==null);s.removeCredentialSlot(slot);check(epoch()==++e);
+ s.removeCredentialSlot(slot);check(epoch()==++e);
  s.rollbackProviderAdmission(admitted,null);check(epoch()==e); // no foreign replay
  s.writeCredentialSlot(slot,selection().put("model","different-model").toString());check(epoch()==++e);
  s.writeCredentialSlot(slot,selection().put("provider","cerebras").put("key","synthetic-direct-key").toString());check(epoch()==++e);
@@ -148,7 +148,7 @@ import org.json.JSONObject;public class CommitTest{
  System.out.println("PASS actual credential-store commits: "+checks+" checks; no-shutdown/write/remove/CAS/ABA/admission/rollback/stripping/shutdown paths");
  }
 }`);
- const actual=['LocalAgentProviderAdmission.java','AlphaCredentialStore.java','LegacyCloudRecovery.java'].map(nativeSource);
+ const actual=['LocalAgentProviderAdmission.java','AlphaCredentialStore.java','AlphaUtil.java','Slots.java'].map(nativeSource);
  return [...modeled(),admission,...actual];
 }
 

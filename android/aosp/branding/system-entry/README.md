@@ -37,10 +37,10 @@ python3 prepare.py
 python3 test_native_plan.py
 ```
 
-`fetch.py` fetches only the official URLs in `SOURCE-INPUTS.json` and requires the exact
+`fetch.py` fetches only the official URLs for the files in `SOURCE-INPUTS.json` and requires the exact
 recorded SHA-256 for every file. Existing correct inputs are reused without network access.
 `prepare.py` reproduces the candidate and requires its bytes to match the reviewed patch
-hash. Generated source, assets, manifest copies and patch copies go under ignored `.cache/`;
+hash. Staged source and the generated product overlay go under ignored `.cache/`;
 none of the downloaded baseline or staged source needs to be committed.
 
 To reuse an existing offline input directory:
@@ -86,31 +86,3 @@ Alpha, clock/alarm/emergency/secure camera, privacy indicators, gestures, compac
 RTL and 200% text. The decorative collision rule must be checked on the real expanded shade.
 No deferred listening-indicator code is reused or presented as activity state.
 
-## OS17 runtime correction and next image
-
-OS17's factory image did **not** include the custom-shortcut picker flag override. The
-device owner reported that its picker feature flag was false even though Alpha's separate
-entry flag was true. During physical QA the owner enabled the single-bool fabricated
-overlay `com.android.shell:AlphaLockscreenShortcuts`, targeting SystemUI's
-`custom_lockscreen_shortcuts_enabled`, through the supported overlay manager. No
-`ignore-overlayable` or exclusive overlay mode was used. This runtime overlay persists
-under device data; it is separate from OS17's factory image.
-
-The owner then reported that the correct provider URI
-`lockscreen_quickaffordance/affordances` exposed **Open Alpha** as enabled, and explicitly
-selected Alpha at Start and Camera at End in place of the disabled default Home Controls
-row. That selection is physical QA state, not a default written by this source package.
-
-To remove only that temporary feature override, the device owner can run:
-
-```sh
-adb -s <pixel-serial> shell cmd overlay disable --user current com.android.shell:AlphaLockscreenShortcuts
-```
-
-This does not delete stored shortcut choices. While OS17 still supplies the false factory
-default, removing the override can make the picker unavailable again. This package now
-enables the same existing bool and the Alpha/Camera unset-slot defaults through the normal
-Alpha product overlay for the **next** image. OS17's runtime selections and fabricated bool
-overlay do not establish that its factory image contains either correction. Verify the next
-image's packaged values and provider flag before removing the temporary overlay
-after an update. Do not describe that future default correction as already present in OS17.

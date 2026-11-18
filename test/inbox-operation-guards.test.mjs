@@ -211,13 +211,12 @@ test('mail keeps its offline snapshots apart from the account document', async (
     const account = {environment: 'production', userId: 'user', organizationId: 'org', credentialId: 'credential'};
     assert.equal(readCacheIdentity(account), JSON.stringify(['production', 'user', 'org', 'credential']), 'the account document keeps its identity');
     assert.notEqual(readCacheIdentity(account, 'gmail'), readCacheIdentity(account));
-    // Mail saved in the account document by an earlier version is erased there, not read; Calendar's entries stay.
+    // Mail never reads the account document; Calendar's entries stay there.
     const shared = 'connected-read-cache:v1:' + await sha(readCacheIdentity(account));
-    slots.set(shared, {version: 1, owner: readCacheIdentity(account), entries: [{key: 'gmail:mailbox', value: 'old mail', at: Date.now()}, {key: 'calendar:owner:v1', value: 'saved owner', at: Date.now()}]});
+    slots.set(shared, {version: 1, owner: readCacheIdentity(account), entries: [{key: 'calendar:owner:v1', value: 'saved owner', at: Date.now()}]});
     const calendar = await serviceReadCache(account), mail = await serviceReadCache(account, 'gmail');
     assert.notEqual(mail, calendar); assert.equal(await serviceReadCache(account, 'gmail'), mail, 'one handle per document'); assert.equal(await serviceReadCache(account), calendar);
-    assert.equal(await mail.get('gmail:mailbox'), null, 'the earlier snapshot is not migrated');
-    await until(() => slots.get(shared).entries.find(entry => entry.key === 'gmail:mailbox')?.value === null, 'the retired mail snapshot');
+    assert.equal(await mail.get('gmail:mailbox'), null, 'mail starts empty');
     assert.equal((await calendar.get('calendar:owner:v1')).value, 'saved owner');
     await mail.put('gmail:mailbox', {messages: ['saved mail']}); await calendar.put('calendar:feed', {events: ['saved event']});
     assert.equal(slots.size, 2); for (const slot of slots.keys()) assert.match(slot, /^connected-read-cache:v1:[a-f0-9]{64}$/);

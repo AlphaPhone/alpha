@@ -27,40 +27,40 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class CameraFlowInstrumentedTest {
  private Context context(){return InstrumentationRegistry.getInstrumentation().getTargetContext();}
- private String eval(BoundedActivityScenario<MainActivity> s,String js)throws Exception{
+ private String eval(String js)throws Exception{
   return WebViewTestDriver.evaluate(js);
  }
- private void until(BoundedActivityScenario<MainActivity>s,String js)throws Exception{
-  for(int i=0;i<150;i++){if("true".equals(eval(s,"Boolean("+js+")")))return;SystemClock.sleep(100);}
-  fail("Camera condition: "+js+"; screen="+eval(s,"document.body.innerText.slice(-1000)"));
+ private void until(String js)throws Exception{
+  for(int i=0;i<150;i++){if("true".equals(eval("Boolean("+js+")")))return;SystemClock.sleep(100);}
+  fail("Camera condition: "+js+"; screen="+eval("document.body.innerText.slice(-1000)"));
  }
- private void click(BoundedActivityScenario<MainActivity>s,String label)throws Exception{
+ private void click(String label)throws Exception{
   String selector="document.querySelector('button[aria-label='+"+JSONObject.quote(JSONObject.quote(label))+"+']')";
-  until(s,selector);eval(s,"("+selector+").click()");
+  until(selector);eval("("+selector+").click()");
  }
  /** Buttons inside review dialogs and the access panel are named by their text. */
- private void clickText(BoundedActivityScenario<MainActivity>s,String text)throws Exception{
+ private void clickText(String text)throws Exception{
   String selector="[...document.querySelectorAll('dialog button,[data-alpha-camera-access] button')].find(b=>b.textContent.trim()==="+JSONObject.quote(text)+"&&!b.disabled)";
-  until(s,selector);eval(s,"("+selector+").click()");
+  until(selector);eval("("+selector+").click()");
  }
  /** Camera's assistant pill opens the composer; a scan request is answered on this phone. */
- private void askAlpha(BoundedActivityScenario<MainActivity>s,String text)throws Exception{
-  eval(s,AppNavigation.type());until(s,AppNavigation.composer());
-  eval(s,"(()=>{const e=("+AppNavigation.composer()+");Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,"+JSONObject.quote(text)+");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
-  click(s,"Send");
+ private void askAlpha(String text)throws Exception{
+  eval(AppNavigation.type());until(AppNavigation.composer());
+  eval("(()=>{const e=("+AppNavigation.composer()+");Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,"+JSONObject.quote(text)+");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  click("Send");
  }
- private void closeScan(BoundedActivityScenario<MainActivity>s)throws Exception{
+ private void closeScan()throws Exception{
   String selector="[...document.querySelectorAll('dialog button')].find(b=>['Cancel scan','Close scan'].includes(b.textContent.trim()))";
-  until(s,selector);eval(s,"("+selector+").click()");
+  until(selector);eval("("+selector+").click()");
  }
- private void navigate(BoundedActivityScenario<MainActivity>s,String label)throws Exception{
-  until(s,"document.documentElement.dataset.activeView");eval(s,AppNavigation.request(label));until(s,AppNavigation.selected(label));
+ private void navigate(String label)throws Exception{
+  until("document.documentElement.dataset.activeView");eval(AppNavigation.request(label));until(AppNavigation.selected(label));
  }
  private boolean preview(View v){
   if(v.getClass().getName().equals("androidx.camera.view.PreviewView")&&v.getParent()!=null)return true;
   if(v instanceof ViewGroup){ViewGroup group=(ViewGroup)v;for(int i=0;i<group.getChildCount();i++)if(preview(group.getChildAt(i)))return true;}return false;
  }
- private void nativePreview(BoundedActivityScenario<MainActivity>s,boolean expected)throws Exception{
+ private void nativePreview(boolean expected)throws Exception{
   AtomicBoolean seen=new AtomicBoolean();for(int i=0;i<100;i++){WebViewTestDriver.withActivity(MainActivity.class, a->seen.set(preview(a.getWindow().getDecorView())));if(seen.get()==expected)return;SystemClock.sleep(100);}assertEquals("Native PreviewView attachment",expected,seen.get());
  }
  private Set<Uri> ownedImages(){
@@ -75,14 +75,14 @@ public class CameraFlowInstrumentedTest {
   InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context().getPackageName(),Manifest.permission.CAMERA);
   Set<Uri> before=ownedImages(),created=new HashSet<>();
   try(BoundedActivityScenario<MainActivity>s=BoundedActivityScenario.launch(MainActivity.class)){
-   navigate(s,"Camera");until(s,"document.querySelector('[data-alpha-camera-screen]')");nativePreview(s,true);
+   navigate("Camera");until("document.querySelector('[data-alpha-camera-screen]')");nativePreview(true);
    // Asking Alpha to scan in Camera reviews one unsaved frame locally; nothing reaches Photos unless kept.
    Set<Uri> beforeScan=ownedImages();
-   askAlpha(s,"Scan this");
-   until(s,"document.querySelector('dialog[aria-label=\"Review scanned text\"]')");
+   askAlpha("Scan this");
+   until("document.querySelector('dialog[aria-label=\"Review scanned text\"]')");
    assertEquals("Scan frame is not published to Photos",beforeScan,ownedImages());
-   closeScan(s);until(s,"!document.querySelector('dialog[aria-label=\"Review scanned text\"]')");nativePreview(s,true);
-   click(s,"Take photo");
+   closeScan();until("!document.querySelector('dialog[aria-label=\"Review scanned text\"]')");nativePreview(true);
+   click("Take photo");
    for(int i=0;i<100&&created.isEmpty();i++){created.addAll(ownedImages());created.removeAll(before);if(created.isEmpty())SystemClock.sleep(100);}
    assertEquals("Exactly one owned image published",1,created.size());
    Uri uri=created.iterator().next();byte[] bytes;
@@ -90,28 +90,28 @@ public class CameraFlowInstrumentedTest {
    assertTrue("JPEG has real bytes",bytes.length>1000);assertEquals(255,bytes[0]&255);assertEquals(216,bytes[1]&255);
    BitmapFactory.Options dimensions=new BitmapFactory.Options();dimensions.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,dimensions);
    assertTrue("Captured pixels decode",dimensions.outWidth>0&&dimensions.outHeight>0);
-   until(s,"document.querySelector('button[aria-label=\"Open last photo\"] span')?.style.background.includes('data:image/jpeg;base64,')");
-   click(s,"Open last photo");until(s,AppNavigation.selected("Photos"));
-   until(s,"document.body.innerText.includes('saved to Android Photos') && [...document.querySelectorAll('[style]')].some(e=>e.style.background.includes('data:image/jpeg;base64,'))");
-   ShareFlowAssertions.opensExactItemAndCancels(()->click(s,"Share photo"),bytes,"image/jpeg");
-   until(s,"document.body.innerText.includes('saved to Android Photos')");
-   ShareFlowAssertions.receivesInSeparateApp(()->click(s,"Share photo"),bytes);
-   until(s,"document.body.innerText.includes('saved to Android Photos')");
-   click(s,"Ask Alpha about this photo");
-   until(s,"document.querySelector('dialog[aria-label=\"Ask about selected content\"] img[alt=\"Image for question review\"]')?.naturalWidth>0");
-   eval(s,"(()=>{const e=document.querySelector('dialog[aria-label=\"Ask about selected content\"] textarea[aria-label=\"Content excerpt\"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'A captured test frame');e.dispatchEvent(new Event('input',{bubbles:true}));})()");
-   clickText(s,"Use in conversation");
-   until(s,"document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'false' && "+AppNavigation.composer()+"?.value.includes('Source: Selected photo')");
-   assertEquals("Production suggestions do not invent a contact", "false", eval(s,"document.querySelector('[data-alpha-layer=conversation]').textContent.includes('Maya')"));
-   assertEquals("Photo remains the active agent view", "\"photos\"", eval(s,"document.documentElement.dataset.activeView"));
-   click(s,"Minimize chat");
-   until(s,"document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'true' && document.body.innerText.includes('saved to Android Photos')");
-   navigate(s,"Home");s.recreate();navigate(s,"Photos");
-   until(s,"document.querySelector('button[aria-label^=\"Captured photo \"]')");
-   eval(s,"document.querySelector('button[aria-label^=\"Captured photo \"]').click()");
-   until(s,"document.body.innerText.includes('saved to Android Photos') && [...document.querySelectorAll('[style]')].some(e=>e.style.background.includes('data:image/jpeg;base64,'))");
-   nativePreview(s,false);navigate(s,"Camera");until(s,"document.querySelector('[data-alpha-camera-screen]')");nativePreview(s,true);
-   navigate(s,"Home");nativePreview(s,false);until(s,"!document.querySelector('[data-alpha-camera-screen]')");
+   until("document.querySelector('button[aria-label=\"Open last photo\"] span')?.style.background.includes('data:image/jpeg;base64,')");
+   click("Open last photo");until(AppNavigation.selected("Photos"));
+   until("document.body.innerText.includes('saved to Android Photos') && [...document.querySelectorAll('[style]')].some(e=>e.style.background.includes('data:image/jpeg;base64,'))");
+   ShareFlowAssertions.opensExactItemAndCancels(()->click("Share photo"),bytes,"image/jpeg");
+   until("document.body.innerText.includes('saved to Android Photos')");
+   ShareFlowAssertions.receivesInSeparateApp(()->click("Share photo"),bytes);
+   until("document.body.innerText.includes('saved to Android Photos')");
+   click("Ask Alpha about this photo");
+   until("document.querySelector('dialog[aria-label=\"Ask about selected content\"] img[alt=\"Image for question review\"]')?.naturalWidth>0");
+   eval("(()=>{const e=document.querySelector('dialog[aria-label=\"Ask about selected content\"] textarea[aria-label=\"Content excerpt\"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'A captured test frame');e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+   clickText("Use in conversation");
+   until("document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'false' && "+AppNavigation.composer()+"?.value.includes('Source: Selected photo')");
+   assertEquals("Production suggestions do not invent a contact", "false", eval("document.querySelector('[data-alpha-layer=conversation]').textContent.includes('Maya')"));
+   assertEquals("Photo remains the active agent view", "\"photos\"", eval("document.documentElement.dataset.activeView"));
+   click("Minimize chat");
+   until("document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'true' && document.body.innerText.includes('saved to Android Photos')");
+   navigate("Home");s.recreate();navigate("Photos");
+   until("document.querySelector('button[aria-label^=\"Captured photo \"]')");
+   eval("document.querySelector('button[aria-label^=\"Captured photo \"]').click()");
+   until("document.body.innerText.includes('saved to Android Photos') && [...document.querySelectorAll('[style]')].some(e=>e.style.background.includes('data:image/jpeg;base64,'))");
+   nativePreview(false);navigate("Camera");until("document.querySelector('[data-alpha-camera-screen]')");nativePreview(true);
+   navigate("Home");nativePreview(false);until("!document.querySelector('[data-alpha-camera-screen]')");
   }finally{created.addAll(ownedImages());created.removeAll(before);for(Uri uri:created)context().getContentResolver().delete(uri,null,null);}
  }
  private void permissionButton(String suffix)throws Exception{
@@ -136,34 +136,34 @@ public class CameraFlowInstrumentedTest {
   InstrumentationRegistry.getInstrumentation().getUiAutomation().revokeRuntimePermission(pkg,Manifest.permission.CAMERA);
   shell("pm set-permission-flags "+pkg+" "+Manifest.permission.CAMERA+" user-set user-fixed");
   try(BoundedActivityScenario<MainActivity>s=BoundedActivityScenario.launch(MainActivity.class)){
-   navigate(s,"Camera");
-   until(s,"document.querySelector('[role=alert][aria-label=\"Camera access is off\"]')?.textContent.includes('Open settings')");nativePreview(s,false);
-   clickText(s,"Open settings");
+   navigate("Camera");
+   until("document.querySelector('[role=alert][aria-label=\"Camera access is off\"]')?.textContent.includes('Open settings')");nativePreview(false);
+   clickText("Open settings");
    long end=SystemClock.elapsedRealtime()+15000;while(SystemClock.elapsedRealtime()<end&&!resumed().contains("settings"))SystemClock.sleep(100);
    assertTrue("Application details settings is foreground: "+resumed(),resumed().contains("settings"));
    shell("pm clear-permission-flags "+pkg+" "+Manifest.permission.CAMERA+" user-set user-fixed");
    InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(pkg,Manifest.permission.CAMERA);
    WebViewTestDriver.pressBack();
-   until(s,"document.querySelector('[data-alpha-camera-screen]') && !document.querySelector('[data-alpha-camera-access]')");nativePreview(s,true);
-   navigate(s,"Home");nativePreview(s,false);
+   until("document.querySelector('[data-alpha-camera-screen]') && !document.querySelector('[data-alpha-camera-access]')");nativePreview(true);
+   navigate("Home");nativePreview(false);
   }finally{shell("pm clear-permission-flags "+pkg+" "+Manifest.permission.CAMERA+" user-set user-fixed");}
  }
  @Test public void denyingCameraAllowsExplicitRetryWithoutFakePreview()throws Exception{
   Assume.assumeTrue("Separate revoked-permission fixture: -e cameraPermissionTest true", "true".equals(InstrumentationRegistry.getArguments().getString("cameraPermissionTest")));
   assertEquals("Revoke CAMERA before this instrumentation run",PackageManager.PERMISSION_DENIED,context().checkSelfPermission(Manifest.permission.CAMERA));
   try(BoundedActivityScenario<MainActivity>s=BoundedActivityScenario.launch(MainActivity.class)){
-   navigate(s,"Camera");permissionButton(":id/permission_deny_button");
-   until(s,"document.querySelector('[role=alert][aria-label=\"Camera access is off\"]')");nativePreview(s,false);
+   navigate("Camera");permissionButton(":id/permission_deny_button");
+   until("document.querySelector('[role=alert][aria-label=\"Camera access is off\"]')");nativePreview(false);
    // Closing Android's dialog resumes the app. A denial must not be answered with a second dialog:
    // Alpha stays in front, still denied, until the owner retries.
    long quiet=SystemClock.elapsedRealtime()+4000;
    while(SystemClock.elapsedRealtime()<quiet){assertTrue("No permission dialog reopens after Don't allow: "+resumed(),resumed().contains(context().getPackageName()+"/")&&!resumed().contains("permissioncontroller"));SystemClock.sleep(250);}
    assertEquals(PackageManager.PERMISSION_DENIED,context().checkSelfPermission(Manifest.permission.CAMERA));
-   until(s,"document.querySelector('[role=alert][aria-label=\"Camera access is off\"]')");
-   click(s,"Take photo");permissionButton(":id/permission_allow_foreground_only_button");
-   until(s,"document.querySelector('[data-alpha-camera-screen]')");nativePreview(s,true);
+   until("document.querySelector('[role=alert][aria-label=\"Camera access is off\"]')");
+   click("Take photo");permissionButton(":id/permission_allow_foreground_only_button");
+   until("document.querySelector('[data-alpha-camera-screen]')");nativePreview(true);
    assertEquals(PackageManager.PERMISSION_GRANTED,context().checkSelfPermission(Manifest.permission.CAMERA));
-   navigate(s,"Home");nativePreview(s,false);
+   navigate("Home");nativePreview(false);
   }
  }
 }

@@ -1,8 +1,8 @@
 import { holdPhoneInert } from '../runtime/modal-inert';
 import { reviewMailAttachment, type MailAttachment } from '../runtime/inbox-attachment';
 import { describeEmailTarget, type EmailTarget } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/use-in-email.ts';
+import type { SelectedFile } from '../native/alpha-mail-attachments';
 
-type SelectedFile = MailAttachment & { size: number; sha256: string };
 /** Reads only after an explicit Files action. Selection/context alone never attaches bytes. */
 export function reviewFileEmail(options: {
  sourceNote?: string;

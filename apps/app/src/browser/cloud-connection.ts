@@ -1,14 +1,16 @@
 import {productionCloud,stagingCloud} from '../runtime/cloud-deployment.generated';
-import {anyAbortSignal} from '../runtime/abort-signal';
+import {abortError,anyAbortSignal,delay} from '../lib/abort';
+import {isRecord} from '../lib/parse';
 import {googleAuthorizationUrlAllowed} from '../runtime/google-authorization';
 import {WebPlugin} from '@capacitor/core';
 import type {CloudCredential,CloudEnvironment} from '../runtime/cloud-protocol';
 import {cloudVoiceLimitOf,type CloudVoiceLimitFacts} from '../runtime/cloud-voice-limit';
 
 const endpoint='/__alpha-browser-cloud';
+const REQUEST_TIMEOUT_MS=120000;
 const references=new Map<string,string|null>();
 export async function browserCloudCall(data:Record<string,unknown>,signal?:AbortSignal):Promise<Response>{
- return fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-Alpha-Browser-Cloud':'1'},body:JSON.stringify(data),signal:signal?anyAbortSignal([signal,AbortSignal.timeout(120000)]):AbortSignal.timeout(120000),redirect:'error'});
+ return fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-Alpha-Browser-Cloud':'1'},body:JSON.stringify(data),signal:signal?anyAbortSignal([signal,AbortSignal.timeout(REQUEST_TIMEOUT_MS)]):AbortSignal.timeout(REQUEST_TIMEOUT_MS),redirect:'error'});
 }
 async function rpc(data:Record<string,unknown>,signal?:AbortSignal){const response=await browserCloudCall(data,signal);if(!response.ok)throw Object.assign(Error('Cloud development connection unavailable.'),{status:response.status});return response.json();}
 /** Development host storage references only. Cloud bearers never enter browser storage. */
@@ -52,14 +54,14 @@ export async function clearBrowserCloudCredentialIfCurrent(environment:CloudEnvi
 export async function browserCloudCredential(environment:string,credentialId:string,signal:AbortSignal){
  const stored=await rpc({operation:'secureRead',slot:'cloud:'+environment},signal),credential=stored.value===null?null:JSON.parse(stored.value);signal.throwIfAborted();
  if(!credential?.credentialReference)throw Object.assign(Error('Sign in to Cloud before using voice.'),{code:'voice-http-401',status:401});
- if(credential.credentialId!==credentialId)throw new DOMException('Cloud account changed','AbortError');return credential;
+ if(credential.credentialId!==credentialId)throw abortError('Cloud account changed');return credential;
 }
 export async function browserCloudVoice(input:{environment:string;credentialId:string;requestId:string},operation:'stt'|'tts',payload:Blob|string,signal:AbortSignal):Promise<Response>{
  const credential=await browserCloudCredential(input.environment,input.credentialId,signal);
  const values={operation,environment:input.environment,credentialId:input.credentialId,requestId:input.requestId,credentialReference:credential.credentialReference};let response:Response;
  if(operation==='stt'){
   if(!(payload instanceof Blob))throw Error('Recorded audio required');const form=new FormData();for(const [key,value]of Object.entries(values))form.append(key,value);form.append('audio',payload,'recording');
-  response=await fetch(endpoint,{method:'POST',headers:{'X-Alpha-Browser-Cloud':'1'},body:form,signal:anyAbortSignal([signal,AbortSignal.timeout(120000)]),redirect:'error'});
+  response=await fetch(endpoint,{method:'POST',headers:{'X-Alpha-Browser-Cloud':'1'},body:form,signal:anyAbortSignal([signal,AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),redirect:'error'});
  }else response=await browserCloudCall({...values,text:payload},signal);
  signal.throwIfAborted();if(!response.ok){
   // The development bridge passes a 429's retry facts only (cloud-voice-limit.ts); they are validated again.
@@ -76,8 +78,8 @@ export class BrowserCloudSignIn extends WebPlugin {
  private googleAttemptId?:string;
  private async signIn(data:Record<string,unknown>,signal?:AbortSignal){
   const response=await browserCloudCall(data,signal);let body:unknown;try{body=await response.json();}catch{/* An unreadable reply cannot confirm cancellation. */}
-  if(!body||typeof body!=='object'||Array.isArray(body))throw Object.assign(Error('Cloud development sign-in failed'),{code:'unavailable'});
-  const result=body as Record<string,unknown>;
+  if(!isRecord(body))throw Object.assign(Error('Cloud development sign-in failed'),{code:'unavailable'});
+  const result=body;
   if(!response.ok)throw Object.assign(Error('Cloud development sign-in failed'),{code:typeof result.code==='string'?result.code:'unavailable'});
   return result;
  }
@@ -108,7 +110,7 @@ export class BrowserCloudSignIn extends WebPlugin {
     // host outcome, explicit Cancel or expiry can retire this login.
     const result=await this.signIn({operation:'signInPollGoogle',attemptId:started.attemptId},controller.signal);
     if(result.status==='authenticated'||result.status==='mfa'){handedOff=true;return result;}
-    await new Promise<void>((resolve,reject)=>{const done=()=>{clearTimeout(timer);controller.signal.removeEventListener('abort',abort);resolve();},abort=()=>{clearTimeout(timer);controller.signal.removeEventListener('abort',abort);reject(controller.signal.reason);},timer=setTimeout(done,1000);controller.signal.addEventListener('abort',abort,{once:true});if(controller.signal.aborted)abort();});
+    await delay(1000,controller.signal);
    }
    throw Object.assign(Error('Sign-in expired'),{code:'expired'});
   }finally{controller.abort();popup.close();if(this.googleController===controller){this.googleController=undefined;this.googlePopup=undefined;this.googleAttemptId=undefined;

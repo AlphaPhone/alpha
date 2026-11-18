@@ -3,6 +3,8 @@ import { Capacitor } from '@capacitor/core';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { registerPlugin } from '../platform-plugins';
 import { errorClassOf, recordRendererFailure, type RendererFailureKind } from './crash-log';
+import type { DeviceAppsPlugin } from '../native/device-apps.ts';
+import type { ElizaSystemPlugin } from '../native/eliza-system.ts';
 
 declare const __APP_VERSION__: string;
 
@@ -10,11 +12,10 @@ declare const __APP_VERSION__: string;
  * Diagnostics deliberately exclude error messages, stacks, URLs and storage: any of
  * them can carry note text, addresses or account data. Only the failure class is kept.
  */
-export function recoveryDiagnostics(kind: RendererFailureKind, error: unknown): string {
+function recoveryDiagnostics(kind: RendererFailureKind, error: unknown): string {
   const name = errorClassOf(error);
-  const version = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown';
   const platform = document.documentElement.classList.contains('native-phone') ? 'android' : 'web';
-  return [`failure: ${kind}`, `error: ${name}`, `version: ${version}`, `platform: ${platform}`, `time: ${new Date().toISOString()}`].join('\n');
+  return [`failure: ${kind}`, `error: ${name}`, `version: ${__APP_VERSION__}`, `platform: ${platform}`, `time: ${new Date().toISOString()}`].join('\n');
 }
 
 const recoveryStyle = {
@@ -44,16 +45,16 @@ function takeOverFromOpenDialogs(): void {
  * Launcher builds only: Alpha may be the HOME app, and Reload alone can keep a broken page as the
  * only home screen. Any failure here hides the button; Reload never depends on it.
  */
-export function homeEscapeAvailable(): Promise<boolean> {
+function homeEscapeAvailable(): Promise<boolean> {
   try {
     if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('DeviceApps')) return Promise.resolve(false);
-    const system = registerPlugin<{ getBuildInfo(): Promise<{ launcher?: boolean }> }>('ElizaSystem');
+    const system = registerPlugin<Pick<ElizaSystemPlugin, 'getBuildInfo'>>('ElizaSystem');
     return system.getBuildInfo().then(info => info?.launcher === true, () => false);
   } catch { return Promise.resolve(false); }
 }
 /** Opens Android's Home app picker (else default apps, else Settings) from the user's tap. */
-export function openHomeChooser(): void {
-  try { void registerPlugin<{ openHomeChooser(): Promise<void> }>('DeviceApps').openHomeChooser().catch(() => undefined); }
+function openHomeChooser(): void {
+  try { void registerPlugin<Pick<DeviceAppsPlugin, 'openHomeChooser'>>('DeviceApps').openHomeChooser().catch(() => undefined); }
   catch { /* Reload stays available. */ }
 }
 const homeEscapeLabel = 'Switch Home';
@@ -102,7 +103,7 @@ let installed = false;
  * render failure is caught by RootErrorBoundary instead.
  */
 export function installGlobalErrorRecovery(): void {
-  if (installed || typeof window === 'undefined') return;
+  if (installed) return;
   installed = true;
   window.addEventListener('error', event => {
     // Resource load failures are not script errors.
@@ -116,6 +117,7 @@ export function installGlobalErrorRecovery(): void {
 }
 
 let forced = false;
+const recoveryButton = { minHeight: 48, width: '100%', margin: '16px 0 8px', border: 0, borderRadius: 24, background: '#171717', color: '#fff', font: 'inherit', fontWeight: 600 };
 /** Test hook only reachable by dispatching a DOM event; it never alters data. */
 function ForcedFailure({ children }: { children: ReactNode }) {
   // React retries a failed render once, so the flag stays set until the boundary catches it.
@@ -137,8 +139,8 @@ export class RootErrorBoundary extends Component<{ children: ReactNode }, { fail
     return <div className="alpha-recovery" role="alertdialog" aria-labelledby="alpha-recovery-title" style={{ position: 'fixed', inset: 0, zIndex: 2147483000, display: 'flex', overflow: 'auto', padding: 24, boxSizing: 'border-box', background: '#f7f7f7', color: '#171717', font: '16px/1.5 system-ui,sans-serif' }}>
       <div style={{ maxWidth: 380, width: '100%', margin: 'auto' }}>
         <h1 id="alpha-recovery-title">Something went wrong</h1>
-        <button type="button" autoFocus onClick={() => location.reload()} style={{ minHeight: 48, width: '100%', margin: '16px 0 8px', border: 0, borderRadius: 24, background: '#171717', color: '#fff', font: 'inherit', fontWeight: 600 }}>Reload</button>
-        {this.state.homeEscape && <button type="button" onClick={openHomeChooser} style={{ minHeight: 48, width: '100%', margin: '16px 0 8px', border: 0, borderRadius: 24, background: '#171717', color: '#fff', font: 'inherit', fontWeight: 600 }}>{homeEscapeLabel}</button>}
+        <button type="button" autoFocus onClick={() => location.reload()} style={recoveryButton}>Reload</button>
+        {this.state.homeEscape && <button type="button" onClick={openHomeChooser} style={recoveryButton}>{homeEscapeLabel}</button>}
         <details><summary>Diagnostics</summary><pre style={{ whiteSpace: 'pre-wrap', font: '12px/1.4 ui-monospace,monospace', background: '#ececec', padding: 12, borderRadius: 12 }}>{this.state.diagnostics}</pre></details>
       </div>
     </div>;

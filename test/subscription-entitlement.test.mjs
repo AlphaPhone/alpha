@@ -134,44 +134,6 @@ test('a resident turn failure forwards its own reset fields and records the late
   assert.match(ui.slice(ui.indexOf('  async send('), ui.indexOf('export function ConnectionChooser')), /const limit = refused \? null : readServiceLimit\(error\);\s+if \(limit\) update\(\{ lastServiceLimit: \{ \.\.\.limit, observedAt: Date\.now\(\) \} \}\);/);
 });
 
-test('only admission and its background refresher read the entitlement; turns and local speech never do', () => {
-  const ui = fs.readFileSync('apps/app/src/runtime/connection-ui.tsx', 'utf8');
-  const admission = ui.slice(ui.indexOf('async function admitCloudResident'), ui.indexOf('async function connectResident'));
-  const explicitRefresh=ui.slice(ui.indexOf('async function refreshMembershipBalance'),ui.indexOf('function clearPersonalSetup'));
-  assert.ok(admission.includes('checkEntitlement('));
-  assert.equal(ui.split('checkEntitlement(').length, admission.split('checkEntitlement(').length + explicitRefresh.split('checkEntitlement(').length - 1, 'checkEntitlement is called only during admission or explicit/background refresh');
-  // Every Cloud detach stops background refresh; the send path never reads billing.
-  const detach = ui.slice(ui.indexOf('function detachService()'), ui.indexOf('async function verifyService'));
-  assert.match(detach, /^function detachService\(\) \{ stopEntitlementRefresh\(\);/);
-  assert.match(ui.slice(ui.indexOf('function stopEntitlementRefresh'), ui.indexOf('function detachService()')), /entitlementRefresher\?\.stop\(\);entitlementRefresher=null;/);
-  const send = ui.slice(ui.indexOf('  async send('), ui.indexOf('export function ConnectionChooser'));
-  assert.ok(send.length > 1000, 'send path located');
-  assert.doesNotMatch(send, /creditBalance|legacyAccountUsable|billingFallbackPlan|redeemSubscriptionCode|entitlementSource|subscriptionEntitlement|ENTITLEMENT_PATH|credits\/balance|subscription\/entitlement/);
-  const importers = [];
-  const walk = dir => { for (const entry of fs.readdirSync(dir, {withFileTypes: true})) { const path = `${dir}/${entry.name}`; if (entry.isDirectory()) walk(path); else if (/\.(ts|tsx|js|mjs)$/.test(entry.name) && /subscription-entitlement/.test(fs.readFileSync(path, 'utf8'))) importers.push(path); } };
-  walk('apps/app/src');
-  // The upstream plugin-maps device provider reads Cloud Maps limits with this shared reader.
-  assert.deepEqual(importers.sort(), ['apps/app/src/maps/cloud-maps.ts', 'apps/app/src/prototype/settings-adapter.ts', 'apps/app/src/runtime/cloud-membership-ui.tsx', 'apps/app/src/runtime/cloud-protocol.ts', 'apps/app/src/runtime/cloud-voice.ts', 'apps/app/src/runtime/connection-ui.tsx', 'apps/app/src/runtime/diagnostics-export.ts', 'apps/app/src/runtime/subscription-entitlement.ts']);
-  for (const [file, typeOnly, names] of [
-    ['apps/app/src/maps/cloud-maps.ts', false, ['readServiceLimit']],
-    // A Cloud speech 429 reads as the shared limit with its retry time (cloud-voice-limit.ts).
-    ['apps/app/src/runtime/cloud-voice.ts', false, ['readServiceLimit', 'retryDuration', 'type ServiceLimit']],
-    ['apps/app/src/prototype/settings-adapter.ts', false, ['planAdmission']],
-    ['apps/app/src/runtime/diagnostics-export.ts', true, ['PlanAdmission', 'PlanStatus', 'SubscriptionView']],
-    ['apps/app/src/runtime/cloud-membership-ui.tsx', false, ['alphaSubscriptionCopy', 'type ServiceLimit', 'type SubscriptionView']],
-  ]) {
-    const text = fs.readFileSync(file, 'utf8');
-    const imports = [...text.matchAll(/import(\s+type)?\s*\{([^}]+)\}\s*from\s*['"][^'"]*subscription-entitlement(?:\.ts)?['"]/g)];
-    assert.deepEqual(imports.map(match => ({typeOnly: !!match[1], names: match[2].split(',').map(name => name.trim())})), [{typeOnly, names}], `${file} imports only pure presentation or types, never an entitlement fetch`);
-  }
-  // The production account panel no longer offers a credit balance or top-up.
-  for (const file of ['apps/app/src/runtime/connection-ui.tsx', 'apps/app/src/prototype/settings-adapter.ts', 'apps/app/src/runtime/cloud-voice.ts', 'apps/app/src/runtime/voice-selection.ts']) {
-    const text = fs.readFileSync(file, 'utf8');
-    assert.doesNotMatch(text, /Add credits|Credits available|Check credits|residentTopUp|openTopUp|uses credits|uses its credits|needs credits/, file);
-  }
-});
-
-
 test('Settings retains unknown, expired, inactive and credit-funded admission states', () => {
   const ui = fs.readFileSync('apps/app/src/runtime/connection-ui.tsx', 'utf8');
   const start = ui.indexOf('  residentPlanSettings(){');

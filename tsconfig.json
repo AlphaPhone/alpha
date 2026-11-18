@@ -19,7 +19,6 @@
       "vite/client",
       "node"
     ],
-    "ignoreDeprecations": "6.0",
     "paths": {
       "/src/*": ["./apps/app/src/*"],
       "@elizaos/capacitor-system/sense": ["./.eliza/client-features/plugins/plugin-native-system/src/sense-bridge.ts"],
@@ -105,7 +104,6 @@
       "@elizaos/cloud-sdk/subscription-entitlement": [
         "./.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts"
       ],
-      "@elizaos/contracts/stated-clock-time": ["./.eliza/client-features/packages/contracts/src/stated-clock-time.ts"],
       "@elizaos/contracts/browser-request-grounding": [
         "./.eliza/client-features/packages/contracts/src/browser-request-grounding.ts"
       ],

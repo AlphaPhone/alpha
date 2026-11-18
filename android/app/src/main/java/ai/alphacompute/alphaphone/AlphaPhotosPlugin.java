@@ -22,8 +22,7 @@ import com.getcapacitor.annotation.Permission;
 public class AlphaPhotosPlugin extends PhotosPlugin {
  /** Debug QA markers are the shared closed enum: never media data or exception text; release builds stay silent. */
  static void qaMarker(PhotosPlugin.Diagnostic marker){if(BuildConfig.DEBUG)android.util.Log.i("AlphaPhotosQA",marker.name());}
- static final OwnedMediaConfig MEDIA_CONFIG=AlphaMediaConfig.MEDIA;
- @Override protected OwnedMediaConfig mediaConfig(){return MEDIA_CONFIG;}
+ @Override protected OwnedMediaConfig mediaConfig(){return AlphaMediaConfig.MEDIA;}
  @Override protected String playbackPath(){return AlphaMediaConfig.PLAYBACK_PATH;}
  @Override protected void diagnostic(PhotosPlugin.Diagnostic marker){qaMarker(marker);}
  @Override protected String closedMessage(){return LateLaunch.CLOSED;}

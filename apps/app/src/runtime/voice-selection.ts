@@ -4,7 +4,7 @@ import { connectionController } from './connection-ui';
 /** One build ships the on-device speech models; the speech route is chosen at run time.
  * `speechRoute()` is the single source: the owner's Cartesia key, Cloud speech for a signed-in
  * account with no active plan limit, otherwise this phone. A Cloud or direct attempt that fails
- * before audio flows falls back to on-device speech for that turn (owner decision 2026-11-10). */
+ * before audio flows falls back to on-device speech for that turn. */
 // Plain constants and function exports only: Node contract tests evaluate this source directly.
 const voiceRouteKey = 'alphaphone:voice-route:v1';
 const voicePreferencesEvent = 'alpha:voice-preferences';
@@ -12,25 +12,7 @@ const voicePreferencesEvent = 'alpha:voice-preferences';
 export function voicePreferenceKeys() { return { route: voiceRouteKey, event: voicePreferencesEvent }; }
 export type VoicePreference = 'default' | 'device' | 'agent' | 'manual';
 /**
- * When a spoken turn is sent. 'auto-send' (today's behaviour) sends each finished Cloud
- * conversation transcript as it is; 'review' shows it for editing and an explicit Send first.
- * P-39 (MVP-01) decided the split: the voice assistant submits automatically, while Transcribe
- * only inserts editable text the user sends. This constant is the one switch for the former.
- */
-export type VoiceSendPolicy = 'auto-send' | 'review';
-const VOICE_SEND_POLICY: VoiceSendPolicy = 'auto-send';
-let voiceSendPolicyForTests: VoiceSendPolicy | undefined;
-export function voiceSendPolicy(): VoiceSendPolicy { return testMocksEnabled && voiceSendPolicyForTests ? voiceSendPolicyForTests : VOICE_SEND_POLICY; }
-/** Test-mocks builds only: exercise either policy. A flag-off build always uses the constant. */
-export function setVoiceSendPolicyForTests(policy?: VoiceSendPolicy): boolean {
-  if (!testMocksEnabled) return false;
-  voiceSendPolicyForTests = policy === 'auto-send' || policy === 'review' ? policy : undefined;
-  return true;
-}
-
-/**
- * The Clef end-of-turn stage (P-39 names Clef for semantic turn completion; #663 / H-18 holds the
- * owner decision). Off: the local fused scorer and the long gap decide, and no transcript text
+ * The Clef end-of-turn stage (semantic turn completion; the owner decides when it ships). Off: the local fused scorer and the long gap decide, and no transcript text
  * leaves the phone for endpointing. Turning it on also needs a Cloud Clef client, which the
  * renderer does not hold (native code owns the Cloud credential), so the stage stays out until
  * the owner admits a model and that client exists. This constant is the one switch.
@@ -66,6 +48,8 @@ function networkSpeechKey(): string | null {
 }
 let networkSpeechHold: { key: string; until: number } | undefined;
 const HOLD_BRIEF_MS = 60_000, HOLD_ACCOUNT_MS = 600_000, HOLD_MAX_MS = 3_600_000;
+/** Batch connect and upload failures, and the streaming bridge's failures before or between turns. */
+const BRIEF_HOLD_CODES = new Set(['voice-stt-connect', 'voice-tts-connect', 'voice-stt-upload', 'connect', 'connection-lost', 'startup-timeout', 'unavailable']);
 /**
  * How long a failed Cloud or direct speech request keeps speech on this phone, or null when the
  * failure is not the network route's (cancelled, unconfirmed cleanup, no speech, a refused
@@ -88,8 +72,7 @@ export function networkSpeechFailureHoldMs(error: unknown): number | null {
     return null;
   }
   if (code === 'sign-in') return 0;
-  // Batch connect and upload failures, and the streaming bridge's failures before or between turns.
-  if (['voice-stt-connect', 'voice-tts-connect', 'voice-stt-upload', 'connect', 'connection-lost', 'startup-timeout', 'unavailable'].includes(code)) return HOLD_BRIEF_MS;
+  if (BRIEF_HOLD_CODES.has(code)) return HOLD_BRIEF_MS;
   try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return HOLD_BRIEF_MS; } catch { /* No navigator. */ }
   return error instanceof TypeError ? HOLD_BRIEF_MS : null;
 }
@@ -124,7 +107,7 @@ export function speechRoute(now: number = Date.now()): SpeechRoute {
  * The recorder's shape of the route: network speech ('cloud', Cloud or the owner's key) or this
  * phone. Test-mocks builds keep their explicit device/manual routes and default to network speech.
  */
-export function selectVoiceRoute(preference: VoicePreference = 'default'): 'device' | 'cloud' | 'agent' | 'manual' {
+export function selectVoiceRoute(preference: VoicePreference = 'default'): 'device' | 'cloud' | 'manual' {
   if (testMocksEnabled && (preference === 'device' || preference === 'manual')) return preference;
   const route = speechRoute();
   // Dictation on own keys asks for the phone and keeps it.

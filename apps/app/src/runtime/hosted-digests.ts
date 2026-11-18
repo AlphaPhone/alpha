@@ -56,7 +56,7 @@ export function digestToggledSpec(spec: DigestSpec, enabled: boolean): DigestSpe
   return {...spec, enabled};
 }
 /** Selected calendar ids the latest phone calendar list no longer offers. */
-export type DigestCalendarChoice = {id: string};
+type DigestCalendarChoice = {id: string};
 export function digestMissingCalendars(selected: readonly string[], choices: ReadonlyArray<DigestCalendarChoice>): string[] {
   //@ verify
   //@ ensures forall(k, 0 <= k && k < \result.length ==> selected.includes(\result[k]))

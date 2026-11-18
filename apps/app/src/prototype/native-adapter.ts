@@ -4,7 +4,7 @@ import { testMocksEnabled } from '../build-flags';
 import { speechRoute, type SpeechRoute } from '../runtime/voice-selection';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type Action, type NativeResult } from '../daily';
-import { registerPlugin } from '../platform-plugins';
+import { agent } from '../native/agent';
 import { connectionController, agentAvailabilityNotice, agentPendingText, type ConnectionSnapshot } from '../runtime/connection-ui';
 import { modelLabel } from '../runtime/local-agent';
 import { askAboutCapture } from './camera-adapter';
@@ -13,21 +13,18 @@ import { captureQuestion, locationMimeTypes } from './context-selection';
 
 type Bag = Record<string, any>;
 type Callback = (...args: any[]) => any;
-export type PrototypeNativeOptions = {
+type PrototypeNativeOptions = {
   /** A picker capability is process-scoped. Do not persist its URI as read authority. */
   onSelection?: (module: string, result: NativeResult, api: Bag) => void;
 };
-const installed = new WeakSet<object>();
 const systemPages = new Set(['wifi', 'bluetooth', 'mobile', 'sound', 'notifications', 'battery', 'models', 'developer', 'privacy']);
-/** Non-secret resident provider identity. The native method never returns the stored key. */
-const residentProvider = registerPlugin<{ providerStatus(): Promise<Record<string, unknown>> }>('Agent');
 const providerModelPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 type ProviderStatus = { sessionId: string; label: string | null };
 let providerStatus: ProviderStatus | null = null, providerReading: string | null = null;
 /** Session whose phone action history this view read successfully; an unread history is never shown as empty. */
 let actionHistoryRead: string | null = null;
 
-export type EgressPrivacy = { big: string; sub: string };
+type EgressPrivacy = { big: string; sub: string };
 type EgressConnection = Pick<ConnectionSnapshot, 'kind' | 'session' | 'cloudAccount' | 'residentInference' | 'providerStatus'>;
 /** Who a native resident session sends AI content to, from the inference binding it already reports.
  * Names a provider, never a key. Null when the agent is not a native resident session. */
@@ -61,15 +58,16 @@ export function egressPrivacy(connection: EgressConnection, native = Capacitor.i
   // Only a build without the resident (the production web preview, test mocks) gets here.
   return { big: 'Offline', sub: 'AI off' };
 }
-/** Only a verified resident session on Android reports its configured hosted model.
- * Exported for the Settings rows that show it (About and Models). */
-export function residentModelLabel(connection: ConnectionSnapshot, refresh: () => void): string | null {
+/** Only a verified resident session on Android reports its configured hosted model, for the
+ * Settings rows that show it (About and Models). */
+function residentModelLabel(connection: ConnectionSnapshot, refresh: () => void): string | null {
   const sessionId = connection.session?.sessionId;
   if (!sessionId || connection.kind !== 'resident' || !Capacitor.isNativePlatform()) return null;
   if (providerStatus?.sessionId === sessionId) return providerStatus.label;
   if (providerReading !== sessionId) {
     providerReading = sessionId;
-    void residentProvider.providerStatus().then(status => {
+    // Non-secret resident provider identity. The native method never returns the stored key.
+    void agent.providerStatus().then(status => {
       const provider = status?.provider, model = status?.model;
       // Copy only the two identity fields; ignore anything else a bridge might return.
       const providerLabel = provider === 'elizacloud' ? cloudServiceName(connection.cloudAccount?.environment ?? 'production') : provider === 'cerebras' ? 'Cerebras' : null;
@@ -80,7 +78,7 @@ export function residentModelLabel(connection: ConnectionSnapshot, refresh: () =
   }
   return null;
 }
-const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'wallet', 'workflows']);
+const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'workflows']);
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
 // tile-facts:begin (Alpha's tile labels and theme over the shared truthful presentation; test/shade-tile-facts.test.mjs)
@@ -93,7 +91,7 @@ export const tileKeys: Record<string, TileKey> = { 'Wi-Fi': 'wifi', 'Bluetooth':
 export const tileSettingsPages: Partial<Record<TileKey, string>> = SYSTEM_TILE_SETTINGS_PAGES;
 /** Android system switches as AlphaDevice.snapshot() read them (the shared SystemFacts keys). */
 export const tileFactsFromSnapshot: (snapshot: unknown, torch?: boolean) => TileFacts = tileFactsFromSystemFacts;
-export { broaderPageNotice, handoffGate, switchValue, tileAccessibleName, tileStateText };
+export { broaderPageNotice, handoffGate, switchValue };
 /** `on` colours the tile; `aria` is its accessible name and `pressed` its toggle state (toggles only). */
 export type ShadeTile = { label: string; on?: boolean; aria?: string; pressed?: boolean; css?: string; toggle?: () => void; stateText?: string; [key: string]: unknown };
 /** Present tiles with state only from native facts. Hide the flashlight without a native control.
@@ -133,10 +131,7 @@ export function installPrototypeNativeAdapters(
   _Component: unknown,
   views: Record<string, Bag>,
   options: PrototypeNativeOptions = {},
-): () => void {
-  if (installed.has(views)) return () => {};
-  installed.add(views);
-  const restore: Array<() => void> = [];
+): void {
   const busy = new Set<string>();
   const notify = (api: Bag, message: string) => api.toast(message);
   const unavailable = (api: Bag, message = 'Unavailable') => () => notify(api, message);
@@ -268,11 +263,6 @@ export function installPrototypeNativeAdapters(
       if (['play', 'del', 'saveRn', 'selDel', 'move', 'selMove', 'transcribe'].includes(key)) return native('files');
       if (['shareMsg', 'shareMail', 'selShare'].includes(key)) return unavailable(api, 'Use Files app');
     }
-    if (module === 'wallet') {
-      if (key === 'addCal') return native('calendar');
-      if (['onNum', 'onCvv', 'onExp', 'onCode', 'onName'].includes(key)) return unavailable(api, 'Not connected');
-      if (['pay', 'auth', 'verify', 'next', 'scan', 'reload', 'remove', 'setDef', 'startPay'].includes(key)) return unavailable(api, 'Not connected');
-    }
     if (module === 'settings') {
       // Opening Activity only shows what is already known; reading history is a separate explicit step.
       if (st.page === 'privacy' && key === 'go' && row.label === 'Activity') return () => api.set({ log: true });
@@ -333,7 +323,8 @@ export function installPrototypeNativeAdapters(
     const connection = connectionController.getSnapshot();
     const info = (label: string, val: string): Bag => ({ kInfo: true, label, val, hasVal: !!val, noAB: true });
     const nav = (label: string, go: () => void, aria = label, lucide = ''): Bag => ({ kNav: true, label, lbl: aria, chev: true, noAB: true, go, ...(lucide ? { lucide } : {}) });
-    const model = residentModelLabel(connection, () => { try { api.set({ providerReadAt: Date.now() }); } catch { /* view closed */ } });
+    const repaint = (patch: Bag) => { try { api.set(patch); } catch { /* view closed */ } };
+    const model = residentModelLabel(connection, () => repaint({ providerReadAt: Date.now() }));
     for (const page of out.stack) {
       if (!page || !Array.isArray(page.groups)) continue;
       if ((page.title === 'Models' || page.title === 'About') && model)
@@ -347,7 +338,7 @@ export function installPrototypeNativeAdapters(
           void connectionController.actionHistory().then(() => {
             const after = connectionController.getSnapshot();
             if (sessionId && after.session?.sessionId === sessionId && !after.error && after.actionHistory !== before) actionHistoryRead = sessionId;
-            try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ }
+            repaint({ actionHistoryReadAt: Date.now() });
           });
         }, aria, 'rotate-cw');
         // A decision clears the read history; show it as unread rather than as empty.
@@ -356,7 +347,7 @@ export function installPrototypeNativeAdapters(
           const busyKey = 'activity:' + id;
           if (busy.has(busyKey)) return;
           busy.add(busyKey);
-          void run().catch(() => notify(api, 'Not recorded')).finally(() => { busy.delete(busyKey); actionHistoryRead = null; try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ } });
+          void run().catch(() => notify(api, 'Not recorded')).finally(() => { busy.delete(busyKey); actionHistoryRead = null; repaint({ actionHistoryReadAt: Date.now() }); });
         }, label, lucide);
         const entryRows = (entry: ConnectionSnapshot['actionHistory'][number]): Bag[] => [
           info(entry.description, activityState(entry.state)),
@@ -385,7 +376,7 @@ export function installPrototypeNativeAdapters(
   }
   for (const [module, definition] of Object.entries(views)) {
     if (!externalModules.has(module) || typeof definition.render !== 'function') continue;
-    const render = definition.render, actions = definition.actions, leave = definition.onLeave, ongoing = definition.ongoing;
+    const render = definition.render, actions = definition.actions, leave = definition.onLeave;
     definition.render = (state: Bag, api: Bag) => {
       // Rendering cannot start a fake phone call, navigation timer, capture or booking.
       const renderingApi = ['phone', 'browser', 'camera', 'maps'].includes(module)
@@ -395,15 +386,10 @@ export function installPrototypeNativeAdapters(
     if (actions) definition.actions = Object.fromEntries(Object.keys(actions).map(key => [key, (_card: Bag, api: Bag) => notify(api, 'Unavailable')]));
     if (['phone', 'camera', 'maps', 'workflows'].includes(module)) definition.ongoing = () => null;
     if (leave && ['phone', 'camera', 'maps'].includes(module)) definition.onLeave = () => {};
-    restore.push(() => { definition.render = render; definition.actions = actions; definition.onLeave = leave; definition.ongoing = ongoing; });
   }
   const settings = views.settings;
-  if (settings && typeof settings.render === 'function') {
-    // Later adapters replace settings.render; keep this honesty pass outermost.
-    const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
-    let exposed = finalize(settings.render);
-    Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
-    restore.unshift(() => { delete settings.render; settings.render = exposed; });
-  }
-  return () => { for (const reset of restore) reset(); installed.delete(views); };
+  // Later adapters replace settings.render; keep this honesty pass outermost.
+  const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
+  let exposed = finalize(settings.render);
+  Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
 }

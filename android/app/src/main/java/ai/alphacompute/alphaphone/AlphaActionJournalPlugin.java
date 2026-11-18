@@ -10,47 +10,43 @@ import ai.eliza.plugins.actionjournal.ActionJournalPlugin;
 import ai.eliza.plugins.notifications.NoticeRecovery;
 import java.util.Set;
 import org.json.JSONObject;
-import static ai.eliza.plugins.actionjournal.ActionJournal.field;
 import static ai.eliza.plugins.actionjournal.ActionJournal.sameJson;
 
 /** Product receipt recovery and Clock approval over the shared encrypted journal. */
 @CapacitorPlugin(name="AlphaActionJournal")
 public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  @Override protected ActionJournal createJournal(){return AlphaActionJournal.get(getContext());}
- private static JSONObject read(ActionJournal journal,String scope,String id)throws Exception{return journal.get(scope,id);}
- private static JSObject response(JSONObject entry)throws Exception{return entryResponse(entry);}
  @PluginMethod public void recoverNotification(PluginCall call){work(call,true,(store,scope,id)->{synchronized(store.lock()){
-  JSONObject entry=read(store,scope,id);
-  AlphaCredentialStore noticeStore=new AlphaCredentialStore(getContext());
-  WorkflowNoticeDelivery delivery=new WorkflowNoticeDelivery(new WorkflowNoticeDelivery.Storage(){public String read(String slot)throws Exception{return noticeStore.readCredentialSlot(slot);}public void write(String slot,String value)throws Exception{noticeStore.writeCredentialSlot(slot,value);}},new WorkflowNoticePoster(getContext()));
+  JSONObject entry=store.get(scope,id);
+  WorkflowNoticeDelivery delivery=WorkflowNoticeTapsFactory.delivery(getContext());
   JSONObject recovered=NoticeRecovery.recover(entry,scope,id,call.getString("bindingHash"),delivery::receipt);
-  if(recovered!=entry)store.update(scope,id,previous->recovered);return response(recovered);
+  if(recovered!=entry)store.update(scope,id,previous->recovered);return entryResponse(recovered);
  }});}
  @PluginMethod public void recoverDeletion(PluginCall call){work(call,true,(store,scope,id)->{synchronized(store.lock()){
-  JSONObject entry=read(store,scope,id);if(entry==null)return response(null);
+  JSONObject entry=store.get(scope,id);if(entry==null)return entryResponse(null);
   JSONObject operation=entry.getJSONObject("record").getJSONObject("operation");String type=operation.optString("type");
-  if(!Set.of("calendar_delete","reminder_cancel").contains(type))return response(entry);
+  if(!Set.of("calendar_delete","reminder_cancel").contains(type))return entryResponse(entry);
   JSONObject receipt=NativeDeletionCoordinator.get(getContext()).receipt("calendar_delete".equals(type)?"calendar":"reminder",entry.getString("operationId")),reminderResult=null;
   if(receipt!=null&&"reminder_cancel".equals(type)&&receipt.has("operationBinding")){
    JSONObject binding=receipt.getJSONObject("operationBinding"),saved=AlphaReminders.engine(getContext()).operationReceipt(entry.getString("operationId"),binding.getString("bindingHash"),operation);
    if("succeeded".equals(saved.optString("status")))reminderResult=saved.optJSONObject("result");
   }
   JSONObject recovered=DeletionReceiptRecovery.recover(entry,receipt,reminderResult);
-  if(recovered!=entry){AlphaActionJournal.checkResult(recovered,recovered.getString("status"),recovered.getJSONObject("result"));store.update(scope,id,previous->recovered);}return response(recovered);
+  if(recovered!=entry){AlphaActionJournal.checkResult(recovered,recovered.getString("status"),recovered.getJSONObject("result"));store.update(scope,id,previous->recovered);}return entryResponse(recovered);
  }});}
  @PluginMethod public void recoverReminder(PluginCall call){work(call,true,(store,scope,id)->{synchronized(store.lock()){
-  JSONObject entry=read(store,scope,id);if(entry==null)throw new IllegalStateException();
+  JSONObject entry=store.get(scope,id);if(entry==null)throw new IllegalStateException();
   JSONObject operation=entry.getJSONObject("record").getJSONObject("operation");
-  if(!Set.of("reminder_create","reminder_read_selected","reminder_update","reminder_complete","reminder_snooze","reminder_cancel").contains(operation.optString("type")))throw new IllegalArgumentException();
-  if("terminal".equals(entry.optString("phase"))&&!"unknown".equals(entry.optString("status")))return response(entry);
+  if(!AlphaActionJournal.REMINDER_OPERATIONS.contains(operation.optString("type")))throw new IllegalArgumentException();
+  if("terminal".equals(entry.optString("phase"))&&!"unknown".equals(entry.optString("status")))return entryResponse(entry);
   if(!"applying".equals(entry.optString("phase"))&&!"unknown".equals(entry.optString("status")))throw new IllegalStateException();
   String binding=call.getString("bindingHash");
   if(!scope.equals(entry.getString("scope"))||!id.equals(entry.getString("proposalId"))||!NoticeRecovery.binding(entry,scope,id).equals(binding))throw new IllegalStateException("Reminder recovery binding changed");
   JSONObject receipt=AlphaReminders.engine(getContext()).operationReceipt(entry.getString("operationId"),binding,operation);
-  if(!"succeeded".equals(receipt.optString("status")))return response(entry);
+  if(!"succeeded".equals(receipt.optString("status")))return entryResponse(entry);
   entry.put("phase","terminal").put("status","succeeded").put("summary","Recovered the original saved reminder receipt. No action was repeated.").put("finishedAt",System.currentTimeMillis())
    .put("result",new JSONObject().put("operationId",entry.getString("operationId")).put("reminderResult",receipt.getJSONObject("result")));
-  store.update(scope,id,previous->entry);return response(entry);
+  store.update(scope,id,previous->entry);return entryResponse(entry);
  }});}
  private final android.os.Handler clockMain = new android.os.Handler(android.os.Looper.getMainLooper());
  private <T> T clockUi(java.util.concurrent.Callable<T> action) throws Exception {
@@ -63,7 +59,7 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  }
  private JSONObject clockEntry(ActionJournal store,String scope,String id,String operationId)throws Exception{
   if(destroyed())throw new IllegalStateException();
-  JSONObject entry=read(store,scope,id);
+  JSONObject entry=store.get(scope,id);
   if(entry==null||!"applying".equals(entry.getString("phase"))||!operationId.equals(entry.getString("operationId")))throw new IllegalStateException();
   JSONObject record=entry.getJSONObject("record"),operation=record.getJSONObject("operation");ClockAgentReview.validate(operation);
   for(String name:new String[]{"ownerId","sessionId","agentId","origin","installationId","enrollmentId"})if(record.getString(name).isEmpty())throw new IllegalStateException();
@@ -76,17 +72,13 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
   JSObject out=new JSObject();out.put("result",clock!=null&&clock.has("result")?clock.getJSONObject("result"):ClockAgentReview.result(action,"unknown"));return out;
  }
  private JSONObject clockMarker(JSONObject entry,String phase)throws Exception{return new JSONObject().put("phase",phase).put("attemptId",entry.getString("attemptId")).put("operationHash",entry.getString("operationHash"));}
- /**
-  * The shared plugin stops its worker in handleOnDestroy. A Clock call the page made just before
-  * that can arrive afterwards; the stopped executor then throws on the bridge thread, which ends
-  * the process. Such a call is rejected: nothing was reviewed, approved or handed to Clock.
-  */
+ /** Rejects a Clock call that arrives after handleOnDestroy stopped the worker: nothing was reviewed, approved or handed to Clock. */
  private void clockWork(PluginCall call,Runnable task){
   PluginWorkers.submit(worker(),task,()->call.reject("Clock review closed before this step started; nothing was sent to Clock"));
  }
  @PluginMethod public void reviewClock(PluginCall call){
   clockWork(call,()->{try{
-   String scope=field(call.getString("scope"),"[a-f0-9]{64}"),id=field(call.getString("proposalId"),"[A-Za-z0-9_-]{1,128}"),operationId=field(call.getString("operationId"),"[A-Za-z0-9_-]{1,128}");
+   String scope=ActionJournal.scope(call.getString("scope")),id=ActionJournal.id(call.getString("proposalId")),operationId=ActionJournal.id(call.getString("operationId"));
    ActionJournal store=journal();JSONObject approved;String key=scope+":"+id;
    synchronized(store.lock()){JSONObject entry=clockEntry(store,scope,id,operationId),clock=entry.optJSONObject("clockReview");approved=entry.getJSONObject("record").getJSONObject("operation");if(!sameJson(approved,call.getObject("operation")))throw new IllegalStateException();
     if(clock!=null&&!"reviewing".equals(clock.getString("phase"))){call.resolve(clockReply(clock,approved.getString("action")));return;}
@@ -111,7 +103,7 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
   }catch(Exception refusal){call.reject("Exact approved Clock review unavailable");}});
  }
  @PluginMethod public void cancelClock(PluginCall call){work(call,true,(store,scope,id)->{synchronized(store.lock()){
-  String operationId=field(call.getString("operationId"),"[A-Za-z0-9_-]{1,128}");JSONObject entry=read(store,scope,id);
+  String operationId=ActionJournal.id(call.getString("operationId"));JSONObject entry=store.get(scope,id);
   if(entry==null||!operationId.equals(entry.getString("operationId")))throw new IllegalStateException();
   JSONObject operation=entry.getJSONObject("record").getJSONObject("operation");ClockAgentReview.validate(operation);
   JSONObject clock=entry.optJSONObject("clockReview");if(clock==null)clock=clockMarker(entry,"reviewing");
@@ -123,7 +115,7 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
   // Only the foreground check and Android handoff run on the Activity thread.
   clockWork(call,()->{try{ActionJournal store=journal();synchronized(store.lock()){
    if(destroyed())throw new IllegalStateException();
-   String scope=field(call.getString("scope"),"[a-f0-9]{64}"),id=field(call.getString("proposalId"),"[A-Za-z0-9_-]{1,128}"),operationId=field(call.getString("operationId"),"[A-Za-z0-9_-]{1,128}");
+   String scope=ActionJournal.scope(call.getString("scope")),id=ActionJournal.id(call.getString("proposalId")),operationId=ActionJournal.id(call.getString("operationId"));
    JSONObject entry=clockEntry(store,scope,id,operationId),clock=entry.getJSONObject("clockReview"),operation=entry.getJSONObject("record").getJSONObject("operation");
    if(!"approved".equals(clock.getString("phase"))){call.resolve(clockReply(clock,operation.getString("action")));return;}
    if(!clock.getString("reviewToken").equals(call.getString("reviewToken")))throw new IllegalStateException();

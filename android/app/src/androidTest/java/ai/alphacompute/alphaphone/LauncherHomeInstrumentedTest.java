@@ -70,6 +70,11 @@ public class LauncherHomeInstrumentedTest {
   assertTrue("Android accepted HOME down", ui.injectInputEvent(new KeyEvent(down, down, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_HOME, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD), true));
   assertTrue("Android accepted HOME up", ui.injectInputEvent(new KeyEvent(down, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_HOME, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD), true));
  }
+ private static void openHome() throws Exception {
+  AppNavigation.liveMode();
+  eval(AppNavigation.request("Home"));
+  until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+ }
  private static String button(String label) { return "[...document.querySelectorAll('[data-screen] button')].find(b=>b.getAttribute('aria-label')===" + JSONObject.quote(label) + "&&b.getClientRects().length&&!b.disabled&&!b.closest('[inert]'))"; }
  private static void tap(String label) throws Exception { until(button(label), "Missing control " + label); eval("(" + button(label) + ").click()"); }
  private static final String DRAWER = "document.querySelector('[data-alpha-layer=\"drawer\"][role=\"dialog\"]')";
@@ -103,9 +108,7 @@ public class LauncherHomeInstrumentedTest {
   Intent settingsLaunch = context.getPackageManager().getLaunchIntentForPackage("com.android.settings");
   Assume.assumeTrue("Android Settings has a launcher entry on this image", settingsLaunch != null);
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   AppNavigation.liveMode();
-   eval(AppNavigation.request("Home"));
-   until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+   openHome();
    // Rows are identified by component, not label: an image with two Settings activities gives each
    // its own disambiguated label ("Open Settings (SubSettings)"), so the bare label is not stable.
    android.content.ComponentName settings = settingsLaunch.getComponent();
@@ -132,9 +135,7 @@ public class LauncherHomeInstrumentedTest {
   assumeAlphaIsHome();
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   AppNavigation.liveMode();
-   eval(AppNavigation.request("Home"));
-   until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+   openHome();
    tap("Apps");
    until(DRAWER + "&&" + APPS + ".length>=3", "The drawer lists at least three installed apps");
    org.json.JSONArray labels = new org.json.JSONArray((String) new org.json.JSONTokener(eval("JSON.stringify([...new Set(" + APPS + ".map(b=>b.getAttribute('aria-label')))].slice(0,3))")).nextValue());
@@ -168,9 +169,7 @@ public class LauncherHomeInstrumentedTest {
    if (candidate.activityInfo != null && !context.getPackageName().equals(candidate.activityInfo.packageName)) otherHome = true;
   assertTrue("A stock Home app remains installed to switch back to", otherHome);
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   AppNavigation.liveMode();
-   eval(AppNavigation.request("Home"));
-   until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+   openHome();
    UiAutomation ui = InstrumentationRegistry.getInstrumentation().getUiAutomation();
    for (String action : new String[]{android.provider.Settings.ACTION_SETTINGS, android.provider.Settings.ACTION_HOME_SETTINGS}) {
     ResolveInfo handler = packages.resolveActivity(new Intent(action), PackageManager.MATCH_DEFAULT_ONLY);
@@ -193,9 +192,7 @@ public class LauncherHomeInstrumentedTest {
   Assume.assumeTrue("Android Settings is available to cover Alpha", settings != null && settings.activityInfo != null && !context.getPackageName().equals(settings.activityInfo.packageName));
   UiAutomation ui = InstrumentationRegistry.getInstrumentation().getUiAutomation();
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   AppNavigation.liveMode();
-   eval(AppNavigation.request("Home"));
-   until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+   openHome();
    boolean[] kind = new boolean[2];
    BoundedActivityScenario.main(() -> {
     MainActivity live = MainActivity.liveInstance();
@@ -237,9 +234,7 @@ public class LauncherHomeInstrumentedTest {
   Assume.assumeTrue("The stock dialer has an installed launcher entry",
    context.getPackageManager().getLaunchIntentForPackage(dialerPackage) != null);
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   AppNavigation.liveMode();
-   eval(AppNavigation.request("Home"));
-   until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+   openHome();
    // Tap 1: Apps. Tap 2: the stock dialer's installed entry.
    tap("Apps");
    String phone = "[...document.querySelectorAll('[data-alpha-layer=drawer] [data-launcher-app],[data-alpha-layer=drawer] [data-launcher-favorite]')]"
@@ -260,9 +255,7 @@ public class LauncherHomeInstrumentedTest {
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
    try {
-    AppNavigation.liveMode();
-    eval(AppNavigation.request("Home"));
-    until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready");
+    openHome();
     android.webkit.WebView dead = RendererRecoveryInstrumentedTest.killHostRenderer();
     RendererRecoveryInstrumentedTest.awaitRecovered(dead, "while Alpha is HOME");
     awaitForeground(context.getPackageName(), "Alpha stays in front after renderer recovery");

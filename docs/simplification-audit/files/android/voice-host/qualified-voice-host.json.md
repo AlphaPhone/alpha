@@ -1,0 +1,21 @@
+# android/voice-host/qualified-voice-host.json
+- Lines: 353 (17.8 KB) | Role: the reviewed on-device voice host record: upstream pin and engine fork pin, per-ABI `libelizainference.so`/`libc++_shared.so` digests, component licences and every packaged model/notice/G2P file with sha256 and bytes | Verdict: KEEP (SIMPLIFY the duplicated ASR slot)
+- Importers: `scripts/voice-host.ts` (validator + `--verify`), `android/app/product.gradle` (`verifyVoiceHost`), `scripts/android-stage-voice-models.ts`, `scripts/verify-apks.ts`, `scripts/generate-licenses.ts` (attribution, licenseFlags, noticeFiles), `scripts/generate-sbom.ts`, `scripts/ci/speech-candidate.ts`, `scripts/ci/hosted-native-inputs.py`, `scripts/aosp-listener.ts`, `scripts/stage-embedding-host.ts`, `scripts/app-update-candidate.ts`, `scripts/android-build-preflight.ts`, `.github/workflows/android.yml`, `android-emulator.yml`. Text/path pins: `README.md`, `licenses/README.md`, `licenses/unverified-allowlist.json`, generated `apps/app/public/licenses/THIRD_PARTY_NOTICES.txt` and `third-party-notices.json`, and tests `test/voice-host-record.test.mjs`, `test/host-speech-admission.test.mjs`, `test/sense-packaging-ndk.test.mjs`, `test/strict-build-inputs.test.mjs`, `test/upstream-pin-guard.test.mjs`, `test/ci-pin-bound-scripts.test.mjs`, `test/embedding-host-admission.test.mjs`, `test/voice-host-absent-admission.test.mjs`, `test/android-build-path.test.mjs`, `test/ci-emulator-evidence.test.mjs`, `test/fixtures/app-update-candidate.mjs`.
+
+## Findings
+| # | Lines | Pattern | Finding (with snippet) | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 16-23 | C6 / B3 | `"asrSlot": {"record": "android/paradee-voice/asr-inputs.json", "backend": "parakeet", "paths": ["asr/phonon-2-fv5.gguf"], "current": "…"}` restates what `models[]` (row with `"role": "asr-model"`, `"backend": "parakeet"`, line 117-134) and `android/paradee-voice/asr-inputs.json` already say; `scripts/voice-host.ts:80-87` validates that `asrSlot.paths` equals the ASR rows in order and `:118-125` that both files agree. `current` has no reader. | Delete `asrSlot`; derive `paths` in `voice-host.ts:162` as `models.filter(r => ASR_BACKEND_ROLES.includes(r.role)).map(r => r.path)` and the backend from the rows. Combined with folding `asr-inputs.json` into this record (see its report), delete the equality checks. | Low–medium: update `test/voice-host-record.test.mjs` fixtures that build `asrSlot`. |
+| 2 | 117-134 vs asr-inputs 9-24 | C6 | Phonon-2 `license`, `attribution`, `licenseFlags`, `sha256`, `bytes` duplicated with `asr-inputs.json`. | One record (fold asr-inputs into this file's model row). | Medium (several readers of asr-inputs: `paradee-runtime.ts:89`, `speech-candidate.ts:37`). |
+| 3 | 3, 45, 67 | A8 | `description` (~1 KB) and two identical `componentBuild` strings (~600 chars each) narrate build history ("Pins 86a0d19473, c35106fb14 and b25d8aef29 keep the same engine gitlink…"). | `componentBuild` has no reader (grep in scripts/test/.github: 0). Delete both strings (provenance belongs in the commit that recorded the digests), or keep one short top-level `componentBuild` (builder, pin, NDK, date). | Low |
+| 4 | 7-8 | — | `identity`, `provider` are validated constants (`voice-host.ts:76`). | Keep. | — |
+| 5 | 135-241 | — | Notice rows (Delibes, eSpeak, misaki, Phonon-2, spaCy) feed `generate-licenses.ts`; three share the same Apache-2.0 text digest `c71d239d…` (lines 140,168,204) — legitimate, separate files in the bundle. | Keep. | — |
+
+## Local types and helpers
+None (data). TS shape of this record is declared in `scripts/voice-host.ts:30-50`; `AsrSlot` in `scripts/paradee-runtime.ts` describes the twin `asr-inputs.json`.
+
+## Proposed end state
+~340 lines: no `asrSlot`, one `componentBuild`, shorter description; models/abis/components unchanged byte-for-byte in their digests.
+
+## Verification
+`node --test test/voice-host-record.test.mjs test/voice-host-absent-admission.test.mjs test/host-speech-admission.test.mjs test/sense-packaging-ndk.test.mjs test/strict-build-inputs.test.mjs test/android-build-path.test.mjs`; `node scripts/voice-host.ts --verify`; `node scripts/generate-licenses.ts --check` (notices must be unchanged); `npm run android:build:local` with staged voice outputs; `scripts/verify-apks.ts` on both variants.

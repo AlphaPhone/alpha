@@ -25,7 +25,7 @@ public final class PasswordFillFixtureActivity extends Activity {
    StringBuilder hex = new StringBuilder();
    for (byte b : MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))) hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
    return hex.toString();
-  } catch (Exception unavailable) { return "unavailable"; }
+  } catch (java.security.NoSuchAlgorithmException required) { throw new AssertionError(required); }
  }
  @Override public void onCreate(Bundle state) {
   super.onCreate(state);

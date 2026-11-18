@@ -5,15 +5,12 @@ import static androidx.test.espresso.matcher.ViewMatchers.isRoot;
 import static org.junit.Assert.*;
 
 import android.graphics.Rect;
-import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import androidx.test.espresso.accessibility.AccessibilityChecks;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
 import androidx.test.uiautomator.UiDevice;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
@@ -21,8 +18,8 @@ import org.junit.runner.RunWith;
 
 /**
  * Home, Settings and the composer at 200% system font scale, the page's own measure of that text
- * size, Home text overlap, and the ways into Android's own notification shade (#416, #417; Alpha
- * draws no shade, and a pull on launcher's empty Home asks Android to open its shade):
+ * size, Home text overlap, and the ways into Android's own notification shade (Alpha draws no
+ * shade, and a pull on launcher's empty Home asks Android to open its shade):
  * Accessibility Test Framework checks on the native view hierarchy (Espresso) and a
  * UiAutomator check that every actionable node TalkBack reaches has a label, is not
  * clipped off-screen and appears in reading order. Emulator evidence only.
@@ -38,16 +35,12 @@ public final class AccessibilityInstrumentedTest {
   * One connection for the whole test. A UiAutomation connected without this flag suspends every
   * other accessibility service for as long as it is connected, which would unbind a real screen
   * reader such as TalkBack when one is on; asking for a connection with different flags drops and
-  * reconnects it. UiDevice is given the same flags through Configurator.
+  * reconnects it. UiDevice, AndroidShade and the shell commands are given the same flags through
+  * Configurator.
   */
  private static final int AUTOMATION_FLAGS=android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES;
- private static android.app.UiAutomation automation(){return InstrumentationRegistry.getInstrumentation().getUiAutomation(AUTOMATION_FLAGS);}
- private static String shell(String command)throws Exception{
-  try(InputStream in=new ParcelFileDescriptor.AutoCloseInputStream(automation().executeShellCommand(command))){return new String(in.readAllBytes(),StandardCharsets.UTF_8).trim();}
- }
  private static String js(String code)throws Exception{return WebViewTestDriver.evaluate(code);}
  private static void until(String code)throws Exception{for(int i=0;i<200;i++){if("true".equals(js("Boolean("+code+")")))return;SystemClock.sleep(100);}fail("Accessibility flow condition: "+code);}
- private static void open(String view)throws Exception{js(AppNavigation.request(view));until(AppNavigation.selected(view));}
 
  /** TalkBack linear order of the app window at 200% font, read with this test's UiAutomation flags (TalkBackOrder). */
  private static void talkBackOrder(UiDevice device,String surface)throws Exception{TalkBackOrder.check(device,surface,TalkBackOrder.Assistant.REQUIRED_LAST);}
@@ -69,11 +62,6 @@ public final class AccessibilityInstrumentedTest {
  private static final String HOME_LABELS_SPLIT="(()=>{const bad=[];for(const button of document.querySelectorAll('[data-alpha-home-apps] > button')){const label=button.lastElementChild,text=(label.textContent||'').trim();if(!text||/\\s/.test(text))continue;"
   +"const range=document.createRange();range.selectNodeContents(label);const tops=new Set([...range.getClientRects()].filter(b=>b.width>1).map(b=>Math.round(b.top)));if(tops.size>1)bad.push(text);}return JSON.stringify(bad);})()";
 
- /** A flag-off build without a stored Cloud credential: P-43's required sign-in page covers every view. */
- private static boolean requiredSignIn()throws Exception{
-  if(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)return false;
-  return new AlphaCredentialStore(InstrumentationRegistry.getInstrumentation().getTargetContext()).readCredentialSlot("cloud:production")==null;
- }
  /**
   * Controls of the required sign-in page that cannot be brought wholly on screen by scrolling, or
   * that something else is painted over once they are, as a JSON array (empty when none).
@@ -92,14 +80,14 @@ public final class AccessibilityInstrumentedTest {
   * Never enters an address or a code: nothing is sent to Eliza Cloud.
   */
  @Test public void requiredCloudSignInAtDoubleFontScale()throws Exception{
-  org.junit.Assume.assumeTrue("Only a flag-off build signed out of Eliza Cloud opens the required sign-in page (P-43)",requiredSignIn());
+  org.junit.Assume.assumeTrue("Only a flag-off build signed out of Eliza Cloud opens the required sign-in page (P-43)",AppNavigation.requiredSignIn());
   androidx.test.uiautomator.Configurator configurator=androidx.test.uiautomator.Configurator.getInstance();
   int previousFlags=configurator.getUiAutomationFlags();
   configurator.setUiAutomationFlags(AUTOMATION_FLAGS);
-  String previous=shell("settings get system font_scale");
+  String previous=AccessibilityViewsInstrumentedTest.shell("settings get system font_scale");
   UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
   try{
-   shell("settings put system font_scale 2.0");
+   AccessibilityViewsInstrumentedTest.shell("settings put system font_scale 2.0");
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
     AppNavigation.liveMode();
     AccessibilityChecks.enable().setRunChecksFromRootView(true);
@@ -112,7 +100,7 @@ public final class AccessibilityInstrumentedTest {
     assertEquals("Sign-in controls out of reach at 200% font","[]",unquote(js(SIGN_IN_UNREACHABLE)));
    }
   }finally{
-   shell("settings put system font_scale "+(previous.isEmpty()||"null".equals(previous)?"1.0":previous));
+   AccessibilityViewsInstrumentedTest.shell("settings put system font_scale "+(previous.isEmpty()||"null".equals(previous)?"1.0":previous));
    configurator.setUiAutomationFlags(previousFlags);
   }
  }
@@ -124,30 +112,25 @@ public final class AccessibilityInstrumentedTest {
   androidx.test.uiautomator.Configurator configurator=androidx.test.uiautomator.Configurator.getInstance();
   int previousFlags=configurator.getUiAutomationFlags();
   configurator.setUiAutomationFlags(AUTOMATION_FLAGS);
-  // AndroidShade shares the same connection: with its default flags each shade check reconnected
-  // UiAutomation with accessibility services suppressed, which unbinds any enabled screen reader such
-  // as TalkBack in the middle of the journey and changes what WebView exposes to TalkBackOrder.
-  AndroidShade.useAutomationFlags(AUTOMATION_FLAGS);
-  String previous=shell("settings get system font_scale");
+  String previous=AccessibilityViewsInstrumentedTest.shell("settings get system font_scale");
   UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
   try{
-   shell("settings put system font_scale 2.0");
+   AccessibilityViewsInstrumentedTest.shell("settings put system font_scale 2.0");
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
     AppNavigation.liveMode();
     // Throws on any ATF error-level result for the native hierarchy (WebView host, system bars).
     AccessibilityChecks.enable().setRunChecksFromRootView(true);
-    open("Home");AppNavigation.declineStartupAccess();onView(isRoot()).check(AccessibilityChecks.accessibilityAssertion());talkBackOrder(device,"Home");
+    AppNavigation.open("Home");AppNavigation.declineStartupAccess();onView(isRoot()).check(AccessibilityChecks.accessibilityAssertion());talkBackOrder(device,"Home");
     // Large text reaches the page as WebView text zoom. The page measures it (runtime/text-scale.ts)
     // and its layout rules read the result; a value near 1 here would mean those rules never engage.
     until("Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale'))>0");
     double measured=Double.parseDouble(js("Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale'))"));
     assertTrue("The page measures the 200% text it is drawn at (measured "+measured+")",Math.abs(measured-2.0)<0.2);
-    // Round 7 saw the Home card title printed over the lines around it and app labels split
-    // mid-word at this size. Measured from the painted line boxes inside the WebView.
+    // Overlap and mid-word splits are measured from the painted line boxes inside the WebView.
     assertEquals("Home text printed over other text at 200% font","[]",unquote(js(HOME_TEXT_OVERLAP)));
     assertEquals("Home app labels split mid-word at 200% font","[]",unquote(js(HOME_LABELS_SPLIT)));
 
-    // Gesture zones and Android's shade (#416, #417). Android's shade is the
+    // Gesture zones and Android's shade. Android's shade is the
     // one notification surface: Alpha draws none, in either flavor.
     until(AndroidShade.ALPHA_SHADE_ABSENT);
     Rect web=device.findObject(By.clazz("android.webkit.WebView")).getVisibleBounds();
@@ -176,13 +159,12 @@ public final class AccessibilityInstrumentedTest {
      assertEquals("true",js(AndroidShade.ALPHA_SHADE_ABSENT));
      AndroidShade.collapse();
     }
-    open("Settings");onView(isRoot()).check(AccessibilityChecks.accessibilityAssertion());talkBackOrder(device,"Settings");
-    open("Home");js(AppNavigation.type());until(AppNavigation.composer());talkBackOrder(device,"Composer");
+    AppNavigation.open("Settings");onView(isRoot()).check(AccessibilityChecks.accessibilityAssertion());talkBackOrder(device,"Settings");
+    AppNavigation.open("Home");js(AppNavigation.type());until(AppNavigation.composer());talkBackOrder(device,"Composer");
    }
   }finally{
-   shell("settings put system font_scale "+(previous.isEmpty()||"null".equals(previous)?"1.0":previous));
+   AccessibilityViewsInstrumentedTest.shell("settings put system font_scale "+(previous.isEmpty()||"null".equals(previous)?"1.0":previous));
    configurator.setUiAutomationFlags(previousFlags);
-   AndroidShade.useAutomationFlags(0);
   }
  }
 }

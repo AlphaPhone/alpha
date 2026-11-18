@@ -1,0 +1,16 @@
+# scripts/test-connection-history.ts
+- Lines: 471 | Kind: source transplant at scale (cuts `connection-ui.tsx` at `export function ConnectionChooser()`, strips imports, rewrites `import.meta.env`, runs it in `vm` with ~70 injected bindings; also transplants `conversation-selection.ts`) + two loopback HTTP servers | Verdict: DELETE; REWRITE the few product cases (below)
+- Covers: mostly D5 paths (personal Cloud dedicated agent connect, paired remote agent pairing, keyset paging over 260 messages, device/session revocation); also product rules: history membership check, action stripping on restore, current device time zone metadata and invalid-zone refusal, user-text format negotiation, Stop with and without the upstream turn-abort route, owner copy for Cloud refusals without retry, Calendar coverage refusal reply, `calendarDay` observation admitted only after a fresh status handshake and cancelled by a date-only revision. Duplicates: `test/browser/connection-boundaries.production.spec.ts` (flag-off), `test/browser/chat-continuity.spec.ts`, `test/remote-protocol` tests via `connection-contracts.test.mjs`. Callers/importers: `test/connection-contracts.test.mjs` (child suite); comments in `connection-boundaries.production.spec.ts:412`, `test/workflow-device-bindings-fixture.test.mjs:5`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 197-209 | T2 | Text cut of a 4,200-line god module; any edit to `connection-ui.tsx` (D1 split in Stage F) breaks it. | Delete. | L |
+| 2 | 197 | T10 | The regex that removes `function ResidentRecoveryPanel(...)` before `productionCloudSignInRequired` no longer matches: the panel is now at line 4074, after the `ConnectionChooser` cut (3646). Dead text surgery. | Gone with delete. | L |
+| 3 | 217-329 | A3 / D5 | `cloudList`, `cloudPersonalConnect`, `pair('remote', ...)`, `RemoteProtocol`, `DevelopmentCloudAgentProtocol`, `PersonalProtocolError`: all on the D5 list (delete-candidates C4 names this script). | Delete. | L |
+| 4 | 24-26 | T9 | Self-respawn through `child-command.ts`. | Gone. | L |
+| 5 | 175-184 | D5 | Binding bag sets `testMocksEnabled`, `devSurfacesEnabled`, `browserDevProfile`... by hand: the flag zoo. | Gone. | L |
+| 6 | 430-469 | — | The `AlphaClient` -> controller -> `LocalAgentProtocol` block exercises real modules but only through the transplanted controller. | Rewrite after Stage F exports a Node-importable controller, or as a journey. | M |
+
+## Proposed end state
+Cases worth carrying (others are D5 or duplicates): (a) `journeys/chat.spec.ts` on the resident dev bridge: Stop with turn-abort route sends exactly one abort and no repeat; Stop without it shows "May still finish" then the single finished reply; (b) same journey: refused turn (`rate_limited` with retry hint, `insufficient_credits`) shows owner copy and is posted once; (c) integration `test/local-agent-observation.test.ts`: `calendarDay` is sent only after a fresh status that admits it, a date-only revision during the status read cancels before serialization, a changed `serverInstanceId` drops the field until rebinding; (d) invalid time zone never reaches the transport. Delete the script, its `connection-contracts.test.mjs` entry and the two comments.

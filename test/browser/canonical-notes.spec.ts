@@ -322,28 +322,6 @@ test('an agent append refreshes the open note and its row, and a stale owner edi
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
-test('Notes keeps previous device data behind an explicit recovery route without mixing collections',async({page})=>{
- const {errors}=await canonicalNotesFixture(page);
- const before=await page.evaluate(async()=>{
-  const m=await import('/src/runtime/browser-notes-document.ts');
-  await(await m.openBrowserNotes()).replace([{id:'old-note',kind:'text',title:'Previous local note',body:'Retained exact local text',custom:{keep:'verbatim'}}]);
-  return m.readBrowserNotesRaw();
- });
- await openCanonicalNotes(page);
- await expect(page.getByRole('button',{name:'Open Previous local note',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Record voice note',exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toBeVisible();
- await expect(page.getByRole('group',{name:'Folders',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'New note',exact:true}).click();
- await page.getByRole('textbox',{name:'Title',exact:true}).fill('Canonical only');
- await page.getByRole('textbox',{name:'Note',exact:true}).fill('New text stays in the canonical store.');
- await expect(page.getByRole('button',{name:'Done editing note',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Back to notes',exact:true}).click();
- await expect(page.getByRole('button',{name:'Open Canonical only',exact:true})).toBeVisible();
- expect(await page.evaluate(async()=>(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())).toBe(before);
- expect((await snapshot(page)).notes.map((note:any)=>note.title)).toEqual(['Canonical only']);
- expect(errors).toEqual([]);
-});
 
 test('canonical Notes editor stays focusable beside half chat and isolates without losing its draft under full chat',async({page})=>{
  await page.setViewportSize({width:412,height:915});

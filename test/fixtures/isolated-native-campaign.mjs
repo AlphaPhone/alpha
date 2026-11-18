@@ -9,7 +9,7 @@ const scripts={'recovery':path.resolve('scripts/test-reminder-recovery.ts'),'rec
 export const permissionCampaign=['camera','camera-capture','settings','channels','voice','voice-revoke','voice-limit','notice','notice-denied'];
 export function exercise(mode,kind='calendar',extraArguments=[]){
  const homePackage=mode==='google-home'?'com.google.android.apps.nexuslauncher':'com.android.launcher3';
- const restartCampaign=['inbox','notes','document','text-scale','bookmark','notes-secure-migration','crash-log','theme','source-reference'].includes(kind);
+ const restartCampaign=['inbox','document','text-scale','bookmark','notes-secure-migration','crash-log','theme','source-reference'].includes(kind);
  const reminderCampaign=['one-off','recurrence','recovery','recurrence-recovery'].includes(kind);
  const permissionCase=permissionCampaign.includes(kind);
  const calendarCampaign=!permissionCase&&!restartCampaign&&!reminderCampaign&&kind!=='workflow';
@@ -125,7 +125,7 @@ else if(a.includes('instrument')){
   if(JSON.parse(fs.readFileSync(file)).recording?.alive){console.log(block(1)+block(-2)+'FAILURES!!!\\nINSTRUMENTATION_CODE: -1\\n');process.exit(0);}
   console.log(block(1)+'INSTRUMENTATION_RESULT: shortMsg=Process crashed.\\nINSTRUMENTATION_CODE: 0\\n');process.exit(0);
  }
- const gate=['inboxPhase','notesDocumentPhase','documentPhase','textScalePhase','bookmarkPhase','notesSecureMigrationPhase','crashLogPhase','themePhase','sourceReferencePhase'].find(g=>a.includes(g)),phase=gate?a[a.indexOf(gate)+1]:null;
+ const gate=['inboxPhase','documentPhase','textScalePhase','bookmarkPhase','notesSecureMigrationPhase','crashLogPhase','themePhase','sourceReferencePhase'].find(g=>a.includes(g)),phase=gate?a[a.indexOf(gate)+1]:null;
  // The crash-log phase ends its own process through the default handler.
  if(gate==='crashLogPhase'&&phase==='crash'){s.crashed=true;save();console.log(mode==='crash-completes'?block(1)+block(0)+'OK (1 test)\\nINSTRUMENTATION_CODE: -1\\n':block(1)+'INSTRUMENTATION_RESULT: shortMsg=Process crashed.\\nINSTRUMENTATION_CODE: 0\\n');process.exit(0);}
  let output=block(1)+block(0)+'OK (1 test)\\nINSTRUMENTATION_CODE: -1\\n';

@@ -1,0 +1,16 @@
+# scripts/workflow-worker-artifact.ts
+- Lines: 73 | Kind: build script module (verify and atomically stage the workflow-worker artifact with a bounded extraction index) | Verdict: KEEP, SIMPLIFY
+- Covers: the packaged workflow worker is exactly the manifest's files (no extras, no symlinks, size-bounded, hashes match, required deps present) and is staged atomically with a `files.sha256` index for the native extractor. Duplicates: `workerHash` is a C3 twin; `verify-packaged-runtime.py:201-223` re-checks the same index/manifest inside the APK (that one is the APK-side check; legitimate). Callers/importers: `build-workflow-worker.ts`, `stage-local-agent-runtime.ts`, `stage-workflow-worker.ts`, `prepared-workflow-worker.ts`, `cloud-resident-host.ts`, `native-google-host-artifact.ts`, `ci/export-browser-proof.ts`, `test-workflow-worker.ts`, `test-workflow-compiler.ts`, `test-mobile-workflow-bundle.ts`, `quint-lib.ts:22`, `source-snapshot.ts`, refinement harnesses (`boundaries.mjs`, `native-google-host-artifact*.mjs`, `prepared-workflow-worker.mjs`, `workflow-worker-staging.mjs`), `specs/quint/services/manifest.json`, tests `workflow-worker-assets.test.mjs`, `prepared-workflow-worker.test.mjs`, `product-character-host.test.mjs`, `android-build-path.test.mjs`, fixtures.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 14–20 | A1/A8 | Refuses artifacts carrying a `.patch-overlay.json` from "the retired patch builder". No current builder writes that record. Also mirrored in `specs/quint/refinement/services/workflow-worker-staging.mjs:29` and `test/workflow-worker-assets.test.mjs:18`. | Delete the check with its harness/test lines (the harness change must keep the model passing: the model state for "patched overlay" goes too, or the harness stops feeding it). | Medium (formal lane). |
+| 2 | 13, 53–56 | B3 | Walks every ancestor directory up to `/` checking for symlinks, on every verify and stage. On macOS `/tmp` → `/private/tmp` and similar system links would fail; a repo-root bound is enough. | Stop the walk at the repository root (or drop it; `lstat` per file already rejects links inside the artifact). | Low |
+| 3 | 52, 63–64 | B5 | Verifies source, copies, re-verifies the copy, then re-hashes the manifest once more. Check-act-check sandwich on a local copy. | Keep one re-verify of the copy (it catches a concurrent writer); drop the extra manifest hash compare (already covered by `verifyWorkerArtifact(temporary)` returning the same `manifestHash`). | Low |
+| 4 | 10 | C3 | `workerHash`. | `scripts/lib/hash.ts`. | None |
+| 5 | 25 | B3 | `manifest.files` shape checks after a typed `JSON.parse` cast. Boundary is the artifact file. | Keep the check; drop the misleading cast type. | Low |
+| 6 | 32–37, 13 | D8 | Recursive `visit` and loops packed on single lines. | Reformat. | None |
+
+## Proposed end state
+~55 lines: one verifier (bounded walk inside the artifact, hash/required-deps checks), one atomic stager with a single post-copy verification; no retired patch-overlay refusal; shared hash. Output (`files.sha256` index format, return values) unchanged, since native extraction and the Quint staging model depend on it.

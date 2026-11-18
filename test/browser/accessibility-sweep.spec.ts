@@ -62,7 +62,7 @@ for (const state of STATES) {
 // The states below failed on real layout defects when this lane was added (issue #701). They still
 // run every rule, and must still report a defect: a fix makes the test fail with "now passes", and
 // the entry must then be removed. A timeout or a state that no longer opens fails as well, instead
-// of counting as the expected failure. The list may only shrink (test/accessibility-coverage.test.mjs).
+// of counting as the expected failure. The list may only shrink.
 const OPEN_AT_300 = new Set([
 ]);
 for (const state of [...LIVE_STATES, ...BROWSER_APP_STATES, ...LAUNCHER_STATES]) {

@@ -9,10 +9,10 @@ function fixture({resident=true}={}){
  const f={onDevice:0,synthesized:0};
  const binding={sessionId:'s1',agentId:'a1'};
  const box={Date,JSON,DOMException,AbortController,document:{hidden:false,addEventListener(){},removeEventListener(){}},testMocksEnabled:false,
-  registerPlugin:()=>({synthesizeLocalBrowserReading:async()=>{f.synthesized++;return {playbackId:'p',execution:'device'};}}),playOwnedSpeech:async()=>{},createPairedVoice:()=>null,
+  registerPlugin:()=>({synthesizeLocalBrowserReading:async()=>{f.synthesized++;return {playbackId:'p',execution:'device'};}}),playOwnedSpeech:async()=>{},
   createOnDeviceVoice:()=>{f.onDevice++;return {playbackReady:async()=>true};},
   // A signed-in Cloud account: the speech route would be Cloud, and page reading still is not.
-  connectionController:{getResidentReadingBinding:()=>resident?binding:null,getPairedVoiceBinding:()=>null,getCloudEnvironment:()=>'production',getCloudClient:()=>({sessionId:'c',credentialId:'c'}),getSnapshot:()=>({open:false}),subscribe:()=>()=>{}}};
+  connectionController:{getResidentReadingBinding:()=>resident?binding:null,getCloudEnvironment:()=>'production',getCloudClient:()=>({sessionId:'c',credentialId:'c'}),getSnapshot:()=>({open:false}),subscribe:()=>()=>{}}};
  vm.runInNewContext(source+';Object.assign(globalThis,{createNativeReadingVoice});',box);
  return {f,box};
 }

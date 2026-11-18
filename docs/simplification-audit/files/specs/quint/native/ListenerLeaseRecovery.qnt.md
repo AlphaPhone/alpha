@@ -1,0 +1,16 @@
+# specs/quint/native/ListenerLeaseRecovery.qnt
+- Lines: 171 | Kind: Quint model (live; D7) | Verdict: MERGE (partial): keep the lease/frame-admission half here; move the crash-history half into `specs/quint/native/NativeListenerStore.qnt`
+- Covers: (a) `IndicatorLease` monotonic lease: acknowledgement before first frame, exact 3000 ms expiry, no renew after expiry, other-boot invalidation, unknown display uses the listener's own screen state, attribution (chip + recording) required after the 2500 ms grace; (b) `ListenerStore`/`CrashLoopBreaker`: three unclean starts within 600000 ms trip the breaker, cap of eight exits, reboot/update/permission revocation do not count, a trip stays latched until explicit consent. Duplicates: (b) is also modelled by `NativeListenerStore.qnt:84-90,133-138` (same `now - time < 600000` window, `length() >= 3` trip, `slice(len-8, len)` cap, `markerBoot`/`markerInstall`) and partly by `AlwaysOnListenerIndicatorReadback.processRestart`; (a)'s boundary classes are point-checked again in `specs/quint/native/conformance.mjs:173-190`. Callers/importers: `quint:check` (12 runs); `refinement/native/ComponentTraces.java:124-170` `leases()` (javac of vendor `IndicatorLease`/`CrashLoopBreaker`), run from `refinement/native/index.mjs:112-131`; `refinement/native/indicator-provider.mjs` (mentions the model); obligation `index.mjs:227`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 8-9, 33-35, 94-109, 154-170 | T4 / C5 | Crash-history state (`sessionOpen, markerBoot, install, markerInstall, wall, exits, tripped, historyLoaded`), `recent`, `unclean`, `processStarts`, `loadSavedHistory` and six scenarios restate `NativeListenerStore` (`thirdUncleanStartTripsTest`, `crashWindowExpiryDoesNotClearLatchTest`, `fullHistoryRetainsEightNewestTest`). | Move the three scenarios `NativeListenerStore` lacks (`rebootDoesNotCountCrashTest`, `updateDoesNotCountCrashTest`, `permissionRevocationDoesNotCountCrashTest`) into it, then delete the crash half here (keep only `processConsent`/`tripped` as inputs to `FrameNeedsConsent`). Drop the `CrashLoopBreaker` part of `ComponentTraces.leases()` if `NativeListenerStore`'s harness executes the breaker. | Medium: two harnesses change together. |
+| 2 | 104 | A8 | Comment "Startup may restore records created by an earlier installed version" reads like a legacy-data path; `loadSavedHistory` only seeds persisted crash history (current format), it is not a migration. | Reword: "Startup loads the persisted crash history." | None |
+| 3 | 17-27, 51-64 | — (keep) | Lease verdict and frame admission (`FrameNeedsFreshLease`, `AttributionAfterGrace`, `NoRenewExpiredLease`) are unique here. | Keep. | — |
+| 4 | manifest `sources` | §2.9 | Alpha `SenseApplication.java`, `ListeningService.java` pinned; executed code is upstream `IndicatorLease`/`CrashLoopBreaker`. | Pin the compiled upstream files (already in `sharedSources`). | Low |
+
+## Proposed end state
+`ListenerLeaseRecovery` shrinks to the lease and frame-admission model (about 100 lines, 6 scenarios). Crash-loop
+rules live only in `NativeListenerStore` with the three non-counting cases added there. The duplicate point checks in
+`conformance.mjs` go away with the always-on harness move.

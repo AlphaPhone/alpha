@@ -1,6 +1,6 @@
 import { DEFAULT_SURFACE_LAYOUT, keyboardFreeHeight, raisesSoftKeyboard, sameSurfaceLayout, surfaceLayout as sharedSurfaceLayout, type SurfaceLayout } from '../../../../.eliza/client-features/packages/ui/src/components/shell/responsive-layout.ts';
 /**
- * How the phone canvas is fitted to the window (issue #411).
+ * How the phone canvas is fitted to the window.
  *
  * Layout is decided from measured window geometry, not from the screen's orientation:
  *
@@ -105,7 +105,7 @@ export function canvasGeometry(input: CanvasInput, freeHeight: number, banner = 
 export const isEditing = raisesSoftKeyboard;
 
 /** Canvas width from which Inbox, Notes and Files show the open item beside their list. */
-export const SPLIT_CANVAS = 1000;
+const SPLIT_CANVAS = 1000;
 /** Narrowest readable Calendar day column at 100% text; the time gutter takes 76px. */
 const DAY_COLUMN = 240;
 /**
@@ -113,7 +113,7 @@ const DAY_COLUMN = 240;
  * returns to one pane and Calendar shows the selected day as an agenda list instead of timed blocks
  * (responsive-surface matrix: "keep agenda fallback at large text").
  */
-export const LARGE_TEXT = 1.5;
+const LARGE_TEXT = 1.5;
 
 /** Layout choices that change what a surface renders, not only how CSS places it. */
 export type { SurfaceLayout };

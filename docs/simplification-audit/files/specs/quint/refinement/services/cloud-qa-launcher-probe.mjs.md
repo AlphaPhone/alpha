@@ -1,0 +1,19 @@
+# specs/quint/refinement/services/cloud-qa-launcher-probe.mjs
+- Lines: 430 | Kind: Quint refinement probe (integration: copies the real launcher and helpers into a scratch repo and runs them in a child Node process with `registerHooks` ports for `node:fs`, `node:child_process`, `node:fs/promises`) | Verdict: KEEP pending owner (delete together with `scripts/start-cloud-qa.ts` if staging Cloud QA is retired); SIMPLIFY
+- Covers: one `scripts/start-cloud-qa.ts` invocation per scenario (22): profile/marker/token custody, protected port, route mismatch, log no-follow/single-link custody, child supervision, receipt publication and preload pin admission, projected into `CloudQaLauncher` state. Duplicates: `test/cloud-qa-launcher.test.mjs` (imports `cloudQaConfiguration`; overlapping refusal cases), twin probes `combined-agent-launcher-probe.mjs`, `reviewed-workflow-launcher-probe.mjs`. Callers/importers: only `cloud-qa-launcher.mjs:11` (spawned as a child process).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 14-20, 47 | T10 (path pins) | Copies seven product/vendor files by literal path into a scratch repo; any rename of `private-runtime-launch.ts`, `cloud-sdk-authority.ts`, `native-view-policy.ts` (scripts-08 proposes merging `cloud-sdk-authority.ts` into `cloud-deployment-policy.ts`) breaks it. Not text slicing: it runs whole modules. | Derive the copy list from the launcher's esbuild metafile (one helper shared with the two twin probes) instead of a hand list. | Low |
+| 2 | 263-276 | T10 (specifier pins) | Hooks resolve `node:fs`/`node:child_process` only when `parentURL` equals the launcher, the shared vendor launcher, `core-state-patch.ts` and `immutable-workspace-source.mjs`. Moving a `spawn`/`fs` call into another helper silently bypasses the ports (the scenario then fails, not passes, so it is safe but brittle). | Accept; document in the harness header. Prefer dependency injection in `start-cloud-qa.ts` (export `launch({fs, spawn, execFileSync})`) so the probe no longer needs module hooks. | Medium (product change to the script) |
+| 3 | 156-170, 375-404 | T8 / B5 | Exact-text assertions on error messages (`/Provide absolute/`, `/ENXIO/`), on exact `openSync` flags and on the 13 receipt keys. Reasonable for a custody model, but the receipt-key list duplicates `start-cloud-qa.ts`'s writer. | Keep flag/mode checks (they are the safety property); drop the exact receipt key list in favour of the fields the model observes. | Low |
+| 4 | 28-34 | B3 | Re-asserts the parent harness's scratch layout and modes (`assert.deepEqual(readdirSync(scratch), ['home'])`), which `cloud-qa-launcher.mjs` just created. | Delete these self-checks. | Low |
+| 5 | 1-430 | C5 | Same skeleton (scratch fixture writer, `action`, `point`, observe/trace, `registerHooks` port module, `process.once('exit')` report) as `combined-agent-launcher-probe.mjs` and `reviewed-workflow-launcher-probe.mjs`. | Extract `refinement/services/launcher-probe-support.mjs` (write/json helpers, trace recorder, port-module writer + hook registration, exit reporter). | Low |
+| 6 | whole | cost | 22 child Node processes, each `git init`+commit, timeout 12 s; run twice per `npm test` (own test + services aggregate, T4). | Run once (see `cloud-qa-launcher.mjs`); path-scope to `scripts/start-cloud-qa.ts`, its helpers, `upstream.lock.json`. | Low |
+
+## Proposed end state
+Keep while `scripts/start-cloud-qa.ts` and `CloudQaLauncher.qnt` are live (D20: code and model together). Shrink by moving the
+shared probe skeleton into one support module, deriving copied sources from a bundle metafile, and dropping self-checks of
+the fixture. If the owner retires staging Cloud QA (scripts-13 owner question), delete this file with the launcher, the
+model, `cloud-qa-launcher.mjs`/`.md`, `test/quint-cloud-qa-launcher.test.mjs` and `test/cloud-qa-launcher.test.mjs`.

@@ -4,7 +4,5 @@
  * owner has open. Advertised on the verified Alpha image only.
  */
 export {
-  isTelephonyAction, telephonyActionCapabilities, validateTelephonyAction,
-  PHONE_CALL_CAPABILITY, CONTACT_WRITE_CAPABILITY, SMS_COMPOSE_CAPABILITY, MESSAGES_READ_CAPABILITY, VOICEMAIL_READ_CAPABILITY, VOICEMAIL_DELETE_CAPABILITY,
-  type TelephonyActionOperation,
+  isTelephonyAction, telephonyActionCapabilities,
 } from '../../../../.eliza/client-features/packages/contracts/src/telephony-actions.ts';

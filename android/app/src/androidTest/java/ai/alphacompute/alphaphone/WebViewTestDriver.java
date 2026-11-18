@@ -1,12 +1,9 @@
 package ai.alphacompute.alphaphone;
 
 import android.app.Activity;
-import android.os.Handler;
-import android.os.Looper;
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
 import androidx.test.runner.lifecycle.Stage;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.*;
 
@@ -18,19 +15,22 @@ final class WebViewTestDriver {
   CountDownLatch done=new CountDownLatch(1);AtomicReference<Throwable> error=new AtomicReference<>();
   TestUiDispatch dispatch=TestUiDispatch.post(()->{
    try {
-    T target=null;
-    for(Stage stage:new Stage[]{Stage.RESUMED,Stage.STARTED,Stage.PAUSED,Stage.STOPPED}) {
-     for(Activity activity:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage)) {
-      if(activity.getClass()==type&&!activity.isFinishing()&&!activity.isDestroyed()){target=type.cast(activity);break;}
-     }
-     if(target!=null)break;
-    }
+    T target=liveActivity(type);
     if(target==null)throw new AssertionError("No live Activity of exact type "+type.getName());
     action.accept(target);
    }catch(Throwable failure){error.set(failure);}finally{done.countDown();}
   });
   dispatch.await(done,"Main thread action for "+type.getName());
   if(error.get()!=null)throw new AssertionError("Activity action failed for "+type.getName(),error.get());
+ }
+ /** On the main thread: the first live Activity of exactly this type, by lifecycle stage, or null. */
+ private static <T extends Activity> T liveActivity(Class<T> type) {
+  for(Stage stage:new Stage[]{Stage.RESUMED,Stage.STARTED,Stage.PAUSED,Stage.STOPPED}) {
+   for(Activity activity:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage)) {
+    if(activity.getClass()==type&&!activity.isFinishing()&&!activity.isDestroyed())return type.cast(activity);
+   }
+  }
+  return null;
  }
  static void cancelDocumentPicker() throws Exception {
   android.app.UiAutomation ui=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation();
@@ -80,13 +80,7 @@ final class WebViewTestDriver {
   AtomicReference<Throwable> error=new AtomicReference<>();
   TestUiDispatch dispatch=TestUiDispatch.post(()->{
    try {
-    MainActivity target=null;
-    for(Stage stage:new Stage[]{Stage.RESUMED,Stage.STARTED,Stage.PAUSED,Stage.STOPPED}) {
-     for(Activity activity:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage)) {
-      if(activity.getClass()==type&&!activity.isFinishing()&&!activity.isDestroyed()) {target=(MainActivity)activity;break;}
-     }
-     if(target!=null)break;
-    }
+    MainActivity target=liveActivity(type);
     if(target==null)throw new AssertionError("No live exact Activity for WebView evaluation: "+type.getName());
     target.getBridge().getWebView().evaluateJavascript(script,value->{answer.set(value);done.countDown();});
    } catch(Throwable failure) {error.set(failure);done.countDown();}

@@ -17,7 +17,6 @@ final class TestUiDispatch {
  }
  static TestUiDispatch post(Runnable action){return new TestUiDispatch(new Handler(Looper.getMainLooper()),action,8000);}
  static TestUiDispatch postForFixture(Handler handler,Runnable action,long timeoutMs){return new TestUiDispatch(handler,action,timeoutMs);}
- boolean started(){return claim.started();}
  void await(CountDownLatch completion,String diagnostic)throws InterruptedException{
   final boolean complete;
   try{complete=completion.await(Math.max(0,deadline-SystemClock.elapsedRealtime()),TimeUnit.MILLISECONDS);}

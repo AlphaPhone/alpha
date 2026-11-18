@@ -8,7 +8,6 @@ import androidx.test.uiautomator.BySelector;
 import androidx.test.uiautomator.StaleObjectException;
 import androidx.test.uiautomator.UiDevice;
 import androidx.test.uiautomator.UiObject2;
-import androidx.test.uiautomator.Until;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
@@ -52,14 +51,10 @@ final class PasswordVaultFixture implements AutoCloseable {
   return field != null ? field : device.findObject(FOCUSED_PROMPT_FIELD);
  }
  /** Waits up to timeoutMs for Android's device-credential prompt to show its entry field. */
- static boolean credentialPromptShown(long timeoutMs) {
+ static boolean credentialPromptShown(long timeoutMs) { return credentialPrompt(true, timeoutMs); }
+ private static boolean credentialPrompt(boolean shown, long timeoutMs) {
   long deadline = SystemClock.uptimeMillis() + timeoutMs;
-  do { if (credentialField() != null) return true; SystemClock.sleep(100); } while (SystemClock.uptimeMillis() < deadline);
-  return false;
- }
- private static boolean credentialPromptGone(long timeoutMs) {
-  long deadline = SystemClock.uptimeMillis() + timeoutMs;
-  do { if (credentialField() == null) return true; SystemClock.sleep(100); } while (SystemClock.uptimeMillis() < deadline);
+  do { if ((credentialField() != null) == shown) return true; SystemClock.sleep(100); } while (SystemClock.uptimeMillis() < deadline);
   return false;
  }
  /** Answers Android's device-credential prompt with the fixture PIN and waits for it to close.
@@ -86,11 +81,11 @@ final class PasswordVaultFixture implements AutoCloseable {
    try { field.setText(PIN); }
    catch (StaleObjectException rebound) { continue; }
    device.pressEnter();
-   if (credentialPromptGone(5_000)) return;
+   if (credentialPrompt(false, 5_000)) return;
   }
   fail("The credential prompt closed after the PIN");
  }
- /** Logcat since the given epoch (seconds), app process only, for secret scans. */
+ /** Logcat since the given epoch (seconds), all processes, for secret scans. */
  static String logcatSince(long epochSeconds) throws Exception {
   return shell("logcat -d -v epoch -T " + epochSeconds + ".000");
  }

@@ -96,8 +96,7 @@ public final class WorkflowNoticeProcessDeathInstrumentedTest {
   // The prepare run posted one approval through main; no step notice exists yet.
   assertNotNull("Main prepared route ledger required",store.readCredentialSlot(WorkflowNoticeTaps.SLOT));assertNull("Fresh delivery ledger required",store.readCredentialSlot(WorkflowNoticeDelivery.SLOT));
   NotificationManager manager=context.getSystemService(NotificationManager.class);
-  WorkflowNoticeDelivery.Storage storage=new WorkflowNoticeDelivery.Storage(){public String read(String key)throws Exception{return store.readCredentialSlot(key);}public void write(String key,String value)throws Exception{store.writeCredentialSlot(key,value);}};
-  WorkflowNoticeTaps taps=new WorkflowNoticeTaps(storage);WorkflowNoticeDelivery delivery=new WorkflowNoticeDelivery(storage,new WorkflowNoticePoster(context));
+  WorkflowNoticeTaps taps=WorkflowNoticeTapsFactory.create(context);WorkflowNoticeDelivery delivery=WorkflowNoticeTapsFactory.delivery(context);
   String operation="process_"+UUID.randomUUID(),binding="b".repeat(64);
   try(WorkflowNoticeOwnerFixture fixture=new WorkflowNoticeOwnerFixture(context)){
    // The restored owner's route, so main's owner fence leaves it alone.
@@ -133,7 +132,6 @@ public final class WorkflowNoticeProcessDeathInstrumentedTest {
    assertEquals(receipt,store.readCredentialSlot(WorkflowNoticeDelivery.SLOT));
    StatusBarNotification finalNotice=notice(manager,operation);assertEquals(original.getPostTime(),finalNotice.getPostTime());assertEquals(pending,finalNotice.getNotification().contentIntent);
    JSONObject row=new JSONObject(store.readCredentialSlot(WorkflowNoticeTaps.SLOT)).getJSONObject(operation);assertEquals("pending",row.getString("state"));assertEquals(1,row.getLong("order"));
-   android.os.Bundle evidence=new android.os.Bundle();evidence.putString("workflowNoticeProcessDeath",new JSONObject().put("beforePid",before.pid).put("beforeStart",before.start).put("afterPid",after.pid).put("afterStart",after.start).put("uid",after.uid).put("postTime",original.getPostTime()).toString());InstrumentationRegistry.getInstrumentation().addResults(evidence);
   }finally{
    manager.cancel("alpha-workflow-"+operation,0);
    // Runner removes this entire fresh user; do not race main's encrypted ledger with cleanup writes.

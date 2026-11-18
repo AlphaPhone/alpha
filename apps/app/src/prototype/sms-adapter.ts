@@ -1,4 +1,4 @@
-import {isIncompleteSmsRow,normalizePhoneNumber} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {isIncompleteSmsRow,normalizePhoneNumber,type SmsMessage} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createSmsSession,mmsProblemLabel,mmsReceiptLabel,receiptLabel} from '../runtime/image-sms';
@@ -9,8 +9,8 @@ import {formatDateTime} from './locale-time';
 import {displayNumber,initials,numberKey,shortWhen,threadTitle} from './telephony-presenters';
 import {askedDraftPlaced,canSuggest,emptyDraft,readinessLost,reviewFinished,suggestionDismissed,suggestionReplied,suggestionRequested,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 /** The open thread's visible tail, handed to the reply suggester and to the agent's selected-thread read. */
-export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
-export type SmsReplySuggester=(thread:OpenThread,signal:AbortSignal)=>Promise<string|null>;
+type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
+type SmsReplySuggester=(thread:OpenThread,signal:AbortSignal)=>Promise<string|null>;
 let suggester:SmsReplySuggester|null=null;
 /** Installed only while the owner has suggested replies turned on; null turns them off. */
 export function setSmsReplySuggester(next:SmsReplySuggester|null){suggester=next;}
@@ -24,7 +24,7 @@ export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
 /** What the owner has open in Messages right now, for `messages_read_selected`; null when no thread is open. */
 export const openSmsThread=()=>openThreadReader?.()??null;
 /** What became of a draft Alpha was asked to put in the open conversation's text field. */
-export type AskedDraft='drafted'|'none-selected'|'occupied'|'unavailable';
+type AskedDraft='drafted'|'none-selected'|'occupied'|'unavailable';
 let askedDraftWriter:((text:string,number?:string)=>AskedDraft)|null=null;
 /**
  * Puts a draft the owner asked Alpha for into the open conversation's text field; with `number`, only
@@ -71,6 +71,8 @@ export function installSmsAdapter(Component:any,views:Bag){
   suggesting?.abort();suggesting=null;if(draft.draft==='agent'&&!operationId&&!mmsOperationId){body='';draft=emptyDraft();}else draft=readinessLost(draft);names.clear();people.length=0;selectedThread=null;namesLoaded=false;
  }else{void reconcile();void reconcileMms();}};
  const resetMms=(pictures:boolean)=>{mmsOperationId='';mmsReview=null;if(pictures){attachments=[];pictureSeq=0;}};
+ /* A draft change retires the review in progress: the next Send opens a new one. */
+ const invalidateReview=()=>{draftRevision++;operationId='';resetMms(false);notice='';receipt=null;};
  const inputRecipients=()=>recipients.split(',').map(v=>v.trim()).filter(Boolean);
  const inFront=()=>active&&owner?.S().view==='messages'&&!document.hidden;
  const ready=()=>inFront()&&!busy&&session.state.status?.permissions.sms==='granted';
@@ -103,7 +105,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   draftThread=null;composing=true;selectedThread=null;suggestConfirm=false;
   if(session.state.thread)session.openThread(null);else changed();
  };
- const threadRows=():any[]=>session.state.thread?session.state.rows.filter(row=>!isIncompleteSmsRow(row)&&(row as any).threadId===session.state.thread).sort((a,b)=>a.date-b.date):[];
+ const threadRows=():SmsMessage[]=>session.state.thread?session.state.rows.filter((row):row is SmsMessage=>!isIncompleteSmsRow(row)&&row.threadId===session.state.thread).sort((a,b)=>a.date-b.date):[];
  /* The newest message when it is inbound: the one a reply would answer. */
  const latestInbound=()=>{const rows=threadRows(),last=rows[rows.length-1];return last&&last.direction==='incoming'?String(last.id):null;};
  /* Opening a thread drops the session's thread list. Keep only the selected addresses. */
@@ -123,7 +125,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   if(!ready())return 'unavailable';
   if(draft.draft==='owner'||(body&&!drafted())||attachments.length||operationId||mmsOperationId)return 'occupied';
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
-  suggesting?.abort();suggesting=null;draft=next;body=next.text;draftRevision++;operationId='';resetMms(false);notice='';receipt=null;paint();return 'drafted';
+  suggesting?.abort();suggesting=null;draft=next;body=next.text;invalidateReview();paint();return 'drafted';
  };
  function loadNames(){if(namesLoaded||!active||session.state.status?.permissions.contacts!=='granted')return;namesLoaded=true;const token=lifecycle;
   void client.searchContacts('',100).then(cards=>{if(token!==lifecycle)return;for(const card of cards)for(const number of card.phoneNumbers){const key=numberKey(number);if(!key||!card.displayName)continue;if(!names.has(key))names.set(key,card.displayName);people.push({name:card.displayName,number});}paint();}).catch(()=>{namesLoaded=false;});}
@@ -142,7 +144,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   void suggester(thread,controller.signal).then(text=>text&&text.trim()?text.trim().slice(0,1600):null,()=>null).then(text=>{
    if(token!==lifecycle||controller.signal.aborted)return;if(suggesting===controller)suggesting=null;
    const was=draft;draft=suggestionReplied(draft,ticket,latestInbound(),ready()&&!body&&!attachments.length,text);
-   if(draft.draft==='agent'&&was.draft!=='agent'){body=draft.text;draftRevision++;operationId='';resetMms(false);notice='';receipt=null;}paint();});
+   if(draft.draft==='agent'&&was.draft!=='agent'){body=draft.text;invalidateReview();}paint();});
  }
  /* A confirmed review that did not fail clears the composer; nothing is ever sent again from here. */
  const finished=(status:string)=>{const result=status==='cancelled'||status==='denied'?null:status==='failed'?'failed' as const:status==='unknown'?'unknown' as const:'sent' as const;if(!result)return;draft=reviewFinished(draft,result);if(result==='sent'){body='';attachments=[];pictureSeq=0;composing=false;}};
@@ -178,7 +180,7 @@ export function installSmsAdapter(Component:any,views:Bag){
   const done=(event?:Event)=>{if(document.hidden&&event?.type!=='pagehide')return;window.removeEventListener('pagehide',done);if(!picking)return;picking=false;sync();};input.oncancel=()=>done();window.addEventListener('pagehide',done);
   input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files){if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');if(!file.size||file.size>1024*1024)throw Error('Each picture must be smaller than 1 MB.');picked.push({contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())});}
    if(!active||token!==lifecycle||draft!==draftRevision||busy)return;if(attachments.length+picked.length>MMS_MAX_ATTACHMENTS)throw Error('Max 5 pictures');
-   for(const item of picked)attachments.push({...item,name:`picture-${++pictureSeq}.${MMS_PICTURES[item.contentType]}`});draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();
+   for(const item of picked)attachments.push({...item,name:`picture-${++pictureSeq}.${MMS_PICTURES[item.contentType]}`});invalidateReview();changed();
   }catch(error){if(active&&token===lifecycle){notice=error instanceof Error?error.message:'Unreadable pictures';changed();}}};
   picking=true;input.click();}
  async function handoff(){if(!inFront()||busy||operationId||mmsOperationId||attachments.length)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
@@ -186,7 +188,9 @@ export function installSmsAdapter(Component:any,views:Bag){
   const status=session.state.status;if(!status){notice='Refresh needed';return;}
   const checked=reviewSms({recipients:draftRecipients(),body},status,'handoff');if('problem' in checked){notice=smsProblemLabel(checked.problem,'handoff',false,body.length);return;}
   const result=await client.composeSms(checked.review);if(active&&token===lifecycle&&draft===draftRevision)notice=result.message;}catch{if(active&&token===lifecycle)notice='Couldn’t open';}finally{if(token===lifecycle){busy=false;changed();}}}
- const edit=(setter:(value:string)=>void)=>(event:Event)=>{if(busy)return;setter((event.target as HTMLInputElement).value);draftRevision++;operationId='';resetMms(false);notice='';receipt=null;changed();};
+ const edit=(setter:(value:string)=>void)=>(event:Event)=>{if(busy)return;setter((event.target as HTMLInputElement).value);invalidateReview();changed();};
+ const pickSim=(id:number)=>()=>{if(busy)return;sim=String(id);invalidateReview();changed();};
+ const removePicture=(index:number)=>()=>{if(busy)return;attachments.splice(index,1);invalidateReview();changed();};
  async function permission(access:'sms'|'sendSms'|'phoneState'){
   if(!inFront()||busy)return;const token=lifecycle;busy=true;changed();
   try{await session.request(access);}
@@ -195,7 +199,7 @@ export function installSmsAdapter(Component:any,views:Bag){
  }
  /* Back returns to the list and keeps the draft bound to its recipients. */
  const back=views.messages.back;views.messages.back=(st:Bag,api:Bag)=>{if(session.state.thread){if(suggestConfirm){suggestConfirm=false;paint();}else closeThread();return true;}if(composing){if(!busy){composing=false;changed();}return true;}return back?back(st,api):false;};
- views.messages.reply=()=>null;views.messages.suggestions=()=>[];
+ views.messages.suggestions=()=>[];
  /* One Send: several recipients or pictures go as one reviewed MMS, otherwise a reviewed SMS. */
  /* The orb in the conversation bar is Alpha. Text the owner typed there goes with it as the request,
   * so "tell her I'm running late" can be typed in place and is sent to Alpha by the same tap; a draft Alpha wrote stays where it is. */
@@ -218,8 +222,8 @@ export function installSmsAdapter(Component:any,views:Bag){
    compose:()=>compose(),closeNew:()=>{if(!busy){composing=false;changed();}},
    needsSendAccess:!!status&&status.permissions.sendSms!=='granted',needsSimAccess:!!status&&status.permissions.phoneState!=='granted',
    canHandoff:!!status&&!direct&&!attachments.length&&!operationId&&!mmsOperationId&&hasBody&&sendingTo.length>0,
-   threads:state.threads.map((row,index)=>{const incomplete=isIncompleteSmsRow(row),full=row as any,name=incomplete?'Conversation content unavailable':threadTitle(full.addresses,names),unread=!incomplete&&full.unread===true,when=shortWhen(row.date,now);
-    return {id:row.id,open:()=>opens[index]?.open(),title:name,ini:initials(name),when,snippet:incomplete?'Use the system messaging app to view this conversation.':String(full.snippet||''),unread,weight:unread?700:600,color:unread?'var(--fg)':'var(--mut)',label:`${name}, ${when}${unread?', unread':''}`};}),
+   threads:state.threads.map((row,index)=>{const incomplete=isIncompleteSmsRow(row),name=incomplete?'Conversation content unavailable':threadTitle(row.addresses,names),unread=!incomplete&&row.unread===true,when=shortWhen(row.date,now);
+    return {id:row.id,open:()=>opens[index]?.open(),title:name,ini:initials(name),when,snippet:incomplete?'Use the system messaging app to view this conversation.':String(row.snippet||''),unread,weight:unread?700:600,color:unread?'var(--fg)':'var(--mut)',label:`${name}, ${when}${unread?', unread':''}`};}),
    title,ini:initials(title),canCall:!!sole,call:()=>{if(sole)api?.open?.('phone',{prefill:sole});},callLabel:`Call ${title}`,
    bubbles:state.rows.filter(row=>row.threadId===state.thread).slice().sort((a,b)=>a.date-b.date).map(row=>{
     if(isIncompleteSmsRow(row))return {id:row.id,text:'Use the system messaging app to view this message.',hasText:true,side:'flex-start',bg:'var(--s2)',fg:'var(--mut)',failed:false,picture:false};
@@ -238,8 +242,8 @@ export function installSmsAdapter(Component:any,views:Bag){
    },
    cannotSend:busy||!direct||!hasDraft||!sendingTo.length,submit,
    pickSim:sims.length>1,sims:sims.map(row=>{const on=String(row.id)===sim;return {label:row.displayName||`SIM ${row.slot+1}`,on,bg:on?'var(--fg)':'var(--s2)',fg:on?'var(--bg)':'var(--fg)',
-    pick:()=>{if(busy)return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);changed();}};}),
-   pictures:attachments.map((item,index)=>({label:item.name,remove:()=>{if(busy)return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();}})),hasPictures:attachments.length>0,
+    pick:pickSim(row.id)};}),
+   pictures:attachments.map((item,index)=>({label:item.name,remove:removePicture(index)})),hasPictures:attachments.length>0,
    hasNotice:!!notice};
  }
  const simLabel=(id:number)=>{const row=session.state.status?.subscriptions?.find(value=>value.id===id);return row?`SIM ${row.slot+1}`:'SIM';};
@@ -260,7 +264,7 @@ export function installSmsAdapter(Component:any,views:Bag){
  const nativeThreads=session.state.threads.map(row=>isIncompleteSmsRow(row)
   ? {id:row.id,label:'Conversation content unavailable',snippet:'Use the system messaging app to view this conversation.',open:()=>{notice='Content unavailable. Use the system messaging app to view this conversation.';changed();}}
   : {...row,label:row.addresses.join(', ')||'Conversation',open:()=>chooseThread(row.id,row.addresses)});
- return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeReceipts:session.state.receipts.map(row=>({id:row.operationId,label:`${formatDateTime(new Date(row.createdAt))} · Subscription ${row.subscriptionId} · ${receiptLabel(row.status)}`})),nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:busy||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:()=>{if(busy)return;receipt=null;notice='';sim=String(row.id);draftRevision++;operationId='';resetMms(false);changed();}})),nativeSim:sim?`Selected subscription ${sim}`:session.state.status?.permissions.phoneState!=='granted'?'Grant SIM access to select a SIM.':session.state.status?.subscriptions?.length===0?'No active SIM is available.':'Select a SIM below',nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:edit(value=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);}),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttach:()=>attach(),nativeMmsAvailable:!!session.state.status?.mmsSend,nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:()=>{if(busy)return;attachments.splice(index,1);draftRevision++;operationId='';resetMms(false);receipt=null;notice='';changed();}})),nativeHandoff:()=>void handoff(),nativeNotice:notice,nativeClear:()=>{if(busy)return;clearDraft();if(draftThread===null)recipients='';changed();},
+ return {nativeManaged:true,nativePrototype:false,nativeStatus:session.state.message,nativeRows,nativeThreads,nativeInThread:!!session.state.thread,nativeBack:closeThread,nativeMore:!!session.state.next,nativeBusy:busy||session.state.busy,nativeRefresh:()=>{void session.refresh();void reconcile();void reconcileMms();},nativeLoadMore:()=>void session.refresh(true),nativeRead:()=>void permission('sms'),nativeSendAccess:()=>void permission('sendSms'),nativeSimAccess:()=>void permission('phoneState'),nativeSims:(session.state.status?.subscriptions||[]).map(row=>({...row,label:`SIM ${row.slot+1}: ${row.displayName}`,pick:pickSim(row.id)})),nativeRecipients:recipients,nativeBody:body,nativeOnRecipients:(event:Event)=>{if(draftThread===null&&!session.state.thread)edit(value=>recipients=value)(event);},nativeOnBody:edit(value=>{body=value;suggesting?.abort();suggesting=null;draft=typed(draft,value);}),nativeSend:()=>void send(),nativeSendMms:()=>void sendMms(),nativeAttach:()=>attach(),nativeMmsAvailable:!!session.state.status?.mmsSend,nativeAttachments:attachments.map((item,index)=>({label:`${item.name} · ${Math.max(1,Math.round(item.bytes.length/1024))} KB`,remove:removePicture(index)})),nativeHandoff:()=>void handoff(),nativeNotice:notice,nativeClear:()=>{if(busy)return;clearDraft();if(draftThread===null)recipients='';changed();},
   ...designed(nativeThreads)};};
  p.componentDidMount=function(){mount?.call(this);owner=this;this.smsSelection=()=>{const selected=session.state.status?.subscriptions?.find(row=>String(row.id)===sim);return inFront()&&selected?{kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)}:undefined;};lifecycle++;this.smsReturn=watchReturnToApp(()=>void session.refresh());this.smsHide=()=>{if(!document.hidden)picking=false;sync();};document.addEventListener('visibilitychange',this.smsHide);sync();};
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);sync();};

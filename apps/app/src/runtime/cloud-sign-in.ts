@@ -13,15 +13,14 @@ import {
   type NativeCloudSignInAuthenticated,
   type NativeCloudSignInCodeStarted,
   type NativeCloudSignInFailureCode,
-  type NativeCloudSignInGoogleMfaRequired,
   type NativeCloudSignInGoogleOutcome,
   type NativeCloudSignInMfaRequired,
-  type NativeCloudSignInPort,
 } from '../../../../.eliza/client-features/packages/auth/src/auth/native-cloud-sign-in.ts';
+import type { AlphaCloudSignInPlugin } from '../native/alpha-cloud-sign-in.ts';
 
 /**
- * Alpha binding of the shared native Eliza Cloud sign-in renderer contract (owner directive
- * 2026-10-14, #410). Sign-in happens on Alpha's own screens: an email or SMS code typed into
+ * Alpha binding of the shared native Eliza Cloud sign-in renderer contract. Sign-in happens on
+ * Alpha's own screens: an email or SMS code typed into
  * Alpha, or Google in the user's external browser. No Eliza Cloud web page is part of a
  * successful sign-in.
  *
@@ -35,26 +34,17 @@ import {
  * Email remains in Alpha when readiness is unavailable. The readiness probe gates Google;
  * it never selects hosted login as a fallback.
  */
-export type CloudSignInFailureCode = NativeCloudSignInFailureCode;
 export type CloudSignInAuthenticated = NativeCloudSignInAuthenticated<CloudEnvironment>;
 export type CloudSignInEmailStarted = NativeCloudSignInCodeStarted;
 export type CloudSignInMfaRequired = NativeCloudSignInMfaRequired;
-export type CloudSignInGoogleMfaRequired = NativeCloudSignInGoogleMfaRequired<CloudEnvironment>;
 export type CloudSignInGoogleOutcome = NativeCloudSignInGoogleOutcome<CloudEnvironment>;
-/** The shared native port plus Alpha's native-only explicit recovery of the same product's saved
- * pre-namespace credential (AlphaCloudSignInPlugin). Never a startup migration. */
-export type CloudSignInPort = NativeCloudSignInPort<CloudEnvironment> & {
-  /** Browser-host only: settles the credential commit boundary before cancellation. */
-  cancelGoogleSignIn?(): Promise<unknown>;
-  savedSignInRecoveryStatus?(): Promise<{eligible: boolean}>;
-  restoreSavedSignIn?(): Promise<{restored: boolean}>;
-};
+export type CloudSignInPort = AlphaCloudSignInPlugin;
 export const CloudSignInError = NativeCloudSignInError;
 export type CloudSignInError = NativeCloudSignInError;
 
 /** Owner-facing copy. Never includes server text, codes or addresses. Where the screen already
  * carries the next step (a Try again button, Resend under the code), Alpha states only the fact. */
-export function signInFailureMessage(code: CloudSignInFailureCode, serviceName: string): string {
+export function signInFailureMessage(code: NativeCloudSignInFailureCode, serviceName: string): string {
   if (code === 'invalid-code') return 'Wrong code';
   if (code === 'app-link-unverified') return 'Didn’t finish';
   if (code === 'activation-pending') return 'Not confirmed yet';

@@ -1,5 +1,4 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-import {openLegacyNotes} from './helpers/legacy-notes';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 async function open(page:Page){/* Diagnostic-only fixture; no production Settings shortcut. */await openConnectionDiagnostics(page);await expect(page.getByRole('heading',{name:'Development connections'})).toBeVisible();}
@@ -17,7 +16,4 @@ test('Home cancels a queued reply save without persistence',async({page})=>{
 });
 test('another tab selection retires the old development session',async({page,context})=>{
  await page.goto('/?mode=dev',{waitUntil:'domcontentloaded'});await open(page);await page.getByRole('button',{name:'Connect development profile'}).click();const other=await context.newPage();await other.goto('/?mode=dev',{waitUntil:'domcontentloaded'});await other.evaluate(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await expect.poll(()=>page.evaluate(async()=>{const {connectionController}=await import('/src/runtime/connection-ui.tsx');return connectionController.getSnapshot().session;})).toBeNull();
-});
-test('interactive development connection supplies a real workflow Write result',async({page})=>{
- await page.addInitScript(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[{id:902,name:'Development connected note',on:true,trig:{kind:'time',days:'Every day',t:8},steps:[{k:'Write',t:'A short message',apps:[]},{k:'Write',t:'A note in Notes',apps:['Notes']}],runs:[]}],localRuns:{}})));await page.goto('/?mode=dev',{waitUntil:'domcontentloaded'});await open(page);await page.getByRole('textbox',{name:'Scripted reply'}).fill('A reviewed development response');await page.getByRole('button',{name:'Save development reply'}).click();await expect(page.getByText('Development reply saved.',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Connect development profile'}).click();await returnToApps(page);await openLegacyNotes(page);await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('Development connected note',{exact:true}).click();await page.getByRole('button',{name:'Run now',exact:true}).click();await expect.poll(()=>page.evaluate(()=>Object.values(JSON.parse(localStorage.getItem('alpha.dev.app.workflows')!).localRuns).map((r:any)=>r.status))).toEqual(['ok']);expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())!).records.some((r:any)=>r.body==='A reviewed development response'))).toBe(true);
 });

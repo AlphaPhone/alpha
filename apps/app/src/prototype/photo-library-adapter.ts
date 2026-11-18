@@ -1,37 +1,27 @@
-/** Photos' agent bridge for the full permitted MediaStore library (issue 408, policy P-24).
+/** Photos' agent bridge for the full permitted MediaStore library (policy P-24).
  * Native reads go through AlphaPhotoLibrary; rules live in runtime/photo-library.ts. Reads return
  * identity-only rows; select, filter, open, album and share requests and every review act on the
  * main Photos Library the owner sees (camera-adapter registers it with setMainLibraryHost).
  * Nothing is copied or uploaded. */
 import { Capacitor } from '@capacitor/core';
-import { registerPlugin } from '../platform-plugins';
+import { alphaPhotoLibrary, type AlphaPhotoLibraryPlugin } from '../native/alpha-photo-library';
+import { errorCode } from '../lib/error-text';
 import {
   LibraryRevisions, parsePage, parseScope, parseValidation, parseItem, prepareReview, modelItem, modelSearchResult, LIBRARY_LIMITS,
-  type LibraryReview, type LibraryScopeState, type LibraryItem, type LibraryChange, type LibraryAgentOperation, type LibraryAgentResult,
+  type LibraryReview, type LibraryScopeState, type LibraryItem, type LibraryAgentOperation, type LibraryAgentResult,
 } from '../runtime/photo-library';
 import type { PhotosViewOperation, PhotosViewResult } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
 
-type Bag = Record<string, any>;
-type Items = { items: { id: string; revision: string }[] };
-export type PhotoLibraryPort = {
-  scope(): Promise<unknown>;
-  page(options: { before?: string; limit?: number; thumbnails?: boolean; thumbnailSize?: number; kind?: string; from?: number; to?: number; favorites?: boolean }): Promise<unknown>;
-  inspect(options: { id: string; size?: number; pixels?: boolean }): Promise<unknown>;
-  validate(options: Items): Promise<unknown>;
-  requestChange(options: Items & { operation: LibraryChange }): Promise<{ status: string; operation?: string; outcomes?: { id: string; status: string }[] }>;
-  share(options: Items): Promise<{ status: string; count: number }>;
-};
-const nativePort = registerPlugin<PhotoLibraryPort>('AlphaPhotoLibrary');
 const CHANGED_OUTCOMES = ['favorited', 'unfavorited', 'trashed', 'restored', 'unchanged'];
 /** Owner-facing summary of a native batch change result (never reports an unverified item as changed). */
-export function describeLibraryChange(result: { status: string; outcomes?: { id: string; status: string }[] }, requested: number) {
+function describeLibraryChange(result: { status: string; outcomes?: { id: string; status: string }[] }, requested: number) {
   const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
   const verified = outcomes.filter(row => CHANGED_OUTCOMES.includes(row.status)).length, stale = outcomes.filter(row => row.status === 'stale').length;
   if (result.status === 'complete' && verified === requested) return `${verified} ✓`;
   return `${verified}/${requested} ✓${stale ? ` · ${stale} skipped` : ''}`;
 }
-export const deviceLibraryAvailable = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaPhotoLibrary');
-const revisionSession = () => { try { return Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(36).padStart(2, '0')).join('').slice(0, 12); } catch { return Date.now().toString(36).slice(-8); } };
+const deviceLibraryAvailable = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaPhotoLibrary');
+const revisionSession = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(36).padStart(2, '0')).join('').slice(0, 12);
 
 /** A refusal the agent executor reports as a failed action with this owner-facing text. */
 export class LibraryAgentRefusal extends Error { override readonly name = 'LibraryAgentRefusal'; }
@@ -61,7 +51,7 @@ let mainHost: MainLibraryHost | undefined;
 export function setMainLibraryHost(host: MainLibraryHost | undefined) { mainHost = host; return () => { if (mainHost === host) mainHost = undefined; }; }
 
 /** One instance per Photos module mount. */
-export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, available = deviceLibraryAvailable) {
+export function createDeviceLibrary(port: AlphaPhotoLibraryPlugin = alphaPhotoLibrary, available = deviceLibraryAvailable) {
   const modelRevisions = new LibraryRevisions(revisionSession());
   let status = '', review: LibraryReview | undefined, acting = false, epoch = 0, disposed = false;
 
@@ -110,7 +100,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         if (pending.action === 'trash') mainHost?.trashed(trashed);
       }
     } catch (failure) {
-      const code = (failure as { code?: string })?.code;
+      const code = errorCode(failure);
       if (code === 'LIBRARY_DECLINED') status = 'Nothing changed.';
       else if (code === 'LIBRARY_STALE') status = 'Item changed';
       else status = 'Failed';
@@ -124,7 +114,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     return host;
   };
 
-  /** Approved agent operations (issue 408). Reads stay local and return identity-only rows with
+  /** Approved agent operations. Reads stay local and return identity-only rows with
    * opaque revisions; select, view requests and reviews act only on the owner-visible Library. */
   const agent: LibraryAgent = {
     async run(operation, signal) {
@@ -142,7 +132,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (operation.type === 'photo_library_inspect') {
         let row: LibraryItem;
         try { row = parseItem(await port.inspect({ id: operation.id, size: 64, pixels: false })); }
-        catch (failure) { if ((failure as { code?: string })?.code === 'LIBRARY_MISSING') throw new LibraryAgentRefusal('That item is no longer in the library.'); throw failure; }
+        catch (failure) { if (errorCode(failure) === 'LIBRARY_MISSING') throw new LibraryAgentRefusal('That item is no longer in the library.'); throw failure; }
         signal.throwIfAborted();
         return { kind: operation.type, item: modelItem(row, modelRevisions) };
       }

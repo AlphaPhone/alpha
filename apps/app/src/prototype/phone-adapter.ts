@@ -1,14 +1,13 @@
-import {registerPlugin} from '../platform-plugins';
+import {alphaTelephony} from '../native/alpha-telephony';
 import {aospImage} from '../runtime/aosp-image';
-import {createAospTelephony,normalizePhoneNumber,type AlphaTelephonyPlugin,type AospTelephony} from '../runtime/aosp-telephony';
-import type {TelephonyCallLogEntry} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {createAospTelephony,normalizePhoneNumber,type AospTelephony} from '../runtime/aosp-telephony';
+import type {TelephonyCallLogEntry,VoicemailCarrierState,VoicemailEntry} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {audioReplied,audioRequested,callStarted,closed,closedVoicemail,deleteAsked,deleteCancelled,deleteFinished,ended,opened,paused,played,readinessLost,transcriptReplied,transcriptRequested,type OpenVoicemail,type TranscriptEngine} from '../runtime/voicemail-state';
 import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {formatDateTime} from './locale-time';
 import {callRow,clockLength,displayNumber,initials,numberKey,shortWhen} from './telephony-presenters';
 type Bag=Record<string,any>;
-type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
 const CALL_TYPE:Record<TelephonyCallLogEntry['type'],string>={incoming:'Incoming',outgoing:'Outgoing',missed:'Missed',voicemail:'Voicemail',rejected:'Declined',blocked:'Blocked',answered_externally:'Other device',unknown:'Call'};
 /** Plain rows of recent calls (label, detail and whether the number can be called). */
 export function phoneRows(calls:readonly TelephonyCallLogEntry[],dial:(number:string)=>void){
@@ -60,11 +59,11 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
  * transcribed under the owner's speech setting (Voicemail.qnt). Off the image this adapter returns
  * before registering anything, and the Phone view is not admitted.
  */
-export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true):null){
+export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(alphaTelephony,true):null){
  if(!client)return;
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
- let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:'recents'|'keypad'|'voicemail'='recents';
- let voicemails:Voicemail[]=[],carrier:'ready'|'unconfigured'|'unsupported'|null=null,vm:OpenVoicemail=closedVoicemail();
+ let owner:any,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:'recents'|'keypad'|'voicemail'='recents';
+ let voicemails:VoicemailEntry[]=[],carrier:VoicemailCarrierState|null=null,vm:OpenVoicemail=closedVoicemail();
  type Observation={session:number;stop:(()=>Promise<void>)|null;ready:Promise<void>};
  let observation:Observation|null=null,observationTail:Promise<void>=Promise.resolve();
  let audio:HTMLAudioElement|null=null,audioUrl='',wav:Uint8Array|null=null,position=0,work:AbortController|null=null,inCall=false;
@@ -134,9 +133,9 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   finally{if(token===session){dialing=false;changed();}}
  }
  const ready=()=>active&&available();
- const open=(row:Voicemail)=>{if(vm.id===row.id){closeVoicemail();changed();return;}cancelDelete();releaseAudio();vm=opened(vm,row.id,!row.isNew,row.carrierTranscript);void loadAudio(row);changed();};
+ const open=(row:VoicemailEntry)=>{if(vm.id===row.id){closeVoicemail();changed();return;}cancelDelete();releaseAudio();vm=opened(vm,row.id,!row.isNew,row.carrierTranscript);void loadAudio(row);changed();};
  /* The decoded audio serves both playback and transcription; it stays in memory for the open voicemail only. */
- async function loadAudio(row:Voicemail){
+ async function loadAudio(row:VoicemailEntry){
   const before=vm;vm=audioRequested(vm,ready());if(vm===before)return;const ticket=vm.ticket,controller=new AbortController();work?.abort();work=controller;changed();
   try{
    if(!row.hasAudio){const fetched=await client!.fetchVoicemailAudio(row.id);if(ticket!==vm.ticket)return;if(fetched!=='ready')throw Error(fetched);}
@@ -199,7 +198,6 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  views.phone.suggestions=()=>[];
  views.phone.status=()=>undefined;
  views.phone.render=(st:Bag,viewApi:Bag)=>{
- api=viewApi;
  /* A number handed over from Contacts or Messages fills the keypad once; only the owner's Call tap calls. */
  if(typeof st?.prefill==='string'&&st.prefill){if(!busy()){number=st.prefill.slice(0,40);notice='';tab='keypad';}queueMicrotask(()=>viewApi.set?.({prefill:null}));}
  /* Home's Phone card names the tab it leads to. */
@@ -212,11 +210,10 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   .map(item=>({...item,d:TAB_ICON[item.key as keyof typeof TAB_ICON],bg:item.on?'var(--fg)':'transparent',fg:item.on?'var(--bg)':'var(--fg)'}));
  const match=digits.length>=3?people.find(person=>person.number.replace(/\D/g,'').includes(digits)):undefined;
  const openRow=voicemails.find(row=>row.id===vm.id),length=openRow?openRow.durationSeconds:0;
- return {nativeManaged:true,nativePrototype:false,nativeStatus:status,nativeStatusDot:!status?'':status==='Couldn’t load'?'err':needsAccess?'warn':'',nativeBusy:busy(),nativeAccess:needsAccess,nativeNumber:number,nativeNotice:notice,hasNotice:!!notice,
+ return {nativeManaged:true,nativePrototype:false,nativeStatus:status,nativeBusy:busy(),nativeAccess:needsAccess,nativeNumber:number,nativeNotice:notice,hasNotice:!!notice,
   nativeRows:phoneRows(calls,value=>void call(value)),
   nativeOnNumber:(event:Event)=>{if(busy())return;number=(event.target as HTMLInputElement).value;notice='';changed();},
   nativeDial:()=>void call(number),nativeRefresh:()=>void refresh(),nativeRequest:()=>void refresh(true),
-  nativeContacts:()=>isMvpView('contacts')?viewApi.open?.('contacts'):viewApi.toast?.('Unavailable'),
   tabs,isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
   recents:calls.map(entry=>{const row=callRow(entry,names,now);return {...row,color:row.missed?'var(--alpha-call-red)':'var(--fg)',d:ARROW[row.kind],noCall:!row.canCall||busy(),call:()=>{if(entry.number)void call(entry.number);}};}),
   showRecentStatus:!!status&&!busy()&&!calls.length,retryRecents,

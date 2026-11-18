@@ -3,10 +3,16 @@ import {actionScope} from './device-actions';
 import {isReminderOperation,validateReminderOperation,validateReminderResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
 import type {ActionJournal} from './device-actions';
 import {browserCloudResidentEnabled} from './browser-cloud-resident';
+import {isRecord} from '../lib/parse';
 // The host storage bridge exists only on the development server with
 // test mocks or an explicit private local/Cloud resident preview, matching local-agent.ts. Node
 // contract tests import this module without Vite and pass their own request.
 const developmentBridgeAllowed:boolean=browserCloudResidentEnabled||(import.meta.env!==undefined&&import.meta.env.DEV===true&&(import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||(import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW==='1'&&import.meta.env.VITE_LOCAL_AGENT==='1')));
+/** The journal entry's binding and effect must still be the reviewed ones before a recovery reads a receipt. */
+async function checkRecoveryBinding(input:{scope:string;proposalId:string;bindingHash:string},entry:any,effect:unknown,message:string){
+ const binding=await actionScope(JSON.stringify([input.scope,entry.record.ownerId,entry.record.agentId,entry.record.sessionId,entry.record.origin,entry.record.installationId,entry.record.enrollmentId,input.proposalId,entry.record.digest,entry.operationId]));
+ if(binding!==input.bindingHash||await actionScope(JSON.stringify(effect))!==entry.operationHash)throw Error(message);
+}
 const operation:(input:Record<string,unknown>)=>Promise<any>=developmentBridgeAllowed?async input=>{
  const response=await fetch('/__alpha-local-agent',{method:'POST',headers:{'Content-Type':'application/json','X-Alpha-Local-Agent':'1'},body:JSON.stringify({storage:input}),signal:AbortSignal.timeout(15000),redirect:'error'});
  if(!response.ok)throw Error('Development device storage unavailable');return response.json();
@@ -27,8 +33,7 @@ export const developmentActionJournal:ActionJournal={
   const {entry}=await operation({...input,operation:'get'});if(!entry)throw Error('Notification journal is missing');
   if(entry.phase==='terminal'&&entry.status!=='unknown')return {entry};
   const effect=entry.record.operation;if(effect?.type!=='post_notification'||!entry.record.workflow||!entry.attemptId||entry.phase!=='applying'&&!(entry.phase==='terminal'&&entry.status==='unknown'))throw Error('Notification recovery requires an admitted workflow attempt');
-  const binding=await actionScope(JSON.stringify([input.scope,entry.record.ownerId,entry.record.agentId,entry.record.sessionId,entry.record.origin,entry.record.installationId,entry.record.enrollmentId,input.proposalId,entry.record.digest,entry.operationId]));
-  if(binding!==input.bindingHash||await actionScope(JSON.stringify(effect))!==entry.operationHash)throw Error('Notification recovery binding changed');
+  await checkRecoveryBinding(input,entry,effect,'Notification recovery binding changed');
   const {workflowNoticeReceipt}=await import('../browser/workflow-notices');const receipt=await workflowNoticeReceipt(entry.operationId,effect.title,effect.body,input.bindingHash,AbortSignal.timeout(15000));if(receipt.status!=='succeeded')return {entry};
   return operation({...input,operation:'recoverNotification',expectedEntry:entry});
  },
@@ -42,8 +47,7 @@ export const developmentActionJournal:ActionJournal={
   const {entry}=await operation({...input,operation:'get'});if(!entry)throw Error('Reminder journal is missing');
   if(entry.phase==='terminal'&&entry.status!=='unknown')return {entry};
   const effect=isReminderCreate(entry.record.operation)?validateReminderCreate(entry.record.operation):validateReminderOperation(entry.record.operation);if(!(isReminderOperation(effect)||isReminderCreate(effect))||!entry.attemptId||entry.phase!=='applying'&&entry.status!=='unknown')throw Error('Reminder recovery requires an admitted attempt');
-  const binding=await actionScope(JSON.stringify([input.scope,entry.record.ownerId,entry.record.agentId,entry.record.sessionId,entry.record.origin,entry.record.installationId,entry.record.enrollmentId,input.proposalId,entry.record.digest,entry.operationId]));
-  if(binding!==input.bindingHash||await actionScope(JSON.stringify(effect))!==entry.operationHash)throw Error('Reminder recovery binding changed');
+  await checkRecoveryBinding(input,entry,effect,'Reminder recovery binding changed');
   const {DailyApps}=await import('../daily');const receipt=await DailyApps.reminderOperationReceipt({operationId:entry.operationId,bindingHash:input.bindingHash,operation:effect});if(receipt.status!=='succeeded')return {entry};
   const reminderResult=isReminderCreate(effect)?validateReminderCreateResult(effect,receipt.result,entry.operationId):validateReminderResult(effect,receipt.result);
   return operation({...input,operation:'recoverReminder',expectedEntry:entry,reminderResult});
@@ -56,7 +60,7 @@ export const developmentActionJournal:ActionJournal={
 function advancesPendingDigest(expectedValue:string,value:string):boolean {
  try{
   const prior=JSON.parse(expectedValue);
-  return prior!==null&&typeof prior==='object'&&!Array.isArray(prior)&&
+  return isRecord(prior)&&
    (prior.phase===undefined||prior.phase==='review')&&JSON.stringify({...prior,phase:'dispatched'})===value;
  }catch{return false;}
 }

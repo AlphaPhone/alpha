@@ -97,7 +97,6 @@ public final class MapsRegionalInstrumentedTest {
    waitFor("document.querySelector('[data-alpha-map-plane]')?.dataset.mapReady==='true'");watches(1);
    assertEquals("Navigation survives the view change", "true",js("!!document.querySelector('[aria-label=\"End navigation\"]')"));
    click("End navigation");watches(0);
-   
   }finally{new java.io.File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"maps-navigation-phase.txt").delete();new java.io.File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"maps-navigation-ack.txt").delete();}
  }
 

@@ -1,10 +1,11 @@
 import {Capacitor} from '@capacitor/core';
+import type {BrowserJsonDomainDocument} from '../browser/json-domain-document';
 import {secureConnectionStore} from './native-connection';
 import {validateNotesFolders,NOTES_FOLDERS_SLOT,browserNotesFoldersKey,type NotesFoldersDocument} from './notes-folders-model';
 export * from './notes-folders-model';
 
 /** Storage for the folder list: the encrypted device slot on Android, a browser document on the web build. */
-let browserDocument:Promise<{readJson<T>():Promise<T|null>;editJson<T>(update:(value:T|null)=>T|null):Promise<void>}>|null=null;
+let browserDocument:Promise<BrowserJsonDomainDocument>|null=null;
 const browser=()=>browserDocument??=import('../browser/json-domain-document').then(m=>new m.BrowserJsonDomainDocument(browserNotesFoldersKey));
 const native=()=>Capacitor.getPlatform()==='android';
 export async function readNotesFolders():Promise<NotesFoldersDocument>{

@@ -16,7 +16,7 @@ export const navigationServiceScenarios=[
 ];
 export async function checkNativeNavigationOwnership(extraSources=[]){
  const platform=navigationServicePlatform();
- const compiled=[...['AlphaNavigationService.java','AlphaMapsTransportPlugin.java','PluginWorkers.java'].map(name=>app+name),
+ const compiled=[...['AlphaNavigationService.java','AlphaMapsTransportPlugin.java','PluginWorkers.java','AlphaUtil.java'].map(name=>app+name),
   directory+'/NavigationServicePorts.java','node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/JSObject.java',
   ...platform.paths];
  const sources=[modelPath,...compiled,directory+'/NavigationServiceTraces.java',directory+'/navigation-service-platform.mjs',

@@ -38,8 +38,6 @@ import { BrowserDeviceControls as DevDeviceControls } from './browser/device-con
 import { captureSimulatedApps, installSimulatedApps } from './browser/simulated-apps';
 import {HostedDigestPanel} from './runtime/hosted-digest-ui';
 import { installClockAdapter } from './prototype/clock-adapter';
-import {installNoteWebSourceAdapter} from './prototype/note-web-source-adapter';
-import {installNoteSourceAdapter} from './prototype/note-source-adapter';
 import {installSharePanelAdapter} from './prototype/share-panel-adapter';
 import {installNotesShareAdapter} from './prototype/notes-share-adapter';
 import { installNotesDocumentAdapter } from './prototype/notes-document-adapter';
@@ -66,13 +64,13 @@ import { DailyApps } from './daily';
 import { installPrototypeVoiceAdapter } from './prototype/voice-adapter';
 import { installPrototypeBrowserAdapter } from './prototype/browser-adapter';
 import { installCalendarAdapter } from './prototype/calendar-adapter';
-import { installSystemBarAppearance, type SystemBars } from './prototype/system-bar-appearance';
+import { installSystemBarAppearance } from './prototype/system-bar-appearance';
+import type { SystemBarsPort } from './native/alpha-device';
 import { automaticUpdateIdle, hasAppearancePreview, installSettingsAdapter, readAppearanceChoice, resolveAppearance } from './prototype/settings-adapter';
 import { ConnectionChooser, connectionController, connectionChooserVisible, residentAlwaysPresent } from './runtime/connection-ui';
 import { protectedPowerLaunchState } from './runtime/power-launch-state';
 import { installListenerInvocation, stopWakeListenerForChatOnly } from './runtime/always-on-listener';
 import {GoogleConnectionsPanel,googleConnectionController} from './runtime/google-connection-ui';
-import { installNotesTrashAdapter } from './prototype/notes-trash-adapter';
 import { installNotesFoldersAdapter } from './prototype/notes-folders-adapter';
 import { installInboxCloudAdapter, inboxAttention, subscribeInboxAttention } from './prototype/inbox-cloud-adapter';
 import { installHomeOverviewCards } from './prototype/home-overview-cards';
@@ -109,7 +107,7 @@ const savedMock = testMocksEnabled && (() => {
 // Resolve mock before mounting any native adapter, including after a cold start.
 // Production builds never admit mock or fixture state, whatever the URL or storage says.
 const mock = testMocksEnabled && (query.get('mode') === 'mock' || savedMock);
-// Android's shade is the notification surface (#416, #417); only the browser development build simulates it.
+// Android's shade is the notification surface; only the browser development build simulates it.
 const systemShade=shadeSurface({native:isAndroid,simulated:devSurfacesEnabled});
 const fixture = testMocksEnabled && (mock || (devSurfacesEnabled && !isAndroid && query.get('fixture') === '1'));
 const initialTheme = (() => {
@@ -138,37 +136,35 @@ if (!fixture) {
   installCanonicalCalendarDrafts(Component,VIEWS);
   // Android notification taps are independent of the development stand-in shade.
   if(isAndroid)installCanonicalNotificationTaps(Component);
-  // Notice rows feed only the development stand-in shade; product builds read no notice list (#416).
+  // Notice rows feed only the development stand-in shade; product builds read no notice list.
   if(systemShade==='simulated')installNotificationsAdapter(Component);
   installContextSelection(Component);
   installPrototypeVoiceAdapter(Component, VIEWS);
   installCalendarApprovalAdapter(Component);
   installMapsChatAdapter(Component);
-  installNotesDocumentAdapter(Component, VIEWS);
+  installNotesDocumentAdapter(VIEWS);
   installNotesShareAdapter(VIEWS);
-  installNotesTrashAdapter(Component, VIEWS);
   installNotesFoldersAdapter(Component, VIEWS);
   installCanonicalNotesView(Component,VIEWS);
-  installNoteSourceAdapter(VIEWS);
-  installNoteWebSourceAdapter(VIEWS);
   installPrototypeBrowserAdapter(Component, VIEWS);
   installSettingsAdapter(Component, VIEWS);
   if(!isAndroid){if(devSurfacesEnabled)installBrowserDeviceAdapter(Component);else installBrowserCapabilityTiles(Component);}
-  if(!browserDevProfile) {installInboxCloudAdapter(Component, VIEWS);installUseInEmailReview(Component, VIEWS);}
-  // Home cards read only the provider summaries: unread count, account label and read time for
-  // mail, and the latest retained brief. Nothing here starts a read or a run.
   if(!browserDevProfile){
+    installInboxCloudAdapter(Component, VIEWS);installUseInEmailReview(Component, VIEWS);
+    // Home cards read only the provider summaries: unread count, account label and read time for
+    // mail, and the latest retained brief. Nothing here starts a read or a run.
     const homeSourcesChanged=()=>window.dispatchEvent(new Event(HOME_SOURCES_CHANGED));
     subscribeInboxAttention(homeSourcesChanged);subscribeRetainedDigest(homeSourcesChanged);
     setHomeSources({
       attention:()=>{const value=inboxAttention();return {state:value.state,unread:value.unread,...(value.source?{source:value.source}:{}),...(value.updatedAt?{updatedAt:value.updatedAt}:{})};},
       brief:latestRetainedDigest,
     });
+    installWorkflowAdapter(Component, VIEWS);installAutomationsAdapter(Component,VIEWS);
+  }else{
+    // The development profile has no provider mail summary, but its scheduled digests retain results
+    // the same way, so its Home reads the latest retained brief from the same source.
+    subscribeRetainedDigest(()=>window.dispatchEvent(new Event(HOME_SOURCES_CHANGED)));setHomeSources({brief:latestRetainedDigest});
   }
-  if(!browserDevProfile) {installWorkflowAdapter(Component, VIEWS);installAutomationsAdapter(Component,VIEWS);}
-  // The development profile has no provider mail summary, but its scheduled digests retain results
-  // the same way, so its Home reads the latest retained brief from the same source.
-  if(browserDevProfile){subscribeRetainedDigest(()=>window.dispatchEvent(new Event(HOME_SOURCES_CHANGED)));setHomeSources({brief:latestRetainedDigest});}
   installSharePanelAdapter(Component,VIEWS);
 }
 if(devSurfacesEnabled&&simulatedApps)installSimulatedApps(Component,VIEWS,simulatedApps);
@@ -178,7 +174,7 @@ installCalendarMonthFocus(Component, VIEWS);
 installChatOverlayMotion(Component);
 installReplyAnnouncer(Component);
 installSystemShade(Component,{native:isAndroid});
-installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBars>('AlphaDevice'));
+installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBarsPort>('AlphaDevice'));
 // The shared agenda, mail and brief cards render the final Home values of every adapter above.
 installHomeCardVisibility(Component, () => googleConnectionController.open());
 // Messages and Phone cards exist on the verified image only; elsewhere this installs nothing.

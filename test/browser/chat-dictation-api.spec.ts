@@ -11,8 +11,7 @@ import {attachVoiceFailureMetadata} from './voice-fixture-failure-metadata';
 // capture recovery (two cases; the echo-canceller hold is in voice-assistant.production); interruptSpeech accounting (the busy hold closes capture on submission; interrupting reopens it) is retained separately.
 // Dictation's public component API is retained but there is no chat dictation button.
 // Override only the source build-flags module to exercise local/native branches; no shipped hooks.
-// The stub must export every build flag: updateChannelCheckEnabled joined the module in f4ebce3b3 (#713).
-test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;export const updateChannelCheckEnabled=false;'}));});
+test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;'}));});
 test.afterEach(async({page},info)=>{await attachVoiceFailureMetadata(page,info);});
 async function captureApi(page:Page){
  await page.evaluate(async()=>{const {Component}=await import('/src/prototype/model.js'),{connectionController:c}=await import('/src/runtime/connection-ui.tsx');const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){(window as any).dictationApiFixture=this;return render.call(this);};c.close();});

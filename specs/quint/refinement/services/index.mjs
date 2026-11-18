@@ -11,7 +11,6 @@ import {fileURLToPath} from 'node:url';
 import {checkBrowserGoogleReturn} from './browser-google-return.mjs';
 import {authorizationRefinement} from './authorization.mjs';
 import {googleAccountsRefinement} from './google-accounts.mjs';
-import {calendarRefinement} from './calendar.mjs';
 import {inboxRefinement} from './inbox.mjs';
 import {mapsRefinement} from './maps.mjs';
 import {cacheRefinement} from './cache.mjs';
@@ -73,7 +72,7 @@ export async function runServicesRefinement(onProgress) {
     ...serviceForwardReplayCampaigns([driver]),
     ...[checkWorkflowAuthoring,checkWorkflowNoticeTaps,checkScanReviewDialogs,checkMapsScreenModes,checkMapsNavigationGuidanceReadback,checkPlanAdmissionGrace,checkInboxListPaging,checkAutomationRequestSettlement,checkWorkflowExecutionAuditAdmission].map(withDriver),
     [checkCoreApprovalServiceCurrentRefinement.name, () => checkCoreApprovalServiceCurrentRefinement(undefined, [driver])],
-    ...[authorizationRefinement, googleAccountsRefinement, googleAccountsLifecycleRefinement, calendarRefinement,
+    ...[authorizationRefinement, googleAccountsRefinement, googleAccountsLifecycleRefinement,
       calendarLinkedRefinement, inboxRefinement, mapsRefinement, cacheRefinement, workflowRefinement, policyRefinement,
       readingRefinement, scanRefinement, credentialRefinement, pdfRefinement, runSignInCoordinatorRefinement,
       runCoreRetirementRefinement, runCoreServiceLifecycleRefinement, runCoreRuntimeShutdownRefinement,

@@ -8,11 +8,10 @@ import ai.eliza.plugins.system.reset.DataResetCopy;
  * installed marker names, recovery component and process, product copy and the bounded work that
  * runs before Android's package-scoped clear (ResetBeforeDispatch: Alpha's own calendar, then Cloud
  * key revocation). Behavior (fresh device credential, durable marker, listener acknowledgement first,
- * bounded recovery and fail-closed admission before providers) is upstream; issue #409.
+ * bounded recovery and fail-closed admission before providers) is upstream.
  */
 final class AlphaDataReset {
- /** reset-alpha.pending/.failures and :reset_recovery are installed identities: an interrupted reset
-  * from an earlier build must still resume, so they never change. */
+ /** reset-alpha.pending/.failures and :reset_recovery are persisted identities; never rename them. */
  static final DataReset RESET=DataReset.builder("reset-alpha",ResetRecoveryActivity.class)
   .recoveryProcessSuffix(ResetRecoveryActivity.PROCESS_SUFFIX).logTag("AlphaReset")
   .beforeDispatch(ResetBeforeDispatch.STEP).build();

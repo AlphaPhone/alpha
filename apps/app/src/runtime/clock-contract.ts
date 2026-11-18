@@ -15,10 +15,9 @@ import {
   validateClockHandoffResult,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff.ts';
 import type {ClockHandoffOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
-export {CLOCK_CAPABILITY, clockTimeZone} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
-export type {ClockDay, ClockHandoffOperation as ClockOperation, ClockHandoffResult as ClockResult, ClockHandoffResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
+export {clockTimeZone} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
+export type {ClockDay} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
 export {CLOCK_DAY_NAMES, clockHandoffCapabilities, currentClockTimeZone, describeClockDays} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff.ts';
-export type {ClockHandoffSetRequest as ClockSetRequest, ClockHandoffRequest as ClockDraftRequest} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff.ts';
 
 /** Alpha's Clock form: one to seven unique days, ascending for EXTRA_DAYS. */
 export const clockDays = clockHandoffFormDays;

@@ -13,7 +13,7 @@ import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
 /**
- * Actual Android notifications -> Android's own shade -> the notification's own tap (#416).
+ * Actual Android notifications -> Android's own shade -> the notification's own tap.
  * Alpha draws no shade of its own: the page has no notification layer, Android shows the notice,
  * and the tap reaches the PendingIntent the notice was posted with. The shade is opened with
  * Android's own global action on both flavors; the launcher button is SystemShadeInstrumentedTest's.
@@ -23,6 +23,7 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class NotificationsInstrumentedTest {
  private void until(String condition)throws Exception{long end=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<end){if("true".equals(WebViewTestDriver.evaluate("Boolean("+condition+")")))return;SystemClock.sleep(100);}fail("Notification state: "+condition);}
+ private void home()throws Exception{WebViewTestDriver.evaluate(AppNavigation.request("Home"));until("document.querySelector('[data-screen]')&&!document.querySelector('.alpha-connection-scrim')");}
  private boolean present(NotificationManager manager,String tag,int id){for(android.service.notification.StatusBarNotification row:manager.getActiveNotifications())if(tag.equals(row.getTag())&&row.getId()==id)return true;return false;}
  /**
   * Opens Android's shade with Android's own global action on both flavors, so notice delivery is
@@ -45,7 +46,7 @@ public class NotificationsInstrumentedTest {
   if(android.os.Build.VERSION.SDK_INT>=33)context.registerReceiver(receiver,new IntentFilter(action),Context.RECEIVER_NOT_EXPORTED);else context.registerReceiver(receiver,new IntentFilter(action));
   PendingIntent tap=PendingIntent.getBroadcast(context,token.hashCode(),new Intent(action).setPackage(context.getPackageName()),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   AppNavigation.liveMode();WebViewTestDriver.evaluate(AppNavigation.request("Home"));until("document.querySelector('[data-screen]')&&!document.querySelector('.alpha-connection-scrim')");
+   AppNavigation.liveMode();home();
    AppNavigation.declineStartupAccess();
    manager.notify(tag,1,new Notification.Builder(context,ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title).setContentText("Actual Android fixture body").setContentIntent(tap).setAutoCancel(true).build());
    // The plugin still refuses to open or dismiss a notice it never identified.
@@ -63,7 +64,7 @@ public class NotificationsInstrumentedTest {
    assertTrue("Opening an auto-cancel notice removes the real Android notification",removed);
    if(AndroidShade.isOpen())AndroidShade.collapse();
    // A recreated page still draws no shade of its own.
-   scenario.recreate();WebViewTestDriver.evaluate(AppNavigation.request("Home"));until("document.querySelector('[data-screen]')&&!document.querySelector('.alpha-connection-scrim')");
+   scenario.recreate();home();
    until(AndroidShade.ALPHA_SHADE_ABSENT);
   }finally{if(AndroidShade.isOpen())AndroidShade.collapse();manager.cancel(tag,1);tap.cancel();context.unregisterReceiver(receiver);}
  }
@@ -81,7 +82,7 @@ public class NotificationsInstrumentedTest {
   PendingIntent goneTap=PendingIntent.getBroadcast(context,1,new Intent(goneAction).setPackage(context.getPackageName()),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent liveTap=PendingIntent.getBroadcast(context,2,new Intent(liveAction).setPackage(context.getPackageName()),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   AppNavigation.liveMode();WebViewTestDriver.evaluate(AppNavigation.request("Home"));until("document.querySelector('[data-screen]')&&!document.querySelector('.alpha-connection-scrim')");AppNavigation.declineStartupAccess();
+   AppNavigation.liveMode();home();AppNavigation.declineStartupAccess();
    manager.notify(tag,1,new Notification.Builder(context,ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(goneTitle).setContentText("Synthetic removed target").setContentIntent(goneTap).setAutoCancel(true).build());
    manager.notify(tag,2,new Notification.Builder(context,ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(liveTitle).setContentText("Synthetic positive control").setContentIntent(liveTap).setAutoCancel(true).build());
    goneTap.cancel();assertThrows(PendingIntent.CanceledException.class,()->goneTap.send());
@@ -101,9 +102,9 @@ public class NotificationsInstrumentedTest {
  /** Own-notification agent identities: the native list gives Alpha Phone's own rows the opaque,
   * bounded id/revision that phone-context accepts, never derived from title, text, tag or package. */
  @Test public void ownNotificationIdentitiesAreOpaqueAndBounded()throws Exception{
-  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();android.app.NotificationManager manager=context.getSystemService(android.app.NotificationManager.class);
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager manager=context.getSystemService(NotificationManager.class);
   InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context.getPackageName(),android.Manifest.permission.POST_NOTIFICATIONS);
-  ai.eliza.plugins.reminders.ReminderTestAccess.channel(context);
+  ReminderTestAccess.channel(context);
   String token=java.util.UUID.randomUUID().toString().replace("-",""),title="PRIVATE_NOTICE_TITLE_"+token,body="PRIVATE_NOTICE_BODY_"+token,tag="context-identity-"+token;
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();WebViewTestDriver.evaluate(AppNavigation.request("Home"));until("document.querySelector('[data-screen]')");
@@ -111,8 +112,8 @@ public class NotificationsInstrumentedTest {
    // Rows already listed (for example another test's secret notice) never stand in for this test's rows.
    java.util.Set<String> earlier=new java.util.HashSet<>();JSONObject initial=call("Capacitor.Plugins.AlphaNotifications.list()");assertFalse("Own notifications are readable in the foreground",initial.has("error"));
    for(int i=0;i<initial.getJSONArray("items").length();i++)earlier.add(initial.getJSONArray("items").getJSONObject(i).getString("id"));
-   manager.notify(tag,1,new android.app.Notification.Builder(context,ai.eliza.plugins.reminders.ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title).setContentText(body).build());
-   manager.notify(tag,2,new android.app.Notification.Builder(context,ai.eliza.plugins.reminders.ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title+"_SECRET").setContentText(body).setVisibility(android.app.Notification.VISIBILITY_SECRET).build());
+   manager.notify(tag,1,new Notification.Builder(context,ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title).setContentText(body).build());
+   manager.notify(tag,2,new Notification.Builder(context,ReminderTestAccess.CHANNEL).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title+"_SECRET").setContentText(body).setVisibility(Notification.VISIBILITY_SECRET).build());
    JSONObject own=null,secret=null;org.json.JSONArray items=null;
    for(int attempt=0;attempt<50&&(own==null||secret==null);attempt++){
     JSONObject listed=call("Capacitor.Plugins.AlphaNotifications.list()");assertFalse("Own notifications are readable in the foreground",listed.has("error"));

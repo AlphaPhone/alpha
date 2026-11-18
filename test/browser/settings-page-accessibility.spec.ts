@@ -67,7 +67,7 @@ test('developer-only Settings rows appear only with ?tools=1 on the development 
  await page.getByRole('button', {name:'Back to Settings', exact:true}).click();
  await page.getByRole('button',{name:'Apps',exact:true}).click();
  await page.getByRole('button', {name:'Calendar', exact:true}).click();
- await expect(page.getByText('Calendar backups', {exact:true})).toBeVisible();
+ await expect(page.getByText('Calendar backups', {exact:true})).toHaveCount(0);
 });
 
 

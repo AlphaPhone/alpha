@@ -24,21 +24,21 @@ public final class HostedProcessRestartInstrumentedTest {
  private static void retained(AlphaCredentialStore s,JSONObject state)throws Exception {
   String slot=state.getString("slot");assertTrue("Saved record ciphertext changed",state.getString("cipher").equals(cipher(s,slot+":worker-run")));
   assertTrue("Saved record bytes changed",state.getString("raw").equals(s.readCredentialSlot(slot+":worker-run")));
-  assertEquals("legacy-worker-client",new JSONObject(s.readCredentialSlot(slot)).getString("clientId"));
+  assertEquals("fixture-worker-client",new JSONObject(s.readCredentialSlot(slot)).getString("clientId"));
   assertTrue("Notice ledger changed on replay",state.getString("ledgerCipher").equals(cipher(s,HostedResultNotices.LEDGER)));
  }
  @Test public void prepareCommittedResultWithLostAck()throws Exception {
   Context c=context();AlphaCredentialStore s=new AlphaCredentialStore(c);
   for(String key:new String[]{STATE,HostedDelivery.ACTIVE,HostedResultNotices.LEDGER,HostedResultNotices.PENDING,"hosted-background:v1:preference"})assertNull("Fresh fixture required",s.readCredentialSlot(key));
   try(Fixture server=new Fixture(new JSONObject(),true)){
-   String origin="http://127.0.0.1:"+server.socket.getLocalPort(),scope=HostedResultNotices.hash(new JSONArray().put(origin).put(server.owner).put(server.agent).toString()),slot="hosted-digests:v1:"+scope;
+   String origin="http://127.0.0.1:"+server.socket.getLocalPort(),scope=AlphaUtil.sha256Hex(new JSONArray().put(origin).put(server.owner).put(server.agent).toString()),slot=Slots.HOSTED_DIGESTS_PREFIX+scope;
    String authSlot="remote:"+origin,deviceSlot="device:"+scope,generation=UUID.randomUUID().toString();
    String auth=new JSONObject().put("origin",origin).put("identityId",server.owner).put("sessionId",server.token).put("token",server.token).put("expiresAt",System.currentTimeMillis()+1800000).toString();
    String device=new JSONObject().put("installationId",UUID.randomUUID().toString()).put("key","b".repeat(64)).put("enrollmentId","worker-fixture").toString();
    JSONObject state=new JSONObject().put("owner",server.owner).put("agent",server.agent).put("token",server.token).put("port",server.socket.getLocalPort()).put("slot",slot).put("scope",scope).put("authSlot",authSlot).put("deviceSlot",deviceSlot).put("generation",generation).put("pid",android.os.Process.myPid()).put("phase","preparing");
    s.writeCredentialSlot(STATE,state.toString());s.writeCredentialSlot(authSlot,auth);s.writeCredentialSlot(deviceSlot,device);
-   s.writeCredentialSlot(slot,new JSONObject().put("clientId","legacy-worker-client").put("ids",new JSONArray()).toString());
-   s.writeCredentialSlot(HostedDelivery.ACTIVE,new JSONObject().put("version",1).put("mode","local").put("generation",generation).put("enabled",true).put("polling",true).put("sessionId",SESSION).put("origin",origin).put("ownerId",server.owner).put("agentId",server.agent).put("scope",scope).put("credentialSlot",authSlot).put("credentialDigest",HostedResultNotices.hash(auth)).put("deviceSlot",deviceSlot).put("deviceDigest",HostedResultNotices.hash(device)).toString());
+   s.writeCredentialSlot(slot,new JSONObject().put("clientId","fixture-worker-client").put("ids",new JSONArray()).toString());
+   s.writeCredentialSlot(HostedDelivery.ACTIVE,new JSONObject().put("version",1).put("mode","local").put("generation",generation).put("enabled",true).put("polling",true).put("sessionId",SESSION).put("origin",origin).put("ownerId",server.owner).put("agentId",server.agent).put("scope",scope).put("credentialSlot",authSlot).put("credentialDigest",AlphaUtil.sha256Hex(auth)).put("deviceSlot",deviceSlot).put("deviceDigest",AlphaUtil.sha256Hex(device)).toString());
    try{HostedDelivery.get(c).syncBackground(generation);fail("Lost ACK response must fail the transport");}catch(IOException expected){}
    assertTrue("ACK request reached server",server.acks>=1);assertNull("HTTP fixture failed",server.failure);
    assertEquals(1,HostedDelivery.get(c).history(SESSION).length());assertEquals(1,new JSONObject(s.readCredentialSlot(HostedResultNotices.LEDGER)).length());
@@ -61,7 +61,7 @@ public final class HostedProcessRestartInstrumentedTest {
  }
  @Test public void verifySecondRestartAndCleanup()throws Exception {
   Context c=context();AlphaCredentialStore s=new AlphaCredentialStore(c);JSONObject state=new JSONObject(s.readCredentialSlot(STATE));assertEquals("resumed",state.getString("phase"));assertNotEquals(state.getInt("resumePid"),android.os.Process.myPid());retained(s,state);assertEquals(1,HostedDelivery.get(c).history(SESSION).length());
-  HostedDelivery.get(c).disable();new HostedNoticePoster(c).cancel(HostedResultNotices.hash(state.getString("scope")+":worker-run"));
+  HostedDelivery.get(c).disable();new HostedNoticePoster(c).cancel(AlphaUtil.sha256Hex(state.getString("scope")+":worker-run"));
   for(String key:new String[]{state.getString("authSlot"),state.getString("deviceSlot"),state.getString("slot"),state.getString("slot")+":worker-run",HostedDelivery.ACTIVE,HostedResultNotices.LEDGER,HostedResultNotices.PENDING,STATE})s.removeCredentialSlot(key);
  }
  private static final class Fixture implements AutoCloseable {
@@ -71,7 +71,7 @@ public final class HostedProcessRestartInstrumentedTest {
    if(path.equals("/api/auth/me"))response=new JSONObject().put("identity",new JSONObject().put("id",owner).put("kind","owner")).put("session",new JSONObject().put("id",token).put("kind","machine").put("expiresAt",System.currentTimeMillis()+300000)).put("access",new JSONObject().put("role","OWNER").put("mode","session"));
    else if(path.equals("/api/agents"))response=new JSONObject().put("agents",new JSONArray().put(new JSONObject().put("id",agent).put("status","running")));
    else if(path.equals("/api/workflow/status"))response=new JSONObject().put("hostedDigestProtocol",1);
-   else if(path.equals("/api/workflow/hosted/results?clientId=legacy-worker-client"))response=new JSONObject().put("entries",acks==0?new JSONArray().put(result):new JSONArray());
+   else if(path.equals("/api/workflow/hosted/results?clientId=fixture-worker-client"))response=new JSONObject().put("entries",acks==0?new JSONArray().put(result):new JSONArray());
    else if(path.equals("/api/workflow/hosted/results/ack")){JSONObject receipt=new JSONObject(new String(body));assertEquals("worker-run",receipt.getString("runId"));assertEquals(1,receipt.getInt("cursor"));acks++;if(loseAck)return;response=new JSONObject().put("acknowledged",1);}
    else throw new AssertionError("Unexpected effect route");byte[] bytes=response.toString().getBytes(StandardCharsets.UTF_8);OutputStream out=client.getOutputStream();out.write(("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: "+bytes.length+"\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(bytes);out.flush();
   }

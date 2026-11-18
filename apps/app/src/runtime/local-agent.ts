@@ -1,5 +1,5 @@
 import { isPreparedViewNavigationRequest } from './prepared-view-navigation.ts';
-import {subscribeNativeViewEvents,type NativeViewEventPort} from "./native-view-events";
+import {subscribeNativeViewEvents} from "./native-view-events";
 import {browserCloudResidentEnabled,browserResidentCall,browserProviderCall} from './browser-cloud-resident';
 import type {AppRecordMethod} from './app-record-route-policy';
 import {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
@@ -8,19 +8,18 @@ import {anyAbortSignal,runProviderConfiguration} from './abort-signal';
 import {developmentCloudVoiceEnabled} from './development-cloud-voice';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import {ownerRouteAllowed, ownerRouteGroup} from './owner-route-policy.ts';
-import { registerPlugin } from '../platform-plugins';
 import { Capacitor } from '@capacitor/core';
 import type { VerifiedSession, ChatChannel } from './alpha-client';
 import { conversationViewHeaders, conversationRoomId, messagePageQuery, turnAbortOutcome, turnAbortPath, type MessagePage, type RemoteChatReply, type RemoteConversation, type TurnAbortOutcome } from './remote-protocol';
 import { readLocalAgentStream, type StreamTextListener } from './local-agent-stream';
-import { streamNativeAgent, type NativeStreamPort } from './local-agent-native-stream';
-import { subscribeNativeVoiceEvents, type NativeVoiceEventPort } from './local-agent-native-events';
+import { streamNativeAgent } from './local-agent-native-stream';
+import { subscribeNativeVoiceEvents } from './local-agent-native-events';
+import { agent as native, type NativeRequestPort } from '../native/agent';
+import { isLowerUuid, isSha256Hex } from '../lib/ids';
+import { delay } from '../lib/abort';
 
-export type LocalAgentMethod = AutomationsMethod | AppRecordMethod;
-export interface NativeRequestPort {
-  request(input:Record<string,unknown>):Promise<{status:number;body?:string}>;
-  cancelRequest?(input:{cancelId:string}):Promise<unknown>;
-}
+type LocalAgentMethod = AutomationsMethod | AppRecordMethod;
+export type { NativeRequestPort };
 /** A plain native request whose caller aborts is withdrawn by the id sent with it: native answers
  * the call and never dispatches one still queued behind its workers or enrolling. One already sent
  * to the runtime is not recalled and may have completed; the caller reconciles as for any abort. */
@@ -28,7 +27,7 @@ export function requestNativeAgent(port:NativeRequestPort,input:Record<string,un
   if(!signal)return port.request(input);
   if(signal.aborted)return Promise.reject(signal.reason??new DOMException('Cancelled','AbortError'));
   const cancelId=crypto.randomUUID();
-  const withdraw=()=>{void Promise.resolve().then(()=>port.cancelRequest!({cancelId})).catch(()=>{});};
+  const withdraw=()=>{void Promise.resolve().then(()=>port.cancelRequest({cancelId})).catch(()=>{});};
   signal.addEventListener('abort',withdraw,{once:true});
   return port.request({...input,cancelId}).finally(()=>signal.removeEventListener('abort',withdraw));
 }
@@ -61,16 +60,15 @@ export interface LocalAgentBridge {
   /** Cloud read-aloud as it arrives: binary audio/mpeg, or the JSON envelope of a refusal. */
   speechAudio?(input:{path:'/api/tts/cloud';ownerId:string;requestId:string;body:string},signal:AbortSignal):Promise<Response>;
 }
-const native = registerPlugin<Omit<LocalAgentBridge, 'subscribeVoiceEvents'> & NativeRequestPort & NativeStreamPort & NativeVoiceEventPort & NativeViewEventPort>('Agent');
 // Capacitor proxies synthesize functions for unknown methods. Do not use that
 // proxy to feature-detect streaming before the native IPC adapter implements it.
-const nativeBridge:LocalAgentBridge={subscribeVoiceEvents:(ownerId,listener)=>subscribeNativeVoiceEvents(native,ownerId,listener),start:input=>native.start(input),cancelStart:input=>native.cancelStart!(input),request:(input,signal)=>requestNativeAgent(native,input,signal),stream:(input,signal,onText,onReplyReady)=>streamNativeAgent(native,input,signal,onText,onReplyReady)};
+const nativeBridge:LocalAgentBridge={subscribeVoiceEvents:(ownerId,listener)=>subscribeNativeVoiceEvents(native,ownerId,listener),start:input=>native.start(input),cancelStart:input=>native.cancelStart(input),request:(input,signal)=>requestNativeAgent(native,input,signal),stream:(input,signal,onText,onReplyReady)=>streamNativeAgent(native,input,signal,onText,onReplyReady)};
 // The host bridge at /__alpha-local-agent exists only on the development server
 // with test mocks or the explicit real Cloud resident mode. This
 // module is also imported by Node contract tests, where import.meta.env is absent.
 const developmentBridgeAllowed: boolean = browserCloudResidentEnabled || (import.meta.env !== undefined && import.meta.env.DEV === true && (import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === '1' || (import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW === '1' && import.meta.env.VITE_LOCAL_AGENT === '1')));
 export const browserLocalAgentEnabled: boolean = developmentBridgeAllowed && import.meta.env.VITE_LOCAL_AGENT === '1';
-export const localAgentAvailable = () => Capacitor.isNativePlatform()
+const localAgentAvailable = () => Capacitor.isNativePlatform()
   ? Capacitor.isPluginAvailable('Agent') : browserLocalAgentEnabled;
 /** Packaging availability only; it does not prove startup or inference readiness. */
 export async function localAgentPackaged():Promise<boolean> {
@@ -169,10 +167,6 @@ function record(value:unknown):Record<string,unknown> {
 // ordinary stop → bind → start path, so a listening but unusable runtime is still restarted by a
 // retry. Cleared by the next verified connection.
 let attachDistrusted=false;
-/** Whether an HTTP refusal was answered by the on-device agent itself (its errors carry
- * `source: 'local-agent'`). Its status says nothing about the Eliza Cloud sign-in: a 401 here is
- * the agent's own owner session, never an expired Cloud key. */
-export const localAgentRefusal=(error:unknown):boolean=>!!error&&typeof error==='object'&&(error as {source?:unknown}).source==='local-agent';
 function identifier(value:unknown):string {
   if (typeof value !== 'string' || !value || value.length>512) throw new Error('Invalid local agent identity.');
   return value;
@@ -180,7 +174,7 @@ function identifier(value:unknown):string {
 
 /** A random voice request UUID as the resident stream's existing trace format. */
 export function nativeVoiceTraceId(turnId:unknown):string|undefined {
-  if(typeof turnId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(turnId))return;
+  if(!isLowerUuid(turnId))return;
   const id=turnId.replaceAll('-','');
   return id==='0'.repeat(32)?undefined:id;
 }
@@ -398,7 +392,7 @@ export class LocalAgentProtocol {
   }
   async synthesizeSpeech(text:string,signal:AbortSignal):Promise<Blob>{
     if(!this.browserSpeechAvailable||!this.session)throw Error('Connect the local agent first.');
-    if(typeof text!=='string'||!text.trim()||text.length>500)throw Error('Local agent speech accepts up to 500 characters per phrase.');
+    if(!text.trim()||text.length>500)throw Error('Local agent speech accepts up to 500 characters per phrase.');
     const session=this.session,generation=this.generation,controller=new AbortController(),requestId=crypto.randomUUID();
     this.streams.add(controller);const bounded=anyAbortSignal([signal,controller.signal]);
     try{
@@ -504,6 +498,8 @@ export class LocalAgentProtocol {
 
 /** Hosted inference stays on Qwen through Cerebras; the model is not user-selectable. */
 export const LOCAL_PROVIDER_MODEL='qwen-3.8-27b';
+/** The same model as Eliza Cloud bills and reports it. */
+const CLOUD_PROVIDER_MODEL='cerebras/'+LOCAL_PROVIDER_MODEL;
 export type LocalProviderMode='cloud'|'own';
 export type LocalProviderKey='text'|'voice';
 export interface LocalProviderKeysStatus {text:{configured:boolean};voice:{configured:boolean}}
@@ -525,7 +521,7 @@ export function providerStatusLabel(status:LocalProviderStatus|null|undefined):s
   if(!status)return 'Unknown';
   if(!status.configured)return 'Not set';
   // Eliza Cloud serves the same Qwen model through Cerebras.
-  const model=status.model||(status.provider==='elizacloud'?'cerebras/'+LOCAL_PROVIDER_MODEL:LOCAL_PROVIDER_MODEL);
+  const model=status.model||(status.provider==='elizacloud'?CLOUD_PROVIDER_MODEL:LOCAL_PROVIDER_MODEL);
   return modelLabel(status.provider==='elizacloud'?'Cloud':'Cerebras',model);
 }
 function parseProviderStatus(value:unknown):LocalProviderStatus {
@@ -680,7 +676,7 @@ async function residentAttachmentStatus(credentialId:string,bridge:Pick<LocalAge
   if(attachDistrusted||!nativePlatform&&!browserCloudResidentEnabled||typeof credentialId!=='string'||!credentialId)return {attachable:false};
   try{
     const result=browserCloudResidentEnabled?await browserResidentCall('residentStatus',credentialId):await bridge.residentAttachment?.({credentialId});
-    const guard=result&&typeof result.bindingGuard==='string'&&/^[a-f0-9]{64}$/.test(result.bindingGuard)?result.bindingGuard:undefined;
+    const guard=isSha256Hex(result?.bindingGuard)?result.bindingGuard:undefined;
     return {attachable:result?.attachable===true,...(guard?{bindingGuard:guard}:{})};
   }catch{return {attachable:false};}
 }
@@ -697,7 +693,7 @@ export async function bindResidentCloudProvider(credentialId:string,ports?:{atta
 /** Automatic failed-bind cleanup has no unguarded fallback, including on older hosts. */
 export async function clearLocalProviderIfCurrent(bindingGuard:string,signal:AbortSignal):Promise<'cleared'|'changed'> {
   signal.throwIfAborted();
-  if(!/^[a-f0-9]{64}$/.test(bindingGuard)||browserCloudResidentEnabled||!Capacitor.isNativePlatform()||!native.clearProviderIfCurrent)throw Error('Conditional provider removal is unavailable.');
+  if(!isSha256Hex(bindingGuard)||browserCloudResidentEnabled||!Capacitor.isNativePlatform()||!native.clearProviderIfCurrent)throw Error('Conditional provider removal is unavailable.');
   const result=await native.clearProviderIfCurrent({bindingGuard});
   signal.throwIfAborted();
   if(result.outcome!=='cleared'&&result.outcome!=='changed')throw Error('Conditional provider removal was not confirmed.');
@@ -719,8 +715,8 @@ export async function configureLocalCloudProvider(credentialId:string) {
   try { await stopLocalAgent(); }
   catch(cause) { throw new LocalCloudProviderStopUnconfirmed(cause); }
   if(!native.configureCloudProvider)throw Error('Cloud billing is unavailable in this version.');
-  const result=record(await native.configureCloudProvider({credentialId,model:'cerebras/qwen-3.8-27b'}));
-  return typeof result.bindingGuard==='string'&&/^[a-f0-9]{64}$/.test(result.bindingGuard)?result.bindingGuard:undefined;
+  const result=record(await native.configureCloudProvider({credentialId,model:CLOUD_PROVIDER_MODEL}));
+  return isSha256Hex(result.bindingGuard)?result.bindingGuard:undefined;
 }
 
 export async function stopLocalAgent() {
@@ -732,7 +728,7 @@ export async function stopLocalAgent() {
  * nothing about the shutdown, so it is read again. Reads start 200 ms apart and back off to one
  * second: a slow shutdown costs a bounded number of bridge calls. */
 export async function awaitLocalAgentStopped(getStatus:()=>Promise<{state?:string;serviceActive?:boolean;socketListening?:boolean}|undefined>,
-  clock:{now():number;sleep(ms:number):Promise<void>}={now:()=>performance.now(),sleep:ms=>new Promise(resolve=>setTimeout(resolve,ms))},timeoutMs=30000):Promise<void> {
+  clock:{now():number;sleep(ms:number):Promise<void>}={now:()=>performance.now(),sleep:ms=>delay(ms)},timeoutMs=30000):Promise<void> {
   const deadline=clock.now()+timeoutMs;
   let delay=200;
   while(clock.now()<deadline){

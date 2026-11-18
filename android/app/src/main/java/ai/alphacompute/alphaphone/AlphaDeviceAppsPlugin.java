@@ -13,8 +13,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name="DeviceApps")
 public final class AlphaDeviceAppsPlugin extends Plugin {
  @PluginMethod public void platformCapabilities(PluginCall call){
-  JSObject result=new JSObject();result.put("aospImage",AlphaImageCapabilities.aospImage(getContext()));
-  result.put("phone",false);result.put("contacts",AlphaImageCapabilities.aospImage(getContext()));result.put("sms",false);call.resolve(result);
+  boolean image=AlphaImageCapabilities.aospImage(getContext());
+  JSObject result=new JSObject();result.put("aospImage",image);
+  result.put("phone",false);result.put("contacts",image);result.put("sms",false);call.resolve(result);
  }
  /** The recovery screen's way out of Alpha as HOME (launcher builds): the stock Home picker, else
   * default apps, else Settings itself, never one of Alpha's own activities. Only from a user tap. */

@@ -15,21 +15,21 @@ export async function browserResidentCall(operation:'residentOwn'|'residentCloud
  return response.json();
 }
 
-export interface BrowserProviderStatus {
+interface BrowserProviderStatus {
  mode:'cloud'|'own';revision:string;persistence:'host-session';
  keys:{text:{configured:boolean};voice:{configured:boolean}};
  provider:'cerebras'|'elizacloud';configured:boolean;selected:boolean;voiceConfigured:boolean;
  model:string;attachable:boolean;
 }
-export interface BrowserProviderReveal {key:'text'|'voice';value:string;revision:string}
-export interface BrowserProviderInputMap {
+interface BrowserProviderReveal {key:'text'|'voice';value:string;revision:string}
+interface BrowserProviderInputMap {
  residentProviderSelect:{mode:'cloud'|'own';expectedRevision:string};
  residentProviderEdit:{textKey?:string;voiceKey?:string;expectedRevision:string};
  residentProviderRemove:{key:'text'|'voice';expectedRevision:string};
  residentProviderReveal:{key:'text'|'voice';expectedRevision:string};
 }
-export type BrowserProviderOperation=keyof BrowserProviderInputMap;
-export type BrowserProviderResultMap={
+type BrowserProviderOperation=keyof BrowserProviderInputMap;
+type BrowserProviderResultMap={
  [Operation in BrowserProviderOperation]:Operation extends 'residentProviderReveal'?BrowserProviderReveal:BrowserProviderStatus;
 };
 /** Explicit local-owner key management. Absent edit fields stay absent. Only

@@ -1,0 +1,14 @@
+# specs/quint/services/ProtectedAppUpdatePromotion.qnt
+- Lines: 125 | Kind: Quint model of release workflows + scripts (services family, live; 9 tests) | Verdict: KEEP model; PORT harness (parses workflow YAML step order)
+- Covers: protected release path: a main-push candidate cannot sign; private upload is create-if-absent; signing needs a reviewed receipt of the exact staged pair; public delivery (`scripts/deliver-app-update.ts`) writes the stable pointer only after anonymous readback of the exact APK and refuses when the version floor (stable or legacy `app-stable` tag) is not exceeded. Sources exist: `resident-android.yml`, `release-cloud-app-signing.yml`, `verify-cloud-signing-input.yml`, `publish-qualified-app-update.yml`, `scripts/app-update-candidate.ts`, `ci/verify-cloud-signing-input.sh`, `ci/admit-cloud-signing-input.py`, `ci/private-apk-storage.py`, `ci/qualified-app-update.py`, `sign-release-apks.ts`, `verify-apks.ts`, `deliver-app-update.ts`, `update-artifact.ts`, `update-channel.ts`, `publish-update-manifest.ts`. Duplicates: `AppUpdateCandidate.qnt` (candidate half), `test/deliver-app-update.test.mjs`, `test/qualified-app-update.test.mjs`. Callers/importers: manifest; harness `refinement/services/protected-app-update-promotion.mjs` (imports `deliver` and update-channel constants and runs them against fake GitHub ports; also `YAML.parse`s three workflows and asserts step order); services aggregate only.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | harness 22-60 | T1 / T10 | The `admit`/`MainPushHasNoSigningRoute` half is checked by reading workflow YAML and asserting step order and command strings (`runs('verify-cloud-signing-input.sh --stage')`, `outputs.plan_sha256`). Workflow reviews merge `verify-cloud-signing-input.yml` into `release-cloud-app-signing.yml` and move heredocs into scripts, which breaks these pins. | PORT: once the workflow logic lives in scripts, drive the admission script (`ci/admit-cloud-signing-input.py` or its TS successor) with a push-lane and a dispatch-lane plan; keep YAML structure checks to `actionlint`. Update manifest sources in the same change. | Medium |
+| 2 | 45-48, 56, 111-112 | A1? / owner | `advanceLegacyFloor` and `late-legacy-floor` model `LEGACY_APP_UPDATE_TAG` (`app-stable`). Scripts reports keep it until the owner confirms no installed build polls `app-stable` (install-base fact, D17). | Keep; delete the legacy floor branch and `legacyFloorMustBeExceededTest` with the tag when the owner answers. | Low |
+| 3 | 1-2 | — | Clear header; no tombstones. | None. | — |
+| 4 | manifest sources | P1 | Four workflows as sources make every workflow edit re-run the campaign. | Gate on the release scripts + the two release workflows only. | Low |
+
+## Proposed end state
+Model unchanged (minus the legacy floor once answered). Harness drives scripts only; workflow structure is linted, not text-asserted.

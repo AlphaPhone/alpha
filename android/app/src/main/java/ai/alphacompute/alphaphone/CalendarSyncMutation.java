@@ -69,7 +69,7 @@ final class CalendarSyncMutation {
   Set<String> seen=new HashSet<>();
   for(int i=0;i<requested.length();i++){
    JSONObject guest=requested.getJSONObject(i);if(guest.length()!=2||!(guest.opt("optional") instanceof Boolean))throw new IllegalArgumentException("Invalid Calendar guest");
-   String email=text(guest,"email").toLowerCase(java.util.Locale.ROOT);if(email.length()>320||!email.matches("[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+")||!seen.add(email)||organizers.contains(email))throw new IllegalArgumentException("Invalid Calendar guest email");
+   String email=text(guest,"email").toLowerCase(java.util.Locale.ROOT);if(email.length()>320||!email.matches(CalendarSyncSnapshot.EMAIL)||!seen.add(email)||organizers.contains(email))throw new IllegalArgumentException("Invalid Calendar guest email");
    long type=guest.getBoolean("optional")?2L:1L;ContentValues old=existing.remove(email);
    if(old!=null){if((Long.valueOf(2).equals(old.getAsLong("attendeeType")))!=guest.getBoolean("optional")){ContentValues patch=new ContentValues();patch.put("attendeeType",type);result.add(ContentProviderOperation.newUpdate(ContentUris.withAppendedId(CalendarContract.Attendees.CONTENT_URI,old.getAsLong("_id"))).withValues(patch).withExpectedCount(1).build());}}
    else{ContentValues added=new ContentValues();added.put("event_id",before.eventId);added.put("attendeeEmail",email);added.put("attendeeType",type);added.put("attendeeRelationship",1L);added.put("attendeeStatus",0L);result.add(ContentProviderOperation.newInsert(CalendarContract.Attendees.CONTENT_URI).withValues(added).build());}

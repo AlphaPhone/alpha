@@ -19,7 +19,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * Android's shade is the one notification and quick-settings surface (#416, #417). On the launcher
+ * Android's shade is the one notification and quick-settings surface. On the launcher
  * flavor launcher Home asks Android to open it (a pull on empty Home, EXPAND_STATUS_BAR);
  * the standalone app is an ordinary app and never asks. Alpha draws no shade of its own.
  *

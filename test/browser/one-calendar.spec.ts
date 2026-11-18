@@ -27,9 +27,6 @@ test('Calendar shows a saved reminder when there are no calendar events or Googl
 });
 
 test('Calendar, Home and Google accounts show one merged calendar without a calendar choice',async({page},info)=>{
- // A returning owner whose device kept the removed picker's choice (Holidays only): it no longer narrows anything.
- await page.addInitScript(()=>{const owner=JSON.stringify(['production','8d0f6a3e-1c2b-4d5e-9f60-7a8b9c0d1e2f','1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b']),connectionId='5a7c1e2d-3b4f-4a6e-8c9d-0e1f2a3b4c5d',providerCalendarId='en.usa#holiday@group.v.calendar.google.com';
-  localStorage.setItem(`alpha.google-calendar-selection.v1:${owner}`,JSON.stringify({version:1,owner,selection:{connectionId,sourceId:`google:${encodeURIComponent(connectionId)}:${encodeURIComponent(providerCalendarId)}`,providerCalendarId,name:'Holidays in United States',account:'owner@example.test'}}));});
  await installOneCalendar(page,{googleInFeed:true});
  const card=page.locator('[data-alpha-home-calendar]');
  // Home reads the merged feed: Google's Holidays leads tomorrow, ahead of the owner's own calendars.
@@ -50,8 +47,6 @@ test('Calendar, Home and Google accounts show one merged calendar without a cale
  await expect(panel.getByText('Calendar to display')).toHaveCount(0);
  await expect(panel.getByRole('button',{name:'Add account',exact:true})).toBeVisible();
  await expect(panel.getByRole('button',{name:'Check Google connections',exact:true})).toHaveCount(0);
- // The kept slot is now only the device sync destination; it was read and did not narrow the merged view.
- expect(await page.evaluate(async()=>{const {readGoogleCalendarSelection}=await import('/src/runtime/google-calendar-selection.ts');return readGoogleCalendarSelection({environment:'production',userId:'8d0f6a3e-1c2b-4d5e-9f60-7a8b9c0d1e2f',organizationId:'1e2f3a4b-5c6d-4e7f-8a9b-0c1d2e3f4a5b'})?.name;})).toBe('Holidays in United States');
  const fixture=await requests(page);
  expect(fixture.googleCalendarLists,'Google accounts never lists calendars to choose from').toBe(0);
  expect(fixture.requests.every(request=>request.startsWith('GET ')),'reading the merged calendar writes nothing').toBe(true);

@@ -13,8 +13,7 @@ import java.util.function.Predicate;
  * rebuilt when it is next started, so memory pressure cannot turn into a rebuild loop. A real crash
  * in the background is counted but also rebuilt on the next start. The app's WebViews share one
  * renderer process, so its death reaches every live activity (the launcher surface and the assistant
- * surface): the first report counts it and the others spend nothing. No Android types: host-tested
- * by javac.
+ * surface): the first report counts it and the others spend nothing.
  */
 final class RendererRecoveryBudget {
  static final long WINDOW_MS=60_000L,BACKOFF_MS=5_000L;

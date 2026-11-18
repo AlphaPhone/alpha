@@ -1,0 +1,15 @@
+# test/packaged-runtime.test.py
+- Lines: 252 | Kind: tooling integration (Python unittest of `scripts/verify-packaged-runtime.py` against real ZIP APKs and a temporary staged tree; spawns `node scripts/native-view-policy.ts` once at import) | Verdict: KEEP the cases; REWRITE in TypeScript as part of `test/tooling/apk-verify-audit.test.ts` when `verify-packaged-runtime.py` is ported (scripts report: MERGE into `scripts/packaged-runtime.ts`); until then run it from `test/python-suites.test.mjs`
+- Covers: the release gate that an APK packages exactly the authenticated staged runtime: byte and presence checks of every payload entry, provenance rows, profile marker, dependency inventory bound to the bundle, worker manifest bound to the source stamp, extra worker refused, unsupported ABIs refused, arm64-only Android runtime admitted, invalid Bun target/architectures refused, changed source guard refused, duplicate ZIP entries refused, `NOT_PACKAGED` reported for an app without the runtime. Duplicates: `test/verify-apks.test.mjs`, `test/one-runtime-profile.test.mjs` call the same verifier through `verify-apks.ts` (scripts report lists them). Callers/importers: `test/packaged-runtime.test.mjs` (spawn).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 15-17 | T9 / C7 | Loads the script with `spec_from_file_location` and mutates its `ROOT` global per test. | In the TS port, pass `root` as a parameter to `verify(apk, {root, release})`. | Low |
+| 2 | 219-232 | A8 | Tests that removed options (`--runtime-profile=cloud`, `--local-embeddings`) fail with a one-line message: a refusal stub for removed flags. | Delete the case and the refusal stub in the verifier. | Low |
+| 3 | 234-239 | A8 | Comment narrates "the removed Cloud verifier"; the case itself (unrelated local models are not refused) is a valid boundary. | Keep the case, drop the history. | None |
+| 4 | 130-140 | T8-like | Loops 13 entries x 2 mutations accepting `(ValueError, KeyError)`; a `KeyError` means the verifier crashed rather than refused. | In the port, require the verifier's own error for every mutation. | Low |
+| 5 | 20-21 | - | Spawns Node at import time to compute native view declarations. | In TS, import `native-view-policy.ts` directly. | None |
+
+## Proposed end state
+Cases carried to `test/tooling/apk-verify-audit.test.ts` (one `describe('packaged runtime')`): valid payload verified without execution claim; every entry altered/removed refused; provenance tamper/missing in debug and release; staged provenance required; profile marker missing/cloud refused; dependency inventory must match bundle; worker from different stamp refused; extra worker refused; foreign ABIs refused, arm64-only admitted; Android provenance target/architecture validation; changed source guard refused; duplicate ZIP entries refused; empty app reported `NOT_PACKAGED`; native view declarations must match the reviewed policy. Delete the removed-flag case. The Python file and its wrapper go with the port.

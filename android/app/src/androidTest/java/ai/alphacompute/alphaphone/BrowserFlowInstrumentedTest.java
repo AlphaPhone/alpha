@@ -46,6 +46,8 @@ public class BrowserFlowInstrumentedTest {
   if(!shown.get())WebViewTestDriver.evaluate("(()=>{const b=[...document.querySelectorAll('dialog.alpha-startup-permissions[open] button')].find(b=>b.textContent.trim()==='Not now');if(b)b.click();return !!b})()");
   return answer.get();
  }
+ /** Polls the shown page for up to 15 seconds; true once the expression answers true. */
+ private boolean untilChild(String js)throws Exception{for(int i=0;i<150;i++){if("true".equals(child(js)))return true;SystemClock.sleep(100);}return false;}
  /** Failure-only structural diagnostics: no page text, URLs, cookies or credentials. */
  String diagnostics(){
   StringBuilder evidence=new StringBuilder();
@@ -70,6 +72,10 @@ public class BrowserFlowInstrumentedTest {
   try{evidence.append("; child=").append(child("JSON.stringify({protocol:location.protocol,ready:document.readyState,body:!!document.body})"));}
   catch(Throwable error){evidence.append("; child-diagnostic-unavailable:").append(error.getClass().getSimpleName());}
   return evidence.toString();
+ }
+ /** Waits for the first view, then opens Browser and answers the first-run access panel. */
+ private void openBrowser()throws Exception{
+  until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
  }
  private void page(String suffix)throws Exception{
   for(int i=0;i<300;i++){if("true".equals(child("location.protocol==='https:' && location.hostname==='example.com' && location.search==="+JSONObject.quote(suffix)+" && document.readyState==='complete' && !!document.body && document.body.innerText.trim().length>20")))return;SystemClock.sleep(100);}
@@ -107,7 +113,7 @@ public class BrowserFlowInstrumentedTest {
   AtomicReference<WebView> target=new AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,main->{List<WebView> children=new ArrayList<>();collect(main.getWindow().getDecorView(),children,main.getBridge().getWebView());for(WebView web:children)if(web.isShown()){target.set(web);break;}});
   assertNotNull("Actual loaded child page",target.get());
-  host(AppNavigation.request("Notes"));until(AppNavigation.selected("Notes"));until("window.__alphaTestNavigation?.status==='complete'");
+  host(AppNavigation.request("Notes"));until(AppNavigation.selected("Notes"));until(AppNavigation.SETTLED);
   AtomicBoolean hidden=new AtomicBoolean();for(int i=0;i<100&&!hidden.get();i++){WebViewTestDriver.withActivity(MainActivity.class,a->hidden.set(!target.get().isShown()));if(!hidden.get())SystemClock.sleep(100);}assertTrue("Browser surface actually hidden",hidden.get());deniedChooserCallback(target.get());
   host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
   String presented=null;for(int i=0;i<100&&presented==null;i++){presented=presentedTab();if(presented==null)SystemClock.sleep(100);}assertNotNull("Browser tab presented before leaving",presented);
@@ -123,7 +129,7 @@ public class BrowserFlowInstrumentedTest {
    }assertTrue("Settings Activity stopped browser host",stopped.get());
    SystemClock.sleep(1000);assertEquals("Stopped host keeps the selected tab, and its autofill session, presented",presented,presentedTab());
   }finally{WebViewTestDriver.pressBack();}
-  boolean returned=false;for(int i=0;i<150;i++){if("true".equals(child("document.title==='Upload fixture' && document.querySelector('input').files.length===0"))){returned=true;break;}SystemClock.sleep(100);}assertTrue("Returning restores the same untouched page",returned);
+  assertTrue("Returning restores the same untouched page",untilChild("document.title==='Upload fixture' && document.querySelector('input').files.length===0"));
  }
  private void tapChildInput()throws Exception{
   org.json.JSONArray bounds=new org.json.JSONArray(child("(()=>{const r=document.querySelector('input[type=file]').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2,innerWidth]})()"));
@@ -154,14 +160,14 @@ public class BrowserFlowInstrumentedTest {
   }catch(Exception error){if(server.isClosed())return;}}});
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();address("http://127.0.0.1:"+server.getLocalPort()+"/");
-   boolean ready=false;for(int i=0;i<150;i++){if("true".equals(child("document.title==='Upload fixture' && !!document.querySelector('input')"))){ready=true;break;}SystemClock.sleep(100);}if(!ready)fail("Upload fixture document missing; "+diagnostics());
+   if(!untilChild("document.title==='Upload fixture' && !!document.querySelector('input')"))fail("Upload fixture document missing; "+diagnostics());
    assertNull("Page cannot upload before explicit selection",uploaded.get());
    assertEquals("No native bridge in upload destination","true",child("typeof Capacitor==='undefined'"));
    chooserInactiveBoundaries();assertNull("Rejected inactive callbacks never upload",uploaded.get());
    tapChildInput();
    boolean pickerVisible=false;for(int i=0;i<150;i++){android.view.accessibility.AccessibilityNodeInfo root=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();if(root!=null&&String.valueOf(root.getPackageName()).contains("documentsui")){pickerVisible=true;break;}SystemClock.sleep(100);}assertTrue("System file picker must actually appear",pickerVisible);
    WebViewTestDriver.cancelDocumentPicker();
-   boolean cancelled=false;for(int i=0;i<150;i++){if("true".equals(child("document.title==='Upload fixture' && document.querySelector('input').files.length===0"))){cancelled=true;break;}SystemClock.sleep(100);}assertTrue("Cancelling preserves the page without selecting a file",cancelled);assertNull(uploaded.get());
+   assertTrue("Cancelling preserves the page without selecting a file",untilChild("document.title==='Upload fixture' && document.querySelector('input').files.length===0"));assertNull(uploaded.get());
    tapChildInput();picker.selectDocument(name);
    assertTrue("Actual web request carries selected bytes",received.await(20,TimeUnit.SECONDS));assertEquals(body,uploaded.get());
   }finally{server.close();worker.shutdownNow();resolver.delete(uri,null,null);}
@@ -180,13 +186,12 @@ public class BrowserFlowInstrumentedTest {
    socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "+body.length+"\r\nConnection: close\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));socket.getOutputStream().write(body);socket.getOutputStream().flush();
   }catch(Exception expectedOnCancellation){}});}catch(java.io.IOException stopped){break;}}});
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("http://127.0.0.1:"+server.getLocalPort()+"/slow");nativeText("Loading website…");
    click("Menu");click("Stop loading");nativeText("Loading stopped. Reload from the menu to try again.");
    assertEquals("Cancelled page has no secure indicator","false",host("!!document.querySelector('[role=img][aria-label=\"Secure connection\"]')"));
    release.countDown();click("Menu");click("Reload page");
-   boolean recovered=false;for(int i=0;i<150;i++){if("true".equals(child("document.title==='Recovered page' && document.body.innerText.includes('reload succeeded')"))){recovered=true;break;}SystemClock.sleep(100);}
-   assertTrue("Reload presents actual response bytes after cancellation",recovered);
+   assertTrue("Reload presents actual response bytes after cancellation",untilChild("document.title==='Recovered page' && document.body.innerText.includes('reload succeeded')"));
    assertEquals("HTTP fixture never has a secure indicator","false",host("!!document.querySelector('[role=img][aria-label=\"Secure connection\"]')"));
   }finally{release.countDown();server.close();workers.shutdownNow();}
  }
@@ -202,21 +207,19 @@ public class BrowserFlowInstrumentedTest {
    socket.getOutputStream().write(("HTTP/1.1 "+(retry?"200 OK":"503 Service Unavailable")+"\r\nContent-Type: text/html\r\nContent-Length: "+body.length+"\r\nConnection: close\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));socket.getOutputStream().write(body);socket.getOutputStream().flush();
   }catch(java.io.IOException stopped){if(server.isClosed())break;}}});
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("http://127.0.0.1:"+server.getLocalPort()+"/unavailable");
-   boolean visible=false;for(int i=0;i<150;i++){if("true".equals(child("document.title==='Unavailable' && !!document.querySelector('a[href=\"/retry\"]')"))){visible=true;break;}SystemClock.sleep(100);}
-   if(!visible)fail("HTTP 503 preserves the actual website document; "+diagnostics());
+   if(!untilChild("document.title==='Unavailable' && !!document.querySelector('a[href=\"/retry\"]')"))fail("HTTP 503 preserves the actual website document; "+diagnostics());
    assertEquals("Error document has no native bridge","true",child("typeof Capacitor==='undefined' && typeof androidBridge==='undefined'"));
    child("document.querySelector('a').click();true");
-   boolean retried=false;for(int i=0;i<150;i++){if("true".equals(child("document.title==='Retried' && location.pathname==='/retry'"))){retried=true;break;}SystemClock.sleep(100);}
-   assertTrue("Website retry link reaches its actual destination",retried);
+   assertTrue("Website retry link reaches its actual destination",untilChild("document.title==='Retried' && location.pathname==='/retry'"));
    click("Menu");until("!document.querySelector('button[aria-label=\"Stop loading\"]')");
   }finally{server.close();worker.shutdownNow();}
  }
  @Test public void realHttpsHistoryMenuSharedNormalStorageAndPrivateTabIsolation()throws Exception{
   String token=UUID.randomUUID().toString(),one="?alpha_flow="+token+"-one",two="?alpha_flow="+token+"-two";
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("https://alpha-network-check.invalid/");
    // The address bar closes only after the native tab exists; typing the next
    // address before then races that close and loses the text.
@@ -260,11 +263,6 @@ public class BrowserFlowInstrumentedTest {
   });
   return url.get();
  }
- /** By default this asserts what the product submits: the executable address is refused before any
-  * page exists, and a search becomes https://www.google.com/search?q=<query> in the child WebView.
-  * Nothing here needs the public page to load, so the default campaign can pass offline.
-  * browserFlowLive=1 (an emulator with network) also waits for the real results page and checks
-  * that the provider cannot reach the app bridge; rounds 7 and 8 failed only on that live load. */
  /** The address the shown page's history entry was first asked for, before any redirect the provider made. */
  private String requestedAddress()throws Exception{
   AtomicReference<String> value=new AtomicReference<>();
@@ -276,10 +274,15 @@ public class BrowserFlowInstrumentedTest {
   try{return "search="+child("JSON.stringify({host:location.hostname==='www.google.com'?'www.google.com':location.hostname==='consent.google.com'?'consent.google.com':/(^|\\.)google\\.[a-z.]{2,6}$/.test(location.hostname)?'other-google':'other',path:location.pathname==='/search'?'/search':location.pathname.startsWith('/sorry/')?'/sorry/':'other',hasQ:new URL(location.href).searchParams.has('q'),hasContinue:new URL(location.href).searchParams.has('continue'),textLength:document.body?document.body.innerText.trim().length:-1})");}
   catch(Throwable error){return "search-diagnostic-unavailable:"+error.getClass().getSimpleName();}
  }
+ /** By default this asserts what the product submits: the executable address is refused before any
+  * page exists, and a search becomes https://www.google.com/search?q=<query> in the child WebView.
+  * Nothing here needs the public page to load, so the default campaign can pass offline.
+  * browserFlowLive=1 (an emulator with network) also waits for the real results page and checks
+  * that the provider cannot reach the app bridge. */
  @Test public void submittedSearchUsesRealProviderAndRejectsExecutableAddress()throws Exception{
   boolean live="1".equals(androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("browserFlowLive"));
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("javascript:alert(1)");
    until("document.body.innerText.includes('valid HTTP or HTTPS address without credentials')");
    assertEquals("Rejected address cannot create a page","null",child("true"));
@@ -370,7 +373,7 @@ public class BrowserFlowInstrumentedTest {
  }
  /** Opens Browser and loads the in-memory fixture at {@code path} in the presented tab. */
  private void openSameDocument(String path)throws Exception{
-  until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+  openBrowser();
   // The first address only creates the tab; it fails offline, before the fixture client exists.
   address(SAME+"start");until("!document.querySelector('input[aria-label=Address]')");
   for(int i=0;i<50&&presentedTab()==null;i++)SystemClock.sleep(100);

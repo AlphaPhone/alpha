@@ -2,7 +2,7 @@ import {rendererDeletionClock,claimDeletion,deletionDeadline,deletionWindow,type
 import {calendarRecord,deleteCalendarRecord,type CalendarRecord} from './calendar-records';
 import {revision} from './revision';
 import {journalEntry,trimDeletionJournal,writeJournalEntry} from './journal-retention';
-export type CalendarDeletionTarget={sourceRevision:string;row:CalendarRecord;scope:'event'|'series'};
+type CalendarDeletionTarget={sourceRevision:string;row:CalendarRecord;scope:'event'|'series'};
 export type CalendarDeletion=PendingDeletion<CalendarDeletionTarget>&{blocked?:string;journalBinding?:{scope:string;proposalId:string;operationHash:string}};
 export type CalendarDeletionState={sourceRevision:string;events:CalendarRecord[];deletions?:Record<string,CalendarDeletion>;deleteClaims?:Record<string,string>};
 const unresolved=(entry:CalendarDeletion)=>entry.phase==='queued'||entry.phase==='paused';

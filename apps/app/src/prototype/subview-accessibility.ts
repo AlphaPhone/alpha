@@ -4,6 +4,8 @@ import {createKeyedListFocus} from './keyed-list-focus';
 /** On a split canvas the open message, note or file sits beside its list, which stays usable. */
 const split=()=>currentSurfaceLayout().split;
 type Bag=Record<string,any>;
+/** Controls that can take focus when a screen opens. */
+const FOCUSABLE='button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
 type Popup=[key:string,open:(out:Bag)=>boolean,close:(out:Bag)=>void];
 /**
  * Menus and sheets drawn over a view behind a scrim. Each one owns focus while it is open:
@@ -24,24 +26,29 @@ function popupFocus(name:string,current:()=>Bag){
 }
 /** Full-screen subviews replace their covered content in accessibility navigation. */
 export function installSubviewAccessibility(views:Bag){
- for(const name of ['inbox','workflows']){
-  const render=views[name].render;
+ {
+  const render=views.inbox.render;
   let output:Bag={};
   const attachmentModal=reviewFocus(()=>output.attachment?.close());
   const providerModal=reviewFocus(()=>output.provider?.close());
   const discardModal=reviewFocus(()=>output.c?.cancelDiscard?.());
-  const focus=focusHistory();
-  const detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read),runFocus=subviewFocus(focus.read),builderFocus=subviewFocus(focus.read);
-  const popups=popupFocus(name,()=>output);
-  views[name].render=(state:Bag,api:Bag)=>{
+  const focus=focusHistory(),detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read);
+  views.inbox.render=(state:Bag,api:Bag)=>{
    const out=output=render(state,api);
-   if(name==='inbox'){
-    attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
-    discardModal.render(!!(out.composing&&out.c?.confirm));
-    const review=!!(out.attachmentOpen||out.providerReview||out.composing&&out.c?.confirm);
-    return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,discardModal:discardModal.ref,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
-   }
-   return {...out,...popups(out),captureSubviewFocus:focus.capture,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!(out.detail||out.automation?.detail||out.runOpen||out.builder),detailCovered:!!(out.runOpen||out.builder),runCovered:!!out.builder};
+   attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
+   discardModal.render(!!(out.composing&&out.c?.confirm));
+   const review=!!(out.attachmentOpen||out.providerReview||out.composing&&out.c?.confirm);
+   return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,discardModal:discardModal.ref,detailFocus,composeFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
+  };
+ }
+ {
+  const render=views.workflows.render;
+  let output:Bag={};
+  const focus=focusHistory(),detailFocus=subviewFocus(focus.read),runFocus=subviewFocus(focus.read),builderFocus=subviewFocus(focus.read);
+  const popups=popupFocus('workflows',()=>output);
+  views.workflows.render=(state:Bag,api:Bag)=>{
+   const out=output=render(state,api);
+   return {...out,...popups(out),captureSubviewFocus:focus.capture,detailFocus,runFocus,builderFocus,listCovered:!!(out.detail||out.automation?.detail||out.runOpen||out.builder),detailCovered:!!(out.runOpen||out.builder),runCovered:!!out.builder};
   };
  }
  for(const [name,keys,coverage] of [
@@ -86,7 +93,7 @@ function subviewFocus(read:()=>FocusTarget){
    const target=read();previous=target.element;scope=target.scope;
    queueMicrotask(()=>{
     if(mounted!==element||!element.isConnected||element.closest('[inert]')||document.querySelector('dialog[open]'))return;
-    element.querySelector<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]')?.focus({preventScroll:true});
+    element.querySelector<HTMLElement>(FOCUSABLE)?.focus({preventScroll:true});
    });
   }else{
    previous=null;scope=null;
@@ -116,7 +123,7 @@ function reviewFocus(close:()=>void){
 }
 
 /**
- * A list-detail split that collapses covers its list (#411). When the list held focus, focus moves
+ * A list-detail split that collapses covers its list. When the list held focus, focus moves
  * into the open item that now fills the screen instead of being dropped to the page. `previous` is
  * the focused element from before the layout changed.
  */
@@ -126,7 +133,7 @@ export function keepFocusOnScreen(previous:Element|null){
  const covered=previous.closest<HTMLElement>('[data-alpha-subview][inert]');
  if(!covered)return;
  const open=Array.from(covered.parentElement?.children||[]).filter((element):element is HTMLElement=>element instanceof HTMLElement&&element.matches('[data-alpha-subview]:not([inert])')).pop();
- open?.querySelector<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]')?.focus({preventScroll:true});
+ open?.querySelector<HTMLElement>(FOCUSABLE)?.focus({preventScroll:true});
 }
 
 type FocusTarget={element:HTMLElement|null;scope:HTMLElement|null};

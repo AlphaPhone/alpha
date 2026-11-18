@@ -14,9 +14,10 @@ final class NativeNotificationSession {
   void current()throws Exception;
   JSONObject get(String path,String bearer)throws Exception;
  }
+ private static final java.util.Set<String> CURSOR_FIELDS=java.util.Set.of("afterSequence","nativeEpoch","throughSequence");
  /** Validates the bounded native-notification cursor before building its authenticated route. */
  static String pagePath(JSONObject cursor)throws Exception{
-  for(java.util.Iterator<String> keys=cursor.keys();keys.hasNext();)if(!java.util.Set.of("afterSequence","nativeEpoch","throughSequence").contains(keys.next()))throw new SecurityException("Notification cursor field unavailable");
+  for(java.util.Iterator<String> keys=cursor.keys();keys.hasNext();)if(!CURSOR_FIELDS.contains(keys.next()))throw new SecurityException("Notification cursor field unavailable");
   long after=sequence(cursor,"afterSequence");
   StringBuilder path=new StringBuilder("/api/notifications?nativeTransport=true&afterSequence=").append(after);
   if(cursor.has("nativeEpoch")){

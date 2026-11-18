@@ -1,0 +1,26 @@
+# test/browser/accessibility-sweep.spec.ts
+- Lines: 248 | Kind: Playwright sweep (`chromium`, dev server). It is a matrix of states × themes × text scales × orientation, and it produces **677 tests**. | Verdict: **KEEP as the basis of `journeys/accessibility.spec.ts`** (sweep section), with the matrix reduced
+- Covers: MVP-48 renderer part. Every retained primary view, subview, connected state and failure screen is checked for accessible names and roles, keyboard reachability, focus traps, contrast, 24px targets, TalkBack reading order, 200% and 300% text, landscape, and landscape at 200%. Duplicates: `accessibility-sweep.production.spec.ts` runs the same rules over `LIVE_STATES` on the production bundle. Large-text and landscape assertions in `accessibility-resilience`, `large-text-overlap`, `large-text-layout`, `responsive-surfaces` and several `*-accessibility` micro-specs overlap it. Importers: none.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 19-115 | cost / T4 | This is the largest Playwright cost in the repo: 677 tests, each opening a state (1–10 s) and running four audits, with timeouts of 60–90 s. Light and dark both run full contrast and tab walks (254 tests), although only contrast depends on the theme. Landscape and landscape at 200% each run the whole state list (about 254 tests). | (a) In dark mode, run only `auditPage({contrast:true})`, because tab order, tree and geometry do not depend on the theme. (b) Run landscape at 200% only, since it is a superset of landscape at 100% for clipping and overlap, and drop the plain landscape loop. (c) Run 300% over primary views only (it already does). (d) Shard the sweep into its own Playwright project `a11y-sweep` and run it only when `apps/app/src/**/*.css`, the prototype or runtime UI, or `test/browser/harness/a11y.ts` change (P1 path filter). | Low. The rules are unchanged and the matrix redundancy is removed. Estimated 677 → about 400 tests. |
+| 2 | 27, 51, 73, 100, 111, 134 | C3 | `state.name==='live Settings licenses'?await exposedTabStopBudget(page):undefined` is repeated six times. | Put the tab budget on the `State` itself (`tabBudget: 'exposed'`) or always use `exposedTabStopBudget`. | none |
+| 3 | 24-31, 73, 100, 111, 131-136 | C3 | The audit composition `blocking(format([...auditPage(...), ...auditTree, ...auditTabOrder, ...auditReadingOrder]))` is written out seven times. | Use `a11y.audit(page, profile)` from the harness (see `accessibility-audit.ts.md`). | none |
+| 4 | 31, 101 | B3 | `expect(blocking(found), blocking(found).join('\n'))` applies `blocking` to an already-blocked list (line 100 already blocks). | Use a single `blocking`. | none |
+| 5 | 62-67 | A8 / A7 | `OPEN_AT_300` is an empty set. The comment cites issue #701 and "test/accessibility-coverage.test.mjs", which does not exist (checked: no such file; `grep` finds no other reference). | Delete the set, the `if` branch and the comment. | none |
+| 6 | 78-89 | – | "Widest month name at 300%" pins the clock to September. It is a real regression (November split mid-word). | Keep, inside the 300% section. | none |
+| 7 | 145-176 | T6 | "Late draft status" installs MutationObservers with `addInitScript` and reads `window.__alphaLateDockLayout`. It measures product layout mid-mutation. This is a regression test of a timing defect (CI on PR #803). | Keep it as one test in `journeys/home-shell.spec.ts`. | Low |
+| 8 | 182-208 | T6 | "Row added to composer is in published clearance at once" prepends a synthetic status row with `page.evaluate` and checks `--alpha-dock-clearance`. This unit-tests `dock-clearance.ts` through the page. | Merge with #7 into one dock-clearance test in `home-shell`, or delete because `obscured-by-dock` in the 200% launcher sweep covers the outcome. | Low |
+| 9 | 212-218 | T6 | "200% text survives the browser build re-applying its stored size" tests the harness's own `setTextScale` against `alpha:device-settings`. That is a test of test machinery (T5). | Delete. `setTextScale`'s `!important` rule is what makes it hold, so this tests the helper. | none |
+| 10 | 223-248 | – | "Shared Home tiles are counted, named and reachable" in light and dark. The tile-name rules are also covered by `auditTree` in the main sweep (live Home). What this test adds is the uniqueness and name-equals-label checks. | Keep one theme (the names do not depend on the theme) in `home-shell`. | none |
+| 11 | 6-10 | – | The header comment honestly separates renderer evidence from device acceptance (AGENTS.md). | Keep. | none |
+
+## Proposed end state
+`journeys/accessibility.spec.ts` gets a `describe('sweep')` driven by `harness/states.ts`. Per state there are three tests:
+default size in light with the `full` profile; dark with contrast only; and 200% landscape with the `layout` profile.
+300% runs for primary and launcher views, with the September header case. A separate Playwright project, `a11y-sweep`, is
+selected by path filter. The production twin becomes a project parameter rather than a second file (see
+`accessibility-sweep.production.spec.ts.md`). The timing regressions move to `home-shell`. The `setTextScale`
+self-test and the empty `OPEN_AT_300` machinery are deleted.

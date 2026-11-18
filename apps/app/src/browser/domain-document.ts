@@ -1,18 +1,12 @@
-/** Product migration/recovery policy; the injected upstream store owns transactions. */
-type Snapshot = {revision:string;raw:string|null};
-type Documents = {
- read(key:string,signal?:AbortSignal):Promise<Snapshot|undefined>;
- readOrCreate(key:string,raw:string|null,signal?:AbortSignal):Promise<Snapshot>;
- compareExchange(key:string,expected:Snapshot|undefined,raw:string|null,signal?:AbortSignal):Promise<Snapshot>;
- edit<R>(key:string,editor:(before:Snapshot|undefined)=>Promise<{raw:string|null;result:R}>,signal?:AbortSignal):Promise<R>;
-};
+import type {BrowserDocumentSnapshot as Snapshot,BrowserDocumentStore} from '../../../../.eliza/client-features/packages/ui/src/platform/browser-document-store';
+/** Product recovery policy; the injected upstream store owns transactions. */
+type Documents = Pick<BrowserDocumentStore,'read'|'compareExchange'|'edit'>;
+/** The stored envelope. `legacy` is always written as null. */
 type Envelope = {version:1;legacy:string|null;value:string|null};
 export type DomainRecovery = {
  snapshot:Snapshot|undefined;
- legacy:string|null;
  raw:string|null;
  format:'domain'|'unrecognized';
- legacyChanged:boolean;
 };
 const envelope=(raw:string|null):Envelope=>{
  const value=raw===null?null:JSON.parse(raw);
@@ -21,31 +15,19 @@ const envelope=(raw:string|null):Envelope=>{
   throw Error('Browser document metadata needs recovery.');
  return value;
 };
-const unchanged=(actual:string|null,expected:string|null)=>{
- if(actual!==expected)throw Error('Older browser data changed. Close older tabs and review recovery before continuing.');
-};
+const empty=():Envelope=>({version:1,legacy:null,value:null});
 
-/**
- * One Alpha domain moves as a unit: readers, writers, backup and reset.
- * Legacy storage is never rewritten or removed. A later observed legacy write
- * stops normal access; it is not silently imported over newer document edits.
- */
+/** One Alpha domain moves as a unit: readers, writers, backup and reset. */
 export class BrowserDomainDocument {
  private documents:Documents;
  private key:string;
- private legacy:()=>string|null;
- constructor(documents:Documents,key:string,legacy:()=>string|null){
-  this.documents=documents;this.key=key;this.legacy=legacy;
+ constructor(documents:Documents,key:string){
+  this.documents=documents;this.key=key;
  }
 
  private async load(signal?:AbortSignal):Promise<Envelope>{
   const current=await this.documents.read(this.key,signal);
-  if(current){const value=envelope(current.raw);unchanged(this.legacy(),value.legacy);return value;}
-  // Merely opening an empty domain must not claim a migration or invent data.
-  const legacy=this.legacy();
-  if(legacy===null)return {version:1,legacy:null,value:null};
-  const saved=await this.documents.readOrCreate(this.key,JSON.stringify({version:1,legacy,value:legacy}),signal);
-  const value=envelope(saved.raw);unchanged(this.legacy(),value.legacy);return value;
+  return current?envelope(current.raw):empty();
  }
 
  async readRaw(signal?:AbortSignal):Promise<string|null>{return (await this.load(signal)).value;}
@@ -55,42 +37,36 @@ export class BrowserDomainDocument {
  }
  async edit<T,R>(initial:()=>T|Promise<T>,edit:(data:T)=>R|Promise<R>,signal?:AbortSignal,expected?:DomainRecovery):Promise<R>{
   return this.documents.edit(this.key,async before=>{
-   signal?.throwIfAborted();const legacy=this.legacy();
+   signal?.throwIfAborted();
    // An explicit reviewed intent must not survive an intervening write, even an ABA value change.
-   if(expected){
-    unchanged(legacy,expected.legacy);
-    if(before?.revision!==expected.snapshot?.revision||before?.raw!==expected.snapshot?.raw)throw Error('Device settings changed. Review the current choice and try again.');
-   }
-   const value:Envelope=before?envelope(before.raw):{version:1,legacy,value:legacy};
-   unchanged(legacy,value.legacy);
+   if(expected&&(before?.revision!==expected.snapshot?.revision||before?.raw!==expected.snapshot?.raw))throw Error('Device settings changed. Review the current choice and try again.');
+   const value:Envelope=before?envelope(before.raw):empty();
    const data:T=value.value===null?await initial():JSON.parse(value.value);
    signal?.throwIfAborted();
    const result=await edit(data);signal?.throwIfAborted();
-   unchanged(this.legacy(),value.legacy);
    const raw=JSON.stringify(data);
    if(raw===undefined)throw Error('Browser document cannot be saved.');
    return {raw:JSON.stringify({...value,value:raw}),result};
   },signal);
  }
 
- /** Capture without importing, parsing domain bytes, or requiring readable metadata. */
+ /** Capture without parsing domain bytes or requiring readable metadata. */
  async capture(signal?:AbortSignal):Promise<DomainRecovery>{
-  const snapshot=await this.documents.read(this.key,signal),legacy=this.legacy();
-  if(!snapshot)return {snapshot,legacy,raw:legacy,format:'domain',legacyChanged:false};
-  try{const value=envelope(snapshot.raw);return {snapshot,legacy,raw:value.value,format:'domain',legacyChanged:legacy!==value.legacy};}
-  catch{return {snapshot,legacy,raw:snapshot.raw,format:'unrecognized',legacyChanged:false};}
+  const snapshot=await this.documents.read(this.key,signal);
+  if(!snapshot)return {snapshot,raw:null,format:'domain'};
+  try{return {snapshot,raw:envelope(snapshot.raw).value,format:'domain'};}
+  catch{return {snapshot,raw:snapshot.raw,format:'unrecognized'};}
  }
 
- /** Product-reviewed replacement, bound to the exact captured bytes and legacy copy. */
+ /** Product-reviewed replacement, bound to the exact captured bytes. */
  async restore(expected:DomainRecovery,raw:string,signal?:AbortSignal):Promise<void>{
-  signal?.throwIfAborted();unchanged(this.legacy(),expected.legacy);
-  await this.documents.compareExchange(this.key,expected.snapshot,JSON.stringify({version:1,legacy:expected.legacy,value:raw}),signal);
+  signal?.throwIfAborted();
+  await this.documents.compareExchange(this.key,expected.snapshot,JSON.stringify({version:1,legacy:null,value:raw}),signal);
  }
 
  /** Called only after explicit reset confirmation of the captured recovery state. */
  async reset(expected:DomainRecovery,signal?:AbortSignal):Promise<void>{
-  signal?.throwIfAborted();unchanged(this.legacy(),expected.legacy);
-  // Keep a canonical empty domain so the retained legacy backup cannot reimport.
-  await this.documents.compareExchange(this.key,expected.snapshot,JSON.stringify({version:1,legacy:expected.legacy,value:null}),signal);
+  signal?.throwIfAborted();
+  await this.documents.compareExchange(this.key,expected.snapshot,JSON.stringify({version:1,legacy:null,value:null}),signal);
  }
 }

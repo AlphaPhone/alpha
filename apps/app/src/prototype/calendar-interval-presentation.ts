@@ -1,8 +1,7 @@
 import {calendarAgenda,calendarAgendaRows,calendarDayColumns,calendarDayCount,calendarDayLabel,visibleCalendarDays} from './calendar-days';
 import {formatHour,formatTime,formatMonthDay,formatFullDateTime} from './locale-time';
+import {civilDay,civilDayDiff} from '../lib/civil-date';
 type Bag=Record<string,any>;
-const DAY=86400000;
-const civilDay=(date:Date)=>Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());
 /** Original instants, never a per-day layout duration, determine the readable detail. */
 export function calendarIntervalDetail(begin:number,end:number){
  const start=new Date(begin),finish=new Date(end),crossDate=civilDay(start)!==civilDay(finish),offsetChanged=start.getTimezoneOffset()!==finish.getTimezoneOffset();
@@ -30,9 +29,7 @@ export function presentCalendarIntervals(render:(state:Bag,api:Bag)=>Bag,state:B
     const segments=segmentsFor(day);
     const local=(state.events||[]).filter((e:Bag)=>!e.calendarInterval);
     const timeline=[...local,...segments];
-    // Temporary per-day layout only: provider IDs, original timestamps and
-    // selected-object identity stay in the durable state, never in split copies.
-    // The renderer's selected-day layout (`events` from a renderer without day columns).
+    // Split copies are per-day layout only; provider IDs, original timestamps and identity stay in the durable state.
     const dayEventsOf=(result:Bag):Bag[]=>result.dayEvents??result.events??[];
     out.dayEvents=dayEventsOf(out);
     if(allDay.length||timed.length)out.dayEvents=dayEventsOf(render({...state,events:timeline},api));
@@ -44,6 +41,7 @@ export function presentCalendarIntervals(render:(state:Bag,api:Bag)=>Bag,state:B
     const timelines=new Map<number,Bag[]>(visibleDays.map(off=>[off,off===day?timeline:[...local,...segmentsFor(off)]]));
     const columns=dayCount>1?visibleDays.map(off=>({off,events:off===day?out.dayEvents as Bag[]:dayEventsOf(render({...state,day:off,events:timelines.get(off)},api))})):[];
     const realDay=visibleDays.flatMap(off=>timelines.get(off)!.filter((e:Bag)=>(e.calendarInterval||e.alphaReminderId)&&!e.allDay&&e.off===off&&Number.isFinite(e.t)&&e.t>=0));
+    const now=new Date(api.now),time=now.getHours()+now.getMinutes()/60;
     const first=Math.min(7,...realDay.map((e:Bag)=>Math.floor(e.t))),last=Math.max(23,...realDay.map((e:Bag)=>Math.min(24,Math.ceil(e.t+e.d))));
     if(first<7||last>23){
       const shift=(7-first)*56;
@@ -54,7 +52,6 @@ export function presentCalendarIntervals(render:(state:Bag,api:Bag)=>Bag,state:B
       out.hours=[...added,...out.hours.map((h:Bag)=>({...h,top:h.top+shift,lt:h.lt+shift}))];
       if(last===24)out.hours.push({top:(24-first)*56+8,lt:(24-first)*56,label:formatHour(0)});
       out.nowTop+=shift;out.nativeTimelineHeight=`${Math.max(912+shift,(last-first)*56+16)}px`;
-      const now=new Date(api.now),time=now.getHours()+now.getMinutes()/60;
       out.showNow=day===0&&time>=first&&time<=last;
     }
     const occupied=(off:number)=>onDay(off).length>0||timedOn(off).length>0;
@@ -63,7 +60,6 @@ export function presentCalendarIntervals(render:(state:Bag,api:Bag)=>Bag,state:B
     out.events=dayCount>1?[]:out.dayEvents;
     if(dayCount>1){
       out.nativeAllDay=visibleDays.flatMap(off=>onDay(off).map((e:Bag)=>({title:`${calendarDayLabel(api.now,off)} · ${e.title}`,open:()=>api.set({open:e.id,openDay:off})})));
-      const now=new Date(api.now),time=now.getHours()+now.getMinutes()/60;
       out.dayColumns=calendarDayColumns(columns,api.now,out.nowTop,time>=first&&time<=last,day);
       out.multiDay=true;out.dayCount=dayCount;out.showNow=false;
       out.empty=columns.every(column=>!column.events.length)&&!out.nativeAllDay.length;
@@ -80,7 +76,7 @@ export function presentCalendarIntervals(render:(state:Bag,api:Bag)=>Bag,state:B
     out.week=out.week.map((w:Bag,i:number)=>occupied(weekStart+i)?{...w,dot:weekStart+i===0?'var(--acct)':'var(--mut)'}:w);
     const monthBase=new Date(selectedDate);monthBase.setDate(1);monthBase.setMonth(monthBase.getMonth()+Number(state.month||0));
     const gridStart=new Date(monthBase);gridStart.setDate(1-(monthBase.getDay()+6)%7);
-    const gridOff=(civilDay(gridStart)-civilDay(new Date(api.now)))/DAY;
+    const gridOff=civilDayDiff(gridStart,new Date(api.now));
     out.mdays=out.mdays.map((d:Bag,i:number)=>occupied(gridOff+i)?{...d,dot:gridOff+i===0?'var(--acct)':'var(--fg)'}:d);
  return out;
 }

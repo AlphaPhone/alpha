@@ -78,7 +78,7 @@ test('the development profile and deferred apps need test mocks',async()=>{
  for(const prompt of ['call 5550100','text Ada I am late','open contacts','send a text message to Ada','pay Ada'])assert.equal(off.features.deferredMvpPrompt(prompt),true,prompt);
  assert.equal(off.features.deferredMvpPrompt('open inbox'),false);
  const on={features:await load(true,'prototype/mvp-features.ts'),dev:await load(true,'browser/dev-profile.ts')};
- assert.equal(on.dev.browserDevProfile,true);for(const view of ['phone','wallet'])assert.equal(on.features.isMvpView(view),true);
+ assert.equal(on.dev.browserDevProfile,true);assert.equal(on.features.isMvpView('phone'),true);assert.equal(on.features.isMvpView('wallet'),false,'Wallet has no development fixture');
  assert.equal(on.features.deferredMvpPrompt('call 5550100'),true,'development fixtures never stand in for the AOSP image capability');
 });
 
@@ -107,7 +107,7 @@ async function regional({testMocks,devSurfaces,baseUrl,native=false,developmentB
   registerPlugin:()=>({request:async()=>{throw Error('native transport not expected');},cancel:async()=>{}}),
   configureMapsProvider:config=>configured.push(config),
   fetch:async url=>{fetched.push(String(url));throw Error('offline');},URL,TextDecoder,Uint8Array,JSON,Error,Number,Array,Object,crypto,atob};
- vm.runInNewContext(stripTypeScriptTypes(source,{mode:'strip'})+'\nglobalThis.result={regionalDataset,regionalDiagnostics,initializeRegionalMaps};',context);
+ vm.runInNewContext(stripTypeScriptTypes(source,{mode:'strip'})+'\nglobalThis.result={regionalDiagnostics,initializeRegionalMaps};',context);
  // The upstream provider runs in this realm and uses the global fetch.
  const realFetch=globalThis.fetch;globalThis.fetch=context.fetch;
  try{await context.result.initializeRegionalMaps();}finally{globalThis.fetch=realFetch;}
@@ -117,7 +117,6 @@ async function regional({testMocks,devSurfaces,baseUrl,native=false,developmentB
 test('regional Maps is a test-mocks prototype; loopback HTTP and the emulator gateway exist only there',async()=>{
  const unset=await regional({testMocks:false,devSurfaces:false,baseUrl:undefined});
  assert.equal(unset.diagnostic.stage,'no-configuration');assert.equal(unset.diagnostic.configured,false);assert.deepEqual(unset.fetched,[]);
- assert.equal(unset.regionalDataset.providerId,'alpha-osm-monaco');assert.equal(unset.regionalDataset.coverage.region,'Monaco');
  for(const baseUrl of ['http://127.0.0.1:47850','http://10.0.2.2:47850']){
   const off=await regional({testMocks:false,devSurfaces:false,baseUrl});
   assert.equal(off.diagnostic.error!==''||off.diagnostic.stage!=='ready',true);assert.deepEqual(off.fetched,[],'flag-off builds reject loopback HTTP before any request');
@@ -138,7 +137,7 @@ test('regional Maps is a test-mocks prototype; loopback HTTP and the emulator ga
 test('production Wallet saved routes and direct open/pay requests cannot enter the prototype payment flow',async()=>{
  const {Component,ORDER,VIEWS}=await load(false,'prototype/model.js');
  assert.equal(VIEWS.wallet,undefined,'the simulated payment implementation is not registered');
- assert.ok((await load(true,'prototype/model.js')).VIEWS.wallet,'explicit mock builds retain the fixture');
+ assert.equal((await load(true,'prototype/model.js')).VIEWS.wallet,undefined,'mock builds register no Wallet either');
  const {validateDeviceOperation}=await load(false,'runtime/device-actions.ts');
  const notices=[],changes=[];
  const savedWallet={cards:[{id:'owned-reference',label:'kept'}],pay:true,stage:'auth'};

@@ -48,12 +48,5 @@
       "afterSha256": "b2206dea1227975ef8e4178d26ddd9598feb894081f99a256ea70fa824c1446f",
       "new": false
     }
-  ],
-  "compilation": "pending",
-  "imageBuilt": false,
-  "deviceQualified": false,
-  "ownerCustomLayoutsPreserved": true,
-  "ownerExplicitStorageModesPreserved": true,
-  "appPrivateStorageGranted": false,
-  "crashRecoveryAndVoiceControlsChanged": false
+  ]
 }

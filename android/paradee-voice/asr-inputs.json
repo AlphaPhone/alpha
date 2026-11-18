@@ -3,9 +3,6 @@
   "description": "Model-agnostic ASR slot of the on-device voice bundle. libelizainference (built with LLAMA_BUILD_PARAKEET=ON) serves eliza_inference_asr_* and asr_stream_* from whatever sits under <bundle>/asr/: a parakeet-tdt GGUF (one file) or the Qwen3-ASR text + mmproj pair (two files). `backend` names which; `asr/` holds only that backend's files. Changing the ASR model means changing only this record and restaging; scripts/paradee-runtime.ts admits exactly these files and refuses any other file under asr/.",
   "slot": "asr",
   "backend": "parakeet",
-  "runtimeEnv": {
-    "ELIZA_ASR_BACKEND": "ggml"
-  },
   "model": "Phonon-2 (Parakeet-TDT 0.6B, five-value weights), the upstream mobile-voice@1.1.0 default ASR (elizaOS/eliza#36212, d06a1aa9c9)",
   "license": "CC-BY-4.0",
   "attribution": "Phonon-2 by Fermion Research, CC-BY-4.0, derived from NVIDIA parakeet-tdt-0.6b-v3 (CC-BY-4.0). Fermion's NOTICE ships in the bundle (notices/phonon-2/NOTICE) and in the app's third-party notices; the GGUF also carries it as parakeet.notice.",

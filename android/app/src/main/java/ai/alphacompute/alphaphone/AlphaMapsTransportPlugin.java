@@ -34,11 +34,12 @@ public final class AlphaMapsTransportPlugin extends Plugin {
  }
  // Compile-time constant: builds without ELIZA_DEV_ALLOW_TEST_MOCKS=1 carry no loopback origin.
  private static final String DEVELOPMENT_ORIGIN=BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS?"http://10.0.2.2:47850":"";
+ private static final String REQUEST_ID="[a-zA-Z0-9_-]{1,80}";
  @PluginMethod public void request(PluginCall call){
-  if(!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS||DEVELOPMENT_ORIGIN.isEmpty()||destroyed){call.reject("Regional development transport is unavailable in this build");return;}
+  if(!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS||destroyed){call.reject("Regional development transport is unavailable in this build");return;}
   String path=call.getString("path"),id=call.getString("requestId");
   try{URI uri=new URI(path==null?"":path);String p=uri.getRawPath();
-   if(id==null||!id.matches("[a-zA-Z0-9_-]{1,80}")||path.length()>4096||uri.isAbsolute()||uri.getRawAuthority()!=null||uri.getFragment()!=null||p==null||!(p.matches("/tiles/[0-9]{1,2}/[0-9]{1,6}/[0-9]{1,6}\\.pbf")||p.equals("/capabilities")||p.equals("/search")||p.equals("/place")||p.equals("/route")))throw new IllegalArgumentException();
+   if(id==null||!id.matches(REQUEST_ID)||path.length()>4096||uri.isAbsolute()||uri.getRawAuthority()!=null||uri.getFragment()!=null||p==null||!(p.matches("/tiles/[0-9]{1,2}/[0-9]{1,6}/[0-9]{1,6}\\.pbf")||p.equals("/capabilities")||p.equals("/search")||p.equals("/place")||p.equals("/route")))throw new IllegalArgumentException();
   }catch(Exception invalid){call.reject("Invalid regional request");return;}
   if(earlyCancelled.remove(id)!=null){call.reject("Regional request cancelled");return;}
   Pending job=new Pending(call);if(pending.putIfAbsent(id,job)!=null){call.reject("Duplicate regional request");return;}
@@ -49,8 +50,8 @@ public final class AlphaMapsTransportPlugin extends Plugin {
    job.deadline=deadlines.schedule(()->{job.cancel("Regional service timed out");pending.remove(id,job);},15,TimeUnit.SECONDS);
    FutureTask<Void> task=new FutureTask<>(()->{try{
    if(job.cancelled||destroyed)throw new IOException();
-   HttpURLConnection connection=(HttpURLConnection)new URL(DEVELOPMENT_ORIGIN+path).openConnection();job.connection=connection;
-   connection.setUseCaches(false);connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(15000);connection.setRequestProperty("Accept-Encoding","identity");connection.setRequestProperty("User-Agent","AlphaPhone-RegionalMaps/0.1");
+   HttpURLConnection connection=AlphaUtil.noCache((HttpURLConnection)new URL(DEVELOPMENT_ORIGIN+path).openConnection(),10000,15000);job.connection=connection;
+   connection.setRequestProperty("Accept-Encoding","identity");connection.setRequestProperty("User-Agent","AlphaPhone-RegionalMaps/0.1");
    if(job.cancelled||destroyed)throw new IOException();int status=connection.getResponseCode();
    if(status>=300&&status<400)throw new IOException();
    InputStream raw=status>=400?connection.getErrorStream():connection.getInputStream();
@@ -64,7 +65,7 @@ public final class AlphaMapsTransportPlugin extends Plugin {
    job.task=task;if(job.cancelled){task.cancel(false);return;}PluginWorkers.submit(workers,task,()->{pending.remove(id,job);job.cancel("Regional service is busy; try again");});
   }catch(RejectedExecutionException busy){/* deadlines.schedule after shutdown. */pending.remove(id,job);job.cancel("Regional service is busy; try again");}
  }
- @PluginMethod public void cancel(PluginCall call){String id=call.getString("requestId");Pending job=id==null?null:pending.get(id);if(job!=null){job.cancel("Regional request cancelled");pending.remove(id,job);}else if(id!=null&&id.matches("[a-zA-Z0-9_-]{1,80}")){long now=android.os.SystemClock.elapsedRealtime();earlyCancelled.entrySet().removeIf(e->now-e.getValue()>30000);if(earlyCancelled.size()<64)earlyCancelled.put(id,now);}call.resolve();}
+ @PluginMethod public void cancel(PluginCall call){String id=call.getString("requestId");Pending job=id==null?null:pending.get(id);if(job!=null){job.cancel("Regional request cancelled");pending.remove(id,job);}else if(id!=null&&id.matches(REQUEST_ID)){long now=android.os.SystemClock.elapsedRealtime();earlyCancelled.entrySet().removeIf(e->now-e.getValue()>30000);if(earlyCancelled.size()<64)earlyCancelled.put(id,now);}call.resolve();}
  private final AlphaNavigationService.StopListener navigationStops=(session,reason)->{if(destroyed)return;JSObject event=new JSObject();event.put("sessionId",session);event.put("reason",reason);notifyListeners("navigationStopped",event);};
  private static String text(PluginCall call,String name){String value=call.getString(name,"");return value==null?"":value.length()>200?value.substring(0,200):value;}
  @PluginMethod public void consumeNavigationOpen(PluginCall call){

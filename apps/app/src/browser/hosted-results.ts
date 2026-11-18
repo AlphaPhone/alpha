@@ -5,30 +5,31 @@ import type {HostedResultBinding,HostedResultRoute} from '../runtime/hosted-resu
 import {revision} from './revision';
 import {BrowserDomainDocument} from './domain-document';
 import {browserDocuments} from './documents';
+import {sha256Hex} from '../lib/hash';
+import {canonicalJson} from '../lib/json';
+import {agentOwnerKey} from '../lib/session-key';
 
 type RecordRow=HostedResultRoute&{id:string;digest:string;at:number;revision:string;phase:'posted'|'opened'|'dismissed'|'denied'};
 type State={enabled:boolean;polling:boolean;rows:RecordRow[];pending?:{id:string;token:string}};
 const key='alpha.browser.hosted-results.v1';
-export const hostedResultsDocument=new BrowserDomainDocument(browserDocuments,key,()=>localStorage.getItem(key));
+export const hostedResultsDocument=new BrowserDomainDocument(browserDocuments,key);
 const channel=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel('alpha.browser.documents.v1');
 const initial=():State=>({enabled:true,polling:true,rows:[]});
-const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),byte=>byte.toString(16).padStart(2,'0')).join('');
-function canonical(value:unknown):string{return JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);}
 const blocked=()=>document.hidden||document.documentElement.dataset.devBackground==='true'||!!browserScreenLocked();
 const matches=(a:HostedResultRoute,b:HostedResultBinding)=>a.scope===b.scope&&a.origin===b.origin&&a.ownerId===b.ownerId&&a.agentId===b.agentId;
 /** Redacted browser notice ledger. Result bodies stay in the authenticated digest store. */
-export class BrowserHostedResults extends WebPlugin {
+class BrowserHostedResults extends WebPlugin {
  private binding?:{sessionId:string;value:HostedResultBinding};
  private session=revision();
  constructor(){super();if(channel)channel.onmessage=event=>{if(event.data?.key===key)this.changed(false);};const retire=()=>{this.session=revision();};for(const event of ['alpha:device-state','blur','pagehide','pageshow'])window.addEventListener(event,retire);document.addEventListener('visibilitychange',retire);window.addEventListener('storage',event=>{if(event.key===key)this.changed();});}
  bind(sessionId:string,value:HostedResultBinding){const binding={sessionId,value};this.binding=binding;this.changed();return ()=>{if(this.binding===binding){this.binding=undefined;this.changed();}};}
  async disableBackground(input?:{sessionId:string}){if(!input||input.sessionId===this.binding?.sessionId)this.binding=undefined;}
  private changed(broadcast=true){if(broadcast)channel?.postMessage({key});window.dispatchEvent(new Event('alpha:hosted-notices-changed'));}
- private async retained(route:HostedResultRoute){const binding=this.binding;if(!binding||!binding.value.current()||!matches(route,binding.value))throw Error('Hosted account changed');const result=(await binding.value.history()).find(row=>row.runId===route.runId&&row.workflowId===route.workflowId&&row.workflowVersionId===route.workflowVersionId);if(this.binding!==binding||!binding.value.current()||!result)throw Error('Result is not retained');const digest=await hash(canonical(result));if(this.binding!==binding||!binding.value.current())throw Error('Hosted account changed');return {digest,binding};}
+ private async retained(route:HostedResultRoute){const binding=this.binding;if(!binding||!binding.value.current()||!matches(route,binding.value))throw Error('Hosted account changed');const result=(await binding.value.history()).find(row=>row.runId===route.runId&&row.workflowId===route.workflowId&&row.workflowVersionId===route.workflowVersionId);if(this.binding!==binding||!binding.value.current()||!result)throw Error('Result is not retained');const digest=await sha256Hex(canonicalJson(result));if(this.binding!==binding||!binding.value.current())throw Error('Hosted account changed');return {digest,binding};}
  async publishResult(route:HostedResultRoute){
   for(const field of ['scope','origin','ownerId','agentId','runId','workflowId','workflowVersionId'] as const)if(typeof route[field]!=='string'||!route[field]||route[field].length>2048)throw Error('Invalid result identity');
-  if(route.scope!==await hash(JSON.stringify([route.origin,route.ownerId,route.agentId]))||!/^\w[\w-]{0,127}$/.test(route.runId))throw Error('Result scope mismatch');
-  const {digest,binding}=await this.retained(route),id=await hash(route.scope+':'+route.runId);
+  if(route.scope!==await sha256Hex(agentOwnerKey(route))||!/^\w[\w-]{0,127}$/.test(route.runId))throw Error('Result scope mismatch');
+  const {digest,binding}=await this.retained(route),id=await sha256Hex(route.scope+':'+route.runId);
   const phase=await hostedResultsDocument.edit(initial,state=>{if(this.binding!==binding||!binding.value.current())throw Error('Hosted account changed');const prior=state.rows.find(row=>row.id===id);if(prior){if(prior.digest!==digest)throw Error('Retained result changed');return prior.phase==='dismissed'?'opened':prior.phase;}
    const saved:RecordRow={scope:route.scope,origin:route.origin,ownerId:route.ownerId,agentId:route.agentId,runId:route.runId,workflowId:route.workflowId,workflowVersionId:route.workflowVersionId,id,digest,at:Date.now(),revision:revision(),phase:state.enabled?'posted':'denied'};state.rows.push(saved);while(state.rows.length>200){const index=state.rows.findIndex(row=>row.id!==id&&row.id!==state.pending?.id);state.rows.splice(index,1);}return saved.phase;});this.changed();return {phase};
  }

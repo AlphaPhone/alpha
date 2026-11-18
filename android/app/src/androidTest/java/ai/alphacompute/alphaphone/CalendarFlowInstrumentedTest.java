@@ -32,7 +32,6 @@ public class CalendarFlowInstrumentedTest {
  private void click(String label)throws Exception{
   String q="[...document.querySelectorAll('button')].find(e=>e.getAttribute('aria-label')==="+JSONObject.quote(label)+")";until(q);eval("("+q+").click()");
  }
- private void tapVisibleEvent(String title)throws Exception{CalendarUiTestDriver.tapVisibleEvent(title);}
  private List<Long> ids(ContentResolver resolver,String title){
   List<Long> ids=new ArrayList<>();
   try(Cursor c=resolver.query(CalendarContract.Events.CONTENT_URI,new String[]{CalendarContract.Events._ID},CalendarContract.Events.TITLE+"=? AND "+CalendarContract.Events.DELETED+"=0",new String[]{title},null)){if(c!=null)while(c.moveToNext())ids.add(c.getLong(0));}return ids;
@@ -147,7 +146,7 @@ public class CalendarFlowInstrumentedTest {
      AppNavigation.liveMode();until("Intl.DateTimeFormat().resolvedOptions().timeZone==='America/Los_Angeles'");eval(AppNavigation.request("Calendar"));until(AppNavigation.selected("Calendar"));AppNavigation.declineStartupAccess();chooseDate(day);
      // The loaded provider event retains its two-hour wall-clock span across the gap.
      until("[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')?.startsWith("+JSONObject.quote(seed+",")+"))");
-     tapVisibleEvent(seed);
+     CalendarUiTestDriver.tapVisibleEvent(seed);
      until("document.querySelector('button[aria-label=\"Edit event\"]')");
      assertEquals("DST-crossing provider detail keeps actual end time","true",eval("document.querySelector('[data-screen]').textContent.includes('3:30')"));click("Back to calendar");
      click("New event");until("document.querySelector('input[aria-label=Title]')");
@@ -205,7 +204,7 @@ public class CalendarFlowInstrumentedTest {
     AppNavigation.liveMode();until("Intl.DateTimeFormat().resolvedOptions().timeZone==='America/Los_Angeles'");eval(AppNavigation.request("Calendar"));until(AppNavigation.selected("Calendar"));AppNavigation.declineStartupAccess();chooseDate(day);
     for(int index=0;index<2;index++){
      String title=index==0?a:b;long id=index==0?aId:bId,end=index==0?equal:earlier;
-     tapVisibleEvent(title);until("document.querySelector('button[aria-label=\"Edit event\"]')");
+     CalendarUiTestDriver.tapVisibleEvent(title);until("document.querySelector('button[aria-label=\"Edit event\"]')");
      String expected=index==0?"1:30 AM UTC-07:00 – 1:30 AM UTC-08:00":"1:30 AM UTC-07:00 – 1:15 AM UTC-08:00";
      assertEquals("Detail shows actual repeated-hour endpoints, not clamped geometry","true",eval("[...document.querySelectorAll('div')].some(e=>e.children.length===0&&e.textContent.replaceAll(String.fromCharCode(8239),' ').replaceAll(String.fromCharCode(160),' ')==="+JSONObject.quote(expected)+")"));
      assertComplexEditHandoff(fixture,id,begin,end);click("Back to calendar");
@@ -226,7 +225,7 @@ public class CalendarFlowInstrumentedTest {
      String title=offset<2?overnight:multi;long id=offset<2?nightId:multiId,end=offset<2?nightEnd:multiEnd;
      until("[...document.querySelectorAll('button')].some(e=>e.getAttribute('aria-label')?.startsWith("+JSONObject.quote(title+",")+"))");
      assertEquals("Segment never exceeds one 24-hour axis","true",eval("[...document.querySelectorAll('button')].filter(e=>e.getAttribute('aria-label')?.startsWith("+JSONObject.quote(multi+",")+")).every(e=>e.getBoundingClientRect().height<=24*56)"));
-     tapVisibleEvent(title);until("document.querySelector('button[aria-label=\"Edit event\"]')");
+     CalendarUiTestDriver.tapVisibleEvent(title);until("document.querySelector('button[aria-label=\"Edit event\"]')");
      String endDate=java.time.Instant.ofEpochMilli(end).atZone(zone).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("MMM d, uuuu",Locale.US));
      assertEquals("Detail contains actual end date","true",eval("document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(endDate)+")"));
      assertComplexEditHandoff(fixture,id,start,end);click("Back to calendar");

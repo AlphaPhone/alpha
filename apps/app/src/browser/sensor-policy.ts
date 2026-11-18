@@ -1,5 +1,6 @@
 import {cachedDevicePreferences,readDevicePreferences,initializeDevicePreferences} from './device-preferences';
-export type BrowserSensor='microphoneEnabled'|'locationEnabled';
+import {abortError} from '../lib/abort';
+type BrowserSensor='microphoneEnabled'|'locationEnabled';
 export function browserSensorEnabled(sensor:BrowserSensor){return cachedDevicePreferences()?.[sensor]===true;}
 /** Own a microphone permission request and its eventual stream across policy changes. */
 export class BrowserMicrophone {
@@ -13,7 +14,7 @@ export class BrowserMicrophone {
   if(this.closed||!enabled){this.close();throw new DOMException('Microphone is off. Turn it on in device controls.','NotAllowedError');}
   const signal=this.abort.signal;
   return new Promise<MediaStream>((resolve,reject)=>{
-   const cancelled=()=>reject(new DOMException('Recording cancelled','AbortError'));signal.addEventListener('abort',cancelled,{once:true});
+   const cancelled=()=>reject(abortError('Recording cancelled'));signal.addEventListener('abort',cancelled,{once:true});
    let request:Promise<MediaStream>;try{request=navigator.mediaDevices.getUserMedia({audio:true,video:false});}catch(error){signal.removeEventListener('abort',cancelled);this.close();reject(error);return;}
    request.then(stream=>{signal.removeEventListener('abort',cancelled);if(this.closed){stream.getTracks().forEach(track=>track.stop());return;}this.stream=stream;resolve(stream);},error=>{signal.removeEventListener('abort',cancelled);this.close();reject(error);});
   });

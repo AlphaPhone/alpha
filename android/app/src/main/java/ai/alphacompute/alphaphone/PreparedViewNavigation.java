@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 /** Narrow preparation route; the existing bridge still requires its current owner. */
@@ -16,6 +17,6 @@ final class PreparedViewNavigation {
    return "completed-action".equals(value.opt("delivery"))&&Boolean.TRUE.equals(value.opt("prepareOnly"))&&"gui".equals(value.opt("viewType"))&&
     identifier(value.opt("clientId"),"[A-Za-z0-9._-]{1,128}")&&
     identifier(value.opt("completedActionHandoffId"),"[A-Za-z0-9._:-]{1,128}");
-  }catch(Exception invalid){return false;}
+  }catch(JSONException invalid){return false;}
  }
 }

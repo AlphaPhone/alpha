@@ -72,9 +72,6 @@ final class HostedResultNotices {
   try {poster.post(key,record.getString("scope").equals(showing));record.put("phase","posted");write(LEDGER,ledger);return "posted";}
   catch(SecurityException denied){record.put("phase","denied");write(LEDGER,ledger);return "denied";}
  }
- synchronized void capture(String key)throws Exception {
-  capture(key,false);
- }
  /** These results were shown in the app: their notices are withdrawn. A tap already captured for one stays pending. Returns how many were withdrawn. */
  synchronized int withdraw(String scope,java.util.List<String> runIds)throws Exception {
   if(scope==null||!scope.matches("[a-f0-9]{64}")||runIds.size()>200)throw new IllegalArgumentException("Invalid notice identity");

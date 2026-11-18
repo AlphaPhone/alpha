@@ -164,7 +164,7 @@ public final class BrowserPageQuestionInstrumentedTest {
  /** Opens the Browser view, creates its first tab on an address that cannot resolve, then serves
   * that tab from memory: the fixture's start page is committed before this returns. */
  Pages openBrowser() throws Exception {
-  AppNavigation.liveMode(); js(AppNavigation.request("Browser")); waitFor(AppNavigation.selected("Browser")); waitFor("window.__alphaTestNavigation?.status==='complete'");
+  AppNavigation.liveMode(); js(AppNavigation.request("Browser")); waitFor(AppNavigation.selected("Browser")); waitFor(AppNavigation.SETTLED);
     // The native page is withdrawn while the modal first-run access panel is open; answer it first, as an owner does.
     AppNavigation.declineStartupAccess();
   recordNativeCalls();
@@ -380,7 +380,7 @@ public final class BrowserPageQuestionInstrumentedTest {
     assertEquals("Nothing reaches an agent before Send: " + leaks(reviewed), 0, leaks(reviewed).length());
     assertEquals(0, leaks(ARTICLE).length());
     // Send while inference is unavailable (the resident is running with no network): no
-    // line or toast says so (owner, 2026-11-03), no chooser opens, nothing is dispatched and the draft
+    // line or toast says so, no chooser opens, nothing is dispatched and the draft
     // is kept. The send is seen settling in the composer's own saved copy: marked as sending, then unmarked.
     waitFor("document.querySelector('button[aria-label=Send]')&&!document.querySelector('button[aria-label=Send]').disabled");
     int before = Integer.parseInt(js("window.__pageCalls.length"));
@@ -416,7 +416,7 @@ public final class BrowserPageQuestionInstrumentedTest {
   * reopens the source from the note. Shared with JourneyJ05InstrumentedTest; the caller removes `id`. */
  void sourceNoteSurvivesRecreationAndReopens(BoundedActivityScenario<MainActivity> scenario, String id, String url) throws Exception {
     String title = "Orchard summary " + letters(UUID.randomUUID()).substring(0, 8);
-    AppNavigation.liveMode(); js(AppNavigation.request("Notes")); waitFor(AppNavigation.selected("Notes")); waitFor("window.__alphaTestNavigation?.status==='complete'");
+    AppNavigation.liveMode(); js(AppNavigation.request("Notes")); waitFor(AppNavigation.selected("Notes")); waitFor(AppNavigation.SETTLED);
     String note = new JSONObject().put("id", id).put("kind", "text").put("title", title).put("body", "The orchard has twelve raised beds.")
      .put("webSource", new JSONObject().put("kind", "web-page").put("version", 1).put("name", "Orchard report").put("url", url))
      .put("pinned", false).put("when", "Now").put("createdAt", System.currentTimeMillis()).put("modifiedAt", System.currentTimeMillis()).toString();

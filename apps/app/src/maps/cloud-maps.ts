@@ -51,8 +51,6 @@ connectionController.subscribe(() => {
  const changed = previous?.sessionId !== next?.sessionId || previous?.credentialId !== next?.credentialId;
  previous = next;
  // A rebuilt client for the same session and credential keeps the provider and its guidance; requests resolve the client per call.
- if (changed) {
-  // Retry requires an explicit search; a new account never inherits automatic rerouting.
-  if (maps.cloudMapsDiagnostics().configured) maps.retireCloudMaps();
- }
+ // Retry requires an explicit search; a new account never inherits automatic rerouting.
+ if (changed && maps.cloudMapsDiagnostics().configured) maps.retireCloudMaps();
 });

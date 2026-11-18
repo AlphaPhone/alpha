@@ -5,25 +5,23 @@ export function residentRecoveryReason(error:unknown):ResidentRecoveryReason|und
  const code=error.code;
  return code==='ipc-recovery-retention-limit'||code==='ipc-recovery-required'||code==='runtime-identity-unavailable'?code:undefined;
 }
-export function residentRecoveryMessage(reason:ResidentRecoveryReason):string {
- if(reason==='runtime-identity-unavailable')return 'Startup check failed';
- return reason==='ipc-recovery-retention-limit'?'Restart needed':'Couldn’t start';
-}
+// Never suggests reinstalling: on Android that clears app data.
+const REASON_COPY:Partial<Record<ResidentRecoveryReason,string>>={'ipc-recovery-retention-limit':'Restart needed','runtime-identity-unavailable':'Startup check failed'};
 export const RESIDENT_RECOVERY_PENDING='Couldn’t start';
+export function residentRecoveryMessage(reason:ResidentRecoveryReason):string {
+ return REASON_COPY[reason]??RESIDENT_RECOVERY_PENDING;
+}
 /** Only a fresh, reviewable native snapshot supports restart readiness. */
 export function residentRecoveryCopy(reason:ResidentRecoveryReason,view?:ResidentRecoveryView):string {
  if(view?.step==='unavailable')return 'Restart blocked';
  if(view?.step==='partial')return 'Restart incomplete';
  if(view?.step==='reviewing')return 'Checking restart';
  if(view?.step==='archiving')return 'Restarting';
- if(reason==='ipc-recovery-retention-limit')return 'Restart needed';
- // Never suggests reinstalling: on Android that clears app data.
- if(reason==='runtime-identity-unavailable')return 'Startup check failed';
- return 'Restart phone';
+ return REASON_COPY[reason]??'Restart phone';
 }
 
-export type RecoveryReview = {status:'reviewable';retainedCount:number;reviewToken:string}|{status:'unavailable';retainedCount:number};
-export type RecoveryArchive = {status:'archived'|'unavailable'|'partial';archivedCount:number;retainedCount:number};
+type RecoveryReview = {status:'reviewable';retainedCount:number;reviewToken:string}|{status:'unavailable';retainedCount:number};
+type RecoveryArchive = {status:'archived'|'unavailable'|'partial';archivedCount:number;retainedCount:number};
 export type ResidentRecoveryView = {step:'reviewing'|'archiving'|'unavailable'|'partial'}|{step:'review';review:Extract<RecoveryReview,{status:'reviewable'}>};
 const count=(value:unknown):value is number=>Number.isInteger(value)&&Number(value)>=0&&Number(value)<=64;
 export function parseRecoveryReview(value:unknown):RecoveryReview {
@@ -39,7 +37,7 @@ export function parseRecoveryArchive(value:unknown):RecoveryArchive {
  return {status:v.status!,archivedCount:v.archivedCount,retainedCount:v.retainedCount};
 }
 
-export type ResidentBootStatus = {state?:string;reason?:string};
+type ResidentBootStatus = {state?:string;reason?:string};
 /** Exact native states which invalidate a renderer's resident binding. */
 //@ verify
 //@ ensures \result <==> (state === 'dead' || state === 'restarting' || state === 'booting')
@@ -47,7 +45,7 @@ function residentBootStateLost(state:string|undefined):boolean {
  return state==='dead'||state==='restarting'||state==='booting';
 }
 /** Boot states where the resident this renderer was bound to is gone. Listening (busy or idle) and an owner's stop are not. */
-export function residentBootLost(status:ResidentBootStatus|undefined):boolean {
+function residentBootLost(status:ResidentBootStatus|undefined):boolean {
  return !!status&&residentBootStateLost(status.state);
 }
 /** One plain line for a native boot reason; raw codes never reach the owner. */

@@ -32,28 +32,29 @@ export class BrowserClock {
   // HOME (AP-15) closes alarm settings left open in the app it leaves; a ringing alarm stays until it is stopped or snoozed.
   window.addEventListener('launcher-home',()=>{if(!this.ringing)this.dialog?.close();});
   window.addEventListener('alpha:device-state',()=>{this.retire();});document.addEventListener('visibilitychange',()=>{this.watch();if(document.hidden)this.retire();else void this.poll();});
-  window.addEventListener('storage',event=>{if(event.key==='alpha.browser.reminders.v1')void this.poll();});this.watch();
+  this.watch();
  }
  /** The one-second poll runs only while the page is visible; a hidden page neither rings nor reads. */
  private watch(){if(document.hidden){clearInterval(this.timer);this.timer=undefined;}else this.timer??=setInterval(()=>void this.poll(),1000);}
  private allowed(){return !document.hidden&&document.documentElement.dataset.devBackground!=='true'&&!(testMocksEnabled&&document.documentElement.dataset.connectionMode==='mock')&&!browserScreenLocked();}
  private stopSound(){clearInterval(this.soundTimer);this.soundTimer=undefined;this.audio.stop();}
- private retire(){this.stopSound();this.dialog?.close();this.owns=false;this.ringing='';this.release?.();this.release=undefined;}
+ private releaseRing(){this.stopSound();this.owns=false;this.ringing='';this.release?.();this.release=undefined;}
+ private retire(){this.releaseRing();this.dialog?.close();}
  private async poll(){
   if(this.polling||!this.allowed())return;this.polling=true;
   try{
    this.rows=(await this.daily.listReminders()).reminders.filter(row=>row.id.startsWith('alarm_')&&['scheduled','posted','permission-denied'].includes(row.status)) as Alarm[];
    if(!this.allowed())return;this.loaded=true;this.render();const ringing=ringingAlarms(this.rows);
-   if(!ringing){this.stopSound();this.owns=false;this.ringing='';this.release?.();this.release=undefined;}
+   if(!ringing)this.releaseRing();
    else if(this.owns){if(ringing!==this.ringing)this.ring(ringing);}
-   else if(navigator.locks){void navigator.locks.request('alpha.browser.alarm-owner',{ifAvailable:true},async lock=>{if(!lock||!this.allowed()||this.owns)return;const current=ringingAlarms((await this.daily.listReminders()).reminders);if(!current||!this.allowed())return;this.owns=true;await new Promise<void>(resolve=>{this.release=resolve;this.ring(current);});});}
+   else{void navigator.locks.request('alpha.browser.alarm-owner',{ifAvailable:true},async lock=>{if(!lock||!this.allowed()||this.owns)return;const current=ringingAlarms((await this.daily.listReminders()).reminders);if(!current||!this.allowed())return;this.owns=true;await new Promise<void>(resolve=>{this.release=resolve;this.ring(current);});});}
    const notices=(await this.notifications.list()).items.filter(n=>!n.id.startsWith('alarm_'));
    if(!this.allowed())return;
    const active=notices.map(n=>n.source+':'+n.id+':'+n.revision.split(':')[0]),initial=()=>({seen:[] as string[]}),before=await alertSoundDocument.read(initial);
    // Unchanged polling must not invent records or advance recovery revisions.
    if(!active.some(key=>!before.seen.includes(key)))return;
    const fresh=await alertSoundDocument.edit(initial,data=>{const fresh=active.some(key=>!data.seen.includes(key));data.seen=[...data.seen.filter(key=>!active.includes(key)).slice(-(500-active.length)),...active];return fresh;});if(fresh&&this.allowed())this.audio.play('ring');
-  }catch(error){if(this.status)this.status.textContent='Couldn’t refresh';}finally{this.polling=false;}
+  }catch{if(this.status)this.status.textContent='Couldn’t refresh';}finally{this.polling=false;}
  }
  private ring(key:string){this.ringing=key;this.stopSound();this.open();this.audio.play('alarm');const started=performance.now();this.soundTimer=setInterval(()=>{if(!this.owns||!this.allowed()||performance.now()-started>=60000)this.stopSound();else this.audio.play('alarm');},1000);}
  private async run(task:()=>Promise<string|void>){if(this.busy)return;this.busy=true;this.render();try{const message=await task();if(this.status)this.status.textContent=message||'';await this.poll();}catch{if(this.status)this.status.textContent='Couldn’t save';}finally{this.busy=false;this.render();}}

@@ -1,0 +1,14 @@
+test/photos-library-patch.test.mjs
+test/photos-native-order.test.mjs
+test/photos-pending-read.test.mjs
+test/photos-thumbnail-refresh.test.mjs
+test/photos-view-contract.test.mjs
+test/photos-view.test.mjs
+test/pilot-rotation-journal.test.mjs
+test/pilot-units.test.mjs
+test/pilot-update-export.test.mjs
+test/pinned-voice-build.test.mjs
+test/pixel-spoken-acks.test.mjs
+test/pixel10a-image.test.mjs
+test/pixel10a-source.test.mjs
+test/playwright-projects.test.mjs

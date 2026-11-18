@@ -1,0 +1,14 @@
+# test/fixtures/product-character-host.mjs
+- Lines: 48 | Kind: transplant (strips imports/exports of `scripts/cloud-resident-host.ts`, rewrites `import.meta.dirname`, runs in `vm` with injected globals) over a real temp SDK/worker tree | Verdict: PORT (import `createCloudResidentHost` directly)
+- Covers: the browser Cloud dev bridge's resident host: it admits only a verified prepared source, worker artifact and native Google host module (module missing/changed, input changed, manifest changed, symlink cases) and strips untrusted inherited env (`ELIZA_NATIVE_GOOGLE_HOST_MODULE`, `CEREBRAS_API_KEY`, ...). Duplicates: the five worker files with `test/fixtures/prepared-worker-producer.mjs`. Callers/importers: `test/product-character-host.test.mjs:16`, `test/own-provider-host.test.mjs:4`, `test/browser-cloud-dev-bridge.test.mjs:1168`, `test/cloud-resident-host.test.mjs:8`, `test/cloud-resident-embedding-route.test.mjs:7`, `test/cloud-resident-full-profile.test.mjs:6`, `specs/quint/refinement/application/boundaries.mjs:97-100` (also bundles it for an import-graph check).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 20, 38-39 | T2 | Source transplant of `scripts/cloud-resident-host.ts` only to replace `import.meta.dirname` (used once, `cloud-resident-host.ts:73` `root=path.resolve(import.meta.dirname,'..')`) and to reach `createCloudResidentHost`, which is already exported (`:70`) and already takes `launch`, `inherited`, `request`. Re-declares every import as a global (16 names). | Add an optional `root` option to `createCloudResidentHost` (default `path.resolve(import.meta.dirname,'..')`) and `import {createCloudResidentHost} from '../../scripts/cloud-resident-host.ts'`. Drop `vm`, `stripTypeScriptTypes` and the globals table. | Low: one optional parameter on a dev-only script. |
+| 2 | 22-37 | — | Builds a real temp git SDK, worker manifest and core-state fixture and runs the real verifiers: good integration setup. | Keep; import the worker file list from the shared fixture. | — |
+| 3 | 21-48 | D8 | Statement soup (lines of 300-700 characters). | Reformat with the D9 Prettier pass; split setup into `makeSdk`, `makeWorker`, `applyMode`. | — |
+| 4 | — | — | Six host test importers; research rates several as transplants to delete. Whether the resident host survives D5 depends on `scripts/browser-cloud-dev-bridge.ts` (dev Cloud bridge, kept per D6/D19 if a retained e2e spec drives it). | If D5/D19 removes the dev Cloud bridge, delete this fixture and all six importers together. | Medium: owner question. |
+
+## Proposed end state
+~35-line fixture that prepares the temp SDK/worker tree and calls the imported `createCloudResidentHost({root, ...})`; consumed by one `test/integration/cloud-resident-host.test.mjs` (merging the six host tests' surviving cases: artifact admission modes, untrusted env stripping, embedding route, full profile) and by `boundaries.mjs`.

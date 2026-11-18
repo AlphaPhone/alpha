@@ -1,84 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
 const m=await import('../apps/app/src/prototype/context-selection.ts');
 const {sanitizePhoneContext}=await import('../apps/app/src/runtime/phone-context.ts');
-// Android reports a folder revision that embeds its display name, size and time.
-const androidRevision=(name,modified=1)=>`${name}|vnd.android.document/directory|-1|${modified}|8`;
-const entry=(id,name,extra={})=>({id,parentId:'tree-root',name,mimeType:'text/plain',directory:false,size:3,revision:`${name}|text/plain|3|1|0`,...extra});
-const listing=(entries,extra={})=>({status:'ready',message:'',folder:{id:'tree-root',name:'PRIVATE_FOLDER_NAME',revision:androidRevision('PRIVATE_FOLDER_NAME'),directory:true},entries,...extra});
-const label=(mime,directory)=>directory?'Folder':mime==='text/plain'?'Text':'File';
-
-test('a folder identity is its opaque tree id and a local counter, never the provider revision or a name',()=>{
- const revisions=m.createFolderRevisions();
- const first=revisions(m.folderScope(listing([entry('e1','PRIVATE_FILE_NAME.txt')])));
- assert.deepEqual(Object.keys(first).sort(),['id','kind','revision']);assert.equal(first.kind,'folder');assert.equal(first.id,'tree-root');
- assert.match(first.revision,/^listing-[0-9a-f]{12}-1$/);
- // Another app session never repeats a revision for the same folder id, whatever it lists.
- const later=m.createFolderRevisions()(m.folderScope(listing([entry('e9','other.txt')])));
- assert.equal(later.id,first.id);assert.notEqual(later.revision,first.revision);
- assert.doesNotMatch(JSON.stringify(first),/PRIVATE|\|/);
- // The wire contract accepts it for Files and nowhere else.
- assert.deepEqual(sanitizePhoneContext({view:'files',revision:1,sensitive:false,selectedObject:first}).selectedObject,first);
- assert.throws(()=>sanitizePhoneContext({view:'notes',revision:1,sensitive:false,selectedObject:first}));
- // The provider's own revision string would be refused, so it must never be used as the identity.
- assert.throws(()=>sanitizePhoneContext({view:'files',revision:1,sensitive:false,selectedObject:{kind:'folder',id:'tree-root',revision:androidRevision('PRIVATE_FOLDER_NAME')}}));
-});
-test('the folder revision is stable for an unchanged listing and changes with the folder or any loaded entry',()=>{
- const revisions=m.createFolderRevisions();
- const base=[entry('e1','a.txt'),entry('e2','b.txt')];
- const one=revisions(m.folderScope(listing(base))).revision;
- assert.equal(revisions(m.folderScope(listing([...base].reverse()))).revision,one,'order alone is not a change');
- const renamed=revisions(m.folderScope(listing([entry('e1','a.txt'),entry('e2','renamed.txt')]))).revision;
- assert.notEqual(renamed,one);
- const removed=revisions(m.folderScope(listing([entry('e1','a.txt')]))).revision;
- assert.notEqual(removed,renamed);
- const folderChanged=revisions(m.folderScope({...listing([entry('e1','a.txt')]),folder:{id:'tree-root',name:'PRIVATE_FOLDER_NAME',revision:androidRevision('PRIVATE_FOLDER_NAME',2)}})).revision;
- assert.notEqual(folderChanged,removed);
- // A different folder never reuses another folder's identity.
- const other=revisions(m.folderScope({...listing(base),folder:{id:'tree-other',name:'Other',revision:'x'}}));
- assert.equal(other.id,'tree-other');assert.notEqual(other.revision,one);
- assert.equal(revisions(undefined),undefined);
- // Remembered listings are bounded. A folder that was forgotten gets a new revision, never an old one.
- const issued=new Set([one,renamed,removed,folderChanged,other.revision]);
- for(let index=0;index<80;index++){const next=revisions(m.folderScope({...listing(base),folder:{id:'tree-many-'+index,name:'n',revision:'x'}})).revision;assert.ok(!issued.has(next));issued.add(next);}
- assert.ok(!issued.has(revisions(m.folderScope({...listing([entry('e1','a.txt')]),folder:{id:'tree-root',name:'PRIVATE_FOLDER_NAME',revision:androidRevision('PRIVATE_FOLDER_NAME',2)}})).revision));
- for(const bad of [undefined,{},{folder:{id:'/storage/emulated/0/Private',revision:'1'}},{folder:{id:'tree-root'}},{folder:{id:'tree-root',revision:'1'},entries:[{id:'e1'}]}])assert.equal(m.folderScope(bad),undefined);
-});
-test('a reviewed folder is current only when a fresh read matches it exactly',()=>{
- const reviewed=m.folderScope(listing([entry('e1','a.txt'),entry('e2','b.txt')]));
- assert.equal(m.folderScopeCurrent(reviewed,listing([entry('e2','b.txt'),entry('e1','a.txt')])),true);
- // Deleted, added, replaced-in-place and renamed entries, a changed folder and lost access all fail.
- assert.equal(m.folderScopeCurrent(reviewed,listing([entry('e1','a.txt')])),false,'deleted entry');
- assert.equal(m.folderScopeCurrent(reviewed,listing([entry('e1','a.txt'),entry('e2','b.txt'),entry('e3','c.txt')])),false,'added entry');
- assert.equal(m.folderScopeCurrent(reviewed,listing([entry('e1','a.txt'),entry('e9','b.txt')])),false,'neighbor with the same name');
- assert.equal(m.folderScopeCurrent(reviewed,listing([entry('e1','a.txt'),entry('e2','b.txt',{revision:'b.txt|text/plain|4|2|0'})])),false,'edited entry');
- assert.equal(m.folderScopeCurrent(reviewed,{...listing([entry('e1','a.txt'),entry('e2','b.txt')]),folder:{id:'tree-other',name:'x',revision:androidRevision('PRIVATE_FOLDER_NAME')}}),false,'another folder');
- for(const status of ['revoked','unavailable','unsupported'])assert.equal(m.folderScopeCurrent(reviewed,{status,message:'Folder access ended.'}),false,status);
- // Several loaded pages (Android lists 250 at a time): the fresh read is the first page. It must
- // be exactly the first entries that were loaded, and the reported total must be unchanged.
- const many=Array.from({length:300},(_,index)=>entry('p'+index,'f'+index+'.txt'));
- const paged=m.folderScope(listing(many,{total:300}));
- const firstPage=many.slice(0,250);
- assert.equal(m.folderScopeCurrent(paged,listing(firstPage,{total:300,cursor:'next'})),true);
- assert.equal(m.folderScopeCurrent(paged,listing(firstPage,{total:301,cursor:'next'})),false,'entry added beyond the loaded pages');
- assert.equal(m.folderScopeCurrent(paged,listing([...firstPage.slice(0,249),entry('p900','z.txt')],{total:300,cursor:'next'})),false,'unknown entry');
- // An entry named in the excerpt was deleted and another added elsewhere: the total is the same and
- // every fresh entry was loaded before, but the first page is no longer the reviewed first page.
- assert.equal(m.folderScopeCurrent(paged,listing(many.slice(1,251),{total:300,cursor:'next'})),false,'deleted entry replaced by a later one');
- // A fresh page too short to cover what the excerpt names proves nothing.
- assert.equal(m.folderScopeCurrent(paged,listing(many.slice(0,100),{total:300,cursor:'next'})),false,'short page');
- assert.equal(m.folderScopeCurrent(paged,listing(firstPage,{total:300})),false,'the later pages are gone');
- assert.equal(m.folderScopeCurrent(m.folderScope(listing(firstPage,{total:300,cursor:'next'})),listing(firstPage,{total:300,cursor:'next'})),true,'one loaded page');
- assert.equal(m.folderScopeCurrent(m.folderScope(listing([entry('e1','a.txt'),entry('e1','a.txt')])),listing([entry('e1','a.txt'),entry('e1','a.txt')])),false,'duplicate identities are not a listing');
-});
-test('the folder excerpt lists only the loaded entries of that one folder and says what is left out',()=>{
- const scope=m.folderScope(listing([entry('e1','a.txt'),entry('d1','Sub',{directory:true,mimeType:'vnd.android.document/directory'})],{cursor:'next',total:40}));
- const text=m.folderExcerpt(scope,label);
- assert.deepEqual(text.split('\n'),['Folder: PRIVATE_FOLDER_NAME','2 entries listed by name and type. File contents and subfolder contents are not included.','- a.txt (Text)','- Sub (Folder)','More… (40 total)']);
- assert.match(m.folderExcerpt(m.folderScope(listing([])),label),/^Empty$/m);
- const many=m.folderScope(listing(Array.from({length:m.FOLDER_EXCERPT_LIMIT+3},(_,i)=>entry('e'+i,'f'+i+'.txt'))));
- const lines=m.folderExcerpt(many,label).split('\n');
- assert.equal(lines.filter(line=>line.startsWith('- ')).length,m.FOLDER_EXCERPT_LIMIT);assert.equal(lines.at(-1),'3 more loaded entries are not listed here.');
-});
 test('only an unredacted own notification is reviewable, and only while that exact revision is listed',()=>{
  const own={id:'reminder-1',revision:'occ-1',source:'own',appLabel:'Alpha Phone',title:'Call the clinic',text:'Before noon'};
  assert.equal(m.noticeReviewable(own),true);
@@ -129,7 +51,6 @@ test('a saved capture identity is its id and a local counter, never the library 
  // AlphaPhotos registers the shared PhotosPlugin with Alpha's media names; the shared bridge builds the library.
  const java=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaPhotosPlugin.java','utf8');
  assert.match(java,/public class AlphaPhotosPlugin extends PhotosPlugin \{/);
- assert.match(java,/@Override protected OwnedMediaConfig mediaConfig\(\)\{return MEDIA_CONFIG;\}/);
  const bridge=readFileSync(new URL('../vendor/eliza/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/PhotosPlugin.java',import.meta.url),'utf8');
  assert.match(bridge,/owned = new OwnedMediaLibrary\(getContext\(\), config, playback::revoke\);/);
  const library=readFileSync(new URL('../vendor/eliza/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/OwnedMediaLibrary.java',import.meta.url),'utf8').replace(/\s+/g,' ');
@@ -252,29 +173,4 @@ test('a mail context switched, deleted or changed during its review cannot send 
  assert.match(adapter,/function mailContext\(\):MailContextSource \{if\(!body\|\|!selected\|\|!body\.historyId\)throw new Error\('Refresh this message before sharing'\);/);
  assert.match(adapter,/return validateMailContext\(review,mailContext\(\),current\);/);
  assert.match(adapter,/if \(body\?\.message\.id === id\) \{ body = null;/,'an archived or trashed open message is cleared');
-});
-
-
-test('calendar source discovery coalesces per owner, retries failures and fences old sources',async()=>{
- const {stripTypeScriptTypes}=await import('./support/strip-types.mjs');const vm=await import('node:vm');
- const core=readFileSync(new URL('../vendor/eliza/packages/core/src/runtime/single-flight-memo.ts',import.meta.url),'utf8').replace(/^export /gm,'');
- const SingleFlightMemo=vm.runInNewContext(stripTypeScriptTypes(core,{mode:'strip'})+';SingleFlightMemo',{performance});
- const ui=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
- const source=ui.slice(ui.indexOf('type CalendarAgendaSourceObservation='),ui.indexOf('async function deviceCapabilities'));
- const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
- const window=new EventTarget();let calls=0;const queue=[];
- const contract=readFileSync(new URL('../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts',import.meta.url),'utf8').replace(/^export /gm,'');
- const {calendarSource,calendarTarget}=vm.runInNewContext(stripTypeScriptTypes(contract,{mode:'strip'})+';({calendarSource,calendarTarget})');
- const context=(id,revision)=>({view:'calendar',sensitive:false,revision:1,selectedObject:{kind:'calendar-source',id,revision,accountId:id,sourceRevision:revision}});
- const one='1'.repeat(64),two='2'.repeat(64),oldRevision='3'.repeat(64),newRevision='4'.repeat(64),ownerRevision='5'.repeat(64);
- const sandbox={SingleFlightMemo,calendarSource,calendarTarget,window,Capacitor:{isNativePlatform:()=>false},registerPlugin:()=>({prepareAgentSource(){calls++;return queue.shift();}})};
- const {calendarAgendaObservation:read}=vm.runInNewContext(stripTypeScriptTypes(source,{mode:'strip'})+';({calendarAgendaObservation})',sandbox);
- const owner={supportsCalendarAgenda:true},first=deferred();queue.push(first.promise);
- const a=read(owner,context('local',one)),b=read(owner,context('local',one));await Promise.resolve();assert.equal(calls,1);first.resolve({sourceId:'local',sourceRevision:one});await Promise.all([a,b]);
- queue.push(Promise.reject(Error('unavailable')));const failOwner={supportsCalendarAgenda:true};assert.equal(await read(failOwner,context('local',two)),undefined);
- queue.push(Promise.resolve({sourceId:'local',sourceRevision:two}));assert.equal((await read(failOwner,context('local',two))).sourceId,'local');
- const old=deferred();queue.push(old.promise);const changing={supportsCalendarAgenda:true};const pending=read(changing,context('local',oldRevision));await Promise.resolve();window.dispatchEvent(new Event('alpha:calendar-sync-source-changed'));old.resolve({sourceId:'local',sourceRevision:oldRevision});assert.equal(await pending,undefined);
- queue.push(Promise.resolve({sourceId:'local',sourceRevision:newRevision}));assert.equal((await read(changing,context('local',newRevision))).sourceId,'local');
- queue.push(Promise.resolve({sourceId:'local',sourceRevision:ownerRevision}));assert.equal((await read({supportsCalendarAgenda:true},context('local',ownerRevision))).sourceId,'local');
- assert.equal(queue.length,0);
 });

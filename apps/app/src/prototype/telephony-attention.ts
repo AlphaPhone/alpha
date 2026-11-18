@@ -8,27 +8,25 @@
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createAospTelephony, type AlphaTelephonyPlugin, type AospTelephony} from '../runtime/aosp-telephony';
-import {isIncompleteSmsRow} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {isIncompleteSmsRow, type SmsThread} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {emptyTelephonyAttention, numberKey, presentTelephonyAttention, type TelephonyAttention} from './telephony-presenters';
-export {emptyTelephonyAttention, presentTelephonyAttention, type TelephonyAttention};
 
-type Bag = Record<string, any>;
 const REFRESH_MS = 30_000;
 
 /** One bounded read of every source the owner has granted. A refused or failed source stays null. */
-export async function readTelephonyAttention(client: AospTelephony, isCurrent:()=>boolean=()=>true): Promise<TelephonyAttention> {
+async function readTelephonyAttention(client: AospTelephony, isCurrent:()=>boolean=()=>true): Promise<TelephonyAttention> {
   const read = emptyTelephonyAttention(), status = await client.status();
   if(!isCurrent())throw new DOMException('Read retired','AbortError');
   const attempt = async <T,>(run: () => Promise<T>): Promise<T | null> => { try { return await run(); } catch { return null; } };
   const [threads, calls, voicemail, contacts] = await Promise.all([
     status.permissions.sms === 'granted' ? attempt(() => client.listThreads(20)) : null,
     status.permissions.callLog === 'granted' ? attempt(() => client.recentCalls(50)) : null,
-    attempt(async () => { const page = await (client as Bag).listVoicemail?.(20); return page && page.state === 'ready' ? page.voicemails as NonNullable<TelephonyAttention['voicemail']> : null; }),
+    attempt(async () => { const page = await client.listVoicemail(20); return page.state === 'ready' ? page.voicemails : null; }),
     status.permissions.contacts === 'granted' ? attempt(() => client.searchContacts('', 100)) : null,
   ]);
-  read.threads = threads ? threads.filter(row => !isIncompleteSmsRow(row)) as NonNullable<TelephonyAttention['threads']> : null;
+  read.threads = threads ? threads.filter((row): row is SmsThread => !isIncompleteSmsRow(row)) : null;
   read.calls = calls; read.voicemail = voicemail;
   for (const card of contacts || []) for (const number of card.phoneNumbers) {
     const key = numberKey(number);

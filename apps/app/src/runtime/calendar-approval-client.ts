@@ -1,6 +1,6 @@
 import {CALENDAR_APPROVAL_READ_PATH,calendarApprovalFromList,calendarApprovalId,calendarApprovalPending,calendarApprovalResolvePath,parseCalendarApprovalResolution,type CalendarApproval,type CalendarApprovalDecision} from './calendar-approval.ts';
 
-export interface CalendarApprovalConnection {
+interface CalendarApprovalConnection {
  ownerId:string;
  /** Captured connection, authenticated owner, conversation and foreground admission. */
  current():void;

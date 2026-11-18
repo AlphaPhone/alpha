@@ -19,7 +19,7 @@ public final class PrivateResidentSocketInstrumentedTest {
   StructStat st=Os.lstat(path);assertEquals(Process.myUid(),st.st_uid);assertEquals(bits,st.st_mode&0777);
   assertTrue(socket?OsConstants.S_ISSOCK(st.st_mode):OsConstants.S_ISDIR(st.st_mode));
  }
- static boolean denied(int socketErrno,int rootErrno){
+ private static boolean denied(int socketErrno,int rootErrno){
   return socketErrno==OsConstants.EACCES||socketErrno==OsConstants.EPERM
    ||(socketErrno==OsConstants.ENOENT&&rootErrno==OsConstants.ENOENT);
  }

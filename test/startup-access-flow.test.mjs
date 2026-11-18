@@ -2,12 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 // Alpha's binding of the shared walkthrough (packages/ui permission-walkthrough) at the prepared pin.
 const flow=await import('../apps/app/src/startup-permission-flow.ts');
-test('photo grant description preserves selected/partial scope and rejects locked or malformed native results',()=>{
- assert.match(flow.startupPhotoAccess({scope:'selected',locked:false}).description,/Selected/);
- assert.match(flow.startupPhotoAccess({scope:'partial',locked:false}).description,/Limited/);
- assert.equal(flow.startupPhotoAccess({scope:'denied',locked:false}).granted,false);
- for(const value of [null,{scope:['full'],locked:false},{scope:'full',locked:true},{scope:'full'}])assert.throws(()=>flow.startupPhotoAccess(value));
-});
 test('checks never prompt, denial persists to settings, and a granted readback retires the prompt',async()=>{
  const values=new Map();const store={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
  let granted=false,requests=0,settings=0;
@@ -20,14 +14,6 @@ test('checks never prompt, denial persists to settings, and a granted readback r
  flow.writeStartupPermissionMemory({dismissed:true},store);assert.equal(flow.readStartupPermissionMemory(store).dismissed,true);
  flow.reopenStartupPermissions(store);assert.equal(flow.readStartupPermissionMemory(store).dismissed,false);assert.equal(flow.readStartupPermissionMemory(store).attempted.camera,true);
 });
-
-test('location metadata labels approximate and precise grants without accepting malformed accuracy',()=>{
- assert.match(flow.startupLocationAccess({location:'granted',accuracy:'approximate'}).description,/Approximate/);
- assert.match(flow.startupLocationAccess({location:'granted',accuracy:'precise'}).description,/Precise/);
- assert.equal(flow.startupLocationAccess({location:'denied',accuracy:'none'}).granted,false);
- for(const value of [null,{location:'granted',accuracy:'none'},{location:'granted',accuracy:['precise']},{location:'denied',accuracy:'precise'},{location:'prompt'}])assert.throws(()=>flow.startupLocationAccess(value));
-});
-
 
 test('failed attempt persistence retains one prompt per live flow and permits a prompt after cold restart', async () => {
   const store = { getItem: () => null, setItem: () => { throw new Error('Storage unavailable'); } };

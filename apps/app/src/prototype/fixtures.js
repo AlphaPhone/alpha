@@ -1,5 +1,5 @@
 // Prototype fixture data: seeded people, conversations, mail, events, pages,
-// photos, places, notes, files, wallet, workflows, settings, shell copy and
+// photos, places, notes, files, workflows, settings, shell copy and
 // scripted replies. Only test-mocks builds bundle this module. Production
 // builds (ELIZA_DEV_ALLOW_TEST_MOCKS unset) swap it for fixtures.empty.js,
 // which has the same export names with empty or neutral values, so nothing
@@ -401,41 +401,6 @@ export const FILES_SEED = [
     sum: ["Photo of Ocean Beach at sunset", "Taken Sep 14 at 7:12 PM", "Also in Photos"] }
 ];
 
-export const WAL_CARDS = [
-  { id: "stone", name: "Household", last4: "0359", kind: "Debit", bg: "#D9D7D0", fg: "#000000", def: false, locked: false, tx: [
-    { id: "s1", m: "Rainbow Grocery", a: 92.40, d: 6, icon: "walBag" },
-    { id: "s2", m: "Cole Hardware", a: 23.10, d: 12, icon: "walBag" }] },
-  { id: "work", name: "Work", last4: "7703", kind: "Credit", bg: "#1F1F1F", fg: "#FFFFFF", def: false, locked: false, tx: [
-    { id: "w1", m: "GPU Reserve", a: 120.00, d: 1, icon: "chip", note: "Compute credits" },
-    { id: "w2", m: "Philz Coffee", a: 7.25, d: 2, icon: "walCup" },
-    { id: "w3", m: "Flight SFO to JFK", a: 389.00, d: 4, icon: "plane" },
-    { id: "w4", m: "GPU Reserve", a: 480.00, d: 6, icon: "chip", note: "Compute credits" },
-    { id: "w5", m: "GPU Reserve", a: 120.00, d: 13, icon: "chip", note: "Compute credits" }] },
-  { id: "blue", name: "Alpha Blue", last4: "4821", kind: "Debit", bg: "#0000FF", fg: "#FFFFFF", def: true, locked: false, tx: [
-    { id: "b1", m: "Tartine", a: 38.50, d: 0, icon: "walFood" },
-    { id: "b2", m: "Sightglass Coffee", a: 6.50, d: 1, icon: "walCup" },
-    { id: "b3", m: "Equinox SoMa", a: 210.00, d: 2, icon: "walGym", note: "Monthly membership" },
-    { id: "b4", m: "Rainbow Grocery", a: 64.18, d: 3, icon: "walBag" },
-    { id: "b5", m: "Transit reload", a: 20.00, d: 5, icon: "walBus" },
-    { id: "b6", m: "Blue Bottle Coffee", a: 5.75, d: 8, icon: "walCup" },
-    { id: "b7", m: "Tartine", a: 24.00, d: 11, icon: "walFood" }] }
-];
-export const WAL_TRIPS = [
-  { id: "r1", m: "Bus · 4th St & Folsom St", a: 2.50, d: 0 },
-  { id: "r2", m: "Train · Civic Center", a: 2.50, d: 1 },
-  { id: "r3", m: "Bus · 16th St & Valencia St", a: 2.50, d: 3 }
-];
-export const WAL_MERCH = [["Sightglass Coffee", 6.50, "walCup"], ["Blue Bottle Coffee", 5.75, "walCup"], ["Philz Coffee", 7.25, "walCup"]];
-/* Boarding pass and event ticket shown in Wallet, with their calendar entries. */
-export const WAL_PASSES = [
-  { id: "bp", title: "SFO → JFK", day: 3, time: "8:05 AM", icon: "plane", accent: true, qr: "SFOJFK1482-14A", place: "sfo",
-    cal: { title: "Flight SFO → JFK", off: 3, t: 8 + 5 / 60, d: 5.6, where: "SFO · Gate B12 · Seat 14A", cal: "personal" },
-    suggestions: ["When should I leave for SFO?", "Directions to SFO"],
-    reply: { text: "Gate B12, seat 14A. Boarding at 7:25 AM", title: "SFO to JFK", sub: " · 8:05 AM · Gate B12" } },
-  { id: "ticket", title: "Night Signals", day: 4, time: "8:00 PM", icon: "walTicket", qr: "NIGHTSIGNALS-GA-0412",
-    cal: { title: "Night Signals", off: 4, t: 20, d: 3, where: "The Warfield, 982 Market St", cal: "personal" } }
-];
-
 export const WF_SEED = [
   { id: 1, name: "Morning brief", on: true,
     short: "Spoken rundown of your day, weekdays at 7",
@@ -468,16 +433,16 @@ export const WF_SEED = [
         log: [["When", "No deep-work event on your calendar yesterday.", "skip"]], out: "" }
     ] },
   { id: 3, name: "Receipts to Files", on: true,
-    short: "Saves receipts from Mail and logs the amount",
-    summary: "Receipts from Mail go to Files › Receipts, and the amount goes to Wallet.",
+    short: "Saves receipts from Mail",
+    summary: "Receipts from Mail go to Files › Receipts.",
     trig: { kind: "email", match: "receipt" },
-    steps: [{ k: "Do", t: "Save the attachment to Files", apps: ["Files"] }, { k: "Do", t: "Add the amount to Wallet", apps: ["Wallet"] }],
+    steps: [{ k: "Do", t: "Save the attachment to Files", apps: ["Files"] }],
     runs: [
       { id: "r31", when: "Today, 9:14 AM", status: "fail", sum: "PDF was password-protected", dur: "",
-        log: [["When", "An email from Delta matched “receipt”.", "ok"], ["Do", "Couldn't open the PDF. It's password-protected.", "fail"], ["Do", "Didn't add an amount, since there was nothing to read.", "skip"]],
+        log: [["When", "An email from Delta matched “receipt”.", "ok"], ["Do", "Couldn't open the PDF. It's password-protected.", "fail"]],
         out: "", fix: "Ask me to open it with your Delta password, or forward the receipt without a password." },
       { id: "r32", when: "Yesterday, 6:05 PM", status: "ok", sum: "Saved Blue Bottle receipt · $6.50", dur: "4 s",
-        log: [["When", "An email from Blue Bottle matched “receipt”.", "ok"], ["Do", "Saved receipt-0928.pdf to Files › Receipts.", "ok"], ["Do", "Added $6.50 to Wallet under Food.", "ok"]], out: "" }
+        log: [["When", "An email from Blue Bottle matched “receipt”.", "ok"], ["Do", "Saved receipt-0928.pdf to Files › Receipts.", "ok"]], out: "" }
     ] },
   { id: 4, name: "Weekly review", on: false,
     short: "One-page recap of your week, Fridays at 5",
@@ -546,11 +511,6 @@ export const NOTIF = [
   { id: "n2", icon: "mail", who: "Jordan Park", text: "Revised term sheet attached", time: "1:12", go: { view: "inbox", patch: { open: 2 } } },
   { id: "n3", icon: "cal", who: "Design review", text: "3:00 PM", time: "2:15", go: { view: "calendar", patch: { open: "c4" } } },
   { id: "n4", icon: "shield", who: "Redaction receipt", text: "3 identifiers replaced before the morning brief.", time: "6:00", go: { view: "settings", patch: { page: "privacy" } } }
-];
-export const LOCK_SUM = [
-  { view: "messages", icon: "bubble", label: "2 message notifications", count: 2, notif: "n1" },
-  { view: "inbox", icon: "mail", label: "1 email notification", count: 1, notif: "n2" },
-  { view: "calendar", icon: "cal", label: "1 calendar notification", count: 1, notif: "n3" }
 ];
 /* Initial quick-settings state and the reference-only Enclave lock tile ([state key, icon, label]). */
 export const QUICK_SETTINGS = { wifi: true, bt: true, dnd: false, mic: true, loc: true, plane: false, shield: true, torch: false };
@@ -644,17 +604,6 @@ export const COPY = {
     photosSub: "2,184",
     storageW: "15%",
     storageText: "218 GB free"
-  },
-  wallet: {
-    transit: 23.40,
-    presets: { card: "blue", pass: "bp", addForm: { num: "4000 1234 5678 9017", exp: "11/29", name: "", cvv: "" } },
-    suggestions: ["How much did I spend this week?", "Show my boarding pass", "Pay with my work card"],
-    spendNotes: function (w, only, top, money) {
-      var out = [];
-      if (!only && w.by["Equinox SoMa"]) out.push("Equinox renewed at " + money(w.by["Equinox SoMa"]) + ", as usual");
-      if (!only || only === "work") { var g = w.by["GPU Reserve"]; if (g && top !== "GPU Reserve") out.push("GPU Reserve: " + money(g)); }
-      return out;
-    }
   },
   workflows: {
     sendPresets: [["A message to Maya", ["Messages"]]],

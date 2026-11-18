@@ -1,10 +1,11 @@
+import {isAbortError} from '../lib/abort';
 let current:AbortController|undefined;
 /** One owned picker at a time. Late OS results cannot resume a retired consumer. */
 export async function runFilePicker<T>(choose:(signal:AbortSignal)=>Promise<T>,cancelled:T):Promise<T>{
  current?.abort();const controller=new AbortController();current=controller;const cancel=()=>controller.abort(),back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();cancel();};
  window.addEventListener('alpha-back',back,true);window.addEventListener('pagehide',cancel);window.addEventListener('alpha:device-state',cancel);
  const retired=new Promise<T>(resolve=>controller.signal.addEventListener('abort',()=>resolve(cancelled),{once:true}));
- try{return await Promise.race([choose(controller.signal).catch(error=>{if(controller.signal.aborted||error instanceof DOMException&&error.name==='AbortError')return cancelled;throw error;}),retired]);}
+ try{return await Promise.race([choose(controller.signal).catch(error=>{if(controller.signal.aborted||isAbortError(error))return cancelled;throw error;}),retired]);}
  finally{window.removeEventListener('alpha-back',back,true);window.removeEventListener('pagehide',cancel);window.removeEventListener('alpha:device-state',cancel);if(current===controller)current=undefined;}
 }
 export function inputFiles(signal:AbortSignal,options:{photos?:boolean;directory?:boolean}={}):Promise<File[]>{

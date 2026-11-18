@@ -45,7 +45,7 @@ public class HomeCalendarCardInstrumentedTest {
  }
 
  @Test public void nextProviderEventShowsTitleCalendarNameAndReadTime() throws Exception {
-  Assume.assumeTrue("Run by scripts/test-calendar-regression.ts with calendar access granted", "1".equals(InstrumentationRegistry.getArguments().getString("homeCalendar")));
+  Assume.assumeTrue("Run by scripts/test-calendar-regression.ts with calendar access granted", "1".equals(gate()));
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   assertEquals("The runner granted READ_CALENDAR", PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(Manifest.permission.READ_CALENDAR));
   assertEquals("The runner granted WRITE_CALENDAR", PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(Manifest.permission.WRITE_CALENDAR));

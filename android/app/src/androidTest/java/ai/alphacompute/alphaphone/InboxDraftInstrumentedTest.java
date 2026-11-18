@@ -8,8 +8,6 @@ import androidx.test.runner.lifecycle.Stage;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.*;
 import org.junit.*;
@@ -41,11 +39,7 @@ public final class InboxDraftInstrumentedTest {
   BoundedActivityScenario.main(()->{for(Stage stage:new Stage[]{Stage.RESUMED,Stage.STARTED})for(Activity a:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage))if(a.getClass()==InboxFixtureActivity.class&&!a.isFinishing())out.set((InboxFixtureActivity)a);});
   return out.get();
  }
- private String js(String code)throws Exception{
-  InboxFixtureActivity a=activity();assertNotNull("Fixture Activity is live",a);CountDownLatch done=new CountDownLatch(1);AtomicReference<String> out=new AtomicReference<>();
-  BoundedActivityScenario.main(()->a.getBridge().getWebView().evaluateJavascript(code,value->{out.set(value);done.countDown();}));
-  assertTrue("Fixture WebView responds",done.await(8,TimeUnit.SECONDS));return out.get();
- }
+ private String js(String code)throws Exception{return WebViewTestDriver.evaluate(InboxFixtureActivity.class,code);}
  private void until(String code)throws Exception{
   long end=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<end){if("true".equals(js("Boolean("+code+")")))return;SystemClock.sleep(80);}throw new AssertionError("Inbox UI condition timed out: "+code);
  }
@@ -98,11 +92,10 @@ public final class InboxDraftInstrumentedTest {
    // The Android account panel names the signed-in state and offers Sign out only once /api/v1/user verified the session.
    nav("Settings");click("Agent connection");
    until("document.querySelector('#connection-title')?.textContent==='Your agent'&&"+button("Sign out"));click("Close connection settings");
-   // Inbox loads the signed-in mailbox by itself (the old explicit Load Inbox control is gone).
+   // Inbox loads the signed-in mailbox by itself.
    nav("Inbox");until(button("Fixture a"));until(button("Refresh"));click("Compose");input("To","literal@example.invalid");click("literal@example.invalid");input("Subject","Synthetic saved draft");input("Message","Exact native draft\nSecond line");click("Save draft locally");until("[...document.querySelectorAll('[role=status]')].some(e=>e.textContent==='Saved locally on this device')");
    JSONObject draft=new JSONObject(read(slot()).getString("value"));assertEquals("Exact native draft\nSecond line",draft.getString("body"));
-   StringBuilder hash=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("SHA-256").digest(slot().getBytes(StandardCharsets.UTF_8)))hash.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
-   byte[] bytes=Files.readAllBytes(new File(context.getNoBackupFilesDir(),"connection-credentials/"+hash).toPath());assertFalse(new String(bytes,StandardCharsets.ISO_8859_1).contains("Exact native draft"));
+   byte[] bytes=Files.readAllBytes(new File(context.getNoBackupFilesDir(),"connection-credentials/"+AlphaUtil.sha256Hex(slot())).toPath());assertFalse(new String(bytes,StandardCharsets.ISO_8859_1).contains("Exact native draft"));
   }else{
    JSONObject prior=new JSONObject(new String(Files.readAllBytes(backup.toPath()),java.nio.charset.StandardCharsets.UTF_8));assertNotEquals("Actual new Android process required",prior.getInt("pid"),android.os.Process.myPid());
    // Decision P-43: there is no local-apps choice to keep. The resident starts at every app start and

@@ -5,7 +5,6 @@ export {
   disconnectGmailAccount,
   disconnectMessage,
   type GmailDisconnectOutcome,
-  type GmailFailure,
   type GmailFailureKind,
 } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/failures.ts';
 export { gmailReadable } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/grants.ts';

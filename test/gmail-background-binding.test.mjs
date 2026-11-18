@@ -32,9 +32,6 @@ test('the Alpha binding keeps the installed slot, notice identifiers and bridge 
 });
 
 test('background admission no longer depends on the agent inference provider',()=>{
- const store=java('AlphaCredentialStore.java');
- assert.doesNotMatch(store,/PROVIDER_SLOT\.equals\(name\)\|\|"cloud:production"\.equals\(name\)&&!LocalAgentProviderAdmission\.sameCloudCredential\(before,value\)\)cloudChange/);
- assert.match(store,/if\("cloud:production"\.equals\(name\)&&!LocalAgentProviderAdmission\.sameCloudCredential\(before,value\)\)cloudChange\.changed\(\);/);
  const adapter=readFileSync(join(root,'apps/app/src/prototype/inbox-cloud-adapter.ts'),'utf8');
  const watch=adapter.match(/const watchSelectedMail=\(\)=>\{.*\};/)?.[0]??'';
  assert.match(watch,/if\(!selected\)\{void configureGmailBackground\(null\)/,'only an unselected account withdraws');

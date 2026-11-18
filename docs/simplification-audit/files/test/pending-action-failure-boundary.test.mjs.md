@@ -1,0 +1,14 @@
+# test/pending-action-failure-boundary.test.mjs
+- Lines: 181 | Kind: transplant (slices `replyFailure` and the post-turn block of `apps/app/src/runtime/connection-ui.tsx`, regex-evaluates `REPLY_FAILURES` and `EFFECT_APPLIED_INTERRUPTED`, and slices three regions of `apps/app/src/prototype/agent-adapter.ts` (error presentation, `planActionCard`.., `p.agentSay`); runs them with `new Function` and ~45 injected fakes) | Verdict: DELETE; REWRITE the user-visible cases in `journeys/chat.spec.ts`
+- Covers: when a reply ends in a terminal failure, the chat shows one interrupted message and at most one "action could not be shown" notice, never executes pending actions, keeps service-limit state, maps billing refusal to the funding action and provider-less resident to the provider action, says "Done…" when an effect was applied, bounds notices (5, 500 chars), and never shows the old notice after the conversation, session owner/agent/origin changes or the binding is missing. Duplicates: `test/browser/resident-failures.production.spec.ts:54,126` (failure kinds, provider-less turn, sends once), `test/browser/billing-recovery.production.spec.ts:143,233` (billing refusal and funding popup), `test/browser/chat-system-notices.production.spec.ts:18` (notices collapse to one), `test/chat-ui-failed-turn.test.mjs` (same `REPLY_FAILURES`). Callers/importers: `npm test` glob; `test/support/strip-types.mjs`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 9-23, 64-76 | T2 | Five text-anchored slices of the two largest god modules (`connection-ui.tsx` 4.2k lines, `agent-adapter.ts` 2.1k); any split (D1), rename or formatter run breaks it. | Delete. | Low |
+| 2 | 30-60, 77-92 | T3 | ~45 injected fakes (`state`, `selected`, `connectionController`, `validateUuid`…): the test re-creates the module's closure. | Delete. | Low |
+| 3 | 104-141 | T4 | Failure kinds, billing and provider cards are covered by the production resident/billing journeys. | Keep there. | Low |
+| 4 | 142-181 | - | Unique: notice suppression when the conversation or session identity changed before settlement, malformed/oversized notice bounding, and "Done…" wording after an applied effect. | Carry to `journeys/chat.spec.ts` (resident stub emits a terminal failure with notices). | Medium |
+
+## Proposed end state
+File deleted. `journeys/chat.spec.ts` (resident-stub project) gains three cases: (1) a failed turn with an unsupported-action notice shows one interrupted message and one notice, and switching conversation before the failure settles shows no notice; (2) a failure after an applied effect says "Done…" and never "Nothing has been approved"; (3) seven notices including empty/oversized ones render at most five safe ones. Failure-kind wording and billing/provider actions stay in the existing production journeys (moved into `journeys/chat.spec.ts` and `journeys/connection-cloud.spec.ts`).

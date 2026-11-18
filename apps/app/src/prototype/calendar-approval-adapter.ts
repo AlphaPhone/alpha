@@ -2,20 +2,20 @@ import {connectionController} from '../runtime/connection-ui';
 import {alphaClient} from '../runtime/alpha-client';
 import {calendarReviewText,inboxChoiceText,calendarApprovalStatus,type CalendarApproval,type CalendarApprovalResolution} from '../runtime/calendar-approval';
 import {reviewCalendarApproval} from './calendar-approval-review';
+import {sessionKey} from '../lib/session-key';
 type Shell=Record<string,any>;
 type CalendarReview=ReturnType<typeof calendarReviewText>;
 /** Parses of the agent messages on screen, by message id. A message whose text has not changed keeps
  * its parse (the same object, which callers must not change), so a render parses only new or edited
  * messages. `retain` forgets the ids that are no longer in the conversation. */
-export function createCalendarReviewParses(parseText:(text:string)=>CalendarReview=calendarReviewText){
+function createCalendarReviewParses(){
  const known=new Map<string,{text:string;parsed:CalendarReview}>();
  return {
   parse(id:string,text:string):CalendarReview{
    const hit=known.get(id);if(hit&&hit.text===text)return hit.parsed;
-   const parsed=parseText(text);known.set(id,{text,parsed});return parsed;
+   const parsed=calendarReviewText(text);known.set(id,{text,parsed});return parsed;
   },
   retain(ids:Iterable<string>){const keep=new Set(ids);for(const id of [...known.keys()])if(!keep.has(id))known.delete(id);},
-  get size(){return known.size;},
  };
 }
 /** Presentation only: stored messages, model context and copied source text remain unchanged. */
@@ -23,10 +23,10 @@ export function installCalendarApprovalAdapter(Component:Shell){
  const p=Component.prototype,render=p.renderVals,unmount=p.componentWillUnmount;
  const states=new WeakMap<object,{abort?:AbortController;statuses:Map<string,string>;results:Map<string,CalendarApprovalResolution>}>();
  const state=(shell:Shell)=>{let value=states.get(shell);if(!value){value={statuses:new Map(),results:new Map()};states.set(shell,value);}return value;};
- const binding=()=>{const snapshot=connectionController.getSnapshot();return JSON.stringify([snapshot.session,snapshot.history?.conversationId]);};
+ const binding=()=>{const snapshot=connectionController.getSnapshot();return sessionKey(snapshot.session,snapshot.history?.conversationId);};
  const labels=(shell:Shell,row:CalendarApproval)=>{
-  const port=connectionController.getAppRecordClient?.(),model=shell.agentCalendar?.state;
-  if(!port?.current()||!model||model.savedAt!==null||model.status!=='ready'||model.ownerKey!==JSON.stringify([new URL(port.identity.origin).origin,port.identity.ownerId,port.identity.agentId]))return {};
+  const port=connectionController.getAppRecordClient(),model=shell.agentCalendar?.state;
+  if(!port?.current()||!model||model.savedAt!==null||model.status!=='ready'||model.ownerKey!==sessionKey(new URL(port.identity.origin).origin,port.identity.ownerId,port.identity.agentId))return {};
   const p=row.payload,matches=(value:Shell)=>value.calendarId===p.calendarId&&value.side==='owner'&&String(value.grantId??'')===String(p.grantId??'')&&(!p.expectedProvider||value.provider===p.expectedProvider);
   const sources=model.calendars.filter(matches);if(sources.length!==1)return {};
   const events=(model.feed?.events??[]).filter((event:Shell)=>matches(event)&&(event.externalId===p.eventId||event.id===p.eventId)&&(p.expectedEventStartAtMs==null||Date.parse(event.startAt)===p.expectedEventStartAtMs));
@@ -65,10 +65,10 @@ export function installCalendarApprovalAdapter(Component:Shell){
    // A verified device receipt may already replace the original review prose.
    // Keep that projection and never interpret its summary as Calendar commands.
    if(typeof message.displayText==='string'&&message.displayText!==source)return {...message,messageActionsLabel:message.messageActionsLabel?'Message actions: '+message.displayText:message.messageActionsLabel};
-   // Order: the Calendar projection, then inbox choices (prose only); maps-chat-adapter.ts runs after this.
+   // Order: the Calendar projection, then inbox choices (prose only); the Maps chat adapter runs after this.
    const parsed=cache.parse(String(message.id),source),displayText=inboxChoiceText(parsed.displayText);
    return {...message,displayText,hasCalendarText:message.hasCalendarText!==false&&!!displayText,messageActionsLabel:message.messageActionsLabel?'Message actions: '+(displayText||'Calendar request'):message.messageActionsLabel,calendarReviews:parsed.ids.map(id=>({id,status:value.statuses.get(key+id)||'',canOpen:value.results.get(key+id)?.kind==='succeeded',open:()=>void review(this,id),openCalendar:()=>{if(this.live&&!document.hidden&&binding()===key){this.openView('calendar');void this.refreshAgentCalendar?.();}}}))};
   });return out;
  };
- p.componentWillUnmount=function(){states.get(this)?.abort?.abort();states.delete(this);parses.delete(this);return unmount?.call(this);};
+ p.componentWillUnmount=function(){states.get(this)?.abort?.abort();states.delete(this);parses.delete(this);return unmount.call(this);};
 }

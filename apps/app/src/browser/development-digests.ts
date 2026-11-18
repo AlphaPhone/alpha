@@ -5,6 +5,7 @@ import {developmentDigestDocument,readDevelopmentDigests,validateDevelopmentDige
 import {assertDevelopmentIdentity,verifyDevelopmentIdentity,developmentIdentity,type DevelopmentIdentity} from './development-identity';
 import {revision} from './revision';
 import {devSurfacesEnabled} from '../build-flags';
+import {deviceTimeZone} from '../lib/civil-date';
 import {scheduledOccurrence,settleOccurrence,carriedSettlement,digestSourceState,wall,DIGEST_MISSED_TEXT,DIGEST_UNAVAILABLE_TEXT} from './development-digest-occurrence';
 const id=(v:unknown):string=>{if(typeof v!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(v))throw Error('Invalid digest identity.');return v;};
 /** Requests and periodic inbox checks settle only the latest occurrence, never a backlog. */
@@ -46,7 +47,7 @@ export async function developmentDigestRequest(identity:DevelopmentIdentity,path
   if(path==='/api/workflow/hosted/sources'&&body===undefined)return {sources:state.sources.map(({text,...source})=>source)};
   if(path==='/api/workflow/hosted/loops'&&body===undefined)return {loops:state.loops};
   if(path==='/api/workflow/hosted/live-accounts'){state.liveRevision??=revision();return {accounts:[browserDigestAccount(identity,state.liveRevision),...delegation.grants.filter(g=>!g.revoked&&Date.parse(g.expiresAt)>now).map(grantAccount)]};}
-  if(path==='/api/workflow/hosted/live-calendars'){const account=liveAccount(body?.accountId);if(!account.kinds.includes('calendar'))throw Error('Calendar access is not granted.');if(body?.accountId!==account.accountId||body.accountRevision!==account.accountRevision)throw Error('Source access changed.');return {calendars:[{calendarId:'local',label:'Browser calendar',timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone}],truncated:false};}
+  if(path==='/api/workflow/hosted/live-calendars'){const account=liveAccount(body?.accountId);if(!account.kinds.includes('calendar'))throw Error('Calendar access is not granted.');if(body?.accountId!==account.accountId||body.accountRevision!==account.accountRevision)throw Error('Source access changed.');return {calendars:[{calendarId:'local',label:'Browser calendar',timeZone:deviceTimeZone()}],truncated:false};}
     if(path.startsWith('/api/workflow/hosted/results?')){const client=id(new URL(path,location.origin).searchParams.get('clientId'));await tick();await check();return {entries:state.results.filter(r=>r.cursor>(Object.hasOwn(state.acks,client)?state.acks[client]:0)).slice(0,50)};}
   if(path==='/api/workflow/hosted/results/ack'){const client=id(body?.clientId);if(!state.results.some(r=>r.cursor===body.cursor&&r.runId===body.runId))throw Error('Digest receipt changed.');if(!Object.hasOwn(state.acks,client)&&Object.keys(state.acks).length>=100)throw Error('Digest client history is full.');state.acks[client]=Math.max(Object.hasOwn(state.acks,client)?state.acks[client]:0,body.cursor);return {};}
   if(!body||body.confirmed!==true)throw Error('Review this digest change first.');

@@ -588,7 +588,7 @@ test("round-9 registrations: new classes, campaigns and removed reasons", () => 
 });
 
 test("PrototypeFlow and CalendarFlow are registered; the retired resident Activity test is gone", () => {
-  // PrototypeFlow's four methods need no host: the class runs by name, and its live-agent journey is LiveAgent's.
+  // PrototypeFlow's four methods need no host: the class runs by name.
   assert.ok(Object.hasOwn(CLASS_REGISTRY, "PrototypeFlow") && !Object.hasOwn(NOT_RUN_BY_A_RUNNER, "PrototypeFlow"));
   assert.equal(parseInstrumentationArgs(["--classes", "PrototypeFlow"]).classes[0], C("PrototypeFlow"));
   // CalendarFlow changes the device time zone: gated, in a disposable user, with Calendar access granted.
@@ -622,9 +622,7 @@ test("restart runner wires the migration, crash-log, theme and source-reference 
   }
 });
 
-test("round-9 journeys and links: J01, J05, the note link and the Maps return are registered offline", () => {
-  // J01 drives Camera UI the view refresh removed; it is listed as not run until it is rewritten.
-  assert.ok(Object.hasOwn(NOT_RUN_BY_A_RUNNER, "PosterCalendarJourney") && !Object.hasOwn(CLASS_REGISTRY, "PosterCalendarJourney"));
+test("round-9 journeys and links: J05, the note link and the Maps return are registered offline", () => {
   for (const [name, gate] of [["JourneyJ05", "journeyJ05"], ["Maps", "mapsEventReturn"]]) {
     assert.equal(CLASS_REGISTRY[name].args[gate], "1", `${name} passes ${gate}`);
     assert.ok(gateRead(sourceOf(name), gate, "1"), `${name} reads ${gate}`);

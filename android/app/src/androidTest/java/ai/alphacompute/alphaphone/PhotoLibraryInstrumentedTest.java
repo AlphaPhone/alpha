@@ -100,7 +100,7 @@ public class PhotoLibraryInstrumentedTest {
     assertEquals(FIXTURES, new HashSet<>(ids).size());
     // Ids are stable across a fresh read.
     JSONObject again = call("page", new JSONObject().put("query", prefix).put("limit", 25));
-    for (int i = 0; i < Math.min(24,ids.size()); i++) assertEquals(ids.get(i), again.getJSONArray("items").getJSONObject(i).getString("id"));
+    for (int i = 0; i < 24; i++) assertEquals(ids.get(i), again.getJSONArray("items").getJSONObject(i).getString("id"));
     // LIKE wildcards in the query are literal.
     assertEquals(0, call("page", new JSONObject().put("query", prefix.replace('-', '_') + "%")).getJSONArray("items").length());
 

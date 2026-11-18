@@ -121,17 +121,6 @@ test('live latency is numbers only, kept on the active turn and copied into diag
   assert.equal(timing.recordLiveVoiceTiming({mode: 'stream', partials: -1}), false);
 });
 
-test('the live client and adapter never store, log or send interim text and keep the send policy constant', () => {
-  const sources = ['apps/app/src/runtime/live-voice.ts', '.eliza/client-features/packages/voice/src/live-voice-session.ts', 'apps/app/src/runtime/native-live-voice.ts'].map(file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8'));
-  for (const source of sources) assert.doesNotMatch(source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /console\.|localStorage|sessionStorage|indexedDB/);
-  const adapter = fs.readFileSync(new URL('../apps/app/src/prototype/voice-adapter.ts', import.meta.url), 'utf8');
-  for (const line of adapter.split('\n').filter(line => /conversationInterim/.test(line)))
-    assert.doesNotMatch(line, /draft|setItem|sendVoiceTurn|sendVoiceEntry|console\./, 'interim text is display only');
-  assert.match(fs.readFileSync(new URL('../apps/app/src/runtime/voice-selection.ts', import.meta.url), 'utf8'), /const VOICE_SEND_POLICY: VoiceSendPolicy = 'auto-send';/);
-  // Every final goes through the existing voice policy boundary: the assistant and the recorded loop share one send.
-  assert.match(adapter, /const sendTurn=async\([\s\S]{0,400}sendVoiceEntry\(\{policy:voiceSendPolicy\(\)/);
-  assert.equal((adapter.match(/send:sendTurn/g) || []).length, 2);
-});
 
 test('Android: Silero VAD runs in the app process and only the live ASR and end-of-turn routes are added to the agent bridge', () => {
   const plugin = fs.readFileSync(new URL('../android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java', import.meta.url), 'utf8');
@@ -175,7 +164,7 @@ test('the native speech bridge and live transport are shared upstream; Alpha kee
   const turn = strip(fs.readFileSync(new URL('../apps/app/src/runtime/native-voice-turn.ts', import.meta.url), 'utf8'));
   assert.match(turn, /setNativeVoiceStageSink\(nativeVoiceStageSink\(plugin\(\)\)\)/);
   assert.doesNotMatch(turn, /markVoiceTurn\(|Promise\.race/);
-  for (const file of ['local-voice.ts', 'paired-voice.ts']) {
+  for (const file of ['local-voice.ts']) {
     const source = strip(fs.readFileSync(new URL('../apps/app/src/runtime/' + file, import.meta.url), 'utf8'));
     assert.match(source, /const operation = createNativeSpeechRequests\(\{/, file);
     assert.doesNotMatch(source, /new AbortController\(\)|crypto\.randomUUID/, file);

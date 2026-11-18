@@ -24,11 +24,11 @@ public final class HostedResultNoticesTest {
   notices=new HostedResultNotices(storage,poster);String question=notices.peek().getString("token");notices.releaseQuestion(question);require(notices.peek().length()==0&&active.contains(tuesday),"Cancel releases only Ask, preserving notice");
   notices.capture(tuesday,true);String stale=notices.peek().getString("token");notices.capture(tuesday,false);require(!notices.peek().getBoolean("question")&&!stale.equals(notices.peek().getString("token")),"ordinary tap supersedes pending question with a new token");
   try{notices.releaseQuestion(stale);throw new AssertionError("stale release accepted");}catch(IllegalStateException expected){}
-  notices.capture(tuesday);String token=notices.peek().getString("token");notices.consume(token);require(!active.contains(tuesday)&&cancelled.contains(tuesday),"acknowledgement cancels the notice");
+  notices.capture(tuesday,false);String token=notices.peek().getString("token");notices.consume(token);require(!active.contains(tuesday)&&cancelled.contains(tuesday),"acknowledgement cancels the notice");
   notices.withdrawOtherOwners(new JSONObject().put("origin",origin).put("ownerId",owner).put("agentId",agent));require(active.contains(evening),"exact result owner stays visible");
-  notices.capture(evening);require(notices.peek().length()>0,"owner's result tap pending");
+  notices.capture(evening,false);require(notices.peek().length()>0,"owner's result tap pending");
   notices.withdrawOtherOwners(new JSONObject().put("origin","https://other.invalid").put("ownerId",owner).put("agentId",agent));require(active.isEmpty()&&notices.peek().length()==0,"owner change cancels result notices and captured taps");
-  notices.capture(evening);require(notices.peek().length()==0,"stale result PendingIntent cannot disclose prior owner");
+  notices.capture(evening,false);require(notices.peek().length()==0,"stale result PendingIntent cannot disclose prior owner");
   require("owner-changed".equals(notices.publish(retain.apply("run-evening","evening-loop"))),"queued prior-owner result refuses to post");
   notices=new HostedResultNotices(storage,poster);notices.withdrawOtherOwners(new JSONObject().put("origin",origin).put("ownerId",owner).put("agentId",agent));
   require("owner-withdrawn".equals(notices.publish(retain.apply("run-evening","evening-loop")))&&posted.size()==3,"return retains result history without resurrecting its notice");

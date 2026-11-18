@@ -4,6 +4,7 @@ import android.content.Context;
 import ai.eliza.voice.RecordingPcm;
 import ai.eliza.voice.CartesiaSpeech;
 import ai.eliza.plugins.agent.runtime.NativeProviderSlot;
+import ai.eliza.plugins.passwords.PasswordSurfaces;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -29,9 +30,13 @@ final class KeyboardDictationCloud implements CartesiaSpeech.Guard {
  }
  private JSONObject selection() throws Exception {
   return AlphaLocalAgentPlugin.withCredentialAuthority(authority, () -> {
-   if (cancelled || ai.eliza.plugins.passwords.PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
-   return new JSONObject(new AlphaCredentialStore(context).readCredentialSlot("local-agent-provider:v1"));
+   requireActive();
+   return new JSONObject(new AlphaCredentialStore(context).readCredentialSlot(Slots.LOCAL_AGENT_PROVIDER));
   });
+ }
+ /** Cancellation or a visible password surface ends the dictation before any credential is read. */
+ private void requireActive() throws IOException {
+  if (cancelled || PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
  }
  private String directKey() throws Exception {
   JSONObject selected = selection();
@@ -43,12 +48,12 @@ final class KeyboardDictationCloud implements CartesiaSpeech.Guard {
  }
  private JSONObject credential() throws Exception {
   return AlphaLocalAgentPlugin.withCredentialAuthority(authority, () -> {
-   if (cancelled || ai.eliza.plugins.passwords.PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
+   requireActive();
    AlphaCredentialStore store = new AlphaCredentialStore(context);
-   JSONObject saved = new JSONObject(store.readCredentialSlot("cloud:production"));
+   JSONObject saved = new JSONObject(store.readCredentialSlot(Slots.CLOUD_PRODUCTION));
    String id = saved.getString("credentialId");
    if (id.isEmpty() || (credentialId != null && !credentialId.equals(id))) throw new IOException("Account changed");
-   LocalAgentProviderAdmission.requireCloudVoiceSelection(store.readCredentialSlot("local-agent-provider:v1"), id);
+   LocalAgentProviderAdmission.requireCloudVoiceSelection(store.readCredentialSlot(Slots.LOCAL_AGENT_PROVIDER), id);
    if (saved.has("expiresAt") && saved.getLong("expiresAt") <= System.currentTimeMillis()) throw new IOException("Sign in again");
    return saved;
   });
@@ -73,13 +78,11 @@ final class KeyboardDictationCloud implements CartesiaSpeech.Guard {
    JSONObject saved = credential();
    String token = saved.getString("token");
    if (token.isEmpty() || token.length() > 16384 || token.contains("\r") || token.contains("\n")) throw new IOException("Sign in again");
-   HttpURLConnection request = (HttpURLConnection)new URL("https://" + host + "/api/v1/voice/stt").openConnection();
+   HttpURLConnection request = AlphaUtil.noCache((HttpURLConnection)new URL("https://" + host + "/api/v1/voice/stt").openConnection(), 20000, 60000);
    connection = request;
    String boundary = "AlphaDictation" + UUID.randomUUID().toString().replace("-", "");
    byte[] prefix = ("--"+boundary+"\r\nContent-Disposition: form-data; name=\"provider\"\r\n\r\ncartesia\r\n--"+boundary+"\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"recording.wav\"\r\nContent-Type: audio/wav\r\n\r\n").getBytes(StandardCharsets.US_ASCII);
    byte[] suffix = ("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.US_ASCII);
-   request.setInstanceFollowRedirects(false); request.setUseCaches(false);
-   request.setConnectTimeout(20000); request.setReadTimeout(60000);
    request.setRequestMethod("POST"); request.setDoOutput(true);
    request.setRequestProperty("Authorization", "Bearer " + token);
    request.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);

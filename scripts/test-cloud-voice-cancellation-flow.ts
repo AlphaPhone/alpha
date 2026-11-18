@@ -13,7 +13,7 @@ await owned(async(f,clock)=>{
  assert.equal(typeof view().readAloud,'function');
  assert.match(view().cloudSpeechDisclosure,/^Text → /);
  view().readAloud();await clock.flush();assert.equal(f.cloudSpeech,1);assert.equal(typeof view().stopReading,'function');
- assert.equal(f.localFactories,0);assert.equal(f.pairedFactories,0);
+ assert.equal(f.localFactories,0);
  const request=f.speechInputs[0].requestId;f.holdPlaybackCleanup=true;view().stopReading();await clock.advance(650);
  assert.equal(f.stopPlaybackInputs.filter(input=>input.requestId===request).length,1,'Idempotent exact request cleanup');
  const starting=f.shell.startVoice();await clock.flush();assert.equal(f.starts,0,'Prior Notes speaker retirement blocks new capture beyond the old500ms timeout');

@@ -9,7 +9,6 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.CalendarContract;
 import android.provider.DocumentsContract;
-// MVP-DEFERRED: import android.provider.ContactsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
@@ -29,7 +28,7 @@ import java.util.concurrent.Executors;
 /** Product handoffs only. Opening another app never proves that a write completed. */
 @CapacitorPlugin(name = "DailyApps", permissions = {@Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS}), @Permission(alias = "camera", strings = {Manifest.permission.CAMERA})})
 public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
- private static final String[] ACTIONS = {"camera", "photos", "files", "maps", "calendar", "calendar-create", "reminder", "email", "inbox", "browser", "notifications", "settings", "autofill", "voice"}; // MVP-DEFERRED: "phone", "messages", "contacts".
+ private static final String[] ACTIONS = {"camera", "photos", "files", "maps", "calendar", "calendar-create", "reminder", "email", "inbox", "browser", "notifications", "settings", "autofill", "voice"};
  private boolean selectionPending;
  /** Selected-document calls reach the document provider (a cloud file can stall for its whole download) and
   *  the shared SelectedDocuments monitor, so they run here in call order, never on Capacitor's plugin thread. */
@@ -132,9 +131,6 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  private String string(PluginCall call, String key, String fallback) { return call == null ? fallback : call.getString(key, fallback); }
  private Intent intent(String action, PluginCall call) {
   switch (action) {
-   // MVP-DEFERRED: case "phone": return new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(string(call, "query", ""))));
-   // MVP-DEFERRED: case "messages": return new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(string(call, "query", "")))).putExtra("sms_body", string(call, "body", ""));
-   // MVP-DEFERRED: case "contacts": return new Intent(Intent.ACTION_VIEW).setDataAndType(ContactsContract.Contacts.CONTENT_URI, ContactsContract.Contacts.CONTENT_TYPE);
    case "camera": return new Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA);
    case "photos": return new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
    case "files": {

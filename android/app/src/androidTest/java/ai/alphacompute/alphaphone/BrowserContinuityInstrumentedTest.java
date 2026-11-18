@@ -38,7 +38,7 @@ public final class BrowserContinuityInstrumentedTest {
   int count=0;for(int i=0;i<100;i++){count=AlphaBrowserStores.session(context).read().getJSONArray("tabs").length();if(count==expected)break;SystemClock.sleep(100);}return count;
  }
  /** The persistent normal-tab profile is retained by decision; only ephemeral ones retire. */
- private static java.util.HashSet<String> ephemeralOnly(java.util.Collection<String> names){java.util.HashSet<String> out=new java.util.HashSet<>();for(String name:names)if(AlphaBrowserPlugin.ephemeralProfile(name))out.add(name);return out;}
+ private static java.util.HashSet<String> ephemeralOnly(java.util.Collection<String> names){java.util.HashSet<String> out=new java.util.HashSet<>();for(String name:names)if(AlphaBrowserStores.IDENTITY.ephemeral(name))out.add(name);return out;}
  private void saved(BrowserBookmarkStore store,String url,boolean expected)throws Exception{for(int i=0;i<150;i++){if(store.read().contains(url)==expected)return;SystemClock.sleep(100);}fail("Native encrypted bookmark commit did not match UI action");}
  @Test public void tabsSurviveAppNavigationAndBookmarksSurviveActivityRecreation()throws Exception{
   AppNavigation.assumeNoRequiredSignIn("Browser continuity");
@@ -92,7 +92,7 @@ public final class BrowserContinuityInstrumentedTest {
   });
   for(String profile:before.profiles){
    // The persistent normal-tab profile is retained by product decision.
-   if(!AlphaBrowserPlugin.ephemeralProfile(profile))continue;
+   if(!AlphaBrowserStores.IDENTITY.ephemeral(profile))continue;
    java.util.concurrent.atomic.AtomicBoolean purged=new java.util.concurrent.atomic.AtomicBoolean();
    for(int i=0;i<200&&!purged.get();i++){
     WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
@@ -144,12 +144,10 @@ public final class BrowserContinuityInstrumentedTest {
    assertEquals("Normal-tab cookie survives the host reload","true",browser.child("document.cookie.includes('alpha_reload_signin="+token+"')"));
    assertEquals("Normal tab never sees private data","null",browser.child("localStorage.getItem('reload_private')"));
    click("Menu");click("New private tab");privateFixture(url,token);BrowserSnapshot second=snapshot();
-   app("Settings");ready("window.__alphaTestNavigation?.status==='complete'");click("Agent connection");ready("document.querySelector('.alpha-connection-scrim')");
-   host("[...document.querySelectorAll('.alpha-connection summary')].find(e=>e.textContent==='Mock mode').click()");
-   WebViewTestDriver.navigateHostDocument("[...document.querySelectorAll('.alpha-connection button')].find(e=>e.textContent.trim()==='Enter mock mode').click()",false);
-   ready("document.documentElement.dataset.connectionMode==='mock'&&document.querySelector('.mock-mode-banner')");resetVerified(second,url);
+   app("Settings");ready(AppNavigation.SETTLED);click("Agent connection");ready("document.querySelector('.alpha-connection-scrim')");
+   AppNavigation.enterMockMode();resetVerified(second,url);
    assertEquals("Mock renderer does not receive private bookmark URL","false",host("document.body.textContent.includes("+JSONObject.quote(token)+")"));
-   WebViewTestDriver.navigateHostDocument("document.querySelector('.mock-mode-banner button').click()",true);ready("document.documentElement.dataset.connectionMode==='live'&&!document.querySelector('.mock-mode-banner')");
+   AppNavigation.exitMockMode();
    assertSame(first.activity,snapshot().activity);app("Browser");page(url);click("Menu");click("New private tab");address(url);page(url);assertEquals("Fresh private profile after mock exit","null",browser.child("localStorage.getItem('reload_private')"));
    click("Menu");click("Bookmarks and history");click("Bookmarks");ready(button(url));
   }finally{if(store.read().contains(url))store.change(url,false);}
@@ -176,7 +174,7 @@ public final class BrowserContinuityInstrumentedTest {
     boolean privateSupported=androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DELETE_BROWSING_DATA);
     click("Menu");click("New private tab");address(url);
     if(privateSupported)page(url);else ready("document.body.innerText.includes('Private tabs need an Android System WebView')");
-    java.util.HashSet<String> ephemeral=new java.util.HashSet<>();for(String name:snapshot().profiles)if(AlphaBrowserPlugin.ephemeralProfile(name))ephemeral.add(name);
+    java.util.HashSet<String> ephemeral=ephemeralOnly(snapshot().profiles);
     assertEquals("Private tab uses an ephemeral profile exactly when supported",privateSupported,!ephemeral.isEmpty());
     assertTrue(fixture.edit().putStringSet("profiles",ephemeral).putBoolean("privateSupported",privateSupported).commit());
     assertEquals("Only the normal tab is saved",1,savedTabs(context,1));
@@ -192,7 +190,7 @@ public final class BrowserContinuityInstrumentedTest {
    WebViewTestDriver.withActivity(MainActivity.class,activity->{
     java.util.List<String> names=androidx.webkit.ProfileStore.getInstance().getAllProfileNames();
     for(String name:retired)assertFalse("Old private profile deleted after real process restart",names.contains(name));
-    assertTrue("Persistent sign-in profile retained across process restart",names.contains(AlphaBrowserPlugin.PERSISTENT_PROFILE));
+    assertTrue("Persistent sign-in profile retained across process restart",names.contains(AlphaBrowserStores.PERSISTENT_PROFILE));
    });
    app("Browser");
    if("verify".equals(phase)){

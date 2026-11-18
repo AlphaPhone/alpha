@@ -13,7 +13,6 @@ import {replayVideoEditReview} from './video-edit-review.mjs';
 import {checkResidentStartCancel} from './resident-start-cancel.mjs';
 import {checkHomeInstanceHandoff} from './home-instance-handoff.mjs';
 import {checkRendererBackgroundRebuild} from './renderer-background-rebuild.mjs';
-import {checkSavedSignInRecovery} from './saved-sign-in-recovery.mjs';
 
 const definitions = [
   ['SpeechCleanupLatch', runSpeechCleanupLatchReplay, 'speechProjection',
@@ -34,8 +33,6 @@ const definitions = [
     'All state fields are compared with actual MainActivity observations through the existing Java harness over closed task and WebView ports.'],
   ['RendererBackgroundRebuild', checkRendererBackgroundRebuild, 's',
     'All state fields are compared with actual MainActivity/shared-budget observations through the existing two-surface Java harness.'],
-  ['SavedSignInRecovery', checkSavedSignInRecovery, 's',
-    'All state fields are compared with actual AlphaCloudSignInPlugin restore observations through the existing Java harness; credential storage and transport are controlled ports.'],
 ];
 
 /** Retain the outer owning tests' positive bounds as well as the drivers' own
@@ -44,7 +41,7 @@ const definitions = [
 function owningAssertions(model, result) {
   const counts = {SpeechCleanupLatch: 96, RendererSpeechChunk: 92, NativeStreamBridge: 70,
     NativeMapsLocation: 79, VideoRecorder: 400, VideoEditReview: 600, ResidentStartCancel: 76,
-    HomeInstanceHandoff: 64, RendererBackgroundRebuild: 65, SavedSignInRecovery: 122};
+    HomeInstanceHandoff: 64, RendererBackgroundRebuild: 65};
   assert.equal(result.traces, counts[model], model + ' owning trace bound');
   const required = {
     SpeechCleanupLatch: ['speak', 'finishPlayback', 'cleanupSettled', 'recoveryStopSettled', 'restart'],
@@ -59,7 +56,7 @@ function owningAssertions(model, result) {
   const checkpointMinimum = {SpeechCleanupLatch: 2500, RendererSpeechChunk: 2000, NativeStreamBridge: 1500, NativeMapsLocation: result.traces * 5};
   if (Object.hasOwn(checkpointMinimum, model)) assert.ok(result.checkpoints > checkpointMinimum[model], model + ' checkpoint bound');
   const stepMinimum = {VideoRecorder: 3000, VideoEditReview: 3000, ResidentStartCancel: 1000,
-    HomeInstanceHandoff: 500, RendererBackgroundRebuild: 1000, SavedSignInRecovery: 1000};
+    HomeInstanceHandoff: 500, RendererBackgroundRebuild: 1000};
   if (Object.hasOwn(stepMinimum, model)) assert.ok(result.steps > stepMinimum[model], model + ' step bound');
   if (model === 'VideoEditReview') assert.equal(result.framesLeftRunning, 0, 'A closed editor requests no more frames');
   if (model === 'ResidentStartCancel') {
@@ -69,10 +66,6 @@ function owningAssertions(model, result) {
   if (model === 'HomeInstanceHandoff') assert.equal(result.reached.length, 6);
   if (model === 'RendererBackgroundRebuild') {
     assert.ok(result.actions.report > 100 && result.actions.recreated > 50);
-    assert.equal(result.reached.length, 7);
-  }
-  if (model === 'SavedSignInRecovery') {
-    assert.ok(result.actions.restoreEnds >= 10 && result.actions.restoreReads >= 50);
     assert.equal(result.reached.length, 7);
   }
   return result;

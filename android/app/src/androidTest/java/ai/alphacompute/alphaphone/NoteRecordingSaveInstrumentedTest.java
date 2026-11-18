@@ -23,12 +23,6 @@ public class NoteRecordingSaveInstrumentedTest {
  private static byte[] wav(){int n=16000;ByteBuffer b=ByteBuffer.allocate(44+n*2).order(ByteOrder.LITTLE_ENDIAN);b.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36+n*2).put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short)1).putShort((short)1).putInt(8000).putInt(16000).putShort((short)2).putShort((short)16).put("data".getBytes(StandardCharsets.US_ASCII)).putInt(n*2);return b.array();}
  private static AlphaNoteAudioPlugin plugin(){for(android.app.Activity activity:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED))if(activity instanceof MainActivity)return (AlphaNoteAudioPlugin)((MainActivity)activity).getBridge().getPlugin("AlphaNoteAudio").getInstance();throw new IllegalStateException();}
 
- @Test public void transcriptPrefixIsBoundedAndKeepsSurrogatePairs(){
-  assertEquals("short",AlphaNoteAudioPlugin.transcriptPrefix("short",10));
-  assertEquals("ab",AlphaNoteAudioPlugin.transcriptPrefix("abc",2));
-  assertEquals("a pair is never split","a",AlphaNoteAudioPlugin.transcriptPrefix("a\uD83D\uDE00",2));
- }
-
  @Test public void aFourHourTranscriptStillSavesTheAudioAndDoneCanBeRetried()throws Exception{
   android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
   String recordingId=UUID.randomUUID().toString();

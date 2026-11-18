@@ -1,34 +1,36 @@
 import {createInlineModal} from '../runtime/inline-modal';
-import {currentClockTimeZone,buildClockRequest,describeClockDays,type ClockDay} from '../runtime/clock-contract';
+import {currentClockTimeZone,buildClockRequest,describeClockDays,CLOCK_DAY_NAMES,type ClockDay} from '../runtime/clock-contract';
 import { DailyApps, type ClockRequest, type ClockResult } from '../daily';
 import { testMocksEnabled } from '../build-flags';
-type Bag=Record<string,any>;
-import {createClockHandoffHistory,clockHandoffLegacyKey,type ClockHandoffSnapshot} from '../runtime/clock-handoff-history';
+import {createClockHandoffHistory,type ClockHandoffSnapshot} from '../runtime/clock-handoff-history';
 import {secureConnectionStore} from '../runtime/native-connection';
-const actions=['set','show','snooze','dismiss'] as const;
+import {deviceTimeZone} from '../lib/civil-date';
+import type {ShellHost,ShellPrototype,ViewRegistry} from './shell-types';
+const ACTION_LABELS:Record<ClockRequest['action'],string>={set:'Set alarm',show:'Show alarms',snooze:'Snooze',dismiss:'Dismiss'};
+const actions=Object.keys(ACTION_LABELS) as ClockRequest['action'][];
+const chipCss=(on:boolean)=>on?'background:var(--fg);color:var(--bg)':'background:var(--s2);color:var(--fg)';
+const inputValue=(event:Event)=>(event.target as HTMLInputElement).value;
+type ClockShell=ShellHost&{clockSelection?:()=>{kind:string;id:string;revision:string}|undefined};
 /** A reviewed handoff, never a local alarm database or a provider-success claim. */
-export function installClockAdapter(Component:any,views:Bag,options:{simulated:boolean;browser?:boolean}) {
+export function installClockAdapter(Component:{prototype:ShellPrototype},views:ViewRegistry,options:{simulated:boolean;browser?:boolean}) {
  const p=Component.prototype,render=views.workflows.render,leave=views.workflows.onLeave;
  const draftId=crypto.randomUUID();let draftRevision=0;
  const selection=()=>open?{kind:'clock-draft',id:draftId,revision:String(draftRevision)}:undefined;
- let owner:any,open=false,action:ClockRequest['action']='set',time='07:00',label='',snooze='10',days:ClockDay[]=[],review:ClockRequest|null=null,busy=false,message='',generation=0;
+ let owner:ClockShell|null=null,open=false,action:ClockRequest['action']='set',time='07:00',label='',snooze='10',days:ClockDay[]=[],review:ClockRequest|null=null,busy=false,message='',generation=0;
  let visit=0;
  // Repeat days reach Clock only when the native handoff reports it carries EXTRA_DAYS
  // (surfaceInfo clockRepeatDaysVersion 1 or later). Otherwise the chips are hidden and a repeat is refused,
  // so a reviewed repeat is never sent as, or silently reduced to, a one-time alarm.
  let repeatSupported=false;
- // Mock simulation exists only in test-mocks builds. A flag-off build that is
- // somehow asked to simulate fails closed instead of opening the real Clock.
- const mockRequested=()=>options.simulated||document.documentElement.dataset.connectionMode==='mock';
- const simulated=()=>testMocksEnabled&&mockRequested();
+ // Mock simulation exists only in test-mocks builds.
+ const simulated=()=>testMocksEnabled&&(options.simulated||document.documentElement.dataset.connectionMode==='mock');
  const repeatAvailable=()=>simulated()||repeatSupported;
- const blocked=()=>!testMocksEnabled&&mockRequested();
  const publish=()=>{++draftRevision;owner?.vset('workflows',{});};
- const history=createClockHandoffHistory(secureConnectionStore,()=>localStorage.getItem(clockHandoffLegacyKey));
+ const history=createClockHandoffHistory(secureConnectionStore);
  let snapshot:ClockHandoffSnapshot|null=null,loading=false,historyGeneration=0;
  const restore=async()=>{
   if(simulated()||options.browser)return;
-  if(!repeatSupported)void Promise.resolve().then(()=>DailyApps.surfaceInfo()).then(info=>{const version=info.clockRepeatDaysVersion;if(typeof version==='number'&&Number.isInteger(version)&&version>=1&&!repeatSupported){repeatSupported=true;publish();}}).catch(()=>{/* Unknown support keeps repeats off. */});
+  if(!repeatSupported)void DailyApps.surfaceInfo().then(info=>{const version=info.clockRepeatDaysVersion;if(typeof version==='number'&&Number.isInteger(version)&&version>=1&&!repeatSupported){repeatSupported=true;publish();}}).catch(()=>{/* Unknown support keeps repeats off. */});
   const token=++historyGeneration,view=generation;snapshot=null;loading=true;publish();
   try {
    const saved=await history.read();if(token!==historyGeneration||view!==generation)return;
@@ -42,24 +44,24 @@ export function installClockAdapter(Component:any,views:Bag,options:{simulated:b
  const modal=createInlineModal(close,()=>document.querySelector<HTMLElement>('button[aria-label="Clock alarms"]'));
  const retireReview=()=>{review=null;++generation;};
  const retireVisit=()=>{open=false;++visit;retireReview();};
- views.workflows.onLeave=(...args:any[])=>{retireVisit();return leave?.(...args);};
+ views.workflows.onLeave=api=>{retireVisit();leave?.(api);};
  const hidden=()=>{if(document.hidden)retireReview();else if(open&&!busy)void restore();};
  const mount=p.componentDidMount,unmount=p.componentWillUnmount;
- p.componentDidMount=function(){mount.call(this);owner=this;this.clockSelection=selection;void restore();window.addEventListener('alpha-back',back,true);window.addEventListener('pagehide',retireReview);document.addEventListener('visibilitychange',hidden);};
- p.componentWillUnmount=function(){if(owner===this){window.removeEventListener('alpha-back',back,true);window.removeEventListener('pagehide',retireReview);document.removeEventListener('visibilitychange',hidden);delete this.clockSelection;owner=null;retireVisit();}unmount.call(this);};
+ p.componentDidMount=function(this:ClockShell){mount.call(this);owner=this;this.clockSelection=selection;void restore();window.addEventListener('alpha-back',back,true);window.addEventListener('pagehide',retireReview);document.addEventListener('visibilitychange',hidden);};
+ p.componentWillUnmount=function(this:ClockShell){if(owner===this){window.removeEventListener('alpha-back',back,true);window.removeEventListener('pagehide',retireReview);document.removeEventListener('visibilitychange',hidden);delete this.clockSelection;owner=null;retireVisit();}unmount.call(this);};
  const change=(fn:()=>void)=>{if(busy)return;fn();review=null;publish();};
  const build=():ClockRequest=>{
   if(action==='set'&&days.length&&!repeatAvailable())throw Error('No repeat yet');
   return buildClockRequest({action,time,label,snooze,days},action==='set'?currentClockTimeZone():'');
  };
- const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
  const description=(request:ClockRequest)=>request.action==='set'?[`${String(request.hour).padStart(2,'0')}:${String(request.minute).padStart(2,'0')}`,request.days?describeClockDays(request.days):'',request.label||''].filter(Boolean).join(' · '):request.action==='show'?'':request.action==='snooze'?`Snooze: ${request.snoozeMinutes} min requested. Clock may use its default duration and affect all ringing alarms.`:'Dismiss alarm. Clock may ask which one. A one-time alarm is disabled; a repeating alarm skips its next occurrence.';
  const dispatch=async(request:ClockRequest)=>{
   if(busy||review!==request)return;
-  if(document.hidden){message='Review again';review=null;publish();return;}
-  if(testMocksEnabled&&simulated()){message='Mock mode: Clock request simulated. No alarm was changed and no app was opened.';review=null;publish();return;}
-  if(blocked()){message='Offline';review=null;publish();return;}
-  if(request.action==='set'&&request.timeZone!==currentClockTimeZone()){message='Time zone changed';review=null;publish();return;}
+  const refuse=(text:string)=>{message=text;review=null;publish();};
+  if(document.hidden){refuse('Review again');return;}
+  // The literal flag lets a production build drop the simulated copy.
+  if(testMocksEnabled&&simulated()){refuse('Mock mode: Clock request simulated. No alarm was changed and no app was opened.');return;}
+  if(request.action==='set'&&request.timeZone!==currentClockTimeZone()){refuse('Time zone changed');return;}
   if(!snapshot||loading){message='Can’t reach Clock';publish();return;}
   const id=crypto.randomUUID(),token=generation,expected=snapshot;
   busy=true;review=null;message='Saving Clock request…';publish();
@@ -67,7 +69,7 @@ export function installClockAdapter(Component:any,views:Bag,options:{simulated:b
   try {retained=await history.save(expected,{id,action:request.action,status:'opening',at:new Date().toISOString()});}
   catch {busy=false;snapshot=null;if(token===generation){message='Can’t reach Clock';publish();}return;}
   // Admission is asynchronous. A retired review must never dispatch after it completes.
-  let cancelled=token!==generation||document.hidden||mockRequested();
+  let cancelled=token!==generation||document.hidden;
   try{if(request.action==='set'&&request.timeZone!==currentClockTimeZone())cancelled=true;}catch{cancelled=true;}
   let result:ClockResult;
   if(cancelled)result={action:request.action,status:'failed',message:'Not sent'};
@@ -83,12 +85,12 @@ export function installClockAdapter(Component:any,views:Bag,options:{simulated:b
   if(token===generation){message=result.message;publish();}
   else if(open&&!document.hidden)void restore();
  };
- views.workflows.render=(state:Bag,api:Bag)=>{
+ views.workflows.render=(state,api)=>{
   const out=render(state,api);
   const renderedVisit=visit;
   out.openClock=()=>{
    if(busy||document.hidden||renderedVisit!==visit||!api.isActive())return;
-   if(options.browser&&!simulated()&&!blocked()){
+   if(options.browser&&!simulated()){
     void DailyApps.clockHandoff({action:'show',reviewed:true}).catch(()=>api.toast('Couldn’t open'));
     return;
    }
@@ -97,15 +99,15 @@ export function installClockAdapter(Component:any,views:Bag,options:{simulated:b
   const currentReview=review;
   out.clock=open?{
    modalRef:modal.ref,title:'Clock',topPadding:simulated()?'76px':'var(--native-top-inset,0px)',message,busy:busy||loading,isSet:action==='set',isSnooze:action==='snooze',time,label,snooze,
-   zone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+   zone:deviceTimeZone(),
    close,
-   actions:actions.map(kind=>({label:kind==='set'?'Set alarm':kind==='show'?'Show alarms':kind==='snooze'?'Snooze':'Dismiss',pick:()=>change(()=>{action=kind;}),css:action===kind?'background:var(--fg);color:var(--bg)':'background:var(--s2);color:var(--fg)'})),
+   actions:actions.map(kind=>({label:ACTION_LABELS[kind],pick:()=>change(()=>{action=kind;}),css:chipCss(action===kind)})),
    // Repeat-day chips (Sunday=1 … Saturday=7), Monday first; none selected is a one-time alarm.
    // null, not [], when repeats are unavailable: the template renders the Repeat group for any array.
    repeatAvailable:repeatAvailable(),
-   days:action!=='set'||!repeatAvailable()&&!days.length?null:[2,3,4,5,6,7,1].map(day=>({label:dayNames[day-1],short:dayNames[day-1],aria:`Repeat on ${dayNames[day-1]}`,on:days.includes(day as ClockDay),css:days.includes(day as ClockDay)?'background:var(--fg);color:var(--bg)':'background:var(--s2);color:var(--fg)',toggle:()=>change(()=>{days=days.includes(day as ClockDay)?days.filter(d=>d!==day):[...days,day as ClockDay].sort((a,b)=>a-b);})})),
+   days:action!=='set'||!repeatAvailable()&&!days.length?null:[2,3,4,5,6,7,1].map(day=>({label:CLOCK_DAY_NAMES[day-1],short:CLOCK_DAY_NAMES[day-1],aria:`Repeat on ${CLOCK_DAY_NAMES[day-1]}`,on:days.includes(day as ClockDay),css:chipCss(days.includes(day as ClockDay)),toggle:()=>change(()=>{days=days.includes(day as ClockDay)?days.filter(d=>d!==day):[...days,day as ClockDay].sort((a,b)=>a-b);})})),
    repeatText:days.length?`Repeats ${describeClockDays(days)}`:'One time',
-   onTime:(e:Bag)=>change(()=>{time=e.target.value;}),onLabel:(e:Bag)=>change(()=>{label=e.target.value;}),onSnooze:(e:Bag)=>change(()=>{snooze=e.target.value;}),
+   onTime:(e:Event)=>change(()=>{time=inputValue(e);}),onLabel:(e:Event)=>change(()=>{label=inputValue(e);}),onSnooze:(e:Event)=>change(()=>{snooze=inputValue(e);}),
    prepare:()=>{if(busy||loading)return;try{review=build();message='';}catch(error){message=(error as Error).message;}publish();},
    review:currentReview?{text:description(currentReview),confirm:()=>dispatch(currentReview),cancel:()=>change(()=>{}),label:testMocksEnabled&&simulated()?'Simulate Clock request':'Open Clock'}:null,
   }:null;

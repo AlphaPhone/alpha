@@ -1,13 +1,13 @@
 <?xml version='1.0' encoding='utf-8'?>
-<selector xmlns:ns0="http://schemas.android.com/apk/res/android">
-    <item ns0:state_active="true" ns0:state_pressed="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:state_active="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:state_checkable="true" ns0:state_checked="true" ns0:state_pressed="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:state_checkable="true" ns0:state_pressed="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:state_checkable="true" ns0:state_checked="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:state_checkable="true" ns0:drawable="@color/key_background_lxx_dark" />
-    <item ns0:state_empty="true" ns0:state_pressed="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:state_empty="true" ns0:drawable="@android:color/transparent" />
-    <item ns0:state_pressed="true" ns0:drawable="@color/key_background_pressed_lxx_dark" />
-    <item ns0:drawable="@color/key_background_lxx_dark" />
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_active="true" android:state_pressed="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:state_active="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:state_checkable="true" android:state_checked="true" android:state_pressed="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:state_checkable="true" android:state_pressed="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:state_checkable="true" android:state_checked="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:state_checkable="true" android:drawable="@color/key_background_lxx_dark" />
+    <item android:state_empty="true" android:state_pressed="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:state_empty="true" android:drawable="@android:color/transparent" />
+    <item android:state_pressed="true" android:drawable="@color/key_background_pressed_lxx_dark" />
+    <item android:drawable="@color/key_background_lxx_dark" />
 </selector>

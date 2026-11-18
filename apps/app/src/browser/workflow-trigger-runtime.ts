@@ -6,13 +6,15 @@ import {browserSensorEnabled} from './sensor-policy';
 import {SavedPlaces} from '../maps/saved-places';
 import {distanceToRoute} from '../maps/route-distance';
 import {NativeMapsLocation,type Position} from '../maps/native-location';
+import type {LocationBridge} from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/native-location.ts';
+import {noticeActionBlocked} from './notice-action';
+import {sha256Hex} from '../lib/hash';
 type Bag=Record<string,any>;
 export type TriggerJob=TriggerOccurrence&{id:string;sourceHash:string};
 export type TriggerState={cursors:TriggerCursor[];queue:TriggerJob[]};
 export const emptyTriggerState=():TriggerState=>({cursors:[],queue:[]});
-const foreground=()=>!document.hidden&&document.documentElement.dataset.devBackground!=='true'&&!Array.from(document.querySelectorAll('[aria-label="Unlock with fingerprint"], [aria-label="Wake"]')).some(element=>element.getClientRects().length);
+const foreground=()=>!noticeActionBlocked();
 const app=(api:Bag,name:string)=>({...api.get(name),...JSON.parse(localStorage.getItem('alpha.dev.app.'+name)||'{}')});
-const sha=async(value:unknown)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)))),b=>b.toString(16).padStart(2,'0')).join('');
 function sourceRecord(occurrence:TriggerOccurrence,snapshot:TriggerSnapshot):Bag{
  const source=occurrence.source;let rows:Bag[]=[];
  if(source.kind==='message')rows=(snapshot.messages[source.person]||[]).filter(row=>!row.me&&(source.id!==null?row.id===source.id:row.k===source.k));
@@ -26,7 +28,7 @@ export async function hydrateTriggerJob(job:TriggerJob,api:Bag,signal:AbortSigna
  signal.throwIfAborted();const calendar=registerPlugin<any>('AlphaCalendar'),source=job.source;
  const snapshot:TriggerSnapshot={messages:app(api,'messages').threads||{},mails:app(api,'inbox').mails||[],events:[],places:{}};
  if(source.kind==='event'){const result=await calendar.list({begin:source.begin,end:source.end});if(result.truncated)throw Error('Calendar trigger input is incomplete.');snapshot.events=result.events;}
- const row=sourceRecord(job,snapshot);if(await sha(row)!==job.sourceHash)throw Error('The trigger source changed. Inspect it before running again.');signal.throwIfAborted();
+ const row=sourceRecord(job,snapshot);if(await sha256Hex(JSON.stringify(row))!==job.sourceHash)throw Error('The trigger source changed. Inspect it before running again.');signal.throwIfAborted();
  const messages=source.kind==='message'?{[source.person]:[structuredClone(row)]}:undefined;
  const mail=source.kind==='email'?{...row,atts:(row.atts||[]).map(({dataBase64,...attachment}:Bag)=>attachment)}:undefined;
  const input=source.kind==='time'?'':JSON.stringify(messages||mail||row);if(input.length>16000)throw Error('The trigger input is too large for this run.');
@@ -50,7 +52,7 @@ export class WorkflowTriggerRuntime {
   if(!enabled||!browserSensorEnabled('locationEnabled')){if(this.watching){this.watching=false;this.position=undefined;await this.location.stop();}return {places,placeKeys};}
   const config=readLocationSimulation();let position:Position|undefined;
   if(config.mode==='coordinates'){if(this.watching){this.watching=false;await this.location.stop();}position={coordinate:config,accuracyMeters:config.accuracy,timestamp:Date.now(),precision:'precise'};}
-  else {if(!this.watching&&(await registerPlugin<any>('ElizaLocation').checkPermissions()).location==='granted'){this.watching=true;await this.location.start(false,value=>{this.position=value;},()=>{this.position=undefined;this.watching=false;});}position=this.position;}
+  else {if(!this.watching&&(await registerPlugin<Pick<LocationBridge,'checkPermissions'>>('ElizaLocation').checkPermissions()).location==='granted'){this.watching=true;await this.location.start(false,value=>{this.position=value;},()=>{this.position=undefined;this.watching=false;});}position=this.position;}
   if(!position||Date.now()-position.timestamp>30000)return {places,placeKeys};
   const saved=new SavedPlaces().read();for(const [zone,id,radius] of [['home',config.homeId,config.radius],['work',config.workId,config.workRadius??200]] as const){const place=saved.find(item=>item.id===id);if(!place)continue;placeKeys[zone]=JSON.stringify([place.id,place.coordinate,radius]);const distance=distanceToRoute(position.coordinate,[place.coordinate]);places[zone]=distance+position.accuracyMeters<=radius?true:distance-position.accuracyMeters>radius?false:null;}
   return {places,placeKeys};
@@ -73,7 +75,7 @@ export class WorkflowTriggerRuntime {
    const detected=detectWorkflowTriggers(state.flows,triggerState.cursors,snapshot,now);
    const queue=triggerState.queue.filter(job=>state.flows.some((flow:Bag)=>flow.on&&String(flow.id)===job.flowId&&triggerDefinition(flow)===job.definition));
    if(queue.length+detected.occurrences.length>100)throw Error('The workflow queue is full. Open queued workflows before checking more triggers.');
-   for(const occurrence of detected.occurrences)queue.push({...occurrence,id:crypto.randomUUID(),sourceHash:await sha(sourceRecord(occurrence,snapshot))});
+   for(const occurrence of detected.occurrences)queue.push({...occurrence,id:crypto.randomUUID(),sourceHash:await sha256Hex(JSON.stringify(sourceRecord(occurrence,snapshot)))});
    if(this.stopped||!foreground()||raw!==localStorage.getItem('alpha.dev.app.workflows')||incomingRaw[0]!==localStorage.getItem('alpha.dev.app.messages')||incomingRaw[1]!==localStorage.getItem('alpha.dev.app.inbox'))return;
    // Empty polling need not write every second; retain precise cursors when an occurrence is queued.
    const comparable=(cursors:TriggerCursor[])=>JSON.stringify(cursors.map(cursor=>({...cursor,through:Math.floor(cursor.through/60000)})));

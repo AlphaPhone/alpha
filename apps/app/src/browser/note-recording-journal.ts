@@ -1,12 +1,12 @@
-type Snapshot={revision:string;raw:string|null};
-type Documents={read(key:string):Promise<Snapshot|undefined>;readOrCreate(key:string,raw:string|null):Promise<Snapshot>;edit<T>(key:string,edit:(before:Snapshot|undefined)=>Promise<{raw:string|null;result:T}>):Promise<T>};
-type Binding={ownerDigest:string;folderId:string|null};
-export type PendingNoteSegment={segmentId:string;durationMs:number;text?:string;offsetMs?:number;clip?:{blob:Blob;durationMs:number}};
-type Manifest={version:1;recordingId:string;binding:Binding;segments:Omit<PendingNoteSegment,'clip'>[]};
+import type {BrowserDocumentStore} from '../../../../.eliza/client-features/packages/ui/src/platform/browser-document-store';
+type Documents=Pick<BrowserDocumentStore,'read'|'readOrCreate'|'edit'>;
+type RecordingJournalOwner={ownerDigest:string;folderId:string|null};
+type PendingNoteSegment={segmentId:string;durationMs:number;text?:string;offsetMs?:number;clip?:{blob:Blob;durationMs:number}};
+type Manifest={version:1;recordingId:string;binding:RecordingJournalOwner;segments:Omit<PendingNoteSegment,'clip'>[]};
 const MAX_SEGMENT_BYTES=4*1024*1024,MAX_SEGMENT_MS=30_000;
 const key=(id:string)=>'alpha.browser.note-recording.v1:'+encodeURIComponent(id);
 const clipKey=(id:string,segmentId:string)=>key(id)+':segment:'+encodeURIComponent(segmentId);
-function manifest(raw:string,id:string,binding:Binding):Manifest{
+function manifest(raw:string,id:string,binding:RecordingJournalOwner):Manifest{
  const value=JSON.parse(raw) as Manifest;
  if(value?.version!==1||value.recordingId!==id||value.binding?.ownerDigest!==binding.ownerDigest||value.binding?.folderId!==binding.folderId||!Array.isArray(value.segments)||!value.segments.length||value.segments.length>10000||new Set(value.segments.map(row=>row.segmentId)).size!==value.segments.length||value.segments.some(row=>typeof row.segmentId!=='string'||!row.segmentId||row.segmentId.length>160||!Number.isFinite(row.durationMs)||row.durationMs<=0||row.durationMs>MAX_SEGMENT_MS||row.text!==undefined&&(typeof row.text!=='string'||row.text.length>64000)||row.offsetMs!==undefined&&(!Number.isFinite(row.offsetMs)||row.offsetMs<0)))throw Error('Recording segment recovery needs review.');
  return value;
@@ -15,7 +15,7 @@ function manifest(raw:string,id:string,binding:Binding):Manifest{
  * Alpha keeps its namespace and exact standalone segments until audio is bound to a note. */
 export function createNoteRecordingJournal(documents:Documents){
  return {
-  async save(id:string,binding:Binding,segments:PendingNoteSegment[]){
+  async save(id:string,binding:RecordingJournalOwner,segments:PendingNoteSegment[]){
    const value=manifest(JSON.stringify({version:1,recordingId:id,binding,segments:segments.map(({clip:_clip,...row})=>row)}),id,binding);
    for(const segment of segments){
     if(segment.offsetMs!==undefined)continue;
@@ -35,7 +35,7 @@ export function createNoteRecordingJournal(documents:Documents){
     return {raw:JSON.stringify(value),result:undefined};
    });
   },
-  async read(id:string,binding:Binding):Promise<PendingNoteSegment[]|null>{
+  async read(id:string,binding:RecordingJournalOwner):Promise<PendingNoteSegment[]|null>{
    const saved=await documents.read(key(id));if(saved?.raw==null)return null;
    const value=manifest(saved.raw,id,binding),segments:PendingNoteSegment[]=[];
    for(const segment of value.segments){
@@ -48,7 +48,7 @@ export function createNoteRecordingJournal(documents:Documents){
    }
    return segments;
   },
-  async setText(id:string,binding:Binding,segmentId:string,text:string){
+  async setText(id:string,binding:RecordingJournalOwner,segmentId:string,text:string){
    await documents.edit(key(id),async before=>{
     if(before?.raw==null)throw Error('Recording segment recovery needs review.');
     const value=manifest(before.raw,id,binding),segment=value.segments.find(row=>row.segmentId===segmentId);
@@ -56,7 +56,7 @@ export function createNoteRecordingJournal(documents:Documents){
     segment.text=text;return {raw:JSON.stringify(value),result:undefined};
    });
   },
-  async retire(id:string,binding:Binding){
+  async retire(id:string,binding:RecordingJournalOwner){
    const saved=await documents.read(key(id));if(saved?.raw==null)return;
    const value=manifest(saved.raw,id,binding);
    for(const row of value.segments)if(row.offsetMs===undefined)await documents.edit(clipKey(id,row.segmentId),async()=>({raw:null,result:undefined}));

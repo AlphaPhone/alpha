@@ -1,10 +1,11 @@
 import {anyAbortSignal} from './abort-signal';
+import {raceAbort} from '../lib/abort';
 import {readLocalAgentStream,type StreamTextListener} from './local-agent-stream';
-export interface NativeStreamPort {
- addListener(name:string,callback:(event:any)=>void):Promise<{remove():Promise<void>}>;
- requestStream(input:Record<string,unknown>):Promise<{streamId:string}>;
- cancelStream(input:{streamId:string}):Promise<unknown>;
-}
+import type {NativeStreamPort} from '../native/agent';
+export type {NativeStreamPort};
+/** One `alphaAgentStream` envelope as native sends it; every field is checked before use. */
+type StreamEnvelope={streamId?:unknown;event?:unknown}|null|undefined;
+type StreamFrame={type?:unknown;status?:unknown;headers?:HeadersInit;dataBase64?:unknown;error?:unknown};
 /** The agent sends a heartbeat every 5 s, so a minute without any frame is a stalled stream. */
 const STREAM_IDLE_MS=60000;
 /** Native gives one turn on this route up to 600 s. */
@@ -28,14 +29,14 @@ export async function streamNativeAgent(port:NativeStreamPort,input:{path:string
  const fail=(error:Error,revokeReady=false)=>{if(terminal)return;if(revokeReady)onReplyReady?.(undefined);terminal=true;rejectTerminal(error);rejectResponse(error);controller.error(error);};
  const cleanup=(work:Promise<unknown>)=>{void work.catch(()=>{});};
  let remove:(()=>Promise<void>)|undefined;
- let rejectAddition:(()=>void)|undefined;
- const addition=port.addListener('alphaAgentStream',envelope=>{
+ const addition=port.addListener('alphaAgentStream',raw=>{
+  const envelope=raw as StreamEnvelope;
   if(!active||envelope?.streamId!==streamId)return;
   // Every frame for this stream, heartbeats included, proves it is alive.
   clearTimeout(idle);if(!terminal)idle=setTimeout(expire,STREAM_IDLE_MS);
   let interrupted=false;
   try{
-   const event=envelope.event;
+   const event=envelope.event as StreamFrame|null|undefined;
    if(!event||typeof event!=='object')throw Error('Invalid native stream frame');
    if(terminal)return;
    if(event.type==='response'){
@@ -63,7 +64,7 @@ export async function streamNativeAgent(port:NativeStreamPort,input:{path:string
  const abort=()=>{fail(Error('Response interrupted. Outcome unknown; check history before retrying.'));if(started)void port.cancelStream({streamId}).catch(()=>{});};
  bounded.addEventListener('abort',abort,{once:true});
  try{
-  const listener=await Promise.race([addition,new Promise<never>((_,reject)=>{if(bounded.aborted)reject(bounded.reason);else {rejectAddition=()=>reject(bounded.reason);bounded.addEventListener('abort',rejectAddition,{once:true});}})]);
+  const listener=await raceAbort(addition,bounded);
   remove=()=>listener.remove();
   bounded.throwIfAborted();started=true;
   // Do not wait for dispatch acknowledgement to consume events or honour abort.
@@ -75,7 +76,6 @@ export async function streamNativeAgent(port:NativeStreamPort,input:{path:string
   await completed;bounded.throwIfAborted();return result;
  }finally{
   active=false;clearTimeout(idle);clearTimeout(turn);bounded.removeEventListener('abort',abort);
-  if(rejectAddition)bounded.removeEventListener('abort',rejectAddition);
   if(remove)cleanup(remove());
   if(started)cleanup(port.cancelStream({streamId}));
  }

@@ -7,7 +7,7 @@ const windowText=(window:{start:string;end:string;timeZone:string})=>`${formatDe
 
 /** Step one: the owner ticks the calendars this phone may read. Nothing is preselected,
  * and the calendar names never leave this dialog. */
-export function chooseAvailabilityCalendars(sources:readonly AvailabilitySource[],operation:CalendarAvailabilityOperation,signal:AbortSignal,current:()=>void):Promise<string[]|null>{
+function chooseAvailabilityCalendars(sources:readonly AvailabilitySource[],operation:CalendarAvailabilityOperation,signal:AbortSignal,current:()=>void):Promise<string[]|null>{
  current();
  return openReview<string[]>('Calendars','On phone',signal,({content,footer,close})=>{
   const list=element('fieldset');list.style.border='0';list.style.padding='0';list.style.margin='0';list.append(element('legend','On phone'));
@@ -29,7 +29,7 @@ export function chooseAvailabilityCalendars(sources:readonly AvailabilitySource[
  });
 }
 /** Step two: the exact answer that would be shared, shown before it leaves the phone. */
-export async function confirmAvailabilityResult(result:CalendarAvailabilityResult,chosen:readonly AvailabilitySource[],signal:AbortSignal,current:()=>void):Promise<boolean>{
+async function confirmAvailabilityResult(result:CalendarAvailabilityResult,chosen:readonly AvailabilitySource[],signal:AbortSignal,current:()=>void):Promise<boolean>{
  current();
  const approved=await openReview<boolean>('Share availability','Availability result',signal,({content,footer,close})=>{
   const share=element('button','Share with agent'),cancel=element('button','Cancel');

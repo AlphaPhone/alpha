@@ -72,8 +72,7 @@ public final class PasswordBrowserFillInstrumentedTest {
   AccessibilityNodeInfo active=automation().getRootInActiveWindow();if(active!=null)roots.add(active);
   return roots;
  }
- private interface Match{boolean test(AccessibilityNodeInfo node);}
- private AccessibilityNodeInfo find(Match match){
+ private AccessibilityNodeInfo find(java.util.function.Predicate<AccessibilityNodeInfo> match){
   for(AccessibilityNodeInfo root:roots()){
    ArrayDeque<AccessibilityNodeInfo> queue=new ArrayDeque<>();queue.add(root);int visited=0;
    while(!queue.isEmpty()&&visited++<1024){AccessibilityNodeInfo node=queue.remove();if(node.isVisibleToUser()&&match.test(node))return node;for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo child=node.getChild(i);if(child!=null)queue.add(child);}}
@@ -89,7 +88,6 @@ public final class PasswordBrowserFillInstrumentedTest {
   WebViewTestDriver.withActivity(MainActivity.class,main->{List<WebView> children=new ArrayList<>();collect(main.getWindow().getDecorView(),children,main.getBridge().getWebView());for(WebView child:children)if(child.isShown())found.set(child);});
   assertNotNull("Actual native child must be visible",found.get());return found.get();
  }
- private interface DocumentPoint{double[] read()throws Exception;}
  /**
   * Screen position of a point in the child document, or null while the native child and its
   * document disagree about the viewport. They disagree for a while after the keyboard opens: the
@@ -118,10 +116,10 @@ public final class PasswordBrowserFillInstrumentedTest {
   return settled[0]?point:null;
  }
  /** Waits until the same settled screen position is read twice, then sends one real touch there. */
- private void tapSettled(String what,DocumentPoint source)throws Exception{
+ private void tapSettled(String what,java.util.concurrent.Callable<double[]> source)throws Exception{
   float[] point=null,previous=null;StringBuilder seen=new StringBuilder("never sampled");
   for(int i=0;i<300&&point==null;i++){
-   double[] css=source.read();float[] next=css==null?null:screenPoint(css[0],css[1],seen);
+   double[] css=source.call();float[] next=css==null?null:screenPoint(css[0],css[1],seen);
    if(next!=null&&previous!=null&&Math.abs(next[0]-previous[0])<=1&&Math.abs(next[1]-previous[1])<=1)point=next;
    else{previous=next;SystemClock.sleep(100);}
   }

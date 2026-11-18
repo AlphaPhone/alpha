@@ -16,9 +16,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 
-/** Derived from packages/app/scripts/mobile/android/templates/main-activity.ts.
- * Product shell: local assets, Eliza's system bridge, no cloud-auth or implicit kiosk policy.
- */
+/** Product shell: local assets, Eliza's system bridge, no cloud-auth or implicit kiosk policy. */
 public class MainActivity extends BridgeActivity {
  private volatile int bottomInsetDp = 0;
  private volatile int topInsetDp = 0;
@@ -167,9 +165,8 @@ public class MainActivity extends BridgeActivity {
   * lookup for singleTask only matches a task of a compatible type, so each kind of start finds or
   * creates its own task. Granting the HOME role to a running Alpha, or tapping an Alpha notice while
   * Alpha is the home activity, therefore created a second MainActivity with a second page, while
-  * the draft, open conversation and pending approvals stayed in the first. (The second instance on
-  * role grant was measured on the API 36 emulator in round 7; the activity-type rule is AOSP's
-  * implementation, not a public API contract.)
+  * the draft, open conversation and pending approvals stayed in the first. (The activity-type rule
+  * is AOSP's implementation, not a public API contract.)
   *
   * The first live instance is kept, whichever kind it is. A second instance never creates a bridge
   * or loads the page: it gives its intent to the live instance (the same onNewIntent path Android
@@ -178,12 +175,11 @@ public class MainActivity extends BridgeActivity {
   * (ActivityManager.AppTask). A home-type live instance is reached with the implicit HOME intent,
   * the kind of start Android resolves to the home task. An explicit-component start is only the
   * fallback for a standard task Android does not list: made from the instance in the home task it
-  * is matched to that home task first and comes back to the instance that asked (measured on the
-  * API 36 emulator in round 8). If a front start ever produced another instance instead, it
+  * is matched to that home task first and comes back to the instance that asked. If a front start
+  * ever produced another instance instead, it
   * finishes without starting anything, and this process stops handing starts off: the home task
   * would then be left empty, Android would start HOME again and the hand-off would repeat for as
-  * long as the live instance kept not coming forward. Two instances (what round 7 measured) are
-  * the stable fallback. The live instance resuming is what shows a hand-off reached it.
+  * long as the live instance kept not coming forward. Two instances are the stable fallback. The live instance resuming is what shows a hand-off reached it.
   *
   * The kind belongs to the task, not to whatever intent the instance holds later. Android hands a
   * relaunched activity (renderer recovery, a system font-size change) the last intent given to
@@ -352,14 +348,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaNotificationsPlugin.class);
   registerPlugin(AlphaHostedResultsPlugin.class);
   registerPlugin(AlphaGmailPlugin.class);
-  registerPlugin(AlphaListenerPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
-  if (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) {
-   // The optional transfer module is absent from production builds.
-   try { registerPlugin(Class.forName("ai.eliza.plugins.passwords.PasswordTransferPlugin").asSubclass(com.getcapacitor.Plugin.class)); }
-   catch (ClassNotFoundException ignored) { /* Optional development transfer module is not attached. */ }
-  }
   // The native image gate is checked again by every telephony operation.
   // Dialer-role components follow the verified image; Android's role dialog stays the owner's choice.
   AlphaTelephonyRoles.sync(this);

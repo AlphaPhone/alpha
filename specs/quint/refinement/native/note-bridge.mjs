@@ -17,7 +17,7 @@ export const notePermissionScenarios=['direct','direct-call','permission-denied'
  'resume-failure','second-start','discard-retry'];
 
 function sourceFiles(platform){
- return [app+'AlphaVoiceCloudPlugin.java',app+'AlphaNoteRecorder.java',app+'AlphaNoteRecordingService.java',app+'CloudVoiceLimit.java',
+ return [app+'AlphaVoiceCloudPlugin.java',app+'AlphaNoteRecorder.java',app+'AlphaUtil.java',app+'AlphaNoteRecordingService.java',app+'CloudVoiceLimit.java',
   join(native.root, 'plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice/LocalVoiceRecording.java'),join(native.root, 'plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice/CloudSpeechTimings.java'),directory+'/NoteBridgePorts.java',directory+'/NoteRecordingPorts.java',
   'node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/JSObject.java',...platform.paths];
 }

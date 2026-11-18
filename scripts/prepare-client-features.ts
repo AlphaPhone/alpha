@@ -247,7 +247,6 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/ui/src/components/chat/message-maps-parser.ts',
   'packages/ui/src/components/shell/dock-clearance.ts',
   'packages/ui/src/components/shell/responsive-layout.ts',
-  // Agent Maps cards in chat (prototype/maps-chat-adapter.ts); an import-free parser leaf.
   'packages/ui/src/utils/automation-feed-filter.ts',
   'packages/ui/src/overview/daily-overview.ts',
   'packages/ui/src/overview/OverviewCards.tsx',
@@ -316,8 +315,6 @@ export const CLIENT_FEATURE_PATHS = [
   // Framework-free resident Cloud binding controller (AP-04/P-22).
   'packages/auth/src/auth/cloud-resident-binding.ts',
 ];
-// Shared behavior is consumed from the reviewed upstream pin; there are no product patches.
-export const CLIENT_FEATURE_PATCHES = [];
 /** Copy authenticated upstream source outside the immutable vendor checkout. With check, only
  * confirm the prepared copy is current and throw instead of rebuilding it. */
 export function prepareClientFeatures({ root = projectRoot, projectVoice = true, check = false }: PrepareOptions = {}) {

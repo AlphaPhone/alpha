@@ -13,7 +13,7 @@ import static org.junit.Assert.*;
 
 /** Test APK only: persisted synthetic loopback session, restored by the real renderer initializer. */
 final class WorkflowNoticeOwnerFixture implements AutoCloseable {
- static final String PREFS="workflow-owner-restore-fixture",OWNER_SLOT="workflow-notice-owner:v1";
+ static final String PREFS="workflow-owner-restore-fixture";
  final Context context;final JSONObject identity;final String origin,token;final ServerSocket server;final Thread peer;
  final AtomicInteger verified=new AtomicInteger(),agents=new AtomicInteger();volatile Throwable failure;
  static boolean preparing(){return "prepare".equals(InstrumentationRegistry.getArguments().getString("workflowOwnerPhase"));}
@@ -40,13 +40,6 @@ final class WorkflowNoticeOwnerFixture implements AutoCloseable {
    JSONObject publication=new JSONObject().put("key",notice.getKey()).put("postTime",notice.getPostTime()).put("token",WorkflowNoticeTapsFactory.create(context).token(id)).put("receipt",store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT)).put("routes",store.readCredentialSlot(WorkflowNoticeTaps.SLOT));
    assertTrue(context.getSharedPreferences(PREFS,0).edit().putString("publication",publication.toString()).commit());
    assertEquals(context.getPackageName(),notice.getNotification().contentIntent.getCreatorPackage());assertEquals(android.os.Process.myUid(),notice.getNotification().contentIntent.getCreatorUid());assertTrue(notice.getNotification().contentIntent.isImmutable());
-   // Read back the actual OS IntentSender record/launch flags without launching it.
-   try(InputStream input=new android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("dumpsys activity intents "+context.getPackageName()));ByteArrayOutputStream output=new ByteArrayOutputStream()){
-    byte[] buffer=new byte[4096];int count;while((count=input.read(buffer))!=-1){assertTrue("Bounded owned PendingIntent diagnostic",output.size()+count<=65536);output.write(buffer,0,count);}
-    android.os.Bundle evidence=new android.os.Bundle();evidence.putString("workflowOwnerPreparedIntentSender",output.toString("UTF-8"));InstrumentationRegistry.getInstrumentation().addResults(evidence);
-   }
-
-
   }
  }
  /** Persists a fresh synthetic owner identity and its loopback token; returns the identity. */
@@ -94,7 +87,7 @@ final class WorkflowNoticeOwnerFixture implements AutoCloseable {
  void awaitOwner(boolean signedIn)throws Exception{awaitOwner(signedIn,1,1);}
  void awaitOwner(boolean signedIn,int minimumVerified,int minimumAgents)throws Exception{
   AlphaCredentialStore store=new AlphaCredentialStore(context);long end=SystemClock.elapsedRealtime()+20000;
-  do{assertNull("Loopback peer failure",failure);String raw=store.readCredentialSlot(OWNER_SLOT);if(raw!=null){JSONObject stored=new JSONObject(raw),owner=stored.optJSONObject("owner");if(!signedIn&&stored.has("owner")&&stored.isNull("owner"))return;if(signedIn&&owner!=null&&identity.getString("origin").equals(owner.optString("origin"))&&identity.getString("ownerId").equals(owner.optString("ownerId"))&&identity.getString("agentId").equals(owner.optString("agentId"))&&verified.get()>=minimumVerified&&agents.get()>=minimumAgents){return;}}SystemClock.sleep(50);}while(SystemClock.elapsedRealtime()<end);fail("Renderer did not settle expected owner; auth="+verified.get()+", agents="+agents.get()+", nativeOwner="+store.readCredentialSlot(OWNER_SLOT)+", syntheticCredentialPresent="+(store.readCredentialSlot("remote:"+origin)!=null));
+  do{assertNull("Loopback peer failure",failure);String raw=store.readCredentialSlot(WorkflowNoticeTaps.OWNER_SLOT);if(raw!=null){JSONObject stored=new JSONObject(raw),owner=stored.optJSONObject("owner");if(!signedIn&&stored.has("owner")&&stored.isNull("owner"))return;if(signedIn&&owner!=null&&identity.getString("origin").equals(owner.optString("origin"))&&identity.getString("ownerId").equals(owner.optString("ownerId"))&&identity.getString("agentId").equals(owner.optString("agentId"))&&verified.get()>=minimumVerified&&agents.get()>=minimumAgents){return;}}SystemClock.sleep(50);}while(SystemClock.elapsedRealtime()<end);fail("Renderer did not settle expected owner; auth="+verified.get()+", agents="+agents.get()+", nativeOwner="+store.readCredentialSlot(WorkflowNoticeTaps.OWNER_SLOT)+", syntheticCredentialPresent="+(store.readCredentialSlot("remote:"+origin)!=null));
  }
  public void close()throws Exception{server.close();peer.join(6000);assertFalse("Loopback peer stopped",peer.isAlive());assertNull("Loopback peer failure",failure);}
 }

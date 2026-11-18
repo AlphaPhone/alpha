@@ -19,7 +19,7 @@ import org.junit.runner.RunWith;
 
 /**
  * Every retained MVP view and the Apps drawer at 200% system font scale, with normal and
- * largest in-app text (200% and 300% effective text; PRD AP-15, #701): the
+ * largest in-app text (200% and 300% effective text; PRD AP-15): the
  * Accessibility Test Framework checks of the native hierarchy, the TalkBack linear order of the
  * WebView's nodes (TalkBackOrder: labels, reading order, at most one assistant group read last),
  * the screen's name as the focused element after opening it (runtime/view-focus.ts) and the page's
@@ -95,9 +95,6 @@ public final class AccessibilityViewsInstrumentedTest {
   + "if(el.closest('[inert],[aria-hidden=\"true\"],[hidden]'))return 'focus is in hidden content: '+(el.getAttribute('aria-label')||el.textContent.trim().slice(0,40));"
   + "if(el.closest('[data-alpha-layer=\"home\"]')&&document.documentElement.dataset.activeView!=='home')return 'focus stayed on Home';return null;})()";
 
- /** P-43: the views need the test-mocks pair (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) or a phone its owner signed in. */
- private static void assumeViews(String journey) throws Exception { if (!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) AppNavigation.assumeNoRequiredSignIn(journey); }
-
  @Test public void everyViewReadsInOrderAtDoubleFontScale() throws Exception {
   auditViews(100, 2);
  }
@@ -107,7 +104,8 @@ public final class AccessibilityViewsInstrumentedTest {
  }
 
  private void auditViews(int appPercent, int effectiveScale) throws Exception {
-  assumeViews("Every view at " + effectiveScale * 100 + "% font");
+  // P-43: the views need the test-mocks pair (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) or a phone its owner signed in.
+  AppNavigation.assumeNoRequiredSignIn("Every view at " + effectiveScale * 100 + "% font");
   String savedSystemScale = fontScale(null);
   String previous = savedSystemScale.isEmpty() || "null".equals(savedSystemScale) ? "1.0" : savedSystemScale;
   int previousAppPercent = AlphaDevicePlugin.textScalePercent(InstrumentationRegistry.getInstrumentation().getTargetContext());

@@ -186,7 +186,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   // Added by the round-2 integration (PR 388); no recorded run.
   AssistantResidentReuse: { note: "synthetic runtime observation, enrollment and streams; not evidence that a live resident stream survives" },
   LauncherApps: { note: "upstream SystemLauncherApps through Alpha's identity; resolves against this image's package manager only; two methods skip when the image has no other launchable app" },
-  NotesDocument: { note: "Production migration refusal and unchanged Notes; test-mocks builds exercise SAF migration. Restart phase requires the explicit notes development campaign." },
+  NotesDocument: { note: "Notes import refusal: no import control, no document activity, saved Notes unchanged" },
   NotesStorageDurability: { args: { notesStorage: "1" } },
   CloudDeploymentStorage: {},
   CloudSignInAuthorization: { note: "Actual native Authorize/Cancel gate with an isolated plugin and no session; not live authentication or remote key issuance" },
@@ -194,7 +194,6 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   ReminderNoticeQuestion: { requiresTestMocksBuild: true, note: "own reminder notice's Ask Alpha action without a selected agent; the review method needs a selected agent (-e noticeQuestion 1) and skips here (MVP-13, #676)" },
   ReminderLifecycle: { note: "the re-post method skips unless notifications are enabled for the app" },
   ClockHandoff: { args: { clockHandoff: "1" }, note: "Clock intents are intercepted; not ringing evidence" },
-  ClockRepeatDays: {},
   HostedResultNotice: { note: "builders only here; the posted and denied notices need the notification permission set first: node scripts/test-native-permissions.ts notice|notice-denied APP.apk TEST.apk OUTPUT" },
   HostedBackgroundWorker: { secondaryUser: true, requiresTestMocksBuild: true, args: { alphaHostedBackgroundFixture: "true" } },
   WorkflowApprovalNotice: { args: { workflowApprovalNotice: "1" }, grant: ["POST_NOTIFICATIONS"], note: "the runner grants the notification permission the class requires after clearing app data" },
@@ -206,7 +205,6 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   BrowserIsolatedReading: { args: { browserIsolatedReading: "1" }, requiresTestMocksBuild: true, note: "needs a WebView provider with isolated-world injection" },
   BrowserReadingNavigation: { args: { browserIsolatedReading: "1" }, note: "one method per provider: the stale-document method needs isolated-world injection; without it only the reading-unavailable method runs and the other is listed as skipped (INSTRUMENTATION_STATUS browserReadingProvider says which)" },
   PasswordBrowserFill: {},
-  InboxOperationJournal: { args: { inboxOperationNative: "1" } },
   MailAttachment: { args: { mailAttachmentNative: "1" } },
   // Both drive Home, which a production Android build covers with the Eliza Cloud sign-in gate;
   // only a test-mocks build offers "Continue offline" to reach it without an account. SystemShade's
@@ -240,9 +238,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   Maps: { args: { mapsEventReturn: "1" }, note: "calendarLocationReturnsToTheSameEventAndFailsClosed owns a local calendar and grants itself Calendar access; explicitRecenterUsesInjectedNativeLocationAndStopsWatch is skipped without host GPS injection (mapsLatitude/mapsLongitude)" },
   // Self-contained classes with an explicit gate. Registered so the gate is passed.
   BrowserShare: { args: { browserShareLive: "1" }, note: "opens a public HTTPS page and Android's chooser; the emulator needs network" },
-  BrowserUnsupportedReading: { args: { browserUnsupportedReading: "1" }, requiresTestMocksBuild: true, note: "the negative flow: needs a WebView provider WITHOUT isolated-world injection" },
   LargeInboxAttachment: { args: { largeInboxAttachmentNative: "1" } },
-  NoteAudioMetadataEncrypted: { args: { notesAudioEncryption: "1" } },
   AppInfo: { secondaryUser: true, note: "opens Android Settings for the named fixture package in an owned disposable user" },
   NoteRecorder: { secondaryUser: true, note: "uses the microphone and recovers an owned synthetic segmented recording in a disposable user; refuses existing audio" },
   NoteRecordingSave: { secondaryUser: true, note: "synthetic audio store and repeatable save in a disposable user" },
@@ -250,11 +246,9 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   NotesSecureStorage: { args: { notesSecureStorage: "1" }, note: "the legacy-layout migration runs across a process restart in node scripts/test-native-restart.ts notes-secure-migration; its in-process variant (notesSecureMigration=1) is skipped here" },
   PdfViewer: { args: { isolatedPdfNative: "1" } },
   PhotosBatch: { args: { photosBatch: "1" } },
-  KeptCaptureLegacyPath: { note: "A scan Keep reserved under the old Pictures/ capture folder, pending or published, resolves there after the move to DCIM/Camera/ with no second copy" },
   PhotoLibrary: { args: { photoLibrary: "1" }, note: "grants READ_MEDIA_IMAGES/VIDEO (Android 13+), creates and deletes only its own uniquely named fixtures; permission revoke, selected-only grants and reboot need separate campaigns" },
   PhotosForeignLibrary: { args: {}, note: "requires an explicit disposable user, separate-UID synthetic ledger and expected permission scope; no implicit media access" },
   PhotosLibrary: { args: { photosLibrary: "1" }, note: "requires an owned disposable secondary user; synthetic generation fence only, not foreign-media permission acceptance" },
-  UiDispatch: { args: { uiDispatch: "1" } },
   LocalSpeech: { args: { localSpeech: "1" }, note: "needs the staged on-device voice outputs (assets/paradee-voice/v1: Paradee, misaki, the Phonon-2 ASR slot) and the recorded libelizainference engine; no device qualification is recorded yet" },
   LocalSpeechBridge: { args: { localSpeechBridge: "1" }, note: "needs the staged on-device voice outputs including the ASR slot pair" },
   VoiceNoteReadAloud: { args: { localSpeech: "1" }, note: "needs the packaged voice bundle; not audible-speaker evidence" },
@@ -263,10 +257,8 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   SpeechSentenceCancellation: { args: { speechSentenceCancellation: "1" }, note: "needs the staged on-device voice outputs (Paradee)" },
   // Classes with no opt-in gate and no host, account or permission precondition.
   ActionJournal: {},
-  ActivityInstanceSelection: {},
   Assistant: {},
   Flow: {},
-  HostedResultsLifecycle: {},
   LocalAgentProvider: {},
   PhotoEdit: {},
   PhotosCatalogOrder: { secondaryUser: true, note: "two owned JPEGs with EXIF capture times 2010 and now, the old one inserted last: the permitted catalog pages newest capture first, one row per page, no repeats; grants READ_MEDIA_IMAGES itself" },
@@ -322,24 +314,10 @@ export const CAMPAIGN_RUNNERS = [
  * gained a registry entry or a campaign, and for any new class that has neither.
  */
 export const NOT_RUN_BY_A_RUNNER = {
-  PosterCalendarJourney: "J01 drives the removed Camera Scan mode (decision C1); Choose image remains in the composed Camera tools, but this old mode-based journey needs a rewrite to the agent scan path before any runner takes it again",
-  LocalServerSocketRelease: "platform probe for an upstream resident defect (upstream defect 4): it measures Android, not Alpha, and is run by hand when that defect is revisited",
   ResetExternalFixture: "requires an external host controller, disposable non-owner user, synthetic device credential and separate companion/media sentinels; reset kills instrumentation, so phases cannot run as a single generic campaign",
-  AllViewAgentContext: "needs a real local agent with inference and a forwarding observer on the host (agentContext=true); its runner was removed with the smoke suites in 49b1bf4c",
-  CombinedAgent: "needs the combined host runtime with a provider key at 10.0.2.2:47859 (scripts/start-combined-agent.ts); no Android runner starts or pairs it",
-  CombinedAgentRestart: "same combined host runtime, in prepare/verify/cleanup phases around a host restart; compiled, never executed",
   ContactsFlow: "@Ignore: Contacts is deferred from the MVP and the campaign mutates the ContactsProvider",
-  DeviceAction: "needs the device-action backend host and adb reverse (deviceActions=true); its runner was removed in 49b1bf4c",
-  LiveAgent: "needs a running loopback host with a real provider key, adb reverse and a provisioned bearer (liveAgent=true)",
-  PairedMaps: "needs a real paired host and an external Maps fixture (pairedMaps=1); no runner pairs one",
-  PairedReminder: "needs a real paired host (pairedReminder=1); no runner pairs one",
-  PhotosFixtureRecovery: "operator tool that inventories or deletes stranded test-owned media (alphaPhotoRecovery=inventory|delete); never part of a campaign",
   VideoCopyClosedFailureReview: "native-only preservation operator for one existing closed failed copy; requires the exact operation, reviewed record SHA, owner UID and explicit main-process lifecycle approval. Never a generic or bulk campaign; the signed entry is admitted separately after fixture qualification",
   PublicCloudTransportProbe: "probes the public Eliza Cloud endpoint with an owned account (publicCloudProbe=1, ownedCloudRead=1); a human sign-in step",
-  RemoteAgent: "needs the real local Eliza app host at 10.0.2.2:47839 and a pairing-code file (localRemote=true); its runner was removed in 49b1bf4c",
-  ResidentModelResponseContractTest: "plain contract test without the InstrumentedTest suffix; it runs under --all or by its full dotted name and needs no registry entry",
-  SpeechPipelineTrace: "diagnostic acquisition for the on-device speech failure, explicitly not acceptance evidence",
-  VoiceFloatPathDiagnostic: "root-cause diagnostic for the on-device speech round trip, explicitly not acceptance evidence",
 };
 
 /**

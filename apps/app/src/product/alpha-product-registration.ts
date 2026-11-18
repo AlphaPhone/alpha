@@ -63,13 +63,11 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       "--alpha-black": "#000000",
       "--alpha-blue": "#0000FF",
       "--alpha-blue-deep": "#0000B8",
-      "--alpha-blue-glow": "#3D47FF",
       "--alpha-call-accent": "#8A93FF",
       "--alpha-call-green": "#1E9E4A",
       "--alpha-call-red": "#E5383B",
       "--alpha-desktop-backdrop": "#E9E9ED",
       "--alpha-gray-05": "#050505",
-      "--alpha-gray-0d": "#0D0D0D",
       "--alpha-gray-11": "#111111",
       "--alpha-gray-14": "#141414",
       "--alpha-gray-15": "#151515",
@@ -277,8 +275,6 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       "--alpha-status-caution": "#D08A00",
       "--alpha-status-warn": "#E8A200",
       "--alpha-status-error": "#D93025",
-      "--alpha-wallet-navy": "#0C0C61",
-      "--alpha-wallet-new-1": "#5B5BD6",
       "--alpha-web-hero-1": "#17352A",
       "--alpha-white": "#FFFFFF"
     }
@@ -298,13 +294,12 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       notes: "sticky-note",
       contacts: "user-round",
       files: "folder",
-      inventory: "wallet",
       automations: "workflow",
       settings: "settings"
     }
   },
   views: {
-    order: ["phone", "messages", "inbox", "calendar", "browser", "camera", "photos", "maps", "notes", "contacts", "files", "inventory", "automations", "settings"],
+    order: ["phone", "messages", "inbox", "calendar", "browser", "camera", "photos", "maps", "notes", "contacts", "files", "automations", "settings"],
     labels: {
       phone: "Phone",
       messages: "Messages",
@@ -317,12 +312,11 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       notes: "Notes",
       contacts: "Contacts",
       files: "Files",
-      inventory: "Wallet",
       automations: "Workflows",
       settings: "Settings"
     },
-    rendererKeys: { automations: "workflows", inventory: "wallet" },
-    legacyIds: { home: "chat", workflows: "automations", wallet: "inventory" },
+    rendererKeys: { automations: "workflows" },
+    legacyIds: { home: "chat", workflows: "automations" },
     serves: { calendar: ["reminders"] }
   },
   storage: {
@@ -333,8 +327,7 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       appearance: "alpha.appearance.v1",
       connectionSelection: "alpha.connection.selection.v1",
       startupPermissions: "alpha.startup-permissions.v1",
-      startupWalkthrough: "alpha:startup-permission-walkthrough:v1",
-      dailyApps: "alphaphone:daily:v1"
+      startupWalkthrough: "alpha:startup-permission-walkthrough:v1"
     }
   },
   features: {

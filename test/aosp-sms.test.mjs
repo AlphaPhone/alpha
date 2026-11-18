@@ -256,14 +256,11 @@ test("standalone SMS stays unavailable at the UI and agent boundaries", async ()
   assert.ok(ADMITTED_AOSP_VIEW_ADAPTERS.includes("messages"));
   assert.deepEqual(admittedAospViews(false, ["messages", "phone", "contacts"]), []);
   // Agent SMS is negotiated only by the verified image, then validated by the reviewed shared contract.
-  const connection=read("apps/app/src/runtime/connection-ui.tsx");
-  // One negotiation (deviceCapabilities) serves the resident, remote and Cloud runtimes.
   const {selectDeviceCapabilities}=await import("../apps/app/src/runtime/phone-context.ts");
   const profile={android:true,native:true,camera:false,foregroundReview:false,clockRepeatDays:false,aospImage:false};
   assert.equal(selectDeviceCapabilities(["sms.send.v1"],profile).includes("sms.send.v1"),false,"a standalone APK never negotiates SMS");
   assert.equal(selectDeviceCapabilities(["sms.send.v1"],{...profile,aospImage:true}).includes("sms.send.v1"),true,"the image negotiates SMS when the agent offers it");
   assert.equal(selectDeviceCapabilities([],{...profile,aospImage:true}).includes("sms.send.v1"),false);
-  assert.equal((connection.match(/await deviceCapabilities\(/g)||[]).length,3);
   assert.match(read(".eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"),/claimed\.providerIdempotencyKey\s*!==\s*operationId/);
   assert.match(read("apps/app/src/prototype/agent-adapter.ts"),/if\(!aospImage\|\|expectedContext\.sensitive\|\|document\.hidden\|\|expectedContext\.view!=='messages'/);
   const telephony = read("apps/app/src/runtime/aosp-telephony.ts");

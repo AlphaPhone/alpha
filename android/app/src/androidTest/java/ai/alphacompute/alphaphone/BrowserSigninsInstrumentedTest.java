@@ -72,6 +72,14 @@ public final class BrowserSigninsInstrumentedTest {
   for(int i=0;i<100&&!mainIn(Stage.RESUMED);i++)SystemClock.sleep(100);
   assertTrue("Alpha returned to the foreground",mainIn(Stage.RESUMED));
  }
+ /** Alpha paused or stopped for the handoff, or Android reported that no app can open the link. */
+ private boolean awaitHandoff()throws Exception{
+  for(int i=0;i<100;i++){
+   if(mainIn(Stage.PAUSED,Stage.STOPPED)||"true".equals(host("document.body.innerText.includes('No app on this device can open this link.')")))return true;
+   SystemClock.sleep(100);
+  }
+  return false;
+ }
  private int liveTabs()throws Exception{
   int[] count=new int[1];WebViewTestDriver.withActivity(MainActivity.class,activity->{try{Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();java.lang.reflect.Field tabs=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs");tabs.setAccessible(true);count[0]=((java.util.Map<?,?>)tabs.get(plugin)).size();}catch(Exception failure){throw new AssertionError(failure);}});return count[0];
  }
@@ -171,14 +179,7 @@ public final class BrowserSigninsInstrumentedTest {
    browser.child("location.href='tel:+15555550100';true");
    ready("document.body.innerText.includes('without a tap')");page(url);
    fixtureLink("tel:+15555550100",null);tap("#alpha-fixture-link");
-   boolean handedOff=false;
-   for(int i=0;i<100&&!handedOff;i++){
-    AtomicBoolean paused=new AtomicBoolean();
-    BoundedActivityScenario.main(()->{for(Stage stage:new Stage[]{Stage.PAUSED,Stage.STOPPED})for(Activity activity:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage))if(activity instanceof MainActivity)paused.set(true);});
-    handedOff=paused.get()||"true".equals(host("document.body.innerText.includes('No app on this device can open this link.')"));
-    if(!handedOff)SystemClock.sleep(100);
-   }
-   assertTrue("Dialer opened, or Android reported no handler",handedOff);
+   assertTrue("Dialer opened, or Android reported no handler",awaitHandoff());
    if(!"true".equals(host("document.body.innerText.includes('No app on this device')")))returnToAlpha();
    app("Browser");page(url);
    assertEquals("Address type error never replaced the page","false",host("document.body.innerText.includes('address type is not supported')"));
@@ -191,14 +192,7 @@ public final class BrowserSigninsInstrumentedTest {
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();app("Browser");address(url);page(url);
    fixtureLink("tel:+15555550100","_blank");tap("#alpha-fixture-link");
-   boolean handedOff=false;
-   for(int i=0;i<100&&!handedOff;i++){
-    AtomicBoolean paused=new AtomicBoolean();
-    BoundedActivityScenario.main(()->{for(Stage stage:new Stage[]{Stage.PAUSED,Stage.STOPPED})for(Activity activity:ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(stage))if(activity instanceof MainActivity)paused.set(true);});
-    handedOff=paused.get()||"true".equals(host("document.body.innerText.includes('No app on this device can open this link.')"));
-    if(!handedOff)SystemClock.sleep(100);
-   }
-   assertTrue("Dialer opened from the pop-up, or Android reported no handler",handedOff);
+   assertTrue("Dialer opened from the pop-up, or Android reported no handler",awaitHandoff());
    if(!"true".equals(host("document.body.innerText.includes('No app on this device')")))returnToAlpha();
    // The empty pop-up closes after its single handoff; the opener page stays.
    app("Browser");tabs(1);page(url);assertEquals(1,liveTabs());
@@ -209,7 +203,7 @@ public final class BrowserSigninsInstrumentedTest {
   java.util.HashSet<String> names=new java.util.HashSet<>();
   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
    Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();java.lang.reflect.Field tabs=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs");tabs.setAccessible(true);
-   for(Object tab:((java.util.Map<?,?>)tabs.get(plugin)).values()){java.lang.reflect.Field profile=tab.getClass().getDeclaredField("profile");profile.setAccessible(true);String name=(String)profile.get(tab);if(AlphaBrowserPlugin.ephemeralProfile(name))names.add(name);}
+   for(Object tab:((java.util.Map<?,?>)tabs.get(plugin)).values()){java.lang.reflect.Field profile=tab.getClass().getDeclaredField("profile");profile.setAccessible(true);String name=(String)profile.get(tab);if(AlphaBrowserStores.IDENTITY.ephemeral(name))names.add(name);}
   }catch(Exception failure){throw new AssertionError(failure);}});
   return names;
  }

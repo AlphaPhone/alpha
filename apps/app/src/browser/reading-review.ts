@@ -1,6 +1,6 @@
 import {layoutBrowserDialog} from './dialog-layout';
 import {sensitiveReadingUrl,sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
-import {readPublicPageSource as browserReadingSource} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts';
+import {readPublicPageSource} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts';
 import {speakLocalText} from '../local-speech-playback';
 
 /** Review public source text when accessible, or supply an excerpt; the frame stays isolated. */
@@ -28,7 +28,7 @@ export async function reviewBrowserReading(url:string,signal:AbortSignal,valid:(
  if(blocked)block();
  const sourceAbort=new AbortController();let edited=false;field.oninput=()=>{edited=true;count();};
  let active=true,generation=0,speech:AbortController|undefined;
- const stopSpeech=()=>{generation++;speech?.abort();speech=undefined;field.disabled=false;read.disabled=blocked||sourcePending;field.disabled=blocked;stop.disabled=true;};
+ const stopSpeech=()=>{generation++;speech?.abort();speech=undefined;read.disabled=blocked||sourcePending;field.disabled=blocked;stop.disabled=true;};
  let finish!:()=>void;
  const closed=new Promise<void>(resolve=>{finish=()=>{if(!active)return;active=false;sourceAbort.abort();stopSpeech();signal.removeEventListener('abort',finish);window.removeEventListener('pagehide',finish);window.removeEventListener('alpha-back',back,true);document.removeEventListener('visibilitychange',visibility);dialog.remove();if(previous?.isConnected)previous.focus();resolve();};});
  const visibility=()=>{if(document.hidden)finish();},back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();finish();};
@@ -48,6 +48,6 @@ export async function reviewBrowserReading(url:string,signal:AbortSignal,valid:(
   }catch(error){if(active&&current===generation){stopSpeech();status.textContent=error instanceof Error?error.message:'Speech failed';}}
  };
  try{valid();if(!active)return;layoutBrowserDialog(dialog,[read,stop,close]);document.body.append(dialog);dialog.showModal();field.focus();
- void browserReadingSource(url,sourceAbort.signal).then(result=>{if(!active||sourceAbort.signal.aborted)return;valid();sourcePending=false;if(result?.blocked){block();return;}if(blocked)return;read.disabled=false;if(edited)return;if(result){field.value=result.text;count();status.textContent=result.truncated?'Truncated':'';}else status.textContent='Paste text';}).catch(()=>{if(active&&!sourceAbort.signal.aborted){sourcePending=false;block();}});
+ void readPublicPageSource(url,sourceAbort.signal).then(result=>{if(!active||sourceAbort.signal.aborted)return;valid();sourcePending=false;if(result?.blocked){block();return;}if(blocked)return;read.disabled=false;if(edited)return;if(result){field.value=result.text;count();status.textContent=result.truncated?'Truncated':'';}else status.textContent='Paste text';}).catch(()=>{if(active&&!sourceAbort.signal.aborted){sourcePending=false;block();}});
  await closed;}finally{finish();}
 }

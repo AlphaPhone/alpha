@@ -47,14 +47,14 @@ public final class AlphaSystemPlugin extends ai.eliza.plugins.system.SystemPlugi
  @Override protected String buildVersion(){return BuildConfig.VERSION_NAME;}
  /** ACTION_ASSIST, or AlphaAssistActivity's own marker extra. */
  @Override protected boolean isAssistantLaunch(Intent intent){return super.isAssistantLaunch(intent)||(intent!=null&&intent.getBooleanExtra(AlphaAssistActivity.EXTRA_ASSISTANT,false));}
- /** Only the launcher flavor drives Android's shade (#416, #417); the standalone app never asks. */
+ /** Only the launcher flavor drives Android's shade; the standalone app never asks. */
  @Override protected boolean canExpandNotificationShade(){return BuildConfig.IS_LAUNCHER;}
  /** Android's App info for exactly one listed launcher entry, in its profile (the Apps drawer's
   * long-press menu). Only Settings opens; nothing about the app changes. App info needs only the
   * package in that profile: a disabled app, or one in a paused or locked work profile, still opens
   * it (that is where it is enabled again); a removed app or profile is refused. */
  @PluginMethod public void openAppInfo(PluginCall call){
-  if(SystemLauncherApps.malformedText(call.getData(),"packageName")||SystemLauncherApps.malformedText(call.getData(),"activityName")||SystemLauncherApps.malformedText(call.getData(),"user")){call.reject("Choose an installed app");return;}
+  for(String key:new String[]{"packageName","activityName","user"})if(SystemLauncherApps.malformedText(call.getData(),key)){call.reject("Choose an installed app");return;}
   String name=call.getString("packageName"),activity=call.getString("activityName"),user=call.getString("user");
   if(name==null||name.isEmpty()||name.equals(getContext().getPackageName())){call.reject("Choose an installed app");return;}
   try{

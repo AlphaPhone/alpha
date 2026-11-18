@@ -53,7 +53,7 @@ public final class WorkflowApprovalNoticeProcessDeathInstrumentedTest {
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();AlphaCredentialStore store=new AlphaCredentialStore(context);
   assertNotNull("Main prepared route ledger required",store.readCredentialSlot(WorkflowNoticeTaps.SLOT));assertNotNull("Main prepared approval ledger required",store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT));
   NotificationManager manager=context.getSystemService(NotificationManager.class);
-  WorkflowNoticeTaps taps=WorkflowNoticeTapsFactory.create(context);WorkflowNoticeDelivery delivery=WorkflowNoticeTapsFactory.delivery(context);
+  WorkflowNoticeTaps taps=WorkflowNoticeTapsFactory.create(context);
   JSONObject approval=WorkflowNoticeOwnerFixture.approval(context),route=approval.getJSONObject("route");
   String id=approval.getString("id"),binding=approval.getString("bindingHash"),run=route.getString("runId");
   assertTrue(WorkflowNoticeDelivery.approvalId(id));
@@ -100,7 +100,6 @@ public final class WorkflowApprovalNoticeProcessDeathInstrumentedTest {
    assertThrows(IllegalStateException.class,()->WorkflowNoticeTapsFactory.delivery(context).postApproval(WorkflowNoticeTapsFactory.create(context),id,"c".repeat(64),route,expiresAt,System.currentTimeMillis()));
    assertThrows(IllegalStateException.class,()->WorkflowNoticeTapsFactory.delivery(context).postApproval(WorkflowNoticeTapsFactory.create(context),id,binding,route,expiresAt+60000L,System.currentTimeMillis()));
    assertEquals(original.getPostTime(),notice(manager,id).getPostTime());assertEquals(receipt,store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT));assertEquals(captureLedger,store.readCredentialSlot(WorkflowNoticeTaps.SLOT));
-   android.os.Bundle evidence=new android.os.Bundle();evidence.putString("workflowApprovalNoticeProcessDeath",new JSONObject().put("beforePid",before.pid).put("beforeStart",before.start).put("afterPid",after.pid).put("afterStart",after.start).put("uid",after.uid).put("postTime",original.getPostTime()).toString());InstrumentationRegistry.getInstrumentation().addResults(evidence);
   }finally{
    manager.cancel("alpha-workflow-"+id,0);
    // The runner removes this entire fresh user; do not race main's encrypted ledger with cleanup writes.
@@ -111,17 +110,17 @@ public final class WorkflowApprovalNoticeProcessDeathInstrumentedTest {
   if(WorkflowNoticeOwnerFixture.preparing()){WorkflowNoticeOwnerFixture.prepare();return;}
   assertEquals(APP+":workflowNoticeTest",Application.getProcessName());assertTrue(android.os.Process.myUid()/100000>0);
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();AlphaCredentialStore store=new AlphaCredentialStore(context);
-  NotificationManager manager=context.getSystemService(NotificationManager.class);WorkflowNoticeTaps taps=WorkflowNoticeTapsFactory.create(context);WorkflowNoticeDelivery delivery=WorkflowNoticeTapsFactory.delivery(context);
+  NotificationManager manager=context.getSystemService(NotificationManager.class);WorkflowNoticeTaps taps=WorkflowNoticeTapsFactory.create(context);
   JSONObject approval=WorkflowNoticeOwnerFixture.approval(context);String id=approval.getString("id");
   try(WorkflowNoticeOwnerFixture fixture=new WorkflowNoticeOwnerFixture(context)){
    assertOriginalPublication(context,manager,store,taps,id);
    Intent launch=context.getPackageManager().getLaunchIntentForPackage(APP);assertNotNull(launch);context.startActivity(launch);
    WorkflowNoticeProcessDeathInstrumentedTest.Identity before=WorkflowNoticeProcessDeathInstrumentedTest.awaitMain(context);fixture.awaitOwner(true);
-   PendingIntent original=notice(manager,id).getNotification().contentIntent;long end;
+   PendingIntent original=notice(manager,id).getNotification().contentIntent;
    WorkflowNoticeProcessDeathInstrumentedTest.killMainWithoutTasks(context,before);
    store.removeCredentialSlot("remote:"+fixture.origin);
    int authBefore=fixture.verified.get();context.startActivity(launch);WorkflowNoticeProcessDeathInstrumentedTest.Identity after=WorkflowNoticeProcessDeathInstrumentedTest.awaitMain(context);assertTrue(before.pid!=after.pid||!before.start.equals(after.start));fixture.awaitOwner(false);
-   end=SystemClock.elapsedRealtime()+10000;while(!approvals(manager).isEmpty()&&SystemClock.elapsedRealtime()<end)SystemClock.sleep(50);assertTrue("Signed-out startup withdraws OS approval",approvals(manager).isEmpty());
+   long end=SystemClock.elapsedRealtime()+10000;while(!approvals(manager).isEmpty()&&SystemClock.elapsedRealtime()<end)SystemClock.sleep(50);assertTrue("Signed-out startup withdraws OS approval",approvals(manager).isEmpty());
    assertEquals("No credential means no authentication dispatch",authBefore,fixture.verified.get());assertFalse(taps.pending().has("token"));
    assertEquals("suspended",new JSONObject(store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT)).getJSONObject(id).getString("status"));
    awaitTapCancellation(context,taps,id);
@@ -133,12 +132,12 @@ public final class WorkflowApprovalNoticeProcessDeathInstrumentedTest {
   org.junit.Assume.assumeTrue("Explicit isolated product cold-start campaign","1".equals(InstrumentationRegistry.getArguments().getString("workflowApprovalNoticeProcessDeath"))&&!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
   assertEquals(APP+":workflowNoticeTest",Application.getProcessName());assertTrue(android.os.Process.myUid()/100000>0);
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();AlphaCredentialStore store=new AlphaCredentialStore(context);assertTrue("Main absent before native fixture seed",WorkflowNoticeProcessDeathInstrumentedTest.mainPids(context).isEmpty());
-  assertNull(store.readCredentialSlot(WorkflowNoticeOwnerFixture.OWNER_SLOT));assertNull(store.readCredentialSlot(WorkflowNoticeTaps.SLOT));assertNull(store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT));
+  assertNull(store.readCredentialSlot(WorkflowNoticeTaps.OWNER_SLOT));assertNull(store.readCredentialSlot(WorkflowNoticeTaps.SLOT));assertNull(store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT));
   NotificationManager manager=context.getSystemService(NotificationManager.class);WorkflowNoticeTaps taps=WorkflowNoticeTapsFactory.create(context);WorkflowNoticeDelivery delivery=WorkflowNoticeTapsFactory.delivery(context);
   String id="approval-"+(UUID.randomUUID().toString()+UUID.randomUUID()).replace("-","");
   JSONObject owner=new JSONObject().put("origin","https://synthetic-owner.invalid").put("ownerId","synthetic-owner").put("agentId",UUID.randomUUID().toString());
   // Native-only fixture seed models an owner persisted by a prior process, never a credential.
-  store.writeCredentialSlot(WorkflowNoticeOwnerFixture.OWNER_SLOT,new JSONObject().put("owner",owner).toString());
+  store.writeCredentialSlot(WorkflowNoticeTaps.OWNER_SLOT,new JSONObject().put("owner",owner).toString());
   JSONObject route=new JSONObject(owner.toString()).put("scope","a".repeat(64)).put("workflowId","fixture-flow").put("runId","signedout-product-fixture").put("versionId","fixture-version");
   try{
    long expires=System.currentTimeMillis()+600000,end=SystemClock.elapsedRealtime()+10000;String published;
@@ -146,10 +145,9 @@ public final class WorkflowApprovalNoticeProcessDeathInstrumentedTest {
    assertEquals("succeeded",published);PendingIntent original=notice(manager,id).getNotification().contentIntent;
    Intent launch=context.getPackageManager().getLaunchIntentForPackage(APP);assertNotNull(launch);context.startActivity(launch);WorkflowNoticeProcessDeathInstrumentedTest.awaitMain(context);
    boolean settled=false;end=SystemClock.elapsedRealtime()+20000;
-   do{String raw=store.readCredentialSlot(WorkflowNoticeOwnerFixture.OWNER_SLOT);settled=raw!=null&&new JSONObject(raw).has("owner")&&new JSONObject(raw).isNull("owner");if(settled&&approvals(manager).isEmpty())break;SystemClock.sleep(50);}while(SystemClock.elapsedRealtime()<end);
+   do{String raw=store.readCredentialSlot(WorkflowNoticeTaps.OWNER_SLOT);settled=raw!=null&&new JSONObject(raw).has("owner")&&new JSONObject(raw).isNull("owner");if(settled&&approvals(manager).isEmpty())break;SystemClock.sleep(50);}while(SystemClock.elapsedRealtime()<end);
    assertTrue("Actual product initializer settles signed-out owner",settled);assertTrue("Product cold startup withdraws persisted approval",approvals(manager).isEmpty());assertFalse(taps.pending().has("token"));
    assertEquals("suspended",new JSONObject(store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT)).getJSONObject(id).getString("status"));awaitTapCancellation(context,taps,id);assertThrows(PendingIntent.CanceledException.class,()->original.send());
   }finally{manager.cancel("alpha-workflow-"+id,0);}
  }
-
 }

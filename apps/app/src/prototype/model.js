@@ -9,13 +9,13 @@ import {
   IMG, PEOPLE, PN_REC, PN_VM, PN_SCRIPT, PN_SCREEN, PN_REPLIES, MSG_PHOTOS, MSG_SEED, MSG_UNREAD,
   MSG_SMART, MSG_BOT, INBOX_ACCTS, INBOX_SEED, CAL_SEED, CAL_PREP, BR_START, BR_PAGES, BR_ME,
   PH_SEED, PH_DESC, PH_SHARE, MAPS_PLACES, MAPS_FAR, MAPS_MATCH, MAPS_SAVED, NOTES_SEED,
-  CT_SEED, FILES_FOLDERS_EXTRA, FILES_SEED, WAL_CARDS, WAL_TRIPS,
-  WAL_MERCH, WAL_PASSES, WF_SEED, ST_ACCOUNTS, ST_NETS, ST_BT, ST_PERM0, ST_MODELS, ST_LOG,
-  ST_DEVLOG, ST_DEVICE, ST_ABOUT, NOTIF, LOCK_SUM, QUICK_SETTINGS, QUICK_TILES, HEADS, VOICE, COPY,
+  CT_SEED, FILES_FOLDERS_EXTRA, FILES_SEED,
+  WF_SEED, ST_ACCOUNTS, ST_NETS, ST_BT, ST_PERM0, ST_MODELS, ST_LOG,
+  ST_DEVLOG, ST_DEVICE, ST_ABOUT, NOTIF, QUICK_SETTINGS, QUICK_TILES, VOICE, COPY,
   ATTENTION_ROWS, HOME_DEFAULTS
 } from "./fixtures.js";
 import { isMvpView, DEFERRED_MVP_VIEWS, deferredMvpPrompt } from "./mvp-features";
-import { ALPHA_PRODUCT, alphaPaletteColor, alphaThemeVariables } from "../product/alpha-product";
+import { ALPHA_PRODUCT, alphaThemeVariables } from "../product/alpha-product";
 import { navigateMobileShell, resolveMobileShellSwipe } from "@elizaos/ui/mobile-shell/core";
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
@@ -54,7 +54,6 @@ var IC = {
   stop: "M7 7h10v10H7z",
   user: "M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0",
   folder: "M3 6h6l2 2h10v11H3z",
-  wallet: "M3 7h16v12H3zM3 7l12-4v4M15 13h2",
   pin: "M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12zM14 9a2 2 0 1 1-4 0a2 2 0 1 1 4 0z",
   plane: "M10 14L3 11l18-7-7 18-3-7zM10 14l5-5",
   wave: "M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4",
@@ -103,7 +102,7 @@ function imgBg(key, fallback) { return IMG[key] ? "url(" + IMG[key] + ") center 
 /* Home/digest rows that need attention; deferred sources stay excluded. */
 function mockAttentionRows() { return ATTENTION_ROWS.filter(function (row) { return isMvpView(row.go.view); }).map(function (row) { return Object.assign({}, row); }); }
 /* Fixture copy for one view; empty in production builds. */
-function copy(view) { return (COPY && COPY[view]) || {}; }
+function copy(view) { return COPY[view] || {}; }
 /* Canned answers for a view: [{ re, text, nav?, card? }]. Present only with fixtures. */
 function scriptedReply(view, t) {
   var rows = copy(view).replies || [];
@@ -116,7 +115,7 @@ function pad2(n) { return String(n).padStart(2, "0"); }
 /* Time of day without a day period ("3:30" / "15:30"), in the device locale and hour cycle. */
 function fmtT(t) { return formatHours(t, { dayPeriod: false }); }
 
-/* Each app registers itself here. See CONTRACT.md. */
+/* Each app registers itself here. */
 var VIEWS = {};
 var ORDER = [];
 function registerView(key, def) { VIEWS[key] = def; if (isMvpView(key)) ORDER.push(key); }
@@ -139,13 +138,13 @@ function restoreById(list, item, at) {
 /* ===== module: phone ===== */
 /* Phone (dialer). Holes are {{phone.*}}. Tabs: Recents (with favorites row), Keypad, Voicemail.
    Call screen + incoming screen are immersive overlays. Recents/voicemail persist. */
-IC.phoneIn = IC.phoneIn || "M17 7L7 17M7 10v7h7";
-IC.phoneOut = IC.phoneOut || "M7 17L17 7M10 7h7v7";
-IC.phoneVm = IC.phoneVm || "M10 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM21 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM6.5 15.5h11";
-IC.phoneMute = IC.phoneMute || "M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16";
-IC.phoneSpk = IC.phoneSpk || "M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12";
-IC.phoneAddP = IC.phoneAddP || "M14 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM2 21a8 8 0 0 1 12.5-6.6M19 14v6M16 17h6";
-IC.phoneDel = IC.phoneDel || "M9 6h11v12H9l-6-6zM12 9.5l5 5M17 9.5l-5 5";
+IC.phoneIn = "M17 7L7 17M7 10v7h7";
+IC.phoneOut = "M7 17L17 7M10 7h7v7";
+IC.phoneVm = "M10 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM21 12a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM6.5 15.5h11";
+IC.phoneMute = "M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16";
+IC.phoneSpk = "M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12";
+IC.phoneAddP = "M14 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM2 21a8 8 0 0 1 12.5-6.6M19 14v6M16 17h6";
+IC.phoneDel = "M9 6h11v12H9l-6-6zM12 9.5l5 5M17 9.5l-5 5";
 
 var PN = { live: null, boot: null, lastTab: "recents" };
 function pnScript(call) { return PN_SCRIPT[call] || PN_SCRIPT._ || { lines: [], sum: "" }; }
@@ -160,7 +159,7 @@ function pnFmt(s) {
 }
 function pnByNum(api, num) { var d = pnDigits(num); if (d.length < 7) return null; var l = pnPeople(api); for (var i = 0; i < l.length; i++) { var pd = pnDigits(l[i].phone); if (pd && (pd === d || (d.length >= 10 && pd.slice(-10) === d.slice(-10)))) return l[i]; } return null; }
 function pnFirst(p) { return p.first || String(p.name || "").split(" ")[0]; }
-function pnIni(p, num) { return p ? (p.ini || "#") : "#"; }
+function pnIni(p) { return p ? (p.ini || "#") : "#"; }
 function pnFind(t, api) {
   var best = null, len = 0;
   pnPeople(api).forEach(function (p) {
@@ -392,7 +391,7 @@ registerView("phone", {
         call: callFrom(v.pid, v.num),
         msgLabel: "Message " + (p ? p.name : v.label || v.num), hasMsg: !!p, hasAdd: !p,
         addLabel: "Add " + (v.label || v.num) + " to contacts",
-        add: function () { var nm = String(v.label || "").split(" "); api.open("contacts", { add: { first: v.label ? v.label : "", phone: v.num } }); },
+        add: function () { api.open("contacts", { add: { first: v.label ? v.label : "", phone: v.num } }); },
         msg: function () { if (p) api.open("messages", { thread: p.id }); },
         del: function () {
           var s = api.get("phone"); api.stop();
@@ -446,7 +445,6 @@ registerView("phone", {
       match: match ? { ini: match.ini, name: match.name, num: match.phone, pick: function () { api.set({ dial: pnDigits(match.phone) }); } } : null,
       hasMatch: !!match, keys: keys, dkeys: dkeys,
       delKey: function () { var d = api.get("phone").dial || ""; api.set({ dial: d.slice(0, -1) }); },
-      clearKey: function () { api.set({ dial: "" }); },
       dialCall: function () {
         var d = api.get("phone").dial || "";
         if (!d) { var last = (api.get("phone").recents || []).filter(function (e) { return e.dir === "out"; })[0]; if (last) api.set({ dial: last.pid ? pnDigits((pnWho(api, last.pid) || {}).phone) : pnDigits(last.num) }); return; }
@@ -486,7 +484,7 @@ registerView("phone", {
 
 /* ===== module: messages ===== */
 /* Messages: SMS / RCS. Holes are {{messages.*}}. */
-IC.msgUnread = IC.msgUnread || "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z";
+IC.msgUnread = "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z";
 
 var MSG_GENERIC = [["Sounds good", "Sounds good."], ["Thanks!", "Thanks!"]];
 
@@ -526,7 +524,7 @@ function msgPush(api, pid, msgs) {
   api.set(patch);
 }
 function msgFiles(api, ids) {
-  var fl = VIEWS.files ? ((api.get("files") || {}).files || []) : [];
+  var fl = api.get("files").files || [];
   return (ids || []).map(function (id) { var f = fl.filter(function (x) { return x.id === id; })[0]; return f ? { id: f.id, name: f.name, size: f.size } : null; }).filter(Boolean);
 }
 function msgSend(api, pid, text, photo, files) {
@@ -696,13 +694,12 @@ registerView("messages", {
       var bubbles = list.map(function (m, i) {
         var prev = list[i - 1], next = list[i + 1];
         var sep = !prev || m.k - prev.k >= 60;
-        var joinNext = next && next.me === m.me && next.k - m.k < 60;
-        var r = m.me ? (joinNext ? "20px 20px 6px 20px" : "20px 20px 6px 20px") : "20px 20px 20px 6px";
+        var r = m.me ? "20px 20px 6px 20px" : "20px 20px 20px 6px";
         var isPhoto = m.photo != null, isFile = !!m.file;
         return {
           sep: sep, sepLabel: sep ? (m.k < 0 ? "Yesterday " : "") + msgFmt(m.k < 0 ? m.k + 1440 : m.k) : "",
           text: m.text || "", isText: !isPhoto && !isFile, isPhoto: isPhoto, isFile: isFile, file: m.file || "", size: m.size || "",
-          openFile: function () { if (VIEWS.files && m.fid) api.open("files", { open: m.fid }); else api.toast(m.file); },
+          openFile: function () { if (m.fid) api.open("files", { open: m.fid }); else api.toast(m.file); },
           row: "justify-content:" + (m.me ? "flex-end" : "flex-start") + ";margin-top:" + (sep ? "4px" : (prev && prev.me === m.me ? "3px" : "12px")),
           css: (m.me ? "background:var(--acc);color:var(--alpha-white);" : "background:var(--s2);color:var(--fg);") + "border-radius:" + r,
           photoCss: "background:" + (MSG_PHOTOS.length ? imgBg("msg" + ((m.photo || 0) % MSG_PHOTOS.length), MSG_PHOTOS[(m.photo || 0) % MSG_PHOTOS.length]) : "var(--s3)") + ";border-radius:" + r,
@@ -778,8 +775,8 @@ registerView("messages", {
 
 /* ===== module: inbox ===== */
 /* Inbox: email only, across accounts. Holes are {{inbox.*}}. */
-IC.inboxFwd = IC.inboxFwd || "M15 14l5-5-5-5M20 9H10a6 6 0 0 0-6 6v4";
-IC.inboxClip = IC.inboxClip || "M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8";
+IC.inboxFwd = "M15 14l5-5-5-5M20 9H10a6 6 0 0 0-6 6v4";
+IC.inboxClip = "M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8";
 
 
 function inboxAccts(api) {
@@ -810,14 +807,13 @@ function inboxFind(api, word) {
   if (!word) return null; word = word.toLowerCase();
   return inboxPeople(api).filter(function (p) { return p.id === word || p.name.toLowerCase().split(" ")[0] === word || p.name.toLowerCase() === word; })[0] || null;
 }
-function inboxClock(d) { return formatTime(d); }
 function inboxLive(st) { return (st.mails || []).filter(function (m) { return !m.arch && !m.del; }); }
 function inboxMail(st, id) {
   var l = (st.mails || []).concat(st.sent || []);
   for (var i = 0; i < l.length; i++) if (String(l[i].id) === String(id)) return l[i];
   return null;
 }
-function inboxFiles(api) { var f = VIEWS.files ? (api.get("files") || {}).files : null; return f || []; }
+function inboxFiles(api) { return api.get("files").files || []; }
 function inboxOpenFile(api, a) {
   var hit = inboxFiles(api).filter(function (f) { return f.id === a.file; })[0];
   if (hit) api.open("files", { open: a.file }); else api.toast(a.name);
@@ -846,7 +842,7 @@ function inboxDraftCard(api, m) {
 }
 function inboxSendMail(api, to, subj, body, acct, replyTo, atts) {
   var st = api.get("inbox");
-  var s = { id: "s" + Date.now(), sent: true, to: to, acct: acct || "personal", subj: subj || "(no subject)", body: body || "", time: inboxClock(api.now), k: 2000 + (st.sent || []).length, atts: atts || [] };
+  var s = { id: "s" + Date.now(), sent: true, to: to, acct: acct || "personal", subj: subj || "(no subject)", body: body || "", time: formatTime(api.now), k: 2000 + (st.sent || []).length, atts: atts || [] };
   var patch = { sent: [s].concat(st.sent || []) };
   if (replyTo != null) patch.mails = (st.mails || []).map(function (m) { return String(m.id) === String(replyTo) ? Object.assign({}, m, { unread: false, replied: true }) : m; });
   api.set(patch);
@@ -1015,7 +1011,7 @@ registerView("inbox", {
         label: (unread ? "Unread, " : "") + w.name + ", " + m.subj,
         down: s.down, up: s.up,
         tx: st.slide && st.slide.id === m.id ? st.slide.x : 0, current: st.open === m.id ? "true" : "false",
-        // On a split canvas (#411) another message opens beside the list; the one it replaces is
+        // On a split canvas another message opens beside the list; the one it replaces is
         // left read, as Back leaves it.
         open: function () { if (api.swallowed()) return; var prev = api.get("inbox").open; if (prev != null && prev !== m.id) inboxMarkRead(api, prev); api.set({ open: m.id, openLocal: true }); }
       };
@@ -1094,7 +1090,7 @@ registerView("inbox", {
         multi: multi, singleFrom: !multi, from: fa.address, fromId: fa.id,
         fromAccounts: accts.map(function (account) { return {id: account.id, label: account.address || inboxAcctLabel(account)}; }),
         onFrom: function (event) { var id = event.currentTarget.value; if (accts.some(function (account) { return account.id === id; })) upd({ acct: id }); },
-        close: function () { var loc = st.composeLocal; api.set({ compose: null, toQ: "" }); inboxUndo(api, inboxDraftLabel(api, st.compose), { compose: st.compose, composeLocal: true }); },
+        close: function () { api.set({ compose: null, toQ: "" }); inboxUndo(api, inboxDraftLabel(api, st.compose), { compose: st.compose, composeLocal: true }); },
         send: function () {
           var cc = api.get("inbox").compose; cc = cc === true ? {} : cc;
           var rs = inboxRecips(cc.to);
@@ -1132,9 +1128,9 @@ registerView("inbox", {
 /* Calendar. Day timeline + week strip, month panel (tap the title), event detail, create/edit form,
    invites, per-account calendars. All markup holes are {{calendar.*}}.
    Events are stored with a day offset from today (`off`); repeating events recur from that day. */
-IC.calRepeat = IC.calRepeat || "M4 11a7 7 0 0 1 12.5-4.3M20 13a7 7 0 0 1-12.5 4.3M17 3v4h-4M7 21v-4h4";
-IC.calToday = IC.calToday || "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M12 15h.01";
-IC.calNote = IC.calNote || "M5 7h14M5 12h14M5 17h9";
+IC.calRepeat = "M4 11a7 7 0 0 1 12.5-4.3M20 13a7 7 0 0 1-12.5 4.3M17 3v4h-4M7 21v-4h4";
+IC.calToday = "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M12 15h.01";
+IC.calNote = "M5 7h14M5 12h14M5 17h9";
 
 var CAL_COLORS = { acc: "var(--acct)", fg: "var(--fg)", mut: "var(--mut)" };
 var CAL_COLOR_ORDER = ["acc", "fg", "mut"];
@@ -1198,7 +1194,7 @@ function calTimeOf(t, ref) {
   return h + mi / 60;
 }
 function calIsFlowTalk(t) { return /^(turn|switch) (on|off)\b|^(pause|disable|enable|resume|run)\b|why did|morning brief|protect focus|receipts to files|weekly review|^(every|whenever|each)\b|\bevery (day|weekday|morning|evening|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\bwhenever\b|workflow|automat/.test(t); }
-function calMatch(list, t, api) {
+function calMatch(list, t) {
   var best = null, bestScore = 0;
   list.forEach(function (e) {
     var words = e.title.toLowerCase().replace(/[·]/g, " ").split(/\s+/).filter(function (w) { return w.length > 2; });
@@ -1279,7 +1275,7 @@ registerView("calendar", {
     // prep
     var pm = t.match(/prep(?:are)?\s+(?:me\s+)?for\s+(.+)|what should i prep for\s+(.+)/);
     if (pm || (/^prep\b/.test(t) && cur)) {
-      var target = pm ? calMatch(list, pm[1] || pm[2] || "", api) : cur;
+      var target = pm ? calMatch(list, pm[1] || pm[2] || "") : cur;
       if (!target && cur) target = cur;
       if (!target) return null;
       var bullets = calPrep(target, api);
@@ -1307,7 +1303,7 @@ registerView("calendar", {
     // move
     var mv = t.match(/\b(move|push|reschedule|shift)\b\s+(.+?)\s+(to|until|till)\s+(.+)/);
     if (mv) {
-      var e1 = /\b(this|it)\b/.test(mv[2]) && cur ? cur : calMatch(list, mv[2], api);
+      var e1 = /\b(this|it)\b/.test(mv[2]) && cur ? cur : calMatch(list, mv[2]);
       if (!e1) return null;
       var nd = calDayOf(mv[4], api); var nt = calTimeOf(mv[4].indexOf("at") >= 0 || /am|pm/.test(mv[4]) ? mv[4] : "at " + mv[4], e1.t);
       if (nd == null && nt == null) return null;
@@ -1320,7 +1316,7 @@ registerView("calendar", {
     // cancel
     var cm = t.match(/\b(cancel|delete|remove|clear)\b\s+(?:my\s+|the\s+)?(.+)/);
     if (cm && !/workflow|note|mail|message/.test(t)) {
-      var e2 = /^(this|it)\b/.test(cm[2]) && cur ? cur : calMatch(list, cm[2], api);
+      var e2 = /^(this|it)\b/.test(cm[2]) && cur ? cur : calMatch(list, cm[2]);
       if (!e2) return null;
       var snap = Object.assign({}, e2);
       return { text: "Cancelled " + e2.title + (e2.who && e2.who.length ? " and let " + e2.who.map(function (id) { return calPerson(api, id).name.split(" ")[0]; }).join(", ") + " know." : "."), card: { type: "generic", icon: "reply", title: e2.title, sub: "Cancelled · tap to restore", ev: snap, act: { mod: "calendar", fn: "restore" } },
@@ -1494,8 +1490,8 @@ registerView("calendar", {
     var f = st.form; var F = null;
     if (f) {
       var fp = function (p) { set({ form: Object.assign({}, f, p) }); };
-      var inputs=calendarFormInputs(f,new Date(api.now==null?Date.now():api.now));
-      var inputChange=function(kind){return function(event){if(api.get('calendar').form!==f)return;try{fp(calendarFormInputPatch(f,kind,event.target.value,new Date(api.now==null?Date.now():api.now)));}catch(error){api.toast(error.message);fp({});}};};
+      var inputs=calendarFormInputs(f,new Date(api.now));
+      var inputChange=function(kind){return function(event){if(api.get('calendar').form!==f)return;try{fp(calendarFormInputPatch(f,kind,event.target.value,new Date(api.now)));}catch(error){api.toast(error.message);fp({});}};};
       var dayChips = [];
       var first = f.off === 0 ? 1 : (f.off > 0 ? Math.max(1, f.off - 3) : f.off - 3);
       var offsets = [0];
@@ -1571,16 +1567,15 @@ registerView("calendar", {
       mdays: mdays, mPrev: function () { set({ month: (st.month || 0) - 1 }); }, mNext: function () { set({ month: (st.month || 0) + 1 }); },
       closeMonth: function () { set({ month: null }); }, calRows: calRows, chevron: monthOpen ? IC.up : IC.down,
       detail: !!D && !F, ev: D,
-      form: !!F, f: F,
-      noop: function () {}
+      form: !!F, f: F
     };
   }
 });
 
 /* ===== module: browser ===== */
 /* Browser. Agentic: chat about the page, or ask it to act (fill a form), with a confirm step before anything irreversible. */
-IC.brTabs = IC.brTabs || "M5 7h11v12H5zM8 4h11v12";
-IC.brUser = IC.brUser || "M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0";
+IC.brTabs = "M5 7h11v12H5zM8 4h11v12";
+IC.brUser = "M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0";
 
 /* Reference pages and the booking demo come from BR_START / BR_PAGES (fixtures only). */
 var BR_LINKS = BR_START || {};
@@ -1622,9 +1617,9 @@ function brGo(api, url) {
   var tabs = s.tabs.map(function (t) { return t.id === s.cur ? { id: t.id, hist: t.hist.slice(0, t.pos + 1).concat([url]), pos: t.pos + 1 } : t; });
   var visits = url === "newtab" ? s.visits : [url].concat(s.visits.filter(function (v) { return v !== url; })).slice(0, 12);
   api.set({ tabs: tabs, visits: visits, editing: false, menu: false, hl: 0, lib: null, tabsOpen: false });
-  api.later(function () { try { var c = document.querySelector("[data-bscroll]"); if (c) c.scrollTop = 0; } catch (e) {} }, 30);
+  api.later(function () { var c = document.querySelector("[data-bscroll]"); if (c) c.scrollTop = 0; }, 30);
 }
-function brNoScroll() { try { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); var sc = document.querySelector("[data-screen]"); if (sc && (sc.scrollTop || sc.scrollLeft)) { sc.scrollTop = 0; sc.scrollLeft = 0; } } catch (e) {} }
+function brNoScroll() { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); var sc = document.querySelector("[data-screen]"); if (sc && (sc.scrollTop || sc.scrollLeft)) { sc.scrollTop = 0; sc.scrollLeft = 0; } }
 function brCurUrl(s) { var t = s.tabs.filter(function (x) { return x.id === s.cur; })[0] || s.tabs[s.tabs.length - 1]; return t ? t.hist[t.pos] : "newtab"; }
 function brPos(name) {
   try {
@@ -1753,7 +1748,7 @@ if (testMocksEnabled) registerView("browser", {
     }
     if (here && /\bsummar|\btl;?dr\b|\bkey points\b|\bwhat('s| is) this (page|article) about\b|\bthe gist\b/.test(t)) {
       if (!pg.points) return { text: pg.kind === "search" ? "Search results for “" + pg.q + "”. Tap one and I'll read it." : "This tab is empty. Tell me where to go." };
-      var saveAct = VIEWS.notes && VIEWS.notes.actions && VIEWS.notes.actions.save ? { mod: "notes", fn: "save" } : { mod: "browser", fn: "saveNote" };
+      var saveAct = VIEWS.notes.actions && VIEWS.notes.actions.save ? { mod: "notes", fn: "save" } : { mod: "browser", fn: "saveNote" };
       return { text: "Three things from " + pg.host + ".", card: { type: "summary", title: pg.title + " · key points", bullets: pg.points, act: saveAct } };
     }
     if (here && /\bread (it |this |the page |this page )?(out )?(aloud|to me)\b/.test(t)) return { text: "Reading " + pg.host + " aloud.", then: function () { api.toast("Reading aloud · " + (pg.host || "page")); } };
@@ -1899,10 +1894,10 @@ else registerView("browser", {
 /* Camera: video / photo. Immersive. Captures are prepended to Photos' shared list.
    Scanning is not a mode: asking Alpha to scan while Camera is open captures one frame into scan review.
    Scenes come from phScene()/phLook() in the Photos module (CSS compositions, no images). All holes are {{camera.*}}. */
-IC.camFlash = IC.camFlash || "M13 3L5 14h6l-1 7 8-11h-6l1-7z";
-IC.camFlashOff = IC.camFlashOff || "M13 3L9.5 8M8 10l-3 4h6l-1 7 3.2-4.4M15 13.6L18 10h-6l1-7M3 3l18 18";
-IC.camFlip = IC.camFlip || "M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5";
-IC.camScan = IC.camScan || "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10";
+IC.camFlash = "M13 3L5 14h6l-1 7 8-11h-6l1-7z";
+IC.camFlashOff = "M13 3L9.5 8M8 10l-3 4h6l-1 7 3.2-4.4M15 13.6L18 10h-6l1-7M3 3l18 18";
+IC.camFlip = "M4 12a8 8 0 0 1 13.7-5.6L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.7 5.6L4 15M4 20v-5h5";
+IC.camScan = "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10";
 
 /* Zoom ratios of the simulated lenses: the back lens has an ultra-wide, the front lens only 1×. */
 var CAM_ZOOM = [[".5", 1], ["1×", 1.35], ["2", 2], ["5", 3.4]];
@@ -2018,10 +2013,10 @@ registerView("camera", {
 /* Photos: library, albums, viewer, editor, select, share, trash. All markup holes are {{photos.*}}.
    Photos use generated photography (IMG, see img.json); phScene() CSS compositions remain the fallback.
    phScene / phLook are shared with the Camera module. */
-IC.phRotate = IC.phRotate || "M19 12a7 7 0 1 1-2-4.9M19 4v4h-4";
-IC.phCrop = IC.phCrop || "M7 3v14h14M3 7h14v14";
-IC.phSelect = IC.phSelect || "M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM8.5 12.5l2.5 2.5 4.5-5";
-IC.phAlbums = IC.phAlbums || "M8 3h12v12M4 7h12v14H4z";
+IC.phRotate = "M19 12a7 7 0 1 1-2-4.9M19 4v4h-4";
+IC.phCrop = "M7 3v14h14M3 7h14v14";
+IC.phSelect = "M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM8.5 12.5l2.5 2.5 4.5-5";
+IC.phAlbums = "M8 3h12v12M4 7h12v14H4z";
 
 /* ---------- scene composer ---------- */
 function phRg(w, h, x, y, img) { // image layer covering a w×h (% of frame) box whose top-left is x,y (%)
@@ -2081,7 +2076,7 @@ function phScene(scene, figs, tone, img) {
   var L = [];
   var c = PH_FIGC[scene] || "var(--alpha-photo-figure-1)";
   (figs || []).forEach(function (f) { L = L.concat(phFig(f[0], f[1], f[2] || c)); });
-  if (scene === "birthday") L = L.slice(0, 0).concat(PH_SCENES.birthday().slice(0, 4), L, PH_SCENES.birthday().slice(4)); // cake in front of people
+  if (scene === "birthday") L = [].concat(PH_SCENES.birthday().slice(0, 4), L, PH_SCENES.birthday().slice(4)); // cake in front of people
   else L = L.concat((PH_SCENES[scene] || PH_SCENES.beach)(tone));
   return (PH_CACHE[k] = L.join(", "));
 }
@@ -2173,7 +2168,7 @@ function phDescribe(it, api, now) {
 function phBack(st, api) {
   if (st.sheet) { api.set({ sheet: null }); return true; }
   if (st.edit) { api.set({ edit: null }); return true; }
-  if (st.open) { if (st.from && ((api.S && api.S.stack) || []).length) return false; api.set({ open: null, playing: false, from: null }); return true; }
+  if (st.open) { if (st.from && (api.S.stack || []).length) return false; api.set({ open: null, playing: false, from: null }); return true; }
   if (st.sel) { api.set({ sel: null }); return true; }
   if (st.album) { api.set({ album: null }); return true; }
   if (st.searching) { api.set({ searching: false, q: "" }); return true; }
@@ -2476,7 +2471,7 @@ registerView("photos", {
       onQ: function (e) { api.set({ q: e.target.value }); },
       closeSearch: function () { api.set({ searching: false, q: "" }); },
       askQ: function () { var q = (api.get("photos").q || "").trim(); if (q) api.send(q); },
-      searchRef: function (el) { if (el && document.activeElement !== el && !el.dataset.f) { el.dataset.f = "1"; try { el.focus(); } catch (e) {} } },
+      searchRef: function (el) { if (el && document.activeElement !== el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } },
       selStart: function () { api.set({ tab: "lib", sel: [] }); },
       hasFilter: !!st.filter && st.tab !== "alb" && !st.searching, filterLabel: st.filter ? st.filter.label : "", filterN: shown.length,
       clearFilter: function () { api.set({ filter: null }); },
@@ -2503,23 +2498,23 @@ registerView("photos", {
 /* ===== module: maps ===== */
 /* Maps. Holes are {{maps.*}}. The map is drawn in SVG (world units = px at scale 1), pins/labels are HTML overlays.
    State keys double as deep links: {query}, {place}, {directions}. */
-IC.mapsLoc = IC.mapsLoc || "M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M18 12a6 6 0 1 1-12 0a6 6 0 1 1 12 0zM13.2 12a1.2 1.2 0 1 1-2.4 0a1.2 1.2 0 1 1 2.4 0z";
-IC.mapsNav = IC.mapsNav || "M12 3l7 18-7-4-7 4z";
-IC.mapsRoute = IC.mapsRoute || "M6 19a2 2 0 1 1 0-.01M18 7a2 2 0 1 1 0-.01M6 17V11a4 4 0 0 1 4-4h6";
-IC.mapsCar = IC.mapsCar || "M4 17V13l2-5.5A1.5 1.5 0 0 1 7.4 6.5h9.2A1.5 1.5 0 0 1 18 7.5L20 13v4zM4 13h16M4 17v2.5h3V17M17 17v2.5h3V17M7.5 15h.01M16.5 15h.01";
-IC.mapsBus = IC.mapsBus || "M7 3.5h10a2 2 0 0 1 2 2V16a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 16V5.5a2 2 0 0 1 2-2zM5 11h14M8 17.5V20M16 17.5V20M8.5 14.3h.01M15.5 14.3h.01";
-IC.mapsWalk = IC.mapsWalk || "M14 4.5a1.5 1.5 0 1 1-3 0a1.5 1.5 0 1 1 3 0zM9 21l2.5-6.5L14 17v4M11.5 14.5L12.5 9l-3 1.5V14M12.5 9l2 3.5 3 1";
-IC.mapsBike = IC.mapsBike || "M9 16.5a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM22 16.5a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM5.5 16.5L9 9.5h6.5l3 7M12.5 16.5L9 9.5M8 7h3M15 6.5h2l-1.5 3";
-IC.mapsLeft = IC.mapsLeft || "M16 20v-7.5A3.5 3.5 0 0 0 12.5 9H6M10 5L6 9l4 4";
-IC.mapsRight = IC.mapsRight || "M8 20v-7.5A3.5 3.5 0 0 1 11.5 9H18M14 5l4 4-4 4";
-IC.mapsStraight = IC.mapsStraight || "M12 20V5M7 10l5-5 5 5";
-IC.mapsVol = IC.mapsVol || "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11";
-IC.mapsMute = IC.mapsMute || "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 10l4 4M20 10l-4 4";
-IC.mapsCup = IC.mapsCup || "M5 9h11v4.5A4.5 4.5 0 0 1 11.5 18h-2A4.5 4.5 0 0 1 5 13.5zM16 10.5h1.5a2.3 2.3 0 0 1 0 4.6H16M8 3.5v2.5M12 3.5v2.5M4 21h13";
-IC.mapsFood = IC.mapsFood || "M7 3v7M5 3v5a2 2 0 0 0 4 0V3M7 10v11M17 3c-2.2 1.2-3.2 3.6-3.2 6.5V13H17M17 3v18";
-IC.mapsGym = IC.mapsGym || "M7 7v10M4 9.5v5M17 7v10M20 9.5v5M7 12h10";
-IC.mapsWork = IC.mapsWork || "M4 8h16v11H4zM9 8V5h6v3M4 13h16";
-IC.mapsHome = IC.mapsHome || "M4 11l8-7 8 7M6.5 9v11h11V9";
+IC.mapsLoc = "M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M18 12a6 6 0 1 1-12 0a6 6 0 1 1 12 0zM13.2 12a1.2 1.2 0 1 1-2.4 0a1.2 1.2 0 1 1 2.4 0z";
+IC.mapsNav = "M12 3l7 18-7-4-7 4z";
+IC.mapsRoute = "M6 19a2 2 0 1 1 0-.01M18 7a2 2 0 1 1 0-.01M6 17V11a4 4 0 0 1 4-4h6";
+IC.mapsCar = "M4 17V13l2-5.5A1.5 1.5 0 0 1 7.4 6.5h9.2A1.5 1.5 0 0 1 18 7.5L20 13v4zM4 13h16M4 17v2.5h3V17M17 17v2.5h3V17M7.5 15h.01M16.5 15h.01";
+IC.mapsBus = "M7 3.5h10a2 2 0 0 1 2 2V16a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 16V5.5a2 2 0 0 1 2-2zM5 11h14M8 17.5V20M16 17.5V20M8.5 14.3h.01M15.5 14.3h.01";
+IC.mapsWalk = "M14 4.5a1.5 1.5 0 1 1-3 0a1.5 1.5 0 1 1 3 0zM9 21l2.5-6.5L14 17v4M11.5 14.5L12.5 9l-3 1.5V14M12.5 9l2 3.5 3 1";
+IC.mapsBike = "M9 16.5a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM22 16.5a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0zM5.5 16.5L9 9.5h6.5l3 7M12.5 16.5L9 9.5M8 7h3M15 6.5h2l-1.5 3";
+IC.mapsLeft = "M16 20v-7.5A3.5 3.5 0 0 0 12.5 9H6M10 5L6 9l4 4";
+IC.mapsRight = "M8 20v-7.5A3.5 3.5 0 0 1 11.5 9H18M14 5l4 4-4 4";
+IC.mapsStraight = "M12 20V5M7 10l5-5 5 5";
+IC.mapsVol = "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11";
+IC.mapsMute = "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 10l4 4M20 10l-4 4";
+IC.mapsCup = "M5 9h11v4.5A4.5 4.5 0 0 1 11.5 18h-2A4.5 4.5 0 0 1 5 13.5zM16 10.5h1.5a2.3 2.3 0 0 1 0 4.6H16M8 3.5v2.5M12 3.5v2.5M4 21h13";
+IC.mapsFood = "M7 3v7M5 3v5a2 2 0 0 0 4 0V3M7 10v11M17 3c-2.2 1.2-3.2 3.6-3.2 6.5V13H17M17 3v18";
+IC.mapsGym = "M7 7v10M4 9.5v5M17 7v10M20 9.5v5M7 12h10";
+IC.mapsWork = "M4 8h16v11H4zM9 8V5h6v3M4 13h16";
+IC.mapsHome = "M4 11l8-7 8 7M6.5 9v11h11V9";
 
 var MAPS_ME = [608, 832];
 var MAPS_WW = 1200, MAPS_WH = 3200;
@@ -2570,8 +2565,7 @@ function mapsAddr(a) {
 }
 function mapsModeI(m) { for (var i = 0; i < MAPS_MODES.length; i++) if (MAPS_MODES[i][0] === m) return i; return 0; }
 function mapsFmtMin(m) { m = Math.max(1, Math.round(m)); if (m >= 60) { var h = Math.floor(m / 60), r = m % 60; return h + " h" + (r ? " " + r : ""); } return m + " min"; }
-function mapsClock(d) { return formatTime(d); }
-function mapsEta(api, min) { return mapsClock(new Date(api.now.getTime() + min * 60000)); }
+function mapsEta(api, min) { return formatTime(new Date(api.now.getTime() + min * 60000)); }
 function mapsHr(t) { return formatHours(t, { compact: true }); }
 function mapsHours(p, now) {
   if (p.open === "none") return null;
@@ -2631,7 +2625,6 @@ function mapsSearch(q) {
 function mapsNavTick(api) {
   var s = api.get("maps"); if (!s.nav) { api.stopBg(); return; }
   var p = mapsPlace(s.directions); if (!p) return;
-  var total = mapsLen(p.pts).pop();
   var prog = Math.min(1, (s.prog || 0) + 1 / 34);
   var before = mapsStepIdx(p, s.prog || 0), after = mapsStepIdx(p, prog);
   api.set({ prog: prog });
@@ -2913,18 +2906,17 @@ registerView("maps", {
 
 /* ===== module: notes ===== */
 /* Notes: text, checklist, voice (live transcription + Alpha summary), link clips. Holes are {{notes.*}}. */
-IC.notesPin = IC.notesPin || "M9 3h6l-1 6 4 4H6l4-4zM12 13v8";
-IC.notesList = IC.notesList || "M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17";
-IC.notesBox = IC.notesBox || "M5 5h14v14H5z";
-IC.notesRecDot = IC.notesRecDot || "M12 7.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM12 10a2 2 0 1 1 0 4a2 2 0 1 1 0-4z";
-IC.notesWave = IC.notesWave || "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0";
+IC.notesPin = "M9 3h6l-1 6 4 4H6l4-4zM12 13v8";
+IC.notesList = "M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17";
+IC.notesBox = "M5 5h14v14H5z";
+IC.notesRecDot = "M12 7.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM12 10a2 2 0 1 1 0 4a2 2 0 1 1 0-4z";
+IC.notesWave = "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0";
 var NOTES_RED = "var(--alpha-notes-red)";
 
 var NOTES_WAVE = []; (function () { for (var i = 0; i < 56; i++) NOTES_WAVE.push(Math.round(8 + 26 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37)) + (i % 3) * 3)); })();
 var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null };
 
 function notesFmt(sec) { if (!Number.isFinite(sec)) return ""; sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + pad2(sec % 60); }
-function notesNowLabel(d) { return formatTime(d); }
 function notesFind(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 /* Live agent Notes (canonical-notes-ui.ts) bind api.canonicalNotes: the same view, saved through the canonical Notes client. */
 function notesUpd(api, id, patch) {
@@ -2953,7 +2945,7 @@ function notesClose(api) {
   api.set(notesLeave(api, null));
 }
 /** Leaves the open note as Back does: dictation and the unsent checklist item end with it, and an
- * empty new note is dropped. On a split canvas (#411) another note opens beside the list directly. */
+ * empty new note is dropped. On a split canvas another note opens beside the list directly. */
 function notesLeave(api, next) {
   if (api.canonicalNotes) { void api.canonicalNotes.leave(next); return {}; }
   var s = api.get("notes"); notesStopTimers();
@@ -3056,7 +3048,6 @@ function notesNew(api, kind) {
   var leave = notesLeave(api, id);
   api.set(Object.assign(leave, { list: [n].concat(leave.list || api.get("notes").list), blankCreationId: id, blankCreationTitle: title, compose: false, q: null }));
 }
-function notesLast(list) { for (var i = 0; i < list.length; i++) if (list[i].kind === "voice") return list[i]; return null; }
 function notesShare(api, n, via) {
   var parts = n.kind === "voice" ? n.summary.concat(n.actions.map(function (a) { return "Next: " + a.t; }))
     : n.kind === "list" ? n.items.map(function (i) { return (i.done ? "Done: " : "") + i.t; })
@@ -3119,54 +3110,6 @@ registerView("notes", {
     },
     sendShare: function (card, api) { api.toast("Sent to " + card.to.split(" ")[0]); }
   },
-  reply: function (t, raw, api) {
-    if (api.notesSourceMode === "canonical") return null;
-    var st = api.get("notes");
-    var m = raw.match(/^\s*(?:please\s+)?(?:take a note|make a note|note|jot down|write down|remember)\b(?:\s+(?:that|to))?\s*[:,]?\s*(.+)$/i);
-    if (m && m[1].trim()) {
-      var text = m[1].trim().replace(/\.$/, ""); var id = "n" + Date.now();
-      var title = text.length <= 44 ? cap(text) : cap(text.split(/\s+/).slice(0, 5).join(" ")) + "…";
-      var note = { id: id, kind: "text", title: title, body: text.length <= 44 ? "" : cap(text) + ".", pinned: false, when: "Now", createdAt: Date.now(), modifiedAt: Date.now() };
-      return { text: /^\s*remember/i.test(raw) ? "I'll remember. It's in Notes." : "Saved to Notes.", card: { type: "note", body: cap(text), go: { view: "notes", patch: { open: id } } },
-        then: function () { var s = api.get("notes"); api.set({ list: [note].concat(s.list) }); } };
-    }
-    var fm = raw.match(/(?:find|search|show)\s+(?:my\s+)?notes?\s+(?:about|on|for|with|mentioning)\s+(.+)$/i);
-    if (fm) {
-      var term = fm[1].trim().replace(/[?.!]$/, ""); var tl = term.toLowerCase();
-      var hits = st.list.filter(function (n) { return [n.title, n.body, (n.items || []).map(function (i) { return i.t; }).join(" "), (n.lines || []).map(function (l) { return l.t; }).join(" "), (n.summary || []).join(" ")].join(" ").toLowerCase().indexOf(tl) >= 0; });
-      if (!hits.length) return { text: "No notes mention \u201c" + term + "\u201d." };
-      return { text: hits.length === 1 ? "One note: " + (hits[0].title || "Untitled") + "." : hits.length + " notes mention \u201c" + term + "\u201d.", nav: { view: "notes", patch: hits.length === 1 ? { open: hits[0].id, filter: null } : { filter: { text: term }, folder: null, open: null } } };
-    }
-    if (/(start|begin)\s+(a\s+)?(recording|transcri)|record (this|the) (meeting|call)|^record$|^transcribe/.test(t)) {
-      return { text: "Recording.", nav: { view: "notes", patch: { record: true } } };
-    }
-    var digest = copy("notes").digest;
-    if (digest && digest.re.test(t) && /decide|decision|agree|summar|what/.test(t)) {
-      var d = notesFind(st.list, digest.id);
-      if (d) return { text: digest.text, card: { type: "summary", bullets: d.summary.concat(d.actions.map(function (a) { return "Next: " + a.t; })), go: { view: "notes", patch: { open: digest.id } } } };
-    }
-    if (/summar|recap|what did we (decide|say)/.test(t) && /(last|latest|recent)?\s*(recording|meeting|voice note|memo|standup)/.test(t) || (api.active && /what did we decide/.test(t))) {
-      var cur = api.active && st.open ? notesFind(st.list, st.open) : null;
-      var r = cur && cur.kind === "voice" ? cur : notesLast(st.list);
-      if (r) return { text: r.title + ", " + notesFmt(r.dur) + ".", card: { type: "summary", bullets: r.summary.concat(r.actions.map(function (a) { return "Next: " + a.t; })), go: { view: "notes", patch: { open: r.id } } } };
-    }
-    if (api.active && st.open) {
-      var n = notesFind(st.list, st.open);
-      if (n && n.kind === "text" && /checklist|to-?do list|make .*list/.test(t)) {
-        return { text: "Done. Each line is now a checkbox.", then: function () { notesUpd(api, n.id, function (x) { return { kind: "list", items: String(x.body || "").split("\n").filter(function (l) { return l.trim(); }).map(function (l) { return { t: l.trim(), done: false }; }), body: "" }; }); } };
-      }
-      if (n && /summar/.test(t) && n.kind !== "voice") {
-        var src = n.kind === "list" ? n.items.map(function (i) { return i.t + (i.done ? " (done)" : ""); }) : n.kind === "link" ? n.clips : String(n.body || "").split(/\n|\.\s/).filter(function (l) { return l.trim(); });
-        return { text: n.title || "This note", card: { type: "summary", bullets: src.slice(0, 4), title: (n.title || "Note") + " · summary", act: { mod: "notes", fn: "save" } } };
-      }
-      if (n && n.kind === "voice" && /share|send/.test(t) && /action|follow|item|summary|notes/.test(t)) {
-        var pid = null; n.lines.forEach(function (l) { if (!pid && l.s !== "me") pid = l.s; }); var p = api.person(pid) || { name: pid || "Attendees" };
-        return { text: "Here's a draft to " + p.name.split(" ")[0] + ".", card: { type: "draft", to: p.name, pid: pid, body: "From " + n.title + ": " + n.actions.map(function (a) { return a.t; }).join("; ") + ".", act: { mod: VIEWS.messages && VIEWS.messages.actions && VIEWS.messages.actions.sendDraft ? "messages" : "notes", fn: VIEWS.messages && VIEWS.messages.actions && VIEWS.messages.actions.sendDraft ? "sendDraft" : "sendShare" } } };
-      }
-    }
-    return null;
-  },
-
   render: function (st, api) {
     if (!NT.pend && (st.record || st.compose)) {
       NT.pend = true;
@@ -3175,7 +3118,7 @@ registerView("notes", {
       setTimeout(function () { NT.pend = false; var s = api.get("notes"); if (s.record) { api.set({ record: false }); api.toast("Recording isn’t available in this preview."); } else if (s.compose) notesNew(api, "text"); }, 0);
     }
     var list = st.list || [];
-    /* One-column list (PLAN.md section 3, decision N3): the selected folder chip, then the agent's
+    /* One-column list: the selected folder chip, then the agent's
        read-only filter, pinned notes first. A note whose folder was deleted shows under All only. */
     var folders = Array.isArray(st.folders) ? st.folders : [];
     var folder = st.folder && st.folder !== "deleted" && folders.some(function (f) { return f.id === st.folder; }) ? st.folder : null;
@@ -3193,6 +3136,7 @@ registerView("notes", {
       };
     });
     var pinnedRows = rows.filter(function (r) { return r.pinned; }), otherRows = rows.filter(function (r) { return !r.pinned; });
+    var submitFolder = function () { var cur = api.get("notes").folderSheet; if (cur && cur.kind === "rename") notesRenameFolder(api, cur.id); else notesCreateFolder(api); };
     var folderChips = folders.map(function (f) {
       var on = folder === f.id, hold = notesChipHold(api, f.id);
       return { id: f.id, name: f.name, pressed: on ? "true" : "false", label: on ? f.name + ", folder options" : f.name,
@@ -3213,11 +3157,11 @@ registerView("notes", {
     var ed = null, vo = null, lk = null;
     var common = n ? {
       close: function () { notesClose(api); },
-      pinIcon: IC.notesPin, pinCss: n.pinned ? "color: var(--acct)" : "", pinLabel: n.pinned ? "Unpin" : "Pin",
+      pinLabel: n.pinned ? "Unpin" : "Pin",
       pin: async function () { api.set({ menu: null }); await notesUpd(api, n.id, { pinned: !n.pinned }); },
       share: function () { api.set({ sheet: "share", menu: null }); },
       del: function () { api.set({ menu: null }); notesDelete(api, n.id); },
-      /* ⋯ menu: Pin, Move to…, Delete (PLAN.md section 3). */
+      /* ⋯ menu: Pin, Move to…, Delete. */
       menuOpen: st.menu === "main", moveOpen: st.menu === "move", menuShown: !!st.menu,
       more: function () { api.set({ menu: api.get("notes").menu ? null : "main" }); },
       closeMenu: function () { api.set({ menu: null }); },
@@ -3230,6 +3174,7 @@ registerView("notes", {
       onTitle: function (e) { notesUpd(api, n.id, { title: e.target.value }); }
     } : null;
     if (isEdit) {
+      var addItem = function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); };
       ed = Object.assign({}, common, {
         isText: n.kind === "text", isList: n.kind === "list",
         saveStatus: "",
@@ -3254,8 +3199,8 @@ registerView("notes", {
         }),
         newItem: st.newItem || "",
         onNew: function (e) { api.set({ newItem: e.target.value }); },
-        addItem: function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); },
-        newKey: function (e) { if (e.key === "Enter") { e.preventDefault(); var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); } },
+        addItem: addItem,
+        newKey: function (e) { if (e.key === "Enter") { e.preventDefault(); addItem(); } },
       });
     }
     if (n && n.kind === "voice") {
@@ -3280,12 +3225,10 @@ registerView("notes", {
         proc: st.proc === n.id, ready: st.proc !== n.id,
         summary: n.summary || [], noSummary: !(n.summary || []).length,
         hasActions: (n.actions || []).length > 0,
-        actCount: (n.actions || []).length === 1 ? "1 action item" : (n.actions || []).length + " action items",
         actions: (n.actions || []).map(function (a, i) {
           return { t: a.t, idx: i, css: a.done ? "text-decoration: line-through; color: var(--mut)" : "", box: a.done ? "background: var(--fg); color: var(--bg)" : "box-shadow: inset 0 0 0 1.5px var(--mut); color: transparent", label: (a.done ? "Uncheck " : "Check ") + a.t,
             toggle: function () { notesUpd(api, n.id, function (x) { return { actions: x.actions.map(function (y, j) { return j === i ? Object.assign({}, y, { done: !y.done }) : y; }) }; }); } };
         }),
-        calIcon: n.onCal ? IC.check : IC.cal, calLabel: n.onCal ? "Added to calendar" : "Add action items to calendar", calText: n.onCal ? "On calendar" : "Add to calendar",
         toCal: function () {
           if (n.onCal) return;
           notesUpd(api, n.id, { onCal: true });
@@ -3305,18 +3248,18 @@ registerView("notes", {
     if (n && n.kind === "link") {
       lk = Object.assign({}, common, {
         clips: n.clips || [], domain: n.domain, when: n.when,
-        visit: function () { if (VIEWS.browser) api.open("browser", { url: n.url }); else api.toast("Opening " + n.domain); }
+        visit: function () { api.open("browser", { url: n.url }); }
       });
     }
 
     var shareSheet = st.sheet === "share" && !!n;
     return {
-      notesTitle: "Notes", primaryNotes: true, canRecord: true, canCreate: true,
+      notesTitle: "Notes", canRecord: true, canCreate: true,
       newNote: function () { notesNew(api, "text"); },
       // The Notes recorder (voice-adapter, note-recorder.ts) handles Record; `record` is its deep-link flag.
       record: function () { api.set({ record: true }); },
       pinnedRows: pinnedRows, otherRows: otherRows, hasPinned: pinnedRows.length > 0, notesHead: pinnedRows.length > 0 && otherRows.length > 0,
-      none: rows.length === 0, emptyTitle: filter ? "No matches" : "No notes", emptyMessage: "",
+      none: rows.length === 0, emptyTitle: filter ? "No matches" : "No notes",
       allPressed: folder ? "false" : "true", selectAll: function () { api.set({ folder: null, filter: null, folderSheet: null }); },
       folderChips: folderChips,
       newFolder: function () { api.set({ folderSheet: { kind: "new", name: "" } }); },
@@ -3328,8 +3271,8 @@ registerView("notes", {
       folderSheetTitle: sheet && sheet.kind === "new" ? "New folder" : renaming ? "Rename folder" : sheetFolder ? sheetFolder.name : "",
       folderSubmitLabel: renaming ? "Save" : "Create",
       onFolderName: function (e) { var cur = api.get("notes").folderSheet; if (cur && (cur.kind === "new" || cur.kind === "rename")) api.set({ folderSheet: Object.assign({}, cur, { name: e.target.value }) }); },
-      folderNameKey: function (e) { if (e.key === "Enter") { e.preventDefault(); var cur = api.get("notes").folderSheet; if (cur && cur.kind === "rename") notesRenameFolder(api, cur.id); else notesCreateFolder(api); } },
-      createFolder: function () { var cur = api.get("notes").folderSheet; if (cur && cur.kind === "rename") notesRenameFolder(api, cur.id); else notesCreateFolder(api); },
+      folderNameKey: function (e) { if (e.key === "Enter") { e.preventDefault(); submitFolder(); } },
+      createFolder: submitFolder,
       folderSaveDisabled: !(sheet && (sheet.kind === "new" || renaming) && String(sheet.name || "").trim()),
       renameFolder: function () { if (sheetFolder) api.set({ folderSheet: { kind: "rename", id: sheetFolder.id, name: sheetFolder.name } }); },
       deleteFolder: function () { if (sheetFolder) notesDeleteFolder(api, sheetFolder.id); },
@@ -3346,8 +3289,8 @@ registerView("notes", {
 /* ===== module: contacts ===== */
 /* Contacts. Holes are {{contacts.*}}. Working copy of people lives in st.list (persisted);
    other apps can read api.get("contacts").list and fall back to PEOPLE. */
-IC.contactsGift = IC.contactsGift || "M4 11h16v9H4zM3 8h18v3H3zM12 8v12M12 8c-1.5-3-5-3.5-5-1.5S12 8 12 8zM12 8c1.5-3 5-3.5 5-1.5S12 8 12 8z";
-IC.contactsNote = IC.contactsNote || "M5 6h14M5 10h14M5 14h9M5 18h6";
+IC.contactsGift = "M4 11h16v9H4zM3 8h18v3H3zM12 8v12M12 8c-1.5-3-5-3.5-5-1.5S12 8 12 8zM12 8c1.5-3 5-3.5 5-1.5S12 8 12 8z";
+IC.contactsNote = "M5 6h14M5 10h14M5 14h9M5 18h6";
 
 function ctIni(first, last) { var s = ((first || "").charAt(0) + (last || "").charAt(0)).toUpperCase(); return s || "#"; }
 function ctMake(p) { var name = ((p.first || "") + " " + (p.last || "")).trim(); return Object.assign({}, p, { name: name || p.phone || "No name", ini: ctIni(p.first, p.last) }); }
@@ -3393,7 +3336,7 @@ function ctContext(api, p) {
   var bits = [];
   var r = ctLastCall(api, p.id);
   var now = api.now.getTime();
-  if (r && typeof pnRel === "function") bits.push((r.dir === "missed" ? "Missed call " : "Last call ") + pnRel(pnAt(r, now), now).replace(/^(\d)/, "at $1").replace(/^Yesterday/, "yesterday"));
+  if (r) bits.push((r.dir === "missed" ? "Missed call " : "Last call ") + pnRel(pnAt(r, now), now).replace(/^(\d)/, "at $1").replace(/^Yesterday/, "yesterday"));
   if (r && r.note) bits.push(r.note);
   var vm = (api.get("phone").vms || []).filter(function (v) { return v.pid === p.id && !v.heard; })[0];
   if (vm) bits.push("Left a voicemail: " + (vm.gist || "listen in Phone"));
@@ -3428,7 +3371,7 @@ function ctSave(api) {
   var f = ctForm(s, l);
   var clean = {}; CT_FIELDS.forEach(function (k) { clean[k] = String(f[k] || "").trim(); });
   if (!clean.first && !clean.last && !clean.phone) { api.toast("Add a name or number"); return false; }
-  if (clean.phone && typeof pnFmt === "function" && clean.phone.replace(/\D/g, "").length === 10) clean.phone = pnFmt(clean.phone);
+  if (clean.phone && clean.phone.replace(/\D/g, "").length === 10) clean.phone = pnFmt(clean.phone);
   if (s.edit) {
     api.set({ list: l.map(function (x) { return x.id === s.edit ? ctMake(Object.assign({}, x, clean)) : x; }), edit: null, add: null, form: null, open: s.edit });
   } else {
@@ -3485,7 +3428,7 @@ registerView("contacts", {
       var name = raw.replace(em, "").replace(ph, "").replace(/^.*?\bcontact\b\s*(for|named|called)?\s*/i, "").replace(/\b(with|number|phone|email|at|and)\b/gi, " ").replace(/[^A-Za-z' -]/g, " ").replace(/\s+/g, " ").trim();
       if (!name && !ph) return { text: "Opening a new contact.", nav: { view: "contacts", patch: { add: true, open: null } } };
       var parts = name.split(" ").filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); });
-      var np = ctMake({ id: "contact-" + crypto.randomUUID(), first: parts[0] || "", last: parts.slice(1).join(" "), phone: ph && typeof pnFmt === "function" ? pnFmt(ph) : ph.trim(), email: em, address: "", birthday: "", note: "", fav: false });
+      var np = ctMake({ id: "contact-" + crypto.randomUUID(), first: parts[0] || "", last: parts.slice(1).join(" "), phone: ph ? pnFmt(ph) : ph.trim(), email: em, address: "", birthday: "", note: "", fav: false });
       return { text: "Saved " + np.name + ".", card: { type: "generic", icon: "user", title: np.name, sub: np.phone || np.email || "No number yet", go: { view: "contacts", patch: { open: np.id } } },
         then: function () { api.setView("contacts", { list: ctList(api).concat([np]) }); } };
     }
@@ -3498,7 +3441,7 @@ registerView("contacts", {
       var field = /mail/.test(ed[2]) ? "email" : /number|phone/.test(ed[2]) ? "phone" : ed[2];
       var to = raw.match(/\bto\s+(.+)$/i);
       if (to && ed[1] !== "edit") {
-        var val = to[1].trim().replace(/[.]$/, ""); if (field === "phone" && typeof pnFmt === "function") val = pnFmt(val);
+        var val = to[1].trim().replace(/[.]$/, ""); if (field === "phone") val = pnFmt(val);
         return { text: "Updated " + f + "'s " + (field === "phone" ? "number" : field) + ".", card: { type: "generic", icon: field === "email" ? "mail" : field === "phone" ? "phone" : field === "address" ? "pin" : "user", title: p.name, sub: val, go: { view: "contacts", patch: { open: p.id } } },
           then: function () { api.setView("contacts", { list: ctList(api).map(function (x) { if (x.id !== p.id) return x; var y = Object.assign({}, x); y[field] = val; return y; }) }); } };
       }
@@ -3580,7 +3523,7 @@ registerView("contacts", {
       searching: !!st.searching, notSearching: !st.searching,
       openSearch: function () { api.set({ searching: true }); },
       closeSearch: function () { api.set({ searching: false, q: "" }); },
-      searchRef: function (el) { if (el && document.activeElement !== el && !el.dataset.f) { el.dataset.f = "1"; try { el.focus(); } catch (e) {} } },
+      searchRef: function (el) { if (el && document.activeElement !== el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } },
       onQ: function (e) { api.set({ q: e.target.value }); },
       askQ: function () { api.send((api.get("contacts").q || "").trim()); },
       favs: favs, hasFavs: favs.length > 0, groups: groups, noHits: hits.length === 0 && !!q,
@@ -3599,16 +3542,16 @@ registerView("contacts", {
 
 /* ===== module: files ===== */
 /* Files: locations, folders, preview, rename/move/share/delete, select mode, Ask Alpha. Holes are {{files.*}}. */
-IC.filesDown = IC.filesDown || "M12 4v11M7 10l5 5 5-5M5 20h14";
-IC.filesReceipt = IC.filesReceipt || "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3";
-IC.filesPdf = IC.filesPdf || "M6 3h9l4 4v14H6zM14 3v5h5M9 12h6v5H9z";
-IC.filesDoc = IC.filesDoc || "M6 3h9l4 4v14H6zM14 3v5h5";
-IC.filesSort = IC.filesSort || "M7 4v16M4 17l3 3 3-3M13 6h8M13 12h6M13 18h4";
-IC.filesRows = IC.filesRows || "M4 6h16M4 12h16M4 18h16";
-IC.filesSelect = IC.filesSelect || "M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM8 12l3 3 5-6";
-IC.filesMove = IC.filesMove || "M3 6h6l2 2h10v11H3zM10 13.5h6M13.5 11l2.5 2.5-2.5 2.5";
-IC.filesDisk = IC.filesDisk || "M4 5h16v14H4zM4 15h16M16 17.5h.01";
-IC.filesZip = IC.filesZip || "M6 3h12v18H6zM12 3v2M12 7v2M12 11v2M10.5 15h3v3h-3z";
+IC.filesDown = "M12 4v11M7 10l5 5 5-5M5 20h14";
+IC.filesReceipt = "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3";
+IC.filesPdf = "M6 3h9l4 4v14H6zM14 3v5h5M9 12h6v5H9z";
+IC.filesDoc = "M6 3h9l4 4v14H6zM14 3v5h5";
+IC.filesSort = "M7 4v16M4 17l3 3 3-3M13 6h8M13 12h6M13 18h4";
+IC.filesRows = "M4 6h16M4 12h16M4 18h16";
+IC.filesSelect = "M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM8 12l3 3 5-6";
+IC.filesMove = "M3 6h6l2 2h10v11H3zM10 13.5h6M13.5 11l2.5 2.5-2.5 2.5";
+IC.filesDisk = "M4 5h16v14H4zM4 15h16M16 17.5h.01";
+IC.filesZip = "M6 3h12v18H6zM12 3v2M12 7v2M12 11v2M10.5 15h3v3h-3z";
 
 var FILES_FOLDERS = [
   { id: "Downloads", icon: "filesDown" },
@@ -3751,6 +3694,11 @@ registerView("files", {
       var fromP = f.from ? api.person(f.from) : null;
       var asked = !!(st.asked || {})[f.id];
       var wave = []; for (var w = 0; w < 48; w++) wave.push({ h: Math.round(8 + 40 * Math.abs(Math.sin(w * 0.7) * Math.cos(w * 0.29))), c: f.dur && w / 48 < (st.pos || 0) / f.dur ? "var(--acct)" : "var(--s3)" });
+      var saveRn = function () {
+        var v = String(api.get("files").rn || "").trim();
+        if (v) api.set({ files: api.get("files").files.map(function (x) { return x.id === f.id ? Object.assign({}, x, { name: v + parts[1] }) : x; }), renaming: false });
+        else api.set({ renaming: false });
+      };
       pv = {
         name: f.name, base: parts[0], ext: parts[1],
         meta: (f.type === "pdf" ? "PDF" : ty.label) + " · " + f.size + (fromP ? " · from " + fromP.name.split(" ")[0] : "") + " · " + f.folder,
@@ -3768,7 +3716,6 @@ registerView("files", {
           FL.playI = api.every(function () { var s = api.get("files"); var np = (s.pos || 0) + 1; if (np >= f.dur) { clearInterval(FL.playI); api.set({ pos: f.dur, playing: false }); return; } api.set({ pos: np }); }, 250);
         },
         transcribe: function () {
-          if (!VIEWS.notes) return api.toast("Transcribing");
           var id = "memo-" + f.id;
           if (notesFind((api.get("notes").list || []), id)) return api.open("notes", { open: id });
           var note = { id: id, kind: "voice", title: "Landlord", when: "Yesterday · 6:20 PM", dur: f.dur, pinned: false,
@@ -3781,13 +3728,9 @@ registerView("files", {
         rn: st.rn,
         startRename: function () { api.set({ renaming: true, rn: parts[0] }); },
         onRn: function (e) { api.set({ rn: e.target.value }); },
-        saveRn: function () {
-          var v = String(api.get("files").rn || "").trim();
-          if (v) api.set({ files: api.get("files").files.map(function (x) { return x.id === f.id ? Object.assign({}, x, { name: v + parts[1] }) : x; }), renaming: false });
-          else api.set({ renaming: false });
-        },
+        saveRn: saveRn,
         rnKey: function (e) {
-          if (e.key === "Enter") { e.preventDefault(); var v = String(api.get("files").rn || "").trim(); if (v) api.set({ files: api.get("files").files.map(function (x) { return x.id === f.id ? Object.assign({}, x, { name: v + parts[1] }) : x; }), renaming: false }); else api.set({ renaming: false }); }
+          if (e.key === "Enter") { e.preventDefault(); saveRn(); }
           if (e.key === "Escape") api.set({ renaming: false });
         },
         close: function () { clearInterval(FL.playI); api.set({ open: null, renaming: false, playing: false, pos: 0 }); },
@@ -3798,7 +3741,7 @@ registerView("files", {
         sum: f.sum || [],
         askLabel: "Summarize",
         ask: function () { api.set({ asking: f.id }); api.later(function () { var a = Object.assign({}, api.get("files").asked); a[f.id] = true; api.set({ asked: a, asking: null }); }, 1100); },
-        saveSum: function () { if (VIEWS.notes && VIEWS.notes.actions) VIEWS.notes.actions.save({ title: parts[0] + " · summary", bullets: f.sum }, api); else api.toast("Saved to Notes"); }
+        saveSum: function () { if (VIEWS.notes.actions) VIEWS.notes.actions.save({ title: parts[0] + " · summary", bullets: f.sum }, api); else api.toast("Saved to Notes"); }
       };
     }
 
@@ -3845,329 +3788,16 @@ registerView("files", {
   }
 });
 
-/* ===== module: wallet ===== */
-/* Wallet. Holes are {{wallet.*}}. Deep links: {open: cardId|"bp"|"ticket"|"transit"}, {pay: true, card?: cardId}, {add: true}. */
-IC.walTap = IC.walTap || "M6 9.5a4 4 0 0 1 0 5M9.5 7a7.5 7.5 0 0 1 0 10M13 4.5a11 11 0 0 1 0 15";
-IC.walCard = IC.walCard || "M3 6h18v12H3zM3 10h18M7 14.5h4";
-IC.walScan = IC.walScan || "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M4 12h16";
-IC.walTicket = IC.walTicket || "M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4zM14.5 7v2M14.5 11v2M14.5 15v2";
-IC.walBus = IC.walBus || "M7 3.5h10a2 2 0 0 1 2 2V16a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 16V5.5a2 2 0 0 1 2-2zM5 11h14M8 17.5V20M16 17.5V20M8.5 14.3h.01M15.5 14.3h.01";
-IC.walCup = IC.walCup || "M5 9h11v4.5A4.5 4.5 0 0 1 11.5 18h-2A4.5 4.5 0 0 1 5 13.5zM16 10.5h1.5a2.3 2.3 0 0 1 0 4.6H16M8 3.5v2.5M12 3.5v2.5M4 21h13";
-IC.walFood = IC.walFood || "M7 3v7M5 3v5a2 2 0 0 0 4 0V3M7 10v11M17 3c-2.2 1.2-3.2 3.6-3.2 6.5V13H17M17 3v18";
-IC.walGym = IC.walGym || "M7 7v10M4 9.5v5M17 7v10M20 9.5v5M7 12h10";
-IC.walBag = IC.walBag || "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2";
-IC.walUnlock = IC.walUnlock || "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 6.8-1.2";
-
-var WAL_NEW_BG = ["var(--alpha-wallet-navy)", "var(--alpha-gray-3a)", "var(--alpha-wallet-new-1)"];
-
-function walMoney(a) { return "$" + a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
-function walDay(d, now) {
-  if (d === 0) return "Today"; if (d === 1) return "Yesterday";
-  var dt = new Date(now.getTime() - d * 86400000);
-  return d < 7 ? DAYS[dt.getDay()] : formatMonthDay(dt);
-}
-function walDate(off, now) { return formatShortDate(new Date(now.getTime() + off * 86400000)); }
-function walCard(cards, id) { for (var i = 0; i < cards.length; i++) if (cards[i].id === id) return cards[i]; return null; }
-function walDefault(cards) { for (var i = 0; i < cards.length; i++) if (cards[i].def) return cards[i]; return cards[cards.length - 1] || null; }
-function walPayable(cards) { return cards.filter(function (c) { return !c.locked; }); }
-function walFind(t, cards) {
-  if (/\bwork\b|business|company/.test(t)) return "work";
-  if (/household|joint|house\b/.test(t)) return "stone";
-  if (/alpha blue|\bblue\b|personal|debit/.test(t)) return "blue";
-  var m = t.match(/(\d{4})\b/); if (m) { var hit = cards.filter(function (c) { return c.last4 === m[1]; })[0]; if (hit) return hit.id; }
-  return null;
-}
-function walQR(seed) {
-  var n = 25, d = ""; var h = 0; for (var i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  var rnd = function () { h = (h * 1103515245 + 12345) >>> 0; return (h >>> 16) & 1; };
-  var finder = function (x, y) {
-    var ins = function (ox, oy) { var dx = x - ox, dy = y - oy; if (dx < 0 || dy < 0 || dx > 6 || dy > 6) return null; return dx === 0 || dy === 0 || dx === 6 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4); };
-    var r = ins(0, 0); if (r !== null) return r; r = ins(n - 7, 0); if (r !== null) return r; r = ins(0, n - 7); if (r !== null) return r;
-    if ((x === 7 && (y <= 7 || y >= n - 8)) || (y === 7 && (x <= 7 || x >= n - 8)) || (x === n - 8 && y <= 7) || (y === n - 8 && x <= 7)) return false;
-    return null;
-  };
-  for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) { var f = finder(x, y); var on = f === null ? (y === 6 || x === 6 ? (x + y) % 2 === 0 : rnd() === 1) : f; if (on) d += "M" + x + " " + y + "h1v1h-1z"; }
-  return d;
-}
-var WAL_QR = {}; WAL_PASSES.forEach(function (p) { if (p.qr) WAL_QR[p.id] = walQR(p.qr); });
-function walPass(id) { for (var i = 0; i < WAL_PASSES.length; i++) if (WAL_PASSES[i].id === id) return WAL_PASSES[i]; return null; }
-var WAL_TRANSIT = copy("wallet").transit;
-function walWeek(cards, only) {
-  var total = 0, n = 0, by = {};
-  cards.forEach(function (c) { if (only && c.id !== only) return; c.tx.forEach(function (x) { if (x.d < 7) { total += x.a; n++; by[x.m] = (by[x.m] || 0) + x.a; } }); });
-  var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; });
-  return { total: total, n: n, top: top, by: by };
-}
-function walAddTx(api, cardId, tx, patch) {
-  var cards = api.get("wallet").cards.map(function (c) { return c.id === cardId ? Object.assign({}, c, { tx: [tx].concat(c.tx) }) : c; });
-  api.set(Object.assign({}, patch || {}, { cards: cards }));
-}
-function walFmtNum(v) { var d = v.replace(/\D/g, "").slice(0, 19); return d.replace(/(\d{4})(?=\d)/g, "$1 "); }
-function walLuhn(d) { var sum = 0; for (var i = 0; i < d.length; i++) { var x = +d.charAt(d.length - 1 - i); if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; } return d.length > 0 && sum % 10 === 0; }
-function walFmtExp(v) { var d = v.replace(/\D/g, "").slice(0, 4); return d.length > 2 ? d.slice(0, 2) + "/" + d.slice(2) : d; }
-
-/* Undo of a card removal puts that card back among the cards as they are now. A removed default
-   card takes the default back only from the card that inherited it; a default chosen since stays. */
-function walRestoreCard(cards, card, at, heir) {
-  var def = (cards || []).filter(function (c) { return c.def; })[0];
-  var back = !!card.def && (!def || def.id === heir || def.id === card.id);
-  return restoreById(cards, card, at).map(function (c) {
-    if (c.id === card.id) return c.def === back ? c : Object.assign({}, c, { def: back });
-    return back && c.def ? Object.assign({}, c, { def: false }) : c;
-  });
-}
-if (testMocksEnabled) registerView("wallet", {
-  title: "Wallet", icon: "wallet", aliases: ["pay", "cards", "passes"],
-  chat: "hidden",
-  state: { cards: WAL_CARDS, open: null, pay: false, card: null, stage: "auth", paid: null, add: null, form: { num: "", exp: "", name: "", cvv: "" }, code: "", transit: WAL_TRANSIT || 0, trips: WAL_TRIPS, calAdded: {}, pays: 0 },
-  persist: ["cards", "transit", "trips", "calAdded", "pays"],
-  jumps: [[null, "Wallet"], ["card", "Card"], ["pay", "Pay"], ["secure", "Pay from lock"], ["add", "Add card"], ["pass", "Boarding pass"]],
-  preset: function (sub, api) {
-    var pr = copy("wallet").presets || {};
-    if (sub === "card") return pr.card ? { open: pr.card } : null;
-    if (sub === "pay") return { pay: true, stage: "auth" };
-    if (sub === "secure") { api.shell({ secure: true }); return { pay: true, stage: "auth" }; }
-    if (sub === "add") return { add: "form", form: pr.addForm || { num: "", exp: "", name: "", cvv: "" } };
-    if (sub === "pass") return pr.pass ? { open: pr.pass } : null;
-  },
-  badge: function () { return false; },
-  immersive: function (st, api) {
-    if (st.pay || st.add === "scan" || api.secure) return { dark: true, noPill: true };
-    return null;
-  },
-  back: function (st, api) {
-    if (api.secure) { api.stop(); api.set({ pay: false, stage: "auth", card: null }); return false; }
-    if (st.pay) { api.stop(); api.set({ pay: false, stage: "auth", card: null }); return true; }
-    if (st.add) { api.stop(); var a = st.add === true ? "pick" : st.add; api.set({ add: a === "verify" ? "form" : (a === "pick" ? null : "pick"), code: "" }); return true; }
-    if (st.open) { api.set({ open: null }); return true; }
-    return false;
-  },
-  onLeave: function (api) { api.stop(); },
-  suggestions: function (st) {
-    var op = walPass(st.open);
-    if (op && op.suggestions) return op.suggestions;
-    if (st.open && !op && st.open !== "transit") return ["How much did I spend on this card?", "Lock this card"];
-    return copy("wallet").suggestions || ["How much did I spend this week?"];
-  },
-  voicePhrase: "How much did I spend this week?",
-  reply: function (t, raw, api) {
-    var st = api.get("wallet"); var cards = st.cards;
-    if (/\b(spend|spent|spending)\b/.test(t)) {
-      var only = walFind(t, cards) || (/this card/.test(t) && st.open && walCard(cards, st.open) ? st.open : null);
-      var w = walWeek(cards, only); var c = only ? walCard(cards, only) : null;
-      var top = w.top[0];
-      var bullets = [walMoney(w.total) + " across " + w.n + " purchases" + (c ? " on " + c.name : "")];
-      if (top) bullets.push(top + " was the biggest: " + walMoney(w.by[top]));
-      if (copy("wallet").spendNotes) bullets = bullets.concat(copy("wallet").spendNotes(w, only, top, walMoney));
-      return { text: walMoney(w.total) + " this week" + (c ? " on " + c.name : "") + (top ? ", mostly " + top + "." : "."), card: { type: "summary", bullets: bullets, go: { view: "wallet", patch: only ? { open: only } : {} } } };
-    }
-    var pm = t.match(/\bpay (with|using) (?:my |the )?(.+)$/) || (/^(tap to )?pay( now| here)?[.!]?$|contactless/.test(t) ? [t, "", ""] : null);
-    if (pm && !/\bpay (for|back|someone|him|her|them|\w+ \$)/.test(t)) {
-      var id = walFind(pm[2] || "", cards); var cd = id ? walCard(cards, id) : walDefault(cards);
-      if (!cd) return null;
-      if (cd.locked) return { text: cd.name + " is locked. Unlock it first?", nav: { view: "wallet", patch: { open: cd.id } } };
-      return { text: cd.name + " is ready. Hold near the reader.", nav: { view: "wallet", patch: { pay: true, card: cd.id, stage: "auth", open: null, add: null }, chat: "hidden" } };
-    }
-    var bp = WAL_PASSES.filter(function (p) { return p.reply; })[0];
-    if (bp && /boarding pass|my flight|flight pass|\bgate\b.*flight|which gate/.test(t)) {
-      return { text: bp.reply.text + " " + walDate(bp.day, api.now).split(",")[0] + ".", card: { type: "generic", icon: bp.icon, title: bp.reply.title, sub: walDate(bp.day, api.now) + bp.reply.sub, go: { view: "wallet", patch: { open: bp.id, pay: false, add: null } } },
-        nav: { view: "wallet", patch: { open: bp.id, pay: false, add: null } } };
-    }
-    if (/\badd (a |my |new |another )?(credit |debit )?card\b/.test(t)) return { text: "Scan it or type it in.", nav: { view: "wallet", patch: { add: "pick", open: null, pay: false } } };
-    if (WAL_TRANSIT != null && /transit (card|balance)|\bfare balance/.test(t)) return { text: "Transit has " + walMoney(st.transit) + ".", card: { type: "generic", icon: "walBus", title: "Transit", sub: walMoney(st.transit), go: { view: "wallet", patch: { open: "transit" } } } };
-    var lk = t.match(/\b(lock|freeze|unlock|unfreeze)\b (?:my |this |the )?(.*)card/);
-    if (lk) {
-      var lid = walFind(lk[2], cards) || (st.open && walCard(cards, st.open) ? st.open : null);
-      if (!lid) return null;
-      var on = /^(lock|freeze)$/.test(lk[1]); var lc = walCard(cards, lid);
-      return { text: lc.name + " is " + (on ? "locked. Nothing can be charged until you unlock it." : "unlocked."),
-        then: function () { api.set({ cards: api.get("wallet").cards.map(function (c) { return c.id === lid ? Object.assign({}, c, { locked: on }) : c; }) }); } };
-    }
-    return null;
-  },
-  render: function (st, api) {
-    var cards = st.cards || []; var now = api.now;
-    var set = function (p) { api.set(p); };
-    var upd = function (id, p) { set({ cards: api.get("wallet").cards.map(function (c) { return c.id === id ? Object.assign({}, c, p) : c; }) }); };
-    var vis = function (c) {
-      return { name: c.name, last4: "•••• " + c.last4, kind: c.kind, locked: c.locked, unlocked: !c.locked,
-        css: "background: " + c.bg + "; color: " + c.fg + (c.locked ? "; filter: saturate(.25) brightness(.85)" : ""),
-        chip: c.fg === "var(--alpha-black)" || c.fg === alphaPaletteColor("--alpha-black") ? "rgba(0,0,0,.16)" : "rgba(255,255,255,.28)" };
-    };
-    /* stack: default card in front (last) */
-    var order = cards.filter(function (c) { return !c.def; }).concat(cards.filter(function (c) { return c.def; }));
-    var stack = order.map(function (c, i) {
-      return Object.assign(vis(c), { mt: i === 0 ? 0 : -174, label: c.name + " card ending " + c.last4, open: function () { set({ open: c.id }); } });
-    });
-    var passes = WAL_PASSES.map(function (p) {
-      return { id: p.id, title: p.title, sub: walDate(p.day, now) + " · " + p.time, d: IC[p.icon], iconCss: p.accent ? "background: var(--acc); color: var(--alpha-white)" : "background: var(--s3)", right: "" };
-    }).concat(WAL_TRANSIT != null ? [
-      { id: "transit", title: "Transit", sub: "Tap at the gate", d: IC.walBus, iconCss: "background: var(--s3)", right: walMoney(st.transit) }
-    ] : []).map(function (p) { return Object.assign(p, { go: function () { set({ open: p.id }); } }); });
-
-    /* detail */
-    var oc = st.open ? walCard(cards, st.open) : null;
-    var det = null;
-    if (oc) {
-      det = Object.assign(vis(oc), {
-        tx: oc.tx.map(function (x) { return { m: x.m, sub: walDay(x.d, now) + (x.note ? " · " + x.note : ""), amt: walMoney(x.a), d: IC[x.icon] || IC.walCard }; }),
-        hasTx: oc.tx.length > 0,
-        lockTrack: api.track(oc.locked), lockKx: api.kx(oc.locked), lockOn: oc.locked,
-        defTrack: api.track(oc.def), defKx: api.kx(oc.def), defOn: oc.def,
-        pay: function () { if (oc.locked) { api.toast("Unlock the card to pay"); return; } set({ pay: true, card: oc.id, stage: "auth" }); },
-        ask: function () { api.send("How much did I spend on my " + oc.name + " card this week?"); },
-        lock: function () { upd(oc.id, { locked: !oc.locked }); api.toast(oc.name + (oc.locked ? " unlocked" : " locked")); },
-        setDef: function () { if (oc.def) { api.toast("Already your default"); return; } set({ cards: api.get("wallet").cards.map(function (c) { return Object.assign({}, c, { def: c.id === oc.id }); }) }); api.toast(oc.name + " is now your default"); },
-        remove: function () {
-          var before = api.get("wallet").cards;
-          var at = before.map(function (c) { return c.id; }).indexOf(oc.id); var was = before[at] || oc;
-          var rest = before.filter(function (c) { return c.id !== oc.id; });
-          var heir = oc.def && rest.length ? rest[rest.length - 1].id : null;
-          if (heir) rest = rest.map(function (c, i) { return Object.assign({}, c, { def: i === rest.length - 1 }); });
-          set({ cards: rest, open: null });
-          api.toast(oc.name + " •••• " + oc.last4 + " removed", { undo: function () { api.set({ cards: walRestoreCard(api.get("wallet").cards, was, at, heir) }); } });
-        },
-        close: function () { set({ open: null }); }
-      });
-    }
-
-    /* passes */
-    var pass = walPass(st.open) || (st.open === "transit" && WAL_TRANSIT != null) ? st.open : null;
-    var calOn = !!(st.calAdded || {})[pass];
-    var ps = pass ? {
-      isBp: pass === "bp", isTicket: pass === "ticket", isTransit: pass === "transit",
-      date3: walDate(3, now), date4: walDate(4, now), qr: WAL_QR[pass] || "",
-      calOn: calOn, calOff: !calOn,
-      addCal: function () {
-        var c = Object.assign({}, api.get("wallet").calAdded || {}); c[pass] = true; set({ calAdded: c });
-        var wp = walPass(pass); if (wp && wp.cal) api.open("calendar", { add: wp.cal });
-      },
-      dirs: function () { var wp = walPass(pass); if (wp && wp.place) api.open("maps", { query: null, place: null, directions: wp.place, nav: false, mode: "drive" }); },
-      balance: walMoney(st.transit),
-      trips: (st.trips || []).map(function (r) { return { m: r.m, sub: walDay(r.d, now), amt: "−" + walMoney(r.a) }; }),
-      reload: function () {
-        var s2 = api.get("wallet"); var dc = walDefault(s2.cards);
-        var credit = { transit: Math.round((s2.transit + 20) * 100) / 100 };
-        if (dc) walAddTx(api, dc.id, { id: "t" + Date.now(), m: "Transit reload", a: 20, d: 0, icon: "walBus" }, credit);
-        else set(credit);
-        api.toast("Added $20.00" + (dc ? " from " + dc.name : ""));
-      },
-      close: function () { set({ open: null }); }
-    } : null;
-
-    /* pay */
-    var payable = walPayable(cards);
-    var secure = !!api.secure;
-    var payOn = st.pay || secure;
-    var pc = payOn ? (walCard(payable, st.card) || walDefault(payable) || payable[0] || null) : null;
-    var pay = null;
-    var closePay = function () { api.stop(); set({ pay: false, stage: "auth", card: null }); if (secure) api.home(); };
-    if (payOn) {
-      var stage = st.stage || "auth";
-      var mer = WAL_MERCH.length ? WAL_MERCH[(st.pays || 0) % WAL_MERCH.length] : ["Payment terminal", 0, "walCard"];
-      var cycle = function (dir) {
-        if (!pc || payable.length < 2 || stage !== "auth" || secure) return;
-        var i = payable.indexOf(pc); set({ card: payable[(i + dir + payable.length) % payable.length].id });
-      };
-      var sw = api.sw(function (dx) { cycle(dx < 0 ? 1 : -1); });
-      pay = {
-        has: !!pc, none: !pc,
-        c: pc ? vis(pc) : null,
-        isAuth: stage === "auth", isHold: stage === "hold", isDone: stage === "done",
-        dots: payable.length > 1 && !secure ? payable.map(function (c) { var on = pc && c.id === pc.id; return { label: "Pay with " + c.name, css: on ? "background: var(--alpha-white); width: 22px" : "background: var(--alpha-gray-55); width: 8px", go: function () { if (stage === "auth") set({ card: c.id }); } }; }) : [],
-        swDown: function (e) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} sw.down(e); }, swUp: sw.up,
-        paid: st.paid ? walMoney(st.paid.a) : "", paidAt: st.paid ? st.paid.m : "",
-        auth: function () {
-          if (!pc) return;
-          var cid = pc.id;
-          set({ stage: "hold", card: cid });
-          api.later(function () {
-            var s2 = api.get("wallet"); if (!s2.pay && !secure) return;
-            try {
-            walAddTx(api, cid, { id: "p" + Date.now(), m: mer[0], a: mer[1], d: 0, icon: mer[2] }, { stage: "done", paid: { m: mer[0], a: mer[1] }, pays: (s2.pays || 0) + 1 });
-            } catch (error) { api.stop(); set({ stage: "auth", paid: null }); api.toast("Simulated payment was not saved. Review and try again."); }
-          }, 1900);
-          api.later(function () { var s3 = api.get("wallet"); if (s3.stage === "done") closePay(); }, 5200);
-        },
-        done: closePay,
-        cancel: closePay
-      };
-    }
-
-    /* add card */
-    var addStep = st.add === true ? "pick" : st.add;
-    var f = Object.assign({ num: "", exp: "", name: "", cvv: "" }, st.form || {});
-    var digits = f.num.replace(/\D/g, "");
-    var expM = f.exp.match(/^(0[1-9]|1[0-2])\/(\d\d)$/);
-    var nowYY = now.getFullYear() % 100, nowMM = now.getMonth() + 1;
-    var expOk = !!expM && (+expM[2] > nowYY || (+expM[2] === nowYY && +expM[1] >= nowMM));
-    var numOk = digits.length >= 15 && walLuhn(digits);
-    var cvvOk = /^\d{3,4}$/.test(f.cvv);
-    var formOk = numOk && expOk && cvvOk;
-    var numErr = digits.length >= 15 && !numOk ? "Check the card number" : "";
-    var expErr = f.exp.length === 5 && !expOk ? (expM ? "This card has expired" : "Use MM/YY") : "";
-    var add = addStep ? {
-      isPick: addStep === "pick", isScan: addStep === "scan", isForm: addStep === "form", isVerify: addStep === "verify",
-      scan: function () {
-        set({ add: "scan" });
-        api.later(function () { if (api.get("wallet").add !== "scan") return; api.set({ add: "form", form: Object.assign({}, api.get("wallet").form, { num: "4000 1234 5678 9017", exp: "11/29" }) }); api.toast("Card scanned"); }, 2200);
-      },
-      manual: function () { api.stop(); set({ add: "form" }); },
-      close: function () { api.stop(); set({ add: null, form: { num: "", exp: "", name: "", cvv: "" }, code: "" }); },
-      back: function () { VIEWS.wallet.back(api.get("wallet"), api); },
-      num: f.num, exp: f.exp, name: f.name,
-      onNum: function (e) { set({ form: Object.assign({}, api.get("wallet").form, { num: walFmtNum(e.target.value) }) }); },
-      onExp: function (e) { set({ form: Object.assign({}, api.get("wallet").form, { exp: walFmtExp(e.target.value) }) }); },
-      onCvv: function (e) { set({ form: Object.assign({}, api.get("wallet").form, { cvv: e.target.value.replace(/\D/g, "").slice(0, 4) }) }); },
-      cvv: f.cvv, numErr: numErr, hasNumErr: !!numErr, expErr: expErr, hasExpErr: !!expErr,
-      onName: function (e) { set({ form: Object.assign({}, api.get("wallet").form, { name: e.target.value }) }); },
-      prevNum: digits.length ? "•••• " + (digits.length >= 4 ? digits.slice(-4) : digits) : "•••• ••••",
-      prevExp: f.exp || "MM/YY",
-      ok: formOk, notOk: !formOk,
-      nextCss: formOk ? "background: var(--acc); color: var(--alpha-white)" : "background: var(--s2); color: var(--mut)",
-      next: function () {
-        if (!formOk) return;
-        set({ add: "verify", code: "" });
-        api.later(function () { var s2 = api.get("wallet"); if (s2.add === "verify" && !s2.code) { api.set({ code: "482913", auto: true }); } }, 1500);
-      },
-      code: st.code || "", auto: !!st.auto && (st.code || "") === "482913",
-      onCode: function (e) { set({ code: e.target.value.replace(/\D/g, "").slice(0, 6), auto: false }); },
-      codeOk: (st.code || "").length === 6, codeBad: (st.code || "").length !== 6,
-      verifyCss: (st.code || "").length === 6 ? "background: var(--acc); color: var(--alpha-white)" : "background: var(--s2); color: var(--mut)",
-      verify: function () {
-        var s2 = api.get("wallet");
-        if ((s2.code || "").length !== 6) return;
-        var d4 = s2.form.num.replace(/\D/g, "").slice(-4);
-        var nid = "c" + Date.now();
-        var nc = { id: nid, name: s2.form.name ? s2.form.name.split(" ")[0] + "'s card" : "Card " + d4, last4: d4, kind: "Credit", bg: WAL_NEW_BG[(s2.cards.length) % WAL_NEW_BG.length], fg: "var(--alpha-white)", def: s2.cards.length === 0, locked: false, tx: [] };
-        api.stop();
-        api.set({ cards: [nc].concat(s2.cards), add: null, code: "", auto: false, form: { num: "", exp: "", name: "", cvv: "" }, open: nid });
-        api.toast("Card added");
-      }
-    } : null;
-
-    return {
-      stack: stack, passes: passes, hasCards: cards.length > 0, noCards: cards.length === 0,
-      startPay: function () { if (!payable.length) { api.toast("No card to pay with"); return; } set({ pay: true, stage: "auth", card: null }); },
-      startAdd: function () { set({ add: "pick" }); },
-      det: secure ? null : det, isDet: !!det && !secure,
-      ps: ps, isPass: !!ps && !secure,
-      pay: pay, isPay: !!pay, secure: secure, notSecure: !secure,
-      add: add, isAdd: !!add, addScan: !!add && add.isScan && !secure, addPage: !!add && !add.isScan && !secure
-    };
-  }
-});
-
 /* ===== module: workflows ===== */
 /* Workflows: agent automations. List (name + sentence + toggle) → detail (summary, touched apps, step diagram,
    run now, recent runs) → run detail (what Alpha did at each step). Builder for create/edit.
    All markup holes are {{workflows.*}}. */
-IC.wfRead = IC.wfRead || "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z";
-IC.wfIf = IC.wfIf || "M12 3l9 9-9 9-9-9z";
-IC.wfDo = IC.wfDo || "M13 3L5 14h6l-1 7 8-11h-6z";
-IC.wfSkip = IC.wfSkip || "M7 12h10";
-IC.wfUp = IC.wfUp || "M12 19V5M6 11l6-6 6 6";
-IC.wfDown = IC.wfDown || "M12 5v14M6 13l6 6 6-6";
+IC.wfRead = "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z";
+IC.wfIf = "M12 3l9 9-9 9-9-9z";
+IC.wfDo = "M13 3L5 14h6l-1 7 8-11h-6z";
+IC.wfSkip = "M7 12h10";
+IC.wfUp = "M12 19V5M6 11l6-6 6 6";
+IC.wfDown = "M12 5v14M6 13l6 6 6-6";
 
 var WF_KINDS = {
   When: { icon: "clock" },
@@ -4177,10 +3807,10 @@ var WF_KINDS = {
   Send: { icon: "send", presets: (copy("workflows").sendPresets || []).concat([["An email to me", ["Mail"]], ["A reply to the sender", ["Messages"]]]) },
   Notify: { icon: "bell", presets: [["A notification", []], ["A notification, only if urgent", []]] },
   Speak: { icon: "wave", presets: [["Read it aloud", ["Speaker"]], ["Speak it when I pick up the phone", ["Speaker"]]] },
-  Do: { icon: "wfDo", presets: [["Turn on Do Not Disturb", ["Settings"]], ["Turn off Do Not Disturb", ["Settings"]], ["Save the attachment to Files", ["Files"]], ["Add the amount to Wallet", ["Wallet"]]] }
+  Do: { icon: "wfDo", presets: [["Turn on Do Not Disturb", ["Settings"]], ["Turn off Do Not Disturb", ["Settings"]], ["Save the attachment to Files", ["Files"]]] }
 };
 var WF_PALETTE = ["Read", "If", "Write", "Send", "Notify", "Speak", "Do"];
-var WF_APP_IC = { Mail: "mail", Calendar: "cal", Messages: "bubble", Notes: "notes", Files: "folder", Wallet: "wallet", Location: "pin", Contacts: "user", Speaker: "wave", Settings: "moon" };
+var WF_APP_IC = { Mail: "mail", Calendar: "cal", Messages: "bubble", Notes: "notes", Files: "folder", Location: "pin", Contacts: "user", Speaker: "wave", Settings: "moon" };
 var WF_TRIG = [
   ["time", "clock", "Time"], ["event", "cal", "Event"], ["message", "bubble", "Message"], ["location", "pin", "Place"], ["email", "mail", "Email"]
 ];
@@ -4189,10 +3819,9 @@ var WF_EVENTS = [["A deep-work event starts", ["Calendar"]], ["An event ends", [
 var WF_PLACES = ["I arrive home", "I leave home", "I arrive at work"];
 
 
-function wfAmpm(t) { return formatHours(t); }
 function wfTrigText(tr, api) {
   if (!tr) return "";
-  if (tr.kind === "time") return (tr.days || "Every day") + " at " + wfAmpm(tr.t == null ? 18 : tr.t);
+  if (tr.kind === "time") return (tr.days || "Every day") + " at " + formatHours(tr.t == null ? 18 : tr.t);
   if (tr.kind === "event") return tr.ev || WF_EVENTS[0][0];
   if (tr.kind === "message") { var p = api.person(tr.person || copy("workflows").triggerPerson); return (p ? p.name.split(" ")[0] : "Someone") + " texts me"; }
   if (tr.kind === "location") return tr.place || WF_PLACES[0];
@@ -4241,8 +3870,7 @@ function wfShort(f, api) {
   var lead = f.trig && f.trig.kind === "time" ? tr : "When " + wfLc(tr);
   return main ? lead + ": " + wfLc(main.t).replace(/\.$/, "") + "." : lead + ".";
 }
-// MVP-DEFERRED: retain original fixtures, but do not offer or simulate flows
-// that depend on Phone/SMS/Contacts/Wallet. Restore only with the product scope gate.
+// Flows that depend on a deferred view (Phone, Messages, Contacts, Wallet) are neither offered nor simulated.
 function wfAppAllowed(name) {
   var view = { Phone: "phone", Messages: "messages", Contacts: "contacts", Wallet: "wallet" }[name];
   return !view || isMvpView(view);
@@ -4322,7 +3950,7 @@ function wfRunLog(f, api) {
     return [s.k, r, "ok"];
   }));
 }
-function wfNowLabel(api) { var d = api.now; return "Today, " + wfAmpm(d.getHours() + d.getMinutes() / 60); }
+function wfNowLabel(api) { var d = api.now; return "Today, " + formatHours(d.getHours() + d.getMinutes() / 60); }
 function wfBlank() { return { id: null, name: "", trig: { kind: "time", days: "Weekdays", t: 18 }, steps: [] }; }
 
 registerView("workflows", {
@@ -4541,7 +4169,7 @@ registerView("workflows", {
           text: wfTrigText(tr, api),
           isTime: tr.kind === "time", isEvent: tr.kind === "event", isMsg: tr.kind === "message", isPlace: tr.kind === "location", isEmail: tr.kind === "email",
           days: WF_DAYS.map(function (d) { return { label: d, css: chip(tr.days === d), pick: function () { tp({ days: d }); } }; }),
-          time: wfAmpm(tr.t == null ? 18 : tr.t), tMinus: function () { tp({ t: Math.max(0, (tr.t || 0) - 0.5) }); }, tPlus: function () { tp({ t: Math.min(23.5, (tr.t || 0) + 0.5) }); },
+          time: formatHours(tr.t == null ? 18 : tr.t), tMinus: function () { tp({ t: Math.max(0, (tr.t || 0) - 0.5) }); }, tPlus: function () { tp({ t: Math.min(23.5, (tr.t || 0) + 0.5) }); },
           evs: WF_EVENTS.map(function (e) { return { label: e[0], css: chip(tr.ev === e[0]), pick: function () { tp({ ev: e[0] }); } }; }),
           places: WF_PLACES.map(function (p) { return { label: p, css: chip(tr.place === p), pick: function () { tp({ place: p }); } }; }),
           people: PEOPLE.map(function (p) { var on = tr.person === p.id; return { ini: p.ini, first: p.name.split(" ")[0], css: on ? "background:var(--acc);color:var(--alpha-white)" : "background:var(--s2)", pick: function () { tp({ person: p.id }); } }; }),
@@ -4567,8 +4195,7 @@ registerView("workflows", {
       newFlow: function () { set({ build: wfBlank(), sheet: null }); },
       detail: !!D, fd: D,
       runOpen: !!R, r: R,
-      builder: !!B, b: B,
-      noop: function () {}
+      builder: !!B, b: B
     };
   }
 });
@@ -4576,16 +4203,16 @@ registerView("workflows", {
 /* ===== module: settings ===== */
 /* Settings. One stack renderer: stack[0] is the top level, stack[1..] are sub-pages; every page is data
    (hero + groups of typed rows) so every page gets the same back behaviour and the same row styles. */
-IC.stDownload = IC.stDownload || "M12 4v11M7 10l5 5 5-5M5 20h14";
-IC.stBattery = IC.stBattery || "M3 8h15v8H3zM21 11v2";
-IC.stSignal = IC.stSignal || "M5 18v-3M10 18v-6M15 18v-9M20 18V6";
-IC.stSpeaker = IC.stSpeaker || "M4 9h4l5-4v14l-5-4H4zM17 9a4 4 0 0 1 0 6";
-IC.stText = IC.stText || "M5 6h14M12 6v13M9 19h6";
-IC.stList = IC.stList || "M4 6h16M4 12h16M4 18h10";
-IC.stHeadph = IC.stHeadph || "M4 15v-3a8 8 0 0 1 16 0v3M4 15h3v5H4zM17 15h3v5h-3z";
-IC.stCar = IC.stCar || "M4 16v-4l2-5h12l2 5v4zM4 16v2M20 16v2M7 13h.01M17 13h.01";
-IC.stUndo = IC.stUndo || "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3";
-IC.stAt = IC.stAt || "M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5";
+IC.stDownload = "M12 4v11M7 10l5 5 5-5M5 20h14";
+IC.stBattery = "M3 8h15v8H3zM21 11v2";
+IC.stSignal = "M5 18v-3M10 18v-6M15 18v-9M20 18V6";
+IC.stSpeaker = "M4 9h4l5-4v14l-5-4H4zM17 9a4 4 0 0 1 0 6";
+IC.stText = "M5 6h14M12 6v13M9 19h6";
+IC.stList = "M4 6h16M4 12h16M4 18h10";
+IC.stHeadph = "M4 15v-3a8 8 0 0 1 16 0v3M4 15h3v5H4zM17 15h3v5h-3z";
+IC.stCar = "M4 16v-4l2-5h12l2 5v4zM4 16v2M20 16v2M7 13h.01M17 13h.01";
+IC.stUndo = "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3";
+IC.stAt = "M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5";
 
 var ST_PROV = [
   { id: "google", name: "Google", sub: isMvpView("contacts") ? "Gmail, Calendar, Contacts" : "Gmail, Calendar", dom: "gmail.example", web: "accounts.google.example", oauth: true },
@@ -4593,8 +4220,7 @@ var ST_PROV = [
   { id: "icloud", name: "iCloud", sub: isMvpView("contacts") ? "Mail, Calendar, Contacts" : "Mail, Calendar", dom: "icloud.example", web: "", oauth: false },
   { id: "other", name: "Other", sub: isMvpView("contacts") ? "IMAP · CalDAV · CardDAV" : "IMAP · CalDAV", dom: "mail.example", web: "", oauth: false }
 ];
-// MVP-DEFERRED: Contacts account and permission controls follow the same profile
-// as navigation. Restore only after the scope and native acceptance gates there.
+// Contacts sync and permission controls appear only where Contacts is an MVP view.
 var ST_TYPES = [["mail", "Mail", "mail"], ["calendar", "Calendar", "cal"], ["contacts", "Contacts", "user"]].filter(function (x) { return x[0] !== "contacts" || isMvpView("contacts"); });
 var ST_CONNS = [
   { id: "slack", name: "Slack", scopes: ["Read channels you're in", "Send messages you approve"] },
@@ -4606,7 +4232,6 @@ var ST_CONNS = [
 ];
 var ST_VOICES = ["Warm", "Bright", "Low", "Neutral"];
 var ST_PERMS = [["mic", "Microphone", "mic"], ["loc", "Location", "pin"], ["camera", "Camera", "camera"], ["contacts", "Contacts", "user"]].filter(function (x) { return x[0] !== "contacts" || isMvpView("contacts"); });
-var ST_TOP = { accounts: "Accounts", character: "Character", privacy: "Privacy & data", notifications: "Notifications", wifi: "Wi-Fi", bluetooth: "Bluetooth", mobile: "Mobile data", display: "Display", sound: "Sound & vibration", battery: "Battery", about: "About", developer: "Developer", connections: "Connections", models: "Models" };
 
 function stRow(kind, o) { var r = Object.assign({ label: "", sub: "", val: "" }, o); r[kind] = true; if (kind === 'kSlider') r.valueLabel = r.v; r.hasSub = !!r.sub; r.hasIcon = !!r.d; r.hasVal = !!r.val; return r; }
 function stNav(o) { var r = stRow("kNav", o); if (o.bold) r.labCss0 = "font-weight:600"; r.hasTile = !!r.tile; r.hasTrail = !!r.trail; r.chev = !r.trail && !r.noChev; r.lbl = r.aria || r.label; r.labCss = r.danger ? "color:var(--fg);font-weight:600" : (r.accent ? "color:var(--acct);font-weight:600" : ""); return r; }
@@ -4627,7 +4252,7 @@ function stPlane(api, on) {
   else { var pp = api.get("settings").prePlane; if (pp) { q.wifi = pp.wifi; q.bt = pp.bt; } }
   api.shell({ q: q });
 }
-function stUnscroll() { try { var sc = document.querySelector("[data-screen]"); if (sc) { sc.scrollTop = 0; sc.scrollLeft = 0; } window.scrollTo(0, 0); } catch (e) {} }
+function stUnscroll() { var sc = document.querySelector("[data-screen]"); if (sc) { sc.scrollTop = 0; sc.scrollLeft = 0; } window.scrollTo(0, 0); }
 // Covered navigation pages stay mounted for animation and Back state, but
 // must leave both the keyboard order and accessibility tree.
 var stPageFocus = new WeakMap();
@@ -4682,7 +4307,7 @@ function stPageAccess(root) {
   stPageFocus.set(root, { page: current, depth: depth, key: key, saved: saved });
 }
 /* the prototype page must never scroll (focus/scrollIntoView can nudge the stage); undo it on every commit */
-function stNoScroll() { try { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); var sc = document.querySelector("[data-screen]"); if (sc && (sc.scrollTop || sc.scrollLeft)) { sc.scrollTop = 0; sc.scrollLeft = 0; } } catch (e) {} }
+function stNoScroll() { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); var sc = document.querySelector("[data-screen]"); if (sc && (sc.scrollTop || sc.scrollLeft)) { sc.scrollTop = 0; sc.scrollLeft = 0; } }
 function stEmailOk(s) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s || ""); }
 /* A model download runs on background timers, so it finishes after Settings is left: a started
    row always reaches 100% and is never left part-way, where it could neither finish nor restart. */
@@ -4841,7 +4466,6 @@ registerView("settings", {
     var levelOf = function (a, k) { return a[k] ? ((a.access || {})[k] || "read") : "off"; };
     var setAcct = function (id, patch) { set({ accounts: api.get("settings").accounts.map(function (a) { return a.id === id ? Object.assign({}, a, patch) : a; }) }); };
     var lvlText = function (a) { var on = ST_TYPES.filter(function (x) { return a[x[0]]; }).map(function (x) { return x[1]; }); return on.length ? on.join(" · ") : "Not syncing"; };
-    var persona = ST_VOICES[ch.voice] + " · " + (ch.brev < 40 ? "Brief" : (ch.brev > 65 ? "Detailed" : "Balanced")) + " · " + (ch.tone > 55 ? "Casual" : "Formal");
 
     /* ---------- top level ---------- */
     var top = {
@@ -5157,9 +4781,7 @@ registerView("settings", {
       rootRef: function (el) { stNoScroll(); stPageAccess(el); },
       stack: stack,
       charVal: S.charName, onName: function (e) { api.shell({ charName: e.target.value }); },
-      persona: persona, openChar: go("character"),
-      sheet: sh, hasSheet: !!sh,
-      scrollFix: !!sh
+      sheet: sh, hasSheet: !!sh
     };
   }
 });
@@ -5435,11 +5057,10 @@ class Component extends DCLogic {
     if (n === "boot") return this.runBoot();
     this.headsDone = true; this.hintDone = true;
     if (n === "lock") return this.setState(Object.assign({}, home, { screen: "lock" }));
-    // The development stand-in for Android's shade; product builds have no Alpha shade (#416).
+    // The development stand-in for Android's shade; product builds have no Alpha shade.
     if (n === "shade") return this.setState(Object.assign({}, home, { shade: this.simulatedShade() }));
     if (n === "sheet" || n === "full") return this.setState(Object.assign({}, home, { chat: n }));
     if (n === "voice") { if (!externalVoiceInvocationEnabled) return; this.setState(home); this.later(function () { self.startVoice(); }, 60); return; }
-    if (n === "heads") { this.setState(home); this.later(function () { self.showHeads(); }, 60); return; }
     var parts = String(n).split(":"); var k = parts[0], sub = parts[1];
     if (VIEWS[k]) {
       this.setState(Object.assign({}, home, { view: k, chat: this.defaultChat(k) }));
@@ -5481,7 +5102,7 @@ class Component extends DCLogic {
   }
   /* While the phone is still locked (the lock screen's camera session), only these views open; any
      other view asks for an unlock first. */
-  secureAdmits(secure, k) { return !secure || ["camera", "photos", "wallet"].indexOf(k) >= 0; }
+  secureAdmits(secure, k) { return !secure || ["camera", "photos"].indexOf(k) >= 0; }
   /* A patch from outside the view (a deep link, the assistant, another app) onto state that is kept.
      The view's `incoming` first settles anything the patch cannot coexist with. */
   vpatch(k, p) {
@@ -5541,7 +5162,7 @@ class Component extends DCLogic {
     }
   }
 
-  /* ---- Android's notification shade (#416, #417) ---- */
+  /* ---- Android's notification shade ---- */
   /** Only the browser development build draws a stand-in for Android's shade. */
   simulatedShade() { return this.props.systemShade === "simulated"; }
   /** Opens the development stand-in for Android's shade. Product builds have no Alpha shade. */
@@ -5586,7 +5207,7 @@ class Component extends DCLogic {
   swipe(g, dx, dy) {
     // Gesture zones are the shared shell's (resolveMobileShellSwipe). The top
     // edge belongs to Android; on launcher Home a pull down that starts
-    // on empty Home asks Android for its shade (#417, @elizaos/capacitor-system/shade).
+    // on empty Home asks Android for its shade (@elizaos/capacitor-system/shade).
     var self = this, S = this.S();
     var action = resolveMobileShellSwipe({ screen: S.screen, shade: !!S.shade, view: S.view, chat: S.chat, launcher: this.props.systemShell !== false }, { x: g.x, y: g.y, onShadeControl: false }, dx, dy, {
       pullOpensShade: function (px, py, threshold) { return emptyHomeShadePull(self.pullContext(), g.pull, g.y, px, py, threshold); },
@@ -5643,8 +5264,7 @@ class Component extends DCLogic {
       r = VIEWS[k].reply(t, raw, this.api(k)); if (r) return r;
     }
     if (/what needs|catch me up|triage|anything new|summar/.test(t)) {
-      // MVP-DEFERRED: SMS digest cards stay out of mock and live discovery.
-      // Keep the original fixture data available for a reviewed scope restoration.
+      // Deferred SMS digest cards stay out of mock and live discovery.
       var rows = mockAttentionRows();
       if (rows.length) return { text: rows.length + (rows.length === 1 ? " item needs" : " items need") + " your attention.", card: { type: "digest", rows: rows } };
     }
@@ -5718,8 +5338,7 @@ class Component extends DCLogic {
   }
   stopVoice() { this.clear("v"); clearInterval(this.vI); this.setState({ voice: "off" }); }
   showHeads() {
-    // MVP-DEFERRED: SMS heads-up simulation; restore with approved SMS scope
-    // and native notification/recipient acceptance (see mvp-features.ts).
+    // The SMS heads-up banner is deferred with Messages (mvp-features.ts).
   }
 
   renderVals() {
@@ -5799,7 +5418,7 @@ class Component extends DCLogic {
         gIcon: IC[c.icon] || IC.spark, evIcon: c.act && !c.done ? IC.plus : IC.check, callIni: c.ini || ((c.who || "").split(" ").map(function (w) { return w.charAt(0); }).join("").slice(0, 2)),
         sumSave: t === "summary" && !c.done && !!c.act, sumOpen: t === "summary" && !c.act && !!c.go,
         draftActs: !c.done && S.editCard !== m.id,
-        done: !!c.done || (t === "call" && typeof PN !== "undefined" && !PN.live), notDone: !(c.done || (t === "call" && typeof PN !== "undefined" && !PN.live)),
+        done: !!c.done || (t === "call" && !PN.live), notDone: !(c.done || (t === "call" && !PN.live)),
         rows: (c.rows || []).map(function (r) { return Object.assign({}, r, { dot: r.key ? "var(--acc)" : "var(--line)", icon: IC[r.icon] || IC.right, open: function () { if (r.go) self.openView(r.go.view, r.go.patch, r.go.chat); else self.cardAct(m); } }); }),
         bullets: c.bullets || [],
         act: function () { self.cardAct(m); },
@@ -5873,7 +5492,7 @@ class Component extends DCLogic {
       goFlows: function () { self.openView("workflows", copy("shell").homeWorkflow || null); },
       goSettings: function () { self.openView("settings"); },
       tiles: tiles, bright: S.bright, brightHandoff: true, brightSlider: false, onBright: function () { self.openView("settings", { page: "display" }); }, shadeN: shadeN, shadeY: isOn && S.shade && this.simulatedShade() ? "0" : "-100%",
-      // Android owns the shade (#416): only the development build renders its stand-in.
+      // Android owns the shade: only the development build renders its stand-in.
       simulatedShade: this.simulatedShade(),
       closeShade: function () { self.setState({ shade: false }); }, openSystemShade: function () { self.openSystemShade(); },
       shadeKey: function (event) { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); self.setState({ shade: false }); } }, clearAll: function () { self.setState({ nGone: NOTIFS.map(function (n) { return n.id; }), shade: false }); },
@@ -5907,18 +5526,12 @@ class Component extends DCLogic {
       externalVoiceInvocation: externalVoiceInvocationEnabled,
       startVoice: function () { self.startVoice(); }, stopVoice: function () { self.stopVoice(); },
       voiceToType: function () { var vt = self.S().vtext; self.stopVoice(); self.setState({ chat: self.S().screen === "home" ? "sheet" : self.S().chat, draft: vt }); },
-      headsSw: this.sw(function () { self.setState({ heads: false }); }),
-      headsOpen: function () { if (self.swallowed() || !HEADS) return; self.openView("messages", { thread: HEADS.pid }); },
-      headsOk: function () { self.setState({ heads: false }); if (HEADS) self.toast(HEADS.confirmed); },
-      headsX: function () { self.setState({ heads: false }); },
-      headsReply: function () { self.setState({ heads: false }); if (HEADS) self.agentSay("Here's a reply to " + HEADS.who.split(" ")[0] + ".", { type: "draft", to: HEADS.who, body: HEADS.reply, act: { mod: "messages", fn: "sendDraft" }, pid: HEADS.pid }); },
       fireHeads: function () { var S2 = self.S(); if (S2.screen !== "home") self.unlock(); self.later(function () { self.showHeads(); }, 80); },
       unlock: function () { self.unlock(); }, wake: function () { self.setState({ screen: "lock" }); },
       pDown: function (e) { e.stopPropagation(); self.pLong = false; clearTimeout(self.pT); if (externalVoiceInvocationEnabled) self.pT = setTimeout(function () { self.pLong = true; self.startVoice(); }, 550); },
       pUp: function (e) {
         e.stopPropagation(); clearTimeout(self.pT); if (self.pLong) return; self.pLong = true;
         var now = Date.now();
-        if (self.lastTap && now - self.lastTap < 380 && isMvpView("wallet")) { self.lastTap = 0; clearTimeout(self.tapT); var S2 = self.S(); if (S2.screen !== "home") self.setState({ screen: "home", secure: true }); self.openView("wallet", { pay: true }); return; }
         self.lastTap = now; clearTimeout(self.tapT); self.tapT = setTimeout(function () { self.lastTap = 0; self.power(); }, 380);
       },
       pCancel: function () { clearTimeout(self.pT); },

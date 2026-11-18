@@ -20,7 +20,7 @@ public class ReminderRecurrenceRecoveryInstrumentedTest {
  private static final String FIXTURE="alpha-recurring-recovery-test";
  private void until(String expression)throws Exception{long end=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<end){if("true".equals(WebViewTestDriver.evaluate("Boolean("+expression+")")))return;SystemClock.sleep(100);}fail("Recurring reminder UI missing: "+expression);}
  private void open(Context c,String id,String occurrence)throws Exception{
-  c.startActivity(new Intent(c,MainActivity.class).setAction("ai.alphacompute.alphaphone.OPEN_REMINDER").putExtra(ReminderTestAccess.OPEN_ID,id).putExtra(ReminderTestAccess.OCCURRENCE,occurrence).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP));
+  c.startActivity(new Intent(c,MainActivity.class).setAction(AlphaReminders.CONFIGURATION.openAction).putExtra(ReminderTestAccess.OPEN_ID,id).putExtra(ReminderTestAccess.OCCURRENCE,occurrence).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP));
   until("document.body.innerText.includes('Recurring recovery '+"+JSONObject.quote(id)+") && document.querySelector('button[aria-label=\"Complete reminder occurrence\"]')");
  }
  private void click(String label)throws Exception{String q="document.querySelector('button[aria-label='+"+JSONObject.quote(JSONObject.quote(label))+"+']')";until(q);WebViewTestDriver.evaluate(q+".click()");}

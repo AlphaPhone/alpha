@@ -14,12 +14,7 @@ notice, retained review, busy state, and the real inert and focus cleanup.
 It also observes the continuation from verified account readback.
 
 The application Settings Calendar row opens this panel through
-`googleConnectionController.openCalendar`. The separate
-`openCalendarSyncSettings` export in `calendar-sync-settings.ts` has
-test callers. `test/calendar-sync-settings-navigation.test.mjs` calls
-both modes, and `test/browser/calendar-sync-fixture.ts` calls legacy
-mode. The production source contains the definition and internal
-canonical branch.
+`googleConnectionController.openCalendar`.
 
 The mounted fixture uses a known-on Calendar access receipt. Access
 persistence, link readback, Calendar control, disconnect, native access

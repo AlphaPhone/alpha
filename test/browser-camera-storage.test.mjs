@@ -128,21 +128,6 @@ test('a recording\'s bytes are stored apart from its row and joined only by read
  assert.equal(env.rows('video-data').get(id).path,VIDEO,'changing the row leaves its bytes in place');
 });
 
-test('recordings stored inside their rows by an earlier version are moved on upgrade',async()=>{
- const legacy={id:'v:0000000000001000000000001',kind:'video',path:VIDEO,duration:3,image:'data:image/jpeg;base64,QQ==',width:4,height:3,date:5,revision:'a',mutationRevision:'b',favorite:false,trashed:false};
- const photo={id:'0000000000002000000000002',kind:'image',image:'data:image/jpeg;base64,QQ==',width:4,height:3,date:6,revision:'a',mutationRevision:'c',favorite:true,trashed:false};
- const receipt={id:'edit:11111111-1111-4111-8111-111111111111',kind:'edit-receipt',operationId:'11111111-1111-4111-8111-111111111111',sourceId:photo.id,sourceRevision:'c',copyId:'9',status:'saved'};
- const env=environment(idb=>{idb.databases.set('alpha.browser.photos.v1',{version:2,stores:new Map([['photos',{keyPath:'id',indexes:new Map([['chronological',['date','id']]]),rows:new Map([legacy,photo,receipt].map(row=>[row.id,row]))}]])});});
- const listed=(await env.library.list()).items;
- assert.deepEqual(Array.from(listed,row=>row.id),[photo.id,legacy.id]);
- assert.equal('path' in env.rows('photos').get(legacy.id),false);assert.equal(env.rows('video-data').get(legacy.id).path,VIDEO);assert.equal(env.rows('video-data').size,1);
- assert.equal(env.rows('photos').get(legacy.id).mimeType,'video/webm');assert.equal(env.rows('photos').get(legacy.id).size,192);
- assert.equal((await env.api.browserPhotoFileEntries()).find(file=>file.path.startsWith('Photos/Videos/')).size,192,'a moved recording is still listed as a video file');
- assert.deepEqual({...env.rows('photos').get(photo.id)},photo,'photos are untouched');assert.deepEqual({...env.rows('photos').get(receipt.id)},receipt,'receipts are untouched');
- assert.equal((await env.library.read({id:legacy.id})).path,VIDEO,'the moved recording still plays');
- assert.equal(env.databases.get('alpha.browser.photos.v1').version,3);
-});
-
 test('a saved video copy and permanent deletion keep rows and bytes together',async()=>{
  const env=environment(),id=await recorded(env),source=await env.library.read({id});
  const operationId=crypto.randomUUID(),input={id,revision:source.mutationRevision,operationId,edit:{start:0,end:.5,rotation:0,crop:false}};

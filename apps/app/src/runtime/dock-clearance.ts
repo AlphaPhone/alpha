@@ -1,29 +1,16 @@
 import { installDockClearance as installSharedDockClearance, visibleDocks as sharedVisibleDocks } from '../../../../.eliza/client-features/packages/ui/src/components/shell/dock-clearance.ts';
 /**
- * How much of the bottom of the phone the composer or pill takes, including an expanded chat's
- * text/voice composer, measured in the phone canvas's own pixels.
- *
- * The dock floats over the page. Home used to scroll underneath it with a fixed 108px of padding,
- * which stopped being enough as soon as Home needed to scroll: at 200% text the last row of apps
- * was drawn under the composer, and TalkBack read the composer after controls that sat lower on
- * the screen (round 8 emulator run). A fixed number cannot be right either way: Android moves the
- * dock up by the navigation bar inset, and the composer grows with a longer draft or a status
- * line. So the footprint is measured and published as `--alpha-dock-clearance` on the root
- * element; phone.css gives Home, the app library and every app scroller that
- * much scroll padding so a focused control is brought wholly above the dock.
- * Home and the app library fill the phone behind the floating dock; clearance
- * belongs inside their scroll content rather than clipping the outer viewport.
- *
- * Two lengths are published. `--alpha-dock-clearance` is everything the dock
- * covers now. `--alpha-dock-rest` is the bar alone. Measurements use layout
- * coordinates: entrance animations and chat dragging must not resize Home.
- *
- * Top notices also use this footprint so a long notice cannot cover a multiline draft.
- * While no dock is on screen (the shade or lock screen) the last footprint is
- * kept, so Home does not jump when the dock returns.
+ * How much of the bottom of the phone the composer or pill covers, including an expanded chat's
+ * text/voice composer, measured in the phone canvas's own pixels and published on the root element.
+ * `--alpha-dock-clearance` is everything the dock covers now; `--alpha-dock-rest` is the bar alone.
+ * phone.css gives Home, the app library and every app scroller that much scroll padding so a focused
+ * control is brought wholly above the dock, and top notices use it so they cannot cover a multiline
+ * draft. Measurements use layout coordinates, so entrance animations and chat dragging do not resize
+ * Home. While no dock is on screen (the shade or lock screen) the last footprint is kept, so Home does
+ * not jump when the dock returns.
  */
-export const DOCK_CLEARANCE_PROPERTY = '--alpha-dock-clearance';
-export const DOCK_REST_PROPERTY = '--alpha-dock-rest';
+const DOCK_CLEARANCE_PROPERTY = '--alpha-dock-clearance';
+const DOCK_REST_PROPERTY = '--alpha-dock-rest';
 const HEADER_CLEARANCE_PROPERTY = '--alpha-header-clearance';
 // App headers, the Apps drawer's title row with its Close button, and an open
 // in-phone modal sheet (a month picker, a menu): a notice goes below it, or, when the sheet

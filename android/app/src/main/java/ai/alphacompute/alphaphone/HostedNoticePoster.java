@@ -6,11 +6,6 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
-import android.provider.Settings;
-import com.getcapacitor.*;
-import com.getcapacitor.annotation.*;
-import java.util.concurrent.*;
-import org.json.JSONObject;
 
 final class HostedNoticePoster implements HostedResultNotices.Poster {
  private final Context context;
@@ -31,9 +26,7 @@ final class HostedNoticePoster implements HostedResultNotices.Poster {
   Notification.Builder builder=result(tap,redacted,ask,silent);
   manager().notify(key,0,builder.build());
  }
- /** Visible for builder tests. Superseded by the next daily brief; withdrawn after a day or when opened. */
- Notification.Builder result(PendingIntent tap,Notification redacted){return result(tap,redacted,null);}
- Notification.Builder result(PendingIntent tap,Notification redacted,PendingIntent ask){return result(tap,redacted,ask,false);}
+ /** Superseded by the next daily brief; withdrawn after a day or when opened. */
  Notification.Builder result(PendingIntent tap,Notification redacted,PendingIntent ask,boolean silent){Notification.Builder builder=new Notification.Builder(context,CHANNEL).setSmallIcon(R.drawable.notification_icon).setContentTitle("Your brief is ready").setContentText("Tap to open.").setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(redacted).setContentIntent(tap).setOnlyAlertOnce(true).setAutoCancel(true).setTimeoutAfter(HostedResultNotices.SUPERSEDE_AFTER_MS).setCategory(Notification.CATEGORY_STATUS);if(ask!=null){Notification.Action.Builder action=new Notification.Action.Builder(null,"Ask Alpha",ask);if(Build.VERSION.SDK_INT>=31)action.setAuthenticationRequired(true);builder.addAction(action.build());}
   // Suppress the child alert on the existing channel. No summary is posted for this group,
   // so a visible result stays silent without changing the owner's channel preferences.

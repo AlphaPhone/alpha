@@ -6,7 +6,7 @@ import {browserLocalAgentEnabled,saveNativeGoogleAgentAccess} from './local-agen
 /** Owner switches for agent writes through Google. Off never disconnects or revokes Google; reads keep working. */
 export type GoogleAgentAccess={gmailChanges:boolean;calendarEdits:boolean};
 /** Development host route that hands the switches to the private Google tool host (scripts/local-agent-dev-bridge.ts). */
-export const GOOGLE_AGENT_ACCESS_PATH='/__alpha-agent-google-access';
+const GOOGLE_AGENT_ACCESS_PATH='/__alpha-agent-google-access';
 export function googleAgentAccess():GoogleAgentAccess{
  const saved=cachedDevicePreferences();
  return {gmailChanges:saved?.agentGmailChanges!==false,calendarEdits:saved?.agentCalendarEdits!==false};
@@ -17,7 +17,6 @@ export async function captureGoogleCalendarAccess(){
 }
 /** Keep a save, its host publication and any rollback together across same-origin views. */
 function withGoogleAccessLock<T>(operation:()=>Promise<T>):Promise<T>{
- if(!navigator.locks?.request)throw Error('Safe Google access changes require Web Locks.');
  return navigator.locks.request('alpha.google-agent-access.v1',{mode:'exclusive'},operation);
 }
 /** Hands the saved switches to the agent's Google host. On the phone a failed save throws, so Settings never shows a state the host does not enforce. */

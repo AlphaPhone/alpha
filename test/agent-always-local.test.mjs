@@ -43,92 +43,12 @@ test('production bundles forbid remote-agent fallback copy, which stays test-moc
   assert.doesNotMatch(ui, /NO_REMOTE_(SEND|VOICE)/);
 });
 
-test('plan state never stops or withholds the on-device agent', () => {
-  const admission = between(ui, 'async function admitCloudResident(', 'async function connectResident(');
-  // Admission decides only the inference binding; nothing in it (or the refresh handlers) stops,
-  // retires or skips the agent.
-  for (const forbidden of ['stopLocalAgent(', "retire('Plan required')", "retire('Sign-in required')", 'return false', 'Promise<boolean>'])
-    assert.ok(!admission.includes(forbidden), `admission/refresh must not ${forbidden}`);
-  assert.match(admission, /Promise<ResidentAdmission>/);
-  // The binding rules (account fences, the 7-day offline rule) are the shared controller's
-  // (@elizaos/auth/auth/cloud-resident-binding, covered by its own tests); the outcome mapping is
-  // residentAdmissionOutcome (test/resident-admission-outcome.test.mjs).
-  assert.match(admission, /const outcome=residentAdmissionOutcome\(admission,/);
-  // A plan that ends, or a rejected refresh, rebinds the running agent; it is never stopped. A
-  // revoked credential also retires the reply in flight.
-  assert.match(between(ui, 'function residentPlanEnded(', 'function residentRefreshRefused('), /queueResidentRebind\(\);/);
-  assert.match(between(ui, 'function residentRefreshRefused(', 'async function recheckResidentPlan('), /queueResidentRebind\(true\);/);
-  // connectResident always reaches the start; only the test-mocks staging QA lane stops at admission.
-  const connect = between(ui, 'async function connectResident(', 'async function connectCloud(');
-  const start = connect.indexOf('await client.connect(signal)');
-  assert.ok(start > 0);
-  const beforeStart = connect.slice(0, start);
-  assert.equal((beforeStart.match(/return;/g) || []).length, 1, 'only the QA lane returns before the start');
-  assert.match(beforeStart, /if\(testMocksEnabled&&!residentBindable\(\)\)\{[^\n]*return;\}/);
-  // Startup always starts the agent, signed in or not, and stores no local-only choice.
-  assert.match(between(ui, 'async function startResidentGate(', 'function conversationKey('), /try\{save\(\{kind:'resident'\}\);\}catch\{[^}]*\}\n\s+await startResident\(\);/);
-  assert.match(ui, /if \(residentCloudFlow\(\)\) \{ await startResidentGate\(\); return; \}/);
-  // Product phones refuse disconnecting the resident or removing its provider; there is no Stop, only Restart.
-  for (const method of ['async removeProvider()', 'async disconnect()'])
-    assert.match(between(ui, method, '\n  },'), /if\(residentCloudFlow\(\)\)\{update\(\{error:ALWAYS_LOCAL,message:''\}\);return;\}/, method);
-  assert.doesNotMatch(ui, /async stopLocal\(\)/);
-  // There is no local-apps-only mode.
-  assert.doesNotMatch(ui, /localAppsSelected|localApps\?: ?true|Use local apps without AI/);
-  assert.match(ui, /async restartLocal\(\)/);
-  // Sign-in and sign-out keep the agent running and reconnect it afterwards (native attaches when
-  // the process already matches the binding, otherwise it restarts once).
-  const login = between(ui, 'async residentCloudLogin()', 'async residentManagePlan()');
-  assert.ok(!login.includes('stopLocalAgent('));
-  // In-app sign-in (owner directive 2026-10-14) once Cloud is ready; the browser hand-off until then.
-  assert.ok(login.includes('async residentCloudLogin() { await connectionController.beginSignIn(residentEnvironment()); }'));
-  const browser = between(ui, 'async function residentBrowserLoginAction(', 'async function browserCloudLoginAction(');
-  assert.ok(browser.indexOf('cloud.login(') >= 0 && browser.indexOf('await residentSignedIn(signal,') > browser.indexOf('cloud.login('), 'reconnect only after the browser sign-in returned');
-  assert.match(browser, /catch\(error\)\{if\(kept\)residentRebinds\(\)\.queue\(\);throw error;\}/, 'a cancelled sign-in re-admits a kept sign-in');
-  const signedIn = between(ui, 'async function signedIn(', '/** The development hosted-agent client.');
-  assert.ok(signedIn.includes('if (residentCloudFlow()) { update({ accountCreated: created }); await residentSignedIn(signal, unconfirmed, expected); return; }'), 'the in-app sign-in finishes through the shared resident step');
-  // Both sign-ins reconnect once the key is stored, with the admission they made: access setup opens
-  // as soon as the account is admitted and the agent restarts behind it, shown as starting (owner
-  // report 2026-10-30); setup never waits for the agent's first boot.
-  const resident = between(ui, 'async function residentSignedIn(', '/** The key is stored;');
-  const at = (text) => { const index = resident.indexOf(text); assert.ok(index >= 0, text); return index; };
-  assert.ok(!resident.includes('stopLocalAgent('));
-  assert.ok(at('retire();') < at("update({ residentInference: null, message: 'Signing in…' });"));
-  assert.ok(at("update({ residentInference: null, message: 'Signing in…' });") < at('const admission = await admitCloudResident(signal);'));
-  assert.ok(at('const admission = await admitCloudResident(signal);') < at("update({ signIn: null, message: '', ...(refused ? {} : { residentStarting: true }) });"));
-  assert.ok(at("update({ signIn: null, message: '', ...(refused ? {} : { residentStarting: true }) });") < at('showPostSignInSetup(); setup = true;'));
-  assert.ok(at('showPostSignInSetup(); setup = true;') < at('await connectResident(signal, admission);'));
-  // A refused key is removed after the agent restarted without it, and never opens setup.
-  assert.ok(at('if (!refused) { showPostSignInSetup(); setup = true; }') < at('await cloudCredentialStore.clear(residentEnvironment());'));
-  assert.match(between(ui, 'async function connectResident(', 'async function connectCloud('), /admission=admitted\?\?await admitCloudResident\(signal\);/);
-  const signOut = between(ui, 'async cloudSignOut()', 'async mock()');
-  assert.ok(!signOut.includes('stopLocalAgent(') && signOut.includes('else{retire();try{await connectResident(signal);}'));
-  // Cloud inference is unbound (native stops a process holding the key) before the key is revoked.
-  assert.ok(signOut.indexOf('await clearLocalProvider()') > 0 && signOut.indexOf('await clearLocalProvider()') < signOut.indexOf('client.revokeSession(signal, expected)'));
-});
-
 test('no startup path ends claiming "starting" with nothing starting', () => {
   // Every startup outcome is settled: the resident starts, or the state is `recovering` with Retry.
   assert.match(ui, /\}\)\(\)\.then\(settleResidentAfterStartup\)(\.finally\(\(\)=>\{update\(\{startupResolved:true(?:,automaticRestore:false)?\}\);runQueuedSignInReturn\(\);\}\))?;/);
   assert.match(ui, /async function settleResidentAfterStartup\(\) \{[\s\S]{0,600}await ensureResident\(\);[\s\S]{0,80}update\(\{ kind: 'recovering' \}\);/);
   // A rebind that fails to reconnect leaves the agent recovering (Retry), never "no agent".
   assert.match(between(ui, 'function queueResidentRebind(', 'function runQueuedResidentRebind('), /catch \(error\) \{ if \(residentAlwaysPresent && !active\) update\(\{ kind: 'recovering' \}\); throw error; \}/);
-});
-
-test('Cloud inference is bound only for an admitted plan and unbound otherwise', () => {
-  const bind = between(ui, 'async function applyResidentBinding(', 'function residentBindingController(');
-  // The shared controller binds only an admitted identity; this file passes one only for an
-  // admitted Cloud binding of this account.
-  assert.ok(bind.includes("admission.binding==='cloud'&&admission.credentialId&&admission.account?{identity:{credentialId:admission.credentialId,"), 'an identity is passed only in the admitted branch');
-  assert.ok(!bind.includes('bindResidentCloudProvider('), 'applyResidentBinding never binds directly');
-  const ports = between(ui, 'function residentBindingController(', 'async function connectResident(');
-  assert.equal(ports.split('bindResidentCloudProvider(').length, 2, 'one bind port');
-  assert.equal(ui.split('bindResidentCloudProvider(').length, 3, 'the guarded Cloud bind port and explicit Cloud-account rebind are the only callers');
-  assert.match(ui,/if\(ownProviderSelected\(\)&&issued&&state\.cloudAccount\)\{await bindResidentCloudProvider\(issued\);signal\.throwIfAborted\(\);\}/);
-  // Failed admitted binding explicitly clears (tombstone). Ordinary unbound startup only removes a
-  // genuinely present provider, preserving legacy recovery when native observes absence.
-  assert.match(ports, /clearProvider:async\(_signal,reason\)=>\{await clearLocalProvider\(reason==='unbound'\);\}/);
-  // The running state the UI and tests read is derived from the binding actually applied.
-  assert.match(between(ui, 'async function connectResident(', 'async function connectCloud('), /residentBinding=bound\.binding;\n\s+update\(\{residentInference:bound\.binding==='cloud'\?'cloud':bound\.binding==='unbound'\?'unavailable':'unknown'\}\);/);
 });
 
 test('a chat turn without Cloud inference gets an honest answer with the plan actions', () => {

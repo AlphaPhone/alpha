@@ -15,7 +15,6 @@ export function openVideoEditReview(source:{path:string;duration:number;stream?:
  let busy=false,closed=false,loaded=false,sourceUrl:string|undefined,previewFrame:number|undefined,lastPreviewTime=-1,lastPaintAt=0;
  const controls:HTMLButtonElement[]=[];
  const button=(name:string,action:()=>void)=>{const b=document.createElement('button');b.textContent=name;b.type='button';b.onclick=action;controls.push(b);return b;};
- const clock=videoClock;
  const timeline=document.createElement('div');timeline.className='video-editor-timeline';timeline.setAttribute('aria-label','Trim video');
  const track=document.createElement('div');track.className='video-editor-track';track.setAttribute('aria-hidden','true');
  const selected=document.createElement('div');selected.className='video-editor-selection';
@@ -27,7 +26,7 @@ export function openVideoEditReview(source:{path:string;duration:number;stream?:
   for(const key of ['start','end'] as const){const h=handles[key];if(!h)continue;h.style.left=`${edit[key]/source.duration*100}%`;h.setAttribute('aria-valuenow',String(edit[key]));h.setAttribute('aria-valuetext',`${edit[key].toFixed(3)} seconds`);h.setAttribute('aria-valuemin',String(key==='start'?0:edit.start+.1));h.setAttribute('aria-valuemax',String(key==='end'?source.duration:Math.max(0,edit.end-.1)));}
   selected.style.left=`${edit.start/source.duration*100}%`;selected.style.width=`${(edit.end-edit.start)/source.duration*100}%`;
   playhead.style.left=`${Math.min(1,Math.max(0,video.currentTime/source.duration))*100}%`;
-  startTime.textContent=clock(edit.start);endTime.textContent=clock(edit.end);length.textContent=`${(edit.end-edit.start).toFixed(1)}s`;
+  startTime.textContent=videoClock(edit.start);endTime.textContent=videoClock(edit.end);length.textContent=`${(edit.end-edit.start).toFixed(1)}s`;
  };
  const updateControls=()=>{for(const control of controls)control.disabled=busy||!loaded;};
  // One source fetch; zero paused polling. Playback draws only changed frames, at <=30fps.

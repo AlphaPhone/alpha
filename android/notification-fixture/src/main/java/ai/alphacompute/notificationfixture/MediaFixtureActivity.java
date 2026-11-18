@@ -37,7 +37,7 @@ public final class MediaFixtureActivity extends Activity {
   return uri;
  }
  private byte[] bytes(String kind,int index)throws Exception{
-  if(kind.equals("video")){try(InputStream in=getAssets().open("synthetic-blue.mp4")){byte[] value=readBounded(in,16384);if(value.length>16384)throw new IOException("Video fixture limit");return value;}}
+  if(kind.equals("video")){try(InputStream in=getAssets().open("synthetic-blue.mp4")){return readBounded(in,16384);}}
   Bitmap bitmap=Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888);try{bitmap.eraseColor(Color.rgb(index%256,(index*7)%256,(index*13)%256));ByteArrayOutputStream out=new ByteArrayOutputStream();if(!bitmap.compress(Bitmap.CompressFormat.JPEG,85,out))throw new IOException("JPEG encoding");return out.toByteArray();}finally{bitmap.recycle();}
  }
  private void handle(Intent intent){

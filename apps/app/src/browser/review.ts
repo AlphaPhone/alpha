@@ -16,7 +16,7 @@ export class BrowserReviews {
       const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const token of ['bg','fg','s2','line'])dialog.style.setProperty('--review-'+token,theme.getPropertyValue('--'+token));dialog.style.colorScheme=theme.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';}
 
       const heading = document.createElement('h2'); heading.textContent = title;
-      const body = document.createElement('p'); body.textContent = details; body.style.whiteSpace = 'pre-wrap';
+      const body = document.createElement('p'); body.textContent = details;
       const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
       const approve = document.createElement('button'); approve.textContent = confirmLabel;
 

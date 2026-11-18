@@ -12,7 +12,7 @@ import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
 /**
- * Decision P-43 (owner, 2026-10-13, reconciled with #410/#478): the resident
+ * Decision P-43: the resident
  * agent is always present. Emulator check, flag-off builds only: signed out with the network off
  * and an older build's "local apps without AI" selection stored, the app starts the resident
  * instead of offering a no-agent mode. Every Alpha Phone signs in to Eliza Cloud, so signed out the
@@ -42,13 +42,13 @@ public class ResidentAlwaysPresentInstrumentedTest {
   Assume.assumeTrue("Product behavior only; test-mocks builds keep the development chooser", !BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   AlphaCredentialStore store = new AlphaCredentialStore(context);
-  String savedCloud = store.readCredentialSlot("cloud:production");
+  String savedCloud = store.readCredentialSlot(Slots.CLOUD_PRODUCTION);
   String savedSelection = null;
   shell("svc wifi disable"); shell("svc data disable");
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
    until("document.querySelector('[data-screen]')");
    savedSelection = WebViewTestDriver.evaluate("localStorage.getItem('" + SELECTION + "')");
-   if (savedCloud != null) store.removeCredentialSlot("cloud:production");
+   if (savedCloud != null) store.removeCredentialSlot(Slots.CLOUD_PRODUCTION);
    String previous = WebViewTestDriver.evaluate("performance.timeOrigin");
    // An older build's "Use local apps without AI" choice.
    WebViewTestDriver.navigateHostDocument("localStorage.setItem('" + SELECTION + "',JSON.stringify({kind:'offline',localApps:true}));location.replace(location.origin+location.pathname)", true);
@@ -67,7 +67,7 @@ public class ResidentAlwaysPresentInstrumentedTest {
    assertEquals("Home is behind the page", "true", WebViewTestDriver.evaluate(AppNavigation.selected("Home")));
   } finally {
    shell("svc wifi enable"); shell("svc data enable");
-   if (savedCloud != null) store.writeCredentialSlot("cloud:production", savedCloud);
+   if (savedCloud != null) store.writeCredentialSlot(Slots.CLOUD_PRODUCTION, savedCloud);
    try (BoundedActivityScenario<MainActivity> restore = BoundedActivityScenario.launch(MainActivity.class)) {
     until("document.querySelector('[data-screen]')");
     WebViewTestDriver.evaluate(savedSelection != null && !"null".equals(savedSelection)

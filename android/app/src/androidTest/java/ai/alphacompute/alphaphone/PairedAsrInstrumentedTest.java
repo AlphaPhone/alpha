@@ -28,10 +28,8 @@ public class PairedAsrInstrumentedTest {
   Fixture()throws Exception {task=worker.submit(()->{try{for(int index=0;index<2;index++)try(Socket socket=server.accept()){
    socket.setSoTimeout(10000);InputStream in=socket.getInputStream();ByteArrayOutputStream head=new ByteArrayOutputStream();int c;while((c=in.read())!=-1){head.write(c);byte[] b=head.toByteArray();int n=b.length;if(n>=4&&b[n-4]==13&&b[n-3]==10&&b[n-2]==13&&b[n-1]==10)break;if(n>16384)throw new IOException();}
    String h=head.toString(StandardCharsets.US_ASCII);int length=0;for(String line:h.split("\r\n"))if(line.toLowerCase(Locale.ROOT).startsWith("content-length:"))length=Integer.parseInt(line.substring(15).trim());requests.add(h);byte[] body=in.readNBytes(length);bodies.add(body);
-   String requestId="";for(String line:h.split("\r\n"))if(line.toLowerCase(Locale.ROOT).startsWith("x-request-id:"))requestId=line.substring(13).trim();
    byte[] response=(index==0?"{\"ready\":true,\"provider\":\"local-inference\",\"format\":\"pcm16-wav\",\"maxDurationSeconds\":60,\"language\":\"en\"}":"{\"text\":\"Synthetic provider transcript\",\"provider\":\"local-inference\"}").getBytes(StandardCharsets.UTF_8);
-   String status="200 OK",type="application/json";
-   OutputStream out=socket.getOutputStream();out.write(("HTTP/1.1 "+status+"\r\nContent-Type: "+type+"\r\nContent-Length: "+response.length+"\r\nLocation: https://example.com/\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(response);out.flush();
+   OutputStream out=socket.getOutputStream();out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+response.length+"\r\nLocation: https://example.com/\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(response);out.flush();
   }}catch(IOException e){if(!server.isClosed())throw new RuntimeException(e);}});}
   public void close()throws Exception{server.close();worker.shutdownNow();}
  }

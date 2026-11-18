@@ -1,0 +1,17 @@
+# specs/quint/refinement/native/HostedResultNoticeTraces.java
+- Lines: 462 | Kind: Quint refinement harness (complete `HostedResultNotices.java` + pinned upstream `NoticeOwner.java` executed; bridge handlers of `AlphaHostedResultsPlugin` **text-sliced** by the driver) | Verdict: KEEP; driver PORT (stop slicing the plugin)
+- Covers: hosted-result notification ledger: publish/supersede, redacted durable rows, capture/consume/release tap tokens, owner-tuple withdrawal with partial-write failures, interrupted dispatch repaired without re-post, 200-row cap with pending-tap exemption, locked/unlocked bridge readback, retired bridge worker. Duplicates: `test/hosted-result-notices.test.mjs` + `test/fixtures/HostedResultNoticesTest.java`, `test/hosted-notice-withdraw.test.mjs` + `HostedNoticeWithdrawTest.java` (javac unit tests of the same ledger, T3/T4), `test/quint-browser-hosted-result-notice.test.mjs` (renderer side, different code). Callers/importers: `hosted-result-notices.mjs`, native aggregate, `test/quint-native-hosted-result-notices.test.mjs`.
+- Model live: yes, `NativeHostedResultNotices`. Product files exist (`HostedResultNotices.java` 119 lines, `AlphaHostedResultsPlugin.java` 112 lines).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | driver `hosted-result-notices.mjs:17-36` | T10 | `bridgeSource` cuts `AlphaHostedResultsPlugin.java` between 11 literal anchors (`' static final String CHANNEL='`, `' private void channel()'`, `' private void sourceForeground()'`, `' @PluginMethod public void nativeSourceIdentity'`, `' @PluginMethod public void withdrawOtherOwnerApprovalNotices'`, `' @PluginMethod public void resumeWorkflowApprovalNotice'`, `' private void retryCaptures()'`, `' @Override public void load()'`, `' @Override protected void handleOnNewIntent'`, `' @PluginMethod public void status'`, `' @Override protected void handleOnDestroy()'`), strips `@PluginMethod`, and re-parents the class on a stub `HostedBridgeHost`. All anchors still match today; any reorder/reformat (D9 Prettier does not touch Java, but D1 edits will) breaks it. | PORT: compile the whole plugin against a small `com.getcapacitor` stub set (`Plugin`, `PluginCall`, `JSObject`, `JSArray`, `@PluginMethod`, `@CapacitorPlugin`) — the MMS/SMS platforms already carry such stubs — and stub its collaborators (`HostedDelivery`, `WorkflowNoticeTapsFactory`, `SourceRenewalHost`). The harness then calls the real public methods. | medium |
+| 2 | 284-288 | T10 | Reads the plugin's private `io` executor by name. | Keep (single field), note in the plugin report. | low |
+| 3 | 345-366 | — | `capacity()` asserts exact 200-row cap — real product constant behaviour, checked in harness and in the driver (`assert.deepEqual(capacity, …)`). | Keep in one place (driver). | low |
+| 4 | — | T4 | Ledger behaviour is also tested by two javac unit tests (`HostedResultNoticesTest`, `HostedNoticeWithdrawTest`). | Delete those host tests (owned by the tests-host chunk); this harness is the stronger coverage. | low |
+| 5 | — | T4 | Per-model test + aggregate both run it. | One runner. | — |
+
+## Proposed end state
+Harness unchanged in substance; it compiles the full `AlphaHostedResultsPlugin.java` against shared Capacitor stubs instead of a sliced copy, so plugin edits never break it textually.
+Path filter: `HostedResultNotices.java`, `AlphaHostedResultsPlugin.java`, `PluginWorkers.java`, `upstream.lock.json`, the model, this directory.

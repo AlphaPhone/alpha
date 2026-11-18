@@ -15,7 +15,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
-/** Actual CalendarProvider rows beyond the former fixed window, via visible date controls. */
+/** Actual CalendarProvider rows 120 days back and 430 days ahead load through the visible date controls. */
 @RunWith(AndroidJUnit4.class)
 public final class CalendarRangeInstrumentedTest {
  private String js(String s)throws Exception{return WebViewTestDriver.evaluate(s);}

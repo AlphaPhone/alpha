@@ -12,11 +12,6 @@ import static org.junit.Assert.*;
  * resident (execution 'device') path is covered by residentReadingTokenIsSingleUseAndBound. */
 public final class BrowserReadingInstrumentedTest {
  private final BrowserReadingFixture reading=new BrowserReadingFixture();
- private String js(String code)throws Exception{return reading.js(code);}
- private void waitFor(String condition)throws Exception{reading.waitFor(condition);}
- private void invoke(String code)throws Exception{reading.invoke(code);}
- private JSONObject result()throws Exception{return reading.result();}
- private JSONObject call(String code)throws Exception{return reading.call(code);}
  @Test public void explicitImmutableReviewExcludesSensitiveSubtreesAndRejectsReplay()throws Exception{
   org.junit.Assume.assumeTrue("Explicit browser reading synthetic HTTP fixture", "1".equals(InstrumentationRegistry.getArguments().getString("browserReading")));
   assertTrue("Run against a test-mocks app build: only that build admits this fixture's loopback HTTP route (any other build refuses it, correctly)",BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
@@ -35,16 +30,16 @@ public final class BrowserReadingInstrumentedTest {
  }
  /** {ok, message} of a plugin call, so refusals can be told apart from a later speech failure. */
  private JSONObject settle(String code)throws Exception{
-  js("window.__readingSettled=null;Promise.resolve("+code+").then(v=>window.__readingSettled={ok:true,value:v??{}},e=>window.__readingSettled={ok:false,message:String(e?.message??'')})");
-  waitFor("window.__readingSettled!==null");return new JSONObject(js("window.__readingSettled"));
+  reading.js("window.__readingSettled=null;Promise.resolve("+code+").then(v=>window.__readingSettled={ok:true,value:v??{}},e=>window.__readingSettled={ok:false,message:String(e?.message??'')})");
+  reading.waitFor("window.__readingSettled!==null");return new JSONObject(reading.js("window.__readingSettled"));
  }
  private static final String EXPIRED="Reading approval expired";
  /** Review and approve one device reading; returns its token. */
  private String approveDevice(String binding)throws Exception{
-  invoke("Capacitor.Plugins.AlphaBrowser.reviewReading({...window.__readingArgs,execution:'device',"+binding+"})");
+  reading.invoke("Capacitor.Plugins.AlphaBrowser.reviewReading({...window.__readingArgs,execution:'device',"+binding+"})");
   AlertDialog approved=reading.dialog();
   BoundedActivityScenario.main(()->approved.getButton(AlertDialog.BUTTON_POSITIVE).performClick());
-  JSONObject review=result();assertFalse("Device reading approved: "+review,review.has("error"));return review.getString("readingToken");
+  JSONObject review=reading.result();assertFalse("Device reading approved: "+review,review.has("error"));return review.getString("readingToken");
  }
  /**
   * The resident path production uses (createNativeReadingVoice prefers the resident binding and
@@ -76,7 +71,7 @@ public final class BrowserReadingInstrumentedTest {
     // The exact binding is accepted once; any later failure is synthesis, never the approval.
     JSONObject accepted=settle(with.apply(exact,token));
     assertFalse("The valid token is accepted: "+accepted,!accepted.getBoolean("ok")&&EXPIRED.equals(accepted.optString("message")));
-    call("Capacitor.Plugins.AlphaVoiceCloud.stopPlayback()");call("Capacitor.Plugins.AlphaBrowser.cancelReading(window.__readingTab||{})");
+    reading.call("Capacitor.Plugins.AlphaVoiceCloud.stopPlayback()");reading.call("Capacitor.Plugins.AlphaBrowser.cancelReading(window.__readingTab||{})");
     assertEquals("A replayed token is refused",EXPIRED,settle(with.apply(exact,token)).optString("message"));
     // Expired: the binding's own expiry passes before the token is used.
     long soon=System.currentTimeMillis()+4000;
@@ -85,7 +80,7 @@ public final class BrowserReadingInstrumentedTest {
     assertEquals("An expired binding is refused",EXPIRED,settle(String.format("Capacitor.Plugins.AlphaVoiceCloud.synthesizeLocalBrowserReading({ownerId:'synthetic-resident-owner',sessionId:'synthetic-resident-session',expiresAt:"+soon+",readingToken:%s,execution:'device',requestId:'resident-expired'})",JSONObject.quote(expiring))).optString("message"));
     // Cancelled: cancelling the approved review withdraws its token.
     String cancelled=approveDevice(binding);
-    assertFalse(call("Capacitor.Plugins.AlphaBrowser.cancelReading(window.__readingTab||{})").has("error"));
+    assertFalse(reading.call("Capacitor.Plugins.AlphaBrowser.cancelReading(window.__readingTab||{})").has("error"));
     assertEquals("A cancelled review's token is refused",EXPIRED,settle(with.apply(exact,cancelled)).optString("message"));
    }catch(Exception|AssertionError failure){primary=failure;throw failure;}finally{reading.cleanup(primary,null,installed);}
   }

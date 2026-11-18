@@ -4,7 +4,6 @@ import ai.eliza.plugins.system.SystemLauncherApps;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.List;
@@ -64,30 +63,5 @@ public class LauncherAppsInstrumentedTest {
    try { SystemLauncherApps.resolve(context(), bad[0], bad[1], bad.length > 2 ? bad[2] : null); fail("Malformed request must be rejected"); }
    catch (IllegalArgumentException expected) { assertEquals("Choose an installed app", expected.getMessage()); }
   }
- }
-
- @Test public void packageOnlyRefusalsUseUpstreamCodes() {
-  PackageManager packages = context().getPackageManager();
-  assertEquals(SystemLauncherApps.NOT_INSTALLED, SystemLauncherApps.explain(packages, "org.example.alpha.not.installed").code);
-  // Alpha is installed and enabled; asked about as a launch target it simply has no entry here.
-  assertEquals(SystemLauncherApps.NO_LAUNCHER, SystemLauncherApps.explain(packages, context().getPackageName()).code);
-  assertEquals("The shared failure code is distinct from every refusal", "failed", SystemLauncherApps.FAILED);
-  try { SystemLauncherApps.launchIntent(context(), context().getPackageName()); fail("Alpha never launches itself by package"); }
-  catch (IllegalArgumentException expected) { assertEquals("Choose an installed app", expected.getMessage()); }
- }
-
- @Test public void aComponentOrProfileThatIsNotTextIsMalformedNotAbsent() throws Exception {
-  com.getcapacitor.JSObject request = new com.getcapacitor.JSObject();
-  request.put("packageName", "org.example.one"); request.put("activityName", "org.example.one.Main"); request.put("user", 10);
-  assertTrue("A numeric profile must not be read as the current user", SystemLauncherApps.malformedText(request, "user"));
-  assertFalse(SystemLauncherApps.malformedText(request, "activityName"));
-  request.put("user", "10"); request.put("activityName", true);
-  assertFalse(SystemLauncherApps.malformedText(request, "user"));
-  assertTrue("A non-text activity must not fall back to the package default", SystemLauncherApps.malformedText(request, "activityName"));
-  com.getcapacitor.JSObject legacy = new com.getcapacitor.JSObject();
-  legacy.put("packageName", "org.example.one"); legacy.put("user", org.json.JSONObject.NULL);
-  assertFalse("A package-only request stays valid", SystemLauncherApps.malformedText(legacy, "activityName"));
-  assertFalse(SystemLauncherApps.malformedText(legacy, "user"));
-  assertFalse(SystemLauncherApps.malformedText(null, "user"));
  }
 }

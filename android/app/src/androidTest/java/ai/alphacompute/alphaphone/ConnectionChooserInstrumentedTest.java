@@ -23,7 +23,7 @@ public class ConnectionChooserInstrumentedTest {
   String expression="[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==="+JSONObject.quote(label)+"&&e.getClientRects().length)";
   until(expression);NotesSecureFixture.evaluate("("+expression+").click()");
  }
- @Test public void offlineAndMockAreExplicitAndMockDoesNotChangeSavedNotes()throws Exception{
+ @Test public void closingSavesNoChoiceAndMockPreservesSavedNotes()throws Exception{
   org.junit.Assume.assumeTrue("Mock mode exists only in -PELIZA_DEV_ALLOW_TEST_MOCKS=1 builds",BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    until("document.querySelector('[data-screen]')");

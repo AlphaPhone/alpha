@@ -9,19 +9,19 @@ import { iconStyle } from '../icon-style';
  * Cloud web page. Codes stay in the input while verification is pending or can be retried. They
  * are never stored outside the form, and a different attempt or verification step replaces the input.
  */
-export interface CloudSignInActions {
+interface CloudSignInActions {
   phone?(number: string): void; google(): void; email(address: string): void; verify(code: string): void; resend(): void; cancel(): void; retry?(): void;
   /** Ends the waiting Google attempt and opens a fresh Google page. */
   reopenGoogle?(): void;
 }
-export function AlphaAuthBrand() {
+function AlphaAuthBrand() {
   return <div className="alpha-auth-brand"><span className="alpha-auth-mark" aria-hidden="true"/></div>;
 }
 /** Exact busy messages the controller uses; the panel shows them on the control that started them. */
-export const SIGN_IN_SENDING = 'Sending code';
+const SIGN_IN_SENDING = 'Sending code';
 // Must equal the controller message set while a verified sign-in is admitted (connection-ui.tsx residentSignedIn).
-export const SIGN_IN_SIGNING_IN = 'Signing in…';
-export const SIGN_IN_BROWSER = 'In browser';
+const SIGN_IN_SIGNING_IN = 'Signing in…';
+const SIGN_IN_BROWSER = 'In browser';
 type Pending = 'email' | 'phone' | 'resend' | null;
 export function CloudSignInPanel({ view, busy, google, phone, emailEnabled = true, message, error, errorIsNotice = false, actions, extra, ready = true, dismissible = true, probing = false, unavailable = false, ownKeys, alternate }: {
   view: SignInView; busy: boolean; google: boolean; phone?: boolean; emailEnabled?: boolean; message: string; error: string; actions: CloudSignInActions;

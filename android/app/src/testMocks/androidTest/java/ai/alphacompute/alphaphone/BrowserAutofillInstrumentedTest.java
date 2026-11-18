@@ -8,6 +8,8 @@ import android.webkit.WebView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -106,7 +108,7 @@ public final class BrowserAutofillInstrumentedTest {
  private void eligibility(WebView child,int expected)throws Exception{
   boolean attested=BrowserLoginFields.supported();
   for(int i=0;i<100;i++){
-   java.util.concurrent.atomic.AtomicInteger actual=new java.util.concurrent.atomic.AtomicInteger();
+   AtomicInteger actual=new AtomicInteger();
    BoundedActivityScenario.main(()->actual.set(child.getImportantForAutofill()));
    // The tab flag is read on the main thread by withActivity itself (never nested in main()).
    if(attested)actual.set(actual.get()!=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS?-1:tabAutofillEnabled(child)?View.IMPORTANT_FOR_AUTOFILL_YES:View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
@@ -156,7 +158,7 @@ public final class BrowserAutofillInstrumentedTest {
     // virtual field through a real tap before testing overlay cancellation.
     // Repeat fresh native sessions to cover the observed intermittent popup race.
     for(int cycle=0;cycle<3;cycle++){
-    int previousRequests=SyntheticAutofillService.accepted.get(),previousRejected=SyntheticAutofillService.rejected.get();
+    int previousAccepted=SyntheticAutofillService.accepted.get(),previousRejected=SyntheticAutofillService.rejected.get();
     String secondUrl="https://example.com/?alpha_autofill_overlay="+UUID.randomUUID();
     address(secondUrl);
     childReady("location.href==="+JSONObject.quote(secondUrl)+" && document.readyState==='complete' && !document.querySelector('#alpha-password')");
@@ -165,13 +167,12 @@ public final class BrowserAutofillInstrumentedTest {
     for(int i=0;i<100&&suggestion()==null;i++)SystemClock.sleep(100);
     AccessibilityNodeInfo popup=suggestion();
     if(popup==null){
-     java.util.concurrent.atomic.AtomicInteger important=new java.util.concurrent.atomic.AtomicInteger();
-     java.util.concurrent.atomic.AtomicBoolean focused=new java.util.concurrent.atomic.AtomicBoolean();
+     AtomicInteger important=new AtomicInteger();
+     AtomicBoolean focused=new AtomicBoolean();
      BoundedActivityScenario.main(()->{important.set(child.getImportantForAutofill());focused.set(child.hasWindowFocus());});
-     fail("Real suggestion missing in cycle "+cycle+"; acceptedDelta="+(SyntheticAutofillService.accepted.get()-previousRequests)+"; rejectedDelta="+(SyntheticAutofillService.rejected.get()-previousRejected)+"; usernameFocused="+browser.child("document.activeElement?.id==='alpha-user'")+"; childWindowFocused="+focused.get()+"; eligibility="+important.get());
+     fail("Real suggestion missing in cycle "+cycle+"; acceptedDelta="+(SyntheticAutofillService.accepted.get()-previousAccepted)+"; rejectedDelta="+(SyntheticAutofillService.rejected.get()-previousRejected)+"; usernameFocused="+browser.child("document.activeElement?.id==='alpha-user'")+"; childWindowFocused="+focused.get()+"; eligibility="+important.get());
     }
-    assertNotNull("Real suggestion exists before overlay cycle "+cycle,popup);
-    assertTrue("New document starts a framework request in cycle "+cycle,SyntheticAutofillService.accepted.get()>previousRequests);
+    assertTrue("New document starts a framework request in cycle "+cycle,SyntheticAutofillService.accepted.get()>previousAccepted);
     click("Menu");eligibility(child,View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
     assertTrue("Overlay cancels native credential suggestion in cycle "+cycle,suggestionGone());
     // Reload and a different HTTPS origin must never reuse the prior filled form.

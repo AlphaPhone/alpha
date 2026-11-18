@@ -1,8 +1,5 @@
 package ai.alphacompute.alphaphone;
 
-import android.app.*;
-import android.content.*;
-import android.os.SystemClock;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.json.*;

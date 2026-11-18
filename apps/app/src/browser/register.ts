@@ -14,7 +14,7 @@ import { registerPlugin } from '../platform-plugins';
 import { Capacitor } from '@capacitor/core';
 import { BrowserCalendar } from './calendar';
 import { BrowserSurface } from './browser-surface';
-// This module must be the first import in main: Capacitor keeps the first registration.
+// main imports this module before any runtime module registers a plugin: Capacitor keeps the first registration.
 if (!Capacitor.isNativePlatform()) {
   registerPlugin('ElizaLocation', { web: () => new BrowserLocation() });
   const voice = new BrowserVoice();

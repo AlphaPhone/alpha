@@ -15,12 +15,6 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  */
 @CapacitorPlugin(name = "AlphaBrowser")
 public class AlphaBrowserPlugin extends BrowserTabHostPlugin {
- /** Durable profile shared by every normal tab. Never "Default" (the host's). */
- static final String PERSISTENT_PROFILE = AlphaBrowserStores.PERSISTENT_PROFILE;
- static final String PRIVATE_PREFIX = AlphaBrowserStores.PRIVATE_PREFIX;
- /** Builds before the sign-in decision gave every tab an ephemeral profile. */
- static final String LEGACY_PREFIX = AlphaBrowserStores.LEGACY_PREFIX;
- static boolean ephemeralProfile(String name) { return AlphaBrowserStores.IDENTITY.ephemeral(name); }
  @Override protected BrowserTabHostConfig tabHostConfig() { return AlphaBrowserStores.IDENTITY; }
  @Override protected BrowserBookmarkStore openBookmarkStore(Context context) { return AlphaBrowserStores.bookmarks(context); }
  @Override protected BrowserSessionStore openSessionStore(Context context) { return AlphaBrowserStores.session(context); }

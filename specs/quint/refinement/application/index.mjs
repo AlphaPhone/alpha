@@ -16,7 +16,6 @@ import {shellNavigation, developmentSurfaces, developmentDevice, filesTree} from
 import {filesAndSharing, notificationCollection, developmentHost} from './boundaries.mjs';
 import {runStartupPermissionsCoordinatorRefinement} from './startup-permissions-coordinator.mjs';
 import {checkVaultCoordinator} from './vault-coordinator.mjs';
-import {checkNotesCoordinator} from './notes-coordinator.mjs';
 import {listFocus} from './list-focus.mjs';
 import {checkRecoveryUI} from './recovery-ui.mjs';
 import {checkShellCoordinator} from './shell-coordinator.mjs';
@@ -54,17 +53,13 @@ import {checkEmailSuggestionReview} from './email-suggestion-review.mjs';
 import {checkSharePanelAdmission} from './share-panel-admission.mjs';
 import {checkWorkflowRequestRecoveryAdmission} from './workflow-request-recovery-admission.mjs';
 import {checkAppearancePreferenceAdmission} from './appearance-preference-admission.mjs';
-import {checkNotesTrashReadPublication} from './notes-trash-read-publication.mjs';
-import {checkPreviousNotesAvailability} from './previous-notes-availability.mjs';
 import {checkCommittedViewObservation} from './committed-view-observation.mjs';
-import {checkPreviousNotesSourceOpening} from './previous-notes-source-opening.mjs';
 import {checkScheduledTaskControls} from './scheduled-task-controls.mjs';
 import {checkAgentCalendarSyncControl} from './agent-calendar-sync-control.mjs';
 import {checkGoogleCalendarLinkFlow} from './google-calendar-link-flow.mjs';
 import {checkGoogleCalendarDisconnect} from './google-calendar-disconnect.mjs';
 import {checkGoogleCalendarLinkPublication} from './google-calendar-link-publication.mjs';
 import {checkGoogleCalendarAccessChoice} from './google-calendar-access-choice.mjs';
-import {checkCalendarPreservationConfirmation} from './calendar-preservation-confirmation.mjs';
 import {checkCanonicalCalendarEditorClose} from './canonical-calendar-editor-close.mjs';
 import {checkCanonicalCalendarDraftHandoff} from './canonical-calendar-draft-handoff.mjs';
 import {checkCameraPreviewRetirement} from './camera-preview-retirement.mjs';
@@ -120,7 +115,6 @@ const adapters = [checkCalendarApprovalReview, checkDeviceActionReview, checkCal
   checkBrowserHostedResultNotice, checkHostedNoticeQuestion, checkRendererHostedInbox, checkHostedBackgroundAdmission,
   checkRendererDigestQueue, checkHostedDigestRefresh, checkHostedDigestMutation, checkSourceRenewalQuestion, checkBrowserFilesTrash,
   checkRetainedHomeBrief,
-  checkCalendarPreservationConfirmation,
   checkCanonicalCalendarEditorClose,
   checkCanonicalCalendarDraftHandoff,
   checkCameraPreviewRetirement,
@@ -138,14 +132,11 @@ const adapters = [checkCalendarApprovalReview, checkDeviceActionReview, checkCal
   checkSharePanelAdmission,
   checkWorkflowRequestRecoveryAdmission,
   checkAppearancePreferenceAdmission,
-  checkNotesTrashReadPublication,
-  checkPreviousNotesAvailability,
   checkCommittedViewObservation,
-  checkPreviousNotesSourceOpening,
   checkScheduledTaskControls,
   checkAccountSheet, checkVoiceTranscriptFollow, checkSavedServiceRead, checkCloudPlanRecheck,
   checkOSDefaults, checkOSProvisioning, checkOSSourceStaging,
-  runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, checkNotesCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
+  runStartupPermissionsCoordinatorRefinement, checkVaultCoordinator, listFocus, checkRecoveryUI, checkShellCoordinator, checkNativeViewSubscription, filesPreview, runPermissionChoicesRefinement, checkCanonicalNotesController, checkCanonicalNotesDraft,
   checkCanonicalNotesFeedback, checkCanonicalNotesMutation, checkCanonicalNotesView, checkCanonicalCalendarDraft, checkAgentCalendarRefresh, checkAgentCalendarMutation, checkAgentCalendarEventReturn, checkMapsEventReturn, checkMapsRerouteOwnership, checkCloudConnectionNotices, checkModalScrimOwnership, checkAgentCalendarSyncControl, checkGoogleCalendarLinkFlow, checkGoogleCalendarDisconnect, checkGoogleCalendarLinkPublication, checkGoogleCalendarAccessChoice, checkFilesBrowserController, checkFilesFilter, checkPhotosWindow, checkPhotosTrash, checkGoogleConsentAdmission, checkGoogleAccessPublication, checkBrowserDeletionPoll, checkBrowserJournalRetention, checkBrowserReminderOrphan, checkBrowserOwnerReminderRead, checkBrowserOwnerReminderAction, checkHomeFailureNotice, checkHomeGesture, checkDrawerInteraction, checkAppInfoHandoffComposition, checkLauncherOwnership, checkLauncherObserver, checkLauncherFavorites, checkAccessibleToastLifetime, checkModalToastForwarding, checkScreenFocusOwnership, checkDockClearanceOwnership, checkMountedUpdateAdmission, checkStartupUpdateAdmission, checkAutomaticAppUpdateSchedule, checkCanonicalNotificationTapAdmission, checkResidentLiveness];
 
 /** Component traces, with remaining obligations kept explicit for the aggregate report. */

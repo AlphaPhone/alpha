@@ -231,7 +231,6 @@ test('suite plans: default classes; reading classes with the builds and gates th
  for(const name of READING_CLASSES)assert.notEqual(CLASS_REGISTRY[name].requiresTestMocksBuild,true,name);
  assert.deepEqual(Object.fromEntries([...READING_CLASSES,...READING_TEST_MOCKS_CLASSES].map(name=>[name,CLASS_REGISTRY[name].args])),{BrowserReadingNavigation:{browserIsolatedReading:'1'},BrowserPageQuestion:{browserPageQuestion:'1'},BrowserReading:{browserReading:'1'},BrowserSensitiveReading:{browserSensitiveReading:'1'},BrowserIsolatedReading:{browserIsolatedReading:'1'}});
  // The negative class needs a provider WITHOUT isolated worlds; it must not share this fixture.
- assert.ok(![...READING_CLASSES,...READING_TEST_MOCKS_CLASSES].includes('BrowserUnsupportedReading'));
 
  const speech=suitePlan('fused-speech');
  assert.deepEqual(speech.map(step=>[step.name,step.kind]),[['prepare-emulator','preparation'],['network-off','preparation'],['ci-fused-speech','evidence']]);

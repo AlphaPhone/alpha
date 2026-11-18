@@ -10,7 +10,7 @@ export const noteRecordingScenarios=['pause','rollover','resume-recovered','roll
   'start-journal-failure','start-open-failure','short-stop','capture-error','stale-callback','next-started','next-journal-failure','wrong-id','corrupt-journal','missing-segment','legacy-binding','text-edit-failure'];
 export async function checkNativeNoteRecording(extraSources=[]) {
  const platform=noteRecordingPlatform(),state=mkdtempSync(join(tmpdir(),'quint-note-state-'));
- const compiled=[app+'AlphaNoteRecorder.java',directory+'/NoteRecordingPorts.java',
+ const compiled=[app+'AlphaNoteRecorder.java',app+'AlphaUtil.java',directory+'/NoteRecordingPorts.java',
   'node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/JSObject.java'];
  const sources=[...compiled,directory+'/NoteRecordingTraces.java',directory+'/note-recording-platform.mjs',directory+'/Trace.java',directory+'/java.mjs',fileURLToPath(import.meta.url),...extraSources];
  try {

@@ -1,0 +1,6 @@
+app.config.json
+apps/app/index.html
+apps/app/public/delegation-return.html
+apps/app/public/icons/lucide/LICENSE.txt
+apps/app/public/icons/lucide/source.json
+apps/app/public/icons/senders/sources.json

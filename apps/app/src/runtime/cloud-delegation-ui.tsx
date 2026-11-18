@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { registerPlugin } from '../platform-plugins';
-import { type PluginListenerHandle } from '@capacitor/core';
+import type { AlphaConnectionPlugin } from '../native/alpha-connection';
 import {
 	secureConnectionStore,
 	openConnectionBrowser,
@@ -20,16 +20,7 @@ function DelegationStatus({ message }: { message: string }) {
 		</p>
 	);
 }
-export const delegationNative = registerPlugin<{
-	addListener(
-		event: "cloudDelegationCallback",
-		callback: () => void,
-	): Promise<PluginListenerHandle>;
-	readDelegationCallback(): Promise<{
-		callback: { state: string; code?: string; error?: string } | null;
-	}>;
-	clearDelegationCallback(input: { state: string }): Promise<void>;
-}>("AlphaConnection");
+export const delegationNative = registerPlugin<Pick<AlphaConnectionPlugin, "addListener" | "readDelegationCallback" | "clearDelegationCallback">>("AlphaConnection");
 /** The secure slot shape AlphaConnectionPlugin admits for this panel (RendererCredentialSlots). */
 export const cloudDelegationSlot = /^cloud-delegation:v1:[a-f0-9]{64}$/;
 type Pending = {
@@ -68,7 +59,7 @@ export function CloudDelegationPanel({
 }) {
 	const [expanded, setExpanded] = useState(false);
     const [revocations,setRevocations]=useState<Array<{grantId:string;expiresAt:string}>>([]);
-    async function refreshRevocations(){ const result=await client.delegation("revocations",{},signal); if(valid()&&Array.isArray(result.grants)){setRevocations(result.grants.filter((g: any)=>typeof g.grantId==="string"&&typeof g.expiresAt==="string"));if(result.grants.length)setExpanded(true);} }
+    async function refreshRevocations(){ const result=await client.delegation("revocations",{},signal); if(valid()&&Array.isArray(result.grants)){setRevocations(result.grants.filter((g: {grantId?: unknown; expiresAt?: unknown})=>typeof g.grantId==="string"&&typeof g.expiresAt==="string"));if(result.grants.length)setExpanded(true);} }
 	const [pending, setPending] = useState<Pending | null>(null),
 		[busy, setBusy] = useState(false),
 		[message, setMessage] = useState(
@@ -264,6 +255,18 @@ export function CloudDelegationPanel({
 			void listener.then((l) => l?.remove());
 		};
 	}, [scope, client]);
+	/** Revokes one grant and reports the outcome; `null` when this render no longer owns the panel. */
+	async function revoke(id: string): Promise<boolean | null> {
+		const result = await client.delegation(
+			"revoke",
+			{ grantId: id, confirmed: true },
+			signal,
+		);
+		if (!valid()) return null;
+		const confirmed = result.remoteRevocation === "confirmed";
+		setMessage(confirmed ? "Revoked" : "Off · retry");
+		return confirmed;
+	}
 	async function start() {
 		await run(async () => {
 			const result = await client.delegation(
@@ -376,24 +379,15 @@ export function CloudDelegationPanel({
 					</button>
 				</>
 			)}
-            {revocations.filter(g=>g.grantId!==grantId).map(g=><div key={g.grantId} style={{display:"flex",alignItems:"center",gap:8}}><p style={{flex:1}}><span aria-hidden="true" style={{display:"inline-block",width:8,height:8,borderRadius:"50%",marginRight:6,verticalAlign:"middle",background:"#b26a00"}}/>Disconnect pending</p><button aria-label="Retry Cloud disconnect" disabled={busy} onClick={()=>void run(async()=>{const result=await client.delegation("revoke",{grantId:g.grantId,confirmed:true},signal);if(!valid())return;setMessage(result.remoteRevocation==="confirmed"?"Revoked":"Off · retry");await refreshRevocations().catch(()=>{/* The revoke outcome above stands; the list is read again on the next open. */});})}><span aria-hidden="true" style={iconStyle("rotate-cw")}/></button></div>)}
+            {revocations.filter(g=>g.grantId!==grantId).map(g=><div key={g.grantId} style={{display:"flex",alignItems:"center",gap:8}}><p style={{flex:1}}><span aria-hidden="true" style={{display:"inline-block",width:8,height:8,borderRadius:"50%",marginRight:6,verticalAlign:"middle",background:"#b26a00"}}/>Disconnect pending</p><button aria-label="Retry Cloud disconnect" disabled={busy} onClick={()=>void run(async()=>{if(await revoke(g.grantId)===null)return;await refreshRevocations().catch(()=>{/* The revoke outcome above stands; the list is read again on the next open. */});})}><span aria-hidden="true" style={iconStyle("rotate-cw")}/></button></div>)}
 			{grantId && (
 				<button
 					disabled={busy}
 					onClick={() =>
 						void run(async () => {
-							const result = await client.delegation(
-								"revoke",
-								{ grantId, confirmed: true },
-								signal,
-							);
-							if (!valid()) return;
-							setMessage(
-								result.remoteRevocation === "confirmed"
-									? "Revoked"
-									: "Off · retry",
-							);
-							if (result.remoteRevocation === "confirmed") setGrantId("");
+							const confirmed = await revoke(grantId);
+							if (confirmed === null) return;
+							if (confirmed) setGrantId("");
 							// The revoke outcome above stands when the list cannot be read again.
 							await refreshRevocations().catch(() => {});
 							if (valid()) onConnected();

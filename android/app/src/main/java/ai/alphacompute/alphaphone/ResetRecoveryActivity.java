@@ -5,7 +5,7 @@ import ai.eliza.plugins.system.reset.DataResetCopy;
 import ai.eliza.plugins.system.reset.DataResetRecoveryActivity;
 
 /**
- * Alpha's installed recovery component for a confirmed reset that could not finish (issue #409).
+ * Alpha's installed recovery component for a confirmed reset that could not finish.
  * The manifest keeps it unexported in its own {@link #PROCESS_SUFFIX} process, which installs none
  * of Alpha's content providers and starts no agent, renderer, listener or notification code. The
  * surface (never a completion claim, fresh retry, listener settings, Phone, Android Settings) is

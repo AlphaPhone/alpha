@@ -18,7 +18,6 @@ import static org.junit.Assert.*;
 
 /** Opt-in service-only resident test. No Activity, WebView, UI acceptance, or ordinary background-start claim.  */
 public final class ResidentWorkflowCrashInstrumentedTest {
- private static String readUtf8(java.nio.file.Path path)throws IOException{return new String(Files.readAllBytes(path),StandardCharsets.UTF_8);}
  private Context context;
  private JSONObject fixture;
  private JSONObject readinessTimeoutDiagnostic;
@@ -145,7 +144,6 @@ public final class ResidentWorkflowCrashInstrumentedTest {
  }
 
  private JSONObject ownedChild()throws Exception {return ResidentTestFixture.ownedChild(context,fixture.getString("processExecutableSha256"));}
- private void stopped(JSONObject child)throws Exception {ResidentTestFixture.stopped(context,child);}
  private JSONObject owner()throws Exception {return ResidentTestFixture.owner(request("/api/auth/me",null),ownerBearer);}
  private JSONObject agent()throws Exception {return ResidentTestFixture.agent(request("/api/agents",null));}
  private static final class HeldModel implements AutoCloseable {
@@ -154,7 +152,6 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   final java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
   final boolean trustedResponse;volatile String requestRunId;volatile boolean expectRequest,closed;volatile Throwable failure;volatile java.net.Socket active;
   final Thread thread;
-  HeldModel()throws Exception {this(false);}
   HeldModel(boolean trusted)throws Exception {trustedResponse=trusted;server.setSoTimeout(1000);thread=new Thread(()->{try{while(!closed){
    java.net.Socket accepted;try{accepted=server.accept();}catch(java.net.SocketTimeoutException wait){continue;}
    try(java.net.Socket socket=accepted){active=socket;socket.setSoTimeout(10000);ByteArrayOutputStream header=new ByteArrayOutputStream();int next,tail=0;
@@ -172,12 +169,11 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   public void close()throws Exception{closed=true;release.countDown();server.close();if(active!=null)active.close();thread.join(5000);assertFalse("Loopback worker stopped",thread.isAlive());}
  }
  private File control;
- private void write(File file,String value)throws Exception {try(FileOutputStream out=new FileOutputStream(file)){out.write(value.getBytes(StandardCharsets.UTF_8));out.getFD().sync();}Os.chmod(file.getPath(),0600);}
  private void untilFile(File file,long ms)throws Exception {long end=SystemClock.elapsedRealtime()+ms;while(!file.isFile()&&SystemClock.elapsedRealtime()<end)SystemClock.sleep(100);assertTrue("Fixture witness deadline",file.isFile());}
  private String source() {return "/** @jsxImportSource smthrs */\nimport {createSmithers} from 'smthrs/create';\nimport {z} from 'zod';\nconst {Workflow,Task,smithers,outputs}=createSmithers({output:z.object({value:z.number()})},{dbPath:process.env.ELIZA_SMTHRS_DB_PATH});\nexport default smithers(()=><Workflow name=\"pending-rpc\"><Task id=\"effect\" output={outputs.output} agent={globalThis.__elizaSmithers.agent} retries={0}>synthetic-resident-recovery-only return value one</Task></Workflow>);\n";}
  // Only fixed-schema diagnostic values cross into retained CI evidence. Never retain prompts,
  // model bodies, credential-bearing errors, stacks, event payloads or arbitrary owner paths.
- static JSONObject safeExecutionDiagnostic(JSONObject value,String executionId,String workflowId,String version)throws Exception {
+ private static JSONObject safeExecutionDiagnostic(JSONObject value,String executionId,String workflowId,String version)throws Exception {
   JSONObject safe=new JSONObject().put("executionMatches",executionId.equals(value.optString("id")))
    .put("workflowMatches",workflowId.equals(value.optString("workflowId")))
    .put("versionMatches",version.equals(value.optString("workflowVersionId")));
@@ -272,40 +268,45 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   JSONObject record=null;WorkflowSurvivorInventory.Identity worker=null;String expectedHash=null;
   File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so"),loader=new File(context.getApplicationInfo().nativeLibraryDir,Build.SUPPORTED_ABIS[0].equals("arm64-v8a")?"libeliza_ld_musl_aarch64_real.so":"libeliza_ld_musl_x86_64_real.so");
   try {
-   record=new JSONObject(readUtf8(journal.toPath()));worker=WorkflowSurvivorInventory.processIdentity(record.getInt("pid"));expectedHash=fileHash(loader);
+   record=new JSONObject(readUtf8(journal));worker=WorkflowSurvivorInventory.processIdentity(record.getInt("pid"));expectedHash=fileHash(loader);
    WorkflowSurvivorInventory.verify(journal,record,worker,context.getFilesDir().getCanonicalFile(),bun.getCanonicalPath(),loader.getCanonicalPath(),expectedHash,SystemClock.elapsedRealtime()+5000);return worker;
   }catch(Exception failure){
-   try{write(new File(context.getFilesDir(),"resident-recovery-identity.json"),workerDiagnostic(record,worker,bun,loader,expectedHash).toString());}catch(Exception diagnosticFailure){failure.addSuppressed(diagnosticFailure);}throw failure;
+   try{writePrivate(new File(context.getFilesDir(),"resident-recovery-identity.json"),workerDiagnostic(record,worker,bun,loader,expectedHash).toString());}catch(Exception diagnosticFailure){failure.addSuppressed(diagnosticFailure);}throw failure;
   }
  }
  private void exactAlive(WorkflowSurvivorInventory.Identity worker)throws Exception {assertEquals(worker.key(),WorkflowSurvivorInventory.processIdentity(worker.pid).key());}
  private void crash(JSONObject resident)throws Exception {
   int pid=resident.getInt("pid");assertTrue(pid!=Process.myPid());assertEquals(Process.myUid(),Os.stat("/proc/"+pid).st_uid);assertEquals(resident.getString("start"),processStart(pid));assertEquals(fixture.getString("processExecutableSha256"),fileHash(new File("/proc/"+pid+"/exe")));
-  assertEquals(resident.getString("start"),processStart(pid));assertEquals(Process.myUid(),Os.stat("/proc/"+pid).st_uid);String bundle=new File(context.getFilesDir(),"agent/agent-bundle.js").getCanonicalPath();assertTrue(Arrays.asList(new String(Files.readAllBytes(new File("/proc/"+pid+"/cmdline").toPath()),StandardCharsets.UTF_8).split(String.valueOf((char)0))).contains(bundle));
+  String bundle=new File(context.getFilesDir(),"agent/agent-bundle.js").getCanonicalPath();assertTrue(Arrays.asList(new String(Files.readAllBytes(new File("/proc/"+pid+"/cmdline").toPath()),StandardCharsets.UTF_8).split(String.valueOf((char)0))).contains(bundle));
   Os.kill(pid,android.system.OsConstants.SIGKILL);
   long end=SystemClock.elapsedRealtime()+10000;while(SystemClock.elapsedRealtime()<end){if(!new File("/proc/"+pid).exists())return;try{if(!resident.getString("start").equals(processStart(pid)))return;}catch(IOException gone){return;}SystemClock.sleep(100);}throw new AssertionError("Owned resident did not die");
  }
- @Test public void lostParentModelRpcRemainsUnknownWithoutReplay()throws Throwable {
-  Assume.assumeTrue("Explicit resident crash fixture", "1".equals(InstrumentationRegistry.getArguments().getString("residentCrash")));
+ /** Admits only the disposable-user debug fixture whose staged inputs match the supervisor's pins; returns the run id. */
+ private String admit(String label)throws Exception {
+  Assume.assumeTrue(label, "1".equals(InstrumentationRegistry.getArguments().getString("residentCrash")));
   assertTrue(BuildConfig.DEBUG);assertTrue(Process.myUid()/100000>0);assertTrue(Arrays.asList("arm64-v8a","x86_64").contains(Build.SUPPORTED_ABIS[0]));
   context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue(context.getSystemService(android.os.UserManager.class).isUserUnlocked());
   String run=InstrumentationRegistry.getArguments().getString("residentRunId","");assertTrue(run.matches("[0-9a-f-]{36}"));
   File input=new File(context.getFilesDir(),"resident-recovery-input.json");assertEquals(Process.myUid(),Os.stat(input.getPath()).st_uid);assertEquals(0,Os.stat(input.getPath()).st_mode&0077);try(InputStream in=new FileInputStream(input)){fixture=new JSONObject(new String(bounded(in,16384),StandardCharsets.UTF_8));}assertEquals(run,fixture.getString("runId"));assertEquals(Build.SUPPORTED_ABIS[0],fixture.getString("abi"));assertTrue(input.delete());
   File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so");assertEquals(fixture.getString("bunSha256"),fileHash(bun));try(InputStream in=context.getAssets().open("agent/agent-bundle.js")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}try(InputStream in=context.getAssets().open("agent/alpha-source.json")){assertEquals(fixture.getString("sourceSha256"),boundedHash(in,8L*1024*1024));}
   assertNull(new AlphaCredentialStore(context).readCredentialSlot("local-agent-provider:v1"));assertFalse(ElizaAgentService.getLocalAgentBootState(context).optBoolean("socketListening"));
+  return run;
+ }
+ @Test public void lostParentModelRpcRemainsUnknownWithoutReplay()throws Throwable {
+  String run=admit("Explicit resident crash fixture");
   control=null;
   JSONObject proof=new JSONObject().put("passed",false).put("runId",run).put("case","lost-rpc");Throwable failure=null;JSONObject resident=null;WorkflowSurvivorInventory.Identity worker=null;boolean submitted=false;
   java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationRecoveryEndpoint");hook.setAccessible(true);assertNull(hook.get(null));
-  try(HeldModel model=new HeldModel()) {
+  try(HeldModel model=new HeldModel(false)) {
    hook.set(null,model.server);
    try {
     new AlphaCredentialStore(context).writeCredentialSlot("local-agent-provider:v1",new JSONObject().put("key","synthetic-resident-recovery-only").put("model","qwen-3.8-27b").toString());
     startAndEnroll();resident=ownedChild();String ownerId=owner().getJSONObject("identity").getString("id"),agentId=agent().getString("id");
     String module=source(),digest=hash(module.getBytes(StandardCharsets.UTF_8));JSONObject workflow=request("/api/workflow/workflows",new JSONObject().put("name","Synthetic crash "+run).put("source",module).put("language","tsx").put("steps",new JSONArray()).put("widgets",new JSONArray()).put("activate",true));
     String workflowId=workflow.getString("id"),version=workflow.getString("versionId"),submission=UUID.randomUUID().toString();model.expectRequest=true;
-    assertTrue(agentId.matches("[a-zA-Z0-9_.-]+")&&workflowId.matches("[a-zA-Z0-9_.-]+"));control=new File(context.getFilesDir(),".eliza/smthrs/"+agentId+"/"+workflowId);assertEquals(control.getPath(),control.getCanonicalPath());if(!control.isDirectory())assertTrue(control.mkdirs());Os.chmod(control.getPath(),0700);assertFalse(new File(control,"recovery-effect").exists());write(new File(control,"recovery-effect"),"0");
+    assertTrue(agentId.matches("[a-zA-Z0-9_.-]+")&&workflowId.matches("[a-zA-Z0-9_.-]+"));control=new File(context.getFilesDir(),".eliza/smthrs/"+agentId+"/"+workflowId);assertEquals(control.getPath(),control.getCanonicalPath());if(!control.isDirectory())assertTrue(control.mkdirs());Os.chmod(control.getPath(),0700);assertFalse(new File(control,"recovery-effect").exists());writePrivate(new File(control,"recovery-effect"),"0");
     submitted=true;JSONObject accepted=request("/api/workflow/workflows/"+workflowId+"/run",new JSONObject().put("submissionId",submission).put("expectedVersionId",version).put("input",new JSONObject())).getJSONObject("execution");String executionId=accepted.getString("id");
-    if(!model.received.await(60,java.util.concurrent.TimeUnit.SECONDS)){AssertionError timeout=new AssertionError("Synthetic model request deadline; inspect sanitized execution snapshot");captureMissingModelRequest(proof,model,executionId,workflowId,version,timeout);throw timeout;}assertNull(model.failure);assertEquals(1,model.calls.get());File journal=findOwner(new File(context.getFilesDir(),".eliza/smthrs"),executionId);assertNotNull("Real owner journal",journal);worker=witness(journal);JSONObject ownerRecord=new JSONObject(readUtf8(journal.toPath()));assertEquals(digest,ownerRecord.getString("sourceSha256"));assertEquals(version,ownerRecord.getString("versionId"));assertEquals(executionId,ownerRecord.getString("runId"));
+    if(!model.received.await(60,java.util.concurrent.TimeUnit.SECONDS)){AssertionError timeout=new AssertionError("Synthetic model request deadline; inspect sanitized execution snapshot");captureMissingModelRequest(proof,model,executionId,workflowId,version,timeout);throw timeout;}assertNull(model.failure);assertEquals(1,model.calls.get());File journal=findOwner(new File(context.getFilesDir(),".eliza/smthrs"),executionId);assertNotNull("Real owner journal",journal);worker=witness(journal);JSONObject ownerRecord=new JSONObject(readUtf8(journal));assertEquals(digest,ownerRecord.getString("sourceSha256"));assertEquals(version,ownerRecord.getString("versionId"));assertEquals(executionId,ownerRecord.getString("runId"));
     assertTrue(model.received.await(30,java.util.concurrent.TimeUnit.SECONDS));assertNull(model.failure);assertEquals(1,model.calls.get());
     long oldIpc=Os.lstat(new File(context.getFilesDir(),"ipc").getPath()).st_ino;JSONObject oldResident=resident;assertNotEquals(worker.pid,resident.getInt("pid"));crash(resident);resident=null;
     model.release.countDown();
@@ -319,25 +320,20 @@ public final class ResidentWorkflowCrashInstrumentedTest {
     // Wait for worker exit before any service stop; never stop a legitimate survivor.
     long workerDeadline=SystemClock.elapsedRealtime()+15000;while(new File("/proc/"+worker.pid).exists()&&SystemClock.elapsedRealtime()<workerDeadline){if(!worker.start.equals(processStart(worker.pid)))break;SystemClock.sleep(100);}if(new File("/proc/"+worker.pid).exists())assertNotEquals("Original worker must settle before stop",worker.start,processStart(worker.pid));
     // Second native restart proves durable projection instead of a first-process in-memory result.
-    ElizaAgentService.stop(context);stopped(resident);resident=null;startAndEnroll();resident=ownedChild();JSONObject persisted=execution(executionId);
+    ElizaAgentService.stop(context);stopped(context,resident);resident=null;startAndEnroll();resident=ownedChild();JSONObject persisted=execution(executionId);
     assertEquals("outcome-unknown",persisted.getJSONObject("reconciliation").getString("state"));assertEquals(1,model.calls.get());
     proof.put("firstProcess",oldResident).put("secondProcess",resident).put("oldIpcPreserved",retained).put("workflowId",workflowId).put("workflowVersionId",version).put("executionId",executionId).put("sourceSha256",digest).put("workerPid",worker.pid).put("workerStartTicks",worker.start).put("effectCount",JSONObject.NULL).put("modelRequests",model.calls.get()).put("passed",true);
    } catch(Throwable error){failure=error;}
    finally {
-    try {model.release.countDown();if(submitted&&worker==null)throw new IOException("Submitted worker identity unobserved; preserve for disposable-user teardown");boolean workerGone=worker==null;long end=SystemClock.elapsedRealtime()+20000;while(!workerGone&&SystemClock.elapsedRealtime()<end){try{workerGone=!worker.key().equals(WorkflowSurvivorInventory.processIdentity(worker.pid).key());}catch(Exception gone){workerGone=!new File("/proc/"+worker.pid).exists();}if(!workerGone)SystemClock.sleep(100);}if(!workerGone)throw new IOException("Owned worker remains alive; preserve for disposable-user teardown");ElizaAgentService.stop(context);stopped(resident);proof.put("cleanupComplete",true);}
+    try {model.release.countDown();if(submitted&&worker==null)throw new IOException("Submitted worker identity unobserved; preserve for disposable-user teardown");boolean workerGone=worker==null;long end=SystemClock.elapsedRealtime()+20000;while(!workerGone&&SystemClock.elapsedRealtime()<end){try{workerGone=!worker.key().equals(WorkflowSurvivorInventory.processIdentity(worker.pid).key());}catch(Exception gone){workerGone=!new File("/proc/"+worker.pid).exists();}if(!workerGone)SystemClock.sleep(100);}if(!workerGone)throw new IOException("Owned worker remains alive; preserve for disposable-user teardown");ElizaAgentService.stop(context);stopped(context,resident);proof.put("cleanupComplete",true);}
     catch(Throwable cleanup){if(failure==null)failure=cleanup;else failure.addSuppressed(cleanup);proof.put("cleanupFailed",true);}
     finally {hook.set(null,null);ownerBearer=null;ownerIdentityId=null;}
    }
   } catch(Throwable outer){if(failure==null)failure=outer;else failure.addSuppressed(outer);}
-  proof.put("passed",failure==null&&proof.optBoolean("passed"));try{if(readinessTimeoutDiagnostic!=null)proof.put("readinessTimeoutDiagnostic",readinessTimeoutDiagnostic);if(apiFailureDiagnostic!=null)proof.put("apiFailureDiagnostic",apiFailureDiagnostic);write(new File(context.getFilesDir(),"resident-recovery-complete.json"),proof.toString());}catch(Throwable outputFailure){if(failure==null)failure=outputFailure;else failure.addSuppressed(outputFailure);}if(failure!=null)throw failure;
+  proof.put("passed",failure==null&&proof.optBoolean("passed"));try{if(readinessTimeoutDiagnostic!=null)proof.put("readinessTimeoutDiagnostic",readinessTimeoutDiagnostic);if(apiFailureDiagnostic!=null)proof.put("apiFailureDiagnostic",apiFailureDiagnostic);writePrivate(new File(context.getFilesDir(),"resident-recovery-complete.json"),proof.toString());}catch(Throwable outputFailure){if(failure==null)failure=outputFailure;else failure.addSuppressed(outputFailure);}if(failure!=null)throw failure;
  }
  @Test public void trustedPackagedWorkerSurvivesResidentRestart()throws Throwable {
-  Assume.assumeTrue("Explicit trusted worker fixture", "1".equals(InstrumentationRegistry.getArguments().getString("residentCrash")));
-  assertTrue(BuildConfig.DEBUG);assertTrue(Process.myUid()/100000>0);assertTrue(Arrays.asList("arm64-v8a","x86_64").contains(Build.SUPPORTED_ABIS[0]));
-  context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue(context.getSystemService(android.os.UserManager.class).isUserUnlocked());
-  String run=InstrumentationRegistry.getArguments().getString("residentRunId","");assertTrue(run.matches("[0-9a-f-]{36}"));File input=new File(context.getFilesDir(),"resident-recovery-input.json");assertEquals(Process.myUid(),Os.stat(input.getPath()).st_uid);assertEquals(0,Os.stat(input.getPath()).st_mode&0077);try(InputStream in=new FileInputStream(input)){fixture=new JSONObject(new String(bounded(in,16384),StandardCharsets.UTF_8));}assertEquals(run,fixture.getString("runId"));assertEquals(Build.SUPPORTED_ABIS[0],fixture.getString("abi"));assertTrue(input.delete());
-  File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so");assertEquals(fixture.getString("bunSha256"),fileHash(bun));try(InputStream in=context.getAssets().open("agent/agent-bundle.js")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}try(InputStream in=context.getAssets().open("agent/alpha-source.json")){assertEquals(fixture.getString("sourceSha256"),boundedHash(in,8L*1024*1024));}
-  assertNull(new AlphaCredentialStore(context).readCredentialSlot("local-agent-provider:v1"));assertFalse(ElizaAgentService.getLocalAgentBootState(context).optBoolean("socketListening"));
+  String run=admit("Explicit trusted worker fixture");
   JSONObject proof=new JSONObject().put("passed",false).put("runId",run).put("case","trusted-survivor").put("scope","instrumentation-created worker; no resident-created ancestry or authored parent-RPC survival claim");Throwable failure=null;JSONObject resident=null,replacement=null;TrustedPackagedWorker trusted=null;
   java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationRecoveryEndpoint");hook.setAccessible(true);assertNull(hook.get(null));
   try(HeldModel model=new HeldModel(true)){
@@ -352,16 +348,16 @@ public final class ResidentWorkflowCrashInstrumentedTest {
     long oldIpc=Os.lstat(new File(context.getFilesDir(),"ipc").getPath()).st_ino;JSONObject original=resident;crash(resident);resident=null;exactAlive(worker);startAndEnroll();resident=ownedChild();replacement=resident;assertEquals(ownerId,owner().getJSONObject("identity").getString("id"));assertEquals(agentId,agent().getString("id"));assertNotEquals(original.getInt("pid"),resident.getInt("pid"));assertEquals(worker.key(),witness(trusted.journal).key());assertNotEquals(oldIpc,Os.lstat(new File(context.getFilesDir(),"ipc").getPath()).st_ino);
     boolean retained=false;File[] generations=context.getFilesDir().listFiles(f->f.getName().startsWith("ipc-recovery-"));assertNotNull(generations);for(File generation:generations)if(Os.lstat(generation.getPath()).st_ino==oldIpc)retained=true;assertTrue(retained);assertEquals(1,model.calls.get());
     // Explicit service stop must preserve the same live shared-runtime worker too.
-    ElizaAgentService.stop(context);stopped(resident);resident=null;exactAlive(worker);
+    ElizaAgentService.stop(context);stopped(context,resident);resident=null;exactAlive(worker);
     startAndEnroll();resident=ownedChild();assertEquals(worker.key(),witness(trusted.journal).key());
     assertEquals(ownerId,owner().getJSONObject("identity").getString("id"));assertEquals(agentId,agent().getString("id"));
     proof.put("explicitStopPreservedWorker",true);
     model.release.countDown();JSONObject result=trusted.finish();assertNull(model.failure);assertEquals(1,model.calls.get());String output=result.getJSONArray("output").toString();trusted.close();
-    ElizaAgentService.stop(context);stopped(resident);resident=null;startAndEnroll();resident=ownedChild();JSONObject replay=trusted.replay();assertEquals(output,replay.getJSONArray("output").toString());assertEquals(0,replay.getInt("calls"));assertEquals(1,model.calls.get());assertNull(model.failure);
+    ElizaAgentService.stop(context);stopped(context,resident);resident=null;startAndEnroll();resident=ownedChild();JSONObject replay=trusted.replay();assertEquals(output,replay.getJSONArray("output").toString());assertEquals(0,replay.getInt("calls"));assertEquals(1,model.calls.get());assertNull(model.failure);
     proof.put("firstProcess",original).put("secondProcess",replacement).put("finalProcess",resident).put("oldIpcPreserved",retained).put("workflowVersionId","trusted-v1").put("executionId",trusted.runId).put("sourceSha256",hash(module.getBytes(StandardCharsets.UTF_8))).put("workerPid",worker.pid).put("workerStartTicks",worker.start).put("modelRequests",1).put("canonicalOutput",result.getJSONArray("output")).put("workerIndexSha256",fixture.getString("workerIndexSha256")).put("workerManifestSha256",fixture.getString("workerManifestSha256")).put("compilerManifestSha256",fixture.getString("compilerManifestSha256")).put("freshCanonicalReplay",true).put("passed",true);
    }catch(Throwable error){failure=error;}
-   finally{try{model.release.countDown();if(trusted!=null){if(trusted.process.isAlive())trusted.finish();trusted.close();}ElizaAgentService.stop(context);stopped(resident);proof.put("cleanupComplete",true);}catch(Throwable cleanup){if(failure==null)failure=cleanup;else failure.addSuppressed(cleanup);proof.put("cleanupFailed",true);}finally{hook.set(null,null);ownerBearer=null;ownerIdentityId=null;}}
+   finally{try{model.release.countDown();if(trusted!=null){if(trusted.process.isAlive())trusted.finish();trusted.close();}ElizaAgentService.stop(context);stopped(context,resident);proof.put("cleanupComplete",true);}catch(Throwable cleanup){if(failure==null)failure=cleanup;else failure.addSuppressed(cleanup);proof.put("cleanupFailed",true);}finally{hook.set(null,null);ownerBearer=null;ownerIdentityId=null;}}
   }catch(Throwable outer){if(failure==null)failure=outer;else failure.addSuppressed(outer);}
-  proof.put("passed",failure==null&&proof.optBoolean("passed"));try{if(readinessTimeoutDiagnostic!=null)proof.put("readinessTimeoutDiagnostic",readinessTimeoutDiagnostic);if(apiFailureDiagnostic!=null)proof.put("apiFailureDiagnostic",apiFailureDiagnostic);write(new File(context.getFilesDir(),"resident-recovery-complete.json"),proof.toString());}catch(Throwable outputFailure){if(failure==null)failure=outputFailure;else failure.addSuppressed(outputFailure);}if(failure!=null)throw failure;
+  proof.put("passed",failure==null&&proof.optBoolean("passed"));try{if(readinessTimeoutDiagnostic!=null)proof.put("readinessTimeoutDiagnostic",readinessTimeoutDiagnostic);if(apiFailureDiagnostic!=null)proof.put("apiFailureDiagnostic",apiFailureDiagnostic);writePrivate(new File(context.getFilesDir(),"resident-recovery-complete.json"),proof.toString());}catch(Throwable outputFailure){if(failure==null)failure=outputFailure;else failure.addSuppressed(outputFailure);}if(failure!=null)throw failure;
  }
 }

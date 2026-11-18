@@ -1,19 +1,15 @@
 import {Capacitor} from '@capacitor/core';
-import {mockAttentionRows} from './mock-attention';
-import {HOME_DEFAULTS} from './model.js';
+import {HOME_DEFAULTS, mockAttentionRows} from './model.js';
 import {browserStorageUsage} from '../browser/storage-usage';
 import {browserDevProfile} from '../browser/dev-profile';
-import {formatFullDate} from './locale-time';
+import {APPEARANCE_KEY} from './settings-adapter';
 import {createHomeAgenda, createStorageAccessCheck, homeCalendarEmptyTitle, homeCalendarName, homeCalendarValues, homeReadIsStale, presentHomeAgendaCard, presentHomeAttention, presentHomeBrief, presentHomeBriefCard, presentHomeCalendarSource, type HomeAgendaCardInput, type HomeAttentionSummary, type HomeBriefSummary} from './home-cards';
 type Bag = Record<string, any>;
-const installed = new WeakSet<object>();
 
 /** Production-only absence of provider data. Never install in visual fixtures.
  * Install after effect adapters, before mounting. Does not create user records,
  * clear native app data, or pretend disconnected sources are synchronized. */
 export function installPrototypeDataAdapter(Component: any, views: Record<string, Bag>) {
-  if (installed.has(views)) return;
-  installed.add(views);
   // Home draws no card for a failed calendar read, so opening Calendar by any route reads it again.
   const openView = Component.prototype.openView;
   Component.prototype.openView = function (key: string, ...args: any[]) {
@@ -27,7 +23,6 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
     messages: { threads: {}, unread: {}, extra: [], botI: {}, thread: null, compose: null, typing: null },
     inbox: { mails: [], sent: [], acct: 'all', open: null, compose: null },
     workflows: { flows: [], open: null, run: null, build: null, create: false, running: null },
-    wallet: { cards: [], open: null, pay: false, card: null, paid: null, add: null, transit: 0, trips: [], calAdded: {}, pays: 0 },
     settings: { accounts: [], conns: {}, acct: null, adding: false, addStep: null, addProv: null, addEmail: '', addPw: '', addServer: '', addLvl: null },
   };
   for (const [name, state] of Object.entries(empty)) {
@@ -62,11 +57,6 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
   wrap('phone', out => ({ ...out, favs: [], hasFavs: false }));
   wrap('messages', out => ({ ...out, ...(out.empty ? { emptyText: 'Not connected' } : {}) }));
   wrap('inbox', out => ({ ...out, emptyText: 'Not connected' }));
-  wrap('wallet', (out, _state, api) => ({
-    ...out, passes: [], ps: null, isPass: false,
-    startAdd: () => api.toast('Not connected'),
-    startPay: () => api.toast('Not connected'),
-  }));
   const p = Component.prototype;
   const renderVals = p.renderVals;
   p.renderVals = function () {
@@ -81,7 +71,7 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
     const now = Date.now();
     const calendarSource = views.calendar.displaySources?.();
     const calendarState = this.vget('calendar');
-    const overdueRows: Bag[] = (typeof this.overdueReminders === 'function' ? (() => { try { return this.overdueReminders(); } catch { return []; } })() : [])
+    const overdueRows: Bag[] = (() => { try { return this.overdueReminders(); } catch { return []; } })()
       .filter((row: Bag) => row && typeof row.title === 'string' && Number.isFinite(row.at) && Number(row.at) < now);
     // The app calendar can be hidden in Calendar's display settings; Calendar then leaves its events
     // out, and so does Home. Device calendars have no in-app toggle. Reminders are not affected.
@@ -155,7 +145,7 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
       // A stale read is read again when the card is opened (the same forced read Calendar's retry uses).
       // Opening a view resets its state, so the card names the calendar source it showed: Calendar
       // opens on that source (a device scope chosen there, or the default) with the item selected.
-      goCalendar: () => { if (calendarSource?.error) calendarSource.retry?.(); else if (stale) void this.refreshAgentCalendar?.();
+      goCalendar: () => { if (calendarSource?.error) calendarSource.retry?.(); else if (stale) void this.refreshAgentCalendar();
         const authority = this.vget('calendar').calendarAuthority, patch = {...(authority ? {calendarAuthority: authority} : {}), ...(agenda ? {open:agenda.event.id, day:agenda.event.off, openDay:agenda.event.off} : {})};
         this.openView('calendar', Object.keys(patch).length ? patch : undefined); },
       homeBriefHas: briefCard.has, homeBriefTitle: briefCard.title, homeBriefStatus: briefCard.status, homeBriefLabel: briefCard.label.replace(/^Open scheduled digests\./, 'Open Workflows.'), homeBriefFailed: briefCard.failed,
@@ -180,7 +170,7 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
 let calendarReadRows: unknown, calendarReadAt: number | null = null;
 const NO_EVENTS: Bag[] = [], homeAgenda = createHomeAgenda();
 // Whether saving works in this browser; the synchronous storage read is not repeated on every render.
-const storageAccessible = createStorageAccessCheck(() => { if (!window.indexedDB) throw Error(); window.localStorage.getItem('alpha.appearance.v1'); });
+const storageAccessible = createStorageAccessCheck(() => { if (!window.indexedDB) throw Error(); window.localStorage.getItem(APPEARANCE_KEY); });
 let reminderReadRows: unknown, reminderReadAt: number | null = null;
 
 export const HOME_SOURCES_CHANGED = 'alpha:home-sources-changed';
@@ -210,7 +200,7 @@ export function installHomeCardVisibility(Component: any, openGoogle: () => void
 /** Neutral Home card values used when no fixture defaults are bundled. */
 const NEUTRAL_HOME = {
   homeCalendarLabel: 'Open your calendar', homeCalendarTime: 'Calendar', homeCalendarTitle: 'Loading events…',homeCalendarHasEvent:false,homeCalendarHasMeta:false,homeCalendarFooter:'',
-  homeCalendarSource: '', homeCalendarOrigin: '', homeCalendarDescription: '', homeCalendarOverdue: false, homeCalendarStale: false, homeCalendarNext: '', homeCalendarNextSource: '', homeCalendarHasNext: false, homeCalendarVideo: false, homeCalendarPeople: [] as Bag[],
+  homeCalendarSource: '', homeCalendarOrigin: '', homeCalendarDescription: '', homeCalendarOverdue: false, homeCalendarStale: false, homeCalendarNext: '', homeCalendarNextSource: '', homeCalendarHasNext: false, homeCalendarVideo: false,
   homeWorkflowFreshness: '', homeWorkflowDescription: '',
   homeBriefHas: false, homeBriefTitle: '', homeBriefStatus: '', homeBriefLabel: '', homeBriefFailed: false, homeInboxDescription: '',
   homeWorkflowLabel: 'Open workflows', homeWorkflowTitle: 'Open to view', homeWorkflowTime: 'Workflows', homeWorkflowSource: '',

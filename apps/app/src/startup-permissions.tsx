@@ -3,27 +3,30 @@ import React, {useEffect, useLayoutEffect, useRef, useState, useSyncExternalStor
 import {registerPlugin} from './platform-plugins';
 import {connectionController} from './runtime/connection-ui';
 import {googleConnectionController} from './runtime/google-connection-ui';
-import {startupPhotoAccess,startupLocationAccess,startupFilesAccess,lateReadyNotice,STARTUP_PERMISSIONS_REOPEN} from './startup-permission-flow';
 import {iconStyle} from './icon-style';
 import {Busy,StatusDot} from './runtime/status-ui';
 import {browserStartupPermission} from './startup-browser-permissions';
-import {createStartupPermissionFlow, startupPermissionKeys, nativeStartupPermissionKeys, type NativeStartupPermissionKey as PermissionKey, type StartupPermissionState} from './startup-permission-flow';
-import {readStartupPermissionProgress, writeStartupPermissionProgress, startupPermissionProgressKey} from './startup-permission-progress';
-import {showWalkthroughCompletion} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+import {createStartupPermissionFlow, startupFilesAccess, lateReadyNotice, STARTUP_PERMISSIONS_REOPEN, startupPermissionKeys, nativeStartupPermissionKeys, type NativeStartupPermissionKey as PermissionKey, type StartupPermissionState} from './startup-permission-flow';
+import {readStartupPermissionProgress, writeStartupPermissionProgress} from './startup-permission-progress';
+import {locationAccess, permissionStateAccess, photoLibraryAccess, showWalkthroughCompletion} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+import type {LocationBridge} from '../../../.eliza/client-features/plugins/plugin-maps/src/client/native-location.ts';
+import type {AlphaCalendarPlugin} from './native/alpha-calendar';
+import type {AlphaDevicePlugin} from './native/alpha-device';
+import type {AlphaFilesPlugin} from './native/alpha-files';
+import type {AlphaNotificationsPlugin} from './native/alpha-notifications';
+import type {AlphaPhotoLibraryPlugin} from './native/alpha-photo-library';
+import type {AlphaVoiceCloudPlugin} from './native/alpha-voice-cloud';
+import type {DailyAppsPlugin} from './native/daily-apps';
 import './startup-permissions.css';
 
-const notifications = registerPlugin<{status(): Promise<{permissionGranted: boolean; appEnabled: boolean}>}>('AlphaNotifications');
-const permissions = registerPlugin<{
-  checkPermissions(): Promise<{camera: string}>;
-  requestPermissions(options: {permissions: ['notifications'] | ['camera']}): Promise<unknown>;
-  addListener(event: 'appResumed', callback: () => void): Promise<PluginListenerHandle>;
-}>('DailyApps');
-const microphone = registerPlugin<{checkPermissions(): Promise<{microphone: string}>; requestPermissions(options: {permissions: ['microphone']}): Promise<unknown>}>('AlphaVoiceCloud');
-const location = registerPlugin<{checkPermissions(): Promise<{location: string}>; requestPermissions(): Promise<unknown>}>('ElizaLocation');
-const photos = registerPlugin<{scope():Promise<unknown>;requestAccess():Promise<unknown>}>('AlphaPhotoLibrary');
-const calendar = registerPlugin<{checkPermissions(): Promise<{calendar: string}>; requestAccess(): Promise<{status: string}>}>('AlphaCalendar');
-const device = registerPlugin<{openSettings(options: {page: 'notifications' | 'privacy'}): Promise<unknown>}>('AlphaDevice');
-const files = registerPlugin<{storageState(): Promise<{access?: string}>; storageRequestAccess(options?: {settings?: boolean}): Promise<{access?: string}>}>('AlphaFiles');
+const notifications = registerPlugin<Pick<AlphaNotificationsPlugin, 'status'>>('AlphaNotifications');
+const permissions = registerPlugin<Pick<DailyAppsPlugin, 'checkPermissions' | 'requestPermissions' | 'addListener'>>('DailyApps');
+const microphone = registerPlugin<Pick<AlphaVoiceCloudPlugin, 'checkPermissions' | 'requestPermissions'>>('AlphaVoiceCloud');
+const location = registerPlugin<Pick<LocationBridge, 'checkPermissions' | 'requestPermissions'>>('ElizaLocation');
+const photos = registerPlugin<Pick<AlphaPhotoLibraryPlugin, 'scope' | 'requestAccess'>>('AlphaPhotoLibrary');
+const calendar = registerPlugin<Pick<AlphaCalendarPlugin, 'checkPermissions' | 'requestAccess'>>('AlphaCalendar');
+const device = registerPlugin<Pick<AlphaDevicePlugin, 'openSettings'>>('AlphaDevice');
+const files = registerPlugin<Pick<AlphaFilesPlugin, 'storageState' | 'storageRequestAccess'>>('AlphaFiles');
 const details = {
   notifications: {title: 'Notifications', icon: 'bell', reason: 'Reminders and updates'},
   microphone: {title: 'Microphone', icon: 'mic', reason: 'Voice notes and talk'},
@@ -33,24 +36,13 @@ const details = {
   location: {title: 'Location', icon: 'map-pin', reason: 'Nearby places, directions'},
   files: {title: 'Files', icon: 'folder', reason: 'Shared storage files'},
 };
-const progressKey = 'alpha:startup-permission-progress:v1';
-type Progress = {version: 3; step: number; choices: ('allowed' | 'continued' | 'skipped')[]};
+type Progress = {step: number; choices: ('allowed' | 'continued' | 'skipped')[]};
 function savedProgress(native = false): Progress | null {
-  const keys: readonly PermissionKey[] = native ? nativeStartupPermissionKeys : startupPermissionKeys;
   try {
     const durable = readStartupPermissionProgress(localStorage, native);
     if (durable.status === 'completed') return null;
-    // Session progress from before the durable marker is only read as a fallback, never written.
-    const raw = localStorage.getItem(startupPermissionProgressKey) === null ? sessionStorage.getItem(progressKey) : null;
-    if (!raw) return {version: 3, step: durable.step, choices: durable.choices ?? Array(durable.step).fill('continued')};
-    const value = JSON.parse(raw);
-    if (![1, 2, 3].includes(value.version) || !Number.isInteger(value.step) || value.step < 0 || value.step >= keys.length || !Array.isArray(value.choices) || value.choices.length !== value.step || value.choices.some((choice: unknown) => typeof choice !== 'string' || !['allowed', 'skipped', 'continued'].includes(choice))) return {version: 3, step: 0, choices: []};
-    return {version: 3, step: value.step, choices: value.choices};
-  } catch { return {version: 3, step: 0, choices: []}; }
-}
-function permissionAccess(value: unknown) {
-  if (typeof value !== 'string' || !['granted', 'denied', 'prompt', 'prompt-with-rationale'].includes(value)) throw Error('Permission status unavailable');
-  return {granted: value === 'granted', enabled: value === 'granted', requestable: value !== 'denied'};
+    return {step: durable.step, choices: durable.choices ?? Array(durable.step).fill('continued')};
+  } catch { return {step: 0, choices: []}; }
 }
 /** UI progress is never permission authority. Every grant is read back from the platform. */
 export function StartupPermissions({active:enabled = true}: {active?: boolean} = {}) {
@@ -66,15 +58,15 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const [flows] = useState(() => {
     const nativeBridges = {
       notifications: {status: async () => {const status = await notifications.status(); return {granted: status.permissionGranted, enabled: status.appEnabled};}, request: () => permissions.requestPermissions({permissions: ['notifications']}), openSettings: () => device.openSettings({page: 'notifications'})},
-      microphone: {status: async () => permissionAccess((await microphone.checkPermissions()).microphone), request: () => microphone.requestPermissions({permissions: ['microphone']}), openSettings: () => device.openSettings({page: 'privacy'})},
+      microphone: {status: async () => permissionStateAccess((await microphone.checkPermissions()).microphone), request: () => microphone.requestPermissions({permissions: ['microphone']}), openSettings: () => device.openSettings({page: 'privacy'})},
       // Shared ElizaCamera requests all aliases. The product DailyApps alias requests CAMERA only.
-      camera: {status: async () => permissionAccess((await permissions.checkPermissions()).camera), request: () => permissions.requestPermissions({permissions: ['camera']}), openSettings: () => device.openSettings({page: 'privacy'})},
-      photos: {status: async () => {const access=startupPhotoAccess(await photos.scope());photoDescription.current=access.description;return access;},request: () => photos.requestAccess(),openSettings: () => device.openSettings({page:'privacy'})},
-      calendar: {status: async () => permissionAccess((await calendar.checkPermissions()).calendar), request: () => calendar.requestAccess(), openSettings: () => device.openSettings({page: 'privacy'})},
+      camera: {status: async () => permissionStateAccess((await permissions.checkPermissions()).camera), request: () => permissions.requestPermissions({permissions: ['camera']}), openSettings: () => device.openSettings({page: 'privacy'})},
+      photos: {status: async () => {const access=photoLibraryAccess(await photos.scope());photoDescription.current=access.description;return access;},request: () => photos.requestAccess(),openSettings: () => device.openSettings({page:'privacy'})},
+      calendar: {status: async () => permissionStateAccess((await calendar.checkPermissions()).calendar), request: () => calendar.requestAccess(), openSettings: () => device.openSettings({page: 'privacy'})},
       // Android's "All files access" page (API 29: the storage permission request, or the app's
       // settings page) returns to Alpha; the flow reads access back then.
       files: {status: async () => startupFilesAccess(await files.storageState()), request: () => files.storageRequestAccess(), openSettings: () => files.storageRequestAccess({settings: true})},
-      location: {status: async () => {const raw=await location.checkPermissions();const access=startupLocationAccess(raw);locationDescription.current=access.description;return {...access,requestable:raw.location!=='denied'};}, request: () => location.requestPermissions(), openSettings: () => device.openSettings({page: 'privacy'})},
+      location: {status: async () => {const access=locationAccess(await location.checkPermissions());locationDescription.current=access.description;return access;}, request: () => location.requestPermissions(), openSettings: () => device.openSettings({page: 'privacy'})},
     } as const;
     return Object.fromEntries(keys.map(key => [key, createStartupPermissionFlow(native ? nativeBridges[key] : browserStartupPermission(key as typeof startupPermissionKeys[number], {permissions: navigator.permissions, media: navigator.mediaDevices, geolocation: navigator.geolocation, notifications: typeof Notification === 'undefined' ? undefined : Notification}), {key: native ? key : 'browser'+key})])) as Record<PermissionKey, ReturnType<typeof createStartupPermissionFlow>>;
   });
@@ -172,7 +164,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       targetRef.current = typeof selected === 'string' && keys.includes(selected as PermissionKey) ? selected as PermissionKey : null;
       setTarget(targetRef.current);
       const resume=savedProgress(native);reviewRef.current=resume===null;setReview(reviewRef.current);
-      if (!selected) writeProgress(resume??{version:3 as const,step:0,choices:[]});
+      if (!selected) writeProgress(resume??{step:0,choices:[]});
       setReopened(true);setReady(false);setSilent(false);
       setActive(true);
       void Promise.all(keys.map(async key => {const value = await flows[key].refresh(); if (alive.current && value !== null) setStates(previous => ({...previous, [key]: value}));}));
@@ -208,8 +200,8 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   function advance(choice: Progress['choices'][number]) {
     if (!currentInteraction()) return;
     if (target) {setActive(false); return;}
-    const current = progress ?? {version: 3 as const, step: 0, choices: []};
-    if (current.step + 1 < keys.length) writeProgress({version: 3, step: current.step + 1, choices: [...current.choices, choice]});
+    const current = progress ?? {step: 0, choices: []};
+    if (current.step + 1 < keys.length) writeProgress({step: current.step + 1, choices: [...current.choices, choice]});
     else {finalChoices.current=[...current.choices, choice];writeProgress(null, finalChoices.current);setActive(false);setReady(true);}
   }
   function skip() {
@@ -267,7 +259,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     {connection.accountCreated&&<p role="status" className="alpha-permission-status"><span aria-hidden="true" style={iconStyle('user-round-plus')}/><span className="alpha-sr">New account </span>{connection.cloudAccount?.email||'New account'}</p>}
     {progressError&&<p role="alert" className="alpha-permission-status"><StatusDot tone="warn">Not saved</StatusDot></p>}
     </div>
-    <div className="alpha-permission-actions"><button type="button" className="alpha-permission-primary" disabled={busy} onClick={()=>void finish()}>{busy?<Busy label="Checking"/>:'Done'}</button></div>
+    <div className="alpha-permission-actions"><button type="button" className="alpha-permission-primary" disabled={busy} onClick={finish}>{busy?<Busy label="Checking"/>:'Done'}</button></div>
   </div></dialog>;}
   // One "Access" checklist. The flow still asks one permission at a time, in order: the current row
   // carries its action and each system prompt still appears when that row is tapped.

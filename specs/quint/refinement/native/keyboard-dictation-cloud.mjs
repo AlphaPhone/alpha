@@ -17,7 +17,7 @@ export async function checkKeyboardDictationCloud(extraSources=[]) {
       const path=join(temporary,name);
       mkdirSync(dirname(path),{recursive:true});writeFileSync(path,body);return path;
     });
-    const compiled=['KeyboardDictationCloud.java','KeyboardDictationPolicy.java','CloudSpeechPolicy.java','CloudDeployment.java'].map(name=>app+name);
+    const compiled=['KeyboardDictationCloud.java','KeyboardDictationPolicy.java','CloudSpeechPolicy.java','CloudDeployment.java','AlphaUtil.java','Slots.java'].map(name=>app+name);
     const sources=[modelPath,...compiled,...generatedSources,
       ...['KeyboardDictationCloudTraces.java','Trace.java','java.mjs','keyboard-dictation-cloud-ports.mjs'].map(name=>join(directory,name)),
       fileURLToPath(import.meta.url),'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),...extraSources];

@@ -1,9 +1,10 @@
 import {DailyApps} from '../daily';
 import {devSurfacesEnabled} from '../build-flags';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
 import {reviewMailAttachment} from '../runtime/inbox-attachment';
 type Bag=Record<string,any>;
-const attachments=registerPlugin<any>('AlphaMailAttachments');
+const attachments=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'|'openReviewed'|'cancel'>>('AlphaMailAttachments');
 const recipient=(state:Bag)=>state.thread||(typeof state.compose==='string'?state.compose:null);
 /** Local message copies never enter the SMS/provider transport. */
 export function installSimulatedMessages(view:Bag){

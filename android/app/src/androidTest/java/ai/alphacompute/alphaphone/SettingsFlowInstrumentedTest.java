@@ -2,7 +2,6 @@ package ai.alphacompute.alphaphone;
 
 import android.app.Instrumentation;
 import android.content.Intent;
-import android.os.Build;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.KeyEvent;

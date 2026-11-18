@@ -1,5 +1,6 @@
 import { withMapsNavigationRelay } from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/navigation-relay.ts';
 import {anyAbortSignal} from '../runtime/abort-signal';
+import { asRecord } from '../lib/parse';
 import { residentMapsNavigationPort } from './agent-navigation.ts';
 import { deviceNavigationFailure, type AgentPlaceRef, type MapsDeviceNavigation } from './device-navigation.ts';
 import type { TravelMode } from './contracts.ts';
@@ -12,7 +13,7 @@ export function withResidentMapsNavigation<T>(request: Request | undefined, conv
   anySignal:anyAbortSignal,
   current:()=>residentMapsNavigationPort.current,
   async execute(navigation,value,signal){
-   const operation=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
+   const operation=asRecord(value);
    if(operation?.kind==='select')return navigation.select(operation.place as AgentPlaceRef,signal);
    if(operation?.kind==='start')return navigation.start(operation.request as {destination:AgentPlaceRef;travelMode:TravelMode},signal);
    if(operation?.kind==='reroute')return navigation.reroute(signal);

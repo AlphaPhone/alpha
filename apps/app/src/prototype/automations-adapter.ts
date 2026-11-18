@@ -4,7 +4,7 @@ import {canSnoozeReminder,reminderDue} from '../../../../.eliza/client-features/
 import {AUTOMATIONS_COMMITTED_EVENT} from '../runtime/automation-completion';
 import {openWorkflowFilters,workflowFilterLabel,type WorkflowTypeFilter,type WorkflowStatusFilter} from './workflow-filters';
 import {FEED_FILTERS,passesFilter,type FeedFilter} from '../../../../.eliza/client-features/packages/ui/src/utils/automation-feed-filter';
-import {AutomationsProtocol,AutomationOutcomeError,automationIssue,automationLocalDateInput,automationWhen,workflowDeviceTimeZone,mergeAutomationRows,scheduledTaskEnded,scheduledSnoozeAt,type AutomationRow,type AutomationIssue,type PromptDraft,type ReminderDraft,type AutomationRequest} from '../runtime/automations-protocol';
+import {AutomationsProtocol,AutomationOutcomeError,automationIssue,automationLocalDateInput,automationWhen,workflowDeviceTimeZone,mergeAutomationRows,scheduledTaskEnded,scheduledSnoozeAt,type AutomationRow,type AutomationIssue,type PromptDraft,type ReminderDraft} from '../runtime/automations-protocol';
 import {connectionController,agentPendingText,agentAvailabilityNotice} from '../runtime/connection-ui';
 import {showAgentStatus} from './workflow-authoring';
 import {DailyApps,type Reminder} from '../daily';
@@ -14,7 +14,6 @@ import {Capacitor} from '@capacitor/core';
 import {homeReadIsStale,presentHomeWorkflowFreshness} from './home-cards';
 import './automations.css';
 type Bag=Record<string,any>;
-type Binding={sessionId:string;conversationId?:string;request:AutomationRequest};
 type Editor={kind:'prompt';draft:PromptDraft;row?:AutomationRow}|{kind:'reminder';draft:ReminderDraft;row?:AutomationRow};
 const dateInput=automationLocalDateInput;
 const future=()=>dateInput(Date.now()+3600000);
@@ -59,10 +58,11 @@ export function installAutomationsAdapter(Component:any,views:Bag){
  let intentStore:WorkflowIntentStore|null=null,suspended=document.hidden;
  const recovery=createWorkflowRequestRecovery(async()=>(await import('../browser/domain-recovery')).openDomainRecovery);
  let homeCache:{sessionId:string;rows:Array<{name:string;status:string}>;total:number;complete:boolean;partial:boolean;stale:boolean;error:boolean;loadedAt:number}|null=null;
- const binding=():Binding|null=>(connectionController as typeof connectionController & {getAutomationsClient():Binding|null}).getAutomationsClient();
- const reminderBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh first':issues.find(issue=>issue.source==='reminders')?.message||'';
- const automationBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh first':issues.find(issue=>issue.source==='automations'&&issue.unavailable)?.message||'';
- const scheduleBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh first':issues.find(issue=>issue.source==='schedules')?.message||'';
+ const binding=()=>connectionController.getAutomationsClient();
+ const blockedBy=(match:(issue:AutomationIssue)=>boolean)=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh first':issues.find(match)?.message||'';
+ const reminderBlock=()=>blockedBy(issue=>issue.source==='reminders');
+ const automationBlock=()=>blockedBy(issue=>issue.source==='automations'&&issue.unavailable);
+ const scheduleBlock=()=>blockedBy(issue=>issue.source==='schedules');
  const publish=()=>{if(owner?.live&&!suspended&&!document.hidden)owner.vset('workflows',{automationTick:Date.now()});};
  const retire=(clear=false)=>{dismissFilters();recovery.retire();epoch++;controller?.abort();controller=null;detail=null;scheduleDraft=null;editor=null;creating=false;review=null;message='';if(clear){completionDirty=false;rows=[];issues=[];intentStore=null;state='idle';loadedSession=null;}publish();};
  const requestKey=(id:string)=>{const owner=connectionController.getSnapshot().session;return owner?workflowIntentKey(owner,'automation:'+id):'offline:'+id;};
@@ -167,13 +167,13 @@ export function installAutomationsAdapter(Component:any,views:Bag){
  const newDeviceReminder=()=>{close();owner.openView('calendar');owner.newDeviceReminderDraft();};
  view.back=()=>{if(closeFilters){dismissFilters();return true;}if(editor||detail||creating||review){close();return true;}return back?.();};
  view.onLeave=()=>{retire(true);leave?.();};
- p.cachedAutomationsHome=function(){return this===owner&&homeCache?.sessionId===(binding()?.sessionId||'offline')?homeCache:null;};
+ const cachedHome=(shell:unknown)=>shell===owner&&homeCache?.sessionId===(binding()?.sessionId||'offline')?homeCache:null;
  const values=p.renderVals;
- p.renderVals=function(){const out=values?.call(this)||{},cached=this.cachedAutomationsHome();if(!cached)return out.homeWorkflowHasRows?out:{...out,homeWorkflowFreshness:'',homeWorkflowDescription:'',homeWorkflowConfirmedEmpty:false,homeWorkflowTitle:'Workflows',homeWorkflowTime:'Open to view',homeWorkflowLabel:'Open workflows',goFlows:()=>this.openView('workflows')};const loaded=presentHomeWorkflowFreshness({loadedAt:cached.loadedAt,now:Date.now(),unified:true,agent:cached.sessionId!=='offline'});return {...out,homeWorkflowFreshness:loaded.visible,homeWorkflowDescription:loaded.description,homeWorkflowRows:cached.rows.slice(0,2),homeWorkflowHasRows:cached.total>0,homeWorkflowConfirmedEmpty:cached.complete&&!cached.stale&&!cached.error&&cached.total===0&&cached.loadedAt>0&&cached.loadedAt<=Date.now()&&!homeReadIsStale(cached.loadedAt,Date.now()),homeWorkflowTitle:cached.total?'':cached.partial?'Some unavailable':'None',homeWorkflowTime:cached.error?'Stale':cached.stale?'Not current':cached.partial?'Some unavailable':cached.total>2?`+${cached.total-2} more`:cached.total?'View automations':'',homeWorkflowLabel:'Open workflows',goFlows:()=>this.openView('workflows')};};
+ p.renderVals=function(){const out=values?.call(this)||{},cached=cachedHome(this);if(!cached)return out.homeWorkflowHasRows?out:{...out,homeWorkflowFreshness:'',homeWorkflowDescription:'',homeWorkflowConfirmedEmpty:false,homeWorkflowTitle:'Workflows',homeWorkflowTime:'Open to view',homeWorkflowLabel:'Open workflows',goFlows:()=>this.openView('workflows')};const loaded=presentHomeWorkflowFreshness({loadedAt:cached.loadedAt,now:Date.now(),unified:true,agent:cached.sessionId!=='offline'});return {...out,homeWorkflowFreshness:loaded.visible,homeWorkflowDescription:loaded.description,homeWorkflowRows:cached.rows.slice(0,2),homeWorkflowHasRows:cached.total>0,homeWorkflowConfirmedEmpty:cached.complete&&!cached.stale&&!cached.error&&cached.total===0&&cached.loadedAt>0&&cached.loadedAt<=Date.now()&&!homeReadIsStale(cached.loadedAt,Date.now()),homeWorkflowTitle:cached.total?'':cached.partial?'Some unavailable':'None',homeWorkflowTime:cached.error?'Stale':cached.stale?'Not current':cached.partial?'Some unavailable':cached.total>2?`+${cached.total-2} more`:cached.total?'View automations':'',homeWorkflowLabel:'Open workflows',goFlows:()=>this.openView('workflows')};};
  view.render=(value:Bag,current:Bag)=>{
   api=current;const workflow=render(value,current),currentSession=binding()?.sessionId||'offline';
   if(visible()&&(state==='idle'||completionDirty)&&!controller&&!editor&&!detail&&!creating&&!review&&!workflow.detail&&!workflow.builder&&!workflow.runOpen&&!workflow.removedList){completionDirty=false;state='loading';queueMicrotask(()=>void refresh(true));}
-  if(workflow.detail||workflow.builder||workflow.runOpen||workflow.removedList)return {...workflow,workflowDetail:workflow.detail,automation:null};
+  if(workflow.detail||workflow.builder||workflow.runOpen||workflow.removedList)return {...workflow,automation:null};
   const cards=rows.filter(row=>rowPasses(row,typeFilter)&&rowPasses(row,statusFilter)).map(row=>({name:row.title,icon:current.ic[row.kind==='reminder'||row.kind==='device-reminder'?'bell':row.kind==='prompt'?'spark':row.kind==='schedule'||row.kind==='routine'?'cal':'flow'],short:row.schedule||row.source.replace(/^Agent /,''),statusLabel:locked(row)?'Outcome unknown':row.kind==='workflow'&&row.workflowId&&workflow.waitingFor?.(row.workflowId)?'Waiting for you':rowStatus(row),on:row.enabled,track:current.track(row.enabled),kx:current.kx(row.enabled),dim:'',failed:row.status==='failed',open:()=>show(row),toggle:()=>show(row)}));
   const empty=state==='ready'&&!cards.length&&!issues.length;
   const managementCards=[...(workflow.managementCards||[])];

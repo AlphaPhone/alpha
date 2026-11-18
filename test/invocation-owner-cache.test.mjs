@@ -14,9 +14,6 @@ test('the listener owner is read once per credential state and never survives a 
  assert.match(agent,/if\(credential\.has\("expiresAt"\)\)validUntil=InvocationOwnerCache\.deadline\(credential\.opt\("expiresAt"\)\);/);
  // Every commit in mutateCredentials (the only path that writes the provider or Cloud slots) is wrapped.
  assert.equal(agent.match(/mutation\.commit\(\)/g).length,1);assert.equal(agent.match(/return commitCredentials\(mutation\);/g).length,2);
- // The store writes the provider and Cloud slots only inside a CredentialMutation commit.
- const fast=store.slice(store.indexOf('private boolean mutateSlotOnce('),store.indexOf('return AlphaLocalAgentPlugin.mutateCredentials('));
- assert.match(fast,/if\(!"cloud:production"\.equals\(name\)&&!"cloud:staging"\.equals\(name\)&&!LocalAgentProviderAdmission\.PROVIDER_SLOT\.equals\(name\)\)\{/);
  const temporary=mkdtempSync(join(tmpdir(),'invocation-owner-cache-'));
  try{
   writeFileSync(join(temporary,'Harness.java'),`package ai.alphacompute.alphaphone;

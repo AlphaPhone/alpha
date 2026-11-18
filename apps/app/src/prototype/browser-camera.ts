@@ -5,7 +5,7 @@ import {renderVideoEdit,validateVideoEdit,type VideoEdit} from '../browser/video
 import {BrowserCameraFocus} from '../browser/camera-focus';
 import {browserDevProfile} from '../browser/dev-profile';
 /** A browser image chosen for Photos or kept from scan review, re-encoded as JPEG. */
-export type ImportedCameraImage={original:File;image:string;width:number;height:number};
+type ImportedCameraImage={original:File;image:string;width:number;height:number};
 import {drawCameraFrame} from '../browser/camera-frame';
 import {BrowserVideoCapture} from '../browser/video-capture';
 import {editReceiptAbandoned,editReceiptSettled} from '../browser/edit-receipt';
@@ -37,12 +37,7 @@ function db(){return database??=new Promise<IDBDatabase>((resolve,reject)=>{
  request.onupgradeneeded=()=>{
   const store=request.result.objectStoreNames.contains('photos')?request.transaction!.objectStore('photos'):request.result.createObjectStore('photos',{keyPath:'id'});
   if(!store.indexNames.contains('chronological'))store.createIndex('chronological',['date','id']);
-  if(!request.result.objectStoreNames.contains(VIDEO_DATA)){
-   // Earlier versions stored each recording inside its row. Both writes belong to the upgrade
-   // transaction, so a row and its bytes move together or the upgrade does not happen.
-   const payloads=request.result.createObjectStore(VIDEO_DATA,{keyPath:'id'}),moving=store.openCursor();
-   moving.onsuccess=()=>{const cursor=moving.result;if(!cursor)return;const value=cursor.value as Row;if(value?.kind==='video'){const {row,data}=splitVideoRow(value);if(data){payloads.put(data);cursor.update(row);}}cursor.continue();};
-  }
+  if(!request.result.objectStoreNames.contains(VIDEO_DATA))request.result.createObjectStore(VIDEO_DATA,{keyPath:'id'});
  };
  request.onsuccess=()=>{request.result.onversionchange=()=>{request.result.close();database=undefined;};resolve(request.result);};
  request.onerror=()=>{database=undefined;reject(request.error);};
@@ -85,7 +80,7 @@ async function rows(options:{before?:string;trashed?:boolean;album?:string}={},m
 async function read(id:string){return transaction<Row>('readonly',(store,set,fail)=>{const r=store.get(id);r.onsuccess=()=>{
  const row=r.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)){fail(Error('Photo no longer available.'));return;}
  if(row.kind!=='video'){set(row);return;}
- const data=videoData(store).get(id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path??row.path;set(path?{...row,path}:row);};
+ const data=videoData(store).get(id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path;set(path?{...row,path}:row);};
 };});}
 async function change(input:{id:string;revision:string},patch:Partial<Pick<Row,'favorite'|'trashed'>>){
  return transaction<Row>('readwrite',(store,set,fail)=>{const r=store.get(input.id);r.onsuccess=()=>{const row=r.result as Row|undefined;
@@ -194,11 +189,10 @@ async function savePhotoEdit(input:EditParameters&{sessionId:string;replace?:boo
 }
 
 type Album={id:string;name:string;revision:string;count:number;memberIds:string[]};
-const mediaId=()=>Date.now().toString().padStart(13,'0')+Array.from(crypto.getRandomValues(new Uint8Array(12)),n=>String(n%10)).join('');
 const prepared=new Map<string,{id:string;revision:string}[]>();
 type SelectedMedia={id:string;revision:string};
 /** Share and save hand one set to the system at once; changes are batched by the caller. */
-export const SHARE_LIMIT=100;
+const SHARE_LIMIT=100;
 function selectedMedia(items:SelectedMedia[],limit=20){
  if(!Array.isArray(items)||items.length<1||items.length>limit||items.some(item=>!item||typeof item.id!=='string'||!item.id||typeof item.revision!=='string'||!item.revision)||new Set(items.map(item=>item.id)).size!==items.length)throw Error(`Select between 1 and ${limit} distinct items again.`);
  return items.map(item=>({id:item.id,revision:item.revision}));
@@ -214,7 +208,7 @@ function trashSelection(input:unknown):SelectedMedia[]|null{
 /** The selected rows in selection order. `bytes` joins each video's recording for a handoff;
  * a revision check alone leaves the recordings unread. */
 async function selectedMediaRows(items:SelectedMedia[],bytes=false){
- return transaction<Row[]>('readonly',(store,set,fail)=>{const result:Row[]=new Array(items.length);set(result);items.forEach((item,index)=>{const request=store.get(item.id);request.onsuccess=()=>{const row=request.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==item.revision||row.trashed){fail(Error('Selection changed. Reselect the items.'));return;}result[index]=row;if(!bytes||row.kind!=='video')return;const data=videoData(store).get(item.id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path??row.path;if(path)result[index]={...row,path};};};});});
+ return transaction<Row[]>('readonly',(store,set,fail)=>{const result:Row[]=new Array(items.length);set(result);items.forEach((item,index)=>{const request=store.get(item.id);request.onsuccess=()=>{const row=request.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==item.revision||row.trashed){fail(Error('Selection changed. Reselect the items.'));return;}result[index]=row;if(!bytes||row.kind!=='video')return;const data=videoData(store).get(item.id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path;if(path)result[index]={...row,path};};};});});
 }
 async function selectedMediaFiles(items:SelectedMedia[]){
   const selected=await selectedMediaRows(items,true);
@@ -403,7 +397,7 @@ export const browserCamera={
   if(videoSave)return videoSave;
   const token=generation,session=videoSession;
   videoSave=(async()=>{
-   const clip=await videoCapture.stop(),id=mediaId();
+   const clip=await videoCapture.stop(),id=photoId();
    const path=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(clip.blob);});
    const {row,data}=splitVideoRow<Row>({id:'v:'+id,kind:'video',path,duration:clip.duration,image:clip.image,width:clip.width,height:clip.height,date:Date.now(),revision:revision(),mutationRevision:revision(),favorite:false,trashed:false});
    await transaction<void>('readwrite',(store,set)=>{if(token!==generation||session!==videoSession)throw new DOMException('Video save cancelled.','AbortError');store.add(row);if(data)videoData(store).add(data);set(undefined);});

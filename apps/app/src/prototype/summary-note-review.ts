@@ -1,6 +1,6 @@
 import {proposedRecordingSummary} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-recording-summary.ts';
 import {summarySourceOf,webSourceOf,recordingSourceOf,type SummarySource,type WebSource,type RecordingSource} from './summary-source';
-import type {Source} from './note-source-adapter';
+import type {DocumentSourceLink as Source} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
 /** A direct user edit/save, separate from an agent proposal. Never saves on reply arrival. */
 export function reviewSummaryNote(input:{text:string;source:SummarySource;current:()=>boolean;save:(note:{title:string;body:string;documentSource?:Source;webSource?:WebSource;recordingSource?:RecordingSource;actions?:{t:string;done:boolean}[]})=>Promise<boolean>;complete:()=>void}){
  const source=summarySourceOf(input.source);if(!source||!input.current())throw Error('Source review expired. Ask about the source again.');

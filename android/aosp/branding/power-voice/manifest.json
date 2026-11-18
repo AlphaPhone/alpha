@@ -22,8 +22,5 @@
       "beforeSha256": "6ee15ad5e386de1edb1f33e1100c043db9afe486a0908748ef9572b6cd4cb176",
       "afterSha256": "ee32d56bdc5c74b506a1a01b0480977bd899c7634a7c32a86d8dbcf8ab6574f4"
     }
-  ],
-  "sourceOnly": true,
-  "compiled": false,
-  "deviceQualified": false
+  ]
 }

@@ -15,24 +15,22 @@ public final class PdfViewerInstrumentedTest {
  private final UiAutomation ui=InstrumentationRegistry.getInstrumentation().getUiAutomation();
  private AccessibilityNodeInfo find(AccessibilityNodeInfo node,String text,boolean description,int[] count){
   if(node==null)return null;
-  try{
-   assertTrue("Bounded PDF accessibility hierarchy",++count[0]<=1000);
-   CharSequence value=description?node.getContentDescription():node.getText();
-   if(node.isVisibleToUser()&&value!=null&&value.toString().contains(text))return AccessibilityNodeInfo.obtain(node);
-   for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo found=find(node.getChild(i),text,description,count);if(found!=null)return found;}
-   return null;
-  }finally{node.recycle();}
+  assertTrue("Bounded PDF accessibility hierarchy",++count[0]<=1000);
+  CharSequence value=description?node.getContentDescription():node.getText();
+  if(node.isVisibleToUser()&&value!=null&&value.toString().contains(text))return node;
+  for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo found=find(node.getChild(i),text,description,count);if(found!=null)return found;}
+  return null;
  }
  private AccessibilityNodeInfo find(String text,boolean description){return find(ui.getRootInActiveWindow(),text,description,new int[]{0});}
  private void awaitText(String text,boolean description,long timeout){
   long end=SystemClock.elapsedRealtime()+timeout;
-  do{AccessibilityNodeInfo node=find(text,description);if(node!=null){node.recycle();return;}SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
+  do{if(find(text,description)!=null)return;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
   fail("PDF accessibility text missing: "+text);
  }
  private void page(int number){awaitText("Page "+number+" of 2",false,15000);awaitText("PDF page "+number+" of 2",true,15000);}
  private void click(String text){
   long end=SystemClock.elapsedRealtime()+15000;
-  do{AccessibilityNodeInfo node=find(text,false);if(node!=null)try{if(node.isEnabled()&&node.isClickable()&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK))return;}finally{node.recycle();}SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
+  do{AccessibilityNodeInfo node=find(text,false);if(node!=null&&node.isEnabled()&&node.isClickable()&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK))return;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
   fail("PDF control could not be clicked: "+text);
  }
 
@@ -47,7 +45,7 @@ public final class PdfViewerInstrumentedTest {
     long closedBy=SystemClock.elapsedRealtime()+5000;
     while(scenario.getState()!=Lifecycle.State.DESTROYED&&SystemClock.elapsedRealtime()<closedBy)SystemClock.sleep(100);
     assertEquals("Close PDF destroys its Activity",Lifecycle.State.DESTROYED,scenario.getState());
-    AccessibilityNodeInfo remaining=find("Close PDF",false);try{assertNull("Closed PDF control is gone",remaining);}finally{if(remaining!=null)remaining.recycle();}
+    assertNull("Closed PDF control is gone",find("Close PDF",false));
    }
   }finally{assertTrue(!file.exists()||file.delete());}
  }

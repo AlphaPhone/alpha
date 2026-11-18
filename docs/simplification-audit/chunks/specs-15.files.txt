@@ -1,0 +1,5 @@
+specs/quint/legacy/files-browser/README.md
+specs/quint/legacy/files-browser/check-files-browser-refinement.mjs
+specs/quint/legacy/google-connect/check-google-connect-refinement.mjs
+specs/quint/legacy/home-layout/README.md
+specs/quint/legacy/home-layout/check-home-layout-refinement.mjs

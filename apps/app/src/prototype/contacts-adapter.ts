@@ -5,9 +5,9 @@ import { displayNumber, initials } from './telephony-presenters';
 import {contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
-const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z';
+const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z',MAIL='M3 5h18v14H3zM3 5l9 7 9-7';
 /** Per-number Call and Message open Phone or Messages with the number filled in; nothing dials or sends until the owner does it there. */
-export function contactActs(phones:readonly string[],api:Bag){
+function contactActs(phones:readonly string[],api:Bag){
  return phones.flatMap(number=>[
   ...(isMvpView('phone')?[{d:PHONE,label:`Call ${number}`,go:()=>api.open('phone',{prefill:number})}]:[]),
   ...(isMvpView('messages')?[{d:BUBBLE,label:`Message ${number}`,go:()=>api.open('messages',{prefill:number})}]:[])]);
@@ -25,7 +25,6 @@ export function installContactsAdapter(Component:any,views:Bag){
  /* The open contact as the phone holds it now, the in-app editor and a pending delete confirmation. */
  let detail:ContactDetail|null=null,detailFor='',detailEpoch=0,form:Editor|null=null,confirming=false,saving=false,opening=false,api:Bag|null=null;
  const changed=()=>owner?.setState({contactsNativeRevision:Date.now()});
- const setApi=(next:Bag)=>{api=next;};
  const clear=()=>{epoch++;visit++;rows=[];readable=false;writable=false;more=false;loading=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
  const available=()=>!!owner&&owner.S().view==='contacts'&&isMvpView('contacts')&&!document.hidden;
  const sync=()=>{const next=available();if(next===active)return;active=next;if(next)void refresh();else clear();};
@@ -120,24 +119,23 @@ export function installContactsAdapter(Component:any,views:Bag){
   }catch{if(token===visit&&owner===ownerAtStart&&detail===target&&available())unknownWrite();}
   finally{pendingWrite=false;writeEpoch++;if(unconfirmed)uncertain=true;if(token===visit&&owner===ownerAtStart)saving=false;if(available())changed();}
  }
- views.contacts.reply=()=>null;
  views.contacts.suggestions=()=>[];
  views.contacts.render=function(st:Bag,viewApi:Bag){
-  const api=viewApi;setApi(viewApi);
+  api=viewApi;
   if(st.open&&st.open!==detailFor&&readable)void loadDetail(String(st.open));
   if(!st.open&&detailFor){detailFor='';detail=null;detailEpoch++;confirming=false;}
   const list=rows.map(row=>({id:row.id,name:row.name||'Unnamed contact',first:row.name||'Unnamed contact',ini:initials(row.name||''),phone:'',email:'',fav:false}));
-  const model=render({...st,list,edit:null,add:null,form:null},api);
+  const model=render({...st,list,edit:null,add:null,form:null},viewApi);
   model.nativeManaged=true;model.nativePrototype=false;model.nativeStatus=uncertain?'Outcome unknown · refresh Contacts':pendingWrite?'Contact change pending':status;model.nativeStatusDot=!status?'':!readable?'warn':'';model.nativeBusy=loading||pendingWrite;model.nativeAccess=!readable;model.nativeMore=more&&limit<200;
   model.nativeRefresh=()=>void refresh(false,undefined,true);model.nativeRequest=()=>void refresh(true);model.nativeLoadMore=()=>{limit=Math.min(200,limit+50);void refresh();};
   model.hasQ=false;model.noHits=false;model.addNew=()=>void openEditor();model.notSearching=false;model.searching=false;model.hasQuery=!!String(st.q||'');
   /* A short list needs no letter headings; the search field is always there. */
   for(const group of model.groups||[])group.head=rows.length>=20;
-  model.onQ=(event:Event)=>{api.set({q:(event.target as HTMLInputElement).value,open:null});limit=50;void refresh(false,(event.target as HTMLInputElement).value);};
-  model.closeSearch=()=>{api.set({q:'',searching:false,open:null});limit=50;void refresh(false,'');};
-  if(model.d){const selected=rows.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
-   model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v}))]:[];
-   if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:TYPE_LABEL(row.type)})),...detail.emailAddresses.map(row=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v:row.address,sub:TYPE_LABEL(row.type)}))];
+  model.onQ=(event:Event)=>{viewApi.set({q:(event.target as HTMLInputElement).value,open:null});limit=50;void refresh(false,(event.target as HTMLInputElement).value);};
+  model.closeSearch=()=>{viewApi.set({q:'',searching:false,open:null});limit=50;void refresh(false,'');};
+  if(model.d){const selected=rows.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],viewApi):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
+   model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:MAIL,v}))]:[];
+   if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:TYPE_LABEL(row.type)})),...detail.emailAddresses.map(row=>({d:MAIL,v:row.address,sub:TYPE_LABEL(row.type)}))];
    model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void openEditor(selected);model.d.toggleFav=()=>{};
    model.d.canDelete=!pendingWrite&&!uncertain&&!!selected&&!!detail&&detail.id===selected.id&&writable;model.d.del=()=>{if(model.d.canDelete&&!saving&&!opening&&!form){confirming=true;changed();}};
    model.d.confirming=confirming;model.d.cancelDelete=()=>{if(!saving){confirming=false;changed();}};model.d.confirmDelete=()=>void remove();model.d.busy=saving;

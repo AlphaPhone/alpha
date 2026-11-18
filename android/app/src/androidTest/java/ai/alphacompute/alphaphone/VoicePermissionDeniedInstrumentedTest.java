@@ -12,7 +12,7 @@ import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
 /**
- * journeys-12: with RECORD_AUDIO revoked, starting a recording rejects with
+ * With RECORD_AUDIO revoked, starting a recording rejects with
  * "permission-denied" and the recorder shows the denied state with Open app settings.
  *
  * Revoking a runtime permission kills the target process, so the revoke step runs before

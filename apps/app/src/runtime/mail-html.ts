@@ -1,16 +1,17 @@
 import createDOMPurify from 'dompurify';
 
 const purifier=createDOMPurify();
-const imageUrl=(value:string)=>{
-  if(/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(value))return value;
+/** The URL as an https address without credentials, or null. */
+const safeHttps=(value:string)=>{
   try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password?url.href:null;}catch{return null;}
 };
+const imageUrl=(value:string)=>/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(value)?value:safeHttps(value);
 purifier.addHook('uponSanitizeAttribute',(node,data)=>{
   if(node.nodeName==='IMG'&&data.attrName==='src'){
     const url=imageUrl(data.attrValue);if(url)node.setAttribute('data-alpha-image',url);
   }
   if(node.nodeName==='A'&&data.attrName==='href'){
-    try{const url=new URL(data.attrValue);if(url.protocol==='https:'&&!url.username&&!url.password)node.setAttribute('data-alpha-link',url.href);}catch{}
+    const url=safeHttps(data.attrValue);if(url)node.setAttribute('data-alpha-link',url);
   }
 });
 /** Email markup is isolated from app CSS and scripts. The caller applies the saved

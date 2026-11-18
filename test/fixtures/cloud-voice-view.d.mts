@@ -62,7 +62,6 @@ export function cloudVoiceViewFixture(options?: {
   uploads: number;
   cloudSpeech: number;
   localFactories: number;
-  pairedFactories: number;
   sends: number;
   speechInputs: {requestId: string}[];
   stopPlaybackInputs: PlaybackInput[];

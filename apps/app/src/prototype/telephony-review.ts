@@ -23,15 +23,16 @@ export function askTelephonyReview(review: TelephonyReview, signal: AbortSignal)
     pending = entry; signal.addEventListener('abort', abort, {once: true}); repaint();
   });
 }
+/** A contact's numbers, then its email addresses. */
+const contactLines = (contact: ContactDraft) => [...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)];
 /** A contact's fields as lines; a line the change removes is struck, a line it adds is strong. */
-export function contactChangeLines(before: ContactRecord, after: ContactDraft): {text: string; struck: boolean; added: boolean}[] {
-  const was = [...before.phoneNumbers.map(row => displayNumber(row.number)), ...before.emailAddresses.map(row => row.address)];
-  const will = [...after.phoneNumbers.map(row => displayNumber(row.number)), ...after.emailAddresses.map(row => row.address)];
+function contactChangeLines(before: ContactRecord, after: ContactDraft): {text: string; struck: boolean; added: boolean}[] {
+  const was = contactLines(before), will = contactLines(after);
   return [...was.filter(text => !will.includes(text)).map(text => ({text, struck: true, added: false})),
     ...will.map(text => ({text, struck: false, added: !was.includes(text)}))];
 }
 /** Template values of the sheet for the review that is open, or `{open: false}`. */
-export function presentTelephonyReview(entry: Pending | null) {
+function presentTelephonyReview(entry: Pending | null) {
   if (!entry) return {open: false, rows: [] as never[], dismiss: () => {}};
   const {review, settle} = entry;
   const style = (lines: {text: string; struck: boolean; added: boolean}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400}));
@@ -46,7 +47,7 @@ export function presentTelephonyReview(entry: Pending | null) {
         lines: style([...(renamed ? [{text: change.before.displayName, struck: true, added: false}] : []), ...contactChangeLines(change.before, change.after)]), choose, icon: ICON.save, bg: 'var(--acc)',
         label: `Save changes to ${change.before.displayName}`}; }
     const contact = option as ContactRecord;
-    return {ini: initials(contact.displayName), name: contact.displayName, lines: style([...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)].slice(0, 2).flatMap(plain)),
+    return {ini: initials(contact.displayName), name: contact.displayName, lines: style(contactLines(contact).slice(0, 2).flatMap(plain)),
       choose, icon: ICON.delete, bg: 'var(--alpha-call-red)', label: `Delete ${contact.displayName}`};
   });
   return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', dismiss: () => settle(null)};
@@ -56,13 +57,13 @@ export function installTelephonyReview(Component: any) {
   const p = Component.prototype, render = p.renderVals, mount = p.componentDidMount, unmount = p.componentWillUnmount;
   p.renderVals = function () { return {...render.call(this), telephonyReview: presentTelephonyReview(pending)}; };
   p.componentDidMount = function () {
-    mount?.call(this);
+    mount.call(this);
     repaint = () => this.setState({telephonyReviewRevision: Date.now()});
     this.telephonyReviewHide = () => { if (document.hidden) pending?.settle(null); };
     document.addEventListener('visibilitychange', this.telephonyReviewHide);
   };
   p.componentWillUnmount = function () {
     document.removeEventListener('visibilitychange', this.telephonyReviewHide); pending?.settle(null); repaint = () => {};
-    unmount?.call(this);
+    unmount.call(this);
   };
 }

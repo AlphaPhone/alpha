@@ -1,5 +1,4 @@
-import {workflowDeviceTimeZone,workflowLocalInstant,workflowClockContext} from '../runtime/workflow-local-time';
-import {automationLocalDateInput,localDate} from '../runtime/workflow-local-time';
+import {workflowDeviceTimeZone,workflowLocalInstant,workflowClockContext,automationLocalDateInput,localDate} from '../runtime/workflow-local-time';
 import {Capacitor} from '@capacitor/core';
 import {testMocksEnabled} from '../build-flags';
 import {browserWorkflowDraftStore} from '../browser/workflow-drafts';
@@ -13,12 +12,13 @@ import { workflowSha, workflowBytes } from '../runtime/workflow-device-contract'
 import { checkWorkflowScope, WORKFLOW_OPERATION_LABELS } from '../../../../.eliza/client-features/packages/contracts/src/workflow-scope.ts';
 import { WorkflowTypedRejected, type RemoteWorkflow } from '../runtime/workflow-protocol';
 import { projectNoteForModel, type StickyNote } from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
+import type { AlphaConnectionPlugin } from '../native/alpha-connection';
+import type { AlphaCalendarPlugin, WorkflowCalendar } from '../native/alpha-calendar';
 type Bag=Record<string,any>;
 type Pending={mutationId:string;specDigest:string;compilerRevision:string;workflowId?:string;versionId?:string};
 type Draft={format:1;identity:string;spec:PhoneSpec;workflowId?:string;versionId?:string;pending?:Pending};
-const secure=browserLocalAgentEnabled?developmentWorkflowDraftStore:registerPlugin<{secureRead(v:{slot:string}):Promise<{value:string|null}>;secureCompareExchange(v:{slot:string;expectedValue:string|null;value:string|null}):Promise<{status:string}>}>('AlphaConnection');
-const draftStorageDescription=browserDevProfile?'in this preview (not encrypted)':browserLocalAgentEnabled?'in the private development profile on this computer (not encrypted)':'encrypted on this phone';
-const calendar=registerPlugin<{workflowCalendars():Promise<{status:string;calendars:Bag[]}>;requestWorkflowReadAccess():Promise<{status:string}>}>('AlphaCalendar');
+const secure=browserLocalAgentEnabled?developmentWorkflowDraftStore:registerPlugin<AlphaConnectionPlugin>('AlphaConnection');
+const calendar=registerPlugin<Pick<AlphaCalendarPlugin,'workflowCalendars'|'requestWorkflowReadAccess'>>('AlphaCalendar');
 const palette=['Read','If','Write','Send','Notify','Speak','Do'];
 const icons:Record<string,string>={Read:'wfRead',If:'wfIf',Write:'edit',Send:'send',Notify:'bell',Speak:'wave',Do:'wfDo'};
 const known=new Set(['supplied_text','selected_notes','selected_reminders','calendar_range','contains','compose_draft','model_draft','save_note','app_notification','read_aloud']);
@@ -26,8 +26,7 @@ const supported=(id:string)=>known.has(id)&&(!['app_notification','read_aloud'].
 /** Monday-first weekday chips for a reviewed local-time trigger (0 = Sunday in the shared contract). */
 const WEEKDAYS:Array<[number,string]>=[[1,'Mon'],[2,'Tue'],[3,'Wed'],[4,'Thu'],[5,'Fri'],[6,'Sat'],[0,'Sun']];
 const TRIGGER_LABELS:Record<string,string>={manual:'Manual',time:'Time'};
-const deviceTimeZone=workflowDeviceTimeZone;
-function followDeviceClock(spec:PhoneSpec){const zone=deviceTimeZone();if(spec.trigger.kind==='time')spec.trigger.timeZone=zone;for(const step of spec.steps){if(step.operation==='selected_reminders')step.scope.timeZone=zone;if(step.operation==='calendar_range')step.range.timeZone=zone;}}
+function followDeviceClock(spec:PhoneSpec){const zone=workflowDeviceTimeZone();if(spec.trigger.kind==='time')spec.trigger.timeZone=zone;for(const step of spec.steps){if(step.operation==='selected_reminders')step.scope.timeZone=zone;if(step.operation==='calendar_range')step.range.timeZone=zone;}}
 const shiftLocalTime=(value:string,minutes:number)=>{const [h,m]=value.split(':').map(Number);const total=Math.min(23*60+59,Math.max(0,h*60+m+minutes));return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');};
 /** Owner-facing policy for a scheduled typed workflow; the agent enforces each part. */
 const SCHEDULE_POLICY='Phone must be on.';
@@ -41,7 +40,7 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
  // retained draft for another workflow was shown instead: Discard then opens that target.
  let targetName='',requested:{workflow?:RemoteWorkflow}|null=null;
  type DraftStorage={slot:string;raw:string|null;failed:boolean;queue:Promise<void>;secure:typeof secure};
- let calendars:Bag[]=[],storage:DraftStorage|null=null;
+ let calendars:WorkflowCalendar[]=[],storage:DraftStorage|null=null;
  let retainedDraftState:{storage:DraftStorage;draft:Draft|null}|null=null;
  const pendingWrites=new Set<Promise<void>>();
  const failedWrites=new Set<DraftStorage>();
@@ -49,9 +48,9 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
  const selected=()=>draft?.spec.steps.find(s=>s.id===sheet);
  const locked=()=>busy||!!draft?.pending||!!storage?.failed;
  /** Workflows cannot yet save into the agent's Notes: its create has no client identity, so a repeat could add a second note. */
- const offered=(id:string)=>supported(id)&&!(id==='save_note'&&owner()?.notesSourceMode==='canonical');
- /** Notes a Notes step may select: the agent's Notes when that is the current source, otherwise Previous notes. */
- const noteRows=():Array<{id:string;title:string;body:string}>=>{const host=owner();if(host?.notesSourceMode!=='canonical')return host?.vget('notes').list??[];return ((host.canonicalNotesUi?.notes()??[]) as StickyNote[]).map(note=>({id:note.id,...projectNoteForModel(note)}));};
+ const offered=(id:string)=>supported(id)&&id!=='save_note';
+ /** Notes a Notes step may select: the agent's Notes. */
+ const noteRows=():Array<{id:string;title:string;body:string}>=>((owner()?.canonicalNotesUi?.notes()??[]) as StickyNote[]).map(note=>({id:note.id,...projectNoteForModel(note)}));
  function persist(recovered?:DraftStorage){
   if(!draft||!storage)return;
   const target=storage,snapshot=JSON.stringify(draft);
@@ -114,7 +113,7 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
   const common={id:stepId,kind:kind as PhoneStep['kind'],operation:id};
   if(id==='supplied_text')return {...common,text:''};
   if(id==='selected_notes'){ensureDevice();return {...common,notes:[]};}
-  if(id==='selected_reminders'){ensureDevice();return {...common,scope:{window:'open_and_completed_today',timeZone:deviceTimeZone(),maximumItems:50}};}
+  if(id==='selected_reminders'){ensureDevice();return {...common,scope:{window:'open_and_completed_today',timeZone:workflowDeviceTimeZone(),maximumItems:50}};}
   if(id==='calendar_range'){ensureDevice();const start=new Date();start.setHours(0,0,0,0);const end=new Date(start);end.setDate(end.getDate()+1);return {...common,range:{calendarIds:[],start:start.toISOString(),end:end.toISOString(),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,maximumEvents:100}};}
   if(id==='contains')return {...common,source,text:'',caseSensitive:false};
   if(id==='compose_draft')return {...common,source,prefix:'',suffix:''};
@@ -130,8 +129,7 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
  function move(offset:number){const step=selected();if(!step||!draft||locked())return;const list=[...draft.spec.steps],index=list.indexOf(step),next=index+offset;if(next<0||next>=list.length)return;[list[index],list[next]]=[list[next],list[index]];const seen=new Set<string>();for(const item of list){if(item.source&&!seen.has(item.source)){toast('Must follow its input');return;}seen.add(item.id);}change(()=>{draft!.spec.steps=list;});}
  async function chooseNote(id:string){const step=selected();if(step?.operation!=='selected_notes'||!draft||locked())return;const expected=generation,target=step;if(step.notes.some((n:Bag)=>n.id===id)){change(()=>{step.notes=step.notes.filter((n:Bag)=>n.id!==id);});return;}if(step.notes.length>=16){toast('16 max');return;}try{const host=owner();
   // The agent's Notes: the revision is the saved record's text, checked again when the approved step reads it.
-  if(host.notesSourceMode==='canonical'){const notes=host.canonicalNotesUi;if(!notes?.current)throw new Error('Notes is unavailable. Reconnect your agent, then try again.');const found=noteRows().filter(n=>n.id===id);if(found.length!==1)throw new Error('Note text is unavailable');const revision=await workflowSha([found[0].title,found[0].body]);if(expected!==generation||target!==selected()||locked()||host.canonicalNotesUi!==notes)return;change(()=>{ensureDevice();step.notes.push({id,revision});});return;}
-  await host.notesStore?.assertCurrent();const raw=host.notesStore?.raw;if(host.notesStorageFailed||host.notesPending||host.notesRaw!==raw)throw new Error('Notes changed. Reopen Notes before selecting');const found=host.vget('notes').list.filter((n:Bag)=>n.id===id);if(found.length!==1||typeof found[0].title!=='string'||typeof found[0].body!=='string')throw new Error('Note text is unavailable');const revision=await workflowSha([found[0].title,found[0].body]);await host.notesStore.assertCurrent();if(expected!==generation||target!==selected()||locked()||host.notesStore.raw!==raw)return;change(()=>{ensureDevice();step.notes.push({id,revision});});}catch(error){toast((error as Error).message);}}
+  const notes=host.canonicalNotesUi;if(!notes?.current)throw new Error('Notes is unavailable. Reconnect your agent, then try again.');const found=noteRows().filter(n=>n.id===id);if(found.length!==1)throw new Error('Note text is unavailable');const revision=await workflowSha([found[0].title,found[0].body]);if(expected!==generation||target!==selected()||locked()||host.canonicalNotesUi!==notes)return;change(()=>{ensureDevice();step.notes.push({id,revision});});}catch(error){toast((error as Error).message);}}
  async function loadCalendars(request=false){const step=selected();if(step?.operation!=='calendar_range'||locked())return;const token=generation;try{if(request&&(await calendar.requestWorkflowReadAccess()).status!=='granted')throw new Error('Calendar read permission was not granted');const result=await calendar.workflowCalendars();if(token!==generation||selected()!==step)return;if(result.status!=='ready')throw new Error('Choose Connect calendars to grant read access');calendars=result.calendars;status=calendars.length?'Select only the calendars this workflow may read':'No calendars are available on this phone';publish();}catch(error){if(token===generation){status=(error as Error).message;publish();}}}
  async function save(){if(describeOn||!draft||!catalog||locked())return;const binding=connectionController.getWorkflowClient(),session=connectionController.getSnapshot().session;if(!binding||!session)return;let spec:PhoneSpec;if(!draft.workflowId)followDeviceClock(draft.spec);const draftAtStart=draft,revisionAtStart=JSON.stringify(draft.spec),generationAtStart=generation;try{spec=normalizePhoneSpec(draft.spec);assertPhoneCapabilities(spec,catalog);await localSaved();if(draft!==draftAtStart||generation!==generationAtStart||JSON.stringify(draft.spec)!==revisionAtStart)return;}catch(error){status=(error as Error).message;publish();return;}const encoded=JSON.stringify(spec);if(review!==encoded){review=encoded;sheet=null;status='Review the steps, then tap Save again. It saves paused, and each phone step still needs your approval.'+(spec.trigger.kind==='time'?' Its schedule stays off until you turn it on.':'');publish();return;}
   const token=generation,expectedCatalog=catalog;controller=new AbortController();const signal=controller.signal;busy=true;publish();const valid=()=>token===generation&&!signal.aborted&&connectionController.getWorkflowClient()?.sessionId===binding.sessionId&&!document.hidden;
@@ -169,7 +167,8 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
   }catch(error){if(token===generation)toast((error as Error).message);}
   finally{if(token===generation){busy=false;publish();}}
  }
- function cancelGeneration(){if(generating){generation++;controller?.abort();controller=null;busy=false;generating=false;}describeOn=false;generated=null;status='';publish();}
+ function stopGeneration(){if(generating){generation++;controller?.abort();controller=null;busy=false;generating=false;}}
+ function cancelGeneration(){stopGeneration();describeOn=false;generated=null;status='';publish();}
  async function generateDraft(){
   if(!describeOn||!draft||!catalog||locked())return;
   const binding=connectionController.getWorkflowClient();if(!binding)return;
@@ -181,12 +180,12 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
   const capabilities=catalog;controller=new AbortController();const signal=controller.signal;busy=true;generating=true;generated=null;status='';publish();
   const valid=()=>active&&describeOn&&token===generation&&!signal.aborted&&!document.hidden&&binding.sessionId===connectionController.getWorkflowClient()?.sessionId&&JSON.stringify(draft?.spec)===baseline;
   try{await localSaved();if(!valid())return;const spec=await binding.client.generatePhone(prompt,capabilities,operations,signal,existing,target);if(!valid())return;generated=spec;generatedBaseline=baseline;generatedSession=binding.sessionId;status='';}
-  catch(error){if(valid()){const message=error instanceof Error?error.message:'Generation failed.';status=message.startsWith('Workflow needs clarification: ')?message.slice('Workflow needs clarification: '.length):error instanceof Error?error.message:'Failed';}}
+  catch(error){if(valid())status=error instanceof Error?error.message.replace(/^Workflow needs clarification: /,''):'Failed';}
   finally{if(token===generation){busy=false;generating=false;controller=null;publish();}}
  }
  function useGenerated(){if(!generated||locked()||!draft)return;if(generatedSession!==connectionController.getWorkflowClient()?.sessionId||generatedBaseline!==JSON.stringify(draft.spec)||JSON.stringify(generated.device)!==JSON.stringify(connectionController.getWorkflowDeviceTarget()??undefined)){generated=null;status='Changed';publish();return;}const spec=generated;change(()=>{draft!.spec={...spec,trigger:draft!.spec.trigger};generated=null;describeOn=false;sheet=null;});}
  /** The owner sets when the workflow runs; generation never does. Only triggers this agent offers are selectable. */
- function chooseTrigger(kind:string){if(!draft||!catalog||locked())return;const offered=catalog.triggers.find(t=>t.kind===kind);if(!offered?.available||!['manual','time'].includes(kind)){toast(offered?.reason||'Not on this agent');return;}if(draft.spec.trigger.kind===kind)return;change(()=>{draft!.spec.trigger=kind==='time'?{kind:'time',localTime:'08:00',timeZone:deviceTimeZone(),days:[1,2,3,4,5]}:{kind:'manual'};});}
+ function chooseTrigger(kind:string){if(!draft||!catalog||locked())return;const offered=catalog.triggers.find(t=>t.kind===kind);if(!offered?.available||!['manual','time'].includes(kind)){toast(offered?.reason||'Not on this agent');return;}if(draft.spec.trigger.kind===kind)return;change(()=>{draft!.spec.trigger=kind==='time'?{kind:'time',localTime:'08:00',timeZone:workflowDeviceTimeZone(),days:[1,2,3,4,5]}:{kind:'manual'};});}
  function editTime(edit:(trigger:PhoneTimeTrigger)=>PhoneTimeTrigger|null){const trigger=draft?.spec.trigger;if(!trigger||trigger.kind!=='time'||locked())return;const next=edit(trigger);if(next)change(()=>{draft!.spec.trigger=next;});}
  function toggleDay(day:number){editTime(trigger=>{const days=trigger.days.includes(day)?trigger.days.filter(d=>d!==day):[...trigger.days,day].sort((a,b)=>a-b);if(!days.length){toast('Pick a day');return null;}return {...trigger,days};});}
  function triggerSheet(api:Bag){const trigger=draft?.spec.trigger??{kind:'manual' as const};const time=trigger.kind==='time'?trigger:null;
@@ -231,7 +230,7 @@ export function createWorkflowAuthoring(owner:()=>any,publish:()=>void,onSaved:(
  return {typed:true,fullEditor:true,metadataOnly:false,name:draft?.spec.name||'',onName:(event:Bag)=>change(()=>{draft!.spec.name=String(event.target.value);}),description:draft?.spec.description||'',onDescription:(event:Bag)=>change(()=>{draft!.spec.description=String(event.target.value);}),saveOff:describeOn||locked()||!draft||!draft.spec.steps.length,saveCss:describeOn||locked()?'background:var(--s2);color:var(--mut)':'background:var(--acc);color:#fff',save,cancel:close,typedStatus:status,typedReview:review?reviewSummary(JSON.parse(review)):'',typedSpecification:review?JSON.stringify(JSON.parse(review),null,2):'',hasTypedReview:!!review,unknown:!!draft?.pending,refresh:recover,canResend:!!draft?.pending&&unreceipted&&!busy,resend,resendLabel:resendReview?'Confirm resend':'Resend',discard:discardDraft,canDiscard:!!draft&&!draft.pending&&!busy,discardLabel:discard?'Confirm discard':'Discard',describeOff:catalog?.generationProtocol!==1,steps:rows,palette:palette.map(k=>({k,d:api.ic[icons[k]],label:'Add '+k+' step',add:()=>add(k)})),hasApps:false,
    // `empty` is the template's only gate for the Describe button: offered whenever the draft can change, steps or not.
    // describe() and generateDraft send the current draft as the existing one.
-   empty:!!draft&&!describeOn&&!locked(),describe:()=>{if(locked()||!draft)return;if(catalog?.generationProtocol!==1){toast('Not on your agent');return;}describeOn=true;generated=null;review=null;status='Sent to your agent';publish();},describeOn,descriptionPrompt,onGenerationPrompt:(event:Bag)=>{if(generating){generation++;controller?.abort();controller=null;busy=false;generating=false;}descriptionPrompt=String(event.target.value);generated=null;status='';publish();},generateDraft,cancelGeneration,generating,generateLabel:generating?'Generating…':'Generate draft',generateCss:locked()||!descriptionPrompt.trim()?'background:var(--s2);color:var(--mut)':'background:var(--acc);color:#fff',generationOff:locked()||!descriptionPrompt.trim(),generatedName:generated?.name||'',generatedDescription:generated?.description||'',generatedSteps,generatedReview:generated?JSON.stringify(generated,null,2):'',hasGenerated:!!generated,useGenerated,sheetOn:!!sheet,closeSheet:()=>{sheet=null;publish();},isTrig:sheet==='trigger',isStep:!!step,
+   empty:!!draft&&!describeOn&&!locked(),describe:()=>{if(locked()||!draft)return;if(catalog?.generationProtocol!==1){toast('Not on your agent');return;}describeOn=true;generated=null;review=null;status='Sent to your agent';publish();},describeOn,descriptionPrompt,onGenerationPrompt:(event:Bag)=>{stopGeneration();descriptionPrompt=String(event.target.value);generated=null;status='';publish();},generateDraft,cancelGeneration,generating,generateLabel:generating?'Generating…':'Generate draft',generateCss:locked()||!descriptionPrompt.trim()?'background:var(--s2);color:var(--mut)':'background:var(--acc);color:#fff',generationOff:locked()||!descriptionPrompt.trim(),generatedName:generated?.name||'',generatedDescription:generated?.description||'',generatedSteps,generatedReview:generated?JSON.stringify(generated,null,2):'',hasGenerated:!!generated,useGenerated,sheetOn:!!sheet,closeSheet:()=>{sheet=null;publish();},isTrig:sheet==='trigger',isStep:!!step,
   tr:triggerSheet(api),
   sp:step?{typed:true,freeTextStyle:"display:none",k:step.kind,d:api.ic[icons[step.kind]],up:()=>move(-1),down:()=>move(1),upCss:index===0?'opacity:.3':'',downCss:index===draft!.spec.steps.length-1?'opacity:.3':'',presets:enabledOptions.map(o=>({label:o.label||o.id.replaceAll('_',' '),css:o.id===step.operation?'background:var(--acc);color:#fff':o.available&&offered(o.id)?'background:var(--s2)':'background:var(--s2);opacity:.5',pick:()=>chooseOperation(o.id)})),text:'',onText:()=>{},fields,hasSource:!!step.source,sources:draft!.spec.steps.slice(0,index).map(s=>({label:s.kind+': '+s.operation.replaceAll('_',' '),selected:step.source===s.id,pick:()=>change(()=>{step.source=s.id;})})),caseMatch:step.operation==='contains',caseLabel:step.caseSensitive?'Case-sensitive match':'Ignore letter case',toggleCase:()=>change(()=>{step.caseSensitive=!step.caseSensitive;}),isNotes:step.operation==='selected_notes',notes:step.operation==='selected_notes'?noteRows().map((n:Bag)=>({label:n.title||'Untitled note',selected:step.notes.some((chosen:Bag)=>chosen.id===n.id),pick:()=>void chooseNote(n.id)})):[],isCalendar:step.operation==='calendar_range',connectCalendars:()=>void loadCalendars(true),calendars:step.operation==='calendar_range'?calendars.map(c=>({label:c.name+' · '+c.account,selected:step.range.calendarIds.includes(c.id),pick:()=>change(()=>{const chosen=step.range.calendarIds;step.range.calendarIds=chosen.includes(c.id)?chosen.filter((id:string)=>id!==c.id):chosen.length<16?[...chosen,c.id]:chosen;})})):[],del:remove}:null};
  }

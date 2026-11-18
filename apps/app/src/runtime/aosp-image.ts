@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { detectTelephonyProfile } from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 /**
- * Alpha AOSP image capability (owner decision P-36, issue #420).
+ * Alpha AOSP image capability.
  *
  * Phone, Contacts and SMS exist only on the Alpha AOSP image. The capability is decided by native
  * code from facts an ordinary install cannot produce (see AlphaImageCapability.java): the launcher
@@ -11,7 +11,7 @@ import { detectTelephonyProfile } from '../../../../.eliza/client-features/packa
  * URL, storage, a build flag or the launcher flavor: a standalone APK, a sideloaded launcher APK, a
  * browser and a test-mocks development server all read `false`, and restored state cannot change it.
  */
-export const AOSP_TELEPHONY_PLUGIN = 'AlphaTelephony';
+const AOSP_TELEPHONY_PLUGIN = 'AlphaTelephony';
 /** Views the owner decision limits to the Alpha AOSP image. */
 export const AOSP_IMAGE_VIEWS: readonly string[] = Object.freeze(['phone', 'messages', 'contacts']);
 /**

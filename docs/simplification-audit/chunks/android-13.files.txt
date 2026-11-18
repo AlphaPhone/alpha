@@ -1,0 +1,17 @@
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaFilesPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaGmailPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaHostedResultsPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapabilities.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaKeyboardDictationService.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaListenerPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaMailAttachmentsPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaMailFileProvider.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaMailPdfActivity.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaMapsTransportPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaMediaConfig.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaNavigationService.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaNoteAudioPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaNoteDocumentsPlugin.java
+android/app/src/main/java/ai/alphacompute/alphaphone/AlphaNoteRecorder.java

@@ -1,0 +1,12 @@
+# specs/quint/application/BackDispatch.qnt
+- Lines: 218 | Kind: Quint model (application family, live: registered in `specs/quint/application/manifest.json`) | Verdict: KEEP model; PORT `test/quint-back-dispatch.test.mjs`
+- Covers: Native Back: Android hands Back to the page only while the availability flag is set, every such Back closes exactly one renderer layer (popover, dialog, panel, shade, voice, conversation, drawer, menu, edit, inner page, stack, view), and the activity never exits over an open layer. Models: `prototype/agent-adapter.ts` (`updateBackAvailability`, `alphaCanGoBack`, `backHandler`, `modalPanels`), `prototype/home-shell.ts`, `prototype/model.js` (`back()`, `shellNavigate`), `MainActivity.java` (`handleOnBackPressed`) — exist; 14 symbol pins present. Duplicates: Android instrumentation Back tests and Playwright home-shell specs cover individual cases. Callers/importers: manifest (16 tests, 6 witnesses); `scripts/check-quint.ts` default gate (typecheck + every manifest `tests` run + simulation) via `npm run quint:check`; changed-model symbolic verify via `scripts/ci/check-changed-models.ts` when a manifest source changes; replayed only by `test/quint-back-dispatch.test.mjs` (no harness under `refinement/`; uses `shell-model-traces.mjs`, `shell-core-fixture.mjs`).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | test 15-25 | T10 / T2 | The test slices `agent-adapter.ts` between `'  function modalPanels(){'` / `'  // Native Back reaches'`, `'  function updateBackAvailability('` / `'\n  const notesLeave'`, and the body of `this.backHandler = …` / `this.selectionHandler =`; regex-extracts the JavaScript string `MainActivity.java` evaluates and asserts a Java `if (home || "true".equals(handled) …` line by regex; `shell-core-fixture.mjs` slices `model.js` (research §2.6). | PORT: export `backAvailability(document, controllers)` and `handleBack(event)` from a small `prototype/back-dispatch.ts`; move the activity's injected script to a resource/constant that both Java and the test read as data; import `home-shell.ts` as it already does. | High: the most text-coupled harness of this chunk (three god files and a Java string). |
+| 2 | 130-195 | — | Model is clear and well commented; 16 runs are useful regression scenarios. | Keep. | — |
+
+## Proposed end state
+Model unchanged. Its replay imports a back-dispatch module and the shell core; no slices of `agent-adapter.ts`, `model.js` or `MainActivity.java`.

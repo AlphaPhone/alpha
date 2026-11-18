@@ -1,0 +1,3 @@
+scripts/ci/fixtures/recovery-idle-52ab.json
+scripts/ci/fixtures/recovery-policy-52ab.txt
+scripts/ci/fixtures/recovery-storage-e4d-pass.txt

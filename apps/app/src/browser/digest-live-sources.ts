@@ -2,9 +2,10 @@ import {calendarDocument} from './calendar-store';
 import type {HostedLiveSelection} from '../runtime/hosted-digests';
 import {calendarRange,type CalendarRecord} from './calendar-records';
 import type {DevelopmentIdentity} from './development-identity';
+import {isSha256Hex} from '../lib/ids';
 export const browserDigestAccount=(identity:DevelopmentIdentity,revision:string)=>({accountId:'browser:'+identity.namespace,accountRevision:revision,label:'Browser Inbox and Calendar',kinds:['email','calendar']});
 export function validateBrowserDigestSelection(value:any,identity:DevelopmentIdentity,revision:string,account=browserDigestAccount(identity,revision)):HostedLiveSelection{
- if(!/^[a-f0-9]{64}$/.test(revision)||!value||value.provider!=='google'||value.accountId!==account.accountId||value.accountRevision!==revision||!account.kinds.includes(value.kind)||!Number.isInteger(value.windowHours)||value.windowHours<1||value.windowHours>168||!Number.isInteger(value.maxItems)||value.maxItems<1||value.maxItems>25||value.kind==='calendar'&&value.calendarId!=='local')throw Error('Source access changed.');
+ if(!isSha256Hex(revision)||!value||value.provider!=='google'||value.accountId!==account.accountId||value.accountRevision!==revision||!account.kinds.includes(value.kind)||!Number.isInteger(value.windowHours)||value.windowHours<1||value.windowHours>168||!Number.isInteger(value.maxItems)||value.maxItems<1||value.maxItems>25||value.kind==='calendar'&&value.calendarId!=='local')throw Error('Source access changed.');
  return {provider:'google',accountId:value.accountId,accountRevision:revision,kind:value.kind,windowHours:value.windowHours,maxItems:value.maxItems,...(value.kind==='calendar'?{calendarId:'local'}:{})};
 }
 const text=(v:unknown,max:number)=>typeof v==='string'?v.slice(0,max):'';

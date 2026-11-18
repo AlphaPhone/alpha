@@ -3,8 +3,7 @@ import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/p
 import {noticeReviewable} from '../prototype/context-selection';
 import {alphaClient} from './alpha-client';
 import {digestSummaryText} from './hosted-digests';
-import type {resolveHostedResultTap} from './hosted-result-notices';
-type Result=Awaited<ReturnType<typeof resolveHostedResultTap>>;
+import type {HostedResultTap as Result} from './hosted-result-notices';
 /** The opaque Android action resolves only a retained result from the same owner and agent.
  * A result that cannot be reviewed here is handed back through `unreviewable` so the caller opens it like an ordinary tap. */
 export function reviewHostedNoticeQuestion(options:{signal?:AbortSignal;result:Extract<Result,{kind:'ready'}>;current:()=>boolean;recheck:()=>Promise<Result>;canCompose:()=>boolean;consume:()=>Promise<void>;discard:()=>Promise<void>;compose:(draft:string)=>void;report:(message:string)=>void;unreviewable:()=>void;closed:()=>void}):(()=>void)|undefined {

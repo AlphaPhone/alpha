@@ -1,13 +1,13 @@
 import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
-import { devSurfacesEnabled, testMocksEnabled } from '../build-flags';
+import { devSurfacesEnabled } from '../build-flags';
 import { browserDevProfile } from '../browser/dev-profile';
 // Flag-off builds resolve this to an inert stub (vite.config.ts disabledModuleSource).
 import { createDevelopmentVault } from './dev-vault';
 import { createPasswordsClient, passwordsError, type PasswordsClient } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/client.ts';
-import { createTransferClient, type ElizaPasswordTransferPlugin, type PasswordTransferClient } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts';
 import { filterEntries, normalizeWebsite } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts';
 import type { ElizaPasswordsPlugin, PasswordBinding, PasswordEntrySummary, PasswordsStatus } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/definitions.ts';
+import type { BrowserTabHostPlugin } from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts';
 
 /**
  * Settings → Password manager over the shared plugin-native-passwords vault.
@@ -51,14 +51,6 @@ function resolveClient(): Promise<PasswordsClient | null> {
   return resolving;
 }
 
-/** Transfers run natively and expose only counts validated by the shared client. */
-let transfer: PasswordTransferClient | null | undefined;
-function transferClient(): PasswordTransferClient | null {
-  if (transfer !== undefined) return transfer;
-  if (!testMocksEnabled || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('ElizaPasswordTransfer')) return transfer = null;
-  return transfer = createTransferClient(registerPlugin<ElizaPasswordTransferPlugin>('ElizaPasswordTransfer'));
-}
-
 function clearSecrets() { if (draft) draft.password = ''; draft = null; }
 function lockState(message: string) {
   ++generation; confirmReset = null;
@@ -77,7 +69,7 @@ function expired(message: string) {
 async function refreshBrowserFill(current: () => boolean) {
   if (!Capacitor.isNativePlatform()) return;
   try {
-    const result = await registerPlugin<{ loginFillStatus(): Promise<{ available?: unknown }> }>('AlphaBrowser').loginFillStatus();
+    const result = await registerPlugin<Pick<BrowserTabHostPlugin, 'loginFillStatus'>>('AlphaBrowser').loginFillStatus();
     if (current()) browserFill = { available: result?.available === true };
   } catch { if (current()) browserFill = null; }
 }
@@ -96,14 +88,12 @@ async function refresh() {
     if (!current()) return;
     status = next;
     if (next.locked) { expired(notice); notify(); return; }
-    else {
-      const list = await vault.list();
-      if (!current()) return;
-      entries = list;
-      if (expiry) clearTimeout(expiry);
-      // Reflect the native unlock window; native code enforces it independently.
-      expiry = setTimeout(() => { expired('Locked'); notify(); }, Math.max(1000, next.unlockRemainingMs));
-    }
+    const list = await vault.list();
+    if (!current()) return;
+    entries = list;
+    if (expiry) clearTimeout(expiry);
+    // Reflect the native unlock window; native code enforces it independently.
+    expiry = setTimeout(() => { expired('Locked'); notify(); }, Math.max(1000, next.unlockRemainingMs));
   } catch (error) {
     if (!current()) return;
     const failure = passwordsError(error);
@@ -130,10 +120,6 @@ async function run(name: string, task: (vault: PasswordsClient, current: () => b
     else if (draft && (name === 'save' || name === 'remove')) draft.error = failure.message;
     else if (fail) fail(failure.message);
     else notice = failure.message;
-    // Transfer can stop after changing the selected file or vault. Never lose
-    // this warning when the generic vault mapper replaces native error text.
-    if (name === 'export') notice = 'Export failed · delete file';
-    else if (name === 'import') notice = 'Import failed';
   } finally { if (ticket === operation) { busy = ''; if (active && !document.hidden) notify(); } }
 }
 
@@ -165,7 +151,7 @@ interface Helpers { info(label: string, val: string): Bag; group(rows: Bag[]): B
 
 // `lucide` names the row icon (public/icons/lucide); `trail` is an inline trailing glyph path.
 const nav = (label: string, go: () => void, extra: Bag = {}): Bag => ({ kNav: true, label, lbl: extra.aria || label, chev: !extra.val && !extra.trail, noAB: true, go, hasSub: !!extra.sub, sub: extra.sub || '', hasVal: !!extra.val, val: extra.val || '', busy: !!busy, ...(extra.lucide ? { lucide: extra.lucide } : {}), ...(extra.trail ? { hasTrail: true, trail: extra.trail, trailCss: extra.trailCss || 'color:var(--mut)' } : {}), ...(extra.labCss ? { labCss: extra.labCss } : {}) });
-const button = (label: string, go: () => void, primary = false, disabled = false, icon = ''): Bag => ({ kBtn: true, label, go, dis: disabled || !!busy, noAB: true, css: primary && !disabled ? 'background:var(--acc);color:#fff' : 'background:var(--s2)', ...(icon ? { hasIcon: true, d: icon } : {}) });
+const button = (label: string, go: () => void, primary = false, icon = ''): Bag => ({ kBtn: true, label, go, dis: !!busy, noAB: true, css: primary ? 'background:var(--acc);color:#fff' : 'background:var(--s2)', ...(icon ? { hasIcon: true, d: icon } : {}) });
 const iconInfo = (helpers: Helpers, label: string, val: string, icon: string): Bag => ({ ...helpers.info(label, val), ...(helpers.ic[icon] ? { hasIcon: true, d: helpers.ic[icon] } : {}) });
 const input = (ic: Bag, label: string, placeholder: string, type: string, value: string, change: (value: string) => void, icon = 'lock'): Bag => ({ kInput: true, label, ph: placeholder, type, value, d: ic[icon] || ic.lock, hasIcon: true, noAB: true, change: (event: Event) => change((event.target as HTMLInputElement).value) });
 const captioned = (helpers: Helpers, cap: string, rows: Bag[], plain = false): Bag => ({ ...helpers.group(rows), ...(plain ? { css: 'display:flex;flex-direction:column;gap:10px' } : {}), cap, hasCap: !!cap });
@@ -242,25 +228,6 @@ export function passwordManagerGroups(helpers: Helpers): Bag[] {
     groups.push(captioned(helpers, '', [input(helpers.ic, 'Search passwords', 'Search passwords', 'search', query, value => { query = value; notify(); }, 'search'), button('Add password', () => openEntry(helpers, null), true)], true));
     const shown = filterEntries(entries, query);
     groups.push(helpers.group(shown.length ? shown.map(entry => nav(entry.label, () => openEntry(helpers, entry), { sub: entry.username, aria: `Open ${entry.label}`, lucide: 'globe' })) : [helpers.info(entries.length ? 'No matching passwords' : 'No saved passwords', '')]));
-    const move = transferClient();
-    if (move) groups.push(helpers.group([
-      nav(busy === 'import' ? 'Importing…' : 'Import passwords', () => void run('import', async (_vault, current) => {
-        try {
-          const result = await move.importVault();
-          if (!current()) return;
-          notice = result.imported ? `Imported ${result.imported} ${result.imported === 1 ? 'password' : 'passwords'}${result.skipped ? `, ${result.skipped} not imported` : ''}.` : 'No passwords were imported.';
-        } finally { if (current()) await refresh(); }
-      }), { lucide: 'download' }),
-      nav(busy === 'export' ? 'Exporting…' : 'Export passwords', () => void run('export', async (_vault, current) => {
-        // Native export locks the vault before its fresh authentication, so the list is
-        // refreshed after a cancelled or failed export too.
-        try {
-          const result = await move.exportVault();
-          if (!current()) return;
-          notice = `Exported ${result.exported}`;
-        } finally { if (current()) await refresh(); }
-      }), { aria: 'Export passwords, unencrypted file', lucide: 'share-2', trail: helpers.ic.info || '', trailCss: 'color:var(--warn)' }),
-    ]));
   }
   if (status) {
     const selection = { 'this-app': 'Alpha', other: 'Other', none: 'None', unknown: '—' }[status.autofill.selected];
@@ -323,7 +290,7 @@ export function passwordEntryPage(helpers: Helpers, back: () => void): Bag | nul
     actions.push(button(current.confirmDelete ? 'Confirm delete' : 'Delete', () => {
       if (!current.confirmDelete) { set({ confirmDelete: true }); return; }
       void run('remove', async (v, currentRun) => { await v.remove(id); if (!currentRun()) return; if (draft === current) draft = null; notice = 'Password deleted.'; helpers.set({ page: 'password-provider' }); await refresh(); });
-    }, false, false, helpers.ic.trash || ''));
+    }, false, helpers.ic.trash || ''));
   }
   groups.push(captioned(helpers, '', actions, true));
   return { isTop: false, notTop: true, cls: 'enter', z: 5, title, hasTitle: true, backLabel: 'Back to Password manager', back: leave, hero: {}, groups };

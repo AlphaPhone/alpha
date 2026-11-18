@@ -1,0 +1,15 @@
+# test/browser/view-navigation-react.spec.ts
+- Lines: 56 | Kind: Playwright chromium, 14 tests (2-scenario loop + 10-view loop); real React chat over a fake `AlphaConnection` native bridge, but the agent is reached by `connectionController.pair('remote','https://owned-views.invalid',…)` in-page (hosted pairing) (s2 r5) | Verdict: MERGE into `journeys/chat.spec.ts` ("agent opens a view") on the resident/flag-off harness
+- Covers: a VIEWS_SHOW prepared receipt from the agent's reply switches the shell to the view, claims once with the current client/installation ids and acknowledges only IDs plus `switched:true` after the view is visible; unknown-child and wrong-client receipts do nothing; going offline while the claim is pending cannot switch or acknowledge; each of ten registered views (automations → workflows) maps to the right Alpha view and the enrolled view profile lists exactly eleven views. Duplicates: `view-navigation.spec.ts` (module-level twin), `voice-owned-navigation.spec.ts`, `local-agent-native-stream.spec.ts`, `helpers/native-navigation-protocol.ts`, host `flag-off-navigation-protocol.test.mjs`, `prepared-navigation-route.test.mjs`, `voice-prepared-navigation.test.mjs`. Callers/importers: chromium only.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 40 | A3 / D5 | Connects with `connectionController.pair('remote', …)`, the hosted/paired agent path the PRD excludes; it survives only as test-mocks harness (D5). The same navigation contract runs over the resident agent in `local-agent-native-stream.spec.ts` / `native-navigation-protocol.ts`. | Move the cases onto the resident harness; drop the pairing fixture. | Medium: verify the resident path covers claim + ack ordering. |
+| 2 | 11-39 | T7 | 30-line fake of the remote agent HTTP API (auth, pair, me, agents, device registration, view profile, conversations, claim, result). | Gone with the move; the resident harness already answers these at the native boundary. | None |
+| 3 | 53-56 | T4 | Ten-view loop re-runs the full pairing and chat turn per view to check a mapping table. | Keep two: `automations` (alias to workflows) and one plain view; the full mapping list is a constant, not behaviour. | None |
+| 4 | 44 | — | Screenshot written to a fixed `test-results/promoted-view-react/` path instead of `info.outputPath`. | Use `info.outputPath` or drop. | None |
+| 5 | 50 | P2 | Owner change simulated by `connectionController.offline()` in-page. | Use the Settings/connection UI or a harness "agent lost" event. | Low |
+
+## Proposed end state
+In `journeys/chat.spec.ts` (production lane, resident agent): "asking to open Notes switches the view, claims once and acknowledges only IDs after the view is visible"; "a receipt for another client is ignored"; "losing the agent during the claim neither switches nor acknowledges"; "Workflows is opened for an automations receipt". Delete this file. Owner question: once these run on the resident path, can the hosted-pairing test harness in `connection-ui.tsx` (`hosted.pair`) be deleted (D5 follow-up)?

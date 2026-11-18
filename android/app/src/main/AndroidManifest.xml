@@ -61,8 +61,8 @@
   <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH"/></intent>
   <intent><action android:name="android.settings.SETTINGS"/></intent>
   <intent><action android:name="android.settings.APP_NOTIFICATION_SETTINGS"/></intent>
-  <!-- Home Phone shortcut: resolve and open the user's dialer with an empty dial pad. Alpha's own
-       Phone view, calls and call permissions stay MVP-DEFERRED. -->
+  <!-- Home Phone shortcut: resolve and open the user's dialer with an empty dial pad. The image's own
+       Phone surfaces are declared in the launcher manifest. -->
   <intent><action android:name="android.intent.action.DIAL"/><data android:scheme="tel"/></intent>
   <!-- SMS handoff visibility (SENDTO smsto) is declared only by the launcher manifest, for the Alpha AOSP image. -->
   <intent><action android:name="android.intent.action.SET_ALARM"/></intent>

@@ -5,7 +5,7 @@ import {setTextScale} from './accessibility-states';
 // Live agent Notes are drawn by Alpha's own Notes template, the one mock mode shows, in the view refresh
 // layout: header with Back, title, Record and +, the folder chips, and a one-column
 // list (title, date, two-line preview) with a Pinned section. Recently deleted is a folder chip while it
-// has items; Previous notes is a quiet text action under the list. Screenshots land in test-results/notes-restore for side-by-side review
+// has items. Screenshots land in test-results/notes-restore for side-by-side review
 // with the mock-mode reference.
 const SHOTS='test-results/notes-restore';
 const at='2026-10-30T09:00:00.000Z';
@@ -43,43 +43,6 @@ async function layout(page:Page){
  });
 }
 
-test('live agent Notes use the mock-mode Notes design with typed cards',async({page})=>{
- await page.goto('/?mode=mock&start=notes');await expect(page.getByRole('button',{name:'Open Design sync',exact:true})).toBeVisible();
- const mock=await layout(page);await shot(page,'reference-mock-list');
- // The mock checklist editor, for the side-by-side review of the live one.
- await card(page,'Groceries').click();await expect(page.getByRole('button',{name:'Uncheck Oat milk',exact:true})).toBeVisible();
- await shot(page,'reference-mock-checklist');
- const {foreign,errors}=await openSeeded(page);
- // Same header as mock mode: Back, title, Record and +, each in the same place, size and icon.
- expect(await layout(page)).toEqual(mock);
- await expect(page.getByRole('heading',{name:'Notes',exact:true})).toBeVisible();
- const header=page.locator('[data-alpha-subview="notes-list"] [data-alpha-app-header="main"]');
- expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record voice note','New note']);
- for(const name of ['Back to apps','Record voice note','New note'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
- // No search pill and no Trash in the header (decisions P2, N2).
- await expect(page.getByRole('button',{name:'Search notes',exact:true})).toHaveCount(0);
- await expect(header.getByRole('button',{name:'Open Trash',exact:true})).toHaveCount(0);
- // One column: Pinned first, every row at the same x.
- const order=await page.locator('[data-alpha-subview="notes-list"] button.notes-row').evaluateAll(list=>list.map(el=>[el.getAttribute('aria-label'),Math.round(el.getBoundingClientRect().x)]));
- expect(order[0][0]).toBe('Open Launch checklist');expect(order).toHaveLength(6);expect(new Set(order.map(([,x])=>x)).size).toBe(1);
- await expect(page.locator('.notes-section',{hasText:'Pinned'})).toBeVisible();
- await expect(card(page,'Design sync')).toContainText('6:48');
- await expect(card(page,'The case for on-device agents')).toContainText('news.example');
- await expect(card(page,'Groceries')).toContainText('☑ Oat milk');
- await expect(card(page,'Radiator')).toContainText('Call the landlord Friday.');
- // The shared Notes view's agent ids stay on the matching controls (canonical-notes-ui.ts, template.html).
- const ids=(scope:string)=>page.locator(`${scope} [data-agent-id]`).evaluateAll(list=>list.filter(el=>(el as HTMLElement).getClientRects().length).map(el=>el.getAttribute('data-agent-id')));
- const listIds=await ids('[data-alpha-subview="notes-list"]');
- expect(listIds.slice(0,3)).toEqual(['notes-record','notes-new','launch']);
- expect([...listIds].sort()).toEqual(['agents','gifts','groceries','launch','notes-new','notes-record','voice-sync','voicemail']);
- await shot(page,'live-list');
- // The list stays flat; removing navigation never removes saved notes.
- await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'New folder',exact:true})).toHaveCount(0);
- await expect(page.getByRole('group',{name:'Folders',exact:true})).toHaveCount(0);
- expect(foreign).toEqual([]);expect(errors).toEqual([]);
-});
 
 test('live agent Notes in dark mode, the text editor and the checklist editor',async({page})=>{
  const {foreign,errors}=await openSeeded(page,'/?theme=dark');

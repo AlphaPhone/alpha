@@ -398,7 +398,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       await new Promise<void>(resolve => forgetTabs(closed, true, resolve));
       if (disposed) return;
       sessionHydrated = true; lastSaved = JSON.stringify(savedSnapshot());
-      shell.toast(Capacitor.isNativePlatform() ? 'Cleared' : 'Cleared');
+      shell.toast('Cleared');
     } catch (error) { report(error); } finally { clearingData = false; }
   }
   async function clearSiteData() {
@@ -421,7 +421,6 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   // restoreSession replaces it with saved normal tabs.
   definition.persist = ['tabs', 'cur', 'marks', 'visits'];
   definition.onLeave = () => {externalHandoff.retire();stopReading();hide();};
-  definition.reply = () => null;
   definition.back = (s: Bag, api: Bag) => {
     if (s.finding) { closeFind(); return true; }
     for (const key of ['editing', 'tabsOpen', 'menu', 'lib', 'share']) if(s[key]) { api.set({ [key]: key === 'lib' ? null : false }); return true; }
@@ -468,9 +467,9 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       libMarksCss: historyOpen ? unselectedTabStyle : selectedTabStyle,
       libHistCss: historyOpen ? selectedTabStyle : unselectedTabStyle,
       clearHist: () => api.set({visits: []}),
-      profileUnsupportedPage:profileUnsupportedTab===s.cur&&!s.editing,profileUnsupportedEditing:profileUnsupportedTab===s.cur&&!!s.editing,profileUnsupportedMessage:PROFILE_UNSUPPORTED_MESSAGE,isNews:false,isEnc:false,isBook:false,isSearch:false,isGeneric:false,isNew:!info,
+      profileUnsupportedPage:profileUnsupportedTab===s.cur&&!s.editing,profileUnsupportedEditing:profileUnsupportedTab===s.cur&&!!s.editing,profileUnsupportedMessage:PROFILE_UNSUPPORTED_MESSAGE,isNew:!info,
       privateNotice:Capacitor.isNativePlatform()?'Private · cleared on close':'This tab is not saved in Alpha history. Website cookies and sign-ins are managed by your browser.',isPrivate:priv,openPrivate:()=>openNew(true),clearData:()=>void clearBrowsingData(),clearSite:()=>void clearSiteData(),canClearSite:Capacitor.isNativePlatform()&&!!info?.committed&&!info?.error&&!!url,
-      recents:[],sugg:localSuggestions,people:[],agOn:false,confirm:false,clearAddress:(event:Event)=>{api.set({addr:''});(event.currentTarget as HTMLElement).parentElement?.querySelector('input')?.focus();},
+      sugg:localSuggestions,clearAddress:(event:Event)=>{api.set({addr:''});(event.currentTarget as HTMLElement).parentElement?.querySelector('input')?.focus();},
       // Find in page is native findAllAsync. A web build's page is an opaque-origin sandboxed frame the host
       // cannot search, so the menu offers no Find there (the template keys on openFind).
       openFind:Capacitor.isNativePlatform()?()=>openFind():undefined,canFind:Capacitor.isNativePlatform()&&!!info?.committed&&!info?.error,finding:!!s.finding&&s.findTab===s.cur,

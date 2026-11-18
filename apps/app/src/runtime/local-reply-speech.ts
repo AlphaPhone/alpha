@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
+import type { AlphaVoiceCloudPlugin } from '../native/alpha-voice-cloud';
 import { planLocalSpeech } from './local-speech-text';
 import { nativeVoiceTurnId } from './voice-timing';
 
@@ -10,15 +11,7 @@ import { nativeVoiceTurnId } from './voice-timing';
  * A call settles when its own sentence has finished playing: the next sentence's start on the same
  * utterance, or the utterance's end.
  */
-type Bridge = {
-  synthesizeLocal(input: { text: string; requestId: string; append: true; voiceTurnId?: string }): Promise<{ playbackId?: string; execution?: string; appended?: boolean }>;
-  play(input: { playbackId: string }): Promise<unknown>;
-  cancel(input: { requestId: string }): Promise<unknown>;
-  stopPlayback(input: { playbackId?: string; requestId: string }): Promise<unknown>;
-  addListener(event: string, listener: (value: { playbackId?: string; requestId?: string; atMs?: number; reason?: string; message?: string }) => void): Promise<{ remove(): Promise<void> }> | { remove(): Promise<void> };
-  holdSpeechEngine?(): Promise<unknown>;
-  releaseSpeechEngineHold?(): Promise<unknown>;
-};
+type Bridge = Pick<AlphaVoiceCloudPlugin, 'synthesizeLocal' | 'play' | 'cancel' | 'stopPlayback' | 'addListener' | 'holdSpeechEngine' | 'releaseSpeechEngineHold'>;
 type Sentence = { requestId: string; playbackId?: string; started(): void; ended(): void; failed(error: unknown): void };
 const SENTENCE_LIMIT_MS = 120_000;
 

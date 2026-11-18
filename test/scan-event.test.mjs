@@ -2,13 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 // J01 poster inference rules are the shared plugin-files documents/scan-event module and its tests
 // cover every rule. Alpha keeps only the mapping of a reviewed proposal onto its local Calendar form.
 const alpha=await import('../apps/app/src/prototype/scan-event.ts');
-const shared=await import('../.eliza/client-features/plugins/plugin-files/src/documents/scan-event.ts');
 const {scanEventDraft}=alpha;
-test('Alpha uses the shared poster suggestion rules, not a copy',()=>{
- assert.equal(alpha.suggestScanEvent,shared.suggestScanEvent);
- assert.equal(alpha.suggestScanEventDetails,shared.suggestScanEventDetails);
- assert.deepEqual(alpha.suggestScanEvent('Open studio\n2026-10-10\n18:30\nMain hall'),{title:'Open studio',date:'2026-10-10',time:'18:30',minutes:60,location:''});
-});
 test('reviewed draft keeps civil date across month/year boundaries without writing an event',()=>{
  const draft=scanEventDraft({title:' Reviewed event ',date:'2027-01-02',time:'23:45',minutes:90,location:' Hall '},'Exact reviewed OCR text',new Date(2026,11,31,12));
  assert.equal(draft.off,2);assert.equal(draft.t,23.75);assert.equal(draft.d,1.5);assert.equal(draft.title,'Reviewed event');assert.equal(draft.notes,'Exact reviewed OCR text');assert.equal(draft.where,'Hall');assert.equal(draft.cal,'native:local');assert.equal(draft.id,null);

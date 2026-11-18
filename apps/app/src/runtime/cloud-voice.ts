@@ -5,7 +5,8 @@ import {developmentCloudVoiceEnabled} from './development-cloud-voice';
 import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../../../../.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts';
 import { playOwnedSpeech, confirmSpeechRetirement } from '../local-speech-playback';
 import { registerPlugin } from '../platform-plugins';
-import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
+import type { AlphaVoiceCloudBrowserMethods, AlphaVoiceCloudPlugin, SpeechRecordingInput, VoiceRecordingStopped } from '../native/alpha-voice-cloud';
 import { connectionController } from './connection-ui';
 import { cloudVoiceLimitOf } from './cloud-voice-limit';
 import { readServiceLimit, retryDuration, type ServiceLimit } from './subscription-entitlement';
@@ -80,26 +81,7 @@ export async function readNativeCloudStreamTiming(timeoutMs = 2_000): Promise<un
 }
 export function createCloudStreamingSpeech(input: Parameters<typeof createSharedCloudStreamingSpeech>[0]) { return createSharedCloudStreamingSpeech(input, streamingNative); }
 
-export type VoiceClip = { recordingId: string; durationMs: number };
-export type VoiceRecordingStopped = { recordingId: string; durationMs?: number; interrupted?: 'call-active' };
-export type SpeechRecordingInput = {recordingId:string;requestId:string;savedNoteId?:string;savedDurationMs?:number;offsetMs?:number};
-const native = registerPlugin<{
-  transcribeOwnRecording(input:SpeechRecordingInput & {providerRevision:string}):Promise<{text:string;local:false}>;
-  synthesizeOwn(input:{text:string;requestId:string;providerRevision:string;replace?:boolean}):Promise<{playbackId:string}>;
-  transcribeDevelopmentCloudRecording(input:SpeechRecordingInput & {route?:'cloud'|'direct'}):Promise<{text:string;local:false}>;
-  synthesizeDevelopmentCloud(input:{text:string;requestId:string;replace?:boolean;route?:'cloud'|'direct'}):Promise<{playbackId:string}>;
-  startRecording(): Promise<{ recordingId: string; maxDurationMs: number }>;
-  stopRecording(): Promise<VoiceClip>;
-  getRecordingMetrics(input:{recordingId:string}):Promise<{recordingId:string;peak:number;rms?:number}>;
-  cancelRecording(): Promise<void>;
-  transcribeRecording(input: SpeechRecordingInput & {environment:string;credentialId:string}): Promise<{ text: string; local: false }>;
-  synthesize(input: { text: string; requestId: string; environment: string; credentialId: string; replace?:boolean }): Promise<{ playbackId: string }>;
-  play(input: { playbackId: string;replace?:boolean }): Promise<void>;
-  stopPlayback(input?: { requestId: string }): Promise<void>;
-  cancel(input: { requestId: string }): Promise<void>;
-  addListener(event: 'recordingStopped', callback: (clip: VoiceRecordingStopped) => void): Promise<PluginListenerHandle>;
-  addListener(event: 'playbackEnded' | 'playbackFailed' | 'playbackStopped', callback: (event: { playbackId?: string }) => void): Promise<PluginListenerHandle>;
-}>('AlphaVoiceCloud');
+const native = registerPlugin<AlphaVoiceCloudPlugin & AlphaVoiceCloudBrowserMethods>('AlphaVoiceCloud');
 
 /** Binds all audio to the explicitly selected account. Native code owns the
  * private recording, bearer credential, upload and decoded playback file. */

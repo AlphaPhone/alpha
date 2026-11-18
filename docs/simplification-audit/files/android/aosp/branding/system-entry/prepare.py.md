@@ -1,0 +1,29 @@
+# android/aosp/branding/system-entry/prepare.py
+- Lines: 394 | Role: Deterministically regenerates the reviewed system-entry patch from pinned baseline sources: string-replaces 6 existing SystemUI files, adds 6 new files from embedded Python string literals, stages output under `.cache/staged`, asserts the patch hash matches `manifest.json`, then writes a patch copy, the product overlay and a manifest record into `.cache/`. | Verdict: SIMPLIFY
+- Importers: CLI only (README:36,50). `test_native_plan.py` reads its `.cache/staged` output (STAGED) and `.cache/product-overlay/...` (line 99); it does not read `.cache/manifest.json` or `.cache/alpha-native-system-entry.patch`. Not run in CI.
+
+## Findings
+| # | Lines | Pattern | Finding (with snippet) | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 40-56, 59-167, 171-265, 330-338, 344-350 | C7 / D8 | ~280 lines of Java, Kotlin and XML embedded as Python string literals (new files `AlphaSystemEntryPolicy.java`, `AlphaAssistantQuickAffordanceConfig.kt`, `AlphaShadeWordmarkPolicy.java`, `AlphaShadeWordmarkView.java`, `alpha_system_entry.xml`, `ic_alpha_system_mark.xml` template); unreadable/unlintable and duplicated in the patch. | Move each body verbatim into `system-entry/src/<same AOSP path>`; `add(path, (ROOT/"src"/path).read_text())`. `test_native_plan.py` can javac `src/` directly. Byte-identical content keeps the patch hash. | Low (hash assertion at 371 proves no drift). |
+| 2 | 101-117 | B3 / B4 | Generated `available()` reads `config_alpha_system_entry_enabled` at 103 and again as the first argument at 111; `isUserSwitching` at 104 and again at 112; `user != userTracker.userId` at 112 compares against the value read at 102. | Pass `true` / the already-checked values or drop the duplicate parameters from `AlphaSystemEntryPolicy.available` (40-56). Any change to generated source text changes the patch bytes, so `alpha-native-system-entry.patch`, `manifest.json` (`patchSha256` + `afterSha256` of the touched file), `PROVENANCE.json:10,59` (if kept) and `power-voice/manifest.json:7` (`requiresAppliedSystemUIPatchSha256`) must be regenerated/updated together. | Medium: changes shipped SystemUI code; needs recompilation (manifest says `compilation: pending` anyway) and device acceptance. |
+| 3 | 178-184, 232-233 | B4 / D10 | `AlphaShadeWordmarkPolicy.fits(..., boolean collision)` is only ever called with `false` (233); collision is checked by `collides()` at 240. | Remove the parameter. Any change to generated source text changes the patch bytes, so `alpha-native-system-entry.patch`, `manifest.json` (`patchSha256` + `afterSha256` of the touched file), `PROVENANCE.json:10,59` (if kept) and `power-voice/manifest.json:7` (`requiresAppliedSystemUIPatchSha256`) must be regenerated/updated together. | Medium (as above). |
+| 4 | 352-355 | B4 | `assert OUT.parent == DATA and OUT.name == 'staged'` where `OUT = DATA / 'staged'` (line 13): always true. | Delete; just `OUT.mkdir(parents=True, exist_ok=True)`. | None. |
+| 5 | 372, 384-393 | B5 | Writes `.cache/alpha-native-system-entry.patch` and `.cache/manifest.json` that nobody reads; the record hard-codes `identity`/`productOverlay` facts already in the committed `manifest.json`. | Delete both writes; keep the hash assertion (370-371). Optionally assert the generated `files` rows equal committed `manifest.json` `files` (makes the committed manifest verified rather than restated). | None. |
+| 6 | 373-383 | C6 | Re-generates `product-overlay/values/alpha-system-entry.xml` content into `.cache/` although the committed file is the source the stage script uses; `test_native_plan.py:99` then compares the two. | Delete the overlay write and the corresponding test comparison; the committed file + `manifest.json` sha is the single source. | None. |
+| 7 | 18-30 | C3 | `sha`, `original`, `replace_once`, `edit`, `add` twin `core-launcher/prepare.py:35-46` (`original`, `replace`, `edit`) and `hidden-navigation-handle/prepare.py`. | Move to shared `packet.py` (`PatchBuilder(base, inputs)` with `edit/add/replace_once/emit_patch`) and use it from all three prepare scripts. | Low. |
+| 8 | 359-369 | C3 | Unified-diff emission with the no-newline marker rule; twin in `core-launcher/prepare.py` and `hidden-navigation-handle/prepare.py` (diff + hash). | Same shared `emit_patch`. | Low: byte-identical output required (hash asserts guard it). |
+| 9 | 11 | C3 | `REPO = next(path for path in ROOT.parents if (path / 'app.config.json').is_file())`; also `test_native_plan.py:7`. | Shared `packet.REPO`. | None. |
+| 10 | 357, 362, 373, 384-393 | D8 | Multiple statements per line, 200+ char dict literals. | Disappears with the deletions; format the rest. | None. |
+
+## Local types and helpers
+| `sha` | helper | 18 | see `apply.py.md` digest twins | `packet.py` |
+| `original`/`replace_once`/`edit`/`add` | helper | 19-30 | `core-launcher/prepare.py:35-46`, `hidden-navigation-handle/prepare.py` | `packet.py` |
+| patch emitter | helper (inline) | 359-369 | core-launcher/hidden-navigation-handle prepare | `packet.py` |
+| `AlphaSystemEntryPolicy.PACKAGE/ACTIVITY` | const (generated Java) | 46-47 | `power-voice/*.patch:93-97`, `provision/AlphaWelcome.java:68`, `config.xml:5`, `alpha-keyboard-dictation.xml:5` | stays (separate AOSP modules) |
+
+## Proposed end state
+~110 lines: load inputs, 6 anchored edits of existing files, `add()` of 6 files read from `system-entry/src/`, emit patch, assert hash (and optionally manifest rows). New files live as real sources (~270 lines under `src/`, now lintable).
+
+## Verification
+Manual `python3 fetch.py && python3 prepare.py && python3 test_native_plan.py` must report the unchanged hash 58e75d2a... for the pure refactor; behaviour fixes (findings 2-3) need regenerated hashes, a full SystemUI build and device acceptance.

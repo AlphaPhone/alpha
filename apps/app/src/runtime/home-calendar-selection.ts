@@ -105,16 +105,17 @@ export function homeCalendarSelection(
 		return quiet;
 	// An empty answer requires complete coverage of both the local week and month.
 	const begin = Date.parse(state.feed.timeMin),
-		end = Date.parse(state.feed.timeMax);
+		end = Date.parse(state.feed.timeMax),
+		periodStart = Math.min(monthStart, weekStart);
+	const startsAtLocalMidnight = (value: string) => {
+		const x = getZonedDateParts(new Date(value), timeZone);
+		return x.hour === 0 && x.minute === 0 && x.second === 0;
+	};
 	return Number.isFinite(begin) &&
 		Number.isFinite(end) &&
 		begin <= now.getTime() &&
-		(day(state.feed.timeMin) < Math.min(monthStart, weekStart) ||
-			(day(state.feed.timeMin) === Math.min(monthStart, weekStart) &&
-				(() => {
-					const x = getZonedDateParts(new Date(state.feed.timeMin), timeZone);
-					return x.hour === 0 && x.minute === 0 && x.second === 0;
-				})())) &&
+		(day(state.feed.timeMin) < periodStart ||
+			(day(state.feed.timeMin) === periodStart && startsAtLocalMidnight(state.feed.timeMin))) &&
 		day(state.feed.timeMax) >= Math.max(monthEnd, weekEnd)
 		? { event: null, verified: true, emptyLabel: "Nothing planned" }
 		: quiet;

@@ -1,0 +1,14 @@
+specs/quint/application/ShellScreen.qnt
+specs/quint/application/SignInChooser.qnt
+specs/quint/application/SignInReadinessProbe.qnt
+specs/quint/application/SourceRenewalQuestion.qnt
+specs/quint/application/StartupPermissions.qnt
+specs/quint/application/StartupUpdateAdmission.qnt
+specs/quint/application/StoppedReplyReconciliation.qnt
+specs/quint/application/ViewAdmission.qnt
+specs/quint/application/VoiceOwnedNavigation.qnt
+specs/quint/application/VoiceSurfaceRetirement.qnt
+specs/quint/application/VoiceTranscriptFollow.qnt
+specs/quint/application/VoiceTurnReview.qnt
+specs/quint/application/WorkflowClockAdmission.qnt
+specs/quint/application/WorkflowRequestRecoveryAdmission.qnt

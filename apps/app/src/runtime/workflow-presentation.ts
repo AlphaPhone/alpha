@@ -1,4 +1,7 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
+import { raceAbort } from '../lib/abort';
+import type { AlphaNotificationsPlugin } from '../native/alpha-notifications';
+import { registerPlugin } from '../platform-plugins';
 
 /**
  * Workflow device protocol this renderer registers: 2 adds foreground presentation, 3 adds the
@@ -40,18 +43,17 @@ export async function workflowPresentationProtocol(signal: AbortSignal): Promise
 let presentationReady = false;
 async function probePresentation(signal: AbortSignal): Promise<1 | 2 | 'stalled'> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let cancel: (() => void) | undefined;
   try {
+    // Both bridges declare the same probe; AlphaNotifications' type describes the pair.
     const probes = Promise.all(['AlphaNotifications', 'AlphaVoiceCloud'].map(name =>
-      registerPlugin<{workflowPresentationCapabilities(): Promise<{protocol?: unknown}>}>(name).workflowPresentationCapabilities()));
-    const result = await Promise.race([
+      registerPlugin<Pick<AlphaNotificationsPlugin, 'workflowPresentationCapabilities'>>(name).workflowPresentationCapabilities()));
+    const result = await raceAbort(Promise.race([
       probes,
       new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 2000); }),
-      new Promise<never>((_, reject) => { cancel = () => reject(signal.reason); signal.addEventListener('abort', cancel, {once:true}); if(signal.aborted)cancel(); }),
-    ]);
+    ]), signal);
     signal.throwIfAborted();
     if (result === null) return 'stalled';
     return result.every(value => value?.protocol === 2) ? 2 : 1;
   } catch { signal.throwIfAborted(); return 1; }
-  finally { clearTimeout(timer); if(cancel)signal.removeEventListener('abort',cancel); }
+  finally { clearTimeout(timer); }
 }

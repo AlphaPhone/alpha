@@ -25,7 +25,6 @@ const virtual = {
     export function googleCalendarDisconnectLifecycle(){throw Error('Unexpected fixture disconnect')}
     export function googleDisconnectConfirmation(){return ''}
     export function googleDisconnectMessage(){return ''}`,
-  './google-calendar-selection': 'export function clearGoogleCalendarSelectionForConnection(){throw Error("Unexpected fixture persistence")}',
   './native-connection': `export const googleWorkspaceReturnPort=undefined;
     export function openConnectionBrowser(...args){return globalThis.googleLinkPorts.openBrowser(...args)}`,
   './cloud-protocol': "export function cloudServiceName(){return 'Fixture Cloud'}",

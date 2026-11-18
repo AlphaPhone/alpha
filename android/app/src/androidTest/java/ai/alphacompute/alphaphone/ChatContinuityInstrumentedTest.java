@@ -66,7 +66,7 @@ public class ChatContinuityInstrumentedTest {
   fail(message);
  }
  /** Focus the visible composer and ask Android for the real soft keyboard. */
- static void showKeyboard() throws Exception {
+ private static void showKeyboard() throws Exception {
   eval("(" + AppNavigation.composer() + ")?.focus()");
   SystemClock.sleep(200);
   WebViewTestDriver.withActivity(MainActivity.class, activity -> {
@@ -76,7 +76,7 @@ public class ChatContinuityInstrumentedTest {
   awaitIme(true, "The real soft keyboard must be visible");
  }
  /** The visible composer holds the draft and it, with Send when shown, fits inside innerHeight. */
- static void assertComposer(String text, String when) throws Exception {
+ private static void assertComposer(String text, String when) throws Exception {
   String composer = AppNavigation.composer();
   until(composer + "&&(" + composer + ").value===" + JSONObject.quote(text), "Composer keeps the draft " + when);
   String layout = eval("(()=>{const e=(" + composer + ");const r=e.getBoundingClientRect();const s=e.parentElement.querySelector('button[aria-label=Send]')?.getBoundingClientRect();"
@@ -85,16 +85,14 @@ public class ChatContinuityInstrumentedTest {
   assertTrue("Composer within innerHeight " + when + ": " + parsed, parsed.getBoolean("fits"));
  }
  /** No message bubble shows the draft: it was never sent. */
- static void assertNotPosted(String text) throws Exception {
+ private static void assertNotPosted(String text) throws Exception {
   assertEquals("The draft was never posted", "false", eval("[...document.querySelectorAll('[data-screen] *')].some(e=>!e.childElementCount&&e.tagName!=='TEXTAREA'&&e.closest('[data-alpha-layer=\"conversation\"]')&&(e.textContent||'').includes(" + JSONObject.quote(text) + "))"));
  }
  /**
   * Whether Alpha holds the HOME role, as Android's RoleManager answers for this package. Resolving the
   * HOME intent is not that answer: package visibility hides the stock launcher from Alpha (system_server
   * logs the AppsFilter interaction alphaphone -> nexuslauncher as BLOCKED on the API 36 emulator), so
-  * the resolver named Alpha while the stock launcher held the role. In the emulator campaign of
-  * 2026-10-14 the launcher run then took the HOME branch, HOME opened the stock launcher, and
-  * recreate() ran with Alpha in the background (the recreated activity stopped, never resumed).
+  * the resolver can name Alpha while the stock launcher holds the role.
   */
  static boolean alphaIsHome(Context context) {
   if (!BuildConfig.IS_LAUNCHER) return false;

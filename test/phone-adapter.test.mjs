@@ -128,11 +128,6 @@ test('voicemail deletion rechecks approval and dispatches once even if the list 
  rows=[];model().nativeRefresh();await settle();assert.equal(model().vm.open,false);
  complete({status:'deleted'});assert.equal(await accepted,'deleted');
 });
-test('Contacts opens only where Contacts is admitted',async()=>{
- const {views}=mount({status:status()});await settle();const opened=[],toasts=[];const api={open:view=>opened.push(view),toast:text=>toasts.push(text)};
- globalThis.mvpViews=[];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,[]);assert.deepEqual(toasts,['Unavailable']);
- globalThis.mvpViews=['contacts'];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,['contacts']);globalThis.mvpViews=[];
-});
 test('rows without a dialable number cannot dial',()=>{const rows=phoneRows([{...call,number:'',cachedName:null}],()=>{throw Error('dialed');});assert.equal(rows[0].noDial,true);rows[0].dial();assert.match(rows[0].label,/Unknown caller/);});
 test('the template wraps the prototype Phone behind nativePrototype',()=>{const html=readFileSync('apps/app/src/prototype/template.html','utf8');const start=html.indexOf('<sc-if value="{{is.phone}}">');assert.ok(html.indexOf('<sc-if value="{{phone.nativeManaged}}">',start)>start);assert.ok(html.indexOf('<sc-if value="{{phone.nativePrototype}}">',start)<html.indexOf('{{phone.title}}',start));});
 

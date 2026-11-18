@@ -6,7 +6,7 @@ import {test,expect,type Page} from '@playwright/test';
 // conversation the way sendVoiceTurn does, so first-token is observed from rendered state.
 // Evidence boundary: source/browser (test-mocks build). No device latency sample is produced.
 const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
-async function setup(page:Page,options:{playback:'starts'|'fails';policy?:'auto-send'|'review'}){
+async function setup(page:Page,options:{playback:'starts'|'fails'}){
  await page.route('https://**/*',route=>route.abort());
  await page.addInitScript(()=>{
   localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
@@ -15,10 +15,9 @@ async function setup(page:Page,options:{playback:'starts'|'fails';policy?:'auto-
  });
  await page.goto('/');
  await expect(page.locator('textarea[data-alpha-composer]')).toBeEnabled();
- await page.evaluate(async({playback,policy})=>{
+ await page.evaluate(async({playback})=>{
   const {BrowserVoice}=await import('/src/browser/voice.ts'),{connectionController:c}=await import('/src/runtime/connection-ui.tsx'),{Component}=await import('/src/prototype/model.js');
   const timing=await import('/src/runtime/voice-timing.ts');timing.clearVoiceTiming();
-  if(policy)(await import('/src/runtime/voice-selection.ts')).setVoiceSendPolicyForTests(policy);
   const f=(window as any).timingFixture;f.playback=playback;
   const snapshot={...c.getSnapshot(),open:false,busy:false,session:{origin:'https://owned.invalid',ownerId:'owner',agentId:'agent',sessionId:'synthetic-agent'}};c.getSnapshot=()=>snapshot as any;
   c.getCloudEnvironment=()=>'production';c.getCloudClient=()=>({sessionId:'synthetic-cloud',credentialId:'synthetic-credential',client:{}} as any);
@@ -85,10 +84,3 @@ test('closing voice while the transcript is pending records the turn as abandone
  expect(await page.evaluate(()=>(window as any).timingFixture.sends)).toBe(0);
 });
 
-test('under the review policy a discarded transcript is abandoned after transcript-ready, with no send mark',async({page})=>{
- await setup(page,{playback:'starts',policy:'review'});await talk(page);await utterance(page);
- await expect(voice(page)).toHaveAttribute('data-voice-state','review');
- await voice(page).getByRole('button',{name:'Discard voice message',exact:true}).click();await expect(voice(page)).toHaveCount(0);
- const rows=await records(page);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({entry:'conversation',policy:'review',outcome:'abandoned'});
- expect(Object.keys(rows[0].marks)).toEqual(['recording-end','transcript-ready']);expect(await page.evaluate(()=>(window as any).timingFixture.sends)).toBe(0);
-});

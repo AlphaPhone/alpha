@@ -23,12 +23,14 @@ export class BrowserFiles extends SharedFiles {
   return paths.map(path=>{const row=listed.find(item=>item.path===path);if(!row)throw Error('The selected media changed. Select it again.');return row;});
  }
  private mediaId(path:string){return decodeURIComponent(path.split('/').slice(2).join('/'));}
+ /** A reviewed listing must still name exactly these rows at their reviewed revisions. */
+ private assertReviewed(reviewed:string[]|undefined,rows:{path:string;revision:string}[]){if(reviewed&&(reviewed.length!==rows.length||rows.some((row,i)=>reviewed[i]!==JSON.stringify([row.path,row.revision]))))throw Error('The selected media changed. Select it again.');}
  private readonly sourceSelections=new Map<string,string>();
  async select(input:{id:string}){const selected=await super.select(input);this.sourceSelections.set(selected.selectionId,input.id);return selected;}
  async forgetSelected(input:{selectionId:string}){this.sourceSelections.delete(input.selectionId);return super.forgetSelected(input);}
  async sourceReference(input:{selectionId:string}){await this.attachment(input);const id=this.sourceSelections.get(input.selectionId);if(!id||!/^[a-f0-9-]{36}$/.test(id))throw Error('Select the library file again.');return 'b1:'+id;}
  async selectSourceReference(reference:string){if(!/^b1:[a-f0-9-]{36}$/.test(reference))throw Error('Source belongs to another device or is unavailable.');return this.select({id:reference.slice(3)});}
- // Files browser (PLAN section 4): the same storage* surface as AlphaFilesPlugin, over this library.
+ // Files browser: the same storage* surface as AlphaFilesPlugin, over this library.
  private readonly volume=new BrowserStorageVolume(this as any,{
   trashFolder: '.Trash-alpha',
   trashKey: 'alpha.files.trash.v1',
@@ -52,7 +54,7 @@ export class BrowserFiles extends SharedFiles {
   if(!input.paths.every(path=>this.photoPath(path)))return this.volume.run('storageTransfer',input);
   if(!input.copy)throw Error('Use Add to folder to keep the original in Photos.');
   const rows=await this.photoRows(input.paths);
-  if(input.reviewed&&(input.reviewed.length!==rows.length||rows.some((row,i)=>input.reviewed![i]!==JSON.stringify([row.path,row.revision]))))throw Error('The selected media changed. Select it again.');
+  this.assertReviewed(input.reviewed,rows);
   if(input.dest.split('/').some(part=>part==='.'||part==='..'))throw Error('Choose a Files folder.');
   let folderId='root';
   for(const part of input.dest.split('/').filter(Boolean)){const folder=(await super.list({id:folderId})).entries.find(row=>row.directory&&row.name===part);if(!folder)throw Error('The destination folder is unavailable.');folderId=folder.id;}
@@ -75,7 +77,7 @@ export class BrowserFiles extends SharedFiles {
  async storageTrash(input:{paths:string[];reviewed?:string[]}){
   if(!input.paths.every(path=>this.photoPath(path)))return this.volume.run('storageTrash',input);
   const rows=await this.photoRows(input.paths);
-  if(input.reviewed&&(input.reviewed.length!==rows.length||rows.some((row,i)=>input.reviewed![i]!==JSON.stringify([row.path,row.revision]))))throw Error('The selected media changed. Select it again.');
+  this.assertReviewed(input.reviewed,rows);
   const result=await browserPhotoLibrary.changeMany({operation:'trash',items:rows.map(row=>({id:this.mediaId(row.path),revision:row.revision}))});this.storageChanged();
   return {status:'ready',outcomes:result.outcomes.map(item=>({path:rows.find(row=>this.mediaId(row.path)===item.id)!.path,status:['updated','unchanged'].includes(item.status)?'trashed':'changed',to:'photo:'+item.id}))};
  }
@@ -99,7 +101,7 @@ export class BrowserFiles extends SharedFiles {
  async storageShare(input:{paths:string[]}){if(!input.paths.every(path=>this.photoPath(path)))return this.volume.run('storageShare',input);const rows=await this.photoRows(input.paths);return browserPhotoLibrary.shareMany({items:rows.map(row=>({id:this.mediaId(row.path),revision:row.revision}))},()=>!document.hidden);}
  async storageSaveMedia(input:{paths:string[]}){const rows=await this.photoRows(input.paths);await saveBrowserMedia({items:rows.map(row=>({id:this.mediaId(row.path),revision:row.revision}))},()=>!document.hidden);return {status:'opened'};}
  async storageSelect(input:{path:string}){
-  if(input.path.startsWith('Photos/')){const existing=await this.volume.run('storageSelect',input);if(existing.status==='selected')return existing;const id=decodeURIComponent(input.path.split('/').slice(2).join('/')),row=await browserPhotoLibrary.read({id});if(row.trashed)throw Error('Photo is in Recently deleted.');return {status:'selected',action:'photos',selectionId:'browser-photo:'+id};}
+  if(input.path.startsWith('Photos/')){const existing=await this.volume.run('storageSelect',input);if(existing.status==='selected')return existing;const id=this.mediaId(input.path),row=await browserPhotoLibrary.read({id});if(row.trashed)throw Error('Photo is in Recently deleted.');return {status:'selected',action:'photos',selectionId:'browser-photo:'+id};}
   return this.volume.run('storageSelect',input);
  }
  storageOpen(input:{path:string}){return this.volume.run('storageOpen',input);}

@@ -280,13 +280,11 @@
       "apps/app/src/prototype/notes-document-adapter.ts",
       "apps/app/src/browser/domain-document.ts",
       "apps/app/src/prototype/canonical-notes-controller.ts",
-      "apps/app/src/prototype/canonical-notes-editor.ts",
       "apps/app/src/prototype/canonical-notes-ui.ts",
       "apps/app/src/prototype/notes-folders-adapter.ts",
       "apps/app/src/runtime/notes-folders.ts",
       "apps/app/src/runtime/notes-folders-model.ts",
       "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/prototype/legacy-notes-access.ts",
       "apps/app/src/runtime/note-default-title.ts"
     ],
     "abstractions": [
@@ -1008,7 +1006,6 @@
       "apps/app/src/prototype/calendar-adapter.ts",
       "apps/app/src/prototype/calendar-month-focus.ts",
       "apps/app/src/prototype/calendar-days.ts",
-      "apps/app/src/runtime/google-calendar-selection.ts",
       "apps/app/src/runtime/calendar-form-draft.ts",
       "apps/app/src/prototype/agent-calendar-adapter.ts",
       "apps/app/src/runtime/agent-calendar.ts",
@@ -1637,7 +1634,6 @@
       "cleanRemovedNoteClosesTest"
     ],
     "sources": [
-      "apps/app/src/prototype/canonical-notes-editor.ts",
       ".eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts",
       ".eliza/client-features/plugins/plugin-notes/src/types.ts",
       ".eliza/client-features/plugins/plugin-notes/src/note-authored.ts"
@@ -1686,7 +1682,6 @@
       "lostOwnerCannotPublishTest"
     ],
     "sources": [
-      "apps/app/src/prototype/canonical-notes-editor.ts",
       ".eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts",
       ".eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts",
       ".eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts",
@@ -3247,40 +3242,6 @@
     ]
   },
   {
-    "path": "specs/quint/application/CalendarPreservationConfirmation.qnt",
-    "module": "CalendarPreservationConfirmation",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "sameOwnerReplacementBeforeDispatchTest",
-      "reentryAndOldFinallyTest",
-      "committedMarkerSurvivesRetirementTest",
-      "currentExactMarkerPublishesTest",
-      "changedInventoryRequiresFreshReviewTest",
-      "pageHideRetiresHeldApprovalTest"
-    ],
-    "invariants": [
-      "ActiveReviewOwnsVisit",
-      "MarkerHasDispatch",
-      "PublishedHasCurrentReadback"
-    ],
-    "sources": [
-      "apps/app/src/prototype/agent-calendar-adapter.ts",
-      "apps/app/src/prototype/settings-adapter.ts",
-      "apps/app/src/prototype/model.js",
-      "apps/app/src/prototype/template.html",
-      "apps/app/src/runtime/agent-calendar.ts",
-      "apps/app/src/runtime/legacy-calendar-preservation.ts",
-      "apps/app/src/browser/calendar-store.ts",
-      "apps/app/src/browser/documents.ts"
-    ],
-    "abstractions": [
-      "Exact mounted Settings review, live port and pending confirmation, with separate marker capture, expected receipt, CAS commit and UI settlement.",
-      "Two owners, four port lifetimes and attempts, two real inventory equality classes. Chromium IndexedDB and closed record transport. Installed provider and arbitrary device loss are separate."
-    ]
-  },
-  {
     "path": "specs/quint/application/CanonicalCalendarEditorClose.qnt",
     "module": "CanonicalCalendarEditorClose",
     "init": "init",
@@ -3517,7 +3478,6 @@
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/local-agent.ts",
       "apps/app/src/runtime/remote-protocol.ts",
-      "apps/app/src/runtime/development-cloud-agents.ts",
       "apps/app/src/prototype/camera-adapter.ts"
     ],
     "stateMapping": {
@@ -3531,120 +3491,6 @@
       "One attachment with bounded binding generations and representative owners and conversations. Physical storage, queued React commits, arbitrary overlap and image preview remain separate.",
       "Source review recorded in specs/quint/ui-return-review-20261109.md."
     ]
-  },
-  {
-    "path": "specs/quint/application/PreviousNotesAvailability.qnt",
-    "module": "PreviousNotesAvailability",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "ownerABADoesNotReviveOldProbeTest",
-      "viewRetirementDoesNotReadNativeDraftTest",
-      "nativeDraftPresenceRequiresCurrentCollectionTest",
-      "ownerSwitchClearsVisibleLegacyBeforeNewProbeTest",
-      "hideAndSuspendRetireVisibleProbeTest",
-      "blockedStoreRemainsUnavailableTest"
-    ],
-    "invariants": [
-      "ActiveProbeHasExactOwner",
-      "DraftReadsFollowDeviceCollection",
-      "LegacyRetirementClearsBeforeCanonical"
-    ],
-    "sources": [
-      "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/prototype/legacy-notes-access.ts"
-    ],
-    "stateMapping": {
-      "device/visible/hidden/suspended/owner": "Platform and controlled owner and view observations supplied to the real presence code",
-      "mode/epoch/legacyOwner/probeOwner/probeEpoch/active/started": "Exact renderer Notes source and current read ownership",
-      "pending/draftReads/availability/paints/cleared/canonical": "Observed read ports, published availability, record retirement and canonical refresh"
-    },
-    "abstractions": [
-      "Two owners and three pending read identities. Browser and native presence use closed storage ports.",
-      "The selected legacy view is an input. Record opening, React commits, legacy key parsing, and device persistence require separate evidence."
-    ]
-  },
-  {
-    "path": "specs/quint/application/PreviousNotesSourceOpening.qnt",
-    "module": "PreviousNotesSourceOpening",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "retiredOpenCannotReportLaterSuccessTest",
-      "heldRetentionKeepsCurrentSourceTest",
-      "supersededRetentionRefusesOldSelectionTest",
-      "nativeDraftReadBeforeEditableTest",
-      "unreadableDraftKeepsSavedRowsReadOnlyTest",
-      "draftOnlyStorageRequiresReviewTest",
-      "ownerChangeDropsHeldFingerprintTest",
-      "unretainedEditRefusesCanonicalReturnTest"
-    ],
-    "invariants": [
-      "NoRetiredSuccess",
-      "LegacySelectionHasExactOwner",
-      "EditableRowsHaveCurrentStore",
-      "CanonicalReturnClearsLegacyView"
-    ],
-    "sources": [
-      "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/prototype/legacy-notes-access.ts"
-    ],
-    "stateMapping": {
-      "device/owner/mode/epoch/legacyOwner/canonical/refreshes": "Actual renderer source ownership and refresh call to the controlled canonical coordinator",
-      "last/task/retention/pending/finished/retired": "Selection calls and results, held retention/read ports, and observed aborts",
-      "status/failed/editedSaved/document/storeEpoch/rows/source/kept": "Actual visible saved rows and read admission, source identity and preserved draft projection"
-    },
-    "abstractions": [
-      "Actual renderer selection and read-only admission against closed store projections. Two owners, three selections and two retained-draft task identities.",
-      "The source binding, closed collection and draft results and source-scoped boolean are observed. Device storage, queued React commits, recording, presence probing, Trash, retention writes and canonical store behavior remain separate."
-    ],
-    "bounds": {
-      "maxSamples": 1000,
-      "maxSteps": 80,
-      "maxVerifyDepth": 8
-    }
-  },
-  {
-    "path": "specs/quint/application/NotesTrashReadPublication.qnt",
-    "module": "NotesTrashReadPublication",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "canonicalDoesNotReadTest",
-      "newerResultCannotBeReplacedTest",
-      "pendingSuccessorAlreadyOwnsReadTest",
-      "canonicalSwitchDropsHeldSuccessTest",
-      "sourceReturnDoesNotReviveHeldErrorTest",
-      "currentFailureAndEmptyReadTest",
-      "unmountDropsHeldReadAndListenerTest"
-    ],
-    "invariants": [
-      "ExactPublication",
-      "ConsistentReadCount",
-      "ReadErrorHidesRows"
-    ],
-    "sources": [
-      "apps/app/src/prototype/notes-trash-adapter.ts",
-      "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/main.tsx"
-    ],
-    "stateMapping": {
-      "live/mode/epoch": "Shell lifetime and selected Notes source generation supplied by controlled host transitions",
-      "started/pending": "Actual Trash read port calls, bound to their admitted source epochs",
-      "rows/error/writes/lastWrite": "Exact Trash row and error patches observed at the shell call after each read settles"
-    },
-    "abstractions": [
-      "One mounted legacy/canonical shell, three read identities, bounded source changes and one unmount. Execute the real adapter and Trash change listener with controlled read and shell ports.",
-      "The source mode and generation transitions use the agent-adapter contract. React commit timing, durable storage, maintenance, restore, erase and canonical Notes remain separate."
-    ],
-    "bounds": {
-      "maxSamples": 1000,
-      "maxSteps": 80,
-      "maxVerifyDepth": 8
-    }
   },
   {
     "path": "specs/quint/application/BrowserExternalHandoff.qnt",
@@ -4251,7 +4097,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/prototype/maps-chat-adapter.ts",
+      "apps/app/src/prototype/maps-adapter.ts",
       "apps/app/src/prototype/calendar-approval-adapter.ts"
     ],
     "symbols": [
@@ -4296,7 +4142,7 @@
         "name": "voiceSendTurnId"
       },
       {
-        "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+        "path": "apps/app/src/prototype/maps-adapter.ts",
         "name": "installMapsChatAdapter"
       },
       {
@@ -7115,103 +6961,6 @@
     ]
   },
   {
-    "path": "specs/quint/application/NotesTrashSession.qnt",
-    "module": "NotesTrashSession",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "timerAndOpenShareOnePassTest",
-      "backgroundPassWithoutChangeSkipsReloadTest",
-      "openTrashForgetsRefusalTest",
-      "refusedNoteDeletedForeverTest",
-      "unconfirmedPermanentDeleteKeepsChoiceTest",
-      "failedStorageRefusesEraseTest",
-      "busyBlocksSecondActionTest"
-    ],
-    "invariants": [
-      "SingleMaintenancePass",
-      "JoinedPassReloads",
-      "OneDestructiveAction",
-      "FullChoiceHoldsRefusal",
-      "ConfirmationNeedsOpenTrash",
-      "PermanentOnlyAfterRefusal"
-    ],
-    "witnesses": [
-      "ForegroundJoinedBackgroundWitness",
-      "RefusalPendingWitness",
-      "ChoiceDismissedDuringDeleteWitness",
-      "RestoreWaitsForMaintenanceWitness",
-      "DeletedForeverWitness"
-    ],
-    "sources": [
-      "apps/app/src/prototype/notes-trash-adapter.ts",
-      "apps/app/src/runtime/notes-trash.ts",
-      "apps/app/src/runtime/notes-trash-policy.ts"
-    ],
-    "symbols": [
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "installNotesTrashAdapter"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "runMaintenance"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "scheduleMaintenance"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "moveToTrash"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "deleteForever"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "erase"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "restore"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "refused"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "maintaining"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "trashFull"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "trashConfirm"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-trash-adapter.ts",
-        "name": "trashOpen"
-      }
-    ],
-    "stateMapping": {
-      "maintaining/background/joinReload/passes/reloadOwed": "The single maintenance promise, whether a background caller started it, and the Trash re-read a foreground caller or a removal owes",
-      "busy/operations": "The adapter busy latch shared by restore, erase and permanent deletion",
-      "trashOpen/confirm/full/refused": "Notes view state folder, trashConfirm and trashFull, and the in-memory refused note",
-      "rows/forever/noteOpen/storageFailed": "One counted Trash row, completed permanent deletions, the refused note still open in the list, and failed Notes storage"
-    },
-    "abstractions": [
-      "One renderer, at most one Trash row counted, three destructive actions and one refused note; a second refusal during a permanent deletion is not modeled. Storage, locks and the voice-recording paths are in NotesLifecycle and PermanentVoiceDeletion.",
-      "The 15-minute timer, startup and resume are one nondeterministic background pass. A render that finds the refused note gone is a separate sweep step. The canonical Notes source, which skips maintenance, is outside this model.",
-      "Model safety checks do not establish implementation refinement or device acceptance."
-    ]
-  },
-  {
     "path": "specs/quint/application/MediaCopyIntent.qnt",
     "module": "MediaCopyIntent",
     "init": "init",
@@ -7574,68 +7323,6 @@
       "A replacement track has its own independent chain and is not modeled.",
       "A tap starts its driver write in the same turn when no write is in flight, and the taps waiting behind a write run as soon as the driver answers; neither is a separate step.",
       "Trace replay: test/quint-camera-focus-writes.test.mjs replays simulator traces step by step against BrowserCameraFocus with a DOM and a camera track whose driver replies are model steps and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
-    ]
-  },
-  {
-    "path": "specs/quint/application/DomainDocumentCreation.qnt",
-    "module": "DomainDocumentCreation",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "emptyDomainReadWritesNothingTest",
-      "firstReadImportsLegacyTest",
-      "firstEditCreatesTest",
-      "legacyWriteAfterImportStopsAccessTest",
-      "legacyAppearsAfterCreationTest"
-    ],
-    "invariants": [
-      "AbsentUntouched",
-      "ReadImportsOnce",
-      "ImportRecordsItsSource",
-      "ImportedLegacyRetained",
-      "BlockedMeansLegacyMoved"
-    ],
-    "witnesses": [
-      "AbsentAfterReadWitness",
-      "ImportedLegacyWitness",
-      "CreatedByEditWitness",
-      "LegacyMovedWitness"
-    ],
-    "sources": [
-      "apps/app/src/browser/domain-document.ts"
-    ],
-    "symbols": [
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "BrowserDomainDocument"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "readOrCreate"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "unchanged"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "load"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "edit"
-      }
-    ],
-    "stateMapping": {
-      "present/value/baseline": "The stored envelope: whether it exists, its value and the legacy bytes it recorded",
-      "legacy/legacyWrites": "Legacy storage as older code leaves it",
-      "writes/readWrites/reads": "Document writes, writes made by a read, and reads",
-      "blocked": "The last access stopped because legacy storage no longer matches the envelope"
-    },
-    "abstractions": [
-      "Legacy bytes are absent, old or changed; the value is none, the import or an edit. The document store transaction is atomic here; revisions, corruption and reviewed recovery are in DurableStore.",
-      "Trace replay: test/quint-domain-document-creation.test.mjs replays simulator traces step by step against BrowserDomainDocument over an in-memory revisioned document store and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
     ]
   },
   {
@@ -9566,180 +9253,6 @@
     ]
   },
   {
-    "path": "specs/quint/application/NoteSourceDialog.qnt",
-    "module": "NoteSourceDialog",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "linkRetainsReferenceAndReleasesSelectionTest",
-      "changedNoteStopsLinkTest",
-      "closedDialogLeavesReferenceForMaintenanceTest",
-      "verifyRefusesOtherFileTest",
-      "removeDropsLinkAndAsksMaintenanceTest",
-      "refusedReleaseIsReportedTest",
-      "abandonedActionFinishesWithoutDialogTest",
-      "linkedReferenceOpensWithoutPickerTest",
-      "abandonedRemovalStillAsksMaintenanceTest",
-      "unsavedLinkKeepsOldSourceTest"
-    ],
-    "invariants": [
-      "SelectionHeldOnlyByRunningAction",
-      "FinishedActionHoldsNothing",
-      "LinkedReferenceRetained",
-      "DialogShowsStoredLinkWhileFresh",
-      "ViewerCancelledOncePerDialog",
-      "WaitingStagesKnown",
-      "StatusOnlyFromShownDialog"
-    ],
-    "witnesses": [
-      "StaleActionReleasedWitness",
-      "OrphanReferenceWitness",
-      "LinkSaveIssuedWitness",
-      "LinkSavedWitness",
-      "ReleaseRefusedWitness",
-      "ReplacedReferenceMaintainedWitness",
-      "MatchingFileOpenedWitness",
-      "OtherFileRefusedWitness",
-      "LinkedReferenceOpenedWitness",
-      "ViewerAnsweredWitness",
-      "AbandonedActionOutlivesDialogWitness"
-    ],
-    "sources": [
-      "apps/app/src/prototype/note-source-adapter.ts"
-    ],
-    "symbols": [
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "installNoteSourceAdapter"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "releaseUnusedSourceReferences"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "sourceDocument"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "closeCurrent"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "forgetSelected"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "retainSourceReference"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "openReviewed"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "openSourceReference"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "releaseSourceReferences"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "saveImportedNote"
-      }
-    ],
-    "stateMapping": {
-      "visit/rev/link/linkRef": "The Notes view being active, the stored note revision and its documentSource with its a1: reference",
-      "gen/open/expected/source/sourceRef/status": "The dialog on screen, the note JSON it reviewed, the source it shows and its status line",
-      "op/opGen": "The action in flight, the port call it waits on, its picker selection and the dialog that started it",
-      "grants/leaked/refs": "Picker selections not yet given back through forgetSelected, selections whose release was refused, and references Android retains",
-      "views/cancels/maintains": "Viewer opens, AlphaMailAttachments.cancel calls on close and Notes Trash maintenance requests"
-    },
-    "abstractions": [
-      "The Android path with one note, two files, three dialogs, three picks and two outside edits. The browser path uses the owned file picker of SystemPickerVisibility and holds no grant.",
-      "The read of the selected bytes and their review are one step. At most one action is followed at a time: a newer dialog starts an action only after the abandoned action of an earlier dialog has finished.",
-      "Maintenance keeps a reference retained by the action in flight; the source keeps any reference retained within three days.",
-      "Trace replay: test/quint-note-source-dialog.test.mjs replays simulator traces step by step against installNoteSourceAdapter mounted in a DOM with the picker, attachment plugin and Notes api as ports and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
-    ],
-    "sharedSources": [
-      "plugins/plugin-files/src/documents/source-links.ts"
-    ]
-  },
-  {
-    "path": "specs/quint/application/NoteWebSourceDialog.qnt",
-    "module": "NoteWebSourceDialog",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "visitClosesDialogTest",
-      "closedDialogAbortsVisitTest",
-      "changedNoteIgnoresPressTest",
-      "unconfirmedRemovalKeepsDialogBusyTest",
-      "savedRemovalClosesDialogTest",
-      "hiddenPageClosesDialogTest",
-      "abandonedRemovalStalesNewDialogTest"
-    ],
-    "invariants": [
-      "OneActionPerDialog",
-      "HiddenOrLeftPageHasNoDialog",
-      "DialogOverRemovedLinkIsStale",
-      "VisitNeedsItsOpenDialog",
-      "UnconfirmedDialogStaysBusy",
-      "RunningActionKnown"
-    ],
-    "witnesses": [
-      "VisitAbortedByCloseWitness",
-      "VisitedWitness",
-      "RemovedWitness",
-      "UnconfirmedWitness",
-      "StalePressIgnoredWitness",
-      "AbandonedRemovalLandsWitness"
-    ],
-    "sources": [
-      "apps/app/src/prototype/note-web-source-adapter.ts"
-    ],
-    "symbols": [
-      {
-        "path": "apps/app/src/prototype/note-web-source-adapter.ts",
-        "name": "installNoteWebSourceAdapter"
-      },
-      {
-        "path": "apps/app/src/prototype/note-web-source-adapter.ts",
-        "name": "openWebSource"
-      },
-      {
-        "path": "apps/app/src/prototype/note-web-source-adapter.ts",
-        "name": "openReviewedWebSource"
-      },
-      {
-        "path": "apps/app/src/prototype/note-web-source-adapter.ts",
-        "name": "saveImportedNote"
-      },
-      {
-        "path": "apps/app/src/prototype/note-web-source-adapter.ts",
-        "name": "closeCurrent"
-      },
-      {
-        "path": "apps/app/src/prototype/note-web-source-adapter.ts",
-        "name": "visibility"
-      }
-    ],
-    "stateMapping": {
-      "visit/hidden/rev/linked": "The Notes view being active, document.hidden, the stored note revision and whether it has a webSource",
-      "gen/open/expected/busy/status": "The dialog on screen, the note JSON it reviewed, its disabled controls and its status line",
-      "op/opGen": "The visit or removal in flight and the dialog that started it",
-      "navigations/removals/refused": "Completed openReviewedWebSource calls, saved removals and presses a used or stale dialog ignored"
-    },
-    "abstractions": [
-      "One note, three dialogs and two outside edits. The visit port honours the abort signal: a visit succeeds only while its dialog is open.",
-      "At most one action is followed at a time: a newer dialog acts only after the abandoned action of an earlier dialog has settled.",
-      "Trace replay: test/quint-note-web-source-dialog.test.mjs replays simulator traces step by step against installNoteWebSourceAdapter mounted in a DOM with the Notes api as a port and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
-    ]
-  },
-  {
     "path": "specs/quint/application/KeyboardDetectors.qnt",
     "module": "KeyboardDetectors",
     "init": "init",
@@ -9958,7 +9471,7 @@
     "stateMapping": {
       "owner/front/session": "the mounted instance, owner.S().view === 'settings' and connectionController.getCloudClient()?.sessionId",
       "current/issued/reads/limits": "capabilityAbort, the refreshCapabilities calls that started a read, Gmail account requests in flight and their 10 s timers",
-      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization\u2026, a grant label, Authorization not verified",
+      "gmail": "the authorization line: Not checked, Cloud sign-in required, Checking authorization…, a grant label, Authorization not verified",
       "licenses/fetching/fetches": "the module-level licenses.status and the notice file request",
       "dropped": "ghost: answers that arrived for a superseded read, another instance or another session"
     },

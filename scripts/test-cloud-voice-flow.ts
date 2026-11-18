@@ -1,15 +1,7 @@
-// Actual segmented Notes renderer and Cloud speech driver, with in-memory native ports.
+// Actual Notes recorder session and Cloud speech driver, with in-memory native ports.
 import assert from 'node:assert/strict';
 import type {NoteRecordingStatus, NoteRecorderSession, SavedNoteAudio} from '../apps/app/src/prototype/note-recorder.ts';
 import {cloudVoiceViewFixture} from '../test/fixtures/cloud-voice-view.mjs';
-
-async function until(check: () => boolean) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    if (check()) return;
-    await new Promise(resolve => setTimeout(resolve, 2));
-  }
-  assert.ok(check(), 'Synthetic Notes recorder did not settle');
-}
 
 const recordingId = '11111111-2222-4333-8444-555555555555';
 const segmentId = recordingId + '-s0';
@@ -35,39 +27,6 @@ const noteRecording: RecordingFixture = driver => ({
   saveNoteRecording: input => driver.saveRecording(input),
   async discardNoteRecording() { recording = {state:'idle'}; return recording; },
 });
-const f = cloudVoiceViewFixture({cloudProfile:true,noteRecording});
-try {
-  f.shell.openView('notes');
-  f.render().record();
-  await until(() => f.render().noteRecorder?.phase === 'recording');
-  assert.equal(f.render().noteRecorder?.doneLabel, 'Stop recording');
-  assert.equal(f.uploads, 0);
-  // Production Stop saves audio locally. A failed local commit keeps the stopped recording.
-  f.shell.failPersistence = true;
-  assert.ok(f.notesRecorderControl);
-  assert.equal(await f.notesRecorderControl.stop(), 'failed');
-  assert.equal(recording.state, 'stopped');
-  assert.equal(f.render().noteRecorder?.phase, 'stopped');
-  assert.equal(f.render().noteRecorder?.doneLabel, 'Save recording');
-  assert.equal(f.render().noteRecorder?.transcribe, undefined);
-  assert.equal(f.uploads, 0);
-  assert.equal(f.localFactories, 0);
-  assert.equal(f.shell.notes.list.length, 0);
-
-  f.shell.failPersistence = false;
-  const stopped = f.render().noteRecorder;
-  assert.ok(stopped);
-  stopped.done();
-  await until(() => f.shell.notes.list.length === 1);
-  assert.equal(f.shell.notes.list[0].body, '');
-  assert.equal(f.shell.notes.list[0].audio?.transcript, '');
-  assert.equal(f.shell.notes.list[0].audio?.audioId, recordingId);
-  assert.equal(recording.state, 'idle', 'Confirmed local save releases the recorder journal');
-  assert.equal(f.uploads, 0, 'Stop and local retries never authorize Cloud transcription');
-  assert.equal(f.sends, 0);
-} finally {
-  f.close();
-}
 // Keep the explicit remote-transcription contract covered separately from the audio-only renderer.
 // This is the actual session and actual Cloud driver, not a removed recorder UI control.
 const consentFixture = cloudVoiceViewFixture({cloudProfile:true,noteRecording});
@@ -101,4 +60,4 @@ try {
   consent?.close();
   consentFixture.close();
 }
-console.log('PASS Notes Stop saves audio locally; explicit Cloud transcription still requires consent after Stop and retries only local save.');
+console.log('PASS Explicit Cloud transcription still requires consent after Stop and retries only local save.');

@@ -31,7 +31,7 @@ the retained factory overlays. This avoids the duplicate package names used by f
 and automatically generated framework overlays. LatinIME alone uses the static product
 overlay path because its theme uses private app attributes.
 
-The stage script in the local builder records exact base hashes before the two small
+`scripts/stage-alpha-os-branding.py` records exact base hashes before the two small
 Provision edits. It retains Android's existing device-owner branch and completion methods.
 The main Alpha app remains nonprivileged. The separate existing platform provisioner owns
 provisioning and default Home selection; its wallpaper action uses the normal platform API.
@@ -62,7 +62,32 @@ LatinIME's overlay is compiled into its APK through the scoped
 resolved from a separately generated runtime-overlay package. Other packages retain
 their normal overlay behavior.
 
-`home-back-keyboard-inputs.json` binds each source edit to its exact original SHA-256.
-Local preparation, host policy tests and guarded GCP staging live under the task's
-`builder/` directory. Host tests are logic evidence; component compilation and physical
-gesture/keyboard acceptance must be recorded separately.
+`home-back-keyboard-inputs.json` records each edited file's base and patched SHA-256.
+`scripts/stage-alpha-os-branding.py` stages the Launcher3 and LatinIME overlays but does not
+apply `home-back-keyboard.patch` or read its inputs file.
+
+## Power and assistant defaults
+
+`AlphaFrameworkOverlay` (`overlay/frameworks/base/core/res/res/values/config.xml`) sets the
+default assistant package and long-press Power behavior independently of the optional offline
+listener. Power + Volume Up keeps the power menu; camera double-press, emergency gestures and
+short-press keep factory values. Saved assistant and power preferences remain authoritative.
+Framework source: `frameworks/base@94b4c163b7dfe5ce3607f7bb8456f9573f7de57d`,
+`core/res/res/values/config.xml` and `PhoneWindowManager.java`.
+
+## Keyboard dictation
+
+The stock LatinIME microphone dispatches `CODE_SHORTCUT` to
+`RichInputMethodManager.switchToShortcutIme()`, which returns silently when no auxiliary IME is
+installed (`packages/inputmethods/LatinIME@afe0d5c261c3a0c88b38894981a7b332da93e7dd`). The
+launcher APK supplies `AlphaKeyboardDictationService`, an auxiliary `voice` subtype using the
+selected Alpha Cloud or Direct voice provider; standalone APKs do not register it.
+
+The framework overlay `alpha-keyboard-dictation.xml` sets the system voice package. The pinned
+framework's `updateDefaultVoiceImeIfNeededLocked()` (`InputMethodManagerService.java`) enables
+the preinstalled service and writes `DEFAULT_VOICE_INPUT_METHOD` when its identity changes; the
+selected keyboard and a later owner opt-out are preserved. There is no per-phone settings script.
+`test/aosp-fresh-presets.test.py`, with `ALPHA_DICTATION_APP_ROOT`, `ALPHA_FRESH_PRESET_INPUTS`
+and `ALPHA_BRANDING_ASSETS` set, checks the staged overlay against the launcher manifest and
+voice subtype. Device acceptance covers Start/Stop insertion, Cancel, Back, field/account
+switch, lock/call interruption, password denial, owner opt-out and IME focus while switching.

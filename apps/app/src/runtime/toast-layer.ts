@@ -33,6 +33,8 @@ export function installToastLayer(): () => void {
   if (installed) return installed;
   let frame = 0, undo: HTMLButtonElement | null = null;
   const modalOrder = new Set<HTMLElement>();
+  /** Moves a modal to the end of the open order (the top of the browser's top layer). */
+  const bump = (dialog: HTMLElement) => { modalOrder.delete(dialog); modalOrder.add(dialog); };
   const modals = () => {
     for (const dialog of modalOrder) if (!dialog.isConnected || !isOpenModal(dialog)) modalOrder.delete(dialog);
     for (const dialog of document.querySelectorAll<HTMLElement>(MODALS)) if (isOpenModal(dialog)) modalOrder.add(dialog);
@@ -40,10 +42,7 @@ export function installToastLayer(): () => void {
   };
   modals();
   const focused = document.activeElement?.closest<HTMLElement>(MODALS);
-  if (focused && isOpenModal(focused)) {
-    modalOrder.delete(focused);
-    modalOrder.add(focused);
-  }
+  if (focused && isOpenModal(focused)) bump(focused);
   const host = (dialog: HTMLElement) => {
     let region = Array.from(dialog.querySelectorAll<HTMLElement>(`[${HOST}]`)).find(child => child.closest(DIALOG_OWNER) === dialog);
     if (region) return region;
@@ -104,20 +103,15 @@ export function installToastLayer(): () => void {
       const dialog = record.target;
       if (record.attributeName === 'open' && record.oldValue === null &&
           dialog instanceof HTMLDialogElement && dialog.matches('dialog[open]:modal')) {
-        modalOrder.delete(dialog);
-        modalOrder.add(dialog);
+        bump(dialog);
       }
       if (record.attributeName === 'aria-modal' && record.oldValue !== 'true' &&
           dialog instanceof HTMLElement && isOpenModal(dialog)) {
-        modalOrder.delete(dialog);
-        modalOrder.add(dialog);
+        bump(dialog);
       }
       for (const node of record.addedNodes) if (node instanceof HTMLElement) {
         const added = [node, ...node.querySelectorAll<HTMLElement>(MODALS)];
-        for (const candidate of added) if (isOpenModal(candidate)) {
-          modalOrder.delete(candidate);
-          modalOrder.add(candidate);
-        }
+        for (const candidate of added) if (isOpenModal(candidate)) bump(candidate);
       }
     }
     schedule();

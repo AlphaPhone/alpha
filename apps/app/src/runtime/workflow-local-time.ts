@@ -1,6 +1,7 @@
 import {phoneWorkflowLocalDay,zoneOffsetMinutes} from '../../../../.eliza/client-features/packages/contracts/src/phone-workflow.ts';
 import {formatSchedule} from '../../../../.eliza/client-features/packages/ui/src/utils/cron-format.ts';
 import {formatDateTime,formatTime,formatMonthDay} from '../prototype/locale-time';
+import {deviceTimeZone} from '../lib/civil-date';
 // Upstream plugin-scheduling/src/scheduled-task/trigger-tz.ts. The prepared
 // browser SDK does not export this scheduling sentinel.
 const OWNER_LOCAL_TZ='owner_local';
@@ -23,7 +24,7 @@ export function workflowClockExpression(time:string,days:number[]):string{
  return `${Number(match[2])} ${Number(match[1])} * * ${ordered.length===7?'*':ordered.join(',')==='1,2,3,4,5'?'1-5':ordered.join(',')}`;
 }
 
-export const workflowDeviceTimeZone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
+export const workflowDeviceTimeZone=()=>deviceTimeZone()||'UTC';
 /** Existing recurrences retain their clock. Explain a foreign clock only where it affects an edit. */
 export function workflowClockContext(zone:string):string{
  if(!zone||zone===OWNER_LOCAL_TZ||zone===workflowDeviceTimeZone())return '';
@@ -42,7 +43,7 @@ export function workflowLocalInstant(stamp:string|number,_locale?:string):string
 export function workflowCronLabel(expression:string,zone:string,now=Date.now()):string{
  const canonical=expression.replace(/1,2,3,4,5$/, '1-5'),cadence=formatSchedule(canonical);
  if(/^Every (minute|hour|\d+ minutes|\d+ hours)$/.test(cadence))return cadence;
- if(zone===OWNER_LOCAL_TZ||zone===workflowDeviceTimeZone()){const label=formatSchedule(canonical);if(label!==canonical)return label;const clock=workflowClockSchedule(canonical);if(!clock)return 'Repeating schedule';const names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];const at=formatSchedule(workflowClockExpression(clock.time,[0,1,2,3,4,5,6])).replace('Every day at ','');return clock.days.map(day=>names[day]).join(', ')+' at '+at;}
+ if(zone===OWNER_LOCAL_TZ||zone===workflowDeviceTimeZone()){if(cadence!==canonical)return cadence;const clock=workflowClockSchedule(canonical);if(!clock)return 'Repeating schedule';const names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];const at=formatSchedule(workflowClockExpression(clock.time,[0,1,2,3,4,5,6])).replace('Every day at ','');return clock.days.map(day=>names[day]).join(', ')+' at '+at;}
  const next=workflowNextClockOccurrence(expression,zone,now);
  return next===null?'Scheduled time unavailable':'Next '+workflowLocalInstant(next);
 }

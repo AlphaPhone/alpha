@@ -8,7 +8,6 @@
 # @ActivityCallback members by reflection from the WebView.
 -keep class com.getcapacitor.** { *; }
 -keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
--keep class com.getcapacitor.community.** { *; }
 -keepclassmembers class * {
     @com.getcapacitor.PluginMethod <methods>;
     @com.getcapacitor.annotation.PermissionCallback <methods>;
@@ -19,11 +18,6 @@
 # network policy). Their manifest components are instantiated by name.
 -keep class ai.eliza.plugins.** { *; }
 -keep class ai.elizaos.plugins.** { *; }
-
-# Upstream NativeProcessSupervisor and Chromium browser-surface helpers are staged
-# verbatim from the pinned checkout; keep their names and members intact.
--keep class ai.eliza.plugins.agent.runtime.NativeProcessSupervisor { *; }
--keep class ai.eliza.plugins.browsersurface.** { *; }
 
 # Manifest components Android instantiates by class name.
 -keep class ai.alphacompute.alphaphone.MainActivity { *; }
@@ -54,9 +48,6 @@
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
-
-# Developer hooks are absent from release; registration is reflective and only
-# attempted when BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS is true (debug + flag).
 
 # WebView JavaScript interfaces.
 -keepclassmembers class * {

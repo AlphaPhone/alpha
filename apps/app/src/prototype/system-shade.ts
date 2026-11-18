@@ -1,4 +1,5 @@
 import { registerPlugin } from '../platform-plugins';
+import type { AlphaDevicePlugin } from '../native/alpha-device';
 import {
   defaultShadeFallbackCopy,
   emptyHomePullEligible,
@@ -12,7 +13,7 @@ import {
 } from '@elizaos/capacitor-system/shade';
 
 /*
- * Android's shade is the one notification and quick-settings surface (issues #416 and #417). Alpha posts its notices as ordinary Android notifications with
+ * Android's shade is the one notification and quick-settings surface. Alpha posts its notices as ordinary Android notifications with
  * owner-bound taps and draws no shade of its own in a product build:
  *
  * - launcher Home (Android): a downward pull that starts on empty Home asks Android to expand
@@ -27,8 +28,7 @@ import {
 
 // The shade and empty-Home pull policy is shared (@elizaos/capacitor-system/shade, tested
 // there); Alpha supplies its wording and the selector of its Home layer.
-export { emptyHomeShadePull, overflowPullDecision, PULL_SLOP, shadeSurface, STATUS_BAND } from '@elizaos/capacitor-system/shade';
-export type { PullContext, PullStart, ShadeSurface } from '@elizaos/capacitor-system/shade';
+export { emptyHomeShadePull, shadeSurface } from '@elizaos/capacitor-system/shade';
 
 /** Alpha's words for each outcome; they never claim the shade opened. */
 export const ALPHA_SHADE_COPY = defaultShadeFallbackCopy('Alpha');
@@ -65,14 +65,14 @@ export function pullStart(target: EventTarget | null): PullStart | null { return
  * overflows (a short screen, large text) scrolls normally; at its top a downward pull on empty
  * Home is taken over by the shared installOverflowPull instead.
  */
-export function markHomeFits(): void {
+function markHomeFits(): void {
   const home = document.querySelector<HTMLElement>(HOME.home);
   if (!home) return;
   const fits = home.scrollHeight <= home.clientHeight + 1 ? 'true' : 'false';
   if (home.dataset.alphaHomeFits !== fits) home.dataset.alphaHomeFits = fits;
 }
 
-const device = registerPlugin<{ openNotificationShade(): Promise<{ status?: string }> }>('AlphaDevice');
+const device = registerPlugin<Pick<AlphaDevicePlugin, 'openNotificationShade'>>('AlphaDevice');
 
 /** Android side of the system shade: ask Android, and say so truthfully when it does not open. */
 export function installSystemShade(Component: any, options: { native: boolean }): void {
@@ -84,20 +84,20 @@ export function installSystemShade(Component: any, options: { native: boolean })
     self.alphaHomeFitFrame = requestAnimationFrame(() => { self.alphaHomeFitFrame = undefined; markHomeFits(); });
   };
   const watch = (self: any) => {
-    const home = document.querySelector('[data-alpha-layer="home"]'), layout = home?.querySelector('[data-alpha-home-layout]'), clearance = home?.querySelector('[data-alpha-home-clearance]');
+    const home = document.querySelector(HOME.home), layout = home?.querySelector('[data-alpha-home-layout]'), clearance = home?.querySelector('[data-alpha-home-clearance]');
     if (home !== self.alphaHomeWatched || layout !== self.alphaHomeLayoutWatched || clearance !== self.alphaHomeClearanceWatched) {
       self.alphaHomeObserver?.disconnect();
       self.alphaHomeWatched = home; self.alphaHomeLayoutWatched = layout; self.alphaHomeClearanceWatched = clearance;
       // An observer reports each element once when observed, and again whenever its size changes,
       // so renders do not force a layout read here.
-      if (home && typeof ResizeObserver !== 'undefined') {
+      if (home) {
         self.alphaHomeObserver = new ResizeObserver(() => markHomeFits());
         self.alphaHomeObserver.observe(home);
         // Dock padding can change the outer height while the content box stays unchanged.
         if (layout) self.alphaHomeObserver.observe(layout, { box: 'border-box' });
         // The half sheet changes scroll range without resizing Home or its stable icon layout.
         if (clearance) self.alphaHomeObserver.observe(clearance);
-      } else markHomeFits();
+      }
     }
     // The overflow pull's non-passive touch listeners run on every touch, so they exist only while
     // Home is showing; an app or the lock screen scrolls without them.

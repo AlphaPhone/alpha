@@ -16,7 +16,7 @@ public final class BrowserDialogLifecycleInstrumentedTest {
  private String host(String js)throws Exception{return WebViewTestDriver.evaluate(js);}
  private void ready(String js)throws Exception{for(int i=0;i<200;i++){if("true".equals(host("Boolean("+js+")")))return;SystemClock.sleep(100);}fail("Browser lifecycle control missing");}
  private void click(String label)throws Exception{String q="[...document.querySelectorAll('[data-screen] button')].find(e=>e.getAttribute('aria-label')==="+JSONObject.quote(label)+")";ready(q);host("("+q+").click()");}
- private void app(String label)throws Exception{host(AppNavigation.request(label));ready(AppNavigation.selected(label));ready("window.__alphaTestNavigation?.status==='complete'");}
+ private void app(String label)throws Exception{host(AppNavigation.request(label));ready(AppNavigation.selected(label));ready(AppNavigation.SETTLED);}
  private AlertDialog listing()throws Exception{
   AtomicReference<AlertDialog> result=new AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
@@ -40,10 +40,8 @@ public final class BrowserDialogLifecycleInstrumentedTest {
    // Exercise a host navigation arriving while the native dialog is showing;
    // this is an adversarial lifecycle transition, not a touch through a modal.
    app("Settings");click("Agent connection");ready("document.querySelector('.alpha-connection-scrim')");
-   host("[...document.querySelectorAll('.alpha-connection summary')].find(e=>e.textContent==='Mock mode').click()");
-   WebViewTestDriver.navigateHostDocument("[...document.querySelectorAll('.alpha-connection button')].find(e=>e.textContent.trim()==='Enter mock mode').click()",false);
-   ready("document.documentElement.dataset.connectionMode==='mock'&&document.querySelector('.mock-mode-banner')");dismissed(second);
-   WebViewTestDriver.navigateHostDocument("document.querySelector('.mock-mode-banner button').click()",true);ready("document.documentElement.dataset.connectionMode==='live'&&!document.querySelector('.mock-mode-banner')");
+   AppNavigation.enterMockMode();dismissed(second);
+   AppNavigation.exitMockMode();
    AlertDialog third=openDownloads();WebViewTestDriver.withActivity(MainActivity.class,a->third.dismiss());dismissed(third);
   }
  }

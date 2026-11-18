@@ -112,17 +112,16 @@ test('browser build without the development profile offers no simulated vault', 
   await expect(page.getByRole('button', { name: 'Add password', exact: true })).toHaveCount(0);
 });
 
-async function nativeVault(page: Page, options: { leak?: boolean; selected?: string; damaged?: boolean; transfer?: boolean } = {}) {
-  await page.addInitScript(({ leak, selected, damaged, transfer }) => {
+async function nativeVault(page: Page, options: { leak?: boolean; selected?: string; damaged?: boolean } = {}) {
+  await page.addInitScript(({ leak, selected, damaged }) => {
     const w = window as any; w.androidBridge = {}; localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
     const f = w.vaultFixture = { calls: [] as any[], locked: true, damaged: !!damaged, selected: selected || 'none', entries: [
       { id: 'n1', label: 'Bank app', username: 'holder@example.test', updatedAt: 1, bindings: [{ kind: 'android', facet: `android://${'ab'.repeat(32)}@com.example.bank`, display: 'Bank (com.example.bank)' }] },
-    ] as any[], listeners: {} as any, transferCode: 'locked',holdNextList:false,holdNextUnlock:false,releaseList:undefined as (()=>void)|undefined,releaseUnlock:undefined as (()=>void)|undefined };
+    ] as any[], listeners: {} as any,holdNextList:false,holdNextUnlock:false,releaseList:undefined as (()=>void)|undefined,releaseUnlock:undefined as (()=>void)|undefined };
     const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
     w.Capacitor = { PluginHeaders: [
       {name:'AlphaNotifications',methods:methods(['status','crossAppStatus','addListener','removeListener'])},
       {name:'AlphaVoiceCloud',methods:methods(['checkPermissions'])},
-      ...(transfer ? [{ name: 'ElizaPasswordTransfer', methods: methods(['exportVault', 'importVault']) }] : []),
       { name: 'ElizaPasswords', methods: methods(['status', 'unlock', 'lock', 'list', 'save', 'remove', 'reset', 'reveal', 'copy', 'openAutofillSettings']) },
       { name: 'AlphaDevice', methods: methods(['snapshot', 'openPasswordProvider']) },
       { name: 'AlphaConnection', methods: methods(['secureRead', 'addListener', 'removeListener']) },
@@ -134,7 +133,6 @@ async function nativeVault(page: Page, options: { leak?: boolean; selected?: str
     nativePromise: async (plugin: string, method: string, input: any) => {
       if(plugin==='AlphaNotifications')return {permissionGranted:true,appEnabled:true};
       if(plugin==='AlphaVoiceCloud')return {microphone:'granted'};
-      if (plugin === 'ElizaPasswordTransfer') { f.calls.push({ method, input }); f.locked = true; throw Object.assign(new Error('synthetic-dev-transfer-error'), { code: f.transferCode }); }
       if (plugin === 'ElizaPasswords') {
         f.calls.push({ method, input });
         if (method === 'status') return { available: true, locked: f.locked, unlockRemainingMs: f.locked ? 0 : 50000, unlockSeconds: 60, biometric: true, autofill: { supported: true, selected: f.selected } };
@@ -187,7 +185,7 @@ test('leaving a pending native reset review prevents a later reset request',asyn
 });
 
 test('native vault: Android unlock, app bindings, copy and autofill picker with status readback', async ({ page }) => {
-  await nativeVault(page, { transfer: true });
+  await nativeVault(page);
   await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
   const bank = page.getByRole('button', { name: 'Open Bank app', exact: true });
   await expect(bank).toContainText('holder@example.test');
@@ -208,44 +206,6 @@ test('native vault: Android unlock, app bindings, copy and autofill picker with 
   await page.getByRole('button', { name: 'Proton Pass', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Get Proton Pass', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Export passwords, unencrypted file', exact: true }).click();
-  await expect(page.getByText('Export failed · delete file', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Unlock passwords', exact: true })).toBeVisible();
-  await expect(bank).toHaveCount(0);
-  await noSecretOutsideDialogs(page);
-  await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
-  await page.evaluate(() => { (window as any).vaultFixture.transferCode = 'cancelled'; });
-  await page.getByRole('button', { name: 'Import passwords', exact: true }).click();
-  await expect(page.getByText('Import failed', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Unlock passwords', exact: true })).toBeVisible();
-  await expect(bank).toHaveCount(0);
-  await noSecretOutsideDialogs(page);
-});
-
-test('native vault whose key was lost can only be deleted after confirmation and a fresh unlock', async ({ page }) => {
-  await nativeVault(page, { damaged: true });
-  await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
-  await expect(page.getByText('Damaged', { exact: true })).toBeVisible();
-  await expect(page.getByText('Saved passwords can no longer be decrypted on this device.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Add password', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Reset vault', exact: true }).click();
-  // The first tap only arms the action; nothing is deleted yet.
-  expect(await page.evaluate(() => (window as any).vaultFixture.calls.filter((c: any) => c.method === 'reset').length)).toBe(0);
-  await expect(page.getByText('Can’t be undone.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Confirm reset vault', exact: true }).click();
-  await expect(page.getByText('Vault reset', { exact: true })).toBeVisible();
-  const calls: string[] = await page.evaluate(() => (window as any).vaultFixture.calls.map((c: any) => c.method));
-  // Reset follows its own unlock, never the earlier one that discovered the damage.
-  expect(calls.slice(calls.lastIndexOf('reset') - 1, calls.lastIndexOf('reset') + 1)).toEqual(['unlock', 'reset']);
-  await expect(page.getByRole('button', { name: 'Add password', exact: true })).toBeVisible();
-  await expect(page.getByText('No saved passwords', { exact: true })).toBeVisible();
-});
-
-test('native response carrying a secret is refused before anything renders', async ({ page }) => {
-  await nativeVault(page, { leak: true });
-  await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
-  await expect(page.getByText('Saved passwords are unavailable.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open Bank app', exact: true })).toHaveCount(0);
   await noSecretOutsideDialogs(page);
 });
 

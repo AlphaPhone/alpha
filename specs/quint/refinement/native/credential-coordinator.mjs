@@ -9,8 +9,8 @@ export const credentialCoordinatorSources = [
   ...residentSources,
   ...['ConnectionTransport.java','DelegationCallback.java','PendingRequests.java','CloudConnectionPolicy.java','SecureSlotPolicy.java','OwnerRoutePolicy.java'].map(name=>'vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/connection/'+name),
   ...['AlphaCredentialStore.java', 'AlphaConnectionPlugin.java', 'SerialStorageTasks.java',
-    'RendererCredentialSlots.java', 'ConnectionRoutes.java', 'LegacyCloudRecovery.java',
-    'GoogleWorkspaceReturn.java','GoogleWorkspaceReturnFlow.java','OwnerRoutes.java',
+    'RendererCredentialSlots.java', 'ConnectionRoutes.java',
+    'GoogleWorkspaceReturn.java','GoogleWorkspaceReturnFlow.java','AlphaUtil.java','OwnerRoutes.java',
     'CalendarSyncConsent.java'].map(name => app + name),
 ];
 export const credentialScenarios = [

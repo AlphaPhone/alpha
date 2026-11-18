@@ -45,5 +45,5 @@ const portArgs=viteArgs.some(arg=>arg==='--port'||arg.startsWith('--port='))?[]:
 console.log(`Starting the local agent on 127.0.0.1:${port} (profile ${profile}) and the development server.`);
 console.log(developmentConnectionTools?'Connection sheet: development tools (ALPHA_DEV_CONNECTION_TOOLS=1).':'Connection sheet: Alpha connection. Set ALPHA_DEV_CONNECTION_TOOLS=1 for development profiles, mock mode and subscription gate QA.');
 run(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1',...portArgs,'--strictPort',...viteArgs],{
-  ...env,ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_LOCAL_AGENT:'1',VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:developmentConnectionTools?'':'1',VITE_ALPHA_DEV_CARTESIA:env.ALPHA_DEV_CARTESIA==='1'?'1':'',ALPHA_LOCAL_AGENT_ORIGIN:`http://127.0.0.1:${port}`,ALPHA_LOCAL_AGENT_TOKEN_FILE:join(profile,'owner-token'),
+  ...env,ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_LOCAL_AGENT:'1',VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:developmentConnectionTools?'':'1',ALPHA_LOCAL_AGENT_ORIGIN:`http://127.0.0.1:${port}`,ALPHA_LOCAL_AGENT_TOKEN_FILE:join(profile,'owner-token'),
 });

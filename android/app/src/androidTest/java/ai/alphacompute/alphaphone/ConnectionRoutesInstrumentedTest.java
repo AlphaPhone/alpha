@@ -6,7 +6,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.nio.file.Files;
-import java.security.MessageDigest;
 import java.util.Map;
 import java.util.TreeMap;
 import org.json.JSONObject;
@@ -47,9 +46,7 @@ public class ConnectionRoutesInstrumentedTest {
   if (stored == null) return files;
   for (File file : stored) {
    if (!file.isFile()) continue;
-   StringBuilder hex = new StringBuilder();
-   for (byte b : MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file.toPath()))) hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
-   files.put(file.getName(), hex.toString());
+   files.put(file.getName(), AlphaUtil.sha256Hex(Files.readAllBytes(file.toPath())));
   }
   return files;
  }
@@ -95,6 +92,10 @@ public class ConnectionRoutesInstrumentedTest {
     new JSONObject().put("url", "https://api.eliza.app/api/v1/api-keys/other").put("method", "DELETE"),
     // Self-revocation with a body is not self-revocation.
     new JSONObject().put("url", "https://api.eliza.app/api/v1/api-keys/current").put("method", "DELETE").put("body", "{}"),
+    // Unreviewed routes, and a reviewed POST route read with GET, on the admitted origin.
+    new JSONObject().put("url", "https://api.eliza.app/api/agents").put("method", "GET"),
+    new JSONObject().put("url", "https://api.eliza.app/api/v1/eliza/unreviewed-service").put("method", "GET"),
+    new JSONObject().put("url", "https://api.eliza.app/api/v1/eliza/google/disconnect").put("method", "GET"),
    };
    for (int i = 0; i < refused.length; i++) {
     JSONObject args = refused[i].put("requestId", "routes-" + i + "-" + java.util.UUID.randomUUID());

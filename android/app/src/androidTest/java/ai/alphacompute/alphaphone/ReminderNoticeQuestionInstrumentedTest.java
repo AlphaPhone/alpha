@@ -16,7 +16,7 @@ import static org.junit.Assert.*;
 
 /**
  * MVP-13 notification question on Android: Alpha's own posted reminder offers "Ask Alpha" in
- * Android's shade (Alpha draws no shade, #416). The question action opens the exact reminder and,
+ * Android's shade (Alpha draws no shade). The question action opens the exact reminder and,
  * with an agent selected, a review whose excerpt is that notice's title and text; the reviewed text
  * is what reaches the draft, and a reminder cancelled during review adds nothing. Without a selected
  * agent nothing is reviewed or composed and the notification is retained. The action's own
@@ -44,10 +44,9 @@ public class ReminderNoticeQuestionInstrumentedTest {
   ReminderTestAccess.deliver(c,id,ReminderTestAccess.read(c,id).getString("occurrenceId"));
   StatusBarNotification posted=null;for(int i=0;i<100&&(posted=notification(id))==null;i++)SystemClock.sleep(100);
   assertNotNull("The reminder notice is posted",posted);
-  assertEquals(AlphaReminders.CONFIGURATION.questionActionLabel,posted.getNotification().actions[2].title.toString());
   return posted;
  }
- private void ask(StatusBarNotification posted)throws Exception{posted.getNotification().actions[2].actionIntent.send();}
+ private void ask(StatusBarNotification posted)throws Exception{ReminderNotificationActions.intent(posted,ReminderNotificationActions.ASK).send();}
  private void ready()throws Exception{
   AppNavigation.liveMode();WebViewTestDriver.evaluate(AppNavigation.request("Home"));
   until("document.querySelector('[data-screen]')&&!document.querySelector('.alpha-connection-scrim')");AppNavigation.declineStartupAccess();

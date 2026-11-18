@@ -31,10 +31,14 @@ final class KeyboardDictationPolicy {
   if (unbound || !("cerebras".equals(provider) || "elizacloud".equals(provider))) throw new IllegalStateException("Choose a voice provider in Alpha");
   return "cerebras".equals(provider);
  }
+ // android.text.InputType and EditorInfo values, kept as literals so the policy stays Android-free.
+ private static final int TYPE_MASK_CLASS = 0xf, TYPE_MASK_VARIATION = 0xff0, TYPE_CLASS_TEXT = 1, TYPE_CLASS_NUMBER = 2;
+ private static final int TYPE_TEXT_VARIATION_PASSWORD = 0x80, TYPE_TEXT_VARIATION_VISIBLE_PASSWORD = 0x90, TYPE_TEXT_VARIATION_WEB_PASSWORD = 0xe0;
+ private static final int TYPE_NUMBER_VARIATION_PASSWORD = 0x10, IME_FLAG_NO_PERSONALIZED_LEARNING = 0x1000000;
  static boolean permitted(int inputType, int imeOptions) {
-  int kind = inputType & 0xf, variation = inputType & 0xff0;
-  return inputType != 0 && (imeOptions & 0x1000000) == 0
-    && !(kind == 1 && (variation == 0x80 || variation == 0x90 || variation == 0xe0))
-    && !(kind == 2 && variation == 0x10);
+  int kind = inputType & TYPE_MASK_CLASS, variation = inputType & TYPE_MASK_VARIATION;
+  return inputType != 0 && (imeOptions & IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+    && !(kind == TYPE_CLASS_TEXT && (variation == TYPE_TEXT_VARIATION_PASSWORD || variation == TYPE_TEXT_VARIATION_VISIBLE_PASSWORD || variation == TYPE_TEXT_VARIATION_WEB_PASSWORD))
+    && !(kind == TYPE_CLASS_NUMBER && variation == TYPE_NUMBER_VARIATION_PASSWORD);
  }
 }

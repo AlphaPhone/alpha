@@ -60,11 +60,11 @@ const apps = {
   browser: ['', 'book', 'tabs', 'agent'], camera: ['', 'video', 'scan'],
   photos: ['', 'viewer', 'albums', 'search'], maps: ['', 'search', 'place', 'route', 'nav'],
   notes: ['', 'editor', 'rec', 'voice'], contacts: ['', 'detail', 'edit'],
-  files: ['', 'folder', 'preview'], wallet: ['', 'card', 'pay', 'secure', 'add', 'pass'],
+  files: ['', 'folder', 'preview'],
   workflows: ['', 'flow', 'run', 'failed', 'new'], settings: ['', 'character', 'accounts', 'adding', 'privacy', 'wifi'],
 };
 const appStates = Object.entries(apps).flatMap(([app, subs]) => subs.map(sub => app + (sub ? ':' + sub : '')));
-if (appStates.length !== 60) throw new Error('Expected sixty app fixture states');
+if (appStates.length !== 54) throw new Error('Expected fifty-four app fixture states');
 const states = option('states')?.split(',') ?? [...appStates, 'home', 'boot', 'lock', 'shade', 'sheet', 'full', 'voice', 'heads'];
 const themes = option('themes')?.split(',') ?? ['light', 'dark'];
 if ([...states, ...themes].some(name => !/^[A-Za-z0-9_:-]+$/.test(name))) throw Error('Capture states and themes must be simple names');

@@ -28,23 +28,23 @@ public final class HostedBackgroundWorkerInstrumentedTest {
   assertNull("Refuse existing background preference",storage.readCredentialSlot("hosted-background:v1:preference"));
   assertNull("Refuse to replace existing notice history",storage.readCredentialSlot(HostedResultNotices.LEDGER));
   try(Fixture server=new Fixture()){
-   String origin="http://127.0.0.1:"+server.socket.getLocalPort(),scope=HostedResultNotices.hash(new JSONArray().put(origin).put(server.owner).put(server.agent).toString()),slot="hosted-digests:v1:"+scope,authSlot="remote:"+origin,deviceSlot="device:"+scope;
+   String origin="http://127.0.0.1:"+server.socket.getLocalPort(),scope=AlphaUtil.sha256Hex(new JSONArray().put(origin).put(server.owner).put(server.agent).toString()),slot=Slots.HOSTED_DIGESTS_PREFIX+scope,authSlot="remote:"+origin,deviceSlot="device:"+scope;
    String auth=new JSONObject().put("origin",origin).put("identityId",server.owner).put("sessionId",server.token).put("token",server.token).put("expiresAt",System.currentTimeMillis()+300000).toString();
    String device=new JSONObject().put("installationId",UUID.randomUUID().toString()).put("key","b".repeat(64)).put("enrollmentId","worker-fixture").toString();
    String raw=" \n"+server.result.toString()+"  ";String generation=UUID.randomUUID().toString();
    List<String> slots=Arrays.asList(HostedDelivery.ACTIVE,HostedResultNotices.LEDGER,HostedResultNotices.PENDING,"hosted-background:v1:preference",authSlot,deviceSlot,slot,slot+":worker-run");UUID workId=null;
    try{
-    storage.writeCredentialSlot(authSlot,auth);storage.writeCredentialSlot(deviceSlot,device);storage.writeCredentialSlot(slot,new JSONObject().put("clientId","legacy-worker-client").put("ids",new JSONArray().put("worker-run")).put("pendingNotices",new JSONArray().put("worker-run")).toString());storage.writeCredentialSlot(slot+":worker-run",raw);
+    storage.writeCredentialSlot(authSlot,auth);storage.writeCredentialSlot(deviceSlot,device);storage.writeCredentialSlot(slot,new JSONObject().put("clientId","fixture-worker-client").put("ids",new JSONArray().put("worker-run")).put("pendingNotices",new JSONArray().put("worker-run")).toString());storage.writeCredentialSlot(slot+":worker-run",raw);
     byte[] before=read(storage.slotFile(storage.slotHash(slot+":worker-run")).getBaseFile());
-    JSONObject binding=new JSONObject().put("version",1).put("mode","local").put("generation",generation).put("enabled",true).put("polling",true).put("sessionId","fixture-session").put("origin",origin).put("ownerId",server.owner).put("agentId",server.agent).put("scope",scope).put("credentialSlot",authSlot).put("credentialDigest",HostedResultNotices.hash(auth)).put("deviceSlot",deviceSlot).put("deviceDigest",HostedResultNotices.hash(device));storage.writeCredentialSlot(HostedDelivery.ACTIVE,binding.toString());
+    JSONObject binding=new JSONObject().put("version",1).put("mode","local").put("generation",generation).put("enabled",true).put("polling",true).put("sessionId","fixture-session").put("origin",origin).put("ownerId",server.owner).put("agentId",server.agent).put("scope",scope).put("credentialSlot",authSlot).put("credentialDigest",AlphaUtil.sha256Hex(auth)).put("deviceSlot",deviceSlot).put("deviceDigest",AlphaUtil.sha256Hex(device));storage.writeCredentialSlot(HostedDelivery.ACTIVE,binding.toString());
     WorkManager manager=WorkManager.getInstance(context);
     for(int iteration=0;iteration<2;iteration++){
      OneTimeWorkRequest request=new OneTimeWorkRequest.Builder(HostedDeliveryWorker.class).setInputData(new Data.Builder().putString("generation",generation).build()).build();workId=request.getId();manager.enqueue(request).getResult().get(10,TimeUnit.SECONDS);
      long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(70);WorkInfo info;
      do{info=manager.getWorkInfoById(workId).get(5,TimeUnit.SECONDS);if(info!=null&&info.getState().isFinished())break;Thread.sleep(100);}while(System.nanoTime()<end);
      assertNotNull(info);assertEquals("Actual Worker must finish",WorkInfo.State.SUCCEEDED,info.getState());
-     assertEquals(raw,storage.readCredentialSlot(slot+":worker-run"));assertArrayEquals("Legacy ciphertext must not be rewritten",before,read(storage.slotFile(storage.slotHash(slot+":worker-run")).getBaseFile()));
-     assertEquals("legacy-worker-client",new JSONObject(storage.readCredentialSlot(slot)).getString("clientId"));assertEquals(1,HostedDelivery.get(context).history("fixture-session").length());
+     assertEquals(raw,storage.readCredentialSlot(slot+":worker-run"));assertArrayEquals("Stored ciphertext must not be rewritten",before,read(storage.slotFile(storage.slotHash(slot+":worker-run")).getBaseFile()));
+     assertEquals("fixture-worker-client",new JSONObject(storage.readCredentialSlot(slot)).getString("clientId"));assertEquals(1,HostedDelivery.get(context).history("fixture-session").length());
     }
     HostedDelivery.get(context).polling(false);
     assertFalse(HostedDelivery.get(context).status().getBoolean("backgroundEnabled"));
@@ -58,7 +58,7 @@ public final class HostedBackgroundWorkerInstrumentedTest {
     HostedDelivery.get(context).disableSession("older-session");assertEquals("newer-session",new JSONObject(storage.readCredentialSlot(HostedDelivery.ACTIVE)).getString("sessionId"));
    }finally{
     if(workId!=null)WorkManager.getInstance(context).cancelWorkById(workId).getResult().get(10,TimeUnit.SECONDS);
-    HostedDelivery.get(context).disable();new HostedNoticePoster(context).cancel(HostedResultNotices.hash(scope+":worker-run"));
+    HostedDelivery.get(context).disable();new HostedNoticePoster(context).cancel(AlphaUtil.sha256Hex(scope+":worker-run"));
     for(String key:slots)storage.removeCredentialSlot(key);
    }
   }
@@ -71,7 +71,7 @@ public final class HostedBackgroundWorkerInstrumentedTest {
    if(path.equals("/api/auth/me"))response=new JSONObject().put("identity",new JSONObject().put("id",owner).put("kind","owner")).put("session",new JSONObject().put("id",token).put("kind","machine").put("expiresAt",System.currentTimeMillis()+300000)).put("access",new JSONObject().put("role","OWNER").put("mode","session"));
    else if(path.equals("/api/agents"))response=new JSONObject().put("agents",new JSONArray().put(new JSONObject().put("id",agent).put("status","running")));
    else if(path.equals("/api/workflow/status"))response=new JSONObject().put("hostedDigestProtocol",1);
-   else if(path.equals("/api/workflow/hosted/results?clientId=legacy-worker-client"))response=new JSONObject().put("entries",acks==0?new JSONArray().put(result):new JSONArray());
+   else if(path.equals("/api/workflow/hosted/results?clientId=fixture-worker-client"))response=new JSONObject().put("entries",acks==0?new JSONArray().put(result):new JSONArray());
    else if(path.equals("/api/workflow/hosted/results/ack")){JSONObject receipt=new JSONObject(new String(body));assertEquals("worker-run",receipt.getString("runId"));assertEquals(1,receipt.getInt("cursor"));acks++;response=new JSONObject().put("acknowledged",1);}
    else throw new AssertionError("Unexpected effect route");byte[] bytes=response.toString().getBytes(StandardCharsets.UTF_8);OutputStream out=client.getOutputStream();out.write(("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: "+bytes.length+"\r\n\r\n").getBytes(StandardCharsets.US_ASCII));out.write(bytes);out.flush();
   }

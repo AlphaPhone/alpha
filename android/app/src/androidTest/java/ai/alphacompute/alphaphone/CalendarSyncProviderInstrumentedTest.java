@@ -18,7 +18,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /** Real CalendarProvider on an authorized disposable device/emulator. No Google, network,
- * resident agent or real account. This source is not evidence that it has been installed/run. */
+ * resident agent or real account. */
 @RunWith(AndroidJUnit4.class)
 public final class CalendarSyncProviderInstrumentedTest {
  @Before public void requireDisposableProviderFixture(){

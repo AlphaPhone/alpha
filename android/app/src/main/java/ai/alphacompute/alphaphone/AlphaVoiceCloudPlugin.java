@@ -271,7 +271,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private HttpURLConnection connectPaired(PluginCall call,boolean status,SpeechRequestGate.Request request,boolean asr)throws Exception{
   if(!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)throw new IOException("Network speech is not enabled");
   String origin=required(call.getString("origin"),2048);java.net.URI uri=new java.net.URI(origin);
-  boolean local=BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS&&"http".equals(uri.getScheme())&&Set.of("127.0.0.1","10.0.2.2").contains(uri.getHost());
+  boolean local="http".equals(uri.getScheme())&&Set.of("127.0.0.1","10.0.2.2").contains(uri.getHost());
   if(uri.getHost()==null||(!"https".equals(uri.getScheme())&&!local)||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||!"".equals(uri.getRawPath())||uri.getPort()==0||uri.getPort()>65535)throw new IllegalArgumentException();
   AlphaConnectionPlugin store=(AlphaConnectionPlugin)getBridge().getPlugin("AlphaConnection").getInstance();
   PairedAgentCredential pairedCredential=PairedAgentCredential.resolve(call,store);

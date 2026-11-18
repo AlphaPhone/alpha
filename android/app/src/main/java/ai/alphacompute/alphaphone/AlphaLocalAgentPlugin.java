@@ -430,7 +430,6 @@ private static final class ResidentAttachDiagnostic {
   }catch(Exception error){call.reject("Conditional provider removal could not be confirmed.");}},()->call.reject("Local agent bridge is closed."));
  }
  static final String CLOUD_PROVIDER_MODEL=LocalAgentProviderAdmission.CLOUD_PROVIDER_MODEL;
- static final String CLOUD_PROVIDER_BASE=LocalAgentProviderAdmission.CLOUD_PROVIDER_BASE;
  /** Binds an existing account credential; no bearer value crosses this method's renderer API. */
  @PluginMethod public void configureCloudProvider(PluginCall call) {
   if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
@@ -478,21 +477,7 @@ private static final class ResidentAttachDiagnostic {
  }
  // The provider rules live in LocalAgentProviderAdmission (host-JVM tested); these names stay for callers.
  static boolean validProviderToken(String token,int maximumLength){return LocalAgentProviderAdmission.validProviderToken(token,maximumLength);}
- static String cloudProviderToken(String saved,String credentialId,long now) throws Exception {return LocalAgentProviderAdmission.cloudProviderToken(saved,credentialId,now);}
  static void applyProviderEnvironment(JSONObject provider,String cloudSaved,java.util.Map<String,String> env,long now) throws Exception {LocalAgentProviderAdmission.applyProviderEnvironment(provider,cloudSaved,env,now);}
- static final String PROVIDER_MODEL_PATTERN=LocalAgentProviderAdmission.PROVIDER_MODEL_PATTERN;
- /**
-  * No admitted plan, Cloud unreachable without a recent plan, or signed out: the agent runs with no
-  * hosted inference. Every provider credential and selector is removed, so no request can reach a
-  * model provider; the pinned upstream runtime answers chat turns as provider-less (no_provider).
-  */
- static void applyUnboundEnvironment(java.util.Map<String,String> env){
-  // The verified product module is credential-independent; shared cleanup
-  // predates that contract and removes the same module for other hosts.
-  String productModule=env.get("ELIZA_NATIVE_GOOGLE_HOST_MODULE");
-  NativeProviderSlot.applyUnboundEnvironment(env);
-  if(productModule!=null)env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",productModule);
- }
  static JSObject providerIdentity(String saved) {
   try{return new JSObject(LocalAgentProviderAdmission.providerIdentity(saved).toString());}
   catch(org.json.JSONException impossible){throw new IllegalStateException(impossible);}
@@ -1086,7 +1071,7 @@ private static final class ResidentAttachDiagnostic {
     try{captureReminderOwnerSession();return true;}
     catch(SecurityException changed){
      // A new process bearer retires old calls, not the existing owner's NMS receipts.
-     invalidateCalls();++lifecycleEpoch;AlphaCanonicalNotifications.suspendForRestart();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;
+     invalidateCalls();++lifecycleEpoch;clearEnrollment();
     }
    }
    epoch=lifecycleEpoch;
@@ -1197,7 +1182,7 @@ private static final class ResidentAttachDiagnostic {
  private static final String REQUEST_DEADLINE_MESSAGE="Local agent request timed out before dispatch.";
  private static final class RequestDeadlineExpired extends Exception {}
 
- /** Omission preserves the legacy per-dispatch timeout. Explicit budgets include time on the worker queue. */
+ /** Null without timeoutMs (the per-dispatch timeout applies). Explicit budgets include time on the worker queue. */
  private static Long localRequestDeadline(JSONObject input,long entered) {
   if(!input.has("timeoutMs"))return null;
   Object value=input.opt("timeoutMs");

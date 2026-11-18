@@ -105,7 +105,7 @@ adapterTest('actual adapter starts existing Cartesia route without local preflig
   assert.equal(h.directFactories,1);assert.equal(h.directStarts,1);
   assert.equal(h.renderChat().activity.props.phase,'listening');
   assert.equal(h.shell.renderVals().pillVoice.activity.props.phase,'listening');
-  assert.equal(h.localFactories,0);assert.equal(h.pairedFactories,0);assert.equal(h.starts,0);assert.equal(h.accountOpens,0);
+  assert.equal(h.localFactories,0);assert.equal(h.starts,0);assert.equal(h.accountOpens,0);
   assert.equal(h.directOptions.binding.conversationId,h.conversation);
   assert.equal(h.directOptions.getUiContext().uiViewPath,'/chat');
   assert.equal(h.renderChat().lines[0].t,'Listening…');

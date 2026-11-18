@@ -4,9 +4,9 @@ import fs from 'node:fs';
 
 // Voice assistant controller (apps/app/src/runtime/voice-assistant.ts, #423): endpointing,
 // generations, closed-input busy holds, explicit interruption, heard-content accounting, account change, and the live segment stream
-// it listens through (live-segment-stream.ts). Fake clock, capture, agent and speaker.
+// it listens through (live-voice-session.ts). Fake clock, capture, agent and speaker.
 const {VoiceAssistantSession, splitSpokenSentences, ASSISTANT_TIMING_DEFAULTS} = await import('../apps/app/src/runtime/voice-assistant.ts');
-const {createLiveSegmentStream} = await import('../apps/app/src/runtime/live-segment-stream.ts');
+const {createLiveSegmentStream} = await import('../.eliza/client-features/packages/voice/src/live-voice-session.ts');
 
 function fakeClock() {
   let now = 0, id = 0;
@@ -747,7 +747,7 @@ test('one result per closed segment: an unavailable route (503) is fatal after a
 });
 
 test('sources: no Web Speech, storage or logging in the assistant path; the adapter keeps dictation separate behind one chat voice launcher', () => {
-  const files = ['apps/app/src/runtime/voice-assistant.ts', '.eliza/client-features/packages/voice/src/voice-assistant-session.ts', 'apps/app/src/runtime/live-segment-stream.ts', '.eliza/client-features/packages/voice/src/live-voice-session.ts', 'apps/app/src/runtime/voice-turn-routes.ts', '.eliza/client-features/packages/voice/src/voice-turn-routes.ts', 'apps/app/src/runtime/native-live-voice.ts'];
+  const files = ['apps/app/src/runtime/voice-assistant.ts', '.eliza/client-features/packages/voice/src/voice-assistant-session.ts', '.eliza/client-features/packages/voice/src/live-voice-session.ts', 'apps/app/src/runtime/voice-turn-routes.ts', '.eliza/client-features/packages/voice/src/voice-turn-routes.ts', 'apps/app/src/runtime/native-live-voice.ts'];
   for (const file of files) {
     const source = fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
     assert.doesNotMatch(source, /console\.|localStorage|sessionStorage|indexedDB|speechSynthesis|SpeechRecognition|onnx/i, file);
