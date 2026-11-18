@@ -44,6 +44,24 @@ test('a new tab is added and shown empty; a private one only when asked; a full 
   const rows=host.state().tabs.length;await assert.rejects(control({type:'browser_tab_new'}),refused(/8 tabs open/));assert.equal(host.state().tabs.length,rows);
  });
 });
+// The owner's v609 turns: "open example.com in the browser", then "open wikipedia.org in a new tab",
+// then "switch to the example.com tab" and "find the word domain on this page". An address opened in
+// a new tab (browser_navigate newTab) keeps the agent's earlier page in its own tab.
+test('an address opened in a new tab keeps the earlier page, so switching back and finding in it work',async()=>{
+ await browser(async({host,sent,page,control})=>{
+  const approved=async(address,newTab)=>{const present=await host.component.browserNavigateApproved(address,signal(),true,newTab);await host.sync();const id=sent('navigate').at(-1).id;present?.();await host.sync();return id;};
+  const example=await approved('https://example.com/',false);await page(example,'https://example.com/','Example Domain');
+  const wiki=await approved('https://wikipedia.org/',true);await page(wiki,'https://wikipedia.org/','Wikipedia');
+  assert.notEqual(wiki,example,'the new tab is not the agent\'s earlier tab');
+  assert.deepEqual(host.state().tabs.map(tab=>tab.id),[example,wiki]);assert.equal(host.state().cur,wiki);
+  await (await control({type:'browser_tab_switch',target:'example'}))();assert.equal(host.state().cur,example);
+  await (await control({type:'browser_find',text:'domain'}))();assert.equal(host.state().findTab,example);
+  await new Promise(resolve=>setTimeout(resolve,200));
+  assert.deepEqual(sent('find').map(input=>[input.id,input.query]),[[example,'domain']]);
+  // Without newTab an open still reuses the agent's own tab rather than adding one.
+  const reused=await approved('https://example.org/',false);assert.equal(reused,wiki);assert.equal(host.state().tabs.length,2);
+ });
+});
 test('switching finds one tab by a word of its title or its site and shows it after the receipt',async()=>{
  await browser(async({host,open,control,asked})=>{
   const news=await open('https://news.example/today','Morning news',{fresh:false}),docs=await open('https://docs.example.org/guide','Field guide');
@@ -189,4 +207,7 @@ test('Browser controls are advertised only where this phone carries them out',()
  assert.deepEqual(selectDeviceCapabilities(offered,{...profile,android:false,native:false}).slice(2),['browser.search.v1','browser.tabs.v1','browser.history.v1'],'the web build cannot find in a page');
  assert.deepEqual(selectDeviceCapabilities(['browser.tabs.v1'],profile).slice(2),['browser.tabs.v1'],'only what the agent offers');
  assert.deepEqual(selectDeviceCapabilities([],profile).slice(2),[]);
+ // A typed address in a new tab, when the agent offers it, on every build that runs Browser tabs.
+ assert.deepEqual(selectDeviceCapabilities([...offered,'browser.open-new-tab.v1'],{...profile,android:false,native:false}).slice(2),['browser.search.v1','browser.tabs.v1','browser.history.v1','browser.open-new-tab.v1']);
+ assert.ok(!selectDeviceCapabilities(offered,profile).includes('browser.open-new-tab.v1'),'only when the agent offers it');
 });
