@@ -13,9 +13,9 @@ export type EmptyStateProps = Omit<ComponentProps<"div">, "title"> & {
 /** Stands where a list or view has nothing to show yet. */
 export function EmptyState({ title, icon, className, children, ...props }: EmptyStateProps) {
   return (
-    <div className={cn("flex flex-col items-center gap-4 p-8 text-center", className)} {...props}>
-      {icon ? <div aria-hidden className="text-muted-foreground">{icon}</div> : null}
-      <p className="text-sm font-medium text-muted-foreground">{title}</p>
+    <div className={cn("flex flex-col items-center gap-4 px-8 py-12 text-center", className)} {...props}>
+      {icon ? <div aria-hidden className="text-muted-foreground [&_svg:not([class*='size-'])]:size-10">{icon}</div> : null}
+      <p className="text-base text-muted-foreground">{title}</p>
       {children}
     </div>
   );

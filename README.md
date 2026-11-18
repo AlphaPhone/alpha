@@ -25,9 +25,9 @@ on Effect, and the interface in React on one design system.
 | `vibestack/` | The toolchain, with [its guide](vibestack/README.md) |
 | `legacy/` | The implementation being replaced, kept as the guide to what each area does and removed area by area as it is rebuilt |
 
-The agent runtime is the open-source
-[elizaOS](https://github.com/elizaOS/eliza) runtime at the commit
-`legacy/upstream.lock.json` pins.
+The on-device agent, the Android device package and the hosted services
+are the open-source [elizaOS](https://github.com/elizaOS/eliza) packages on
+its `vibestack` branch, at a pinned commit.
 
 ## Setup and checks
 
