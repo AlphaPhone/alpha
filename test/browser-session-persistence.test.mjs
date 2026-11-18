@@ -139,4 +139,9 @@ test('approved opens reuse an untouched New tab or the agent tab and never a use
   assert.equal(approvedOpenTab(tabs, 'user', 'agent', true, untouched), 'private-blank');
   assert.equal(approvedOpenTab([{id: 'user'}, {id: 'private-blank', priv: true}], 'private-blank', undefined, false, untouched), undefined);
   assert.equal(approvedOpenTab([{id: 'user'}, {id: 'agent', priv: true}], 'user', 'agent', false, () => false), undefined);
+  // An open the owner asked for in a new tab never replaces the agent's earlier page; an untouched
+  // New tab is a new tab already.
+  assert.equal(approvedOpenTab(tabs, 'user', 'agent', false, untouched, true), 'blank');
+  assert.equal(approvedOpenTab(tabs, 'blank', 'agent', false, untouched, true), 'blank');
+  assert.equal(approvedOpenTab([{id: 'user'}, {id: 'agent'}], 'user', 'agent', false, () => false, true), undefined);
 });

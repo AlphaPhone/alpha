@@ -1419,7 +1419,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // The tab the request was made from, when it was made in Browser: page history acts on that page only.
       const tab=expectedContext.view==='browser'?expectedContext.selectedObject:undefined,observed=tab?.kind==='browser-tab'&&tab.revision!==undefined?{id:tab.id,revision:tab.revision}:undefined;
       // Several tabs matching the request's words are listed in this action's own card; the agent never sees them.
-      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true));
+      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
       return { status: 'succeeded', summary: browserControl?browserControlSummary(operation):browserNavigationSummary(operation.url),presentBrowser:()=>{
         const show=()=>{
           if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;

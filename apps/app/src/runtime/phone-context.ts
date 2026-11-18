@@ -140,6 +140,10 @@ export const CALENDAR_AVAILABILITY_CAPABILITY = 'calendar.availability-read.v1';
  * Files plugin is present; `clockRepeatDays`: native Clock carries repeat days; `aospImage`: the Alpha system image. */
 /** The shared contract's TELEPHONY_VIEWS_CAPABILITY. Its module also loads the Node-only workflow contract, which the renderer cannot import. */
 export const TELEPHONY_VIEWS_CAPABILITY = 'views.telephony.v1';
+/** The shared browser contract's BROWSER_OPEN_NEW_TAB_CAPABILITY:
+ * browser_navigate {url, newTab: true} opens a typed address in a tab of its own. Kept here until
+ * the pinned contract exports it; the agent offers it only from that revision. */
+export const BROWSER_OPEN_NEW_TAB_CAPABILITY = 'browser.open-new-tab.v1';
 export type DeviceCapabilityProfile = {android: boolean; native: boolean; camera: boolean; foregroundReview: boolean; canonicalNotes?: boolean; previousNotes?: boolean; photoLibrary?: boolean; files?: boolean; clockRepeatDays: boolean; aospImage: boolean};
 /** Every capability either list offers. The Cloud agent answers two lists, its capabilities route
  * and its device registration. They are one list in the pinned agent; an older Cloud agent's route
@@ -161,7 +165,7 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
   // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.
-  for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[])])if(agent.includes(capability))capabilities.push(capability);
+  for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[]),BROWSER_OPEN_NEW_TAB_CAPABILITY])if(agent.includes(capability))capabilities.push(capability);
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
   // The device photo library is offered only where the native Photos plugin exists and the agent offers it.

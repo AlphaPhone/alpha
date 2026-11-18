@@ -575,7 +575,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         if (!disposed && !document.hidden && owner.S().view === 'browser') void navigate(url.href, true);
       });
     };
-    this.browserNavigateApproved = async (raw: string, signal: AbortSignal, deferPresentation = false) => {
+    this.browserNavigateApproved = async (raw: string, signal: AbortSignal, deferPresentation = false, newTab = false) => {
       const url = new URL(raw);
       if (url.protocol !== 'https:' || url.username || url.password) throw new BrowserOpenRefused('Only HTTPS destinations may be approved');
       signal.throwIfAborted();
@@ -584,7 +584,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // destination must not silently switch to saved sign-ins and history.
       const privateTab=!!(shell.S?.().view==='browser'&&isPrivate(selected));
       // Reuse an untouched New tab or the agent's own earlier tab, so opens do not fill the tab limit.
-      const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab) && !tabInfo(tab));
+      // "Open x.com in a new tab" keeps the agent's earlier page in its own tab.
+      const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab) && !tabInfo(tab), newTab);
       const id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
       if (id) agentTab = id;
       const present = () => {

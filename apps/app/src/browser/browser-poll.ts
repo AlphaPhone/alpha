@@ -3,11 +3,13 @@
 
 /** The existing tab an approved (agent) open loads into, or undefined for a new tab: the selected
  * tab while it is an untouched New tab, else the agent's own earlier tab, else any untouched New
- * tab. Only tabs of the requested profile qualify; a page the user opened is never replaced. */
-export function approvedOpenTab(tabs: ReadonlyArray<{id: string; priv?: boolean}>, selected: string | undefined, agentTab: string | undefined, privateTab: boolean, untouched: (id: string) => boolean): string | undefined {
+ * tab. Only tabs of the requested profile qualify; a page the user opened is never replaced. An
+ * open the owner asked for in a new tab (`newTab`) never replaces the agent's earlier page either:
+ * only an untouched New tab, which is a new tab already, is reused. */
+export function approvedOpenTab(tabs: ReadonlyArray<{id: string; priv?: boolean}>, selected: string | undefined, agentTab: string | undefined, privateTab: boolean, untouched: (id: string) => boolean, newTab = false): string | undefined {
   const fits = (id: string | undefined) => tabs.some(tab => tab.id === id && !!tab.priv === privateTab);
   if (selected && fits(selected) && untouched(selected)) return selected;
-  if (agentTab && fits(agentTab)) return agentTab;
+  if (!newTab && agentTab && fits(agentTab)) return agentTab;
   return tabs.find(tab => !!tab.priv === privateTab && untouched(tab.id))?.id;
 }
 
