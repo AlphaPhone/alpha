@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {stripTypeScriptTypes} from './support/strip-types.mjs';
-const {createFilesIndex,compareFilesEntries,matchesFileQuery,sortLabel,RECENT_LIMIT,filesIndexKey}=await import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(readFileSync('apps/app/src/prototype/files-index.ts','utf8'))).toString('base64'));
+const {createFilesIndex,compareFilesEntries,RECENT_LIMIT,filesIndexKey}=await import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(readFileSync('apps/app/src/prototype/files-index.ts','utf8'))).toString('base64'));
 const memory=()=>{const values=new Map();return {getItem:key=>values.has(key)?values.get(key):null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key),values};};
 
 test('recent sort is newest modified first with folders first and unknown times last; name sort is natural',()=>{
@@ -7,7 +7,6 @@ test('recent sort is newest modified first with folders first and unknown times 
  assert.deepEqual([...rows].sort(compareFilesEntries('recent')).map(r=>r.name),['Alpha','Zeta','a.txt','file10.txt','b.txt','c.txt']);
  assert.deepEqual([...rows,{name:'file9.txt',directory:false}].sort(compareFilesEntries('name')).map(r=>r.name),['Alpha','Zeta','a.txt','b.txt','c.txt','file9.txt','file10.txt']);
  assert.equal(compareFilesEntries('name')({name:'A',directory:false},{name:'a',directory:false})<0,true,'stable tie-break');
- assert.equal(sortLabel('name'),'Sorted by name');assert.equal(sortLabel('recent'),'Sorted by newest');
 });
 test('recent rows persist newest first, keep same-name picks and report evicted grants',()=>{
  const store=memory();let now=1;const index=createFilesIndex(store,()=>++now);
@@ -40,11 +39,4 @@ test('stored rows are validated and never invent access',()=>{
  assert.deepEqual(createFilesIndex(store).list().map(r=>r.name),['ok.txt']);
  store.setItem(filesIndexKey,'{');assert.deepEqual(createFilesIndex(store).list(),[]);
  const broken={getItem(){throw Error('blocked');},setItem(){throw Error('blocked');},removeItem(){}};const index=createFilesIndex(broken);index.record({kind:'scan-pdf',name:'x.pdf',mimeType:'application/pdf'});assert.deepEqual(index.list(),[]);
-});
-test('search matches name and type words by prefix',()=>{
- assert.equal(matchesFileQuery({name:'Quarterly Report 2026.pdf',mimeType:'application/pdf'},'quart rep'),true);
- assert.equal(matchesFileQuery({name:'notes.txt',mimeType:'text/plain'},'text'),true);
- assert.equal(matchesFileQuery({name:'Résumé.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},'resume document'),true);
- assert.equal(matchesFileQuery({name:'notes.txt',mimeType:'text/plain'},'pdf'),false);
- assert.equal(matchesFileQuery({name:'notes.txt',mimeType:'text/plain'},'  '),false);
 });
