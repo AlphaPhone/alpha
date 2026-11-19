@@ -88,6 +88,9 @@ interface MapsScreenBackground {
   ): Promise<boolean>;
   update(title: string, text: string): void;
   stop(): Promise<void>;
+  /** Guidance reached `destination`: end the screen-off session. With Maps off screen the
+   * host first tells the owner where they arrived. */
+  arrive(destination: string): Promise<void>;
 }
 
 interface MapsScreenHost {
@@ -238,6 +241,8 @@ export interface MapsScreenView {
     routeReady: boolean;
     /** The provider's ordered route choice; empty when it offered one route. */
     routes: readonly MapsScreenRouteChoice[];
+    /** The selected route's turn-by-turn steps, in order; empty without a route. */
+    steps: readonly { instruction: string; distance: string }[];
   };
   navigation?: {
     arrived: boolean;
@@ -343,6 +348,12 @@ export class MapsScreenController {
   private contextKey = "";
   private contextRevision = 0;
   private recenterOnly = false;
+  /** This visit already looked for the phone's position on open. */
+  private openedLocate = false;
+  /** The pending location request is the quiet one made on open: a failure shows nothing. */
+  private quietLocate = false;
+  /** The quiet request's failure, which the status does not show. */
+  private quietFailure?: unknown;
   private recenterSelection?: MapsScreenSelection;
   private recenterPosition?: Coordinate;
   private locationTimeout?: ReturnType<typeof setTimeout>;
@@ -436,6 +447,10 @@ export class MapsScreenController {
     clearTimeout(this.locationTimeout);
     this.locationTimeout = undefined;
     this.recenterOnly = false;
+    // A provider switch keeps the visit: the position is not looked up again.
+    if (cancelIntent) this.openedLocate = false;
+    this.quietLocate = false;
+    this.quietFailure = undefined;
     this.recenterSelection = undefined;
     this.recenterPosition = undefined;
     this.sharing?.abort.abort();
@@ -507,6 +522,8 @@ export class MapsScreenController {
     this.locationTimeout = undefined;
     this.locating = false;
     this.recenterOnly = false;
+    this.quietLocate = false;
+    this.openedLocate = false;
     ++this.searchIntent;
     for (const listener of [...this.releaseListeners]) listener();
     void this.host.agentLocation.stop().catch(() => {});
@@ -833,6 +850,26 @@ export class MapsScreenController {
     if (item) this.choose(`place:${item.providerId}:${item.id}`);
   }
 
+  /** A long press on the map drops a pin there, as typed coordinates would. Directions and
+   * guidance keep their route; the press changes nothing while they are open. */
+  dropPin(point: Coordinate): void {
+    if (this.disposed || !this.host.active() || this.directions || this.navigating)
+      return;
+    let pinned: Coordinate;
+    try {
+      pinned = coordinate(point);
+    } catch {
+      return;
+    }
+    this.host.discardHandoff?.();
+    this.cancelLocate();
+    ++this.searchIntent;
+    this.selected = { label: "Dropped pin", coordinate: pinned, origin: "manual" };
+    this.searching = false;
+    this.message = "";
+    this.invalidate();
+  }
+
   closePlace(): void {
     this.selected = undefined;
     this.message = "";
@@ -925,21 +962,63 @@ export class MapsScreenController {
 
   // ---- location -------------------------------------------------------------
 
+  /**
+   * Maps opened with nothing chosen yet: when location is already allowed, show where the
+   * phone is, once per visit. Never asks for permission and never replaces a choice.
+   */
+  showPositionOnOpen(): void {
+    if (this.openedLocate || !this.usable()) return;
+    this.openedLocate = true;
+    const idle = () =>
+      this.usable() &&
+      !this.locating &&
+      !this.selected &&
+      !this.searching &&
+      !this.query.trim() &&
+      !this.directions &&
+      !this.navigating &&
+      this.state?.position.phase !== "ready";
+    if (!idle()) return;
+    void this.host.locationGranted().then(
+      (granted) => {
+        if (!granted || !idle()) return;
+        this.quietLocate = true;
+        this.requestLocation();
+      },
+      () => {},
+    );
+  }
+
   /** An explicit location request; the platform may show its permission prompt. */
   locate(): void {
+    // The owner's own request replaces the quiet one made on open, so its outcome is shown.
+    if (this.quietLocate) {
+      const recenterOnly = this.recenterOnly;
+      this.cancelLocate();
+      this.recenterOnly = recenterOnly;
+    }
+    this.requestLocation();
+  }
+
+  private requestLocation(): void {
     if (this.disposed || this.locating || !this.host.active()) return;
-    this.host.discardHandoff?.();
-    this.message = "";
+    if (!this.quietLocate) this.host.discardHandoff?.();
+    this.quietFailure = undefined;
+    // The quiet request on open leaves whatever the screen is already saying.
+    if (!this.quietLocate) this.message = "";
     this.locating = true;
-    if (!this.directions && !this.recenterOnly) this.selected = undefined;
+    if (!this.directions && !this.recenterOnly && !this.quietLocate)
+      this.selected = undefined;
     this.searching = false;
     const controller = this.ensure();
     this.locationTimeout = setTimeout(() => {
       if (!this.locating || this.controller !== controller) return;
       this.locating = false;
       this.recenterOnly = false;
-      this.message =
-        "Couldn't find your location. Try again or enter a starting point.";
+      if (!this.quietLocate)
+        this.message =
+          "Couldn't find your location. Try again or enter a starting point.";
+      this.quietLocate = false;
       void controller.suspend().catch(() => {});
       this.invalidate();
     }, 15_000);
@@ -949,6 +1028,7 @@ export class MapsScreenController {
 
   /** A newer choice replaces a pending location request. A late fix does not change it. */
   private cancelLocate(): void {
+    this.quietLocate = false;
     if (!this.locating) return;
     this.locating = false;
     this.recenterOnly = false;
@@ -972,9 +1052,11 @@ export class MapsScreenController {
   manualLocation(): void {
     if (this.disposed || !this.host.active()) return;
     this.release();
+    // Same visit: the coordinate prompt is not replaced by a fresh look for the position.
+    this.openedLocate = true;
     this.query = "";
     this.searching = false;
-    this.message = "Enter latitude, longitude in Search, then press Enter.";
+    this.message = "Type a latitude and longitude in Search, then press Enter.";
     this.invalidate();
   }
 
@@ -1164,8 +1246,7 @@ export class MapsScreenController {
     this.navRouteId = route.id;
     this.backgroundRunning = false;
     const session = ++this.navSession;
-    this.message =
-      "Waiting for a fresh location fix. Foreground guidance only.";
+    this.message = "Waiting for your location.";
     void this.host.background
       .start(`Route to ${selected.label}`, "Waiting for location", (reason) => {
         if (session !== this.navSession || !this.navigating) return;
@@ -1178,8 +1259,7 @@ export class MapsScreenController {
           return;
         }
         this.backgroundRunning = false;
-        this.message =
-          "Screen-off guidance is unavailable. Foreground guidance only.";
+        this.message = "Keep Maps open for turn guidance.";
         if (!this.host.active()) this.release();
         else this.invalidate();
       })
@@ -1402,11 +1482,12 @@ export class MapsScreenController {
     const choosingOrigin = this.choosingOrigin();
     const error =
       snapshot.saved.error ||
-      snapshot.position.error ||
+      (snapshot.position.error !== this.quietFailure &&
+        snapshot.position.error) ||
       (choosingOrigin ? snapshot.originSearch.error : snapshot.search.error) ||
       snapshot.route.error;
     const pending =
-      this.locating ||
+      (this.locating && !this.quietLocate) ||
       (choosingOrigin
         ? snapshot.originSearch.phase === "loading"
         : snapshot.search.phase === "loading");
@@ -1663,6 +1744,16 @@ export class MapsScreenController {
           via: option.steps[0]?.instruction || "",
           selected: option.id === route?.id,
         })),
+        steps:
+          snapshot.route.phase === "ready" && route
+            ? route.steps.map((step) => ({
+                instruction: step.instruction,
+                distance:
+                  step.distanceMeters > 0
+                    ? guidanceDistance(step.distanceMeters)
+                    : "",
+              }))
+            : [],
       };
     }
     if (this.navigating && selected) {
@@ -1709,7 +1800,7 @@ export class MapsScreenController {
             ? guidance.remaining
             : this.backgroundRunning
               ? "Continues with the screen off"
-              : "Foreground guidance",
+              : "Keep Maps open",
         remaining: guidance?.remaining || "",
         offRoute: this.offRoute,
         canReroute:
@@ -1764,8 +1855,27 @@ export class MapsScreenController {
       this.locating = false;
       clearTimeout(this.locationTimeout);
       this.locationTimeout = undefined;
+      // The quiet request on open only shows the position and centres on it. Once the owner
+      // has begun something else, the fix changes nothing they see but the position mark.
+      const quiet = this.quietLocate;
       const recenterOnly = this.recenterOnly;
       this.recenterOnly = false;
+      this.quietLocate = false;
+      if (quiet) {
+        if (
+          !this.selected &&
+          !this.directions &&
+          !this.searching &&
+          !this.query.trim()
+        ) {
+          this.recenterSelection = undefined;
+          this.recenterPosition = position.coordinate;
+          if (position.precision === "approximate")
+            this.message = "Approximate location";
+        }
+        this.invalidate();
+        return;
+      }
       if (recenterOnly) {
         this.recenterSelection = this.selected;
         this.recenterPosition = position.coordinate;
@@ -1788,9 +1898,12 @@ export class MapsScreenController {
       clearTimeout(this.locationTimeout);
       this.locationTimeout = undefined;
       this.recenterOnly = false;
-      this.message = next.position.error
-        ? mapsFailureText(next.position.error)
-        : "Location unavailable.";
+      if (this.quietLocate) this.quietFailure = next.position.error;
+      else
+        this.message = next.position.error
+          ? mapsFailureText(next.position.error)
+          : "Location unavailable.";
+      this.quietLocate = false;
     }
     this.invalidate();
   }
@@ -1803,7 +1916,7 @@ export class MapsScreenController {
       this.navFix = undefined;
       this.host.voice.pause();
       this.message =
-        "A fresh, precise location fix is needed for turn guidance.";
+        "Turn guidance needs a precise, up-to-date location.";
       this.invalidate();
       return;
     }
@@ -1825,7 +1938,7 @@ export class MapsScreenController {
       this.message = "Destination reached.";
       this.offRoute = false;
       void this.host.navigationLocation.stop();
-      void this.host.background.stop();
+      void this.host.background.arrive(this.selected?.label ?? "");
       this.backgroundRunning = false;
     } else {
       const nearest = distanceToRoute(fix.coordinate, current.geometry);
@@ -1879,7 +1992,7 @@ export class MapsScreenController {
     if (!this.navigating || this.rerouting) return undefined;
     if (!usableNavigationFix(this.navFix, this.now())) {
       this.message =
-        "A fresh, precise location fix is needed to reroute. The current route was kept.";
+        "Rerouting needs a precise, up-to-date location. The current route was kept.";
       this.host.voice.pause();
       this.invalidate();
       return undefined;

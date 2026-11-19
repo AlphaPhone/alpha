@@ -62,6 +62,7 @@ function fixture(compiled, providerHelpers, notificationHelpers) {
     refresh() {}
     hidden() {}
     unwind() {unwinds++;}
+    showPositionOnOpen() {}
     dispose() {}
   }
   const context = vm.createContext({window, document, AbortController, queueMicrotask,

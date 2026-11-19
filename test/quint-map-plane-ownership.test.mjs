@@ -63,7 +63,7 @@ function driver(compiled) {
       setMapState(state) { probe.calls++; probe.mapState = state; reports.push({source: probe.source, generation: context.inspectMapPlane().generation}); }
       refresh() { probe.calls++; }
       retryMap() { probe.retries++; probe.mapState = 'loading'; }
-      pin() {} release() {} hidden() {} dispose() {}
+      pin() {} release() {} hidden() {} showPositionOnOpen() {} dispose() {}
     },
     MapPlane: class {
       constructor(element, region, onError, colors, onPin, onCopyright) {

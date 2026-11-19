@@ -102,7 +102,8 @@ export function navigationServicePlatform(){
    public class Notification {
     public static final int VISIBILITY_PUBLIC=1;
     public static final String CATEGORY_NAVIGATION="navigation";
-    public String title,text;
+    public String title,text,category;
+    public boolean autoCancel,ongoing;
     public PendingIntent stop;
     public static class Action {
      final PendingIntent stop;
@@ -120,10 +121,11 @@ export function navigationServicePlatform(){
      public Builder setContentTitle(String title){value.title=title;return this;}
      public Builder setContentText(String text){value.text=text;return this;}
      public Builder setContentIntent(PendingIntent intent){return this;}
-     public Builder setOngoing(boolean value){return this;}
+     public Builder setOngoing(boolean ongoing){value.ongoing=ongoing;return this;}
+     public Builder setAutoCancel(boolean cancel){value.autoCancel=cancel;return this;}
      public Builder setOnlyAlertOnce(boolean value){return this;}
      public Builder setShowWhen(boolean value){return this;}
-     public Builder setCategory(String category){return this;}
+     public Builder setCategory(String category){value.category=category;return this;}
      public Builder setVisibility(int visibility){return this;}
      public Builder addAction(Action action){value.stop=action.stop;return this;}
      public Notification build(){return value;}
@@ -139,6 +141,8 @@ export function navigationServicePlatform(){
    private NotificationChannel channel;
    public NotificationChannel getNotificationChannel(String id){return channel;}
    public void createNotificationChannel(NotificationChannel value){channel=value;}
+   public final java.util.Map<Integer,Notification> posted=new java.util.LinkedHashMap<>();
+   public void notify(int id,Notification value){posted.put(id,value);}
   }`,
   'android/app/Service.java':`package android.app;
    import android.content.*;
