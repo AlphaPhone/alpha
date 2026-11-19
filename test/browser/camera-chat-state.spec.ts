@@ -13,7 +13,8 @@ test.beforeEach(async({page})=>{
   const devices=navigator.mediaDevices;devices.getUserMedia=async()=>canvas.captureStream(20);Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:devices});
  });
  await page.goto('/');
- // A handle on the shell, to open Camera the way a chat card or the Apps drawer does while the chat is open.
+ // A handle on the shell, to switch views the way the chat's navigation does (agent-adapter openInternalView):
+ // the conversation's current detent goes with the switch.
  await page.evaluate(async()=>{const {Component}=await import('/src/prototype/model.js');const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){(window as any).cameraChatShell=this;return render.call(this);};});
  await returnToApps(page);
  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
@@ -58,7 +59,7 @@ test('a closed chat stays closed when the owner opens Camera from Home',async({p
 test('an open chat stays open over Camera, with the preview visible and the shutter reachable',async({page})=>{
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await expect.poll(()=>detent(page)).toBe('sheet');
- await page.evaluate(()=>(window as any).cameraChatShell.openView('camera'));
+ await page.evaluate(()=>(window as any).cameraChatShell.openView('camera',undefined,(window as any).cameraChatShell.S().chat));
  await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
  await previewLive(page);
  await expect.poll(()=>detent(page)).toBe('sheet');
@@ -70,7 +71,7 @@ test('an open chat stays open over Camera, with the preview visible and the shut
  await expect.poll(()=>page.evaluate(async()=>{const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');return (await browserPhotoLibrary.list()).items.length;})).toBe(before+1);
  expect(await detent(page)).toBe('sheet');
  // Leaving Camera keeps the sheet too.
- await page.evaluate(()=>(window as any).cameraChatShell.openView('notes'));
+ await page.evaluate(()=>(window as any).cameraChatShell.openView('notes',undefined,(window as any).cameraChatShell.S().chat));
  await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
  expect(await detent(page)).toBe('sheet');
 });
@@ -79,7 +80,7 @@ test('a full chat stays full when Camera opens',async({page})=>{
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await page.getByRole('button',{name:'Expand chat',exact:true}).click();
  await expect.poll(()=>detent(page)).toBe('full');
- await page.evaluate(()=>(window as any).cameraChatShell.openView('camera'));
+ await page.evaluate(()=>(window as any).cameraChatShell.openView('camera',undefined,(window as any).cameraChatShell.S().chat));
  await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
  await page.waitForTimeout(400);
  expect(await detent(page)).toBe('full');
@@ -93,7 +94,7 @@ test('a full chat stays full when Camera opens',async({page})=>{
 test('a scan asked for on Camera keeps the open sheet, with scan review above it',async({page})=>{
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await expect.poll(()=>detent(page)).toBe('sheet');
- await page.evaluate(()=>(window as any).cameraChatShell.openView('camera'));
+ await page.evaluate(()=>(window as any).cameraChatShell.openView('camera',undefined,(window as any).cameraChatShell.S().chat));
  await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
  await previewLive(page);
  expect(await page.evaluate(async()=>{const {requestCameraScan}=await import('/src/prototype/camera-adapter.ts');return requestCameraScan();})).toBe(true);

@@ -5959,10 +5959,6 @@ class Component extends DCLogic {
       this.stageSwitched("left");
       chat = S.chat;
     }
-    // An open conversation keeps its detent across every view switch, from the chat or by the owner: a
-    // sheet stays a sheet and full stays full. A view laid out under the open sheet keeps its controls
-    // above it (Camera: phone.css, the camera's chat-open layout). Only an explicit detent moves it.
-    if (chat == null && (S.chat === "sheet" || S.chat === "full")) chat = S.chat;
     // A stage switch keeps the Back stack, as Component.stage does: stageFrom is its way back (D11).
     var nav = this.shellNavigate({ type: "open", view: k, history: staged ? "keep" : opts.push ? "push" : "reset", assistant: this.shellDetent(chat, k) });
     if (S.view !== k) {
