@@ -179,4 +179,20 @@ function fakeHost(){
   library.dispose();host.release();
  }finally{delete globalThis.document;}
 }
+// 5. Agent-named items older than the loaded window are read before they count as missing.
+{
+ const {resolveRequestedRows}=await import('../../apps/app/src/prototype/photo-library-adapter.ts');
+ const loaded=[{id:'m:3'},{id:'m:2'}],reads=[];
+ const read=async id=>{reads.push(id);if(id==='m:1')return {id:'m:1'};if(id==='m:7')return undefined;if(id==='m:8')return {id:'m:9'};throw Object.assign(Error('missing'),{code:'LIBRARY_MISSING'});};
+ const signal=new AbortController().signal;
+ const result=await resolveRequestedRows(loaded,['m:2','m:1','m:7','m:8','m:404'],row=>row.id,read,signal);
+ assert.deepEqual(result.rows.map(row=>row.id),['m:2','m:1'],'the loaded row, then the older row read from the library');
+ assert.equal(result.missing,3,'unreadable, deleted and mismatched reads are missing');
+ assert.deepEqual(reads,['m:1','m:7','m:8','m:404'],'loaded rows are not read again');
+ const none=await resolveRequestedRows(loaded,['m:3'],row=>row.id,async()=>{throw Error('no read expected');},signal);
+ assert.deepEqual(none,{rows:[{id:'m:3'}],missing:0});
+ const stop=new AbortController();let started=0;
+ const pending=resolveRequestedRows(loaded,['m:5','m:6'],row=>row.id,async id=>{started++;stop.abort();return {id};},stop.signal);
+ await assert.rejects(pending,error=>error?.name==='AbortError');assert.equal(started,1,'a cancelled request reads nothing more');
+}
 console.log('PASS photo library adapter');

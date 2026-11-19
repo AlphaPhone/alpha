@@ -24,7 +24,6 @@ import {EMERGENCY_REFUSAL,imageContactPorts,imageDialHandoff,imageSmsPort,imageS
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
 import {approvedCardTelephony,createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
-import {DeviceActionNotStarted} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
@@ -39,6 +38,7 @@ import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {captureSelectionOpen} from './context-selection';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
@@ -825,7 +825,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if (view === 'maps') providerSelection = getMapsSelectedObject();
     if (view === 'photos') {
       const state = shell.vget('photos');
-      if (state.open === state.nativePhotoSelection?.id) providerSelection = state.nativePhotoSelection;
+      if (captureSelectionOpen(state.open, state.nativePhotoSelection)) providerSelection = state.nativePhotoSelection;
     }
     if (view === 'inbox') {
       const state = shell.vget('inbox');

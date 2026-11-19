@@ -70,6 +70,8 @@ test('Photos tabs stay aligned in Albums and selection opens the real media libr
  await page.goto('/');await page.getByRole('button',{name:'Photos',exact:true}).click();
  const select=page.getByRole('button',{name:'Select photos',exact:true}),library=page.getByRole('button',{name:'Library',exact:true});
  const settle=()=>library.evaluate(async el=>{await document.fonts.ready;const animations=new Set(el.getAnimations({subtree:true}));for(let parent=el.parentElement;parent;parent=parent.parentElement)for(const animation of parent.getAnimations())animations.add(animation);await Promise.all([...animations].filter(animation=>animation.effect?.getComputedTiming().endTime!==Infinity).map(animation=>animation.finished));await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));});
+ // Library and Albums have their own icons, set by the shared Photos view (the same in fixture builds).
+ expect(await page.locator('.photos-section-icon').evaluateAll(icons=>icons.map(icon=>getComputedStyle(icon).maskImage))).toEqual([expect.stringContaining('/icons/lucide/images.svg'),expect.stringContaining('/icons/lucide/folder.svg')]);
  await settle();const before=await library.boundingBox();await page.getByRole('button',{name:'Albums',exact:true}).click();
  await settle();const after=await library.boundingBox();expect(after!.x).toBe(before!.x);expect(after!.y).toBe(before!.y);
  // Select belongs to grids (the Library and each album), not the album list.

@@ -60,6 +60,23 @@ export type MainLibraryHost = {
   trashed(ids: string[]): void;
 };
 let mainHost: MainLibraryHost | undefined;
+/** The rows an agent request names: those in the loaded Library window, then each other id read
+ * from the library one at a time (it may be older than the window). An id the library cannot
+ * read, or reads as deleted, is missing. Reads stop when the request is cancelled. */
+export async function resolveRequestedRows<T>(loaded: readonly T[], ids: readonly string[], idOf: (row: T) => string,
+  read: (id: string) => Promise<T | undefined>, signal: AbortSignal): Promise<{ rows: T[]; missing: number }> {
+  const wanted = new Set(ids), rows = loaded.filter(row => wanted.has(idOf(row)));
+  const found = new Set(rows.map(idOf));
+  for (const id of wanted) {
+    if (found.has(id)) continue;
+    signal.throwIfAborted();
+    let row: T | undefined;
+    try { row = await read(id); } catch { row = undefined; }
+    signal.throwIfAborted();
+    if (row !== undefined && idOf(row) === id && !found.has(id)) { rows.push(row); found.add(id); }
+  }
+  return { rows, missing: ids.length - rows.length };
+}
 export function setMainLibraryHost(host: MainLibraryHost | undefined) { mainHost = host; return () => { if (mainHost === host) mainHost = undefined; }; }
 
 /** One instance per Photos module mount. */

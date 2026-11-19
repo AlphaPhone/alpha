@@ -2776,7 +2776,7 @@ registerView("photos", {
     return {
       hdr: !selecting && !st.searching, isLib: st.tab !== "alb" || !!st.searching, isAlb: st.tab === "alb" && !st.searching, libTab: st.tab !== "alb",
       title: st.tab === "alb" ? "Albums" : "Photos",
-      tabs: [["lib", "Library", IC.photo], ["alb", "Albums", IC.phAlbums]].map(function (t) { var on = (st.tab || "lib") === t[0]; return { id: t[0], label: t[1], d: t[2], on: on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)", pick: function () { api.set({ tab: t[0], sel: null }); } }; }),
+      tabs: [["lib", "Library", IC.photo], ["alb", "Albums", IC.phAlbums]].map(function (t) { var on = (st.tab || "lib") === t[0]; return { id: t[0], label: t[1], d: t[2], iconCss: "mask-image:url(/icons/lucide/" + (t[0] === "lib" ? "images" : "folder") + ".svg)", on: on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)", pick: function () { api.set({ tab: t[0], sel: null }); } }; }),
       searching: !!st.searching, q: st.q || "", hasQ: !!(st.q || "").trim(), askLabel: "Ask " + api.name + ": “" + (st.q || "").trim() + "”",
       search: function () { api.set({ searching: true, q: "", sel: null, album: null }); },
       onQ: function (e) { api.set({ q: e.target.value }); },

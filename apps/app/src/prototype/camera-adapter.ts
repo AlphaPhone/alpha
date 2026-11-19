@@ -16,7 +16,7 @@ import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,medi
 import {createInlineModal} from '../runtime/inline-modal';
 import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
-import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,type HostOperation} from './photo-library-adapter';
+import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,resolveRequestedRows,type HostOperation} from './photo-library-adapter';
 import type {PhotosViewResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
 import {virtualGrid,newestFirst,mergeWindow,readWindow,keepThumbnails,changeBatches,runBatches,thumbnailPlan,groupSections,patchRows,insertRows,patchSelection,favoriteTarget,batches,daysLeft,pinchColumns,dragRange,filterMatches,filterLabel,viewerTitle,formatBytes,shotAt,albumOf,GRID_COLUMNS,type PhotosFilter} from '../ui/mobile-shell/photos-view';
 import {LIBRARY_LIMITS,type LibraryAgentOperation,type LibraryAgentResult} from '../runtime/photo-library';
@@ -36,6 +36,7 @@ import {cameraFocusTarget} from '../browser/camera-focus';
 import {BrowserReviews} from '../browser/review';
 import {testMocksEnabled} from '../build-flags';
 import {createPhotoViewport} from './photo-viewport';
+import {accessDetail,flashFromReceipt,flashLabel,nextFlashMode,nextTimer,recordingLabel,timerLabel,type FlashMode,type TimerSeconds} from './camera-controls';
 
 type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult;cancelledBeforeCapture?:true};
 let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back')=>Promise<CameraCaptureAttempt>)|undefined;
@@ -67,7 +68,7 @@ const nativeCamera = registerPlugin<{
   /** Binds VideoCapture only for Video mode. */
   setCaptureMode?(options: { mode: 'photo' | 'video'; quality?: string; bitrate?: number; frameRate?: number }): Promise<unknown>;
   setZoom(options: { zoom: number }): Promise<void>;
-  setSettings(options: { settings: { flash: 'off' | 'on' } }): Promise<void>;
+  setSettings(options: { settings: { flash: 'off' | 'auto' | 'on' } }): Promise<void>;
   setFocusPoint(options: { x: number; y: number }): Promise<void>;
 }>('ElizaCamera');
 /** A read of the current grant; it never shows Android's permission dialog. */
@@ -219,14 +220,16 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   const cancelScan=()=>{closeScan?.();closeScan=undefined;};
   let api: Bag | undefined;
   let direction: 'front' | 'back' = 'back';
-  let flash = false, disposed = false;
+  let flash: FlashMode = 'off', disposed = false;
+  /** The self-timer the owner chose (kept while Camera stays mounted), and the countdown a shutter press started. */
+  let selfTimer: TimerSeconds = 0, countdown: {left:number;token:number;handle:number}|undefined;
   let lens: Lens = { minZoom: 1, maxZoom: 1, hasFlash: false, zoom: 1, flash: false }, zoomRatio = 1;
   /** The last-capture tile: this session's newest capture, or one library row read after the preview is ready. */
   let lastCapture: SavedPhoto | undefined, lastEpoch=0;
   function setLast(item:SavedPhoto|undefined){++lastEpoch;lastCapture=item;}
   function staleLast(){if(session.phase==='ready'&&!document.hidden)void loadLast(session.token());else setLast(undefined);}
   let accessPanel: HTMLElement | undefined;
-  let duration = 0;
+  let duration = 0, recordedBytes = 0;
   const photoViewport=createPhotoViewport();
   let viewerRevision=0;
   let video: HTMLVideoElement | undefined, videoId = '', videoRevision = '';
@@ -870,8 +873,11 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const vf=document.querySelector<HTMLElement>(finder),screen=vf?.closest<HTMLElement>('[data-alpha-camera-root]')||vf?.closest<HTMLElement>('[data-alpha-layer]')||vf?.closest<HTMLElement>('[data-screen]');if(!screen)return;
     const label=kind==='unavailable'?'Can’t start camera':kind==='camera'?'Camera off':'Mic off';
     const panel=document.createElement('div');panel.setAttribute('role','alert');panel.setAttribute('aria-label',label);panel.dataset.alphaCameraAccess=kind;
-    panel.style.cssText='position:absolute;left:16px;right:16px;top:38%;z-index:50;padding:16px;border-radius:20px;background:#1c1c1e;color:var(--alpha-white);font:inherit;display:flex;flex-direction:column;gap:12px;text-align:center';
+    panel.style.cssText='position:absolute;left:16px;right:16px;top:38%;z-index:50;padding:16px;border-radius:20px;background:var(--alpha-gray-1c);color:var(--alpha-white);font:inherit;display:flex;flex-direction:column;gap:12px;text-align:center';
     const title=document.createElement('strong');title.textContent=label;
+    // One line says why access is needed, or what went wrong, and what the buttons below do.
+    const detail=document.createElement('p');detail.dataset.alphaCameraAccessDetail='';detail.style.cssText='margin:0;font-size:14px;line-height:1.35;color:rgba(255,255,255,.72)';
+    detail.textContent=accessDetail(kind,browserMode);
     const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;justify-content:center;flex-wrap:wrap';
     const action=(text:string,go:()=>void)=>{const b=document.createElement('button');b.type='button';b.textContent=text;b.style.cssText='min-height:44px;padding:0 16px;border-radius:22px;background:rgba(255,255,255,.16);color:var(--alpha-white);font:inherit';b.onclick=go;actions.append(b);return b;};
     if(!browserMode&&kind!=='unavailable')action('Allow',()=>{void device.openSettings({page:'privacy'}).catch(()=>message('Couldn’t open'));}).setAttribute('aria-label','Allow in Settings');
@@ -881,8 +887,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const glyph=document.createElement('span');glyph.setAttribute('aria-hidden','true');glyph.dataset.alphaCameraAccessGlyph='';
     glyph.style.cssText=`align-self:center;width:32px;height:32px;background:currentColor;-webkit-mask:url(/icons/lucide/${kind==='microphone'?'mic-off':'camera'}.svg) center/contain no-repeat;mask:url(/icons/lucide/${kind==='microphone'?'mic-off':'camera'}.svg) center/contain no-repeat`;
     const icon=document.createElement('span');icon.setAttribute('aria-hidden','true');icon.style.cssText='position:relative;align-self:center;display:flex';icon.append(glyph);
-    if(kind!=='microphone'){const slash=document.createElement('span');slash.style.cssText='position:absolute;left:50%;top:-2px;width:2.5px;height:36px;margin-left:-1px;border-radius:2px;background:currentColor;box-shadow:0 0 0 2px #1c1c1e;transform:rotate(-45deg)';icon.append(slash);}
-    panel.append(icon,title,actions);
+    if(kind!=='microphone'){const slash=document.createElement('span');slash.style.cssText='position:absolute;left:50%;top:-2px;width:2.5px;height:36px;margin-left:-1px;border-radius:2px;background:currentColor;box-shadow:0 0 0 2px var(--alpha-gray-1c);transform:rotate(-45deg)';icon.append(slash);}
+    panel.append(icon,title,detail,actions);
     screen.append(panel);accessPanel=panel;
   }
   let noticeTimer:number|undefined,noticeGeneration=0;
@@ -894,7 +900,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   };
   /** The shutter flash: the only feedback a capture gives while it is written. */
   function shutterFlash(owner:Bag){owner.set({fl:1});window.setTimeout(()=>{if(!disposed)owner.set({fl:0});},90);}
-  function adoptLens(receipt:unknown){lens=lensFromReceipt(receipt);zoomRatio=lens.zoom;flash=lens.flash;}
+  function adoptLens(receipt:unknown){lens=lensFromReceipt(receipt);zoomRatio=lens.zoom;flash=flashFromReceipt(lens.flash,flash);}
   /** Re-read the Camera album on entry and after library changes. A newer capture wins over an old read. */
   async function loadLast(token:number){
     const epoch=++lastEpoch;
@@ -926,7 +932,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   async function stop() {
     agentRequest?.cancelReveal?.();
-    pendingShot=undefined;
+    pendingShot=undefined;cancelCountdown();
     clearCameraInteraction();
     // A scan review that opened a system picker stays open while Android covers the WebView.
     closeQuestion?.();closeQuestion=undefined;if(!systemPickerActive())cancelScan(); mask(false); hideAccess();
@@ -936,7 +942,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     if(retry)previewReleased=false;
     // Every start goes through the native layer, which checks camera access again: it may have changed in Android settings.
     const outcome=await session.start(retry);
-    if(outcome.status==='ready'){hideAccess();adoptLens(previewReceipt);mask(true);api?.set({flash,nativeCameraPhase:'ready'});bindMode(api?.get('camera').mode);void loadLast(session.token());}
+    if(outcome.status==='ready'){hideAccess();adoptLens(previewReceipt);mask(true);api?.set({flash:flash!=='off',nativeCameraPhase:'ready'});bindMode(api?.get('camera').mode);void loadLast(session.token());}
     else if(outcome.status==='denied'){mask(false);showAccess('camera');}
     else if(outcome.status==='unavailable'){mask(false);showAccess('unavailable');}
   }
@@ -1001,12 +1007,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     message(limitReached?'Saved · max length':'');
   }
   function flipLens(owner: Bag) {
-    clearCameraInteraction();
+    clearCameraInteraction();cancelCountdown();
     const next = direction === 'back' ? 'front' : 'back';
     return control(async () => {
-      if (flash) {
+      if (flash !== 'off') {
         await camera.setSettings({ settings: { flash: 'off' } });
-        flash = false;
+        flash = 'off';
         owner.set({ flash: false });
       }
       if (Math.abs(zoomRatio - 1) > 1e-3) {
@@ -1018,7 +1024,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     }, receipt => {
       direction = next;
       adoptLens(receipt);
-      owner.set({ front: next === 'front', flash });
+      owner.set({ front: next === 'front', flash: flash !== 'off' });
     }, browserMode);
   }
   const finishVideo=()=>session.finishRecording();
@@ -1031,7 +1037,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     soundless=withoutSound;
     let outcome:Awaited<ReturnType<typeof session.startRecording>>;
     try{outcome=await session.startRecording();}finally{soundless=false;}
-    if(outcome==='recording'){duration=0;api?.set({ rec: true });message('');}
+    if(outcome==='recording'){duration=0;recordedBytes=0;api?.set({ rec: true });message('');}
     else if(outcome==='denied')showAccess('microphone');
     else if(outcome==='failed')message('Didn’t start');
     schedule();
@@ -1072,6 +1078,23 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(session.phase==='ready'&&session.current(token)&&api?.get('camera').mode==='photo')return capture();
     });
   }
+  function cancelCountdown(){if(!countdown)return;window.clearInterval(countdown.handle);countdown=undefined;if(!disposed)api?.set({nativeCountdown:0});}
+  /** The shutter in Photo mode with a self-timer: the first press counts down, a second press cancels.
+   * The photo is taken only if the same preview is still ready in Photo mode when it ends. */
+  function shoot(){
+    if(countdown){cancelCountdown();return;}
+    // A control still settling (focus, zoom) does not skip the countdown: capture() queues behind it.
+    if(!selfTimer||!api||api.get('camera').mode!=='photo'||session.phase!=='ready'||scanning||session.recording||session.recordingStarting||session.finalizing){void capture();return;}
+    const token=session.token(),run={left:selfTimer as number,token,handle:0};
+    run.handle=window.setInterval(()=>{
+      if(countdown!==run)return;
+      if(disposed||!active()||!session.current(token)||session.phase!=='ready'||api?.get('camera').mode!=='photo'){cancelCountdown();return;}
+      run.left--;
+      if(run.left>0){api?.set({nativeCountdown:run.left});return;}
+      cancelCountdown();void capture();
+    },1000);
+    countdown=run;api.set({nativeCountdown:run.left});
+  }
   async function capture() {
     if (!api || !active()) return;
     if (session.phase !== 'ready') { if (session.phase !== 'starting') await start(true); return; }
@@ -1100,7 +1123,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(!cameraViewVisible()||!owner)return {status:'failed',summary:'Open Camera first'};
       if(agentRequest||session.busy)return busy;
       const capture: AgentCaptureRequest = { queued: true, refused: false };
-      request=agentRequest=capture;requestedCaptureHolds++;
+      // An owner self-timer would take a second photo after the agent's: the request cancels it.
+      request=agentRequest=capture;requestedCaptureHolds++;cancelCountdown();
       // The conversation keeps its detent where Camera is laid out above it (the open sheet in portrait).
       // Only a conversation over the viewfinder (full, or a landscape sheet) closes so the owner sees what is
       // taken. The committed state can also be settled while its moving panel still covers Camera.
@@ -1155,6 +1179,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         if(chatCovers()||conversationOverViewfinder(conversationPanel())){
           return {status:'failed',summary:'Camera viewfinder is covered'};
         }
+        // The owner may have flipped back while the shutter waited its turn: never answer with the other camera.
+        if(wantedLens&&direction!==wantedLens)return {status:'failed',summary:'The camera changed, so no photo was taken.'};
         dispatched=true;shutterFlash(owner);
         let item:SavedPhoto;
         try{item=await writePhoto(owner,false);}
@@ -1338,12 +1364,21 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const ready = session.phase === 'ready', recordingBusy = session.recording || session.recordingStarting || session.finalizing;
     // The viewfinder stays black until the first real frame, then fades to the preview.
     data.bg = 'transparent'; data.vfBg = ready ? 'transparent' : '#000000'; data.vfOp = 1;
-    data.zoomCss = ''; data.rec = session.recording; data.recTime = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`;
-    data.shutter = () => { void capture(); };
+    data.zoomCss = ''; data.rec = session.recording; data.recTime = recordingLabel(duration, recordedBytes, RECORDING);
+    data.shutter = () => { shoot(); };
+    // Self-timer: Photo mode only; the shutter then counts down and a second press cancels.
+    data.timerAvailable = ready && !recordingBusy && st.mode === 'photo';
+    data.timerLabel = timerLabel(selfTimer); data.timerOn = selfTimer > 0; data.timerText = selfTimer ? `${selfTimer}s` : '';
+    data.cycleTimer = () => { selfTimer = nextTimer(selfTimer); currentApi.set({ nativeSelfTimer: selfTimer }); };
+    data.counting = !!countdown; data.countdown = countdown ? String(countdown.left) : '';
+    data.countdownLabel = countdown ? `Photo in ${countdown.left} ${countdown.left === 1 ? 'second' : 'seconds'}` : '';
+    if (countdown) data.shutterLabel = 'Cancel timer';
     data.flip = () => { void flipLens(currentApi); };
     data.flashAvailable = ready && !recordingBusy && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
-    if (browserMode) data.flashLabel = browserCamera.lightingLabel(flash);
-    data.toggleFlash = () => { const next = !flash; void control(() => camera.setSettings({ settings: { flash: next ? 'on' : 'off' } }), () => { flash = next; currentApi.set({ flash: next }); }); };
+    // Native: Off, Auto, On. The browser track has only its torch, on or off.
+    data.flashLabel = browserMode ? browserCamera.lightingLabel(flash !== 'off') : flashLabel(flash);
+    data.flashAuto = !browserMode && flash === 'auto';
+    data.toggleFlash = () => { const next = nextFlashMode(flash, browserMode); void control(() => camera.setSettings({ settings: { flash: next } }), () => { flash = next; currentApi.set({ flash: next !== 'off', flashMode: next }); }); };
     const stops = ready ? zoomStops(lens) : [];
     data.showZoom = !recordingBusy && stops.length > 1;
     data.zooms = stops.map(([ratio, label]) => ({ label, aria: `Zoom ${label.replace('×', '')}x`, css: Math.abs(ratio - zoomRatio) < 1e-3 ? ZOOM_ON : ZOOM_OFF, pick: () => zoomTo(ratio) }));
@@ -1367,7 +1402,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
     // Camera has two modes, Video and Photo; asking about the frame goes through chat.
-    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
+    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;cancelCountdown();bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {
@@ -1513,24 +1548,27 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         await openSaved(row.id,owner);
         return {kind:'photos_open',opened:owner.get('photos').open===row.id};
       }
-      const wanted=new Set(operation.ids),rows=captures.filter(row=>wanted.has(nativeId(row.id)));
+      // Items older than the loaded window are read from the library before they count as missing.
+      const {rows,missing}=await resolveRequestedRows(captures,operation.ids,row=>nativeId(row.id),async id=>{const row=normalize(await library.read({id}));return row.trashed?undefined:row;},signal);
+      if(disposed||!owner.isActive())throw new LibraryAgentRefusal('Open Photos, then ask again.');
+      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy right now.');
       if(operation.type==='photo_library_select'){
         if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos.');
         selection=rows;selectionTab='lib';photosFilter=undefined;
         owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
-        return {kind:'photo_library_select',selected:rows.length,missing:operation.ids.length-rows.length};
+        return {kind:'photo_library_select',selected:rows.length,missing};
       }
       if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos.');
       if(albumReview||shareReview)throw new LibraryAgentRefusal('Finish the open review first.');
       if(operation.type==='photos_share'){
         // Reviewed: the owner confirms over the grid, then picks a target in Android's share sheet.
-        shareReview={items:rows.map(row=>({...row})),missing:operation.ids.length-rows.length};
+        shareReview={items:rows.map(row=>({...row})),missing};
         owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
-        return {kind:'photos_share',status:'review_opened',count:rows.length,missing:operation.ids.length-rows.length};
+        return {kind:'photos_share',status:'review_opened',count:rows.length,missing};
       }
-      albumReview={name:operation.name,items:rows.map(row=>({...row})),missing:operation.ids.length-rows.length};
+      albumReview={name:operation.name,items:rows.map(row=>({...row})),missing};
       owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
-      return {kind:'photos_album_create',status:'review_opened',count:rows.length,missing:operation.ids.length-rows.length};
+      return {kind:'photos_album_create',status:'review_opened',count:rows.length,missing};
     },
   };
   const releaseHost=setMainLibraryHost(host);
@@ -1566,7 +1604,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const data = photosRender(st, currentApi);data.normalSelecting=true;if(data.v)data.v.notDeleted=true;
     const onAlbums=st.tab==='alb'&&!st.album;
     // Header: "Photos" / "Albums" with text tabs; Select in the Library and in albums.
-    data.tabs=(data.tabs||[]).map((tab:Bag)=>({...tab,iconCss:'mask-image:url(/icons/lucide/'+(tab.label==='Library'?'images':'folder')+'.svg)',pick:()=>{if(mutating||sharing)return;selection=undefined;selectionTab=undefined;drag=undefined;currentApi.set({nativeMultiSelection:Date.now()});tab.pick?.();}}));
+    // The Library and Albums icons come from the shared Photos view, so fixture and live builds match.
+    data.tabs=(data.tabs||[]).map((tab:Bag)=>({...tab,pick:()=>{if(mutating||sharing)return;selection=undefined;selectionTab=undefined;drag=undefined;currentApi.set({nativeMultiSelection:Date.now()});tab.pick?.();}}));
     data.libTab=!onAlbums&&!selection;
     // Access: one row while access is partial or denied; nothing once it is full.
 
@@ -1782,7 +1821,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   const timer = window.setInterval(async () => {
     if (!session.recording || polling || session.finalizing) return;
     polling = true;
-    try { const state = await camera.getRecordingState(); if (session.recording) { duration = state.duration; if (!state.isRecording) { limitStop = true; void finishVideo(); } else api?.set({ nativeRecordingTick: duration }); } }
+    try { const state = await camera.getRecordingState(); if (session.recording) { duration = state.duration; recordedBytes = Number.isFinite(state.fileSize) ? state.fileSize : 0; if (!state.isRecording) { limitStop = true; void finishVideo(); } else api?.set({ nativeRecordingTick: duration }); } }
     catch { if (session.recording) void finishVideo(); }
     finally { polling = false; }
   }, 500);

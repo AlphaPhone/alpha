@@ -230,3 +230,19 @@ test('two-finger preview pinch changes the real zoom crop without firing tap foc
  await expect(page.getByRole('button',{name:'Zoom 2x',exact:true})).toHaveCSS('width','40px');
  await cdp.detach();
 });
+test('the self-timer counts down before a photo and a second shutter press cancels it',async({page})=>{
+ const timer=page.getByRole('button',{name:'Timer off',exact:true});
+ await timer.click();await expect(page.getByRole('button',{name:'Timer 3 seconds',exact:true})).toHaveAttribute('aria-pressed','true');
+ const photos=()=>page.evaluate(async()=>{const {browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');return (await p.list()).items.length;});
+ const before=await photos();
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await expect(page.getByRole('timer',{name:'Photo in 3 seconds',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Cancel timer',exact:true}).click();
+ await expect(page.locator('[data-alpha-camera="countdown"]')).toHaveCount(0);
+ await page.waitForTimeout(3500);expect(await photos()).toBe(before);
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await expect(page.getByRole('timer',{name:'Photo in 1 second',exact:true})).toBeVisible({timeout:4000});
+ await expect.poll(photos,{timeout:6000}).toBe(before+1);
+ await page.getByRole('button',{name:'Timer 3 seconds',exact:true}).click();await expect(page.getByRole('button',{name:'Timer 10 seconds',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();await expect(page.locator('[data-alpha-camera="timer"]')).toHaveCount(0);
+});
