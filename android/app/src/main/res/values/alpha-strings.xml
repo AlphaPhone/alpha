@@ -4,4 +4,7 @@
     <string name="alpha_mail_pdf_label">PDF attachment</string>
     <string name="alpha_notification_listener_label">Alpha Phone selected notifications</string>
     <string name="alpha_reset_recovery_label">Reset Alpha data</string>
+    <!-- The launcher variant's Messages and Phone entries, shown where Android lists default apps. -->
+    <string name="alpha_messages_label">Messages</string>
+    <string name="alpha_phone_label">Phone</string>
 </resources>
