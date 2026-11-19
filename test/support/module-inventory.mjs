@@ -32,6 +32,7 @@ export const moduleInventory = {
     actions: []
   },
   reviewedHelpers: {
+    "apps/app/src/browser/page-question.ts": {"owner": "apps/app/src/prototype/browser-adapter.ts", "reason": "Recognises explicit questions about the open public page and selects one bounded public passage.", "tests": ["test/browser/journey-j05-web-research-note.spec.ts", "test/reading-capability-probe.test.mjs"]},
     "apps/app/src/browser/history.ts": {"owner": "apps/app/src/browser/browser-surface.ts", "reason": "Keeps visit timestamps and applies the selected History clear range.", "tests": ["test/browser/browser-signins.spec.ts", "test/native-browser-view-binding.test.mjs"]},
     "android/app/src/main/java/ai/alphacompute/alphaphone/ViewRequestDiagnostic.java": {"owner": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java", "reason": "Correlates failed navigation phases without recording request paths or payloads.", "tests": ["test/view-request-diagnostic.test.mjs"]},
     "apps/app/src/browser/workflow-app-state.ts": {"owner": "apps/app/src/browser/simulated-workflows.ts", "reason": "Reads one development workflow state from the simulator and its saved overlay.", "tests": ["test/browser/dev-workflow-execution.spec.ts", "test/browser/dev-workflow-messages.spec.ts"]},
@@ -324,6 +325,7 @@ export const moduleInventory = {
     "apps/app/src/browser/notification-recovery.ts",
     "apps/app/src/browser/notification-store.ts",
     "apps/app/src/browser/notifications.ts",
+    "apps/app/src/browser/page-question.ts",
     "apps/app/src/browser/password-provider.ts",
     "apps/app/src/browser/photo-filter.ts",
     "apps/app/src/browser/preference-documents.ts",
