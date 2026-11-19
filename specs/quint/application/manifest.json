@@ -2223,11 +2223,14 @@
       "passiveNoticeKeepsCurrentUndoTest",
       "pendingUndoKeepsItsExactActionTest",
       "heldUndoOfferStillQueuesTest",
-      "heldUndoOfferRetainsNextUndoTest"
+      "heldUndoOfferRetainsNextUndoTest",
+      "errorNoticeKeepsItsSlotTest",
+      "queuedErrorIsNeverCollapsedTest",
+      "repeatedErrorIsShownOnceTest"
     ],
     "abstractions": [
       "Three native read identities with sampled timeout percentages and explicit rejection.",
-      "One active shell toast and up to three queued messages. Callback authority, domain expiry, modal presentation and physical scheduling remain separate.",
+      "One active shell toast and up to three queued messages. An Undo offer or an error notice holds the slot; a later toast waits behind it. Callback authority, domain expiry, modal presentation and physical scheduling remain separate.",
       "One active shell toast and at most one waiting message. Modal presentation, Undo action selection and real platform scheduling are separate.",
       "expire stands for every close of the visible toast (timer, tap, Undo); closing an Undo offer from its focused button and the focus return are outside this model."
     ],
@@ -2244,7 +2247,8 @@
     "witnesses": [
       "QueuedBehindUndoWitness",
       "QueuedWhileHeldWitness",
-      "ScaledQueuedBehindUndoWitness"
+      "ScaledQueuedBehindUndoWitness",
+      "QueuedBehindErrorWitness"
     ],
     "invariant": "safety"
   },

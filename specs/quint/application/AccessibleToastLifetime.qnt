@@ -3,12 +3,12 @@ module AccessibleToastLifetime {
   pure val Messages = Set(1, 2, 3)
   pure val Replies = Set(0, 100, 150, 200, 300, 600)
   type State = {scale: int, latest: int, started: Set[int], pending: Set[int],
-    message: int, undo: bool, duration: int, held: bool, timerDelay: int,
-    queued: List[{message: int, undo: bool}]}
+    message: int, undo: bool, error: bool, duration: int, held: bool, timerDelay: int,
+    queued: List[{message: int, undo: bool, error: bool}]}
   var state: State
 
   action init = state' = {scale: 100, latest: 0, started: Set(), pending: Set(),
-    message: 0, undo: false, duration: 0, held: false, timerDelay: 0, queued: []}
+    message: 0, undo: false, error: false, duration: 0, held: false, timerDelay: 0, queued: []}
   // Message 3 is the controlled 191-character passage; 1 and 2 are short. An Undo offer stays
   // 10 s, the same window as the reviewed-deletion notice.
   pure def duration(message: int, undo: bool, scale: int): int =
@@ -28,14 +28,21 @@ module AccessibleToastLifetime {
 
   action reset = state' = {...state, scale: 100, latest: 0}
 
-  action show(message: int, undo: bool): bool = all {
-    message.in(Messages), state.queued.length() < 3,
-    state' = if (state.message != 0 and state.undo) {
-      val queuedToast = {message: message, undo: undo}
-      val passiveTail = state.queued.length() > 0 and not(state.queued.nth(state.queued.length() - 1).undo) and not(undo)
-      {...state, queued: if (passiveTail) state.queued.slice(0, state.queued.length() - 1).append(queuedToast)
+  // An Undo offer or an error notice keeps its slot: a later toast waits behind it. Consecutive
+  // passive notices share the next slot; an Undo offer or an error is never collapsed away. A notice
+  // identical to the one it would wait behind is not queued again.
+  action show(message: int, undo: bool, error: bool): bool = all {
+    message.in(Messages), state.queued.length() < 3, not(undo and error),
+    state' = if (state.message != 0 and (state.undo or state.error)) {
+      val queuedToast = {message: message, undo: undo, error: error}
+      val hasTail = state.queued.length() > 0
+      val waitsBehind = if (hasTail) state.queued.nth(state.queued.length() - 1) else {message: state.message, undo: state.undo, error: state.error}
+      val repeated = not(undo) and waitsBehind == queuedToast
+      val passiveTail = hasTail and not(waitsBehind.undo or waitsBehind.error) and not(undo or error)
+      if (repeated) state
+      else {...state, queued: if (passiveTail) state.queued.slice(0, state.queued.length() - 1).append(queuedToast)
         else state.queued.append(queuedToast)}
-    } else {...state, message: message, undo: undo,
+    } else {...state, message: message, undo: undo, error: error,
       duration: duration(message, undo, state.scale),
       timerDelay: if (state.held) 0 else duration(message, undo, state.scale)}
   }
@@ -46,9 +53,9 @@ module AccessibleToastLifetime {
   action expire = all {
     state.message != 0, not(state.held),
     state' = if (state.queued.length() == 0)
-      {...state, message: 0, undo: false, duration: 0, timerDelay: 0}
+      {...state, message: 0, undo: false, error: false, duration: 0, timerDelay: 0}
     else {val queuedToast = state.queued.head()
-      {...state, queued: state.queued.tail(), message: queuedToast.message, undo: queuedToast.undo,
+      {...state, queued: state.queued.tail(), message: queuedToast.message, undo: queuedToast.undo, error: queuedToast.error,
         duration: duration(queuedToast.message, queuedToast.undo, state.scale),
         timerDelay: duration(queuedToast.message, queuedToast.undo, state.scale)}}
   }
@@ -62,43 +69,44 @@ module AccessibleToastLifetime {
     reset,
     nondet message = Messages.oneOf()
     nondet undo = Set(true, false).oneOf()
-    show(message, undo),
+    nondet error = Set(true, false).oneOf()
+    show(message, undo, error),
     expire, hold, resume,
     state' = state
   }
 
   val requestOwnership = (state.latest == 0 or state.latest.in(state.started))
     and state.pending.subseteq(state.started) and state.started.subseteq(Requests)
-  val toastOwnership = if (state.message == 0) state.duration == 0 and state.timerDelay == 0 and not(state.undo or state.held)
-    else state.message.in(Messages) and
+  val toastOwnership = if (state.message == 0) state.duration == 0 and state.timerDelay == 0 and not(state.undo or state.error or state.held)
+    else state.message.in(Messages) and not(state.undo and state.error) and
       Replies.exists(scale => scale >= 100 and
         state.duration == duration(state.message, state.undo, scale)) and
       state.timerDelay == (if (state.held) 0 else state.duration)
   val safety = requestOwnership and toastOwnership and state.scale.in(Replies) and state.scale >= 100
 
   run staleBootCannotReplaceResumeTest = init.then(request(1)).then(request(2))
-    .then(reply(2, 600)).then(reply(1, 100)).then(show(1, true))
+    .then(reply(2, 600)).then(reply(1, 100)).then(show(1, true, false))
     .expect(safety and state.scale == 600 and state.duration == 60000)
   run resetInvalidatesPendingNativeReadTest = init.then(request(1)).then(reset)
-    .then(reply(1, 600)).then(show(1, false))
+    .then(reply(1, 600)).then(show(1, false, false))
     .expect(safety and state.scale == 100 and state.duration == 1900)
   run failedReadKeepsLastGoodScaleTest = init.then(request(1)).then(reply(1, 150))
-    .then(request(2)).then(reply(2, 0)).then(show(1, false))
+    .then(request(2)).then(reply(2, 0)).then(show(1, false, false))
     .expect(safety and state.scale == 150 and state.duration == 2850)
-  run refreshAffectsOnlyNewToastsTest = init.then(show(1, true)).then(request(1)).then(reply(1, 300))
-    .expect(safety and state.duration == 10000).then(show(2, false))
+  run refreshAffectsOnlyNewToastsTest = init.then(show(1, true, false)).then(request(1)).then(reply(1, 300))
+    .expect(safety and state.duration == 10000).then(show(2, false, false))
     .expect(safety and state.message == 1 and state.undo and state.duration == 10000).then(expire)
     .expect(safety and state.duration == 5700 and not(state.undo)).then(expire)
     .expect(safety and state.message == 0)
-  run longMessageAndFocusHoldKeepCapturedDurationTest = init.then(show(3, false))
+  run longMessageAndFocusHoldKeepCapturedDurationTest = init.then(show(3, false, false))
     .expect(safety and state.duration == 10050).then(hold)
     .then(request(1)).then(reply(1, 600)).expect(safety and state.timerDelay == 0)
     .then(resume).expect(safety and state.timerDelay == 10050).then(expire)
     .expect(safety and state.message == 0)
-  run passiveNoticeKeepsCurrentUndoTest = init.then(show(1, true)).then(show(2, false)).then(show(3, false))
-    .expect(safety and state.message == 1 and state.undo and state.queued == [{message: 3, undo: false}])
+  run passiveNoticeKeepsCurrentUndoTest = init.then(show(1, true, false)).then(show(2, false, false)).then(show(3, false, false))
+    .expect(safety and state.message == 1 and state.undo and state.queued == [{message: 3, undo: false, error: false}])
     .then(expire).expect(safety and state.message == 3 and not(state.undo))
-  run pendingUndoKeepsItsExactActionTest = init.then(show(1, true)).then(show(2, true)).then(show(3, false))
+  run pendingUndoKeepsItsExactActionTest = init.then(show(1, true, false)).then(show(2, true, false)).then(show(3, false, false))
     .expect(safety and state.message == 1 and state.queued.length() == 2)
     .then(expire).expect(safety and state.message == 2 and state.undo)
     .then(expire).expect(safety and state.message == 3 and not(state.undo))
@@ -106,10 +114,22 @@ module AccessibleToastLifetime {
   val QueuedBehindUndoWitness = state.queued.length() > 0 and state.undo and not(state.held)
   val QueuedWhileHeldWitness = state.queued.length() > 0 and state.held
   val ScaledQueuedBehindUndoWitness = state.queued.length() > 0 and state.queued.head().message == 3 and state.scale == 600 and state.duration == 10000
-  run heldUndoOfferStillQueuesTest = init.then(show(1, true)).then(hold).then(show(2, false))
-    .expect(safety and state.held and state.undo and state.queued == [{message: 2, undo: false}] and state.timerDelay == 0)
+  run heldUndoOfferStillQueuesTest = init.then(show(1, true, false)).then(hold).then(show(2, false, false))
+    .expect(safety and state.held and state.undo and state.queued == [{message: 2, undo: false, error: false}] and state.timerDelay == 0)
     .then(resume).then(expire).expect(safety and state.message == 2 and not(state.undo))
-  run heldUndoOfferRetainsNextUndoTest = init.then(show(1, true)).then(hold).then(show(2, true))
-    .expect(safety and state.message == 1 and state.undo and state.queued == [{message: 2, undo: true}])
+  run heldUndoOfferRetainsNextUndoTest = init.then(show(1, true, false)).then(hold).then(show(2, true, false))
+    .expect(safety and state.message == 1 and state.undo and state.queued == [{message: 2, undo: true, error: false}])
     .then(resume).then(expire).expect(safety and state.message == 2 and state.undo)
+
+  val QueuedBehindErrorWitness = state.queued.length() > 0 and state.error and not(state.undo)
+  run errorNoticeKeepsItsSlotTest = init.then(show(3, false, true)).then(show(1, false, false)).then(show(2, false, false))
+    .expect(safety and state.message == 3 and state.error and state.queued == [{message: 2, undo: false, error: false}])
+    .then(expire).expect(safety and state.message == 2 and not(state.error)).then(expire)
+    .expect(safety and state.message == 0)
+  run queuedErrorIsNeverCollapsedTest = init.then(show(1, true, false)).then(show(2, false, true)).then(show(3, false, false))
+    .expect(safety and state.queued == [{message: 2, undo: false, error: true}, {message: 3, undo: false, error: false}])
+    .then(expire).expect(safety and state.message == 2 and state.error)
+  run repeatedErrorIsShownOnceTest = init.then(show(2, false, true)).then(show(2, false, true))
+    .expect(safety and state.queued == []).then(show(1, false, true)).then(show(1, false, true))
+    .expect(safety and state.queued == [{message: 1, undo: false, error: true}])
 }

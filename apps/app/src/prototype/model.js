@@ -5601,13 +5601,17 @@ class Component extends DCLogic {
   stopEvery(grp) { this.I = this.I || {}; (this.I[grp] || []).forEach(clearInterval); this.I[grp] = []; }
   toast(msg, opts) {
     opts = opts || {};
-    // An incoming notice must not replace a restore action the owner can still choose.
-    // Restore callbacks retain their own source/revision checks; queueing never extends
-    // a provider or deletion deadline. Consecutive passive notices share the next slot.
-    if (this.toastActive && this.undoFn) {
+    // An incoming notice must not replace a restore action the owner can still choose, or an
+    // error before it is read. Restore callbacks retain their own source/revision checks;
+    // queueing never extends a provider or deletion deadline. Consecutive passive notices share
+    // the next slot; an Undo or error is never collapsed away, and a notice identical to the one
+    // it would wait behind is not queued again.
+    if (this.toastActive && (this.undoFn || this.toastKind === "error")) {
       var queue = this.toastQueue || (this.toastQueue = []), last = queue[queue.length - 1];
-      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind };
-      if (last && !last.undo && !next.undo) queue[queue.length - 1] = next;
+      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind === "error" ? "error" : undefined };
+      var tail = last || { msg: this.toastMessage, undo: this.undoFn, kind: this.toastKind === "error" ? "error" : undefined };
+      if (!next.undo && !tail.undo && tail.msg === msg && tail.kind === next.kind) return;
+      if (last && !last.undo && last.kind !== "error" && !next.undo && next.kind !== "error") queue[queue.length - 1] = next;
       else queue.push(next);
       return;
     }
@@ -5623,7 +5627,7 @@ class Component extends DCLogic {
     // Undo stays as long as the reviewed-deletion notice (10 s) so the two restore offers match.
     this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * accessibilityTimeoutScale();
     this.undoFn = opts.undo || null;
-    this.toastKind = opts.kind === "error" ? "error" : "";
+    this.toastKind = opts.kind === "error" ? "error" : ""; this.toastMessage = msg;
     this.setState({ toast: msg, toastUndo: !!opts.undo }); this.scheduleToast();
   }
   scheduleToast() {

@@ -46,10 +46,11 @@ function fixture(name, code) {
     'state.pending': qset(pending.keys()),
     'state.message': shell.state.toast ? Number(shell.state.toast[0]) : 0,
     'state.undo': typeof shell.undoFn === 'function',
+    'state.error': shell.state.toast ? shell.toastKind === 'error' : false,
     'state.duration': shell.state.toast ? shell.toastDuration : 0,
     'state.held': !!shell.toastHeld,
     'state.timerDelay': timers.values().next().value?.delay ?? 0,
-    'state.queued': Array.from(shell.toastQueue ?? [], row => ({message: Number(row.msg[0]), undo: typeof row.undo === 'function'})),
+    'state.queued': Array.from(shell.toastQueue ?? [], row => ({message: Number(row.msg[0]), undo: typeof row.undo === 'function', error: row.kind === 'error'})),
   });
   const result = trace(name, observe());
   const save = (label, ...action) => {
@@ -99,9 +100,9 @@ function fixture(name, code) {
       assert.equal(await refresh(null), 1);
       save('non-native reset retires older reads', 'reset');
     },
-    show(message, undo) {
-      shell.toast(message === 3 ? '3'.repeat(191) : String(message), undo ? {undo() { assert.fail('expiration must never invoke Undo'); }} : undefined);
-      save('the actual shell schedules or replaces a toast', 'show', message, undo);
+    show(message, undo, error = false) {
+      shell.toast(message === 3 ? '3'.repeat(191) : String(message), undo ? {undo() { assert.fail('expiration must never invoke Undo'); }} : error ? {kind: 'error'} : undefined);
+      save('the actual shell schedules, queues or replaces a toast', 'show', message, undo, error);
     },
     expire() {
       const [id, timer] = timers.entries().next().value;
@@ -172,6 +173,15 @@ globalThis.api = {refresh: refreshAccessibilityTimeout, start: startAccessibilit
   });
   await run('scaled_passive_notice_waits_behind_original_undo', async f => {
     f.show(1, true); f.request(1); await f.reply(1, 30000, 6); f.show(3, false); f.expire(); f.expire();
+  });
+  await run('error_notice_keeps_its_slot', async f => {
+    f.show(3, false, true); f.show(1, false); f.show(2, false); f.expire(); f.expire();
+  });
+  await run('queued_error_is_never_collapsed', async f => {
+    f.show(1, true); f.show(2, false, true); f.show(3, false); f.expire(); f.expire(); f.expire();
+  });
+  await run('repeated_error_is_shown_once', async f => {
+    f.show(2, false, true); f.show(2, false, true); f.show(1, false, true); f.show(1, false, true); f.expire(); f.expire();
   });
 
   return checkTraces(boundInputs({model, modelPath: 'specs/quint/application/AccessibleToastLifetime.qnt',

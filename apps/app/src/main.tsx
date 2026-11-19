@@ -92,6 +92,7 @@ import { TEXT_SCALE_PROPERTY } from './runtime/text-scale';
 import { installToastLayer } from './runtime/toast-layer';
 import { startAccessibilityTimeout } from './runtime/accessibility-timeout';
 import { installViewFocus } from './runtime/view-focus';
+import { ERROR_TOAST } from './runtime/error-notice';
 import './prototype/prototype.css';
 import './prototype/phone.css';
 import { installCommsAlpha } from './prototype/comms-alpha';
@@ -234,6 +235,8 @@ if(isAndroid)try{
 let shell: any;
 /** A notice raised while the startup loading screen holds Home unmounted; shown once Home mounts. */
 let pendingNotice: string | undefined;
+// A notice the owner must act on is shown as an error so a later toast cannot replace it unread.
+let pendingNoticeError = false;
 /** A hosted-notice question may fill only the live conversation of the same verified session. */
 function questionTarget(sessionId:string){const snapshot=connectionController.getSnapshot();return Boolean(shell?.live&&!document.hidden&&!snapshot.open&&snapshot.session?.sessionId===sessionId);}
 let launcherPresentation = false;
@@ -353,7 +356,7 @@ function Phone() {
     else if(action==='background'){shell.leave();shell.setState({screen:'off',voice:'off',chat:'input',shade:false});document.documentElement.dataset.devBackground='true';window.dispatchEvent(new Event('blur'));}
     else if(action==='resume'){delete document.documentElement.dataset.devBackground;shell.unlock();window.dispatchEvent(new Event('focus'));}
     if(['power','unlock','boot','background','resume'].includes(action))window.dispatchEvent(new Event('alpha:device-state'));
-  }}/>}{testMocksEnabled && mock && <div className="mock-mode-banner" role="status"><span>Mock mode · simulated data and actions</span><button onClick={() => { void connectionController.offline().then(() => { const url = new URL(location.href); url.searchParams.delete('mode'); url.searchParams.delete('start'); location.assign(url.href); }); }}>Exit mock mode</button></div>}{startupPending && !chooserCommitted && <div className="alpha-startup-loading" role="status" aria-label="Loading Alpha"><span className="alpha-compute-mark"/></div>}<div data-alpha-startup-shell inert={startupPending} aria-hidden={startupPending ? true : undefined} style={{width:'100%',height:'100%',opacity:startupPending ? 0 : 1,pointerEvents:startupPending ? 'none' : undefined}}><Component configureChatPull={(surface:{scale:number})=>setPullScale(surface.scale)} chatPullBinding={chatPullBinding} phoneSurface assistantSurface={assistantSurface} onCloseAssistant={closeAssistant} onReopenStartupAccess={!fixture && !assistantSurface ? reopenStartupPermissions : undefined} systemShell={launcherPresentation} systemShade={systemShade} nativeSystemChrome={isAndroid || !launcherPresentation} initial={testMocksEnabled && fixture ? query.get('start') || 'home' : 'home'} theme={initialTheme} ref={(value: any) => { shell = value; if (value && pendingNotice) queueMicrotask(() => { if (shell === value && value.live && pendingNotice) { value.toast(pendingNotice); pendingNotice = undefined; } }); }} /></div>
+  }}/>}{testMocksEnabled && mock && <div className="mock-mode-banner" role="status"><span>Mock mode · simulated data and actions</span><button onClick={() => { void connectionController.offline().then(() => { const url = new URL(location.href); url.searchParams.delete('mode'); url.searchParams.delete('start'); location.assign(url.href); }); }}>Exit mock mode</button></div>}{startupPending && !chooserCommitted && <div className="alpha-startup-loading" role="status" aria-label="Loading Alpha"><span className="alpha-compute-mark"/></div>}<div data-alpha-startup-shell inert={startupPending} aria-hidden={startupPending ? true : undefined} style={{width:'100%',height:'100%',opacity:startupPending ? 0 : 1,pointerEvents:startupPending ? 'none' : undefined}}><Component configureChatPull={(surface:{scale:number})=>setPullScale(surface.scale)} chatPullBinding={chatPullBinding} phoneSurface assistantSurface={assistantSurface} onCloseAssistant={closeAssistant} onReopenStartupAccess={!fixture && !assistantSurface ? reopenStartupPermissions : undefined} systemShell={launcherPresentation} systemShade={systemShade} nativeSystemChrome={isAndroid || !launcherPresentation} initial={testMocksEnabled && fixture ? query.get('start') || 'home' : 'home'} theme={initialTheme} ref={(value: any) => { shell = value; if (value && pendingNotice) queueMicrotask(() => { if (shell === value && value.live && pendingNotice) { value.toast(pendingNotice, pendingNoticeError ? ERROR_TOAST : undefined); pendingNotice = undefined; pendingNoticeError = false; } }); }} /></div>
 {!fixture && <><ConnectionChooser onPresentation={setChooserCommitted} /><GoogleConnectionsPanel />{!assistantSurface && <><HostedDigestPanel canComposeQuestion={questionTarget} composeQuestion={(draft,sessionId)=>{if(!questionTarget(sessionId))return false;shell.api(shell.S().view).composeContentQuestion(draft);return true;}} /><StartupPermissions active={startupPermissionsActive(connection)} /></>}</>}</>;
 }
 /** Android's locale and 24-hour setting; WebView Intl alone does not follow the latter. */
@@ -450,7 +453,7 @@ async function mountPhone() {
   if (isAndroid && !imageSenseAvailable()) void stopWakeListenerForChatOnly().then(stopped => {
     if (stopped) return;
     const notice = 'Wake listening could not be confirmed off. Turn it off in Android settings.';
-    if (shell?.live) { shell.toast(notice); pendingNotice = undefined; } else pendingNotice = notice;
+    if (shell?.live) { shell.toast(notice, ERROR_TOAST); pendingNotice = undefined; pendingNoticeError = false; } else { pendingNotice = notice; pendingNoticeError = true; }
   });
   // The image's always-on listener heard the wake phrase: start the on-device voice assistant.
   if (imageSenseAvailable() && assistantSurface) installListenerInvocation(() => shell, { authority: () => { const port=connectionController.getAppRecordClient(); if(!port)return null; try{if(!port.current())return null;return JSON.stringify([port.sessionId,port.scope??null,port.identity.ownerId,port.identity.agentId,port.identity.sessionId,port.identity.origin]);}catch{return null;} }, initialRestorePending: () => protectedPowerLaunchState(connectionController.getSnapshot()).initialRestorePending, powerAccountRef: () => protectedPowerLaunchState(connectionController.getSnapshot()).accountRef, connectionOpen: () => connectionController.getSnapshot().open, connected: () => !!connectionController.getSnapshot().session && !connectionController.getSnapshot().busy, voiceActive: () => !!document.querySelector('[data-alpha-chat-recorder]'), subscribe: listener => connectionController.subscribe(listener) });
@@ -459,6 +462,6 @@ async function mountPhone() {
 window.addEventListener('alpha:connection-toast', event => {
   const notice = (event as CustomEvent<unknown>).detail;
   if (typeof notice !== 'string' || !notice) return;
-  if (shell?.live) { shell.toast(notice); pendingNotice = undefined; } else pendingNotice = notice;
+  if (shell?.live) { shell.toast(notice); pendingNotice = undefined; pendingNoticeError = false; } else { pendingNotice = notice; pendingNoticeError = false; }
 });
 void mountPhone();
