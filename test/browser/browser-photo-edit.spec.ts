@@ -79,6 +79,15 @@ test('dragging a crop corner keeps the chosen area, and Rotate turns it with the
  expect(Math.abs(kept!.width-box.width/2)).toBeLessThan(4);expect(Math.abs(kept!.height-box.height)).toBeLessThan(4);
  await expect(page.getByRole('button',{name:'Reset crop',exact:true})).toBeEnabled();
  await page.screenshot({path:info.outputPath('crop-dragged.png'),animations:'disabled'});
+ // Android Back closes only the crop step: the editor stays open and the marked area is dropped.
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
+ await expect(frame).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','false');
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Crop',exact:true}).click();await expect(frame).toBeVisible();
+ await page.mouse.move(corner.x+corner.width/2-5,corner.y+corner.height/2-5);await page.mouse.down();
+ await page.mouse.move(box.x+box.width*.75,box.y+box.height*.75,{steps:4});
+ await page.mouse.move(box.x+box.width/2-5,box.y+box.height-5,{steps:4});await page.mouse.up();
  await page.getByRole('button',{name:'Apply crop',exact:true}).click();
  await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','true');
  // Rotate after cropping turns the kept area with the photo: still the red half, now upright.
@@ -95,10 +104,13 @@ test('dragging a crop corner keeps the chosen area, and Rotate turns it with the
 test('the crop area moves with the keyboard, and Cancel crop or the whole photo leaves no crop',async({page})=>{
  await seed(page);await openEditor(page);
  await page.getByRole('button',{name:'Crop',exact:true}).click();
+ // Focus moves into the crop step, and back to Crop when the step closes.
+ await expect(page.getByRole('button',{name:/^Crop area\./})).toBeFocused();
  await page.getByRole('button',{name:'Square crop',exact:true}).click();
  // Cancel crop drops the marked area: nothing changed, so there is nothing to save.
  await page.getByRole('button',{name:'Cancel crop',exact:true}).click();
  await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','false');
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toBeFocused();
  await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeDisabled();
  // Done on the whole photo is no crop either.
  await page.getByRole('button',{name:'Crop',exact:true}).click();await page.getByRole('button',{name:'Apply crop',exact:true}).click();

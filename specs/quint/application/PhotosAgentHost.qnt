@@ -62,7 +62,8 @@ module PhotosAgentHost {
     s' = { ...s, albumReview: Set(), confirmed: s.confirmed.append(s.albumReview) } }
   action cancelAlbum = all { s.albumReview != Set(), s' = { ...s, albumReview: Set() } }
   /// Leaving Photos or hiding the page ends the visit, its selection and every review (a
-  /// disposed library no longer listens for the hide).
+  /// disposed library no longer listens for the hide). This is the Android host: in the browser a
+  /// hide ends the visit (in-flight requests are refused) but keeps the window, selection and reviews.
   action leave = all { s.inPhotos, s.visit < 3,
     s' = { ...s, inPhotos: false, visit: s.visit + 1, selection: Set(), albumReview: Set(), libraryReview: false } }
   action enter = all { not(s.inPhotos), not(s.disposed), s' = { ...s, inPhotos: true } }
