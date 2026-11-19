@@ -98,6 +98,11 @@ test('Photos Share opens an addressed-by-owner picture draft in Messages',async(
  await page.getByRole('dialog',{name:'Share',exact:true}).getByRole('button',{name:'Messages',exact:true}).click();
  await expect(page.getByRole('button',{name:/Remove picture-1\.png/})).toBeVisible();
  await expect(page.getByRole('textbox',{name:'To',exact:true})).toHaveValue('');
+ // Alpha asked for a text to a new number: the owner's picture message is not addressed to it or replaced.
+ expect(await page.evaluate(async()=>{const m=await import('/src/prototype/sms-adapter.ts' as string) as any;const step=await m.openSmsDraftStep('Running late','+15550109876',undefined,()=>{});step?.();return !!step;})).toBe(true);
+ await expect(page.getByText(/put the draft in Messages/).first()).toBeVisible();
+ await expect(page.getByRole('textbox',{name:'To',exact:true})).toHaveValue('');
+ await expect(page.getByRole('button',{name:/Remove picture-1\.png/})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).telephonyInputs.filter(([method]:[string])=>method==='sendMms'||method==='sendSms'))).toEqual([]);
 });
 for(const [label,size] of [['an unknown size',undefined],['a size over 1 MB',1024*1024+1]] as const)test(`Photos Share does not offer Messages for a picture of ${label}`,async({page})=>{

@@ -456,12 +456,15 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  }
  const wakeSmsNotice=()=>{noticeSignal++;noticeRequested=true;void drainSmsNotice();};
  const closeThread=()=>{if(messageMenu){closeMessageMenu();return;}if(!busy&&!deleting){selectedThread=null;session.openThread(null);}};
- const compose=(prefill?:string)=>{
+ /* Pictures or a send in flight: the composer holds the owner's message, so Alpha neither drafts into it nor addresses it. */
+ const occupied=()=>attachments.length>0||!!operationId||!!mmsOperationId;
+ /* `asked`: Alpha opens the new message for a draft. It never clears or readdresses one the owner's pictures occupy. */
+ const compose=(prefill?:string,asked=false)=>{
   if(!editable())return;
   recipientPicker.close();
-  const switching=draftThread!==null;
-  if(switching||(!shelf&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
-  if(shelf&&prefill&&!recipients)recipients=prefill;
+  const switching=draftThread!==null,kept=asked&&!switching&&occupied();
+  if(switching||(!shelf&&!kept&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
+  if(shelf&&!kept&&prefill&&!recipients)recipients=prefill;
   draftThread=null;composing=true;selectedThread=null;
   if(switching||!retained)loadDraft(null);
   if(session.state.thread)session.openThread(null);else changed();
@@ -516,7 +519,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const placeAsked=(text:string):AskedDraft=>{
   if(!draftRecipients().length)return 'unavailable';
   if(!ready())return 'unavailable';
-  if(attachments.length||operationId||mmsOperationId)return 'occupied';
+  if(occupied())return 'occupied';
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
   draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();if(owner?.S().chat==='full')owner.setState({chat:'sheet'});return 'drafted';
  };
@@ -554,7 +557,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    if(owner!==shell||document.hidden)return false;
    if(!inFront()){shell.openView('messages',undefined,'sheet');await new Promise<void>(resolve=>shell.setState({},()=>resolve()));}
    if(!await until(idle)||!here())return false;
-   if(target)chooseThread(target.id,target.addresses);else compose(wanted);
+   if(target)chooseThread(target.id,target.addresses);else compose(wanted,true);
    if(!await until(idle)||!here())return false;
    if(target){const row=openRow();return row?.id===target.id&&row.addresses.length===1&&numberKey(row.addresses[0])===key&&placeAsked(text)==='drafted';}
    if(!composing||session.state.thread||draftThread!==null)return false;
