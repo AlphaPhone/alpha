@@ -16,6 +16,10 @@ export type PrototypeNativeOptions = {
   onSelection?: (module: string, result: NativeResult, api: Bag) => void;
 };
 const installed = new WeakSet<object>();
+/** Marks a handler whose only effect is to say the feature is unavailable. dc-lite.js drops any
+ * element bound to one, so such a control is not shown. A wrapper that calls it is unmarked and
+ * still shows; the marked handler itself keeps the toast as a fallback. */
+export const UNAVAILABLE_CONTROL = Symbol.for('alpha.unavailableControl');
 const systemPages = new Set(['wifi', 'bluetooth', 'mobile', 'sound', 'notifications', 'battery', 'models', 'developer', 'privacy']);
 /** Session whose phone action history this view read successfully; an unread history is never shown as empty. */
 let actionHistoryRead: string | null = null;
@@ -117,7 +121,7 @@ export function installPrototypeNativeAdapters(
   const restore: Array<() => void> = [];
   const busy = new Set<string>();
   const notify = (api: Bag, message: string) => api.toast(message);
-  const unavailable = (api: Bag, message = 'Unavailable') => () => notify(api, message);
+  const unavailable = (api: Bag, message = 'Unavailable'): Callback => Object.assign(() => notify(api, message), { [UNAVAILABLE_CONTROL]: true });
   async function perform(module: string, api: Bag, action: Action, payload: Bag = {}) {
     if (busy.has(module)) return;
     busy.add(module);
@@ -194,11 +198,14 @@ export function installPrototypeNativeAdapters(
       if (key === 'call') return native('phone');
       if (key === 'camera') return native('camera');
       if (key === 'pick' && path.includes('.photos.')) return native('photos');
+      // The prototype's reply draft only says it is not available (agent-adapter api.say).
+      if (key === 'ask') return unavailable(api);
     }
     if (module === 'inbox') {
       if (key === 'send') return () => perform(module, api, 'email', mailPayload(api.get(module)));
       if (['archive', 'del'].includes(key)) return native('inbox');
       if (key === 'addAcct') return native('settings');
+      if (key === 'ask') return unavailable(api);
     }
     if (module === 'calendar') {
       if (key === 'save') return () => { if (api.get(module).form?.id) { void perform(module, api, 'calendar'); return; } const payload = calendarPayload(api.get(module)); if (payload) void perform(module, api, 'calendar-create', payload); else notify(api, 'Title and time needed'); };
