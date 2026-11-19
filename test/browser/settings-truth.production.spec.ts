@@ -218,6 +218,8 @@ test('every Settings row is a control backed by real state, with no fixture valu
  await expect(voiceRoute.locator('..')).toHaveText('VoiceRecordings, replies → Eliza Cloud');
  const review=()=>current(page).getByRole('switch',{name:'Ask before Alpha acts',exact:true});
  await expect(review()).toHaveAttribute('aria-checked','false');
+ // With asking off, the scope shows that Alpha may read who texted last and draft texts the owner asks for.
+ await expect(review().locator('..').locator('.settings-tag')).toHaveText(['Web','Camera','Photos','Who texted','Text drafts']);
  await review().click();await expect(review()).toHaveAttribute('aria-checked','true');
  await openSettings(page,'Privacy');await expect(review()).toHaveAttribute('aria-checked','true');
  await review().click();await expect(review()).toHaveAttribute('aria-checked','false');

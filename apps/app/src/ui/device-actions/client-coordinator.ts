@@ -1508,11 +1508,17 @@ export class DeviceActionCoordinator<
     return proposals;
   }
   /** Only proposals bound by the host to this exact freshly sent user message may run.
-   * Only reversible local actions bypass the optional review. Sends, deletes, private
-   * reads and Calendar/reminder writes retain their recorded separate review policy.
-   * A reply draft is such a local action: it lands in the open conversation's text
-   * field, visible and editable, and only the owner's own Send tap sends it.
-   * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
+   * With "Ask before Alpha acts" off (the default), reversible local actions skip the
+   * optional review. A reply draft is such a local action: it lands in the open
+   * conversation's text field, visible and editable, and only the owner's own Send tap sends it.
+   * Two text actions also skip it when directSmsRequest grounds them in this message's own
+   * words (owner decision): reading the latest texter's number (sms_latest_sender with
+   * includeAddress) and a draft-only sms_compose whose target is the number the owner asked
+   * for, which lands the same way. A request for a card keeps the card, and a number that
+   * contradicts the request is never direct and stays refused at review (contradictedNumbers).
+   * Sends, deletes, other private reads and Calendar/reminder writes retain their recorded
+   * separate review policy. Recovery, workflows and old hosts remain review-only; ordinary OS
+   * permissions still apply. */
   async performRequested(
     messageId: string,
     context: C,
