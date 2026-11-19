@@ -92,7 +92,7 @@ public class DailyAppsInstrumentedTest {
    String moreOptions="[...document.querySelectorAll('button.automation-more')].find(b=>b.textContent.trim()==='More options')";
    uiWait(scenario,moreOptions);evaluate(scenario,"("+moreOptions+").click()");
    // The on-device reminder action works without an Agent Calendar connection.
-   String deviceReminder="[...document.querySelectorAll('button.workflow-choice')].find(b=>b.textContent.trim()==='Reminder on this phone')";
+   String deviceReminder="[...document.querySelectorAll('button.workflow-choice')].find(b=>b.textContent.trim()==='Phone reminder')";
    uiWait(scenario,deviceReminder);evaluate(scenario,"("+deviceReminder+").click()");uiWait(scenario,AppNavigation.selected("Calendar"));
    uiWait(scenario,"document.querySelector('input[aria-label=Title]')");
    evaluate(scenario,"(()=>{const e=document.querySelector('input[aria-label=Title]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,"+JSONObject.quote(title)+");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
