@@ -17,7 +17,8 @@ export async function filesAndSharing() {
   const drafts = await bundledSource('apps/app/src/ui/mailbox/drafts-controller.ts', {'import.meta.env': '{}'});
   const traces = [];
   const earlierText = {1: 'Earlier unfinished text', 2: 'Earlier unfinished text, edited'};
-  for (const [name, changed, edited] of [['exact', false, false], ['changed', true, false], ['edited-earlier', false, true]]) {
+  // `duplicate`: the owner attached the selected file to the unfinished draft first, so the share is the duplicate refusal.
+  for (const [name, changed, edited, duplicate] of [['exact', false, false, false], ['changed', true, false, false], ['edited-earlier', false, true, false], ['duplicate', false, false, true]]) {
     const page = new JSDOM('<div></div>', {pretendToBeVisual: true});
     let readCount = 0, opened = 0, carryNotice = '';
     const {document} = page.window, held = deferred(), rows = new Map(), toasts = [];
@@ -38,6 +39,8 @@ export async function filesAndSharing() {
       }},
       retained: () => ({ready: Promise.resolve(), available: false, peek: () => null, conflict: false, error: false, status: '',
         edit() {}, resume() {}, replace() {}, retry() {}, clear: async () => {}, recover() {}, retire() {}}),
+      // The composer's own Attach picks the same selected file.
+      attachments: {select: async () => ({status: 'selected', selectionId: 'owner-pick', name: file.name}), read: async () => ({...file, ...reviewed}), forget: async () => {}},
       reviewAttachment: async value => value,
     });
     await mail.bind('grant', 'owner@example.invalid');
@@ -52,14 +55,22 @@ export async function filesAndSharing() {
       const open = mail.email(), fresh = open && open.draftId !== earlierId ? open.proposal : null;
       const earlier = kept || (open?.draftId === earlierId ? {body: open.proposal.bodyText, attachments: open.proposal.attachments} : null);
       const content = draft => Number(Object.keys(earlierText).find(key => earlierText[key] === draft?.body) ?? -1);
+      // The source whose bytes a draft holds: 0 for none, -1 for anything the model does not name.
+      const bytes = draft => { const list = draft?.attachments || []; return !list.length ? 0 : list.length > 1 ? -1 : list[0].dataBase64 === file.dataBase64 ? 1 : list[0].dataBase64 === second.dataBase64 ? 2 : -1; };
       return {'s.inserted': !!fresh && fresh.attachments.length === 1 && fresh.attachments[0].dataBase64 === file.dataBase64 && !fresh.bodyText,
         's.newDraft': !!fresh, 's.earlier': content(earlier), 's.kept': kept ? content(kept) : 0,
-        's.earlierBytes': earlier ? (earlier.attachments || []).length : -1};
+        's.earlierBytes': earlier ? bytes(earlier) : -1, 's.keptBytes': kept ? bytes(kept) : 0};
     };
     const module = sourceContext([source], ['reviewFileEmail'], {window: page.window, document,
       AbortController: page.window.AbortController, reviewMailAttachment: attachment.exports.reviewMailAttachment,
       rethrowAttachmentRefusal: drafts.exports.rethrowAttachmentRefusal});
     const t = trace(`attachment-${name}`, observe());
+    if (duplicate) {
+      mail.begin();mail.render().c.attach();
+      for (let attempt = 0; (observe()['s.earlierBytes'] !== 1 || mail.render().c.busy) && attempt < 40; attempt++) await tick();
+      mail.close();
+      checkpoint(t, 'the owner attaches the selected file to the unfinished draft in its composer', call('attachEarlier'), observe());
+    }
     const close = module.reviewFileEmail({read: async () => {
       if (++readCount === 1) return {...file, ...reviewed};
       await held.promise;
@@ -78,15 +89,16 @@ export async function filesAndSharing() {
     held.resolve();
     for (let attempt = 0; !opened && !carryNotice && attempt < 40; attempt++) await tick();
     assert.equal(document.querySelector('dialog'), null);
-    assert.equal(opened, changed ? 0 : 1);
+    assert.equal(opened, changed || duplicate ? 0 : 1);
     if (changed) assert.match(carryNotice,/selected file changed/);
+    else if (duplicate) assert.equal(carryNotice, 'This file is already attached to your unfinished email in Inbox. Nothing was added.');
     else assert.equal(carryNotice, '');
     assert.deepEqual(toasts, [], 'the review shows its one outcome; the draft side adds no notice');
-    checkpoint(t, 'only matching bytes start a new draft; the unfinished one is kept as it was', call(changed ? 'insertFailed' : 'insert'), observe());
+    checkpoint(t, 'only new matching bytes start a new draft; the unfinished one is kept as it was', call(changed ? 'insertFailed' : duplicate ? 'duplicateRefused' : 'insert'), observe());
     close(); page.window.close(); traces.push(t);
   }
   return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...drafts.sources], traces, scope: 'bounded-component', assumptions: [
-    'The actual Email action, shared validator, exact-byte reread and drafts controller execute on in-memory draft slots.',
+    'The actual Email action, shared validator, exact-byte reread, drafts controller and composer Attach execute on in-memory draft slots.',
     'Native grant changes, the Inbox account binding and cross-tab persistence are separate check boundaries.']});
 }
 
