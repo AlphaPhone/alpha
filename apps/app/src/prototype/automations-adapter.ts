@@ -34,6 +34,8 @@ const filters=[...FEED_FILTERS.slice(0,4),'schedules',...FEED_FILTERS.slice(4)] 
 type Filter=FeedFilter|'schedules';
 const filterNames:Record<Filter,string>={all:'All',reminders:'Reminders',prompts:'Prompts',workflows:'Workflows',schedules:'Schedules',active:'Active',inactive:'Inactive'};
 const SCHEDULE_INVALID='Pick a time and day';
+/** Both end a scheduled item until it is reopened; only Complete counts it as done. */
+const SCHEDULE_ENDINGS:Record<string,string>={Complete:'Marks it done and stops it. You can reopen it later.',Dismiss:'Stops it without marking it done. You can reopen it later.'};
 /** This disclosure applies only to the agent that runs on this Android phone. */
 const scheduleRule=(timed:boolean)=>Capacitor.isNativePlatform()&&connectionController.getSnapshot().kind==='resident'?promptScheduleTiming(timed):'';
 const timedPrompt=(row:AutomationRow)=>row.record.schedules.some((entry:Bag)=>['once','cron','interval'].includes(entry.triggerType??entry.kind));
@@ -56,6 +58,7 @@ export function installAutomationsAdapter(Component:any,views:Bag){
  let detail:AutomationRow|null=null,editor:Editor|null=null,creating=false,review:{label:string;key:string;run:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>}|null=null;
  let state:'idle'|'loading'|'ready'|'failed'='idle',message='',controller:AbortController|null=null,epoch=0,session:string|null=null,loadedSession:string|null=null,history:string[]=[];
  let scheduleDraft:string|null=null;
+ let historyRead:AbortController|null=null;
  let scheduleTime='';
  let scheduleHour='8',scheduleMinute='00',schedulePeriod='AM',scheduleDays=[0,1,2,3,4,5,6];
  const setClock=(time:string)=>{scheduleTime=time;const [hour,minute]=time.split(':');scheduleHour=/^([01]\d|2[0-3]):[0-5]\d$/.test(time)?String(Number(hour)%12||12):hour;scheduleMinute=minute||'00';schedulePeriod=Number(hour)>=12?'PM':'AM';};
@@ -73,7 +76,7 @@ export function installAutomationsAdapter(Component:any,views:Bag){
  const automationBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh first':issues.find(issue=>issue.source==='automations'&&issue.unavailable)?.message||'';
  const scheduleBlock=()=>!binding()?agentPendingText():loadedSession!==binding()?.sessionId||state!=='ready'?'Refresh first':issues.find(issue=>issue.source==='schedules')?.message||'';
  const publish=()=>{if(owner?.live&&!suspended&&!document.hidden)owner.vset('workflows',{automationTick:Date.now()});};
- const retire=(clear=false)=>{releaseReviews?.cancelAll();dismissFilters();recovery.retire();epoch++;controller?.abort();controller=null;activeMutationKey=undefined;detail=null;scheduleDraft=null;editor=null;creating=false;review=null;message='';if(clear){completionDirty=false;rows=[];issues=[];intentStore=null;state='idle';loadedSession=null;}publish();};
+ const retire=(clear=false)=>{historyRead?.abort();historyRead=null;releaseReviews?.cancelAll();dismissFilters();recovery.retire();epoch++;controller?.abort();controller=null;activeMutationKey=undefined;detail=null;scheduleDraft=null;editor=null;creating=false;review=null;message='';if(clear){completionDirty=false;rows=[];issues=[];intentStore=null;state='idle';loadedSession=null;}publish();};
  const requestKey=(id:string)=>{const owner=connectionController.getSnapshot().session;return owner?workflowIntentKey(owner,'automation:'+id):'offline:'+id;};
  const key=(row:AutomationRow)=>requestKey(row.key);
  const locked=(row:AutomationRow)=>uncertain.has(key(row))||(!!binding()&&(intentStore?.locked(key(row))??true));
@@ -172,11 +175,19 @@ export function installAutomationsAdapter(Component:any,views:Bag){
   }catch{if(ticket===epoch)message='Couldn’t release';}
   finally{if(ticket===epoch){intentStore=intents;controller=null;activeMutationKey=undefined;publish();}}
  }
+ const runLines=(runs:unknown[])=>runs.map(value=>promptRunHistoryLine(value as Bag,automationWhen));
+ /** Reads an opened prompt's run history once. A read only; it never holds the list's request slot. */
+ function readHistory(row:AutomationRow){
+  historyRead?.abort();historyRead=null;const selected=binding();if(!selected||!row.triggerId)return;
+  const abort=historyRead=new AbortController();
+  void new AutomationsProtocol(selected.request).promptRuns(row.triggerId,abort.signal).then(runs=>{if(historyRead===abort&&detail?.key===row.key&&binding()?.sessionId===selected.sessionId){history=runLines(runs);publish();}},()=>{/* Refresh execution history stays available. */}).finally(()=>{if(historyRead===abort)historyRead=null;});
+ }
  function show(row:AutomationRow){
   if(controller)return;creating=false;editor=null;review=null;message='';history=[];
   if(row.kind==='workflow'&&row.workflowId){detail=null;const out=render(owner.vget('workflows'),owner.api('workflows'));out.openWorkflow(row.workflowId);return;}
   if(row.kind==='device-reminder'){owner.openView('calendar');void owner.refreshReminders(row.id,row.record.occurrenceId);return;}
   scheduleDraft=null;detail=row;if(row.kind==='reminder'){const attempt=row.record.latestAttempt;history=attempt?.attemptedAt?[(String(attempt.outcome).startsWith('delivered')?'Delivered':String(attempt.outcome).startsWith('blocked')?'Delivery blocked':'Unknown')+' · '+new Date(attempt.attemptedAt).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})]:[];}publish();
+  if(row.kind==='prompt')readHistory(row);
  }
  function ask(label:string,row:AutomationRow,run:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>){if(controller||locked(row))return;const blocked=row.kind==='schedule'?scheduleBlock():'';if(blocked){message=blocked;publish();return;}review={label,key:key(row),run};message='';publish();}
  async function editPrompt(row:AutomationRow){
@@ -208,7 +219,8 @@ export function installAutomationsAdapter(Component:any,views:Bag){
   // What the list prints, one line per cause: with no agent connected its notice is the message, and a repeated
   // issue is listed once. `issues` itself stays complete for the checks that read it.
   const shownIssues=issues.filter((issue,index)=>issue.message!==message&&!(message&&!binding()&&issue.unavailable)&&issues.findIndex(other=>other.message===issue.message)===index);
-  const empty=state==='ready'&&!cards.length&&!issues.length;
+  // With no agent connected the availability notice already says why the list is empty.
+  const empty=state==='ready'&&!cards.length&&!issues.length&&!(message&&!binding());
   const managementCards:Bag[]=[...(workflow.managementCards||[])];
   if(intentStore&&!Capacitor.isNativePlatform())managementCards.push({
    id:'automation-recovery',name:'Recovery',short:'Back up or reset',open:recoverRequests,
@@ -227,7 +239,7 @@ export function installAutomationsAdapter(Component:any,views:Bag){
   let power=null as {label:string;on:boolean;run:()=>void}|null;
   const switchPower=(row:AutomationRow,label:string,fn:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>)=>{power={label,on:row.enabled,run:()=>ask(label,row,fn)};};
   const action=(label:string,fn:(client:AutomationsProtocol,signal:AbortSignal)=>Promise<unknown>)=>{if(detail)actions.push({label,run:()=>ask(label,detail!,fn),disabled:!!controller||selectedLocked||scheduleBlocked});};
-  if(detail?.kind==='prompt'&&detail.triggerId){const row=detail,id=row.triggerId!;if(!row.record.system)actions.push({label:'Edit prompt',run:()=>void editPrompt(row),disabled:!!controller||selectedLocked});actions.push({label:'Refresh execution history',icon:current.ic?.calRepeat,run:()=>void work(async(client,signal)=>{history=(await client.promptRuns(id,signal)).map(value=>promptRunHistoryLine(value as Bag,automationWhen));publish();}),disabled:!!controller});if(!row.record.system){switchPower(row,row.enabled?'Pause':'Enable',(client,signal)=>client.setPromptEnabled(id,!row.enabled,signal));action('Run now',(client,signal)=>client.runPrompt(id,signal));action('Delete prompt',(client,signal)=>client.deletePrompt(id,signal));}}
+  if(detail?.kind==='prompt'&&detail.triggerId){const row=detail,id=row.triggerId!;if(!row.record.system)actions.push({label:'Edit prompt',run:()=>void editPrompt(row),disabled:!!controller||selectedLocked});actions.push({label:'Refresh execution history',icon:current.ic?.calRepeat,run:()=>void work(async(client,signal)=>{history=runLines(await client.promptRuns(id,signal));publish();}),disabled:!!controller});if(!row.record.system){switchPower(row,row.enabled?'Pause':'Enable',(client,signal)=>client.setPromptEnabled(id,!row.enabled,signal));action('Run now',(client,signal)=>client.runPrompt(id,signal));action('Delete prompt',(client,signal)=>client.deletePrompt(id,signal));}}
   const scheduled=detail?.kind==='schedule'?detail:null;
   const scheduleClock=scheduled?.record.trigger?.kind==='cron'?recurringClock(String(scheduled.record.trigger.expression||'')):null;
   const ended=scheduled&&scheduledTaskEnded(scheduled.status);
@@ -270,7 +282,7 @@ export function installAutomationsAdapter(Component:any,views:Bag){
     ask('Save schedule',scheduled,(client,signal)=>client.editSchedule(scheduled.id,instructions,trigger,signal));scheduleDraft=null;publish();},
    power:!!power&&scheduleDraft===null,powerLabel:power?.label||'',powerOn:!!power?.on,powerTrack:current.track(!!power?.on),powerKx:current.kx(!!power?.on),powerDisabled:!!controller||selectedLocked,togglePower:()=>power?.run(),
    locked:(selectedLocked||formLocked)&&!(controller&&activeMutationKey===lockId),allowAnother:()=>void allowAnother(lockId),
-   review:!!review,reviewLabel:review?.label||'',reviewPrompt:`${review?.label||''}?`,reviewDetails:detail?.kind==='reminder'?[detail.title,detail.description,detail.schedule].filter(Boolean).join('\n'):detail?.kind==='prompt'&&review?.label==='Enable'?[detail.schedule,scheduleRule(timedPrompt(detail))].filter(Boolean).join('\n'):'',reviewConfirmLabel:review?.label.startsWith('Snooze until ')?'Snooze':`Confirm ${review?.label||''}`,confirm:()=>{const selected=review;if(selected){review=null;void work(selected.run,selected.key);}},cancelReview:()=>{review=null;publish();},
+   review:!!review,reviewLabel:review?.label||'',reviewPrompt:`${review?.label||''}?`,reviewDetails:detail?.kind==='schedule'&&review&&review.label in SCHEDULE_ENDINGS?SCHEDULE_ENDINGS[review.label]:detail?.kind==='reminder'?[detail.title,detail.description,detail.schedule].filter(Boolean).join('\n'):detail?.kind==='prompt'&&review?.label==='Enable'?[detail.schedule,scheduleRule(timedPrompt(detail))].filter(Boolean).join('\n'):'',reviewConfirmLabel:review?.label.startsWith('Snooze until ')?'Snooze':`Confirm ${review?.label||''}`,confirm:()=>{const selected=review;if(selected){review=null;void work(selected.run,selected.key);}},cancelReview:()=>{review=null;publish();},
   }};
  };
  const mount=p.componentDidMount,unmount=p.componentWillUnmount;
