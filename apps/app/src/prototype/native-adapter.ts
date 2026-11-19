@@ -101,6 +101,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
   camera: [
     'clearSaid cycleTimer flip openLast pick shutter toggleFlash vfCancel vfClick vfDown',
     'vfMove vfUp',
+    'toggleGrid',
   ],
   photos: [
     'addFavorite addToAlbum albumFocus albumsRecover ask askDelete cancel captureSubviewFocus',
@@ -111,12 +112,14 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'openPlace openTrash pause pd pick play pm pu recover replace rotate save seek selAlbum',
     'selAll selCancel selDel selDeleteForever selFav selRecover selShare selStart select send',
     'share shareModal tap up viewerFocus viewerRef',
+    'apply ne nw reset se sw',
   ],
   maps: [
     'backToEvent call clearQ close copyPhone dirs end focusQ go mapRef nativeApplyName',
     'nativeEdit nativeLocation nativeLocationSettings nativeManualLocation nativeRename',
     'onOrigin onQ openInMapsApp originFocus originKey originLocation qKey recenter',
     'retryNativeMap rootRef save searchLead share shareEta start web',
+    'clearRecent compassRef northUp swap',
   ],
   calendar: [
     'accept addEmail cancel captureSubviewFocus checkCreations checkReminderCreations',
@@ -131,6 +134,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'replaceFormDraft response restoreEditDraft restoreFormDraft resumeEditDraft',
     'resumeFormDraft retryEditDraft retryFormDraft sMinus sPlus save separateCreation tlDown',
     'tlUp toggleAllDay toggleMonth toggleVideo',
+    'closeSearch inviteDecline onSearch openSearch',
   ],
   contacts: [
     'addEmail addNew addPhone ask cancel cancelDelete cancelEdit change clear clearSearch',
@@ -145,6 +149,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'openTrash pdfNext pdfPrevious previewFocus reselect restore restoreAll retry rnKey',
     'saveRn selAll selCopy selDel selMove selRename selShare share sort startRename tap',
     'toggleView up',
+    'details selDeleteForever selDetails selRestore selectTrash',
   ],
   settings: [
     'action back change close color go ok onKey onName onPw openAccount pick rootRef set',
