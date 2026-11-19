@@ -54,7 +54,7 @@ test('loop D on Android: a reviewed snapshot, morning and evening schedules, a l
   expect(source.id).toBe(snapshot.body.id);
 
   // 2. Morning schedule: the agent applies it, but its acknowledgement is lost.
-  await digests.getByRole('combobox', { name: 'Reviewed source', exact: true }).selectOption(source.id);
+  await digests.getByRole('combobox', { name: 'Source', exact: true }).selectOption(source.id);
   await digests.getByLabel('Morning', { exact: true }).fill('07:30');
   await button(page, 'Review morning schedule').click();
   await expect(reviewSection(page).getByRole('note')).toHaveText('Keep this phone on. Android may delay scheduled runs. Runs more than 30 minutes late are marked missed.');
@@ -97,7 +97,7 @@ test('loop D on Android: a reviewed snapshot, morning and evening schedules, a l
   expect((await posts(page))[5]).toEqual({ path: 'sources/revoke', body: { id: source.id, confirmed: true } });
   await expect(digests.getByRole('region', { name: 'Source renewal' })).toContainText('Errands revoked');
   // A revoked source cannot be chosen again or renewed in place.
-  await expect(digests.getByRole('combobox', { name: 'Reviewed source', exact: true }).locator('option')).toHaveText(['Choose source']);
+  await expect(digests.getByRole('combobox', { name: 'Source', exact: true }).locator('option')).toHaveText(['Choose source']);
   await expect(digests.getByRole('button', { name: 'Renew Errands', exact: true })).toHaveCount(0);
 
   expect((await posts(page)).map(post => post.path)).toEqual(['sources', 'loops', 'loops', 'loops', 'loops', 'sources/revoke']);
@@ -120,7 +120,7 @@ test('loop D on Android: a schedule edit made against an older version is refuse
   await button(page, 'Review snapshot').click();
   await confirmReview(page, 'Share this tasks snapshot');
   const source = await harness(page, f => f.digests.sources[0].id) as string;
-  await digests.getByRole('combobox', { name: 'Reviewed source', exact: true }).selectOption(source);
+  await digests.getByRole('combobox', { name: 'Source', exact: true }).selectOption(source);
   await button(page, 'Review morning schedule').click();
   await confirmReview(page, "Turn on morning digest at 08:00?");
   await expect(schedules(page)).toHaveCount(1);

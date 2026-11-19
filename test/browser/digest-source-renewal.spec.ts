@@ -10,7 +10,7 @@ test('a bound source shows its renewal window, pauses at expiry and renews with 
  const expiry=panel.getByLabel('Expires after hours',{exact:true});await expect(expiry).toHaveValue('168');await expect(expiry).toHaveAttribute('max','168');
  await panel.getByLabel('Label',{exact:true}).fill('Daily source');await panel.getByLabel('Snapshot text',{exact:true}).fill('Reviewed snapshot content');await expiry.fill('20');
  await panel.getByRole('button',{name:'Review snapshot',exact:true}).click();await panel.getByRole('button',{name:'Confirm',exact:true}).click();
- await panel.getByRole('combobox',{name:'Reviewed source',exact:true}).selectOption({index:1});await panel.getByLabel('Time zone',{exact:true}).fill('UTC');await panel.getByLabel('Morning',{exact:true}).fill('12:30');
+ await panel.getByRole('combobox',{name:'Source',exact:true}).selectOption({index:1});await panel.getByLabel('Time zone',{exact:true}).fill('UTC');await panel.getByLabel('Morning',{exact:true}).fill('12:30');
  await panel.getByRole('button',{name:'Review morning schedule',exact:true}).click();await panel.getByRole('button',{name:'Confirm',exact:true}).click();
  const schedules=panel.getByRole('region',{name:'Digest schedules'}),renewal=panel.getByRole('region',{name:'Source renewal'});
  await expect(schedules).toContainText('Morning at 12:30 (UTC) · Daily source · On');
@@ -44,7 +44,7 @@ test('morning and evening schedules can share one reviewed source',async({page})
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));const panel=page.getByRole('dialog',{name:'Scheduled digests',exact:true});
  await panel.getByText('Share a snapshot',{exact:true}).click();await panel.getByLabel('Label',{exact:true}).fill('Shared source');await panel.getByLabel('Snapshot text',{exact:true}).fill('Shared content');
  await panel.getByRole('button',{name:'Review snapshot',exact:true}).click();await panel.getByRole('button',{name:'Confirm',exact:true}).click();
- await panel.getByRole('combobox',{name:'Reviewed source',exact:true}).selectOption({index:1});await panel.getByLabel('Time zone',{exact:true}).fill('UTC');
+ await panel.getByRole('combobox',{name:'Source',exact:true}).selectOption({index:1});await panel.getByLabel('Time zone',{exact:true}).fill('UTC');
  for(const template of ['morning','evening']){await panel.getByRole('button',{name:`Review ${template} schedule`,exact:true}).click();await panel.getByRole('button',{name:'Confirm',exact:true}).click();}
  const schedules=panel.getByRole('region',{name:'Digest schedules'});await expect(schedules).toContainText('Morning at 08:00 (UTC) · Shared source · On');await expect(schedules).toContainText('Evening at 18:00 (UTC) · Shared source · On');
  const state=await digests(page);expect(new Set(state.loops.map((l:any)=>l.spec.sourceId)).size).toBe(1);expect(state.loops.map((l:any)=>l.spec.template).sort()).toEqual(['evening','morning']);
