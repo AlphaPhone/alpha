@@ -4678,7 +4678,7 @@
     "abstractions": [
       "One reviewed calendar_availability request. Time-zone agreement, permission, the bounded source-list retry, calendar choice, the reviewed read, owner confirmation and the repeated read before sharing are explicit steps.",
       "Read results are abstracted to free, busy and refusals (stale or unknown freshness, changed calendar, time zone, too many events, error). Busy intervals, transparent and tentative events, and all-day civil-day mapping are checked by scripts/test-calendar-availability-flow.ts, not here.",
-      "Session, screen, device or signal changes are one retire step; the source checks them between every await. This model has no trace-refinement driver yet."
+      "Session, screen, device or signal changes are one retire step; the source checks them between every await. test/quint-calendar-availability-review.test.mjs replays the actual executeCalendarAvailability against this model over a scripted provider and review hooks."
     ]
   },
   {
@@ -4703,6 +4703,33 @@
       "Two events, at most two confirmations each. The Undo window is one elapse step; its length (the Undo notice length, scaled by the accessibility timeout) is not modelled.",
       "The reviewed confirmation sheet, organizer/invitee disposition and the provider-version check belong to AgentCalendarMutation; a send here is one delete request to the Calendar service, not a provider outcome.",
       "test/quint-agent-calendar-deferred-delete.test.mjs replays the actual DeferredCalendarDeletes helper against this model with controlled timers and send results."
+    ]
+  },
+  {
+    "path": "specs/quint/application/CalendarNamedRead.qnt",
+    "module": "CalendarNamedRead",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "sharedTest",
+      "notOpenTest",
+      "refusedTest",
+      "mismatchTest",
+      "retiredDuringReadTest",
+      "abortCancelsReadTest",
+      "retiredBeforeCheckTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/agent-adapter.ts",
+      "apps/app/src/ui/calendar/named-read-messages.ts",
+      "apps/app/src/ui/device-actions/client-coordinator.ts",
+      "apps/app/src/runtime/device-actions.ts"
+    ],
+    "abstractions": [
+      "One calendar_named read proposal. The open Calendar view either supplies the owner's selected event or not; the shared executeNamedCalendarRead (plugin-calendar client/named-read.ts at the pinned upstream) sends one exact calendar_read_selected operation, never a write.",
+      "The phone's Share review is one reply (applied or refused); the name check is one step. Session, view, selection and screen changes are one retire step, and the request's signal is one abort step that cancels a read in flight.",
+      "Alpha's receipt sentence is classed by named-read-messages.ts. test/quint-calendar-named-read.test.mjs replays the shared read with Alpha's summary mapping against this model over a scripted Calendar plugin."
     ]
   },
   {
