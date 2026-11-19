@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {captureInputs, checkTraces, qmap, qset} from '../check-traces.mjs';
 import {app, directory, javaTraceCampaign, root} from './java.mjs';
 import {mmsPlatform} from './mms-dispatch-platform.mjs';
-import {historicalTelephonyHost} from './sms-dispatch-platform.mjs';
+import {actionJournalSources, historicalTelephonyHost} from './sms-dispatch-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {prepareNativeFixture} from '../../../../test/fixtures/native-source.mjs';
 import {upstreamNativeSource} from '../../../../scripts/upstream-native-source.ts';
@@ -31,9 +31,9 @@ const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const harness='MmsDispatchTraces.java';
 const historicalInventory='specs/quint/refinement/native/mms-historical-sources.json';
 const scenarios=[
-  'mms-attachment-conflict','sms-first-mms-receives-sms','mms-first-sms-rejected','exact-review',
-  'preflight-revalidates-reviewed-tuple','pruned-exact-review','pruned-conflicting-review','group-carrier-confirm',
-  'preview-invalid-size-and-cancel','carrier-changed-after-review','sim-changed-after-review','begin-refusal-cleans-pdu',
+  'agent-bridge-refuses-mms','mms-attachment-conflict','sms-first-mms-receives-sms','mms-first-sms-rejected','exact-compose',
+  'preflight-revalidates-composed-tuple','pruned-exact-compose','pruned-conflicting-compose','group-carrier-confirm',
+  'invalid-bytes-and-size','carrier-disabled-denies','begin-refusal-cleans-pdu',
   'part-refusal-cleans-outbox','radio-refusal-before-handoff','uncertain-radio-handoff','interrupted-durable-dispatch',
   'role-loss-before-callback','volatile-callback-evidence','committed-callback-refusal','boot-without-receipt',
 ];
@@ -57,7 +57,7 @@ async function campaign(scenarios, extraSources, check, {historicalProbe=false} 
     const productSources=historicalProbe?historicalProduct:product;
     const sourceInputs=history?history.sources:[appBase,...currentPaths.map(path=>'vendor/eliza/'+path),launcherManifest,'android/consumer-host.json',
       'android/upstream-native-sources.json','upstream.lock.json','scripts/prepare-patched-native.ts','scripts/upstream-native-source.ts','test/fixtures/native-source.mjs'];
-    const sources=[...sourceInputs,...productSources,'test/fixtures/jvm-tools.mjs',
+    const sources=[...sourceInputs,...productSources,...actionJournalSources,'test/fixtures/jvm-tools.mjs',
       app+'AlphaImageCapability.java',join(directory,harness),join(directory,'Trace.java'),join(directory,'java.mjs'),
       join(directory,'sms-dispatch-platform.mjs'),join(directory,'mms-dispatch-platform.mjs'),fileURLToPath(import.meta.url),
       ...(jsonJar?[jsonJar]:[]),...generatedSources,...extraSources];
@@ -76,7 +76,7 @@ async function campaign(scenarios, extraSources, check, {historicalProbe=false} 
       });
       assert.match(readFileSync(join(root,launcherManifest),'utf8'),/<receiver\s+android:name="\.AlphaSmsSendReceiver"\s+android:exported="false"/);
     }
-    const complete=compiled.map(name=>resolveSource(shared+name+'.java'));
+    const complete=[...compiled.map(name=>resolveSource(shared+name+'.java')),...actionJournalSources.map(path=>join(root,path))];
     if(!historicalProbe)complete.push(resolveSource(roleSource));
     let traces;
     try {traces=javaTraceCampaign(harness,[...productSources,...complete,...files],scenarios.map(name=>historicalProbe?[name,'historical']:[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
@@ -96,8 +96,8 @@ export function mmsSourceProbe(selected, options) {
 export function checkNativeMmsDispatch(extraSources=[]) {
   return campaign(scenarios,extraSources,async evidence=>{
     const receipt=await checkTraces({...evidence,definitionBatchSize:10,scope: 'bounded-orchestration',assumptions:[
-      'Actual product wrapper, staged SMS/MMS core, extracted native review and outbox members, and exact JVM PDU codec.',
-      'One installed ID shared by two reviews. Synthetic Android telephony, provider, preview, and credential storage ports. Temporary PDU custody uses real file operations.',
+      'Actual product wrapper and Messages composer entry (AlphaTelephonyPlugin.sendComposed), staged SMS/MMS core, extracted native send and outbox members, and exact JVM PDU codec.',
+      'One installed ID shared by two composer sends; the agent bridge sendMms is refused. Synthetic Android telephony, provider, composer window and credential storage ports. Temporary PDU custody uses real file operations.',
       'Both live bridge registrations and exact per-bridge operation-ID notification counts are observed. Process reconstruction replaces all old registrations; the immediate Handler port does not qualify arbitrary held UI-queue retirement races.',
     ]});
     return {receipt,obligations:[

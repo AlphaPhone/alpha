@@ -2620,13 +2620,14 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
+      "agentBridgeRefusesMmsTest",
       "conflictingAttachmentCannotClaimAnotherReceiptTest",
       "mmsCannotClaimSmsWireReceiptTest",
       "retiredMmsRetainsExactBindingTest",
       "retainedIdRejectsDifferentBodyRecipientsAndSimTest",
       "stagedSmsRejectsMmsReceiptTest",
-      "exactMmsReviewRetriesOnceTest",
-      "invalidAttachmentDoesNotOpenReviewTest",
+      "exactComposerRetryUsesFirstReceiptTest",
+      "invalidAttachmentIsNeverJournaledTest",
       "carrierFailureOverridesAndroidSuccessTest",
       "providerChildRefusalKeepsRadioAndDeletesPartialRowTest",
       "failedCallbackWriteDeletesPduButLosesEvidenceOnRestartTest",
@@ -2641,7 +2642,8 @@
       "MmsNeverClaimsDelivery",
       "OutboxOnlyForMms",
       "TombstoneRetiresRecord",
-      "ApprovedReceiptMatchesReview",
+      "ComposedReceiptMatchesSend",
+      "AgentBridgeRefusesMms",
       "LiveBridgeListeners",
       "PerBridgeNoticeCapacity"
     ],
@@ -2663,20 +2665,22 @@
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournal.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournalConfiguration.java"
     ],
     "stateMapping": {
-      "reviewA/reviewB/groupRecipients": "Two exact native review calls, captured SIM class and reviewed recipient count",
-      "reply/replyKind/replyBinding/positiveBinding": "Wire status, typed SMS/MMS result and exact retained and approved binding classes",
+      "groupRecipients/source": "Composed recipient count and whether the last step was the agent bridge sendMms or the Messages composer send",
+      "reply/replyKind/replyBinding/composedBinding": "Wire status, typed SMS/MMS result and exact retained and composed binding classes",
       "memory/disk/tombstoneBinding/boot/process": "Actual shared live/durable journal, capacity tombstone and process or boot reconstruction",
       "smsAttempts/mmsAttempts/mmsAccepted/files": "Controlled radio boundary and actual temporary PDU retention",
       "mmsBox/deletedMms/events": "Outgoing MMS provider state, partial-row rollback, registered bridge identities and exact per-bridge opaque notification counts",
-      "role/carrier/size/sim/provider/locked": "Controlled device admission and failure classes"
+      "role/carrier/size/provider/locked": "Controlled device admission and failure classes"
     },
     "abstractions": [
-      "One ID shared across SMS and MMS, two bridge instances and two exact MMS attachment variants. The SMS competitor is a one-part message.",
+      "One ID shared across SMS and MMS, two bridge instances and two exact MMS attachment variants. The agent bridge sendMms is refused before anything is read; every send goes through the Messages composer (AlphaTelephonyPlugin.sendComposed) with its window guard. Two composer sends with one ID are interleaved by holding the send worker. The SMS competitor is a one-part composer text.",
       "Successful capacity pruning is observed for a settled MMS. Tombstone compaction and pruning write faults are outside this retained-receipt boundary.",
-      "PDU encoding, staged file and journal execute real code with synthetic Android radio, provider and preview ports. Installed URI grants, provider semantics, platform scheduling, and carrier behavior remain separate.",
+      "PDU encoding, staged file and journal execute real code with synthetic Android radio, provider and composer-window ports. Installed URI grants, provider semantics, platform scheduling, composer focus loss and carrier behavior remain separate.",
       "Four callback publications per bridge retain the original depth with at most eight deliveries across the two live bridges. Process restart clears every old listener and loads both current bridge identities with zero counters.",
       "Handler.post executes immediately within each controlled JVM macrostep. Arbitrary held UI-queue retirement races and additional bridge lifecycle interleavings remain separate."
     ],
