@@ -1,5 +1,6 @@
 import {openSharePanel,setShareEmailComposer,unchangedSince} from '../runtime/share-panel';
 import {shareSelectedText,selectedText,copySelectedText} from '../runtime/text-share';
+import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 type Bag=Record<string,any>;
 /** A view state without its top-level refresh counters (*Revision), which change while the shared selection does not. */
 const shareContent=(state:Bag|undefined)=>state&&Object.fromEntries(Object.entries(state).filter(([key])=>!key.endsWith('Revision')));
@@ -19,7 +20,7 @@ export function installSharePanelAdapter(Component:any,views:Record<string,Bag>)
     // The shell replaces a view's state object on every write, so its identity stands in for the content between writes.
     const same=[unchangedSince(()=>shell.S().vs?.[module],()=>shareContent(shell.vget(module))),...(module==='browser'?[unchangedSince(()=>shell.browserSelection?.())]:[])];
     const current=()=>!document.hidden&&shell.S().view===module&&same.every(check=>check());
-    const api=shell.api(module),safe=(run:()=>unknown)=>async()=>{try{if(!current())throw Error('The selection changed. Choose it again.');await run();}catch(error){if(!(error instanceof DOMException&&error.name==='AbortError'))api.toast(error instanceof Error?error.message:'Sharing is unavailable.');}};
+    const api=shell.api(module),safe=(run:()=>unknown)=>async()=>{try{if(!current())throw Error('The selection changed. Choose it again.');await run();}catch(error){if(!(error instanceof DOMException&&error.name==='AbortError'))api.toast(errorNotice(error,'Sharing is unavailable.'),ERROR_TOAST);}};
     void openSharePanel({title:options.title,current,external:target.shareAvailable===false?undefined:safe(()=>external()),email:options.email?safe(options.email):undefined,emailUnavailable:null,copy:options.copy?safe(options.copy):undefined,copyLabel:options.copyLabel,save:options.save?safe(options.save):undefined});
    };
   };

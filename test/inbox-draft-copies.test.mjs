@@ -83,6 +83,24 @@ test('opening an earlier sent version asks through the titled review, which chan
   assert.equal(fixture.windowConfirms, 0, 'the browser confirm is never used');
 });
 
+test('setting a draft aside shows its own conflict sentence, and fixed copy for a storage failure', async () => {
+  reset(); const grant = 'grant-aside', owner = ownerOf(grant);
+  const rows = [local(grant, {id: 'first', subject: 'First'}), local(grant, {id: 'second', subject: 'Second'})];
+  fixture.rows.set(await shelfSlot(grant), {version: 1, owner, items: rows.map(draft => ({draft, toQ: ''}))});
+  const d = make(); await d.bind(grant, 'owner@example.invalid');
+  const pick = subject => { d.chips(chip).find(row => row.subject === subject).pick(); return settle(); };
+  await pick('First'); field(d, 'onBody', 'Changed words');
+  // The storage layer's own words never reach the owner.
+  fixture.failShelf = true; await pick('Second');
+  assert.deepEqual(fixture.toasts, ['The draft could not be saved. Your edits remain here.']);
+  assert.equal(d.render().c.subject, 'First', 'the open email stays');
+  // A shelf changed elsewhere is the controller's own sentence.
+  fixture.failShelf = false; fixture.toasts.length = 0;
+  const slot = await shelfSlot(grant); fixture.rows.set(slot, {...fixture.rows.get(slot), items: fixture.rows.get(slot).items.slice(0, 1)});
+  await pick('Second');
+  assert.deepEqual(fixture.toasts, ['Drafts changed in another window. Reload before continuing.']);
+});
+
 test('retained edits are written once per task with the latest copy, and read back without parsing again', async t => {
   const store = {slots: new Map(), writes: 0};
   globalThis.unsavedStoreFixture = store;

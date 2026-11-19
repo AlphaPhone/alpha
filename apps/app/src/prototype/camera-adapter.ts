@@ -10,6 +10,7 @@ import {createScanCapture} from '../ui/camera/scan-document';
 import type {CameraKeepOutcome} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
 import {reviewFileEmail} from './file-email-review';
 import {connectionController} from '../runtime/connection-ui';
+import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 import type {MailAttachment} from '../runtime/inbox-attachment';
 import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,mediaCopyIntentDocument,type MediaCopyIntent} from '../runtime/media-copy-intent';
 import {createInlineModal} from '../runtime/inline-modal';
@@ -1237,7 +1238,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // The picker covered the page, so the preview restarted: check the view, not the camera epoch.
       if(!image||disposed||!owner.isActive())return;
       closeScan=openScanReview(image,(text,id)=>owner.saveScannedNote?.(text,id)??Promise.resolve(false),draft=>{if(disposed||!owner.isActive())return false;return owner.reviewScannedCalendarDraft?.(draft)??false;},'selected',undefined,owner.S.view==='camera'?documentCamera(owner):undefined);
-    }catch(error){if(!disposed&&owner.isActive())owner.toast(error instanceof Error&&error.message?error.message:'Unreadable image');}
+    }catch(error){if(!disposed&&owner.isActive())owner.toast(errorNotice(error,'Unreadable image'),ERROR_TOAST);}
   }
   function chooseImage(owner:Bag){
     if(disposed||!owner.isActive())return;
@@ -1691,7 +1692,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         if(sharing || mutating)return;
         sharing=true;
         try { const input={id:nativeId(selected.id),revision:selected.mutationRevision},token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected),result:Awaited<ReturnType<typeof nativeLibrary.share>>=browserMode?await browserPhotoLibrary.share(input,current):await nativeLibrary.share(input); if(result.status!=='opened')currentApi.toast(browserMode?result.message||'Share failed':photosResultText(result.message,'Share failed')); }
-        catch(error) { if(!(browserMode&&error instanceof DOMException&&error.name==='AbortError'))currentApi.toast(browserMode&&error instanceof Error?error.message:'Unavailable'); }
+        catch(error) { if(!(browserMode&&error instanceof DOMException&&error.name==='AbortError'))currentApi.toast(browserMode?errorNotice(error,'Unavailable'):'Unavailable',ERROR_TOAST); }
         finally { sharing=false; }
       }, fav: () => { void favorite(selected,currentApi); }, edit: () => {void beginEdit(selected,currentApi);}, del: () => { void changeTrash(selected, true, currentApi, (sequence[index + 1] || sequence[index - 1])?.id); }, info: () => { currentApi.set({ sheet: 'photo-info', chrome: true }); }, ask: selected.kind==='video'||selected.trashed?undefined:() => { askCapture(selected,currentApi); } };
       const playbackCurrent=()=>!!video&&videoId===selected.id&&videoRevision===(selected.contentRevision||selected.revision)&&!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected);
