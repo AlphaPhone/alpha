@@ -57,29 +57,39 @@ test('provider usage, when recorded, replaces estimates and yields the cache hit
   assert.doesNotMatch(report, /text mom|three/);
 });
 
-// The provider reuses a prompt prefix in whole 128-token blocks, system prompt first, then
-// tool definitions, then messages, and bills what misses against a smaller per-minute limit.
-test('the provider simulation caches whole prefix blocks in system, tools, messages order', () => {
+// Measured on the provider: a prompt prefix is reused in whole 1,024-token units, tool
+// definitions first, then the system prompt, then the messages.
+test('the provider simulation caches whole prefix units in tools, system, messages order', () => {
   const receipts = JSON.stringify(Array.from({length: 120}, (_, row) => [`history:${row}`, [['NOTES_CREATE', true, [row]]]]));
-  const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000}];
+  const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 1_200, hash: 'bbbb'}];
   const first = stage1(0, receipts, 'one', {tools});
   const next = stage1(20_000, receipts, 'two', {tools});
   const result = simulateProvider([first, next]);
   const [cold, warm] = [result.stages.stage1.input / 2, result.cachedTokens];
-  assert.equal(warm % CEREBRAS_QWEN.cacheBlockTokens, 0);
-  // Everything but the last message differs by a few tokens, so nearly all of it is reused.
-  assert.ok(warm > 0.9 * cold && warm < cold, `${warm} of ${cold}`);
+  assert.equal(warm % 1024, 0);
+  assert.equal(CEREBRAS_QWEN.cacheBlockTokens, 1024);
+  // Only the end of the last message differs: all but the last partial unit is reused.
+  assert.ok(warm > cold - 1024 - 40 && warm < cold, `${warm} of ${cold}`);
   assert.equal(result.hitRate, warm / result.inputTokens);
 
-  // One changed character at the end of the system prompt loses the tools and the messages.
-  const drifted = simulateProvider([first, {...next, system: `${system}Current contact reference kinds: a.`}]);
-  assert.ok(drifted.cachedTokens <= estimateTokens(system));
-  // Another tool list keeps the system prompt and nothing after it.
-  const otherTools = simulateProvider([first, {...next, tools: [{name: 'HANDLE_RESPONSE', chars: 14_001}]}]);
-  assert.ok(otherTools.cachedTokens <= estimateTokens(system));
+  const toolTokens = Math.round(15_200 / 4);
+  const units = tokens => Math.floor(tokens / 1024) * 1024;
+  // A system prompt that changes keeps the tool definitions before it and loses the messages.
+  const drifted = simulateProvider([first, {...next, system: `Changed. ${system}`}]);
+  assert.equal(drifted.cachedTokens, units(toolTokens));
+  // A changed second tool keeps the first tool and nothing after it, system prompt included.
+  const secondTool = simulateProvider([first, {...next, tools: [tools[0], {...tools[1], hash: 'cccc'}]}]);
+  assert.equal(secondTool.cachedTokens, units(Math.round(14_000 / 4)));
+  // A changed first tool, or the same tools in another order, loses the whole request.
+  assert.equal(simulateProvider([first, {...next, tools: [{...tools[0], hash: 'dddd'}, tools[1]]}]).cachedTokens, 0);
+  assert.equal(simulateProvider([first, {...next, tools: [tools[1], tools[0]]}]).cachedTokens, 0);
+  // One tool more or fewer keeps the tools they share and stops there.
+  assert.equal(simulateProvider([first, {...next, tools: [tools[0]]}]).cachedTokens, units(Math.round(14_000 / 4)));
   // A prefix older than the provider keeps it, or one still being read, is not reused.
   assert.equal(simulateProvider([first, stage1(400_000, receipts, 'two', {tools})]).cachedTokens, 0);
   assert.equal(simulateProvider([first, {...next, at: 500, ms: 900}]).cachedTokens, 0);
+  // Under one unit nothing is reused.
+  assert.equal(simulateProvider([stage1(0, '[]', 'one'), stage1(20_000, '[]', 'one')]).cachedTokens, 0);
 });
 
 test('the provider simulation counts a call against both per-minute limits, with its output cap, when it starts', () => {
