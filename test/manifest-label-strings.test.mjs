@@ -35,12 +35,13 @@ test('the PRD states that the app is English only today', () => {
   assert.match(read(MANIFEST), /android:supportsRtl="false"/);
 });
 
-// The daily-brief and Gmail notices read their owner-facing text from alpha-notices.xml. The
-// refinement harnesses (source-renewal, gmail-background) check that text through the same file.
+// The daily-brief and Gmail notices and the channel descriptions Alpha adds read their owner-facing
+// text from alpha-notices.xml. The refinement harnesses (source-renewal, gmail-background) and
+// test/native-notification-channels.test.mjs check that text through the same file.
 test('notice posters take their owner-facing text from string resources', () => {
   const NOTICES = 'android/app/src/main/res/values/alpha-notices.xml';
   const defined = new Set([...read(NOTICES).matchAll(/<string name="([a-z0-9_]+)">[^<]+<\/string>/g)].map(m => m[1]));
-  for (const poster of ['HostedNoticePoster', 'GmailNoticePoster']) {
+  for (const poster of ['HostedNoticePoster', 'GmailNoticePoster', 'AlphaNotificationChannels']) {
     const source = read(`android/app/src/main/java/ai/alphacompute/alphaphone/${poster}.java`);
     const literal = /(setContentTitle|setContentText|setDescription|setTicker|setSubText)\("|new NotificationChannel\([^,]+,"|Action\.Builder\(null,"/.exec(source);
     assert.equal(literal, null, `${poster} passes owner-facing text as a literal: ${literal?.[0]}`);

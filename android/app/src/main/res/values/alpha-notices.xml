@@ -14,6 +14,15 @@
     <string name="alpha_brief_renewal_title_calendar">Calendar access for your daily brief expires soon</string>
     <string name="alpha_brief_renewal_title_reminders">Reminders access for your daily brief expires soon</string>
     <string name="alpha_brief_renewal_title_calendar_reminders">Calendar and reminders access for your daily brief expires soon</string>
+    <!-- Descriptions for channels shared code creates (AlphaNotificationChannels). -->
+    <string name="alpha_channel_alerts_description">Notices Alpha marks as urgent.</string>
+    <string name="alpha_channel_notifications_description">Notices Alpha marks as important.</string>
+    <string name="alpha_channel_updates_description">Routine notices from Alpha.</string>
+    <string name="alpha_channel_quiet_description">Low-priority notices from Alpha. Shown without sound.</string>
+    <string name="alpha_channel_reminders_old_name">Reminders (not used)</string>
+    <string name="alpha_channel_reminders_old_description">Kept so your earlier sound and alert choices carry over. Reminder alerts use Reminders.</string>
+    <string name="alpha_channel_reminders_name">Reminders</string>
+    <string name="alpha_channel_reminders_description">Reminders you set on this phone. Android may delay them.</string>
     <!-- New Gmail messages (GmailNoticePoster). -->
     <string name="alpha_gmail_channel_name">New Gmail messages</string>
     <string name="alpha_gmail_channel_description">Tells you when new unread mail arrives. Never shows the sender or subject. Android may delay checks.</string>

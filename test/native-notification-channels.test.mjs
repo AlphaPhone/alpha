@@ -4,11 +4,13 @@ import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {nativeSource,runJvm,jvmSkip} from './fixtures/jvm-tools.mjs';
+import {stringResources} from '../specs/quint/refinement/native/string-resources.mjs';
 
 // Run the actual presentation helper against a recording platform boundary. This verifies the
 // calls Alpha makes, not Android's persistence of user choices or real Settings presentation.
 test('channel descriptions update only existing identities and recover after platform refusal',{skip:jvmSkip('javac')},()=>{
  const dir=mkdtempSync(join(tmpdir(),'alpha-channel-descriptions-')),files=[nativeSource('AlphaNotificationChannels.java')];
+ const strings=stringResources();
  const put=(name,source)=>{const file=join(dir,name);mkdirSync(join(file,'..'),{recursive:true});writeFileSync(file,source);files.push(file);};
  try{
   put('android/app/NotificationChannel.java',`package android.app;
@@ -31,7 +33,10 @@ public final class Context {
  public android.app.NotificationManager manager;public boolean refuse;
  public Context(android.app.NotificationManager manager){this.manager=manager;}
  public <T>T getSystemService(Class<T> type){if(refuse)throw new SecurityException("service refused");return type.cast(manager);}
-}`);
+${strings.getString}}`);
+  // The shipped string resources, as Android returns them.
+  put('R.java',`package ai.alphacompute.alphaphone;
+final class R {${strings.rString}}`);
   put('AlphaReminders.java',`package ai.alphacompute.alphaphone;
 final class AlphaReminders {static final Configuration CONFIGURATION=new Configuration();static final class Configuration {final String channelId="alpha_reminders";String dueChannelId(){return channelId+"-due";}}}`);
   put('ChannelDescriptionsTest.java',`package ai.alphacompute.alphaphone;
