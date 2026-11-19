@@ -54,8 +54,23 @@ test('canonical Notes use last-edit order and local date labels without writing 
  const updated=(await snapshot(page)).notes.find((note:any)=>note.id==='newer-created');for(const key of ['createdAt','updatedAt','modifiedAt'])expect(updated.format?.data?.[key]).toBeUndefined();
 });
 
-test('empty canonical Notes explains the first action',async({page})=>{
- await canonicalNotesFixture(page);await openCanonicalNotes(page);await expect(page.getByRole('heading',{name:'No notes',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Record voice note',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:'New note',exact:true})).toBeEnabled();
+test('Done saves a new note and returns to the Notes list',async({page},info)=>{
+ await canonicalNotesFixture(page);await openCanonicalNotes(page);
+ await expect(page.getByRole('heading',{name:'No notes',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Record voice note',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'New note',exact:true}).click();
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await editor.getByRole('textbox',{name:'Title',exact:true}).fill('Tripod checklist');
+ await editor.getByRole('textbox',{name:'Note',exact:true}).fill('Bring the tripod plate.');
+ const done=editor.locator('[data-alpha-app-header="detail"]').getByRole('button',{name:'Done',exact:true});
+ await expect(done).toBeVisible();
+ await page.screenshot({path:info.outputPath('new-note-done.png'),animations:'disabled'});
+ await done.click();
+ await expect(editor).toHaveCount(0);
+ const row=page.getByRole('button',{name:'Open Tripod checklist',exact:true});
+ await expect(row).toHaveCount(1);
+ await row.click();
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Bring the tripod plate.');
 });
 
 test('a lost canonical recording save reply is reconciled without another create',async({page})=>{
@@ -145,7 +160,7 @@ test('Stop saves canonical audio locally and Generate transcript later uses its 
  });
  await page.bringToFront();
  const header=page.locator('[data-alpha-subview="notes-list"] [data-alpha-app-header="main"]');
- expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record voice note','New note']);
+ expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record voice note','New note','Notes options']);
  await page.evaluate(async()=>{
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   connectionController.getCloudEnvironment=()=> 'production';

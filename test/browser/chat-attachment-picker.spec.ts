@@ -210,7 +210,7 @@ test('a large reviewed photo reaches shared compression before explicit Send',as
 });
 
 
-test('a Files preview attaches the exact file to an editable prompt and waits for Send',async({page},testInfo)=>{
+test('a Files preview sends an inline attachment and shows only the answer',async({page},testInfo)=>{
  const outbound=await ready(page);
  await page.getByRole('button',{name:'Files',exact:true}).click();
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
@@ -229,6 +229,11 @@ test('a Files preview attaches the exact file to an editable prompt and waits fo
   text: 'What does this say?',
   images:[{name:'Reviewed notes.txt',mimeType:'text/plain',data:Buffer.from('first bytes').toString('base64')}],
  }]);
+ await expect(page.locator('.sent-content-attachment').filter({hasText:/^Reviewed notes\.txt$/})).toBeVisible();
+ await expect(page.getByText('Attachment received',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:/^Review summary note/})).toHaveCount(0);
+ await expect(page.getByRole('dialog',{name:'Save summary'})).toHaveCount(0);
+ await page.screenshot({path:testInfo.outputPath('file-reply-in-chat.png'),animations:'disabled'});
  await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(0);
  expect(outbound).toEqual([]);
 });
