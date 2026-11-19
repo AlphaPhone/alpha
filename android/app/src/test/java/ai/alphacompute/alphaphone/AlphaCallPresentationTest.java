@@ -351,6 +351,40 @@ public class AlphaCallPresentationTest {
         } finally { owner.onDestroy(); }
     }
 
+    @Test public void theCallNoticeIsPostedOnlyWhenWhatItSaysOrOffersChanges() throws Exception {
+        assertEquals(AlphaCallPresentation.noticeContent("Maya", Call.STATE_DIALING), AlphaCallPresentation.noticeContent("Maya", Call.STATE_DIALING));
+        org.junit.Assert.assertNotEquals(AlphaCallPresentation.noticeContent("Maya", Call.STATE_DIALING), AlphaCallPresentation.noticeContent("Maya", Call.STATE_ACTIVE));
+        org.junit.Assert.assertNotEquals(AlphaCallPresentation.noticeContent("Maya", Call.STATE_DIALING), AlphaCallPresentation.noticeContent("555 0100", Call.STATE_DIALING));
+        AlphaInCallService owner = owner();
+        try {
+            NotificationManager manager = owner.getSystemService(NotificationManager.class);
+            Call call = activeCall();
+            ReflectionHelpers.setField(call, "mState", Call.STATE_DIALING);
+            owner.onCallAdded(call);
+            Notification dialing = manager.getActiveNotifications()[0].getNotification();
+            // Telecom repeats a state and reports detail changes that leave the notice as it is: a
+            // burst of them as a call starts must not post the same notice again (Android sheds
+            // notices past its per-app rate, and a shed update leaves a stale notice).
+            for (int repeat = 0; repeat < 8; repeat++) {
+                queueState(call);
+                ReflectionHelpers.callInstanceMethod(call, "fireDetailsChanged", ClassParameter.from(Call.Details.class, null));
+            }
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            org.junit.Assert.assertSame("an unchanged notice is not posted again", dialing, manager.getActiveNotifications()[0].getNotification());
+            ReflectionHelpers.setField(call, "mState", Call.STATE_ACTIVE); queueState(call);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            Notification connected = manager.getActiveNotifications()[0].getNotification();
+            org.junit.Assert.assertNotSame("a changed state is posted", dialing, connected);
+            assertEquals("In call", connected.extras.getString(Notification.EXTRA_TEXT));
+            // A second call with the same words still gets its own notice, and a removed call's
+            // notice content is forgotten with it.
+            owner.onCallRemoved(call);
+            org.junit.Assert.assertEquals(0, manager.getActiveNotifications().length);
+            Call again = activeCall(); owner.onCallAdded(again);
+            org.junit.Assert.assertEquals(1, manager.getActiveNotifications().length);
+        } finally { owner.onDestroy(); }
+    }
+
     @Test public void theOngoingCallBarIsToldOnlyTheStatesTheOwnerSees() {
         assertEquals("ringing", AlphaCallPresentation.ongoingState(Call.STATE_RINGING));
         assertEquals("ringing", AlphaCallPresentation.ongoingState(Call.STATE_SIMULATED_RINGING));
