@@ -8,7 +8,7 @@ async function browser(run){
  // The native bookmark store keeps addresses only.
  let marks=[];
  const setBookmark=input=>{marks=input.saved?[...marks.filter(url=>url!==input.url),input.url]:marks.filter(url=>url!==input.url);return {urls:marks};};
- const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark','downloads'],results:{bookmarks:()=>({urls:marks}),setBookmark}});
+ const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark','downloads','clearBrowsingData'],results:{bookmarks:()=>({urls:marks}),setBookmark,clearBrowsingData:()=>({closed:[]})}});
  let sequence=0;
  const page=async(id,url,title)=>{host.emit('stateChanged',{id,sequence:++sequence,navigation:'n'+sequence,url,title,committed:true,loading:false,canBack:false,canForward:false,error:''});await host.sync();};
  const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
@@ -105,6 +105,19 @@ test('a bookmark saved without a page name shows its site',async()=>{
   host.rendered().openLib();await host.sync();
   assert.equal(host.rendered().libRows[0].name,'untitled.example');
   assert.deepEqual(host.state().titles,{});
+ });
+});
+
+test('clearing browsing data keeps the names saved with bookmarks',async()=>{
+ await browser(async({host,page,type})=>{
+  const id=await type('https://kept.example/recipe');await page(id,'https://kept.example/recipe','Lentil soup');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  const other=await type('https://visited.example/');await page(other,'https://visited.example/','Visited only');
+  host.rendered().clearData();await host.settle();
+  const approve=[...host.page.window.document.querySelectorAll('button')].find(button=>button.textContent==='Clear data');
+  assert.ok(approve,'Clear browsing data asks first');approve.click();await host.settle();await host.sync();
+  assert.deepEqual(host.state().visits,[]);
+  assert.deepEqual(host.state().titles,{'https://kept.example/recipe':'Lentil soup'},'the bookmark keeps its name; the visit-only name is cleared');
  });
 });
 

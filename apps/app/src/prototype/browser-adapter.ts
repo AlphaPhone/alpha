@@ -367,7 +367,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     const next = rest.length ? rest : [{ id: newTabId(), hist: ['newtab'], pos: 0 }];
     const opener = s.tabs.find((tab: Bag) => tab.id === s.cur)?.opener;
     const cur = next.some((tab: Bag) => tab.id === s.cur) ? s.cur : next.some((tab: Bag) => tab.id === opener) ? opener : next[0].id;
-    shell.vset('browser', {tabs: next, cur, ...(clearHistory ? {visits: [], titles: {}, visitedAt: {}} : {})}, {afterCommit});
+    // Clearing browsing data keeps bookmarks, so it keeps the names saved with them.
+    shell.vset('browser', {tabs: next, cur, ...(clearHistory ? {visits: [], titles: Object.fromEntries(Object.entries(s.titles || {}).filter(([address]) => (s.marks || []).includes(address))), visitedAt: {}} : {})}, {afterCommit});
   }
   function savedSnapshot() {
     const s = state(); if (!s) return null;
