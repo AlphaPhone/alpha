@@ -4483,6 +4483,7 @@
     </section>
   </sc-if>
   <div data-alpha-transcript aria-hidden="{{chatHistoryInert}}" inert="{{chatHistoryInert}}" class="scr" style="flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; padding: 8px 20px 14px; touch-action: pan-y; user-select: text; -webkit-user-select: text; {{chatHistoryStyle}}">
+    <sc-if value="{{chatEmptyNotice}}"><p data-alpha-chat-empty role="status" style="margin: auto 0; text-align: center; color: var(--mut); font-size: 14px; line-height: 1.45">{{chatEmptyNotice}}</p></sc-if>
     <sc-for list="{{msgs}}" as="m">
       <div data-alpha-message-id="{{m.id}}" data-alpha-agent-row="{{m.isAgent}}" style="display: flex; flex-direction: column">
         <sc-if value="{{m.isUser}}">

@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
 const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText,approvalExpiryText}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText,approvalExpiryText,emptyChatNotice}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -237,4 +237,9 @@ test('a pending action states the clock time it expires, and nothing once expire
  assert.equal(approvalExpiryText(at,now),`Expires at ${new Date(at).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}`);
  assert.equal(approvalExpiryText(now,now),'');assert.equal(approvalExpiryText(now-1,now),'');
  assert.equal(approvalExpiryText(undefined,now),'');assert.equal(approvalExpiryText(Number.NaN,now),'');assert.equal(approvalExpiryText('soon',now),'');
+});
+test('an empty conversation names the missing agent; any message or a session keeps it quiet',()=>{
+ assert.equal(emptyChatNotice(0,false,'Your agent is starting…'),'Your agent is starting…');
+ assert.equal(emptyChatNotice(1,false,'Your agent is starting…'),'');
+ assert.equal(emptyChatNotice(0,true,'Your agent is starting…'),'');
 });
