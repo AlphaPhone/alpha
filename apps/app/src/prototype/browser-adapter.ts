@@ -475,7 +475,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     if (tabInfo(s.cur)?.canBack) { void command('back'); return true; }
     return false;
   };
-  const focusedAddresses = new WeakSet<HTMLInputElement>();
+  // Each mounted address or find field takes focus once, so the keyboard opens with it.
+  const focusedInputs = new WeakSet<HTMLInputElement>();
+  const focusOnce = (input: HTMLInputElement | null) => {
+    if (!input || focusedInputs.has(input)) return;
+    focusedInputs.add(input);
+    input.focus({preventScroll: true});
+    input.select();
+  };
   definition.render = (s: Bag, api: Bag) => {
     if(profileUnsupportedTab&&profileUnsupportedTab!==s.cur)profileUnsupportedTab=undefined;
     const info = tabInfo(s.cur), url = info?.url ? new URL(info.url) : null;
@@ -496,12 +503,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       editing: !!s.editing, notEditing: !s.editing, addr: s.addr || '',
       onAddr: (event: Event) => api.set({addr: (event.target as HTMLInputElement).value}),
       cancelEdit: () => api.set({editing: false}),
-      focusRef: (input: HTMLInputElement | null) => {
-        if (!input || focusedAddresses.has(input)) return;
-        focusedAddresses.add(input);
-        input.focus({preventScroll: true});
-        input.select();
-      },
+      focusRef: focusOnce,
       tabsOpen: !!s.tabsOpen, nTabs: s.tabs.length,
       tabsTitle: s.tabs.length === 1 ? '1 tab' : s.tabs.length + ' tabs',
       openTabs: () => api.set({tabsOpen: true, menu: false, editing: false}),
@@ -524,12 +526,12 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // Find in page is native findAllAsync. A web build's page is an opaque-origin sandboxed frame the host
       // cannot search, so the menu offers no Find there (the template keys on openFind).
       openFind:Capacitor.isNativePlatform()?()=>openFind():undefined,canFind:Capacitor.isNativePlatform()&&!!info?.committed&&!info?.error,finding:!!s.finding&&s.findTab===s.cur,
-      find:{query:s.findQuery||'',count:s.findCount||0,index:s.findIndex||0,
+      find:{focusRef:focusOnce,query:s.findQuery||'',count:s.findCount||0,index:s.findIndex||0,
         label:!s.findQuery?'':s.findCount?`${s.findIndex||1} of ${s.findCount}`:(s.findDone===false?'Searching…':'No matches'),
         onInput:(e:Event)=>findQuery((e.target as HTMLInputElement).value),
         onKey:(e:KeyboardEvent)=>{if(e.key==='Enter'){e.preventDefault();findStep(!e.shiftKey);}else if(e.key==='Escape'){e.preventDefault();closeFind();}},
         next:()=>findStep(true),prev:()=>findStep(false),close:()=>closeFind(),nextOp:s.findCount?1:0.3,prevOp:s.findCount?1:0.3},
-      host:url?.host || 'Search or address',hostCss:url?'':'color:var(--mut)',path:url ? url.pathname + url.search : '', hasLock:Capacitor.isNativePlatform() && !!url && url.protocol==='https:' && !!info?.committed && !info?.loading && !info?.error,
+      host:url?.host || (info ? 'Search or address' : priv ? 'New private tab' : 'New tab'),hostCss:url?'':'color:var(--mut)',path:url ? url.pathname + url.search : '', hasLock:Capacitor.isNativePlatform() && !!url && url.protocol==='https:' && !!info?.committed && !info?.loading && !info?.error,
       pageShareAvailable:Capacitor.isNativePlatform(),canCopyLink:!!info?.committed&&!info.loading&&!info.error,pageContentAvailable:Capacitor.isNativePlatform()||!!info?.committed&&!info.loading&&!info.error&&!info.externalOnly,nativeControls:true,externalBrowserAvailable:Capacitor.isNativePlatform(),openExternalBrowser:()=>void externalHandoff.open(),openPasswordProvider:()=>{api.set({menu:false});api.open('settings',{page:'password-provider'});},openDownloads:()=>{api.set({menu:false});void Browser.downloads({session}).catch(report);},copyLink:()=>void copyPageLink(),reload:()=>{api.set({menu:false});void command('reload');},stopLoading:()=>{api.set({menu:false});void command('stop');},loading:!!info?.loading,goBack:()=>void command('back'),goFwd:()=>void command('forward'),backOp:info?.canBack?1:0.3,fwdOp:info?.canForward?1:0.3,
       startEdit:()=>api.set({editing:true,addr:info?.url||'',menu:false}),onAddrKey:(e:KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();void navigate(secureTypedAddress((e.target as HTMLInputElement).value));} else if(e.key==='Escape')api.set({editing:false}); },
       toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('HTTPS only');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{id:'bookmark-recovery',title:'Recover saved bookmarks',host:'Bookmarks unavailable',ini:'!',name:'Recover saved bookmarks',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...Array.from(new Set<string>(s.lib==='history'?s.visits:s.marks)).map((u:string)=>{const address=new URL(u),site=address.hostname.replace(/^www\./,''),named=titleOf(u);return {id:u,title:u,name:named||site,host:address.host+(address.pathname==='/'?'':address.pathname)+address.search,ini:(named||site)[0],go:()=>void navigate(u),canRemove:true,removeAria:historyOpen?'Remove from history':'Remove bookmark',remove:historyOpen?()=>{const current=state(),visits=(current?.visits||[]).filter((visit:string)=>visit!==u);api.set({visits,titles:retainedTitles(current?.titles,visits,current?.marks)});}:()=>saveBookmark(u,false)};})],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!(s.lib==='history'?s.visits:s.marks).length,newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,readAloudAvailable:true,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),

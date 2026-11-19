@@ -62,6 +62,9 @@ var IC = {
   down: "M6 9l6 6 6-6",
   up: "M6 15l6-6 6 6",
   right: "M9 6l6 6-6 6",
+  // Page history arrows, distinct from the chevron that leaves an app.
+  arrowLeft: "M19 12H5M11 6l-6 6 6 6",
+  arrowRight: "M5 12h14M13 6l6 6-6 6",
   kbd: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8",
   stop: "M7 7h10v10H7z",
   user: "M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0",
