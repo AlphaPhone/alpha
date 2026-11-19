@@ -1,5 +1,7 @@
 import {connectionController} from '../runtime/connection-ui';
 import {createInlineModal} from '../runtime/inline-modal';
+import {Capacitor} from '@capacitor/core';
+import {testMocksEnabled} from '../build-flags';
 
 type Shell = Record<string, any>;
 
@@ -110,6 +112,22 @@ export function installChatTools(Component: {prototype: Shell}) {
         if (target) {target.classList.add('alpha-search-hit');setTimeout(() => target.classList.remove('alpha-search-hit'), 1800);}
       }));
     };
+    // New chat and History are reachable from the chat itself, not only from Settings. History opens
+    // where conversations live on this build: Settings › About › Agent activity on the phone, the
+    // agent connection panel in test builds; no other build has a history surface.
+    const connection = connectionController.getSnapshot();
+    const historyPage = Capacitor.isNativePlatform() && !testMocksEnabled;
+    const attached = () => !!(shell.fileAttachments?.length || shell.cameraAttachment || shell.transcriptAttachment || shell.mailAttachment);
+    const newChat = () => {
+      closeMenu();
+      if (attached()) {shell.toast('Send or remove the attachment before starting a new chat.');return;}
+      void connectionController.newConversation();
+    };
+    const history = () => {
+      closeMenu();
+      if (historyPage) shell.openView('settings', {page:'agent-activity'});
+      else connectionController.open();
+    };
     const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
     if(turning)this.chatToolsOpen=false;
     output.chatTools = {
@@ -125,6 +143,10 @@ export function installChatTools(Component: {prototype: Shell}) {
       inside:(event:Event)=>event.stopPropagation(),
       ref: this.chatToolsModal.ref,
       upload: () => void upload(),
+      canNewChat: !!connection.session && !connection.busy,
+      newChat,
+      hasHistory: !!connection.session && (historyPage || testMocksEnabled),
+      history,
       search: () => {closeMenu();shell.chatSearchOpen = true;shell.chatSearchQuery = '';shell.chatSearchResults = [];shell.chatSearchMore = false;shell.chatSearchBusy = false;shell.chatSearchError = '';shell.setState({chat:'full'});},
     };
     output.chatSearch = {
