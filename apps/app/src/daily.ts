@@ -48,6 +48,9 @@ export type NativeResult = {
   uri?: string;
   name?: string;
   mimeType?: string;
+  /** Bytes, when known: the size the Files listing showed for a file opened there. A hint only,
+   * since readers recheck the bytes; an unknown size is never assumed small. */
+  size?: number;
   transcript?: string;
 };
 /** `days` (Sunday=1 … Saturday=7, ascending) is sent only when surfaceInfo reports clockRepeatDaysVersion >= 1. */

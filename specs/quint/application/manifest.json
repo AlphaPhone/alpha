@@ -542,11 +542,18 @@
       "exactCopyTest",
       "changedSourceTest",
       "changedOwnerTest",
+      "editedEarlierDraftTest",
       "failedInsertNeedsNewReviewTest",
-      "revokedReadTest"
+      "revokedReadTest",
+      "duplicateShareRefusedTest",
+      "appendToEarlierCanaryTest",
+      "discardedEarlierCanaryTest",
+      "duplicateShareCanaryTest"
     ],
     "sources": [
       "apps/app/src/prototype/file-email-review.ts",
+      "apps/app/src/ui/mailbox/drafts-controller.ts",
+      "apps/app/src/prototype/inbox-cloud-adapter.ts",
       "apps/app/src/runtime/media-copy-intent.ts",
       "apps/app/src/runtime/inbox-attachment.ts",
       "apps/app/src/prototype/share-panel-adapter.ts",
@@ -554,17 +561,23 @@
     ],
     "abstractions": [
       "Finite representative identities and contents. Exact source symbols and modeling limits are documented in the family README.",
+      "Broken-share canaries are deliberately excluded from step and must violate the invariants their tests name.",
       "Model safety checks do not establish implementation refinement or device acceptance."
     ],
     "invariants": [
       "ExactDraft",
+      "EarlierDraftKept",
+      "NoDuplicateShare",
       "FailedReviewInert",
       "CancelledHoldsNoBytes"
     ],
     "witnesses": [
       "FailedInsertWitness",
       "StaleReadWitness",
-      "InsertedThenSourceChangedWitness"
+      "InsertedThenSourceChangedWitness",
+      "EditedEarlierKeptWitness",
+      "DuplicateRefusedWitness",
+      "KeptEarlierBytesWitness"
     ]
   },
   {
