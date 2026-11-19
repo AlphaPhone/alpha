@@ -145,15 +145,20 @@ test('a reviewed Files attachment starts its own draft, keeps the unfinished one
   assert.deepEqual(c.attached(), ['notes.pdf']);
   assert.equal(c.drafts.render().composing, true, 'the new draft opens in the composer');
   assert.deepEqual(c.shelved().map(draft => [draft.id, draft.body, draft.attachments ?? []]), [[earlier, 'Earlier text', []]]);
-  // The same bytes again start another draft; no draft holds them twice.
-  assert.equal(await add(pdf('notes.pdf')), null);
-  assert.deepEqual(c.attached(), ['notes.pdf']);
+  // The duplicate refusal: the same bytes again add nothing, and the email holding them stays where it is.
+  const holding = c.drafts.email(), before = c.shelved();
+  assert.equal(await add(pdf('notes.pdf')), 'This file is already attached to your unfinished email in Inbox. Nothing was added.');
+  assert.deepEqual(c.drafts.email(), holding);
+  assert.deepEqual(c.shelved(), before);
+  // Other bytes start another draft; the one holding notes.pdf is set aside as it was.
+  assert.equal(await add({...pdf('other.pdf'), dataBase64: b64(3, 1)}), null);
+  assert.deepEqual(c.attached(), ['other.pdf']);
   assert.deepEqual(c.shelved().map(draft => (draft.attachments ?? []).map(file => file.name)), [[], ['notes.pdf']]);
   assert.equal(c.shelved()[0].body, 'Earlier text');
   // The account's size policy is the one reason, returned to the Email action: no toast, nothing changes.
   const shown = c.drafts.email(), shelf = c.shelved();
   assert.equal(await add({...pdf('large.pdf', 3 * MiB), dataBase64: b64(3 * MiB, 2)}), 'Attachments exceed 2 MiB in total. Remove one or choose a smaller file.');
-  assert.equal(await c.drafts.attachReviewed(pdf('other.pdf'), 'stale'), 'The email account changed. Nothing was added.');
+  assert.equal(await c.drafts.attachReviewed(pdf('third.pdf'), 'stale'), 'The email account changed. Nothing was added.');
   assert.deepEqual(c.drafts.email(), shown);
   assert.deepEqual(c.shelved(), shelf);
   assert.deepEqual(c.toasts, []);

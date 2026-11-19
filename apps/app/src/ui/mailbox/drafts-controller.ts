@@ -1849,7 +1849,8 @@ export function createMailDraftsController(
     /**
      * An explicit Files or Photos Email action: these exact bytes start a new local email under
      * this account (`newSharedEmail`), never a provider operation. The email that was open or
-     * unfinished is set aside to Drafts unchanged first; no existing draft takes the file.
+     * unfinished is set aside to Drafts unchanged first; no existing draft takes the file. When
+     * that email already holds these bytes, nothing is added (the duplicate refusal).
      * Resolves to null once the new composer holds the file, or to the reason nothing was
      * added. It shows no notice itself, so the caller shows that one reason.
      */
@@ -1874,6 +1875,14 @@ export function createMailDraftsController(
       } catch (error) {
         return attachmentRefusalText(error);
       }
+      // The duplicate refusal: the open or unfinished email already holds these exact bytes, so a
+      // second email with the same file is not started and that email is not set aside.
+      if (
+        draft?.attachments?.some(
+          (item) => item.dataBase64 === file.dataBase64,
+        )
+      )
+        return "This file is already attached to your unfinished email in Inbox. Nothing was added.";
       let refusal = "";
       const started = await newSharedEmail(
         {
