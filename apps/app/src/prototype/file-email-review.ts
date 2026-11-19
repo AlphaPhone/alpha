@@ -10,7 +10,9 @@ export function reviewFileEmail(options: {
  read: () => Promise<SelectedFile>; current: () => boolean; target: () => EmailTarget;
  insert: (file: MailAttachment, token: string) => boolean; inserted: () => void;
 }): () => void {
- const previous=document.activeElement as HTMLElement|null,dialog=document.createElement('dialog');
+ // A row in an open popup unmounts with it; focus returns to the control that opened the popup.
+ const active=document.activeElement as HTMLElement|null;
+ const previous=active?.closest('[data-alpha-popup]')?document.querySelector<HTMLElement>('[aria-haspopup][aria-expanded="true"]')??active:active,dialog=document.createElement('dialog');
  dialog.className='note-source-dialog';dialog.setAttribute('aria-label','Attach to email');
  const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));}
  const content=document.createElement('div');content.className='note-source-content';
@@ -22,7 +24,7 @@ export function reviewFileEmail(options: {
  content.append(title,destination,details,label,policy,status);footer.append(cancel,confirm);dialog.append(content,footer);
  let ended=false,busy=false,file:SelectedFile|undefined,target:EmailTarget|undefined;
  const release=holdPhoneInert(document.querySelector<HTMLElement>('.os'));
- const close=()=>{if(ended)return;ended=true;file=undefined;target=undefined;document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',close);window.removeEventListener('launcher-home',close);window.removeEventListener('blur',close);window.removeEventListener('alpha-back',back,true);dialog.remove();release();if(previous?.isConnected)previous.focus();};
+ const close=()=>{if(ended)return;ended=true;file=undefined;target=undefined;document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',close);window.removeEventListener('launcher-home',close);window.removeEventListener('blur',close);window.removeEventListener('alpha-back',back,true);dialog.remove();release();const focusTarget=[previous,active].find(element=>element?.isConnected&&!element.closest('[inert]'));focusTarget?.focus();};
  const visibility=()=>{if(document.hidden)close();},back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();close();};
  const current=()=>!ended&&!document.hidden&&options.current();
  cancel.onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=close;

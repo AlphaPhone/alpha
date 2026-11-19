@@ -139,6 +139,7 @@ test.describe('200% text keeps the way out on screen', () => {
 
   test('the Undo toast wraps a long file name and keeps Undo usable', async ({ page }) => {
     await page.goto('/?mode=mock&start=files:preview');
+    await page.getByRole('button', { name: 'File actions', exact: true }).click();
     await page.getByRole('button', { name: 'Delete file', exact: true }).click();
     const undo = page.getByRole('button', { name: 'Undo', exact: true });
     await expect(undo).toBeVisible();
@@ -169,8 +170,8 @@ test.describe('menus and sheets over a scrim own focus', () => {
     ['photos:viewer', ['Share'], 'Share', 'Close share', 'Photo actions'],
     ['notes:editor', ['More', 'Share note'], 'Share', 'Cancel', 'Share note'],
     ['files-storage', ['Files options'], 'Sort and more', 'Close menu', 'Files options'],
-    ['files:preview', ['Move file'], 'Move to', 'Close move', 'Move file'],
-    ['files:preview', ['Share file'], 'Share file', 'Close share', 'Share file'],
+    ['files:preview', ['File actions', 'Add to folder'], 'Move to', 'Close move', 'File actions'],
+    ['files:preview', ['File actions', 'Share file'], 'Share file', 'Close share', 'File actions'],
     ['workflows:new', ['Add Read step'], 'Step editor', 'Close', null],
     // Settings > Google (live: the panel is not mounted in mock mode). The Google accounts panel
     // has no scrim button; its Close button is the pointer dismissal, and Escape returns focus to
@@ -272,6 +273,7 @@ test.describe('toast status messages', () => {
     // Present and empty beforehand: a live region inserted together with its text is not announced reliably.
     await expect(region).toBeEmpty();
     expect(await region.evaluate(el => !!el.closest('[inert],[aria-hidden="true"]'))).toBe(false);
+    await page.getByRole('button', { name: 'File actions', exact: true }).click();
     await page.getByRole('button', { name: 'Delete file', exact: true }).click();
     await expect(region).toContainText('Northpoint_TermSheet_v3.pdf');
     await expect(region.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();

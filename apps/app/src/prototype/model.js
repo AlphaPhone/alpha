@@ -3997,7 +3997,7 @@ registerView("files", {
         close: function () { var d = null; FILES_FOLDERS.forEach(function (x) { if (x.id === st.folder) d = x; }); api.set({ folder: d && d.parent ? d.parent : null, sel: null }); },
         viewIcon: st.grid ? IC.filesRows : IC.grid, viewLabel: st.grid ? "Show as list" : "Show as grid",
         toggleView: function () { api.set({ grid: !st.grid }); },
-        hasMenu: true, hasCrumbs: false, openMenu: function () { api.set({ menu: true }); },
+        hasMenu: true, hasCrumbs: false,
         menuRows: [["list", IC.filesRows, "List", !st.grid, { grid: false }], ["grid", IC.grid, "Grid", !!st.grid, { grid: true }], ["recent", IC.clock, "Newest first", st.sort !== "name", { sort: "recent" }], ["name", IC.filesSort, "Name", st.sort === "name", { sort: "name" }]].map(function (m) {
           return { id: m[0], label: m[2], d: m[1], on: m[3], go: function () { api.set(Object.assign({ menu: false }, m[4])); } };
         }),
@@ -4112,7 +4112,8 @@ registerView("files", {
       closeSheet: function () { api.set({ sheet: null }); },
       shareMsg: function () { filesShare(api, targetIds, "msg"); },
       shareMail: function () { filesShare(api, targetIds, "mail"); },
-      menuOpen: !!st.menu && !!fd, closeMenu: function () { api.set({ menu: false }); },
+      menuOpen: !!st.menu && (st.menu === "file" ? !!pv : !!fd), fileMenu: st.menu === "file" && !!pv, folderMenu: st.menu !== "file", menuLabel: st.menu === "file" ? "File actions" : "Sort and more",
+      openMenu: function () { api.set({ menu: "file" }); }, closeMenu: function () { api.set({ menu: false }); },
       askQ: "Ask " + api.name + ": \u201c" + String(st.q || "").trim() + "\u201d",
       askSearch: function () { var qq = String(api.get("files").q || "").trim(); api.set({ q: null }); api.send("Find the file " + qq); }
     };
