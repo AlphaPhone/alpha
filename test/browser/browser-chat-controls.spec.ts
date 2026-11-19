@@ -3,7 +3,7 @@ import {test,expect} from '@playwright/test';
 import {returnToApps} from './app-navigation';
 
 // Browser controls proposed from chat: search, new tab, switch (one match and several), close,
-// find in page, back and reload, each checked by what Browser then shows.
+// find in page, back and reload, and a switch to a tab that is not open, each checked by what Browser then shows.
 // Real shell, connection controller, device-action coordinator, action journal binding and web
 // Browser. The agent's HTTP answers and the websites are synthetic. The web Browser cannot search
 // a page, so find in page is checked as not offered here; native find is not exercised.
@@ -26,6 +26,7 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
    'Go back':{operation:{type:'browser_history',action:'back'},bound:true},
    'Reload this page':{operation:{type:'browser_history',action:'reload'},bound:true},
    'Find harbour on this page':{operation:{type:'browser_find',text:'harbour'},bound:true},
+   'Switch to the example.com tab':{operation:{type:'browser_tab_switch',target:'example.com'},bound:true},
   };
   const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
   w.Capacitor={PluginHeaders:[{name:'AlphaConnection',methods:methods(['request','cancel','secureRead','secureWrite','secureCompareExchange','secureRemove'])},{name:'AlphaActionJournal',methods:methods(['reserve','markApplying','finish','get','list'])}],nativePromise:async(plugin:string,method:string,input:any)=>{
@@ -156,9 +157,17 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await expect(page.getByText('This action isn\'t available on this phone.',{exact:false}).first()).toBeVisible();
  await expect(page.getByRole('search',{name:'Find in page'})).toHaveCount(0);
 
+ // Switch to a tab that is not open (v612): the phone says so in the chat, nothing changes, and the
+ // agent learns only that it failed, not the tab word.
+ await ask('Switch to the example.com tab');
+ await expect.poll(async()=>(await fixture()).receipts.at(-1)?.id).toBe('proposal-9');
+ await expect(page.getByText('Not started: No open tab matches “example.com”.',{exact:true})).toBeVisible();
+ await expect(tabs).toHaveText('3');await showing('shop.example/hats');
  // The agent received outcomes only: no result, tab title, address or search words.
  const done=await fixture();
- expect(done.receipts.map((receipt:any)=>[receipt.id,receipt.outcome])).toEqual([['proposal-1','applied'],['proposal-2','applied'],['proposal-3','applied'],['proposal-4','applied'],['proposal-5','applied'],['proposal-6','applied'],['proposal-7','applied']]);
- for(const receipt of done.receipts)expect(Object.keys(receipt).sort()).toEqual(['id','operationId','outcome']);
+ expect(done.receipts.map((receipt:any)=>[receipt.id,receipt.outcome])).toEqual([['proposal-1','applied'],['proposal-2','applied'],['proposal-3','applied'],['proposal-4','applied'],['proposal-5','applied'],['proposal-6','applied'],['proposal-7','applied'],['proposal-9','failed']]);
+ // The missing tab is reported as not started (DEVICE_NOT_DISPATCHED), so the agent never claims the switch.
+ for(const receipt of done.receipts)expect(Object.keys(receipt).sort()).toEqual(receipt.outcome==='failed'?['code','id','operationId','outcome']:['id','operationId','outcome']);
+ expect(done.receipts.at(-1).code).toBe('DEVICE_NOT_DISPATCHED');
  expect(JSON.stringify(done.receipts)).not.toMatch(/example|google|harbour|shop|news/);
 });
