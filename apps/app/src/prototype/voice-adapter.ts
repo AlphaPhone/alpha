@@ -1600,7 +1600,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   notes.onLeave = (current: Bag) => { cancelSavedTranscription();if(!ownedNavigation?.applying)noteRealtimeCancellation(conversationVoice,'notes-left-unowned');stopSpeaking();noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;if(!ownedNavigation?.applying)cleanup(); leave?.(current); };
   const visibility = () => {
     // Speech preparation is foreground-only; returning prepares the same route again.
-    if (!document.hidden) { if (reprepare && stage === 'ready' && !busy) { reprepare = false; reopen(error); } return; }
+    // A notification tap that arrived while the launcher was hidden is taken once it is shown.
+    if (!document.hidden) { void recordingNotificationOpen.flush(); if (reprepare && stage === 'ready' && !busy) { reprepare = false; reopen(error); } return; }
     if(chatDestination||['recording','transcribing'].includes(stage))noteRealtimeCancellation(conversationVoice,'document-hidden');
     stopSaved();
     if (playing) { playback?.abort(); playing = false; refresh(); }
@@ -1642,7 +1643,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', pagehide);
   const unmount = Component.prototype.componentWillUnmount;
-  Component.prototype.componentWillUnmount = function () { cancelSavedTranscription();noteRealtimeCancellation(conversationVoice,'component-unmounted');window.removeEventListener('alpha:note-reading',noteReadingChanged);window.removeEventListener(voicePreferenceKeys().event,noteRouteChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;if(recordingShell===this)recordingShell=undefined;cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
+  Component.prototype.componentWillUnmount = function () { cancelSavedTranscription();noteRealtimeCancellation(conversationVoice,'component-unmounted');window.removeEventListener('alpha:note-reading',noteReadingChanged);window.removeEventListener(voicePreferenceKeys().event,noteRouteChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;if(recordingShell===this)recordingShell=undefined;window.removeEventListener('alpha:note-recording-open',requestRecordingOpen);window.removeEventListener('launcher-home',cancelRecordingOpen);cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
 }
 
 function ownBrowserVoiceActive(){return !Capacitor.isNativePlatform()&&speechRoute()==='direct';}
