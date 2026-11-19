@@ -31,3 +31,32 @@ for(const theme of ['light','dark'])test(`${theme} file rename and delete dialog
  await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await expect(page.getByRole('button',{name:'Files',exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toHaveValue('Retained unsent file question');
  expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').storageList({path:''})).entries.map((row:any)=>row.name);})).toEqual(['keep.txt']);
 });
+test.describe('wide Files preview',()=>{
+ test.use({hasTouch:true,isMobile:true});
+ test('keeps folder options beside File actions and returns Move focus to the menu opener',async({page})=>{
+  await page.setViewportSize({width:1280,height:800});
+  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
+  await page.goto('/?mode=dev');
+  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Split contents'],'split.txt',{type:'text/plain'}));});
+  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open split.txt',exact:true}).click();
+  await expect(page.locator('html')).toHaveClass(/(^|\s)alpha-split(\s|$)/);
+  // The folder beside the preview still opens its own menu.
+  const folderOptions=page.getByRole('button',{name:'Files options',exact:true});
+  await folderOptions.click();
+  const folderMenu=page.getByRole('dialog',{name:'Sort and more',exact:true});
+  await expect(folderMenu.getByRole('button',{name:'New folder',exact:true})).toBeVisible();
+  await expect(folderMenu.getByRole('button',{name:'Delete file',exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');await expect(folderMenu).toHaveCount(0);
+  // The preview's menu holds only the file's actions; a sheet opened from it returns focus to its opener.
+  const opener=page.getByRole('button',{name:'File actions',exact:true});
+  await opener.click();
+  const actions=page.getByRole('dialog',{name:'File actions',exact:true});
+  await expect(actions.getByRole('button',{name:'Delete file',exact:true})).toBeVisible();
+  await expect(actions.getByRole('button',{name:'New folder',exact:true})).toHaveCount(0);
+  await actions.getByRole('button',{name:'Add to folder',exact:true}).click();
+  const move=page.getByRole('dialog',{name:'Move to',exact:true});await expect(move).toBeVisible();
+  await move.getByRole('button',{name:'Cancel',exact:true}).click();await expect(move).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').storageList({path:''})).entries.map((row:any)=>row.name);})).toEqual(['split.txt']);
+ });
+});
