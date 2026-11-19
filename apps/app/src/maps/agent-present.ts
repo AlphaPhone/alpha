@@ -9,20 +9,20 @@ export type AgentMapsShellState = Readonly<{
   secure?: unknown;
   shade?: unknown;
   view?: unknown;
+  /** A call is ringing in: its answer screen is not replaced. */
+  incomingCall?: unknown;
 }>;
-
-/** Views an agent request never replaces: a camera capture or the dialer may be mid-use. */
-const KEPT_VIEWS: ReadonlySet<string> = new Set(['camera', 'phone']);
 
 /**
  * Whether the launcher may bring Maps forward for the owner's own chat request. The owner
- * asks from the chat overlay over whichever app is open, so an app such as Browser is
- * replaced by Maps exactly as the owner's own open would. A locked, hidden, shaded or
- * sensitive screen, the assistant window, the connection sheet and a camera or dialer view
- * keep the screen, and the phone reports that Maps could not be shown.
+ * asks from the chat overlay over whichever app is open, so any app, Phone and Camera
+ * included, is replaced by Maps exactly as the owner's own tap on Maps would replace it: a
+ * call in progress keeps its ongoing-call bar and a recording keeps its chip. A locked,
+ * hidden, shaded or sensitive screen, the assistant window, the connection sheet and a
+ * ringing call keep the screen, and the phone says why Maps was not shown.
  */
 export function agentMapsShowable(state: AgentMapsShellState | null | undefined): boolean {
   if (!state || !state.live || state.hidden || state.suspended || state.assistantSurface || state.connectionOpen) return false;
-  if (state.screen !== 'home' || state.secure || state.shade) return false;
-  return !state.view || typeof state.view === 'string' && !KEPT_VIEWS.has(state.view);
+  if (state.screen !== 'home' || state.secure || state.shade || state.incomingCall) return false;
+  return !state.view || typeof state.view === 'string';
 }
