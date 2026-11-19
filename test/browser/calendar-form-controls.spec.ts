@@ -70,7 +70,7 @@ test('reminder drafts show supported fields and keep the event draft fields when
 });
 
 test('a month that fits five rows draws 35 cells and a six-row month 42', async ({ page }) => {
-  await page.getByRole('button', { name: 'Month view', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose date', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Choose calendar date' });
   const cells = dialog.getByRole('button', { name: /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/ });
   // June 2027 starts on a Tuesday and has 30 days: five Monday-first rows.

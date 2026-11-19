@@ -66,7 +66,7 @@ async function openCalendarItem(page:Page,name:string){
   const date=new Date(value);
   return `${date.toLocaleDateString('en-US',{month:'long'})} ${date.getDate()}`;
  },timestamp);
- await button(page,'Month view').click();
+ await button(page,'Choose date').click();
  await page.getByRole('dialog',{name:'Choose calendar date'}).getByRole('button',{name:new RegExp(` ${dateLabel}$`)}).click();
  await item.click();
 }
