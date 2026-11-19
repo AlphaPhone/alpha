@@ -4235,7 +4235,11 @@
       "secondBrowserOpenTest",
       "ungroundedBrowserTest",
       "settingsNavigationTest",
-      "expiredTest"
+      "expiredTest",
+      "recoveredApprovalTest",
+      "recoveredAfterAgentChangeTest",
+      "expiredNotRecoveredTest",
+      "recoveredAfterLiveEffectTest"
     ],
     "sources": [
       "apps/app/src/runtime/device-actions.ts",
@@ -4255,7 +4259,8 @@
       "Review-first is sampled immediately before each direct approval (`allowed`); `unreadable` is a failed preference read and admits nothing. A change during an in-flight approval is not modeled. AtMostFourDirectPerMessage bounds one `performRequested` pass; the Camera continuation and the voice path are separate passes restricted by the same admission.",
       "Context equality, reservation identity, server decision/claim, durable applying/terminal and no-replay are distinct observation boundaries. Dispatch-time expiry, context, sensitivity, preference and request binding are frozen in `at`.",
       "A failure outside the executor's result (`abandon`) answers `failed` unless this attempt dispatched; Alpha's coordinator returns failed/not started from its outer catch when nothing was dispatched (app review AGENT-06). `duplicate` is the not-repeated answer for a proposal whose journal already holds an applying or finished attempt and stays `unknown`. UnknownOnlyAfterDispatch is part of `safety`; FailedWithoutDispatch is a required witness. A product executor that throws DeviceActionNotStarted from a pre-effect guard closes as failed/not started; any other throw after entry is recorded as `unknown`. That executor behaviour is outside this model's ports.",
-      "Workflow-run review (`reviewWorkflow`), the navigation-only review-destination card, domain-specific result validation, Files identities, capability negotiation, native journal durability, recovery and view commands (Browser back/forward/reload, which are not proposals) are separate contracts."
+      "Two approval routes (app review QUINT-02): `live` is the card admitted by the current listing and approved through the live client; `recovered` is a card rebuilt by a fresh pending listing after the conversation reopened and approved through `approvePendingAction`, which re-lists under the current screen. A recovered card is bound to the agent session that listed it (`cardSession`); `changeAgent` models one change of the selected agent while nothing is in flight. Both routes enter the same coordinator `approve` over one journal, so NoSecondEffectPerProposal covers both. The session binding and re-listing in agent-adapter and connection-ui are read from source; the replay drives the coordinator's listing and approval with one agent session and declares the route.",
+      "Workflow-run review (`reviewWorkflow`), the navigation-only review-destination card, domain-specific result validation, Files identities, capability negotiation, native journal durability and its recovery, and view commands (Browser back/forward/reload, which are not proposals) are separate contracts."
     ],
     "invariants": [
       "DirectOnlyAllowlisted",
@@ -4275,6 +4280,8 @@
       "ReceiptAfterTerminalJournal",
       "UnknownJournalOnlyAfterDispatch",
       "UnknownOnlyAfterDispatch",
+      "RecoveredApprovalNeedsSameSession",
+      "RecoveredApprovalNeedsUnexpired",
       "FiniteOutcome"
     ],
     "witnesses": [
