@@ -1044,7 +1044,11 @@ dialog.alarm-page{position:fixed;inset:0 auto auto 0;margin:0;width:100vw;height
 [data-alpha-recorder-actions]{padding-bottom:calc(var(--alpha-dock-reserve,108px) + 16px)!important}
 [data-alpha-view-actions]{bottom:var(--alpha-dock-reserve,108px)!important}
 [data-alpha-photo-actions]>div{padding-bottom:12px!important}
-[data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet),[data-alpha-album-manager]{bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet){bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-album-manager]{position:absolute;inset:auto 0 0;z-index:21;max-height:calc(100% - 32px);padding:20px 24px calc(var(--alpha-dock-reserve,108px) + 12px);overflow-y:auto;box-sizing:border-box;background:var(--s1);color:var(--fg);border-radius:28px 28px 0 0}
+.photo-album-choices{display:grid;gap:8px;margin-top:12px}
+.photo-album-choices button{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 16px;border-radius:14px;background:var(--s2);color:var(--fg);text-align:left}
+.photo-album-membership{padding:6px 16px;color:var(--mut);font-size:14px}
 /* The overflow menu is anchored below its header, so a dock bottom must cap,
  * not stretch, its intrinsic height. Keep short screens scrollable. */
 [data-alpha-popup] .notes-menu[role="dialog"]{bottom:auto!important;height:auto;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
@@ -1098,9 +1102,9 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
 
 /* The viewer has one secondary-action menu; primary controls stay above the dock. */
 .photo-viewer-menu > div { min-width:208px; max-width:calc(100vw - 40px); }
-.photo-viewer-menu > div button { display:flex; align-items:center; gap:12px; white-space:nowrap; }
-.photo-viewer-menu .alpha-compute-mark { width:20px; height:20px; flex-shrink:0; }
-.photo-viewer-menu .i { width:20px; height:20px; flex-shrink:0; }
+.photo-actions-menu > div button { display:flex; align-items:center; gap:12px; white-space:nowrap; }
+.photo-actions-menu .alpha-compute-mark,.photo-action-icon { width:20px; height:20px; flex-shrink:0; }
+.photo-action-icon {display:block;background:currentColor;mask:var(--photo-icon) center/contain no-repeat}
 [data-alpha-popup] .photo-info-sheet[role="dialog"] { left:8px!important; right:8px!important; bottom:calc(var(--alpha-dock-reserve,108px) + 8px)!important; border-radius:28px!important; padding:12px 24px 24px!important; }
 .alpha-share-panel::backdrop { background:rgba(0,0,0,.35); }
 .alpha-share-panel h2 { margin:0; font-size:1.5em; line-height:1.2; }
@@ -1128,8 +1132,9 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
  * the dock (40) and the conversation (50). The inset is screen pixels; the canvas is scaled. */
 .alpha-phone::after { content:""; position:absolute; left:0; right:0; bottom:0; height:calc(var(--native-bottom-inset,0px) / var(--phone-scale,1)); background:var(--bg); z-index:39; pointer-events:none; }
 html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
-/* Camera is black edge to edge in both themes: its navigation backing matches, not the theme's white. */
-.alpha-phone:has([data-alpha-camera-root])::after { background:var(--alpha-black); }
+/* Match the surface that reaches the bottom of the canvas. */
+.alpha-phone:has([data-alpha-camera-root],[data-alpha-subview="photos-viewer"])::after { background:var(--alpha-black); }
+.alpha-phone:has([data-alpha-album-manager])::after { background:var(--s1); }
 /* Loading placeholder for audio and transcripts in Phone: a shape, not a sentence. */
 :is([data-alpha-contact-editor],[data-alpha-phone],[data-alpha-messages],[data-alpha-contacts-bar]) :is(input,textarea) { border:0; outline:0; font-family:inherit; color:inherit; }
 .alpha-phone-tabs { display:flex; justify-content:center; padding:0 16px 8px; flex-shrink:0; }

@@ -582,17 +582,18 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     finally { if (token === albumEpoch) albumBusy = false; }
   }
   async function favorite(row: SavedPhoto, owner: Bag) {
-    if (mutating || sharing || disposed || !row.mutationRevision) return;
+    if (mutating || sharing || disposed || !row.mutationRevision) return false;
     mutating = true; owner.set({nativePhotoMutation:Date.now()});
     try {
       const result = normalize(await library.setFavorite({id:nativeId(row.id),revision:row.mutationRevision,favorite:!row.favorite}));
-      if (disposed) return;
+      if (disposed) return false;
       const updated = {...row,...result}; captures = patchRows(captures,[updated],()=>true); albumRows = patchRows(albumRows,[updated],()=>true);
       const stillSelected = owner.isActive() && owner.get('photos').open === row.id;
       if (stillSelected) preview = updated;
       owner.set({...(stillSelected ? {nativePhotoSelection:captureSelection(updated)} : {}),nativeCaptureRevision:Date.now()});
       albumKey='';++albumEpoch;void loadCounts(owner);
-    } catch (error) { if (!disposed) owner.toast(photosErrorText(error,'Couldn’t save')); }
+      return true;
+    } catch (error) { if (!disposed) owner.toast(photosErrorText(error,'Couldn’t save'));return false; }
     finally { mutating = false; if(!disposed)owner.set({nativePhotoMutation:Date.now()}); }
   }
   function cancelPermanent(owner: Bag) {
@@ -1597,10 +1598,20 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // A queued callback belongs to the dialog and stage that rendered it.
       const current=()=>manager===shown&&shown.creating===creating&&shown.confirmDelete===confirmDelete
         &&!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').sheet==='owned-album';
+      const chosen=items??(media?[media]:[]),unfavorited=chosen.filter(row=>!row.favorite);
+      const close=()=>{if(current()){manager=undefined;currentApi.set({sheet:null});}};
       data.am={
         modalRef:albumModal.ref,title:confirmDelete?'Delete album?':creating?'New album':album?'Manage album':'Add to album',name:shown.name,
         onName:(event:Event)=>{if(current()&&naming){shown.name=(event.target as HTMLInputElement).value;currentApi.set({nativeAlbumDraft:Date.now()});}},
         managing:!!album,naming,info:false,description:'',choose:()=>{},choosing,confirming:!!confirmDelete,error:st.nativeAlbumsError||'',busy:mutating,
+        canFavorite:!!unfavorited.length,inFavorites:!!chosen.length&&!unfavorited.length,
+        inCamera:!!chosen.length&&chosen.every(row=>browserMode||albumOf(row,'camera')),
+        inVideos:!!chosen.length&&chosen.every(row=>albumOf(row,'videos')),
+        addFavorite:async()=>{
+          if(!current()||!choosing||mutating||sharing||!unfavorited.length)return;
+          if(items){close();await changeSelection(currentApi,'favorite',unfavorited);}
+          else if(media&&await favorite(media,currentApi))close();
+        },
         items:customAlbums.map(target=>{
           const member=!items&&target.memberIds.includes(nativeId(media?.id||''));
           return {id:'custom:'+target.id,name:target.name,label:(member?'Remove from ':'Add to ')+target.name,
@@ -1610,7 +1621,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         save:()=>{if(current()&&naming)void mutateAlbum(currentApi,creating?'create':'rename');},
         askDelete:()=>{if(current()&&naming&&album&&!mutating){shown.confirmDelete=true;currentApi.set({nativeAlbumDraft:Date.now()});}},
         delete:()=>{if(current()&&confirmDelete)void mutateAlbum(currentApi,'delete');},
-        close:()=>{if(current()){manager=undefined;currentApi.set({sheet:null});}},
+        close,
       };
     }
     data.selStart=()=>startSelection(currentApi);
@@ -1689,14 +1700,13 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const go = (step: number) => { const target = sequence[index + step]; if (index < 0 || !target) return; void openSaved(target.id, currentApi); };
       const viewport=photoViewport.bind({key:`${selected.id}:${selected.revision}`,width:selected.width,height:selected.height,zoomable:selected.kind!=='video',
         current:()=>!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&!edit&&sameCapture(selected),
-        changed:()=>currentApi.set({nativeViewerRevision:++viewerRevision,chrome:true}),
+        changed:()=>currentApi.set({nativeViewerRevision:++viewerRevision}),
         toggle:()=>currentApi.set({chrome:currentApi.get('photos').chrome===false}),step:go});
       const when = viewerTitle(shotAt(selected)), chrome = st.chrome !== false;
       data.viewing = true; data.viewEmpty = false; data.editing = !!edit&&edit.source===selected.id;
       data.v = { bg: imageCss(selected).replace('cover', 'contain'), tf: selected.kind==='video'?'':viewport.transform, flt: '', slide: '', day: when.day, sub: when.time, chromeOp: chrome ? 1 : 0, chromePE: chrome ? 'auto' : 'none', favIcon: selected.favorite ? 'fill:currentColor' : 'fill:none', favLabel: selected.favorite ? 'Remove from favorites' : 'Favorite', vid: selected.kind === 'video', playing: !!video && !video.paused, playBtn: selected.kind === 'video' && (!video || video.paused), prog: `width:${video?.duration ? Math.min(100, video.currentTime / video.duration * 100) : 0}%`, play: () => { void playVideo(selected, currentApi); }, pause: () => { video?.pause(); currentApi.set({ nativePlaybackRevision: Date.now() }); }, notSecure: true,
-        tap:()=>viewport.tap(),down:(event:PointerEvent)=>viewport.down(event),move:(event:PointerEvent)=>viewport.move(event),up:(event:PointerEvent)=>viewport.up(event),cancel:()=>viewport.cancel(),
+        tap:(event:MouseEvent)=>viewport.tap(event),down:(event:PointerEvent)=>viewport.down(event),move:(event:PointerEvent)=>viewport.move(event),up:(event:PointerEvent)=>viewport.up(event),cancel:()=>viewport.cancel(),
         viewerRef:(element:HTMLElement|null)=>{if(element)element.ondblclick=selected.kind==='video'?null:event=>viewport.double(event);},key:(event:KeyboardEvent)=>viewport.key(event),frame:(element:HTMLElement|null)=>viewport.ref(element),
-        canZoom:selected.kind!=='video',zoomIn:()=>viewport.zoomIn(),zoomOut:()=>viewport.zoomOut(),fit:()=>viewport.fit(),zoomMax:viewport.scale>=4,zoomMin:viewport.scale<=1,zoomLabel:`${Math.round(viewport.scale*100)}%`,
         hasPrev: index > 0, hasNext: index >= 0 && index < sequence.length - 1, prev: () => go(-1), next: () => go(1),
         share: async () => {
         if(sharing || mutating)return;
