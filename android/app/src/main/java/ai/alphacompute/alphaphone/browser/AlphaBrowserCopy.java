@@ -131,4 +131,9 @@ public final class AlphaBrowserCopy {
 
   public static final String SHARE_PAGE = "Share page";
   public static final String OPEN_ELSEWHERE = "Open in another browser";
+
+  /** A tapped mail, phone, text, map or app link in a private tab; the renderer's menu handoff asks the same. */
+  public static final String LEAVE_PRIVATE_TITLE = "Leave private browsing?";
+  public static final String LEAVE_PRIVATE_LINK = "This link opens another app. That app isn’t part of your private tab.";
+  public static final String OPEN_APP = "Open app";
 }
