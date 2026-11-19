@@ -1009,11 +1009,17 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .schedule-controls { display:flex; align-items:center; gap:8px; }
 .schedule-controls > button,.schedule-controls summary { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border-radius:22px; cursor:pointer; }
 .schedule-controls > button { padding:0 16px; background:var(--fg); color:var(--bg); }
+.schedule-controls > button[aria-label="Run now"] { width:44px; flex:none; padding:0; }
+.schedule-controls > button[aria-label="Run now"] > span { display:none; }
+.schedule-controls > .workflow-primary-run { background:var(--acc); color:var(--alpha-white); }
 .schedule-controls summary { width:44px; background:var(--s2); list-style:none; }
 .schedule-controls summary::-webkit-details-marker { display:none; }
 .schedule-controls details { position:relative; }
 .schedule-controls details > div { position:absolute; z-index:4; left:0; min-width:10em; padding:4px; background:var(--bg); box-shadow:0 4px 20px var(--shc); border:1px solid var(--line); border-radius:16px; }
-.schedule-controls details button { display:block; text-align:start; width:100%; min-height:44px; padding:4px 12px; }
+.schedule-controls details button { display:flex; align-items:center; gap:10px; text-align:start; width:100%; min-height:44px; padding:8px 12px; }
+.schedule-controls details button .i { flex-shrink:0; }
+.schedule-controls details button span { min-width:0; overflow-wrap:anywhere; }
+.workflow-detail-actions details > div { left:auto; right:0; }
 .schedule-instructions { display:grid; gap:6px; }
 .schedule-instructions textarea { min-height:6em; padding:12px; border-radius:12px; font:inherit; background:var(--s2);color:var(--fg); }
 

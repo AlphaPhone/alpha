@@ -6392,6 +6392,7 @@ class Component extends DCLogic {
       viewBg: imm.dark ? "var(--alpha-black)" : "var(--bg)", viewFg: imm.dark ? "var(--alpha-white)" : "var(--fg)", sbColor: sbColor, homeIndicatorColor: out.photos && out.photos.albumManager ? "var(--fg)" : sbColor,
       systemShell: P.systemShell !== false,
       showAppBack: P.systemShell === false && isOn && isView && !S.shade,
+      closeWorkflowActions: function (event) { event.currentTarget.closest("details").open = false; },
       // A fresh Home or Talk press is intentional even immediately after opening chat.
       chatControlPointer: function (event) { if (event.isPrimary !== false && event.button === 0) self.swallow = 0; },
       backToApps: function (event) { var fromChat = event && event.currentTarget && event.currentTarget.hasAttribute("data-alpha-chat-home"); if (fromChat && event.detail > 0 && self.swallowed()) return; self.goHome(); },

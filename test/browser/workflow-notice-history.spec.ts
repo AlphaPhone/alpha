@@ -8,7 +8,16 @@ test('compaction frees capacity and preserves exact replay and conflicts after r
 });
 test('history controls export exact text and compact only after confirmation',async({page})=>{
  await page.evaluate(async()=>{const m=await import('/src/browser/workflow-notices.ts');const row=await m.publishWorkflowNotice('ui','Private <text>',new AbortController().signal);await m.actOnWorkflowNotice(row,false);});
- await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('Notice history flow',{exact:true}).click();await page.getByRole('button',{name:'Workflow history',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Workflow history',exact:true});
+ await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('Notice history flow',{exact:true}).click();
+ const run=page.getByRole('button',{name:'Run now',exact:true});
+ await expect(run).toBeVisible();
+ await expect(run.locator('span')).toBeHidden();
+ await expect(page.getByRole('button',{name:'Change',exact:true})).toHaveCount(0);
+ await page.getByLabel('Workflow actions',{exact:true}).click();
+ await expect(page.getByRole('button',{name:'Change',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Workflow history',exact:true})).toHaveCount(0);
+ await page.evaluate(async()=>{const {openWorkflowHistory}=await import('/src/browser/workflow-history.ts');openWorkflowHistory(()=>({flows:[],localRuns:{}}),()=>{},()=>false);});
+ const dialog=page.getByRole('dialog',{name:'Workflow history',exact:true});
  await expect(dialog.getByRole('link',{name:'Download notification history',exact:true})).toHaveAttribute('href',/^blob:/);
  const exported=await dialog.getByRole('link',{name:'Download notification history',exact:true}).evaluate(async(a:HTMLAnchorElement)=>JSON.parse(await (await fetch(a.href)).text()));expect(exported.rows[0].text).toBe('Private <text>');
  await dialog.getByRole('button',{name:'Free notification space',exact:true}).click();expect(await page.evaluate(async()=>JSON.parse((await (await import('/src/browser/workflow-notices.ts')).workflowNoticesDocument.readRaw())!).rows.length)).toBe(1);
