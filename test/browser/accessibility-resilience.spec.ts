@@ -595,7 +595,10 @@ test.describe('screen titles with a large system font', () => {
         const header = el.closest('[data-alpha-app-header]')!, box = el.getBoundingClientRect(), frame = header.getBoundingClientRect();
         const range = document.createRange(); range.selectNodeContents(el);
         const ink = Array.from(range.getClientRects()).filter(rect => rect.width > 1);
-        const buttons = Array.from(header.querySelectorAll('button')).filter(button => button.getClientRects().length).map(button => button.getBoundingClientRect());
+        // Closed details can still return layout rectangles for their hidden menu rows.
+        const buttons = Array.from(header.querySelectorAll('button, summary'))
+          .filter(control => control.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true }))
+          .map(control => control.getBoundingClientRect());
         return {
           cut: el.scrollWidth - el.clientWidth, style: getComputedStyle(el).textOverflow, lines: new Set(ink.map(rect => Math.round(rect.top))).size,
           inside: ink.every(rect => rect.left >= frame.left - 1 && rect.right <= frame.right + 1 && rect.top >= frame.top - 1 && rect.bottom <= frame.bottom + 1 && rect.left >= box.left - 1 && rect.right <= box.right + 1),
