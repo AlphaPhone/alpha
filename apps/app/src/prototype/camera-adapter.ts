@@ -15,7 +15,7 @@ import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,medi
 import {createInlineModal} from '../runtime/inline-modal';
 import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
-import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,type HostOperation} from './photo-library-adapter';
+import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,resolveRequestedRows,type HostOperation} from './photo-library-adapter';
 import type {PhotosViewResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
 import {virtualGrid,newestFirst,mergeWindow,readWindow,keepThumbnails,changeBatches,runBatches,thumbnailPlan,groupSections,patchRows,insertRows,patchSelection,favoriteTarget,batches,daysLeft,pinchColumns,dragRange,filterMatches,filterLabel,viewerTitle,formatBytes,shotAt,albumOf,GRID_COLUMNS,type PhotosFilter} from '../ui/mobile-shell/photos-view';
 import {LIBRARY_LIMITS,type LibraryAgentOperation,type LibraryAgentResult} from '../runtime/photo-library';
@@ -1530,24 +1530,27 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         await openSaved(row.id,owner);
         return {kind:'photos_open',opened:owner.get('photos').open===row.id};
       }
-      const wanted=new Set(operation.ids),rows=captures.filter(row=>wanted.has(nativeId(row.id)));
+      // Items older than the loaded window are read from the library before they count as missing.
+      const {rows,missing}=await resolveRequestedRows(captures,operation.ids,row=>nativeId(row.id),async id=>{const row=normalize(await library.read({id}));return row.trashed?undefined:row;},signal);
+      if(disposed||!owner.isActive())throw new LibraryAgentRefusal('Open Photos, then ask again.');
+      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy. Try again.');
       if(operation.type==='photo_library_select'){
         if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos.');
         selection=rows;selectionTab='lib';photosFilter=undefined;
         owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
-        return {kind:'photo_library_select',selected:rows.length,missing:operation.ids.length-rows.length};
+        return {kind:'photo_library_select',selected:rows.length,missing};
       }
       if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos.');
       if(albumReview||shareReview)throw new LibraryAgentRefusal('Finish the open review first.');
       if(operation.type==='photos_share'){
         // Reviewed: the owner confirms over the grid, then picks a target in Android's share sheet.
-        shareReview={items:rows.map(row=>({...row})),missing:operation.ids.length-rows.length};
+        shareReview={items:rows.map(row=>({...row})),missing};
         owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
-        return {kind:'photos_share',status:'review_opened',count:rows.length,missing:operation.ids.length-rows.length};
+        return {kind:'photos_share',status:'review_opened',count:rows.length,missing};
       }
-      albumReview={name:operation.name,items:rows.map(row=>({...row})),missing:operation.ids.length-rows.length};
+      albumReview={name:operation.name,items:rows.map(row=>({...row})),missing};
       owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
-      return {kind:'photos_album_create',status:'review_opened',count:rows.length,missing:operation.ids.length-rows.length};
+      return {kind:'photos_album_create',status:'review_opened',count:rows.length,missing};
     },
   };
   const releaseHost=setMainLibraryHost(host);
