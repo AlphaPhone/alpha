@@ -56,7 +56,7 @@ function adapterFixture(request,storage={},options={}){
  let view=options.view===undefined?'workflows':options.view,workflowOpened='',deviceOpened='',newWorkflow=0;
  class Shell{live=true;renderVals(){return options.homeFallback||{};}componentDidMount(){}componentWillUnmount(){}S(){return {view};}vset(){}vget(){return {};}api(){return api;}openView(next){view=next;}refreshReminders(id){deviceOpened=id;}newDeviceReminderDraft(){deviceOpened='new-draft';}}
  const api={ic:{bell:'bell',spark:'sparkles',cal:'calendar',flow:'workflow'},track:()=>'',kx:()=>0,isActive:()=>true};
- const views={workflows:{render:()=>({cards:[],managementCards:options.managementCards?.()??[],removedAvailable:options.removedAvailable,openWorkflow:id=>workflowOpened=id,newFlow:()=>newWorkflow++,detail:false,builder:false,runOpen:false}),back:()=>false,onLeave(){},refreshManagement:options.refreshManagement}};
+ const views={workflows:{render:()=>({cards:[],managementCards:options.managementCards?.()??[],removedAvailable:options.removedAvailable,openWorkflow:id=>workflowOpened=id,newFlow:()=>newWorkflow++,detail:!!options.workflowDetail?.(),builder:false,runOpen:false}),back:()=>false,onLeave(){},refreshManagement:options.refreshManagement}};
  const windowEvents=new Map();
  const reviews={asked:[],answer:false};
  const dom=options.dom?new JSDOM('<div class="os"><button id="origin">Filters</button></div>',{pretendToBeVisual:true}):null;
@@ -341,14 +341,16 @@ test('Complete and Dismiss say how they differ before anything is sent',async()=
 });
 
 test('the Removed filter lists removed workflows, opens one for Restore and reads the list again on return',async()=>{
- const f=await fixture(read);let removedReads=0,removed=[{id:'gone',name:'Old flow',description:'',active:false,removed:true,versionId:'v1',steps:[]}];
- const app=adapterFixture(f.request,{},{dom:true,removedAvailable:true,refreshManagement:async(_signal,_valid,listRemoved)=>{if(!listRemoved)return undefined;removedReads++;return removed;}});
+ const f=await fixture(read);let removedReads=0,workflowDetail=false,removed=[{id:'gone',name:'Old flow',description:'',active:false,removed:true,versionId:'v1',steps:[]}];
+ const app=adapterFixture(f.request,{},{dom:true,removedAvailable:true,workflowDetail:()=>workflowDetail,refreshManagement:async(_signal,_valid,listRemoved)=>{if(!listRemoved)return undefined;removedReads++;return removed;}});
  try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);assert.equal(removedReads,0,'removed workflows are read only on request');
   app.render().automation.openFilters();const dialog=app.document.querySelector('dialog');const choose=label=>Array.from(dialog.querySelectorAll('button')).find(button=>button.textContent===label).click();
   choose('Removed');choose('Done');await wait(()=>{const view=app.render();return removedReads===1&&!view.automation.loading&&view.cards.length===1;});
   const card=app.render().cards[0];assert.equal(card.name,'Old flow');assert.equal(card.statusLabel,'Removed');assert.equal(app.render().automation.filterLabel,'All workflows · Removed');
   card.open();assert.equal(app.workflowOpened,'gone');
-  removed=[];await wait(()=>{const view=app.render();return removedReads===2&&!view.automation.loading;});assert.equal(app.render().cards.length,0);assert.equal(app.render().automation.emptyLabel,'No removed workflows');
+  // The workflow detail's own load publishes before its detail is shown; that render must not spend the re-read.
+  app.render();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(removedReads,1,'nothing is re-read before the detail opens');
+  workflowDetail=true;app.render();removed=[];workflowDetail=false;await wait(()=>{const view=app.render();return removedReads===2&&!view.automation.loading;});assert.equal(app.render().cards.length,0);assert.equal(app.render().automation.emptyLabel,'No removed workflows');
   assert.equal(f.calls.some(call=>call.method!=='GET'),false);
  }finally{app.close();await f.close();}
 });

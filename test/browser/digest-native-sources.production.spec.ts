@@ -33,7 +33,7 @@ async function reviewConsent(page: Page, hours = '48', reminders = true) {
   await button(page, 'Choose calendars').click();
   await calendar(page, 'Personal').check();
   if (reminders) await digests.getByRole('checkbox', { name: 'Open phone reminders due today and overdue', exact: true }).check();
-  await digests.getByRole('spinbutton', { name: 'Consent expires in hours', exact: true }).fill(hours);
+  await digests.getByRole('spinbutton', { name: 'Access lasts (hours)', exact: true }).fill(hours);
   await digests.getByRole('button', { name: /^Review( renewal)?$/ }).click();
 }
 
@@ -53,13 +53,13 @@ test('phone sources on Android: reviewed consent within the calendar and expiry 
   await expect(digests.getByRole('status')).toHaveText('Choose at most 16 calendars for this source.');
   for (const row of calendars.slice(1)) await calendar(page, row.name).uncheck();
   for (const hours of ['0', '169']) {
-    await digests.getByRole('spinbutton', { name: 'Consent expires in hours', exact: true }).fill(hours);
+    await digests.getByRole('spinbutton', { name: 'Access lasts (hours)', exact: true }).fill(hours);
     await button(page, 'Review').click();
     await expect(digests.getByRole('status')).toHaveText('Choose a valid time zone and expiry from 1 to 168 hours (7 days).');
   }
   await expect(digests.getByRole('heading', { name: 'Review', exact: true })).toHaveCount(0);
   await digests.getByRole('checkbox', { name: 'Open phone reminders due today and overdue', exact: true }).check();
-  await digests.getByRole('spinbutton', { name: 'Consent expires in hours', exact: true }).fill('48');
+  await digests.getByRole('spinbutton', { name: 'Access lasts (hours)', exact: true }).fill('48');
   await button(page, 'Review').click();
   const review = reviewSection(page);
   await expect(review).toContainText('Allow Alpha to read the selected sources on this phone until');

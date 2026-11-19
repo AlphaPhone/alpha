@@ -162,3 +162,10 @@ for(const [name,notifications,off] of [['off',{permissionGranted:false,appEnable
   if(off){app.render().fd.openNotificationSettings();assert.equal(JSON.stringify(app.settingsOpened),JSON.stringify([{page:'notifications'}]));}
  }finally{app.close();}
 });
+test('opening a workflow that is already on says when notifications are off, so the notice survives leaving for settings',async()=>{
+ const app=adapterFixture({view:'workflows',notifications:{permissionGranted:true,appEnabled:false}});
+ try{
+  app.render().openWorkflow('flow');await wait(()=>app.render().detail&&app.render().fd.notificationsOff,'An enabled workflow did not report notifications off.');
+  assert.equal(app.calls.activate,undefined,'checking sends nothing');
+ }finally{app.close();}
+});

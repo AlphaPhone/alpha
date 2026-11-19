@@ -192,8 +192,7 @@ loadedSession=selected?.sessionId||'offline';
  }
  function show(row:AutomationRow){
   if(controller)return;
-  // A removed workflow may be restored from its detail; the Removed list is read again on return.
-  if(row.status==='removed')completionDirty=true;creating=false;editor=null;review=null;message='';history=[];
+  creating=false;editor=null;review=null;message='';history=[];
   if(row.kind==='workflow'&&row.workflowId){detail=null;const out=render(owner.vget('workflows'),owner.api('workflows'));out.openWorkflow(row.workflowId);return;}
   if(row.kind==='device-reminder'){owner.openView('calendar');void owner.refreshReminders(row.id,row.record.occurrenceId);return;}
   scheduleDraft=null;detail=row;if(row.kind==='reminder'){const attempt=row.record.latestAttempt;history=attempt?.attemptedAt?[(String(attempt.outcome).startsWith('delivered')?'Delivered':String(attempt.outcome).startsWith('blocked')?'Delivery blocked':'Unknown')+' · '+new Date(attempt.attemptedAt).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})]:[];}publish();
@@ -223,6 +222,9 @@ loadedSession=selected?.sessionId||'offline';
  p.renderVals=function(){const out=values?.call(this)||{},cached=this.cachedAutomationsHome();if(!cached)return out.homeWorkflowHasRows?out:{...out,homeWorkflowFreshness:'',homeWorkflowDescription:'',homeWorkflowConfirmedEmpty:false,homeWorkflowTitle:'Workflows',homeWorkflowTime:'Open to view',homeWorkflowLabel:'Open workflows',goFlows:()=>this.openView('workflows')};const loaded=presentHomeWorkflowFreshness({loadedAt:cached.loadedAt,now:Date.now(),unified:true,agent:cached.sessionId!=='offline'});return {...out,homeWorkflowFreshness:loaded.visible,homeWorkflowDescription:loaded.description,homeWorkflowRows:cached.rows.slice(0,2),homeWorkflowHasRows:cached.total>0,homeWorkflowConfirmedEmpty:cached.complete&&!cached.stale&&!cached.error&&cached.total===0&&cached.loadedAt>0&&cached.loadedAt<=Date.now()&&!homeReadIsStale(cached.loadedAt,Date.now()),homeWorkflowTitle:cached.total?'':cached.partial?'Some unavailable':'None',homeWorkflowTime:cached.error?'Stale':cached.stale?'Not current':cached.partial?'Some unavailable':cached.total>2?`+${cached.total-2} more`:cached.total?'View workflows':'',homeWorkflowLabel:'Open workflows',goFlows:()=>this.openView('workflows')};};
  view.render=(value:Bag,current:Bag)=>{
   api=current;const workflow=render(value,current),currentSession=binding()?.sessionId||'offline';
+  // A removed workflow may be restored from its detail, so the Removed list is read again once that detail
+  // closes. Marked while the detail is open, not when the row is tapped: the detail's own load publishes first.
+  if(statusFilter==='removed'&&(workflow.detail||workflow.runOpen))completionDirty=true;
   if(visible()&&(state==='idle'||completionDirty)&&!controller&&!editor&&!detail&&!creating&&!review&&!workflow.detail&&!workflow.builder&&!workflow.runOpen){completionDirty=false;state='loading';queueMicrotask(()=>void refresh(true));}
   if(workflow.detail||workflow.builder||workflow.runOpen)return {...workflow,workflowDetail:workflow.detail,automation:null};
   const cards=(statusFilter==='removed'?removedRows:rows.filter(row=>rowPasses(row,statusFilter as Filter))).filter(row=>rowPasses(row,typeFilter)).map(row=>({name:row.title,icon:current.ic[row.kind==='reminder'||row.kind==='device-reminder'?'bell':row.kind==='prompt'?'spark':row.kind==='schedule'||row.kind==='routine'?'cal':'flow'],short:row.schedule||row.source.replace(/^Agent /,''),statusLabel:locked(row)&&!(controller&&activeMutationKey===key(row))?'Outcome unknown':row.kind==='workflow'&&row.workflowId&&workflow.waitingFor?.(row.workflowId)?'Waiting for you':rowStatus(row),on:row.enabled,track:current.track(row.enabled),kx:current.kx(row.enabled),dim:'',failed:row.status==='failed',busy:!!controller,open:()=>show(row),toggle:()=>show(row)}));

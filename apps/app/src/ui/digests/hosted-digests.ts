@@ -214,10 +214,15 @@ export function digestZoneNote(
 export function digestZoneChoices(
   chosen: string,
   deviceZone: string,
-  supported: readonly string[] = (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })()
+  supported?: readonly string[]
 ): string[] {
-  const valid = (zone: string) => { try { new Intl.DateTimeFormat('en', {timeZone: zone}).format(0); return true; } catch { return false; } };
-  return [...new Set([chosen, deviceZone, ...supported, 'UTC'].filter(zone => !!zone && valid(zone)))];
+  // The runtime's own list is valid by definition and read once; it is not re-checked on every render.
+  const listed = supported ? supported.filter(validDigestZone) : (runtimeDigestZones ??= (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })());
+  return [...new Set([...[chosen, deviceZone].filter(zone => !!zone && validDigestZone(zone)), ...listed, 'UTC'])];
+}
+let runtimeDigestZones: readonly string[] | undefined;
+function validDigestZone(zone: string): boolean {
+  try { new Intl.DateTimeFormat('en', {timeZone: zone}).format(0); return true; } catch { return false; }
 }
 
 // ---------------------------------------------------------------------------

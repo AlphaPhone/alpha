@@ -87,7 +87,7 @@ public class DailyAppsInstrumentedTest {
   String reminderId=null;
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)) {
    ready(scenario);evaluate(scenario,AppNavigation.request("Workflows"));uiWait(scenario,AppNavigation.selected("Workflows"));
-   String newAutomation="document.querySelector('button[aria-label=\"New automation\"]')";
+   String newAutomation="document.querySelector('button[aria-label=\"Add to Workflows\"]')";
    uiWait(scenario,newAutomation);evaluate(scenario,newAutomation+".click()");
    String moreOptions="[...document.querySelectorAll('button.automation-more')].find(b=>b.textContent.trim()==='More options')";
    uiWait(scenario,moreOptions);evaluate(scenario,"("+moreOptions+").click()");
