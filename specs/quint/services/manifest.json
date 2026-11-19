@@ -1862,6 +1862,14 @@
       "delayedReplyKeepsOwnCommitTest",
       "firstEmptyClearAddsTrashTest",
       "repeatEmptyClearPreservesRevisionTest",
+      "erasedEntryCannotBeRestoredTest",
+      "restoreOfErasedNoteIsRefusedTest",
+      "erasedIdIsNeverReusedTest",
+      "activeNoteCannotBeErasedTest",
+      "staleEraseIsRefusedTest",
+      "expiredEntriesLeaveActiveNotesTest",
+      "activeNoteCannotExpireTest",
+      "emptyTrashEraseKeepsRevisionTest",
       "stoppedStoreCannotAdmitTest"
     ],
     "invariants": [

@@ -905,7 +905,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			const target = event.target;
 			if (
 				!(target instanceof HTMLElement) ||
-				target.closest('[inert],[role="dialog"]') ||
+				target.closest('[inert],[role="dialog"],[role="menu"]') ||
 				document.querySelector("dialog[open]")
 			)
 				return;

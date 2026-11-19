@@ -14,9 +14,9 @@ test('retained previous notes have a visible route and return to the current col
  await openCanonicalNotes(page);
  await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toHaveCount(0);
  const options=page.getByRole('button',{name:'Notes options',exact:true});
- const menu=page.getByRole('dialog',{name:'Notes options',exact:true});
+ const menu=page.getByRole('menu',{name:'Notes options',exact:true});
  await options.click();
- await expect(menu.getByRole('button',{name:'On this phone',exact:true})).toBeFocused();
+ await expect(menu.getByRole('menuitem',{name:'On this phone',exact:true})).toBeFocused();
  await page.keyboard.press('Escape');
  await expect(menu).toHaveCount(0);
  await expect(options).toBeFocused();
@@ -60,7 +60,7 @@ test('an unreadable previous collection offers recovery with the agent disconnec
  await selectLegacyNotesSource(page);
  await expect(page.getByText('Previous notes need a recovery review. Nothing was moved or changed.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'New note',exact:true})).toBeDisabled();
- await expect(page.getByRole('button',{name:'Recover browser Notes',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Recover Notes',exact:true})).toBeVisible();
 });
 
 test('a delayed old-owner storage read cannot expose a recovery entry to the next owner',async({page})=>{

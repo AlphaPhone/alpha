@@ -69,7 +69,8 @@ const press = async (page: Page, steps: string[]) => {
       await page.locator('.mail-message-menu').count() && !await page.locator('.mail-message-menu[open]').count()) {
       await page.getByLabel('Message actions', {exact: true}).click();
     }
-    await (step === 'Photos tools' || step === 'Message actions' ? page.getByLabel(step, {exact: true}) : page.getByRole('button', {name: step, exact: true}).first()).click();
+    // Share note and Delete are entries of the Note actions menu.
+    await (step === 'Photos tools' || step === 'Message actions' ? page.getByLabel(step, {exact: true}) : page.getByRole(step === 'Share note' || step === 'Delete' ? 'menuitem' : 'button', {name: step, exact: true}).first()).click();
   }
 };
 /** The named subview is on screen and exposed (not retired behind another subview). */
