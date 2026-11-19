@@ -90,7 +90,7 @@ test('phone sources on Android: reviewed consent within the calendar and expiry 
   await expect(reviewSection(page)).toContainText('Turn on morning digest at 08:00?');
   await expect(reviewSection(page)).toContainText('Sends Phone sources to agent AI');
   await reviewSection(page).getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(schedules(page)).toHaveText([`Morning at 08:00 (${zone}) · Phone sources · On`]);
+  await expect(schedules(page)).toHaveText([`Morning at 08:00 (${zone}) · Phone sources · On Remove`]);
   await expect.poll(() => harness(page, f => f.digests.renewals.includes('arm:' + f.digests.sources[0].id))).toBe(true);
   const first = await harness(page, f => ({ source: f.digests.sources[0], loop: f.digests.loops[0] })) as any;
 
@@ -118,13 +118,13 @@ test('phone sources on Android: reviewed consent within the calendar and expiry 
   expect(rebound).toEqual({ path: 'loops', body: { spec: { version: 1, template: 'morning', timeZone: zone, localTime: '08:00', enabled: true, sourceId: second.id, sourceRevision: second.revision }, mutationId: expect.stringMatching(/^[0-9a-f-]{36}$/), confirmed: true, id: first.loop.id, expectedVersionId: first.loop.versionId } });
   await expect.poll(() => harness(page, f => f.digests.renewals)).toContain('clear:' + first.source.id);
   await expect.poll(() => harness(page, f => f.digests.renewals.includes('arm:' + f.digests.sources[1].id))).toBe(true);
-  await expect(schedules(page)).toHaveText([`Morning at 08:00 (${zone}) · Phone sources · On`]);
+  await expect(schedules(page)).toHaveText([`Morning at 08:00 (${zone}) · Phone sources · On Remove`]);
 
   // Revoking the phone source revokes Android's consent, then the agent's source, and clears its notice.
   await digests.getByRole('button', { name: 'Revoke', exact: true }).nth(1).click();
   await expect(reviewSection(page)).toContainText('Revoke Phone sources?');
   await reviewSection(page).getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(schedules(page)).toHaveText([`Morning at 08:00 (${zone}) · Phone sources · Source revoked — paused`]);
+  await expect(schedules(page)).toHaveText([`Morning at 08:00 (${zone}) · Phone sources · Source revoked — paused Remove`]);
   const consents = await harness(page, f => f.digests.consents) as any[];
   expect(consents.at(-1)).toMatchObject({ sourceId: second.id, revoke: true, confirmed: true, expectedBinding: second.live });
   expect((await posts(page)).at(-1)).toEqual({ path: 'sources/revoke', body: { id: second.id, confirmed: true } });

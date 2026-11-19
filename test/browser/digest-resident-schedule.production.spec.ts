@@ -74,26 +74,26 @@ test('loop D on Android: a reviewed snapshot, morning and evening schedules, a l
   expect((await posts(page))[2]).toEqual(morning);
   expect(await harness(page, f => f.digests.loops.length)).toBe(1);
   expect(Object.keys(await harness(page, f => f.digests.receipts))).toEqual([morning.body.mutationId]);
-  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · On`]);
+  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · On Remove`]);
 
   // 3. Evening schedule on the same source.
   await digests.getByLabel('Evening', { exact: true }).fill('19:15');
   await button(page, 'Review evening schedule').click();
   await confirmReview(page, /Turn on evening digest at 19:15\?\s*Sends Errands to agent AI/);
-  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · On`, `Evening at 19:15 (${zone}) · Errands · On`]);
+  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · On Remove`, `Evening at 19:15 (${zone}) · Errands · On Remove`]);
   expect((await posts(page))[3].body).toEqual({ spec: { version: 1, template: 'evening', sourceId: source.id, sourceRevision: source.revision, timeZone: zone, localTime: '19:15', enabled: true }, mutationId: expect.stringMatching(/^[0-9a-f-]{36}$/), confirmed: true });
 
   // 4. Pause the morning schedule: an edit of that exact version.
   const loop = await harness(page, f => f.digests.loops.find((row: any) => row.spec.template === 'morning')) as { id: string; versionId: string };
   await digests.getByRole('button', { name: 'Pause', exact: true }).first().click();
   await confirmReview(page, 'Pause morning digest?');
-  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · Paused`, `Evening at 19:15 (${zone}) · Errands · On`]);
+  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · Paused Remove`, `Evening at 19:15 (${zone}) · Errands · On Remove`]);
   expect((await posts(page))[4].body).toEqual({ spec: { version: 1, template: 'morning', sourceId: source.id, sourceRevision: source.revision, timeZone: zone, localTime: '07:30', enabled: false }, mutationId: expect.stringMatching(/^[0-9a-f-]{36}$/), confirmed: true, id: loop.id, expectedVersionId: loop.versionId });
 
   // 5. Revoke the source: the running evening schedule reports the revoked source and pauses.
   await digests.getByRole('button', { name: 'Revoke', exact: true }).click();
   await confirmReview(page, 'Revoke Errands?');
-  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · Paused`, `Evening at 19:15 (${zone}) · Errands · Source revoked — paused`]);
+  await expect(schedules(page)).toHaveText([`Morning at 07:30 (${zone}) · Errands · Paused Remove`, `Evening at 19:15 (${zone}) · Errands · Source revoked — paused Remove`]);
   expect((await posts(page))[5]).toEqual({ path: 'sources/revoke', body: { id: source.id, confirmed: true } });
   await expect(digests.getByRole('region', { name: 'Source renewal' })).toContainText('Errands revoked');
   // A revoked source cannot be chosen again or renewed in place.
