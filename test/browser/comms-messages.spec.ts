@@ -31,7 +31,7 @@ async function draftReachable(page: Page) {
       if (block === 'start') expect(box.y, 'the first line can be scrolled into the stage').toBeGreaterThanOrEqual(0);
       else expect(box.y + box.height, 'the last line can be scrolled above the sheet').toBeLessThanOrEqual(sheet.y + 1);
     }).toPass({timeout:5000});
-    for (const control of ['[data-alpha-draft-edit]', '[data-alpha-draft-send]']) await expect(page.locator(control)).toBeInViewport({ratio: 1});
+    for (const control of ['[data-alpha-draft-discard]', '[data-alpha-draft-send]']) await expect(page.locator(control)).toBeInViewport({ratio: 1});
   }
 }
 
@@ -182,7 +182,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await inputs(page,'sendComposedSms')).toEqual([]);
   });
 
-  test('a 1,600-character Alpha draft is reachable line by line with Edit and Send on screen, at default and largest text', async ({page}) => {
+  test('a 1,600-character Alpha draft is editable with Don’t send and Send on screen, at default and largest text', async ({page}) => {
     await setupTelephony(page);
     await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
     await page.getByRole('button', {name: /^Ada Okafor/}).click();
@@ -191,7 +191,7 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await sms(page, 'placeAskedSmsDraft', words)).toBe('drafted');
     await openAlpha(page);
     await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'alpha');
-    await expect(page.locator(bubble)).toHaveAttribute('aria-label', "Alpha's draft, not sent");
+    await expect(page.locator(bubble)).toHaveAttribute('aria-label', /Message draft to Ada Okafor/);
     await draftReachable(page);
     await setTextScale(page, 2);
     await draftReachable(page);
@@ -217,6 +217,31 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
     await page.evaluate(() => (window as any).setDeviceCallState({inCall: false, emergency: false, emergencyLive: false, watching: true}));
     expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(false);
+  });
+
+  test('an Alpha draft keeps its addressee and text in view above a long conversation', async ({page}) => {
+    await setupTelephony(page);
+    // A thread with real history: the stage must not shrink the draft to its action row.
+    await page.evaluate(() => {
+      const rows = (window as any).messages['thread:101'], first = rows[0];
+      for (let i = 0; i < 40; i++) rows.unshift({...first, id: `sms:${2000 + i}`, date: first.date - (i + 1) * 60_000, body: `Earlier message ${i + 1} about who is bringing what to dinner.`});
+    });
+    await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
+    await page.getByRole('button', {name: /^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    await expect(page.getByText('Earlier message 1 about who is bringing what to dinner.', {exact: true})).toHaveCount(1);
+    expect(await sms(page, 'placeAskedSmsDraft', 'Ten minutes away')).toBe('drafted');
+    await openAlpha(page);
+    const draft = page.locator(bubble), body = draft.getByRole('textbox', {name: 'Message draft', exact: true});
+    await expect(body).toHaveValue('Ten minutes away');
+    await expect(draft.locator('.alpha-draft-label')).toBeInViewport({ratio: 1});
+    await expect(body).toBeInViewport({ratio: 1});
+    await expect(page.locator('[data-alpha-draft-send]')).toBeInViewport({ratio: 1});
+    const [card, label, text] = await Promise.all([draft.boundingBox(), draft.locator('.alpha-draft-label').boundingBox(), body.boundingBox()]);
+    expect(card && label && text, 'draft parts are laid out').toBeTruthy();
+    expect(label!.y, 'the addressee is inside the card, not scrolled out of it').toBeGreaterThanOrEqual(card!.y - 1);
+    expect(text!.y + text!.height, 'the whole text box is inside the card').toBeLessThanOrEqual(card!.y + card!.height + 1);
+    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
   });
 
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
@@ -333,8 +358,8 @@ test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA
     await page.locator(alphaField).press('Enter');
     await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'alpha');
     await expect(page.locator(bubble)).toContainText("I'm running ten minutes late.");
-    await expect(page.locator(bubble)).toContainText("Alpha's draft · not sent");
-    await page.locator('[data-alpha-draft-undo]').click();
+    await expect(page.locator(bubble)).toContainText('To Maya Chen');
+    await page.getByRole('button',{name:'Don’t send',exact:true}).click();
     await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'owner');
     await expect(page.locator(bubble)).toContainText('My words');
     await page.locator('[data-alpha-draft-edit]').click();

@@ -301,6 +301,8 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .alpha-draft-bubble[data-alpha-draft-bubble="owner"]{border-color:var(--mut);background:var(--s2)}
 .alpha-draft-bubble[data-alpha-draft-sent="true"]{border-style:solid;background:var(--fg);color:var(--bg)}
 .alpha-draft-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.alpha-sms-inline-body{width:100%;min-height:66px;max-height:34dvh;field-sizing:content;box-sizing:border-box;resize:vertical;color:inherit;background:transparent;border:0;font:inherit;font-size:16px;line-height:1.35}
+[data-alpha-draft-discard]{min-height:44px;padding:0 12px;border-radius:22px;color:var(--fg)}
 .alpha-draft-actions{position:sticky;bottom:0;display:flex;gap:8px;justify-content:flex-end;background:inherit}
 .alpha-filter-chip{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 0 0 12px;border-radius:16px;background:var(--s2);color:var(--fg);font-size:13px}
 .alpha-filter-chip>button{min-width:44px;min-height:44px;margin:-6px 0;display:inline-flex;align-items:center;justify-content:center}
@@ -613,10 +615,28 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > 
 }
 
 /* Keep portrait capture controls above the assistant on short windows. */
+/* The Video/Photo switch shows its choice by colour and dot, never a focus box: no ring after a
+ * tap or click; a keyboard user still gets a thin underline under the focused mode's label. */
+[data-alpha-camera-mode]:focus{outline:none}
+[data-alpha-camera-mode]:focus-visible{outline:none;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px}
 html:not(.alpha-landscape) [data-alpha-camera="capture"]{top:min(712px,calc(100% - var(--alpha-dock-clearance,102px) - 106px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="modes"]{top:min(656px,calc(100% - var(--alpha-dock-clearance,102px) - 162px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="zoom"]{top:min(585px,calc(100% - var(--alpha-dock-clearance,102px) - 217px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="viewfinder"]{height:min(549px,calc(100% - var(--alpha-dock-clearance,102px) - 258px))!important}
+/* Camera with the chat open (the sheet stays where it was when Camera opened): Camera is laid out in
+ * the space above the sheet, the way a comms view's stage is (docs/agentic-comms.md AC-02). The live
+ * preview fills that space and the zoom, mode and capture rows sit over its lower edge, so the
+ * viewfinder stays visible and the shutter, mode switch and flip are reachable above the sheet, never
+ * under it. The dock is inside the sheet there, so nothing in Camera reserves room for it. */
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){bottom:var(--alpha-sheet-height,0px)!important;--alpha-dock-clearance:0px;transition:bottom .42s cubic-bezier(.22,1,.36,1)}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-dragging="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){transition:none}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="viewfinder"]{top:0!important;bottom:0!important;height:auto!important}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="capture"]{top:calc(100% - 98px)!important;z-index:2}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="modes"]{top:calc(100% - 146px)!important;z-index:2}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="zoom"]{top:calc(100% - 194px)!important}
+/* A shade under the rows keeps the white controls legible over a bright preview. */
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:160px;background:linear-gradient(transparent,rgba(0,0,0,.55));pointer-events:none}
+@media (prefers-reduced-motion:reduce){html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){transition:none}}
 
 /* Camera in landscape: the portrait stack (viewfinder, zoom, modes, capture row) is 800px tall and
  * would leave every capture control below the screen. The capture controls move to a column on the
@@ -912,6 +932,8 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 /* The approval row says what a tap does; rows without a label keep their icon. */
 .alpha-row-label:empty { display:none; }
 .alpha-row-label { flex-shrink:0; min-height:36px; padding:0 16px; border-radius:18px; background:var(--acc); color:var(--alpha-white); font-size:14px; font-weight:600; display:inline-flex; align-items:center; }
+/* Decline is an action with the same target size and quieter emphasis. */
+.alpha-action-review .alpha-row-label[data-alpha-secondary-action="true"] { background:var(--s3); color:var(--fg); }
 .alpha-row-label:not(:empty) + svg { display:none; }
 .alpha-action-review button { min-height:56px; }
 .alpha-action-review button:disabled,[data-alpha-proposal-act]:disabled { opacity:.5; cursor:default; }
@@ -1022,7 +1044,11 @@ dialog.alarm-page{position:fixed;inset:0 auto auto 0;margin:0;width:100vw;height
 [data-alpha-recorder-actions]{padding-bottom:calc(var(--alpha-dock-reserve,108px) + 16px)!important}
 [data-alpha-view-actions]{bottom:var(--alpha-dock-reserve,108px)!important}
 [data-alpha-photo-actions]>div{padding-bottom:12px!important}
-[data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet),[data-alpha-album-manager]{bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet){bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-album-manager]{position:absolute;inset:auto 0 0;z-index:21;max-height:calc(100% - 32px);padding:20px 24px calc(var(--alpha-dock-reserve,108px) + 12px);overflow-y:auto;box-sizing:border-box;background:var(--s1);color:var(--fg);border-radius:28px 28px 0 0}
+.photo-album-choices{display:grid;gap:8px;margin-top:12px}
+.photo-album-choices button{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 16px;border-radius:14px;background:var(--s2);color:var(--fg);text-align:left}
+.photo-album-membership{padding:6px 16px;color:var(--mut);font-size:14px}
 /* The overflow menu is anchored below its header, so a dock bottom must cap,
  * not stretch, its intrinsic height. Keep short screens scrollable. */
 [data-alpha-popup] .notes-menu[role="dialog"]{bottom:auto!important;height:auto;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
@@ -1076,9 +1102,9 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
 
 /* The viewer has one secondary-action menu; primary controls stay above the dock. */
 .photo-viewer-menu > div { min-width:208px; max-width:calc(100vw - 40px); }
-.photo-viewer-menu > div button { display:flex; align-items:center; gap:12px; white-space:nowrap; }
-.photo-viewer-menu .alpha-compute-mark { width:20px; height:20px; flex-shrink:0; }
-.photo-viewer-menu .i { width:20px; height:20px; flex-shrink:0; }
+.photo-actions-menu > div button { display:flex; align-items:center; gap:12px; white-space:nowrap; }
+.photo-actions-menu .alpha-compute-mark,.photo-action-icon { width:20px; height:20px; flex-shrink:0; }
+.photo-action-icon {display:block;background:currentColor;mask:var(--photo-icon) center/contain no-repeat}
 [data-alpha-popup] .photo-info-sheet[role="dialog"] { left:8px!important; right:8px!important; bottom:calc(var(--alpha-dock-reserve,108px) + 8px)!important; border-radius:28px!important; padding:12px 24px 24px!important; }
 .alpha-share-panel::backdrop { background:rgba(0,0,0,.35); }
 .alpha-share-panel h2 { margin:0; font-size:1.5em; line-height:1.2; }
@@ -1106,8 +1132,9 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
  * the dock (40) and the conversation (50). The inset is screen pixels; the canvas is scaled. */
 .alpha-phone::after { content:""; position:absolute; left:0; right:0; bottom:0; height:calc(var(--native-bottom-inset,0px) / var(--phone-scale,1)); background:var(--bg); z-index:39; pointer-events:none; }
 html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
-/* Camera is black edge to edge in both themes: its navigation backing matches, not the theme's white. */
-.alpha-phone:has([data-alpha-camera-root])::after { background:var(--alpha-black); }
+/* Match the surface that reaches the bottom of the canvas. */
+.alpha-phone:has([data-alpha-camera-root],[data-alpha-subview="photos-viewer"])::after { background:var(--alpha-black); }
+.alpha-phone:has([data-alpha-album-manager])::after { background:var(--s1); }
 /* Loading placeholder for audio and transcripts in Phone: a shape, not a sentence. */
 :is([data-alpha-contact-editor],[data-alpha-phone],[data-alpha-messages],[data-alpha-contacts-bar]) :is(input,textarea) { border:0; outline:0; font-family:inherit; color:inherit; }
 .alpha-phone-tabs { display:flex; justify-content:center; padding:0 16px 8px; flex-shrink:0; }

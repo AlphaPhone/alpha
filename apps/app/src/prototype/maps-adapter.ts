@@ -1,4 +1,5 @@
 import {createMapsNotificationOpen} from '../runtime/maps-notification-open';
+import {agentMapsShowable} from '../maps/agent-present';
 import {mapsChatText} from '../runtime/action-message-presentation';
 import {BackgroundNavigation,type NavigationBridge} from '../maps/background-navigation';
 import {registerPlugin} from '../platform-plugins';
@@ -530,13 +531,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   const renderVals=Component.prototype.renderVals;
   // Later adapters wrap renderVals too, so disposal leaves this wrapper in place as a pass-through.
   Component.prototype.renderVals=function(this: Bag,...args: unknown[]){if(!disposed){shell=this;queueMicrotask(()=>void notificationOpen.flush());}return renderVals.apply(this,args);};
-  // Maps opens only over Home or itself, on an unlocked, visible, non-sensitive launcher screen.
-  // Any other app keeps the screen; the agent hears that the phone cannot show Maps now.
+  // The owner's chat request opens Maps over Home or the open app (Browser, say) on an unlocked,
+  // visible, non-sensitive launcher screen; agent-present.ts names the screens it keeps.
   const surface = screen.surface(async () => {
     const showable=()=>{
       const value=shell?.S?.();
-      return !disposed&&!document.hidden&&!!shell?.live&&!!value&&value.screen==='home'&&!value.secure&&!value.shade&&!shell.pageSuspended&&
-        !shell.props?.assistantSurface&&!connectionController.getSnapshot().open&&(!value.view||value.view==='home'||value.view==='maps');
+      return !disposed&&!!value&&agentMapsShowable({live:!!shell?.live,hidden:document.hidden,suspended:!!shell?.pageSuspended,
+        assistantSurface:!!shell?.props?.assistantSurface,connectionOpen:!!connectionController.getSnapshot().open,
+        screen:value.screen,secure:value.secure,shade:value.shade,view:value.view});
     };
     if(!showable())return false;
     if(!api?.isActive()){

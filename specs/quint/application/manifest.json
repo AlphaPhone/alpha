@@ -4357,7 +4357,9 @@
       "recordingRefusesTest",
       "leaveWhileQueuedTest",
       "unconfirmedSaveTest",
-      "reopenedChatRefusesCaptureTest",
+      "openSheetStaysOpenTest",
+      "reopenedSheetKeepsCaptureTest",
+      "landscapeSheetRefusesCaptureTest",
       "expandedChatRefusesCaptureTest",
       "closingPanelDelaysCaptureTest",
       "abortDuringRevealTest",
@@ -4375,11 +4377,11 @@
       "plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"
     ],
     "abstractions": [
-      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; a closing panel that may still be painted over the viewfinder after the committed chat is hidden; one shutter. Admission represents the committed chat close in `takeRequestedPhoto`; `revealed` is the wait for the closing panel's transition, and the hold keeps the preview available during it and while preview startup settles. Compositor frames are abstracted to the painted flag, which the mounted replay observes at the shutter. Without a request hold, an open chat releases the preview after its grace (`chatGraceReleases`).",
+      "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; a closing panel that may still be painted over the viewfinder after the committed chat is hidden; one shutter; portrait or landscape. Portrait Camera is laid out above an open sheet (phone.css, Camera's chat-open layout), so only a full chat or a landscape sheet covers the viewfinder (`chatCovers`). Admission represents the committed close of a covering chat in `takeRequestedPhoto`; a portrait sheet keeps its detent; `revealed` is the wait for the closing panel's transition, and the hold keeps the preview available during it and while preview startup settles. Compositor frames are abstracted to the painted flag, which the mounted replay observes at the shutter. Without a request hold, an open chat releases the preview after its grace (`chatGraceReleases`).",
       "Current-source successor of the agent actions in the historical legacy CameraSession design model. Settlement after the preview settles is checked by scenarios (queued capture, start failure, leave while queued), not as a temporal property; no fairness assumption is made.",
-      "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter separately refuses a committed sheet or full chat (`chatCovers`) and a painted panel that still overlaps the viewfinder (`conversationOverViewfinder`). ShutterNeverCovered follows directly from those two guard checks and adds no evidence of its own; RequestUncoversViewfinder carries the reveal wait, and the mounted replay shows that removing either painted-panel check in the source fails a trace.",
+      "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter separately refuses a committed covering chat (`chatCovers`: full, or a landscape sheet) and a painted panel that still overlaps the viewfinder (`conversationOverViewfinder`). ShutterNeverCovered follows directly from those two guard checks and adds no evidence of its own; RequestUncoversViewfinder carries the reveal wait, and the mounted replay shows that removing either painted-panel check in the source fails a trace.",
       "A recording that starts while a request is queued, lens, flash, zoom, video and scan are outside this model. A context change that the phone executor detects before it reaches the camera adapter is journaled as unknown by the coordinator (see DeviceActionReview).",
-      "The owning mounted Camera replay (test/quint-camera-agent-capture.test.mjs) drives the real capture adapter with synthetic preview and shutter ports. It checks the sheet and full chat refusals, a request admitted while the owner's closing panel is still painted, a reopened-then-closed panel refused at the shutter gate, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
+      "The owning mounted Camera replay (test/quint-camera-agent-capture.test.mjs) drives the real capture adapter with synthetic preview and shutter ports. It checks a portrait sheet that stays open while the photo is taken, the full chat refusal, a request admitted while the owner's closing panel is still painted, a reopened-then-closed panel refused at the shutter gate, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
     ],
     "invariants": [
       "CaptureNeedsVisibleCamera",
@@ -11590,7 +11592,8 @@
     "invariant": "safety",
     "tests": [
       "opensMapsOverHomeTest",
-      "neverOpensOverAnotherAppTest",
+      "opensMapsOverAnOpenAppTest",
+      "neverOpensOverAKeptViewTest",
       "blockedScreenRefusesWithoutOpeningTest",
       "lockDuringWaitRefusesTest",
       "timeLimitRefusesAndMapsStillOpensTest",
@@ -11600,12 +11603,12 @@
     ],
     "invariants": [
       "TypeOK",
-      "OpensOnlyOverUnblockedHome",
+      "OpensOnlyOverUnblockedHomeOrApp",
       "AdmittedOnlyWithMapsShown",
       "OneOpenPerRequest",
       "RequestsInOrder",
       "LateOpenFollowsOpen",
-      "PendingOpenOverHome"
+      "PendingOpenOverHomeOrApp"
     ],
     "witnesses": [
       "AdmittedAfterOpenWitness",
@@ -11616,6 +11619,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/maps-adapter.ts",
+      "apps/app/src/maps/agent-present.ts",
       "apps/app/src/maps/screen.ts",
       "apps/app/src/maps/agent-navigation.ts",
       "apps/app/src/ui/maps/maps-screen.ts"
@@ -11624,6 +11628,14 @@
       {
         "path": "apps/app/src/prototype/maps-adapter.ts",
         "name": "showable"
+      },
+      {
+        "path": "apps/app/src/maps/agent-present.ts",
+        "name": "agentMapsShowable"
+      },
+      {
+        "path": "apps/app/src/maps/agent-present.ts",
+        "name": "KEPT_VIEWS"
       },
       {
         "path": "apps/app/src/prototype/maps-adapter.ts",
@@ -11647,13 +11659,13 @@
       }
     ],
     "stateMapping": {
-      "view/pendingOpen": "the launcher state's view and an openView('maps') the shell has not committed",
+      "view/pendingOpen": "the launcher state's view (home, maps, an open app agentMapsShowable lets Maps replace, or a KEPT_VIEWS camera or dialer view) and an openView('maps') the shell has not committed",
       "blocks/disposed": "what showable() refuses: a screen other than home, secure, shade, pageSuspended, the assistant surface, the connection sheet, a hidden document, a shell that is not live; and the adapter's disposed flag",
       "requests/begun": "each call of the present check the adapter hands screen.surface: still awaiting the commit or the two-second limit, answered true or answered false, and whether it asked the shell to open Maps",
       "opens/admissions/lateOpens": "what the launcher looked like at each openView call and each true answer, and opens that committed with no request waiting"
     },
     "abstractions": [
-      "Three requests, three views (Home, Maps, one other app) and eight independent blocks. What the agent does with the answer is in MapsNavigation and MapsRerouteOwnership.",
+      "Three requests, four views (Home, Maps, one open app Maps replaces, one kept camera or dialer view) and eight independent blocks. What the agent does with the answer is in MapsNavigation and MapsRerouteOwnership.",
       "A commit applies a pending open and runs every setState callback in one step, as one shell render does. The two-second limit is an action that can fire at any time before the commit.",
       "An admitted request also needs the Maps state to exist; the replay asserts it at every admission and the model does not carry it.",
       "A request refused by its time limit leaves its open pending, so Maps can still come to the front afterwards (MapsOpensAfterRefusalWitness). The agent was told the phone could not show Maps.",

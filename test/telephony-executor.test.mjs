@@ -81,7 +81,7 @@ test('a review that is no longer current stops before anything happens', async (
   await assert.rejects(run({type: 'phone_call', target: {kind: 'contact', query: 'Priya'}}, p), /context changed/);
   assert.equal(did(p, 'call').length, 0);
 });
-test('a text to a contact shows who matched, then uses the native review under the proposal id; an unknown outcome is not a failure', async () => {
+test('a text to a contact shows who matched, then sends under the proposal id; an unknown outcome is not a failure', async () => {
   let p = ports();
   let result = await run({type: 'sms_compose', query: 'Priya', body: 'On my way'}, p, 'proposal-9');
   assert.deepEqual(did(p, 'ask').map(row => row[1]), [{kind: 'message', options: [{id: '1', name: 'Priya Nair', number: '+14155550132'}], body: 'On my way'}], 'one match is still confirmed with its name and number');
@@ -279,7 +279,7 @@ test('an action refused before it ran carries the typed unavailable result of it
     assert.deepEqual(refused.telephonyResult, kind === 'phone-call' ? {kind, status: 'unavailable', contact: false} : {kind, status: 'unavailable'});
   }
 });
-test('a text to an exact number goes straight to the native review; a named contact is still chosen on the phone', async () => {
+test('a text to an exact number is sent straight from its approved card; a named contact is still chosen on the phone', async () => {
   let p = ports();
   let result = await run({type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'}, p, 'proposal-4');
   assert.deepEqual(did(p, 'sms'), [['sms', '+14155550100', 'Running late', 'proposal-4']]);

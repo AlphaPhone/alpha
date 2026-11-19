@@ -604,7 +604,7 @@
     <h1 data-alpha-messages-title style="flex-grow:1;min-width:0;margin:0 0 0 6px;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{messages.title}}</h1>
     <sc-if value="{{messages.canCall}}"><button aria-label="{{messages.callLabel}}" onClick="{{messages.call}}" disabled="{{messages.calling}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.phone}}"></path></svg></button></sc-if>
    </div>
-   <div class="scr" data-alpha-messages-thread style="flex-grow:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px 14px;touch-action:pan-y">
+   <div class="scr" data-alpha-messages-thread style="flex-grow:1;flex-basis:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px 14px;touch-action:pan-y">
     <sc-if value="{{messages.nativeMore}}"><div style="display:flex;justify-content:center"><button aria-label="Older messages" onClick="{{messages.nativeLoadMore}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M6 15l6-6 6 6"></path></svg></button></div></sc-if>
     <div style="flex-grow:1"></div>
     <sc-for list="{{messages.bubbles}}" key="{{m.id}}" as="m">
@@ -633,17 +633,6 @@
       </sc-if>
      </div>
     </sc-for>
-    <sc-if value="{{messages.draftBubble}}">
-     <div class="alpha-draft-bubble" data-alpha-draft-bubble="{{messages.draftBubble.by}}" data-alpha-draft-sent="{{messages.draftBubble.sent}}" role="group" aria-label="{{messages.draftBubble.aria}}" style="flex-shrink:0;margin-top:8px">
-      <span class="alpha-draft-label" aria-hidden="true"><sc-if value="{{messages.draftBubble.alpha}}"><span class="alpha-mark-18 alpha-mark-fill"><span class="alpha-compute-mark" aria-hidden="true"></span></span></sc-if>{{messages.draftBubble.label}}</span>
-      <span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.draftBubble.text}}</span>
-      <sc-if value="{{messages.draftBubble.canAct}}"><span class="alpha-draft-actions">
-       <sc-if value="{{messages.draftBubble.canUndo}}"><button data-alpha-draft-undo onClick="{{messages.draftBubble.undo}}" style="min-height:44px;padding:0 14px;border-radius:22px;color:var(--fg);font-size:15px">Undo</button></sc-if>
-       <button data-alpha-draft-edit onClick="{{messages.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button>
-       <button data-alpha-draft-send onClick="{{messages.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
-      </span></sc-if>
-     </div>
-    </sc-if>
    </div>
   </sc-if>
   <sc-if value="{{messages.messageDelete}}">
@@ -661,7 +650,7 @@
     <input type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-alpha-messages-recipients aria-label="To" placeholder="{{messages.recipientPlaceholder}}" disabled="{{messages.nativeBusy}}" value="{{messages.recipientValue}}" onChange="{{messages.onRecipientInput}}" maxlength="230" style="flex-grow:1;min-width:0;height:44px;padding:0 16px;border-radius:22px;background:var(--s2);font-size:16px;font-family:inherit;color:inherit;border:0;outline:0;box-sizing:border-box">
     <button aria-label="{{messages.contactsLabel}}" aria-expanded="{{messages.contactsOpen}}" onClick="{{messages.toggleContacts}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.plus}}"></path></svg></button>
    </div>
-   <div class="scr" data-alpha-messages-picks style="flex-grow:1;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
+   <div class="scr" data-alpha-messages-picks style="flex-grow:1;flex-basis:0;min-height:0;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
     <sc-if value="{{messages.contactsOpen}}">
      <section aria-label="Choose a contact" data-alpha-messages-contact-picker>
       <sc-if value="{{messages.contacts.busy}}"><p role="status" style="margin:8px 16px;color:var(--mut)">Checking Contacts</p></sc-if>
@@ -687,6 +676,19 @@
       <span style="font-size:14px;color:var(--mut);font-variant-numeric:tabular-nums;flex-shrink:0">{{c.number}}</span>
      </button>
     </sc-for>
+   </div>
+  </sc-if>
+  <sc-if value="{{messages.draftBubble}}">
+   <div class="alpha-draft-bubble" data-alpha-draft-bubble="{{messages.draftBubble.by}}" data-alpha-draft-sent="{{messages.draftBubble.sent}}" role="group" aria-label="{{messages.draftBubble.aria}}" style="flex-shrink:1;min-height:0;overflow:auto;margin:8px 12px">
+    <span class="alpha-draft-label" aria-hidden="true"><sc-if value="{{messages.draftBubble.alpha}}"><span class="alpha-mark-18 alpha-mark-fill"><span class="alpha-compute-mark" aria-hidden="true"></span></span></sc-if>{{messages.draftBubble.label}}</span>
+    <sc-if value="{{messages.draftBubble.showText}}"><span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.draftBubble.text}}</span></sc-if>
+    <sc-if value="{{messages.draftBubble.alpha}}"><sc-if value="{{messages.draftBubble.canAct}}"><textarea class="alpha-sms-inline-body" aria-label="Message draft" maxLength="1600" value="{{messages.draftBubble.text}}" disabled="{{messages.draftBubble.blocked}}" onChange="{{messages.draftBubble.onText}}"></textarea></sc-if></sc-if>
+    <sc-if value="{{messages.draftBubble.canAct}}"><span class="alpha-draft-actions">
+     <sc-if value="{{messages.draftBubble.canUndo}}"><button data-alpha-draft-undo onClick="{{messages.draftBubble.undo}}" style="min-height:44px;padding:0 14px;border-radius:22px;color:var(--fg);font-size:15px">Undo</button></sc-if>
+     <sc-if value="{{messages.draftBubble.ownerEdit}}"><button data-alpha-draft-edit onClick="{{messages.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button></sc-if>
+     <sc-if value="{{messages.draftBubble.alpha}}"><button data-alpha-draft-discard disabled="{{messages.draftBubble.blocked}}" onClick="{{messages.draftBubble.discard}}">Don’t send</button></sc-if>
+     <button data-alpha-draft-send disabled="{{messages.draftBubble.sendDisabled}}" onClick="{{messages.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
+    </span></sc-if>
    </div>
   </sc-if>
   <sc-if value="{{messages.showComposer}}">
@@ -820,11 +822,13 @@
           <sc-if value="{{messages.t.draftBubble}}">
            <div class="alpha-draft-bubble" data-alpha-draft-bubble="{{messages.t.draftBubble.by}}" data-alpha-draft-sent="{{messages.t.draftBubble.sent}}" role="group" aria-label="{{messages.t.draftBubble.aria}}" style="flex-shrink:0;margin-top:8px">
             <span class="alpha-draft-label" aria-hidden="true"><sc-if value="{{messages.t.draftBubble.alpha}}"><span class="alpha-mark-18 alpha-mark-fill"><span class="alpha-compute-mark" aria-hidden="true"></span></span></sc-if>{{messages.t.draftBubble.label}}</span>
-            <span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.t.draftBubble.text}}</span>
+            <sc-if value="{{messages.t.draftBubble.showText}}"><span style="font-size:16px;line-height:1.35;white-space:pre-wrap">{{messages.t.draftBubble.text}}</span></sc-if>
+            <sc-if value="{{messages.t.draftBubble.alpha}}"><sc-if value="{{messages.t.draftBubble.canAct}}"><textarea class="alpha-sms-inline-body" aria-label="Message draft" maxLength="1600" value="{{messages.t.draftBubble.text}}" disabled="{{messages.t.draftBubble.blocked}}" onChange="{{messages.t.draftBubble.onText}}"></textarea></sc-if></sc-if>
             <sc-if value="{{messages.t.draftBubble.canAct}}"><span class="alpha-draft-actions">
              <sc-if value="{{messages.t.draftBubble.canUndo}}"><button data-alpha-draft-undo onClick="{{messages.t.draftBubble.undo}}" style="min-height:44px;padding:0 14px;border-radius:22px;color:var(--fg);font-size:15px">Undo</button></sc-if>
-             <button data-alpha-draft-edit onClick="{{messages.t.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button>
-             <button data-alpha-draft-send onClick="{{messages.t.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
+             <sc-if value="{{messages.t.draftBubble.ownerEdit}}"><button data-alpha-draft-edit onClick="{{messages.t.draftBubble.edit}}" style="min-height:44px;padding:0 16px;border-radius:22px;box-shadow:inset 0 0 0 1.5px var(--mut);color:var(--fg);font-size:15px">Edit</button></sc-if>
+             <sc-if value="{{messages.t.draftBubble.alpha}}"><button data-alpha-draft-discard disabled="{{messages.t.draftBubble.blocked}}" onClick="{{messages.t.draftBubble.discard}}">Don’t send</button></sc-if>
+             <button data-alpha-draft-send disabled="{{messages.t.draftBubble.sendDisabled}}" onClick="{{messages.t.draftBubble.send}}" style="min-height:44px;padding:0 18px;border-radius:22px;background:var(--acc);color:var(--alpha-white);font-size:15px;font-weight:600">Send</button>
             </span></sc-if>
            </div>
           </sc-if>
@@ -1875,7 +1879,7 @@
     <sc-if value="{{camera.rec}}">
       <span role="timer" aria-label="Recording" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:15px;background:rgba(0,0,0,.75);color:var(--alpha-white);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums"><span class="dot" aria-hidden="true" style="width:7px;height:7px;border-radius:4px;background:var(--alpha-record-dot)"></span>{{camera.recTime}}</span>
     </sc-if>
-    <sc-if value="{{camera.scanDocumentAvailable}}"><button class="ib" aria-label="Scan document" onClick="{{camera.scanDocument}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.notes}}"></path></svg></button></sc-if>
+    <sc-if value="{{camera.showFlip}}"><button class="ib" aria-label="Switch camera" onClick="{{camera.flip}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.camFlip}}"></path></svg></button></sc-if>
     <sc-if value="{{camera.flashAvailable}}"><button class="ib" aria-label="{{camera.flashLabel}}" onClick="{{camera.toggleFlash}}"><svg class="i" viewBox="0 0 24 24"><path d="{{camera.flashIcon}}"></path></svg></button></sc-if>
   </div>
 
@@ -1895,7 +1899,7 @@
   <sc-if value="{{camera.showModes}}">
     <div data-alpha-camera="modes" style="position: absolute; left: 0; right: 0; top: 656px; height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px">
       <sc-for list="{{camera.modes}}" as="m">
-        <button onClick="{{m.pick}}" aria-label="{{m.label}} mode" style="min-height: 44px; flex-shrink: 0; padding: 0 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 14.5px; font-weight: 600; transition: color .2s; {{m.css}}">
+        <button data-alpha-camera-mode onClick="{{m.pick}}" aria-label="{{m.label}} mode" style="min-height: 44px; flex-shrink: 0; padding: 0 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 14.5px; font-weight: 600; transition: color .2s; {{m.css}}">
           {{m.label}}
           <span style="width: 4px; height: 4px; border-radius: 2px; background: var(--alpha-white); opacity: {{m.dot}}"></span>
         </button>
@@ -1913,12 +1917,7 @@
     <button aria-label="{{camera.shutterLabel}}" onClick="{{camera.shutter}}" style="width: 80px; height: 80px; border-radius: 40px; box-shadow: inset 0 0 0 4px var(--alpha-white); display: flex; align-items: center; justify-content: center">
       <span style="display: flex; align-items: center; justify-content: center; color: var(--alpha-black); transition: all .25s cubic-bezier(.2,.8,.2,1); {{camera.innerCss}}"></span>
     </button>
-    <sc-if value="{{camera.showFlip}}">
-      <button aria-label="Switch camera" onClick="{{camera.flip}}" style="width: 52px; height: 52px; border-radius: 26px; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.camFlip}}"></path></svg></button>
-    </sc-if>
-    <sc-if value="{{camera.noFlip}}">
-      <span style="width: 52px; height: 52px"></span>
-    </sc-if>
+    <span aria-hidden="true" style="width: 52px; height: 52px"></span>
   </div>
 </div>
 </sc-if>
@@ -1931,10 +1930,10 @@
     <div data-alpha-app-header="main" style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px 0 20px; gap: 2px; flex-shrink: 0">
     <sc-if value="{{showAppBack}}"><button class="app-header-back" aria-label="Back to apps" onClick="{{backToApps}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
       <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">{{photos.title}}</h1>
-        <details class="photo-import-menu"><summary aria-label="Photos tools"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.more}}"></path></svg></summary><div>
-          <sc-if value="{{photos.libTab}}"><button aria-label="Select photos" onClick="{{photos.selStart}}">Select</button></sc-if>
-          <sc-if value="{{photos.isAlb}}"><button aria-label="New album" onClick="{{photos.newAlbum}}">New album</button></sc-if>
-          <sc-if value="{{photos.importAvailable}}"><button onClick="{{photos.importImage}}">{{photos.importLabel}}</button></sc-if>
+        <details class="photo-import-menu photo-actions-menu"><summary aria-label="Photos tools"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/ellipsis.svg')"></span></summary><div>
+          <sc-if value="{{photos.libTab}}"><button aria-label="Select photos" onClick="{{photos.selStart}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/list-checks.svg')"></span>Select</button></sc-if>
+          <sc-if value="{{photos.isAlb}}"><button onClick="{{photos.newAlbum}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/plus.svg')"></span>New album</button></sc-if>
+          <sc-if value="{{photos.importAvailable}}"><button onClick="{{photos.importImage}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/image.svg')"></span>{{photos.importLabel}}</button></sc-if>
         </div></details>
 
     </div>
@@ -2064,10 +2063,10 @@
         <h1 data-alpha-app-title class="serif" style="margin: 0 0 0 4px; font-size: 26px; letter-spacing: -.01em; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{photos.alb.title}}</h1>
         <span style="font-size: 13px; color: var(--mut); padding: 0 8px">{{photos.alb.count}}</span>
         <sc-if value="{{photos.alb.menu}}">
-          <details class="photo-import-menu"><summary aria-label="Album options"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></summary><div>
-            <sc-if value="{{photos.alb.canSelect}}"><button aria-label="Select items" disabled="{{photos.selectionBusy}}" onClick="{{photos.alb.select}}">Select</button></sc-if>
-            <sc-if value="{{photos.alb.isCustom}}"><button class="ib" aria-label="Rename album" onClick="{{photos.alb.manage}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.edit}}"></path></svg></button><button class="ib" aria-label="Delete album" onClick="{{photos.alb.deleteAlbum}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.trash}}"></path></svg></button></sc-if>
-            <sc-if value="{{photos.alb.canEmpty}}"><button aria-label="Delete all forever" onClick="{{photos.alb.emptyTrash}}" style="display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Empty</button></sc-if>
+          <details class="photo-import-menu photo-actions-menu"><summary aria-label="Album options"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/ellipsis.svg')"></span></summary><div>
+            <sc-if value="{{photos.alb.canSelect}}"><button aria-label="Select items" disabled="{{photos.selectionBusy}}" onClick="{{photos.alb.select}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/list-checks.svg')"></span>Select</button></sc-if>
+            <sc-if value="{{photos.alb.isCustom}}"><button onClick="{{photos.alb.manage}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/edit.svg')"></span>Rename album</button><button onClick="{{photos.alb.deleteAlbum}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Delete album</button></sc-if>
+            <sc-if value="{{photos.alb.canEmpty}}"><button aria-label="Delete all forever" onClick="{{photos.alb.emptyTrash}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Empty</button></sc-if>
           </div></details>
         </sc-if>
         <sc-if value="{{photos.selAll}}"><button class="tap" aria-label="{{photos.selAllLabel}}" disabled="{{photos.selectionBusy}}" onClick="{{photos.selAll}}" style="min-height:44px;padding:0 12px;font-size:16px;font-weight:600;color:var(--acct)">{{photos.selAllLabel}}</button></sc-if>
@@ -2140,14 +2139,13 @@
             <h2 style="margin: 0; font-size: 15px; font-weight: 600">{{photos.v.day}}</h2>
             <div style="font-size: 12.5px; opacity: .72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{photos.v.sub}}</div>
           </div>
-          <details class="photo-import-menu photo-viewer-menu"><summary aria-label="Photo actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.more}}"></path></svg></summary><div onClick="{{photos.closeActions}}">
-            <sc-if value="{{photos.v.canZoom}}"><div role="group" aria-label="Photo zoom"><span role="status">{{photos.v.zoomLabel}}</span><button aria-label="Zoom in" disabled="{{photos.v.zoomMax}}" onClick="{{photos.v.zoomIn}}">Zoom in</button><button aria-label="Zoom out" disabled="{{photos.v.zoomMin}}" onClick="{{photos.v.zoomOut}}">Zoom out</button><button aria-label="Fit photo" disabled="{{photos.v.zoomMin}}" onClick="{{photos.v.fit}}">Fit photo</button></div></sc-if>
+          <details class="photo-import-menu photo-actions-menu photo-viewer-menu"><summary aria-label="Photo actions"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/ellipsis.svg')"></span></summary><div onClick="{{photos.closeActions}}">
             <sc-if value="{{photos.v.ask}}"><button onClick="{{photos.v.ask}}"><span class="alpha-compute-mark" aria-hidden="true"></span>Ask Alpha</button></sc-if>
-            <sc-if value="{{photos.v.info2.canAlbum}}"><button aria-label="Add to album" onClick="{{photos.v.info2.addToAlbum}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.phAlbums}}"></path></svg></button></sc-if>
-            <sc-if value="{{photos.v.canEmail}}"><button onClick="{{photos.v.email}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.mail}}"></path></svg>Email</button></sc-if>
-            <sc-if value="{{photos.v.notSecure}}"><button onClick="{{photos.v.share}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.share}}"></path></svg>Share</button></sc-if>
-            <sc-if value="{{photos.v.notDeleted}}"><button aria-label="{{photos.v.deleteLabel}}" onClick="{{photos.v.del}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.trash}}"></path></svg>Delete</button></sc-if>
-            <sc-if value="{{photos.v.isDeleted}}"><button onClick="{{photos.v.recover}}">Recover</button><sc-if value="{{photos.v.canDeleteForever}}"><button aria-label="Delete this item forever" onClick="{{photos.v.deleteForever}}">Delete</button></sc-if></sc-if>
+            <sc-if value="{{photos.v.info2.canAlbum}}"><button onClick="{{photos.v.info2.addToAlbum}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/folder-input.svg')"></span>Add to album</button></sc-if>
+            <sc-if value="{{photos.v.canEmail}}"><button onClick="{{photos.v.email}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/mail.svg')"></span>Email</button></sc-if>
+            <sc-if value="{{photos.v.notSecure}}"><button onClick="{{photos.v.share}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/share-2.svg')"></span>Share</button></sc-if>
+            <sc-if value="{{photos.v.notDeleted}}"><button aria-label="{{photos.v.deleteLabel}}" onClick="{{photos.v.del}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Delete</button></sc-if>
+            <sc-if value="{{photos.v.isDeleted}}"><button onClick="{{photos.v.recover}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/undo-2.svg')"></span>Recover</button><sc-if value="{{photos.v.canDeleteForever}}"><button aria-label="Delete this item forever" onClick="{{photos.v.deleteForever}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Delete</button></sc-if></sc-if>
           </div></details>
         </div>
       </div>
@@ -2170,13 +2168,19 @@
   <sc-if value="{{photos.albumManager}}">
     <div ref="{{photos.am.modalRef}}" style="position:absolute;inset:0;z-index:20">
     <button aria-hidden="true" tabindex="-1" aria-label="Close album management" onClick="{{photos.am.close}}" style="position:absolute;inset:0;z-index:20;background:var(--scrim)"></button>
-    <div class="enter" data-alpha-album-manager role="dialog" aria-modal="true" aria-label="{{photos.am.title}}" style="color:var(--fg);position:absolute;left:0;right:0;bottom:0;z-index:21;background:var(--s1);border-radius:28px 28px 0 0;padding:24px 24px 44px;max-height:80%;overflow-y:auto;box-sizing:border-box">
+    <div class="enter" data-alpha-album-manager role="dialog" aria-modal="true" aria-label="{{photos.am.title}}">
       <div style="display:flex;align-items:center;gap:12px"><h2 class="serif" style="font-size:26px;flex:1;margin:0">{{photos.am.title}}</h2><button class="ib" aria-label="Close dialog" onClick="{{photos.am.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></div>
       <div role="status" style="color:var(--mut);font-size:14px;margin-top:12px">{{photos.am.error}}</div>
       <sc-if value="{{photos.am.info}}"><button aria-label="Add to album" onClick="{{photos.am.choose}}" style="width:100%;padding:16px;border-radius:24px;background:var(--s2);color:var(--fg)">Add to album</button></sc-if>
       <sc-if value="{{photos.am.choosing}}">
-        <sc-for list="{{photos.am.items}}" key="{{a.id}}" as="a"><button disabled="{{photos.am.busy}}" aria-label="{{a.label}}" onClick="{{a.go}}" style="display:block;width:100%;padding:16px;margin-top:8px;border-radius:18px;background:var(--s2);text-align:left;color:var(--fg)">{{a.label}}</button></sc-for>
-        <button disabled="{{photos.am.busy}}" aria-label="New album" onClick="{{photos.am.create}}" style="display:block;width:100%;padding:16px;margin-top:12px;border-radius:24px;background:var(--fg);color:var(--bg)">New album</button>
+        <div class="photo-album-choices">
+          <sc-if value="{{photos.am.canFavorite}}"><button disabled="{{photos.am.busy}}" onClick="{{photos.am.addFavorite}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/heart.svg')"></span>Add to Favorites</button></sc-if>
+          <sc-if value="{{photos.am.inFavorites}}"><span class="photo-album-membership">In Favorites</span></sc-if>
+          <sc-if value="{{photos.am.inCamera}}"><span class="photo-album-membership">In Camera</span></sc-if>
+          <sc-if value="{{photos.am.inVideos}}"><span class="photo-album-membership">In Videos</span></sc-if>
+          <sc-for list="{{photos.am.items}}" key="{{a.id}}" as="a"><button disabled="{{photos.am.busy}}" onClick="{{a.go}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/folder.svg')"></span>{{a.label}}</button></sc-for>
+          <button disabled="{{photos.am.busy}}" onClick="{{photos.am.create}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/plus.svg')"></span>New album</button>
+        </div>
       </sc-if>
       <sc-if value="{{photos.am.naming}}">
         <input aria-label="Album name" maxlength="80" value="{{photos.am.name}}" onChange="{{photos.am.onName}}" style="width:100%;box-sizing:border-box;margin-top:16px;padding:16px;border:0;border-radius:18px;background:var(--s2);color:var(--fg);font-size:16px">
@@ -4533,10 +4537,10 @@
             <sc-if value="{{m.cDigest}}">
               <div class="{{m.actionReviewClass}}" style="border-radius: 22px; background: var(--s2); overflow: hidden">
                 <sc-for list="{{m.rows}}" as="r">
-                  <button disabled="{{r.disabled}}" onPointerDown="{{r.keepComposerFocus}}" onClick="{{r.open}}" style="width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); text-align: left">
+                  <button disabled="{{r.disabled}}" aria-label="{{r.ariaLabel}}" onPointerDown="{{r.keepComposerFocus}}" onClick="{{r.open}}" style="width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); text-align: left">
                     <span style="width: 34px; height: 34px; border-radius: 17px; background: var(--s3); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; white-space: nowrap">{{r.ini}}</span>
                     <div style="min-width: 0; flex-grow: 1"><div style="font-size: 14px; font-weight: 600">{{r.who}}</div><div style="font-size: 13px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.text}}</div></div>
-                    <strong class="alpha-row-label">{{r.label}}</strong><svg class="i" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--mut)"><path d="{{r.icon}}"></path></svg>
+                    <strong class="alpha-row-label" data-alpha-secondary-action="{{r.secondaryAction}}">{{r.label}}</strong><svg class="i" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--mut)"><path d="{{r.icon}}"></path></svg>
                   </button>
                 </sc-for>
               </div>
