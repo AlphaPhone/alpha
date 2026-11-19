@@ -90,7 +90,7 @@ import {NotesCommitUncertain,isStorageFull} from '../runtime/notes-store';
 import {isNotesOperation,validateNotesOperation,notesTarget} from '../runtime/notes-contract';
 import {isCalendarOperation,validateCalendarResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import { alphaViewKey, alphaViewPaths } from "../product/alpha-product";
-import { workflowSha, validateWorkflowResult } from '../runtime/workflow-device-contract';
+import { workflowSha, validateWorkflowResult, workflowStepScreenCurrent } from '../runtime/workflow-device-contract';
 import { WorkflowReminderOverflow, workflowReminderRows } from '../runtime/workflow-reminder-read';
 import { getMapsSelectedObject, clearMapsSelection } from '../maps/agent-context';
 import { alphaClient, AlphaClientError, type AlphaView } from '../runtime/alpha-client';
@@ -1339,7 +1339,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const readResult=await validateWorkflowResult(operation,{kind:'calendar',events});current();return {status:'succeeded',summary:`Read ${events.length} app Calendar events within the approved range.`,readResult};
       }
       if(operation.type==='read_selected_reminders'||operation.type==='read_selected_notes'||operation.type==='read_calendar_range'){
-        const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='workflows'||expectedContext.selectedObject?.kind!=='workflow-run')throw new Error('Workflow read context changed');};current();
+        const current=()=>{signal.throwIfAborted();context(this);if(!workflowStepScreenCurrent({live:!!this.live,hidden:document.hidden,current:alphaClient.getState().context,approved:expectedContext,read:true}))throw new Error('Workflow read context changed');};current();
         if(operation.type==='read_selected_reminders'){
           const {reminders}=await DailyApps.listReminders();current();
           try{const readResult=await workflowReminderRows(operation,reminders);current();return {status:'succeeded',summary:`Read ${readResult.reminders.length} reminders for ${operation.day}.`,readResult};}
@@ -1369,7 +1369,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(operation.type==='post_notification'||operation.type==='speak_text'){
         if(connectionController.getWorkflowPresentationProtocol()!==2)return {status:'failed',summary:'This device has not negotiated workflow presentation support.'};
-        signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='workflows')throw Error('Workflow review context changed');
+        signal.throwIfAborted();context(this);if(!workflowStepScreenCurrent({live:!!this.live,hidden:document.hidden,current:alphaClient.getState().context,approved:expectedContext,read:false}))throw Error('Workflow review context changed');
         if(operation.type==='post_notification'&&Capacitor.isNativePlatform()){
           const notices=registerPlugin<{postWorkflow(input:{operationId:string;bindingHash:string;title:string;body:string;route:NonNullable<typeof workflowRoute>}):Promise<{status:unknown}>}>('AlphaNotifications');
           if(!bindingHash||!workflowRoute)throw Error('Workflow notification binding is missing');

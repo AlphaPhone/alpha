@@ -36,6 +36,14 @@ export type {
  WorkflowReminderReadOperation,
  WorkflowReminderRow,
 } from '../../../../.eliza/client-features/packages/contracts/src/workflow-device.ts';
+/** A workflow phone step runs only while the owner still has the screen it was approved on in the
+ * foreground: the live shell, a visible page, the exact approved context, not sensitive, on
+ * Workflows and, for a read, on the run's receipt. The device executor checks it around every
+ * await of an approved step, so a step whose screen was left or changed has no effect. */
+export function workflowStepScreenCurrent(input:{live:boolean;hidden:boolean;current:unknown;approved:{view?:string;sensitive?:boolean;selectedObject?:{kind?:string}|null};read:boolean}):boolean{
+ const approved=input.approved;
+ return input.live&&!input.hidden&&JSON.stringify(input.current)===JSON.stringify(approved)&&!approved.sensitive&&approved.view==='workflows'&&(!input.read||approved.selectedObject?.kind==='workflow-run');
+}
 /** Validates a phone read result against its reviewed scope before any model sees it. */
 export const validateWorkflowResult=(operation:WorkflowReadOperation,value:unknown):Promise<WorkflowReadResult>=>validateWorkflowReadResult(operation,value);
 /** Validates a phone reminder read against its reviewed owner-day window. */
