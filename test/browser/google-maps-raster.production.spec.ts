@@ -121,6 +121,7 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
    // The viewport's complete copyright and the full recipient roles open from the badge at every size.
    await expect(privacy.locator('[data-maps-google-attribution]')).toHaveText('Map data © Google · synthetic viewport');
    await expect(privacy.locator('[data-maps-disclosure]')).toContainText('Google Routes for routing, operated by Google');
+   await expect(privacy.getByRole('button',{name:'Enter coordinates',exact:true})).toHaveCount(0);
    const panel=await privacy.locator('.alpha-map-info').boundingBox();
    expect(panel!.x).toBeGreaterThanOrEqual(0);expect(panel!.y).toBeGreaterThanOrEqual(0);
    expect(panel!.x+panel!.width).toBeLessThanOrEqual(layout.width);

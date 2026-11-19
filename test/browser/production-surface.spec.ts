@@ -225,9 +225,9 @@ for (const [view, expected] of Object.entries(rootViewStates)) {
       // No location yet: no base notice, and Recenter is the request for one.
       await expect(page.locator('[data-alpha-maps-status]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Recenter', exact: true })).toBeVisible();
-      await page.locator('summary[aria-label="Map information and credits"]').click();
-      // The shortened tile-provider disclosure (6f8205cb4) names who receives map-area requests.
-      await expect(page.locator('.alpha-map-privacy[open]').getByText('Map tiles: OpenFreeMap', { exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'OpenFreeMap', exact: true })).toBeVisible();
+      await expect(page.getByLabel('Map information and credits', { exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Enter coordinates', exact: true })).toHaveCount(0);
     }
     const text = await page.locator('body').innerText();
     for (const name of fixtureNames) expect(text, `${view} shows fixture ${name}`).not.toContain(name);

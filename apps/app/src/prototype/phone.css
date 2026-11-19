@@ -843,7 +843,6 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-map-info p svg { width:16px; height:16px; flex-shrink:0; }
 .alpha-map-info .alpha-map-credit-links { display:block; padding:0; border-radius:0; background:none; box-shadow:none; font-size:12px; color:var(--mut); }
 .alpha-map-info .alpha-map-credit-links a { color:inherit; text-decoration:underline; }
-.alpha-map-info > button { justify-self:start; min-height:40px; padding:0 14px; border-radius:20px; background:var(--s2); color:var(--fg); font:inherit; font-weight:600; }
 .alpha-landscape .alpha-map-credits { bottom:12px!important; }
 .alpha-landscape [data-alpha-maps-root]:not([data-alpha-maps-guidance="true"]) > .alpha-map-credits {
   right:calc(var(--alpha-dock-width,min(440px,50%)) + 12px);

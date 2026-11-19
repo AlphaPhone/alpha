@@ -2393,7 +2393,6 @@
             <sc-if value="{{maps.mapAttribution}}"><p data-maps-google-attribution>{{maps.mapAttribution}}</p></sc-if>
             <sc-if value="{{maps.locationDisclosure}}"><p><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.lock}}"></path></svg>{{maps.locationDisclosure}}</p></sc-if>
             <sc-if value="{{maps.providerDisclosure}}"><p data-maps-disclosure>{{maps.providerDisclosure}}</p></sc-if>
-            <button class="tap" aria-label="Enter coordinates" onClick="{{maps.nativeManualLocation}}">Coordinates</button>
           </div>
         </details>
         <sc-if value="{{maps.googleMapMissing}}"><span class="alpha-google-map-missing">No imagery</span></sc-if>
@@ -2407,10 +2406,7 @@
       <details class="alpha-map-privacy" name="alpha-map-info"><summary aria-label="Map information and credits"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.info}}"></path></svg></summary>
         <div class="alpha-map-info">
           <sc-if value="{{maps.locationDisclosure}}"><p><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ic.lock}}"></path></svg>{{maps.locationDisclosure}}</p></sc-if>
-          <sc-if value="{{maps.globalBasemap}}"><p>Map tiles: OpenFreeMap</p></sc-if>
           <sc-if value="{{maps.providerDisclosure}}"><p data-maps-disclosure>{{maps.providerDisclosure}}</p></sc-if>
-          <button class="tap" aria-label="Enter coordinates" onClick="{{maps.nativeManualLocation}}">Coordinates</button>
-
         </div>
       </details>
       </sc-if>
