@@ -335,6 +335,8 @@
       "popupPastLimitIsClosedTest",
       "clearDataTest",
       "clearDataKeepsPrivateTabsTest",
+      "privateCommitAfterSwitchTest",
+      "normalCommitAfterSwitchTest",
       "closedPrivateTabForgetsPagesTest"
     ],
     "sources": [
@@ -3754,15 +3756,22 @@
       "reopenedBrowserCannotReviveOldVisitTest",
       "lockedScreenCannotDispatchTest",
       "retiredPrivateHandoffCannotOpenReviewTest",
+      "publicTappedLinkOpensTest",
+      "untappedLinkOpensNothingTest",
+      "privateTappedLinkAsksFirstTest",
+      "privateTappedLinkDeclinedTest",
+      "privateTappedLinkAfterPageChangeTest",
       "missingHttpsNeverPreparesTest"
     ],
     "sources": [
       "apps/app/src/prototype/browser-external-handoff.ts",
       "apps/app/src/prototype/browser-adapter.ts",
-      "vendor/eliza/plugins/plugin-native-browser-surface/src/tab-host.ts"
+      "vendor/eliza/plugins/plugin-native-browser-surface/src/tab-host.ts",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaBrowserPlugin.java"
     ],
     "abstractions": [
-      "One selected tab and bounded presentation epochs, including a retained handoff across view departure and same-address recommit. The external bridge and presentation surface are closed fixtures."
+      "One selected tab and bounded presentation epochs, including a retained handoff across view departure and same-address recommit. The external bridge and presentation surface are closed fixtures.",
+      "tapLink and answerLink stand for AlphaBrowserPlugin.handoff on the shown tab: a tap is required, and a private tab asks before Android opens the other app. The fresh pop-up rule, the app chooser, the missing-app fallback and the Android dialog are not modeled, and no refinement replays the Java path; it is model-only evidence."
     ]
   },
   {
