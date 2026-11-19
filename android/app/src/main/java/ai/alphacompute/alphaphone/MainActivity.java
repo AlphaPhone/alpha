@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import androidx.activity.BackEventCompat;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.splashscreen.SplashScreen;
 import androidx.core.graphics.Insets;
@@ -485,7 +486,21 @@ public class MainActivity extends BridgeActivity {
      if (!isAssistantSurface()) moveTaskToBack(true); else finish();
     });
    }
+   // Predictive Back (android:enableOnBackInvokedCallback): the renderer previews the layer this
+   // Back would close while the gesture is held. The committed gesture still arrives above.
+   @Override public void handleOnBackStarted(BackEventCompat event) { previewBack("start", event); }
+   @Override public void handleOnBackProgressed(BackEventCompat event) { previewBack("progress", event); }
+   @Override public void handleOnBackCancelled() { previewBack("cancel", null); }
   });
+ }
+ /** Visible for tests: the preview event the renderer receives for a held Back gesture. */
+ static String backPreviewScript(String phase, float progress, boolean rightEdge) {
+  float bounded = Math.max(0f, Math.min(1f, progress));
+  return "window.dispatchEvent(new CustomEvent('alpha-back-preview',{detail:{phase:'" + phase + "',progress:" + bounded + ",edge:'" + (rightEdge ? "right" : "left") + "'}}))";
+ }
+ private void previewBack(String phase, BackEventCompat event) {
+  if (getBridge() == null || getBridge().getWebView() == null) return;
+  getBridge().getWebView().evaluateJavascript(backPreviewScript(phase, event == null ? 0f : event.getProgress(), event != null && event.getSwipeEdge() == BackEventCompat.EDGE_RIGHT), null);
  }
  @Override public void onNewIntent(Intent intent) {
   boolean showMaps = captureNavigationOpen(intent);

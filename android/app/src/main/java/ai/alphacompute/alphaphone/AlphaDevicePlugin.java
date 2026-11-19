@@ -1012,4 +1012,14 @@ public final class AlphaDevicePlugin extends Plugin {
    bars.setAppearanceLightStatusBars(!dark);bars.setAppearanceLightNavigationBars(!dark);call.resolve();
   });
  }
+ /** Touch feedback for a renderer control (AlphaHaptics). Android skips it when the owner turned touch feedback off. */
+ @PluginMethod public void haptic(PluginCall call){
+  int feedback=AlphaHaptics.constant(call.getString("kind"),Build.VERSION.SDK_INT);if(feedback<0){call.reject("Unknown feedback");return;}
+  android.app.Activity activity=getActivity();if(activity==null||getBridge()==null){call.reject("Alpha view is unavailable");return;}
+  activity.runOnUiThread(()->{
+   android.view.View view=getBridge().getWebView();
+   if(view==null||activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
+   JSObject result=new JSObject();result.put("performed",view.performHapticFeedback(feedback));call.resolve(result);
+  });
+ }
 }
