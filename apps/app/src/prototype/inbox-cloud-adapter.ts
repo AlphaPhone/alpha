@@ -2,7 +2,7 @@ import React from 'react';
 import {aospImage} from '../runtime/aosp-image';
 import {createAddressBookClient,isIncompleteAddressBookContact,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {literalMailAddress} from '../ui/mailbox/drafts-controller';
-import {agentEmailOperationId} from '../ui/mailbox/agent-email-draft';
+import {agentEmailSend} from '../ui/mailbox/agent-email-draft';
 import {MailFolderPicker} from '../ui/mailbox/MailFolderPicker.tsx';
 import {withGmailAccountLabel} from '../ui/mailbox/grants';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
@@ -485,12 +485,13 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   };
   view.sendAgentEmail=async(id:string,mail:{to:string[];subject:string;body:string},accountToken:string,reviewCurrent:()=>boolean)=>{
     const current=()=>reviewCurrent()&&view.agentEmailAccount()?.token===accountToken&&!document.hidden;
-    if (chatSend || !current()) return {state: 'unsent'};
-    const proposal={mode:'compose',to:[...mail.to],cc:[],bcc:[],subject:mail.subject,bodyText:mail.body,attachments:[]};
-    const draftId='agent-email:'+id;
+    const account=view.agentEmailAccount();
+    if (chatSend || !account || !current()) return {state: 'unsent'};
+    // The request ID names this exact email, so an edit after an undispatched Send is prepared anew.
+    const {draftId,proposal,requestId}=agentEmailSend(id,account,mail);
     chatSend={draftId,proposal,current};
     try{
-      return await provider.prepare({kind:'send',...proposal},{draftId,requestId:agentEmailOperationId(id)},'send-from-composer');
+      return await provider.prepare({kind:'send',...proposal},{draftId,requestId},'send-from-composer');
     }finally{chatSend=undefined;}
   };
   const readable = () => accounts.filter(gmailReadable);

@@ -247,7 +247,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
       const operation = /^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations\/([^/]+)(\/dispatch)?$/.exec(path);
       if (operation && operation[2] && input.method === 'POST') {
         const request = decodeURIComponent(operation[1]);
-        m.dispatches.push({ requestId: request, grantId: body.grantId, digest: body.reviewDigest, bodyText: body.proposal.bodyText });
+        m.dispatches.push({ requestId: request, grantId: body.grantId, digest: body.reviewDigest, bodyText: body.proposal.bodyText, ...(options.emailDraft?{to:body.proposal.to,subject:body.proposal.subject}:{}) });
         if (m.operations[request]?.reviewDigest !== body.reviewDigest) return { status: 409, data: { error: 'Review digest changed' } };
         if (options.emailDraft && m.sendOutcome !== 'succeeded') {
           m.operations[request]={...m.operations[request],state:m.sendOutcome,providerResult:null,rejectionCode:m.sendOutcome==='rejected'?'provider_rejected':null};

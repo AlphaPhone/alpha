@@ -1,9 +1,11 @@
 import type { AgentReply } from '../runtime/alpha-client';
 import { connectionController } from '../runtime/connection-ui';
 import { inboxLocalStore } from '../runtime/inbox-local-store';
+import { editCoalescer, type EditCoalescer } from '../runtime/inbox-edit-coalescer';
 import {
   agentEmailDraft,
   draftMailRecipients,
+  draftRecipientList,
 } from '../ui/mailbox/agent-email-draft';
 
 type Bag = Record<string, any>;
@@ -13,10 +15,14 @@ type Card = {
   from: string;
   grant: string;
   to: string;
+  /** The To line is the owner's own text: the agent's `self` was resolved before the first edit. */
+  literalTo?: boolean;
   subject: string;
   body: string;
   state: 'draft' | 'declined' | 'sending' | 'sent' | 'rejected' | 'uncertain';
 };
+/** An edited draft card waiting to be written, with the shelf revision it was made on. */
+type Edit = { card: Card; revision: number };
 type Shelf = {
   scope: string;
   slot: Promise<string>;
@@ -26,6 +32,7 @@ type Shelf = {
   cards: Map<string, Card>;
   busy: Set<string>;
   notices: Map<string, string>;
+  edits: Map<string, EditCoalescer<Edit>>;
   revision: number;
 };
 
@@ -45,8 +52,7 @@ async function shelfSlot(scope: string) {
   return 'inbox-drafts:v1:chat:' + hash;
 }
 
-function save(shelf: Shelf, card: Card, expected: Card['state'] | undefined) {
-  const revision = shelf.revision;
+function save(shelf: Shelf, card: Card, expected: Card['state'] | undefined, revision = shelf.revision) {
   const write = shelf.writes.then(async () => {
     await shelf.ready;
     const saved = shelf.saved;
@@ -84,6 +90,30 @@ export function installAgentEmailCards(
 ) {
   const shelves = new WeakMap<object, Shelf>();
   const p = Component.prototype, render = p.renderVals;
+  // Leaving the app writes each waiting edit at once, held or not, as the Inbox composer does.
+  const waiting = new Set<EditCoalescer<Edit>>();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) for (const edits of [...waiting]) edits.flush();
+  });
+
+  /** One card's edits, written after each is shown. While a write is in flight only the latest
+   * edit waits, as inbox-unsaved.ts retains Inbox edits, so typing never queues a write per key.
+   * An edit made before a conflict reload is refused with its revision, never written over it. */
+  function editsFor(shell: Bag, shelf: Shelf, messageId: string) {
+    const known = shelf.edits.get(messageId);
+    if (known) return known;
+    const refresh = () => { if (shell.live && draftScope() === shelf.scope) shell.setState({}); };
+    const edits: EditCoalescer<Edit> = editCoalescer<Edit>(({ card, revision }) => {
+      waiting.delete(edits);
+      edits.hold();
+      void save(shelf, card, 'draft', revision).then(
+        () => { if (shelf.cards.get(messageId) === card && shelf.notices.delete(messageId)) refresh(); },
+        () => { shelf.notices.set(messageId, 'Couldn’t save the draft. Try again.'); refresh(); },
+      ).finally(() => edits.release());
+    }, { delay: 0 });
+    shelf.edits.set(messageId, edits);
+    return edits;
+  }
 
   function shelfFor(shell: Bag) {
     const scope = draftScope(), previous = shelves.get(shell);
@@ -94,7 +124,7 @@ export function installAgentEmailCards(
     if (previous?.scope === scope) return previous;
     const shelf: Shelf = {
       scope, slot: shelfSlot(scope), ready: Promise.resolve(), writes: Promise.resolve(),
-      saved: null, cards: new Map(), busy: new Set(), notices: new Map(), revision: 0,
+      saved: null, cards: new Map(), busy: new Set(), notices: new Map(), edits: new Map(), revision: 0,
     };
     shelves.set(shell, shelf);
     shelf.ready = shelf.slot.then(async slot => {
@@ -153,10 +183,11 @@ export function installAgentEmailCards(
       if (!card) return message;
       const account = selectedAccount && (!card.grant || selectedAccount.grant === card.grant)
         ? selectedAccount : null;
-      const resolveAddress = (text: string) => account ? text.split(',').map(value =>
+      // The agent's `self` names the selected account. The owner's own To text is shown and sent as typed.
+      const addressLine = (row: Card) => !account || row.literalTo ? row.to : row.to.split(',').map(value =>
         ['self', 'me', 'myself'].includes(value.trim().toLowerCase()) ? account.from : value.trim()
-      ).join(', ') : text;
-      const to = resolveAddress(card.to);
+      ).join(', ');
+      const to = addressLine(card);
       const current = () =>
         this.live && !document.hidden && draftScope() === shelf.scope &&
         shelf.cards.get(card.messageId)?.id === card.id;
@@ -168,31 +199,42 @@ export function installAgentEmailCards(
         const next = { ...latest, ...changes };
         await save(shelf, next, latest.state);
         shelf.cards.set(card.messageId, next);
+        return next;
       };
       const reportError = () => { shelf.notices.set(card.messageId, 'Couldn’t save the draft. Try again.'); };
       const edit = (key: 'to' | 'subject' | 'body', event: Event) => {
         if (!account || !sameAccount() || shelf.busy.has(card.messageId)) return;
         const latest = shelf.cards.get(card.messageId)!;
         if (latest.state !== 'draft') return;
-        const next = { ...latest, from: account.from, grant: account.grant, [key]: (event.target as HTMLInputElement).value };
+        const next = {
+          ...latest, from: account.from, grant: account.grant, to: addressLine(latest), literalTo: true,
+          [key]: (event.target as HTMLInputElement | HTMLTextAreaElement).value,
+        };
         shelf.notices.delete(card.messageId);
-        if (key !== 'to') next.to = resolveAddress(latest.to);
+        // Show the edit in this event, as the Inbox composer does, so the controlled field keeps
+        // its text, caret and composition, then write it. Send writes exactly this content first.
         shelf.cards.set(card.messageId, next);
-        void save(shelf, next, 'draft').catch(reportError).finally(refresh);
+        refresh();
+        const edits = editsFor(this, shelf, card.messageId);
+        waiting.add(edits);
+        edits.push({ card: next, revision: shelf.revision });
       };
       const decide = async (send: boolean) => {
         if (!current() || shelf.busy.has(card.messageId)) return;
         const latest = shelf.cards.get(card.messageId)!;
         if (latest.state !== 'draft') return;
-        const addressText = resolveAddress(latest.to);
+        const addressText = addressLine(latest);
         const recipients = draftMailRecipients(addressText);
         if (send && (!account || !recipients || !latest.body.trim() || this.S().typing || !sameAccount())) return;
         shelf.busy.add(card.messageId);
         shelf.notices.delete(card.messageId);
+        // A waiting edit is written before the decision, in order, so it never lands over it.
+        shelf.edits.get(card.messageId)?.flush();
         refresh();
         try {
-          const address = account ? { to: addressText, from: account.from, grant: account.grant } : {};
-          await update({ ...address, state: send ? 'sending' : 'declined' });
+          const address = account ? { to: addressText, literalTo: true, from: account.from, grant: account.grant } : {};
+          // Nothing is prepared unless this write of the shown content succeeds; Send sends what it stored.
+          const sending = await update({ ...address, state: send ? 'sending' : 'declined' });
           if (!send || !account || !recipients) return;
           if (!sameAccount()) {
             await update({ state: 'draft' });
@@ -200,7 +242,7 @@ export function installAgentEmailCards(
           }
           try {
             const result = await views.inbox.sendAgentEmail(
-              latest.id, { to: recipients, subject: latest.subject, body: latest.body }, account.token, sameAccount,
+              sending.id, { to: recipients, subject: sending.subject, body: sending.body }, account.token, sameAccount,
             );
             await update({ state: result?.state === 'unsent' ? 'draft' :
               result?.state === 'sent' || result?.state === 'rejected' ? result.state : 'uncertain' });
@@ -218,8 +260,13 @@ export function installAgentEmailCards(
         }
       };
       const busy = shelf.busy.has(card.messageId);
+      // The single-line field shows only the start of a long list, and this Send has no review
+      // sheet, so every recipient is listed under the field.
+      const listed = draftRecipientList(to);
       return { ...message, canUseInEmail: false, emailDraft: {
         ...card, from: card.from || account?.from, to, busy,
+        recipients: listed.map(address => ({ address })),
+        recipientCount: listed.length ? listed.length + (listed.length === 1 ? ' recipient' : ' recipients') : '',
         editing: card.state === 'draft',
         settled: card.state !== 'draft',
         locked: busy || card.state !== 'draft' || !account,
