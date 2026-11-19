@@ -673,14 +673,16 @@
       "terminalManualReopenTest",
       "partialAbsenceRetiresDetailTest",
       "failedListCannotDispatchReviewedActionTest",
-      "retiredReplyDoesNotReleaseTest"
+      "retiredReplyDoesNotReleaseTest",
+      "releaseKeepsOtherRetainedIntentTest"
     ],
     "invariants": [
       "SentWithExactIntent",
       "PendingRemainsJournaled",
       "UnconfirmedStaysLocked",
       "TerminalHasReopenOnly",
-      "FailedSourceDisablesControls"
+      "FailedSourceDisablesControls",
+      "OneRetainedSlotPerOwner"
     ],
     "sources": [
       "apps/app/src/prototype/automations-adapter.ts",
@@ -11923,6 +11925,76 @@
     ],
     "abstractions": [
       "One of three independent roles, durable intent and completion receipt, primary unmanaged system-image identity and role qualification as checked inputs. The Android controller serializes role requests. Eligibility can be lost and regained, and an owner request records the receipt either way. The CI compilation test runs the real staging projection, policy and Android adapter over a synthetic controller that carries the projection anchors, and exercises partial failure restoration plus owner add, remove and clear requests on unfinished migrations, including a choice made while ineligible. Compiling the pinned AOSP controller runs only where its hash-checked input is fetched locally, not in CI. Device reboot persistence, other privileged controller clients and real role grants require image qualification. Progress needs stable eligibility, qualified APK, successful durable writes and fair successful role grants."
+    ]
+  },
+  {
+    "path": "specs/quint/application/WorkflowDeviceSteps.qnt",
+    "module": "WorkflowDeviceSteps",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "approveExecutesOnceTest",
+      "denySendsNoEffectTest",
+      "otherDecisionNeedsItsOwnTapTest",
+      "backgroundCannotDecideTest",
+      "changedReviewIsRefusedTest",
+      "movedAnchorNeedsNewReviewTest",
+      "cancelledRunIsRefusedTest",
+      "expiredStepCannotBeDecidedTest",
+      "expiredStepIsNotOfferedAgainTest"
+    ],
+    "invariants": [
+      "TypeOK",
+      "AtMostOneEffect",
+      "EffectWasApproved",
+      "EffectMatchesReview",
+      "ShownIsPending",
+      "ConfirmIsOfShownStep"
+    ],
+    "sources": [
+      "apps/app/src/prototype/workflow-adapter.ts",
+      "apps/app/src/runtime/workflow-device-contract.ts",
+      "apps/app/src/runtime/connection-ui.tsx"
+    ],
+    "symbols": [
+      {
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "reviewPhone"
+      },
+      {
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "decidePhone"
+      },
+      {
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "phoneContext"
+      },
+      {
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "phoneConfirm"
+      },
+      {
+        "path": "apps/app/src/runtime/connection-ui.tsx",
+        "name": "workflowPhoneActions"
+      },
+      {
+        "path": "apps/app/src/runtime/connection-ui.tsx",
+        "name": "rejectWorkflowPhoneAction"
+      }
+    ],
+    "stateMapping": {
+      "digest/anchor/closed": "the run's phone review as the agent reports it: spec digest, Calendar anchor and cancellation request",
+      "proposal/expired": "the one proposal the agent issued for the step, its decision and its expiry",
+      "foreground": "this exact run open in the foreground Workflows view (phoneContext)",
+      "shown/reviewedDigest/reviewedAnchor/confirm/status": "phoneSteps, the phone review it was read from (phoneReview), the first tap (phoneConfirm) and phoneStatus",
+      "effects/denials/effectsReviewed": "decisions that reached the connection controller, and whether each effect matched its review"
+    },
+    "abstractions": [
+      "One run and one phone step with one proposal. The spec digest and the Calendar anchor each change at most once; the agent abstracts the device action coordinator, which issues the proposal and refuses a decided, expired or cancelled one.",
+      "Each owner action and its awaited reads are one step. Foreground loss between the second tap's re-read and the decision is not interleaved.",
+      "The replay drives the real workflow adapter in its renderer fixture. The executor's own context checks in agent-adapter (Calendar, Notes, notification and speech steps), native notification delivery, approval notices and receipt sync are separate obligations.",
+      "Expiry is enforced by the disabled control here and by the agent's coordinator; the tap handler itself does not check it."
     ]
   }
 ]

@@ -1476,6 +1476,8 @@
       "approvalDigestRejectedTest",
       "committedUnknownApprovalReplayTest",
       "otherOwnerDecisionRejectedTest",
+      "chatRunStartsPausedDefinitionWithoutReceiptTest",
+      "chatRunRemovedRejectedTest",
       "conflictingNativeTerminalFailsClosedTest"
     ],
     "invariants": [
@@ -1484,6 +1486,7 @@
       "NoProcessForUnadmittedRun",
       "TerminalNotRunning",
       "RecordedDecisionHasCanonicalReceipt",
+      "ChatRunHasNoOwnerReceipt",
       "TypeOK"
     ],
     "stateMapping": {
@@ -1499,7 +1502,8 @@
       "Actual PostgreSQL-compatible SQL and Drizzle queries run in single-process PGlite. Multi-host locking, deployment migrations and installed process supervision remain separate obligations.",
       "Worker result/control and canonical Smithers approval-store ports are controlled. No real external workflow effect, hosted grant, provider or device action is performed.",
       "Actual compiler and cron admission classify selected ready/missed/overlap schedules. Finite disposition inputs do not prove all time zones or clock instants.",
-      "Canonical approval is authoritative. A committed decision may survive a failed host transaction while the execution projection stays pending."
+      "Canonical approval is authoritative. A committed decision may survive a failed host transaction while the execution projection stays pending.",
+      "A chat-mode start (the agent's WORKFLOW run) carries no owner submission, version or idempotency key; each request is a new run and only the first is modeled. Whether the phone keeps this path is an open product decision."
     ],
     "bounds": {
       "maxSamples": 1000,
