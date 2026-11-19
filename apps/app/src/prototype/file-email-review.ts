@@ -32,7 +32,10 @@ export function reviewFileEmail(options: {
       if (!target.ready) throw Error(target.reason);
       const file = await read();
       if (!current()) return;
-      if (options.target().token !== target.token) throw Error('The email account changed. Nothing was added.');
+      // A destination that is blocked now gives its own reason; only another token is another account.
+      const now = options.target();
+      if (!now.ready) throw Error(now.reason);
+      if (now.token !== target.token) throw Error('The email account changed. Nothing was added.');
       const review = await reviewMailAttachment(file).catch(rethrowAttachmentRefusal);
       if (!current()) return;
       if (review.sha256 !== file.sha256 || review.size !== file.size) {
