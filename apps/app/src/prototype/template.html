@@ -56,7 +56,15 @@
 </sc-if>
 
 
-<sc-if value="{{chatTools.open}}"><div data-alpha-chat-tools-popup ref="{{chatTools.ref}}" class="chat-tools-backdrop" onClick="{{chatTools.close}}"><div role="dialog" aria-label="Chat actions" class="chat-tools-menu" onClick="{{chatTools.inside}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>Attach media</button><button onClick="{{chatTools.search}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.search}}"></path></svg>Search chat</button></div></div></sc-if>
+<sc-if value="{{chatTools.open}}">
+  <div data-alpha-chat-tools-popup ref="{{chatTools.ref}}" class="chat-tools-backdrop" onClick="{{chatTools.close}}">
+    <div role="dialog" aria-label="{{chatTools.label}}" class="chat-tools-menu" onClick="{{chatTools.inside}}">
+      <sc-if value="{{chatTools.messageOpen}}"><button onClick="{{chatTools.camera}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.camera}}"></path></svg>Camera</button></sc-if>
+      <sc-if value="{{chatTools.messageOpen}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.inboxClip}}"></path></svg>Add media</button></sc-if>
+      <sc-if value="{{chatTools.searchable}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.inboxClip}}"></path></svg>Attach media</button><button onClick="{{chatTools.search}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.search}}"></path></svg>Search chat</button></sc-if>
+    </div>
+  </div>
+</sc-if>
 <sc-if value="{{chatSearch.open}}"><div data-alpha-chat-search-popup ref="{{chatSearch.ref}}" class="chat-tools-backdrop" onClick="{{chatSearch.close}}"><section role="dialog" aria-label="Search chats" class="chat-search-panel" onClick="{{chatSearch.inside}}"><header><h2>Search chats</h2><button class="ib" aria-label="Close search" onClick="{{chatSearch.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></header><input aria-label="Search messages" data-alpha-initial-focus placeholder="Search messages" value="{{chatSearch.query}}" onChange="{{chatSearch.change}}"><sc-if value="{{chatSearch.error}}"><p role="alert">{{chatSearch.error}}</p></sc-if><div class="chat-search-results" aria-busy="{{chatSearch.busy}}"><sc-for list="{{chatSearch.rows}}" key="{{r.id}}" as="r"><button onClick="{{r.go}}"><small>{{r.date}}</small><span>{{r.text}}</span></button></sc-for><sc-if value="{{chatSearch.more}}"><button onClick="{{chatSearch.loadMore}}">More results</button></sc-if></div></section></div></sc-if>
 
 <div data-alpha-system-cutout style="position: absolute; top: 13px; left: 195px; width: 22px; height: 22px; border-radius: 11px; background: var(--alpha-black); box-shadow: 0 0 0 1.5px var(--alpha-gray-11); z-index: 99; pointer-events: none"></div>
@@ -757,7 +765,7 @@
 
   <sc-if value="{{messages.picking}}">
     <div class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 4">
-      <div style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 16px 0 8px; gap: 6px; flex-shrink: 0">
+      <div data-alpha-navigation-header style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 16px 0 8px; gap: 6px; flex-shrink: 0">
         <button class="ib" aria-label="Back to messages" onClick="{{back}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
         <input aria-label="Name or number" placeholder="Name or number" value="{{messages.p.q}}" onChange="{{messages.p.onQ}}" onKeyDown="{{messages.p.onKey}}" style="flex-grow: 1; min-width: 0; height: 46px; border: 0; outline: 0; border-radius: 23px; padding: 0 18px; background: var(--s2); color: var(--fg); font-size: 16px">
       </div>
@@ -780,7 +788,7 @@
 
   <sc-if value="{{messages.inThread}}">
     <div class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 5">
-      <div data-alpha-stage-header class="alpha-stage-header" style="height: 60px; margin-top: 44px">
+      <div data-alpha-navigation-header data-alpha-stage-header class="alpha-stage-header" style="height: 60px; margin-top: 44px">
         <button class="ib" aria-label="Back to messages" onClick="{{back}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
         <button class="tap" aria-label="Contact {{messages.t.name}}" onClick="{{messages.t.who}}" style="flex-grow: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px 0 4px; border-radius: 24px">
           <span data-alpha-stage-avatar style="width: 38px; height: 38px; border-radius: 19px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; background: var(--s2); white-space: nowrap">{{messages.t.ini}}</span>
@@ -836,14 +844,6 @@
       </div>
 
       <div data-alpha-message-composer style="flex-shrink: 0; padding: 6px 12px 30px">
-        <sc-if value="{{messages.t.tray}}">
-          <div class="drop" style="display: flex; gap: 8px; padding: 2px 0 10px">
-            <button aria-label="Camera" onClick="{{messages.t.camera}}" style="width: 72px; height: 72px; border-radius: 18px; flex-shrink: 0; background: var(--s2); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.camera}}"></path></svg></button>
-            <sc-for list="{{messages.t.photos}}" as="ph">
-              <button aria-label="{{ph.label}}" onClick="{{ph.pick}}" style="width: 72px; height: 72px; border-radius: 18px; flex-shrink: 0; {{ph.css}}"></button>
-            </sc-for>
-          </div>
-        </sc-if>
         <sc-if value="{{messages.t.hasAtts}}">
           <div class="scr" style="display: flex; gap: 6px; padding: 2px 0 10px; overflow-x: auto">
             <sc-for list="{{messages.t.atts}}" as="a">
@@ -851,10 +851,6 @@
             </sc-for>
           </div>
         </sc-if>
-        <div style="display: flex; align-items: center; gap: 8px">
-          <button aria-label="Attach" onClick="{{messages.t.toggleTray}}" style="width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: transform .25s; {{messages.t.trayCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button>
-          <sc-if value="{{messages.t.local}}"><button class="ib" aria-label="Attach PDF, image or TXT" disabled="{{messages.t.busy}}" onClick="{{messages.t.attachFile}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.inboxClip}}"></path></svg></button></sc-if>
-        </div>
       </div>
     </div>
   </sc-if>
@@ -4740,7 +4736,7 @@
     <span data-alpha-input-drag-background aria-hidden="true" style="position:absolute;inset:0;z-index:0;border-radius:inherit;touch-action:none"></span>
     <button data-alpha-input-drag-alpha class="alpha-mark-fill" aria-label="{{barAlphaLabel}}" onClick="{{openSheet}}" style="position:relative;z-index:1;touch-action:none;width: 44px; height: 44px; border-radius: 22px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; font-family: Denton, Fraunces, Georgia, serif; font-style: italic; font-size: 24px; flex-shrink: 0"><span class="alpha-compute-mark" aria-hidden="true"></span></button>
     <sc-if value="{{barAlphaControls}}"><button class="ib chat-attach-files" aria-label="Chat actions" aria-haspopup="dialog" aria-expanded="{{chatTools.open}}" disabled="{{chatTools.disabled}}" onPointerDown="{{composerPointer}}" onClick="{{chatTools.toggle}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></sc-if>
-    <sc-if value="{{messages.showComposer}}"><sc-if value="{{messages.nativeMmsAvailable}}"><button class="ib" aria-label="Add picture" onClick="{{messages.nativeAttach}}" disabled="{{messages.nativeBusy}}" style="position:relative;z-index:1;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button></sc-if></sc-if>
+    <sc-if value="{{chatTools.messageAttachments}}"><button class="ib chat-attach-files" data-alpha-message-attach aria-label="Message attachments" aria-haspopup="dialog" aria-expanded="{{chatTools.messageOpen}}" disabled="{{chatTools.messageBusy}}" onPointerDown="{{composerPointer}}" onClick="{{chatTools.toggleMessages}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.plus}}"></path></svg></button></sc-if>
     <span class="alpha-bar-field-wrap" ref="{{composerDockRef}}" style="z-index:1"></span>
     <sc-if value="{{barAlphaControls}}">
     <sc-if value="{{canStopReply}}"><button aria-label="Stop reply" onClick="{{stopReply}}" style="position:relative;z-index:1;width: 44px; height: 44px; border-radius: 22px; flex-shrink: 0; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"></rect></svg></button></sc-if>

@@ -133,7 +133,6 @@ if (!fixture) {
   selected = installSelectedDocumentAdapter(Component, VIEWS);
   installPrototypeCameraAdapter(Component, VIEWS);
   installAgentAdapter(Component, VIEWS);
-  installChatTools(Component);
   installReminderAdapter(Component, VIEWS);
   installCalendarAdapter(Component, VIEWS, {active:deviceCalendarScope});
   if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS,secureConnectionStore);installPhoneAdapter(Component,VIEWS);}
@@ -181,6 +180,7 @@ if (!fixture) {
   installSharePanelAdapter(Component,VIEWS);
 }
 if(devSurfacesEnabled&&simulatedApps)installSimulatedApps(Component,VIEWS,simulatedApps);
+installChatTools(Component);
 if(developmentAgentWorkflows){installWorkflowAdapter(Component,VIEWS);installAutomationsAdapter(Component,VIEWS);}
 installSubviewAccessibility(VIEWS);
 installCalendarMonthFocus(Component, VIEWS);

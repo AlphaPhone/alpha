@@ -429,8 +429,11 @@ test('clearing the text in the bar sends only the remaining picture on the next 
   const send = barSend(page);
   const body = 'These words must not go with the picture again.';
   const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1kAAAAASUVORK5CYII=', 'base64');
+  await page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Message attachments', exact: true}).click();
+  const menu = page.getByRole('dialog', {name: 'Message attachments', exact: true});
+  await expect(menu.getByRole('button')).toHaveText(['Camera','Add media']);
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', {name: 'Add picture', exact: true}).click();
+  await menu.getByRole('button', {name: 'Add media', exact: true}).click();
   await (await chooser).setFiles({name: 'picture.png', mimeType: 'image/png', buffer: picture});
   await expect(page.getByRole('button', {name: 'Remove picture-1.png'})).toBeVisible();
   await draft.fill(body);

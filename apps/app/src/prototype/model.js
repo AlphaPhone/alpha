@@ -747,7 +747,7 @@ function msgSetDraft(api, pid, d) { api.set(msgDraftsPatch(api.get("messages"), 
 function msgSubmit(api, pid) {
   var s = api.get("messages"); var fs = msgFiles(api, s.attach); var d = msgDraft(s, pid);
   var tx = String(d.text).trim(); if (!tx && !fs.length) return null;
-  return msgSend(api, pid, tx, null, fs, Object.assign(msgDraftsPatch(s, pid, emptyDraft()), { tray: false, attach: null }));
+  return msgSend(api, pid, tx, null, fs, Object.assign(msgDraftsPatch(s, pid, emptyDraft()), { attach: null }));
 }
 /* Send on the draft bubble (AC-15): the same Send, then the bubble shows as sent and Alpha notes it quietly. */
 function msgBubbleSend(api, pid) {
@@ -760,7 +760,7 @@ function msgBubbleSend(api, pid) {
 }
 function msgOpenThread(api, pid, local) {
   var st = api.get("messages"); var u = Object.assign({}, st.unread); delete u[pid];
-  api.set({ thread: pid, compose: null, unread: u, tray: false, q: "", local: local !== false });
+  api.set({ thread: pid, compose: null, unread: u, q: "", local: local !== false });
 }
 /* A draft Alpha placed is shown where it will be sent: the stage moves to that thread with the chat
    kept open (over the list, it returns with Back), or Messages opens on it from another app. */
@@ -817,7 +817,7 @@ function msgBar(st, api) {
 
 registerView("messages", {
   title: "Messages", icon: "bubble", aliases: ["texts", "sms", "text"],
-  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, tray: false, typing: null, q: "", filter: null, searching: false, sentDraft: null, local: false, slide: null },
+  state: { threads: MSG_SEED, unread: MSG_UNREAD, extra: [], botI: {}, thread: null, compose: null, text: "", drafts: {}, attach: null, typing: null, q: "", filter: null, searching: false, sentDraft: null, local: false, slide: null },
   persist: ["threads", "unread", "extra"],
   jumps: [[null, "Messages"], ["thread", "Thread"], ["new", "New message"]],
   preset: function (sub) {
@@ -826,7 +826,6 @@ registerView("messages", {
   },
   badge: function (st) { var u = st.unread || {}; return Object.keys(u).some(function (k) { return u[k] > 0; }); },
   back: function (st, api) {
-    if (st.tray) { api.set({ tray: false }); return true; }
     // Opened from this app's list: back to the list. Deep-linked (contacts, shade, chat, share): hand back to the shell's stack.
     if (st.thread || st.compose) { var u = Object.assign({}, st.unread); var tp = st.thread || st.compose; if (typeof tp === "string") delete u[tp]; api.set({ thread: null, compose: null, text: "", attach: null, q: "", unread: u }); return !!st.local; }
     // Back closes the header search and the filter it typed, as in Inbox.
@@ -1008,11 +1007,7 @@ registerView("messages", {
           undo: function () { msgSetDraft(api, tp, draftUndone(msgDraft(api.get("messages"), tp))); }
         } : null,
         atts: atts.map(function (f) { return { name: f.name, rm: function () { api.set({ attach: (api.get("messages").attach || []).filter(function (x) { return x !== f.id; }) }); } }; }),
-        hasAtts: atts.length > 0,
-        tray: !!st.tray, trayCss: st.tray ? "background:var(--fg);color:var(--bg);transform:rotate(45deg)" : "background:var(--s2);color:var(--fg)",
-        toggleTray: function () { api.set({ tray: !api.get("messages").tray }); },
-        camera: function () { api.open("camera", { mode: "photo" }); },
-        photos: MSG_PHOTOS.map(function (g, i) { return { css: "background:" + imgBg("msg" + i, g), label: "Send photo " + (i + 1), pick: function () { msgSend(api, tp, null, i); api.set({ tray: false }); } }; })
+        hasAtts: atts.length > 0
       };
     }
 
