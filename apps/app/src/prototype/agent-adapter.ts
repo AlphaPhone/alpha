@@ -1423,7 +1423,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           const queued=await deletions.reviewAgentReminder({operationId,bindingHash,operation,journalIdentity});
           if(queued.status==='queued')refreshDeletionViews();
           if(reminderDeletionRefusal(queued.status))return {status:'failed',summary:'Deletion was not queued.'};
-          return {status:queued.status==='cancelled'?'failed':'unknown',summary:queued.status==='queued'?'Deletion queued with 10 seconds to Undo.':queued.status==='cancelled'?'Deletion cancelled before admission.':'The deletion outcome is unconfirmed.'};
+          return {status:queued.status==='cancelled'?'failed':'unknown',summary:queued.status==='queued'?'Deletion queued with 10 seconds to Undo.':queued.status==='cancelled'?'Nothing was deleted.':'The deletion outcome is unconfirmed.'};
         }
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
         // Publish the new revision only after the receipt attempt; refreshing here

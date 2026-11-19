@@ -301,7 +301,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
             const receipt=session?await nativeLibrary.saveVideoEdit({sessionId:session.sessionId,...parameters}):await browserPhotoLibrary.saveVideoCopy({id:source.id,revision:row.mutationRevision!,operationId,edit:parameters},signal);
             await pendingCopy?.checking;
             await finishEdit(receipt,owner,ticket);return receipt.status==='saved';
-          }catch{if(ticket.intent)await recoverEdit(owner,ticket);else if(current()){owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Copy request could not be retained. Check saved-copy recovery before another save.':'Save failed');}return false;}
+          }catch{if(ticket.intent)await recoverEdit(owner,ticket);else if(current()){owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Couldn’t save a copy. Try again.':'Save failed');}return false;}
           finally{signal.removeEventListener('abort',abort);if(pendingCopy&&pendingNativeVideoCopy===pendingCopy){pendingNativeVideoCopy=undefined;if(pendingCopy.refresh&&!disposed)invalidateLibrary();}}
         },()=>{if(session){if(nativeVideoSession===session.sessionId)nativeVideoSession=undefined;void nativeLibrary.cancelVideoEdit({sessionId:session.sessionId}).catch(()=>{});}if(editEpoch===token){++editEpoch;closeVideoEdit=undefined;videoEditSource=undefined;}});
         return;
@@ -344,7 +344,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const intent=await readMediaCopyIntent();if(!intent||original&&JSON.stringify(original.intent)!==JSON.stringify(intent))return;
       ticket=original||{token:intent.token,epoch,source,intent};
       const value=await library.editResult({operationId:intent.token});if(!await finishEdit(value,owner,ticket)&&completionCurrent(ticket,owner)){owner.set({nativeCopyRecovery:true});owner.toast('Save unconfirmed');}
-    }catch{if(!disposed&&owner.isActive()&&editEpoch===epoch){owner.set({nativeCopyRecovery:true});owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Copy outcome could not be checked. Use saved-copy recovery; no additional copy was created.':'Save unconfirmed');}}
+    }catch{if(!disposed&&owner.isActive()&&editEpoch===epoch){owner.set({nativeCopyRecovery:true});owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Couldn’t confirm the copy was saved. Check Photos before trying again.':'Save unconfirmed');}}
     finally{recoveringEdit=false;}
   }
   async function saveEdit(owner:Bag,replace=false){
@@ -356,7 +356,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(!completionCurrent(ticket,owner)){await acknowledgeMediaCopyIntent(ticket.intent);return;}
       const value=await library.saveEdit({sessionId:current.sessionId,rotation:current.rotation,crop:current.crop,filter:current.filter,...(replace?{replace:true}:{})});
       if(!await finishEdit(value,owner,ticket)){if(edit===current)current.uncertain=true;await recoverEdit(owner,ticket);}
-    }catch{if(edit===current)current.uncertain=true;if(ticket.intent)await recoverEdit(owner,ticket);else if(completionCurrent(ticket,owner)){owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Copy request could not be retained. Check saved-copy recovery before another save.':'Save failed');}}
+    }catch{if(edit===current)current.uncertain=true;if(ticket.intent)await recoverEdit(owner,ticket);else if(completionCurrent(ticket,owner)){owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Couldn’t save a copy. Try again.':'Save failed');}}
     finally{if(edit===current){current.busy=false;if(completionCurrent(ticket,owner))owner.set({nativeEditRevision:Date.now()});}}
   }
   async function openCopyRecovery(owner:Bag){

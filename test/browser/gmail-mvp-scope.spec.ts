@@ -513,7 +513,7 @@ for(const retirement of ['leaves Inbox','withdraws Gmail changes'] as const)test
  const review=page.getByRole('dialog',{name:'Review mail operation',exact:true});
  if(!await review.isVisible())await page.getByRole('button',{name:'Mail review / receipt',exact:true}).click();
  await expect(review).toContainText(journal.requestId);
- await review.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ await review.getByRole('button',{name:'Check if this change went through',exact:true}).click();
  await expect(review.getByRole('status')).toContainText('Gmail reports that this change was not made.');
  await review.getByRole('button',{name:'Discard this operation',exact:true}).click();
  await expect.poll(saved).toBeNull();
@@ -534,7 +534,7 @@ test('Inbox selection stops after an uncertain result and keeps its receipt',asy
  const receipt=page.getByRole('dialog',{name:'Review mail operation',exact:true});
  await expect(receipt).toContainText(/outcome of this change is unknown/i);
  await expect(receipt.getByRole('button',{name:'Retry',exact:true})).toHaveCount(0);
- await receipt.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ await receipt.getByRole('button',{name:'Check if this change went through',exact:true}).click();
  expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
  expect((await gm(page)).dispatches).toHaveLength(1);
 });
