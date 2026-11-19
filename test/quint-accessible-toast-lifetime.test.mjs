@@ -15,7 +15,7 @@ import {checkAccessibleToastLifetime} from '../specs/quint/refinement/applicatio
 
 test("partial source contract: actual shell timers use the current Android accessibility timeout", {timeout: scaledTimeout(60000)}, async () => {
   const receipt = await checkAccessibleToastLifetime();
-  assert.equal(receipt.traceInputs.length, 15);
-  assert.equal(receipt.observedFields.length, 11);
+  assert.equal(receipt.traceInputs.length, 22);
+  assert.equal(receipt.observedFields.length, 13);
   assert.ok(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound);
 });

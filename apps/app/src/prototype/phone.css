@@ -32,6 +32,11 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
 .alpha-phone [data-alpha-toast] { --alpha-toast-row:56px; --alpha-toast-top:max(8px,min(var(--alpha-notice-top),calc(100% - var(--alpha-dock-clearance,102px) - 12px - var(--alpha-toast-row)))); position:absolute; top:var(--alpha-toast-top); left:16px; right:16px; z-index:97; min-height:0; max-height:max(var(--alpha-toast-row),calc(100% - var(--alpha-toast-top) - var(--alpha-dock-clearance,102px) - 12px)); overflow:auto; }
 [data-alpha-toast] { display:flex; align-items:flex-start; justify-content:center; pointer-events:none; }
 [data-alpha-toast] > * { flex-shrink:0; }
+/* Persistent notices (lost work, a privacy state left on) stay in the chat's notice area, in the
+ * page flow so they cover nothing, until dismissed. */
+.alpha-persistent-notice { margin:0 20px 8px; min-height:44px; box-sizing:border-box; padding:4px 4px 4px 16px; border-radius:22px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; display:flex; gap:12px; align-items:center; }
+.alpha-persistent-notice > span { flex-grow:1; min-width:0; padding:6px 0; overflow-wrap:anywhere; }
+.alpha-persistent-notice > button { flex-shrink:0; min-height:40px; padding:0 14px; border-radius:20px; color:var(--fg); background:var(--s1); font-weight:700; font-size:14px; }
 .alpha-chat-notices { max-height:30%; overflow:auto; flex-shrink:0; }
 .alpha-chat-notices:empty { display:none; }
 /* Full-screen chat on the launcher is drawn under Android's status bar. Its header starts 16

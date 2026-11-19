@@ -228,7 +228,7 @@ The complete Cartesian product of all domain variables is not enumerated by
 these checks. The inventory records domain allocation, not a proof that every
 source variable or every possible implementation behavior refines its model.
 
-`AccessibleToastLifetime` checks native timeout refresh ownership and the shell's toast timer replacement, queueing and expiration: an Undo offer or an error notice keeps its slot, and a later toast waits behind it.
+`AccessibleToastLifetime` checks native timeout refresh ownership and the shell's toast timer replacement, queueing and expiration: a later toast waits behind the visible one (a passive one yields after 1.9 s; an Undo or error replaces a passive one at once; at most three wait, the lowest-rank oldest dropped on overflow), and that a persistent notice is announced once as an error toast and stays listed in the chat notice area, with no timer, until its Dismiss button.
 
 ## Alpha OS defaults and first-run staging
 

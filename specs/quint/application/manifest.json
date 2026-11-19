@@ -2192,11 +2192,13 @@
   },
   {
     "stateMapping": {
-      "queued": "FIFO pending Undo/action identities; consecutive passive notices coalesce, without replacing an active Undo",
+      "queued": "FIFO of waiting toasts: a later toast waits behind the visible one, except that an Undo offer or error replaces a visible passive one; consecutive passive toasts coalesce; at most three wait, and on overflow the oldest of the lowest rank (passive, Undo, error) is dropped",
       "started/pending": "Observed native read calls and unresolved replies",
       "held/timerDelay": "Focus hold on the visible toast and the delay of its single owned expiry timer",
+      "readMin": "toastReadMin: the short reading time (1.9 s, scaled) after which a passive toast yields to a waiting passive one; equal to the full duration for Undo and error toasts",
       "scale/latest": "Last known timeout percentage and exact current native read token",
-      "message/undo/duration": "Shell message identity, retained Undo and its scheduled timeout (an Undo offer stays 10 s before scaling, matching the reviewed-deletion notice; a failure changes only how the toast is announced, not its lifetime)"
+      "message/undo/duration": "Shell message identity, retained Undo and its scheduled timeout (an Undo offer stays 10 s before scaling, matching the reviewed-deletion notice; a failure changes only how the toast is announced, not its lifetime)",
+      "notices": "persistentNotices / S().notices: persistent notices (lost work, a privacy state left on) listed in the chat notice area with no timer until their Dismiss button; each is also announced once as an error toast"
     },
     "step": "step",
     "symbols": [
@@ -2215,6 +2217,22 @@
       {
         "path": "apps/app/src/runtime/accessibility-timeout.ts",
         "name": "accessibilityTimeoutScale"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "toastRank"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "showToast"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "addNotice"
+      },
+      {
+        "path": "apps/app/src/prototype/model.js",
+        "name": "dismissNotice"
       }
     ],
     "init": "init",
@@ -2237,13 +2255,21 @@
       "heldUndoOfferRetainsNextUndoTest",
       "errorNoticeKeepsItsSlotTest",
       "queuedErrorIsNeverCollapsedTest",
-      "repeatedErrorIsShownOnceTest"
+      "repeatedErrorIsShownOnceTest",
+      "passiveNoticeWaitsBehindPassiveTest",
+      "repeatedPassiveIsShownOnceTest",
+      "longPassiveNoticeYieldsAfterReadingTimeTest",
+      "undoWindowIsNotShortenedTest",
+      "undoTakesPassiveNoticePlaceTest",
+      "fullQueueDropsLowestRankTest",
+      "persistentNoticeOutlivesItsToastTest",
+      "persistentNoticesKeepNewestThreeTest"
     ],
     "abstractions": [
       "Three native read identities with sampled timeout percentages and explicit rejection.",
-      "One active shell toast and up to three queued messages. An Undo offer or an error notice holds the slot; a later toast waits behind it. Callback authority, domain expiry, modal presentation and physical scheduling remain separate.",
-      "One active shell toast and at most one waiting message. Modal presentation, Undo action selection and real platform scheduling are separate.",
-      "expire stands for every close of the visible toast (timer, tap, Undo); closing an Undo offer from its focused button and the focus return are outside this model."
+      "One active shell toast and up to three queued messages. A later toast waits behind the visible one (a passive one yields after its short reading time); an Undo offer or error replaces a visible passive one. Callback authority, domain expiry, modal presentation and physical scheduling remain separate.",
+      "expire stands for every close of the visible toast (timer, tap, Undo); closing an Undo offer from its focused button and the focus return are outside this model.",
+      "Persistent notices use the same three message identities, so the three-notice cap is stated as an invariant but its overflow is not reached; the code drops the oldest."
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -2253,13 +2279,17 @@
     "path": "specs/quint/application/AccessibleToastLifetime.qnt",
     "invariants": [
       "requestOwnership",
-      "toastOwnership"
+      "toastOwnership",
+      "queueBounded"
     ],
     "witnesses": [
       "QueuedBehindUndoWitness",
       "QueuedWhileHeldWitness",
       "ScaledQueuedBehindUndoWitness",
-      "QueuedBehindErrorWitness"
+      "QueuedBehindErrorWitness",
+      "QueuedBehindPassiveWitness",
+      "PersistentNoticeWithToastWitness",
+      "FullQueueWitness"
     ],
     "invariant": "safety"
   },

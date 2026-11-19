@@ -5404,7 +5404,7 @@ var BASE = {
   // Quick-settings facts; tiles stay neutral until a fact is known.
   q: Object.assign({}, QUICK_SETTINGS),
   nGone: [], nSlide: null, bright: 70, theme: null, fs: null, now: Date.now(),
-  charName: ALPHA_PRODUCT.identity.characterName, vs: {}, secure: false, stack: [], toastUndo: false, drawer: false, drawerQ: "",
+  charName: ALPHA_PRODUCT.identity.characterName, vs: {}, secure: false, stack: [], toastUndo: false, notices: [], drawer: false, drawerQ: "",
   msgs: [],
   // AP-16 stage history while the chat is open: where each Alpha stage switch came from (D11).
   stageFrom: []
@@ -5560,21 +5560,49 @@ class Component extends DCLogic {
   stopEvery(grp) { this.I = this.I || {}; (this.I[grp] || []).forEach(clearInterval); this.I[grp] = []; }
   toast(msg, opts) {
     opts = opts || {};
-    // An incoming notice must not replace a restore action the owner can still choose, or an
-    // error before it is read. Restore callbacks retain their own source/revision checks;
-    // queueing never extends a provider or deletion deadline. Consecutive passive notices share
-    // the next slot; an Undo or error is never collapsed away, and a notice identical to the one
-    // it would wait behind is not queued again.
-    if (this.toastActive && (this.undoFn || this.toastKind === "error")) {
+    // A persistent notice (lost work, a privacy state left on) is announced once like a failure and
+    // also stays in the chat's notice area, with no timer, until the owner dismisses it there. It
+    // never holds the toast slot, so other feedback is not held back behind it.
+    if (opts.kind === "persistent") { this.addNotice(msg); opts = { kind: "error" }; }
+    // An incoming notice waits its turn, so a restore action the owner can still choose and an
+    // error are never lost before they are read. A passive notice with another passive notice
+    // waiting yields once it has been shown for the short reading time (1.9 s, scaled), so newer
+    // feedback is not held behind it for long; an Undo or error takes a passive notice's place at
+    // once, so a restore window never starts late. Restore callbacks retain their own
+    // source/revision checks; queueing never extends a provider or deletion deadline. Consecutive
+    // passive notices share the next slot; an Undo or error is never collapsed away, and a notice
+    // identical to the one it would wait behind is not queued again. The queue holds at most three
+    // notices: when it overflows, the oldest notice of the lowest rank goes (passive, then Undo,
+    // then error).
+    var next = { msg: msg, undo: opts.undo || null, kind: opts.kind === "error" ? "error" : undefined }, rank = this.toastRank;
+    var passiveShown = this.toastActive && !this.undoFn && !this.toastKind;
+    if (this.toastActive && !(passiveShown && rank(next) > 0)) {
       var queue = this.toastQueue || (this.toastQueue = []), last = queue[queue.length - 1];
-      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind === "error" ? "error" : undefined };
-      var tail = last || { msg: this.toastMessage, undo: this.undoFn, kind: this.toastKind === "error" ? "error" : undefined };
+      var tail = last || { msg: this.toastMessage, undo: this.undoFn, kind: this.toastKind || undefined };
       if (!next.undo && !tail.undo && tail.msg === msg && tail.kind === next.kind) return;
-      if (last && !last.undo && last.kind !== "error" && !next.undo && next.kind !== "error") queue[queue.length - 1] = next;
+      if (last && rank(last) === 0 && rank(next) === 0) queue[queue.length - 1] = next;
       else queue.push(next);
+      if (queue.length > 3) {
+        var drop = 0;
+        queue.forEach(function (row, index) { if (rank(row) < rank(queue[drop])) drop = index; });
+        queue.splice(drop, 1);
+      }
+      if (passiveShown && !this.toastHeld) this.scheduleToast();
       return;
     }
     this.showToast(msg, opts);
+  }
+  toastRank(row) { return row.kind === "error" ? 2 : row.undo ? 1 : 0; }
+  // Persistent notices: at most three, oldest dropped first; the same sentence is listed once.
+  addNotice(msg) {
+    var list = this.persistentNotices || [];
+    if (list.indexOf(msg) >= 0) return;
+    this.persistentNotices = list.concat([msg]).slice(-3);
+    this.setState({ notices: this.persistentNotices.slice() });
+  }
+  dismissNotice(msg) {
+    this.persistentNotices = (this.persistentNotices || []).filter(function (text) { return text !== msg; });
+    this.setState({ notices: this.persistentNotices.slice() });
   }
   showToast(msg, opts) {
     opts = opts || {};
@@ -5584,15 +5612,20 @@ class Component extends DCLogic {
     this.toastHeld = inside; this.toastActive = true;
     this.toastSequence = (this.toastSequence || 0) + 1;
     // Undo stays as long as the reviewed-deletion notice (10 s) so the two restore offers match.
-    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * accessibilityTimeoutScale();
+    var scale = accessibilityTimeoutScale();
+    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * scale;
     this.undoFn = opts.undo || null;
     this.toastKind = opts.kind === "error" ? "error" : ""; this.toastMessage = msg;
+    this.toastReadMin = opts.undo || this.toastKind ? this.toastDuration : Math.min(this.toastDuration, 1900 * scale);
+    this.toastShownAt = Date.now();
     this.setState({ toast: msg, toastUndo: !!opts.undo }); this.scheduleToast();
   }
   scheduleToast() {
     this.clear("t"); if (!this.toastActive || this.toastHeld) return;
-    var self = this, sequence = this.toastSequence;
-    this.later(function () { if (self.toastSequence === sequence && !self.toastHeld) self.closeToast(); }, this.toastDuration, "t");
+    var self = this, sequence = this.toastSequence, delay = this.toastDuration;
+    // A passive notice with another waiting keeps only what is left of its short reading time.
+    if (!this.undoFn && !this.toastKind && this.toastQueue?.length) delay = Math.max(0, this.toastReadMin - (Date.now() - this.toastShownAt));
+    this.later(function () { if (self.toastSequence === sequence && !self.toastHeld) self.closeToast(); }, delay, "t");
   }
   holdToast() { if (this.toastActive) { this.toastHeld = true; this.clear("t"); } }
   resumeToast() { this.toastHeld = false; if (this.toastActive) this.scheduleToast(); }
@@ -6368,6 +6401,8 @@ class Component extends DCLogic {
       toastRole: S.toastUndo ? undefined : "button", toastTabIndex: S.toastUndo ? undefined : 0,
       toastTap: S.toastUndo ? undefined : function () { self.closeToast(); },
       toastKey: S.toastUndo ? undefined : function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); self.closeToast(); } },
+      // A persistent notice is closed only by its own Dismiss button.
+      notices: (S.notices || []).map(function (text) { return { key: text, text: text, dismiss: function () { self.dismissNotice(text); } }; }),
       doUndo: function () { var f = self.undoFn; self.closeToast(); if (f) f(); },
       hasOngoing: !!ongoing && isOn, ongoing: ongoing || {}, sbWifi: S.q.wifi, sbPlane: S.q.plane,
       goCalendar: function () { self.openView("calendar", copy("shell").homeCalendar || null); },

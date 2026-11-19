@@ -10,6 +10,11 @@
  *   api.toast(errorNotice(error, 'Couldn’t share. Try again.'), ERROR_TOAST);
  */
 export const ERROR_TOAST = Object.freeze({kind: 'error' as const});
+/**
+ * A notice the owner must not miss (lost work, a privacy state left on): it is announced once like a
+ * failure and also stays in the chat notice area, with no timer, until the owner presses Dismiss.
+ */
+export const PERSISTENT_NOTICE = Object.freeze({kind: 'persistent' as const});
 
 const LIMIT = 200;
 // Words that describe how the app works, not what happened.
