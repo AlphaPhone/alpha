@@ -252,7 +252,8 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
-          canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg'),
+          // Offered only when Messages can take this picture: a PNG or JPEG whose size the selection reports within its limit.
+          canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg')&&views.messages.pictureFits?.(mime,selected.result.size)===true,
           message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, ...previewMeta(selected.result,mime), d: '',
           textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,

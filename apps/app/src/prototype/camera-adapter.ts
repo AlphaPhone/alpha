@@ -1842,7 +1842,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const canReadAttachment=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments');
       data.v.canEmail=canReadAttachment&&typeof views.inbox.fileEmailTarget==='function';
       data.v.email=()=>emailPhoto(selected,currentApi);
-      data.v.canMessage=canReadAttachment&&typeof views.messages?.sharePicture==='function'&&/\.(jpe?g|png)$/i.test(selected.name||'');
+      // Offered only when Messages can take this picture: a JPEG or PNG whose known size is within its limit.
+      const pictureType=/\.png$/i.test(selected.name||'')?'image/png':/\.jpe?g$/i.test(selected.name||'')?'image/jpeg':'';
+      data.v.canMessage=canReadAttachment&&typeof views.messages?.sharePicture==='function'&&views.messages.pictureFits?.(pictureType,selected.size)===true;
       data.v.message=()=>views.messages.sharePicture(
         async()=>decodedFile(await photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!})),
         ()=>!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected),

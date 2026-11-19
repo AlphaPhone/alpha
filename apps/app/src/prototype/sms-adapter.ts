@@ -65,6 +65,10 @@ const quietNotices=new Set([
 ]);
 const failureNotices=new Set([receiptLabel('failed'),mmsReceiptLabel('failed')]);
 const MMS_PICTURES:Record<string,string>={'image/jpeg':'jpg','image/png':'png','image/gif':'gif'};
+/** The largest picture Messages attaches. */
+const MMS_PICTURE_BYTES=1024*1024;
+/** A picture Messages can attach: a JPEG, PNG or GIF whose size is known and within MMS_PICTURE_BYTES. */
+const mmsPictureFits=(type:string,size:unknown)=>!!MMS_PICTURES[type]&&typeof size==='number'&&Number.isInteger(size)&&size>0&&size<=MMS_PICTURE_BYTES;
 /* Native rejects with these codes before it journals or sends anything, so its message is the
  * reason and the next Send opens a new review. */
 const SMS_NOT_SENT=new Set(['too-long','invalid','busy','unavailable']);
@@ -683,7 +687,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(sentTo)noteSent(sentTo);}
  async function readPicture(file:File):Promise<Omit<MmsAttachmentDraft,'name'>>{
   if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');
-  if(!file.size||file.size>1024*1024)throw Error('Each picture must be smaller than 1 MB.');
+  if(!mmsPictureFits(file.type,file.size))throw Error('Each picture must be smaller than 1 MB.');
   return {contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())};
  }
  function addPictures(pictures:Omit<MmsAttachmentDraft,'name'>[]){
@@ -692,6 +696,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    for(const picture of pictures)attachments.push({...picture,name:`picture-${++pictureSeq}.${MMS_PICTURES[picture.contentType]}`});
   });
  }
+ /** Photos and Files offer Messages only for a picture `readPicture` accepts, so none ends in a size refusal. */
+ views.messages.pictureFits=mmsPictureFits;
  views.messages.sharePicture=async(read:()=>Promise<File>,current:()=>boolean)=>{
   const shell=owner;
   if(!shell||shell.props?.assistantSurface||!current()||!editable())throw Error('Messages is unavailable.');

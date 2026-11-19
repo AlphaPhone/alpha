@@ -48,7 +48,7 @@ export type NativeResult = {
   uri?: string;
   name?: string;
   mimeType?: string;
-  /** Bytes and last change (ms) when the provider reports them. */
+  /** Bytes and last change (ms) when the provider reports them; an unknown size is never assumed small. */
   size?: number;
   modified?: number;
   transcript?: string;
