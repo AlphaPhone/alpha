@@ -285,8 +285,8 @@ function planActionCard(action:unknown):Shell|undefined{
   if(action==='retry')return {type:'generic',icon:'info',title:`Check ${selectedCloudName()} again`,sub:'',planAction:'retry'};
   // AI was believed connected yet the agent answered without it: check what this phone has bound.
   if(action==='provider')return {type:'generic',icon:'info',title:`Check ${selectedCloudName()} again`,sub:'',planAction:'provider'};
-  // Cloud declined a turn for billing: open the account's subscription controls.
-  if(action==='funding')return {type:'generic',icon:'info',title:'Subscription',sub:'',planAction:'funding'};
+  // Cloud declined a turn for billing: open the account's plan controls, named as in Account.
+  if(action==='funding')return {type:'generic',icon:'info',title:'Manage plan',sub:'',planAction:'funding'};
   return undefined;
 }
 /** A saved row keeps its authoritative content and any richer card; only a missing final plan control is enriched. */
