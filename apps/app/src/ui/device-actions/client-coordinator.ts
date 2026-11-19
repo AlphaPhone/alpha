@@ -704,6 +704,8 @@ export class DeviceActionCoordinator<
     string,
     { context: string; expiresAt: number }
   >();
+  /** Pending call and text proposals whose number is not the one the owner wrote. */
+  private contradictedNumbers = new Set<string>();
   constructor(
     ports: DeviceActionCoordinatorPorts<C, R>,
     private readonly options: {
@@ -1247,6 +1249,8 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
+    for (const id of this.contradictedNumbers)
+      if (!pendingIds.has(id)) this.contradictedNumbers.delete(id);
     const items: ReviewItem[] = [];
     for (const proposal of valid) {
       // An approval whose claim never arrived is shown again: deciding is
@@ -1296,6 +1300,24 @@ export class DeviceActionCoordinator<
                   : {}),
               }
             : {}),
+        });
+        continue;
+      }
+      // The owner wrote a number and the model proposed another one: that is
+      // the model's mistake, not a request, so there is no card to approve by
+      // habit. It stays refused on later reviews, which carry no request text.
+      if (
+        this.options.currentRequestTelephonyPolicy &&
+        proof &&
+        proposal.requestMessageId === proof.messageId &&
+        numberContradictsRequest(proposal.operation, proof.text)
+      )
+        this.contradictedNumbers.add(proposal.id);
+      if (this.contradictedNumbers.has(proposal.id)) {
+        items.push({
+          proposalId: proposal.id,
+          proposal: null,
+          notice: `${card.title}: ${NUMBER_MISMATCH_NOTICE}`,
         });
         continue;
       }
@@ -3278,6 +3300,67 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
     (isTelephonyAction(operation) && !isTelephonyRead(operation)) ||
     isClockHandoffOperation(operation)
   );
+}
+export const NUMBER_MISMATCH_NOTICE =
+  "That is not the number in your message, so nothing was called or sent. Ask again with the number.";
+/** The digits of a dial number, or "" for text that is not one. */
+function dialDigits(written: string): string {
+  try {
+    return phoneDialNumber(written).replace(/\D/g, "");
+  } catch {
+    return "";
+  }
+}
+/**
+ * Whether two dial numbers are the same line: the same digits, or the same last
+ * ten when a country code or trunk prefix is written on one side only.
+ */
+function sameLine(a: string, b: string): boolean {
+  return (
+    a === b || (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10))
+  );
+}
+/**
+ * A call or text for a number other than the one the owner wrote in the
+ * message that asked for it. The model sometimes returns a different number
+ * than the message says (seen on a Pixel: "call 415-555-0100" produced a card
+ * for another number), and a card only protects an owner who reads it. A
+ * message that writes no number (a contact name, "the number in that email")
+ * is not judged here and keeps its ordinary card; a number that is part of the
+ * text being sent is the message's content, not its addressee.
+ */
+export function numberContradictsRequest(
+  operation: ReviewableDeviceOperation,
+  request: string,
+): boolean {
+  const op = operation as {
+    type: string;
+    target?: { kind?: string; number?: string };
+    recipients?: string[];
+    body?: string;
+  };
+  const proposed =
+    op.type === "sms_send"
+      ? (op.recipients ?? [])
+      : (op.type === "phone_call" ||
+            op.type === "phone_dial" ||
+            op.type === "sms_compose") &&
+          op.target?.kind === "number" &&
+          op.target.number
+        ? [op.target.number]
+        : [];
+  if (!proposed.length) return false;
+  const body = typeof op.body === "string" ? op.body.replace(/\D/g, "") : "";
+  const written = [...request.matchAll(/\+?[\d(][\d ().-]*\d/g)]
+    .map(([text]) => dialDigits(text))
+    .filter(
+      (digits) => digits.length >= 7 && !(body && body.includes(digits)),
+    );
+  if (!written.length) return false;
+  return proposed.some((number) => {
+    const digits = dialDigits(number);
+    return !written.some((wrote) => sameLine(wrote, digits));
+  });
 }
 /** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
 /** An empty keypad, or a number written in the owner's own current message. */
