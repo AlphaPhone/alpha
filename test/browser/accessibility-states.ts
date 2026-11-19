@@ -145,7 +145,7 @@ export const LIVE_STATES: State[] = [
     await openLegacyNotes(page,[{id:'retained-accessibility-note',kind:'text',title:'Retained note',body:'Existing text remains available.'}]);
     await expect(page.getByRole('button',{name:'Open Retained note',exact:true})).toBeVisible();await settle(page);
   }},
-  legacyNotes('Notes recently deleted', ['New note', 'More', 'Delete', 'Recently deleted'], 'notes-trash'),
+  legacyNotes('Notes recently deleted', ['New note', 'More', 'Delete', 'Notes options', 'Recently deleted'], 'notes-trash'),
   live('Files', ['Files']),
   live('Workflows', ['Workflows']),
   live('Settings', ['Settings']),
