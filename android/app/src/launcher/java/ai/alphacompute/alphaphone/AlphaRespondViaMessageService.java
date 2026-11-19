@@ -36,7 +36,9 @@ public final class AlphaRespondViaMessageService extends Service {
     PendingIntent open = PendingIntent.getActivity(this, 0, review, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     NotificationManager notifications = getSystemService(NotificationManager.class);
     if (notifications != null) {
-     notifications.createNotificationChannel(new NotificationChannel(config.channelId, config.channelName, NotificationManager.IMPORTANCE_HIGH));
+     NotificationChannel channel = new NotificationChannel(config.channelId, config.channelName, NotificationManager.IMPORTANCE_HIGH);
+     channel.setDescription(AlphaMessageNotices.CHANNEL_DESCRIPTION);
+     notifications.createNotificationChannel(channel);
      notifications.notify(TAG, 1, new Notification.Builder(this, config.channelId).setSmallIcon(config.notificationIcon)
       .setContentTitle(TITLE).setContentText(TEXT).setAutoCancel(true).setContentIntent(open)
       .setVisibility(Notification.VISIBILITY_PRIVATE).build());

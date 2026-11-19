@@ -129,6 +129,7 @@ public final class AlphaMessageNoticesTest {
     assertEquals("Reply", notice.actions[0].title.toString());
     assertEquals("Mark as read", notice.actions[1].title.toString());
     assertEquals("the notice uses the configured Messages channel", config.channelId, notice.getChannelId());
+    assertEquals(AlphaMessageNotices.CHANNEL_DESCRIPTION, context.getSystemService(NotificationManager.class).getNotificationChannel(config.channelId).getDescription());
     Intent open = Shadows.shadowOf(notice.contentIntent).getSavedIntent();
     assertEquals(Open.class.getName(), open.getComponent().getClassName());
     assertEquals(Uri.fromParts("eliza-sms-notice", "thread:7", null), open.getData());
