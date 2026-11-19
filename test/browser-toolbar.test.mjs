@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 
 async function browser(run){
- const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext']});
+ // The native bookmark store keeps addresses only.
+ let marks=[];
+ const setBookmark=input=>{marks=input.saved?[...marks.filter(url=>url!==input.url),input.url]:marks.filter(url=>url!==input.url);return {urls:marks};};
+ const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark','downloads','clearBrowsingData'],results:{bookmarks:()=>({urls:marks}),setBookmark,clearBrowsingData:()=>({closed:[]})}});
  let sequence=0;
  const page=async(id,url,title)=>{host.emit('stateChanged',{id,sequence:++sequence,navigation:'n'+sequence,url,title,committed:true,loading:false,canBack:false,canForward:false,error:''});await host.sync();};
  const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
@@ -71,5 +74,60 @@ test('a private tab records no visit time',async()=>{
   host.rendered().openPrivate();await host.sync();
   const id=await type('https://private.example/');await page(id,'https://private.example/','Private');
   assert.deepEqual(host.state().visits,[]);assert.deepEqual(host.state().visitedAt,{});
+ });
+});
+
+test('a bookmark keeps the name of the page it saved, even from a private tab',async()=>{
+ await browser(async({host,page,type})=>{
+  host.rendered().openPrivate();await host.sync();
+  const id=await type('https://private.example/recipe');await page(id,'https://private.example/recipe','Lentil soup');
+  assert.deepEqual(host.state().visits,[],'the private visit is not kept');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  assert.deepEqual(host.state().marks,['https://private.example/recipe']);
+  host.rendered().openLib();await host.sync();
+  const [row]=host.rendered().libRows;
+  assert.equal(row.name,'Lentil soup','the bookmark shows the page name, not only the site');
+  assert.equal(row.host,'private.example/recipe');
+  host.rendered().onLibQuery({target:{value:'lentil'}});
+  assert.deepEqual(host.rendered().libRows.map(row=>row.id),['https://private.example/recipe'],'the name can be searched');
+  host.rendered().onLibQuery({target:{value:''}});
+  host.rendered().libRows[0].remove();await host.settle();await host.sync();
+  assert.deepEqual(host.state().marks,[]);
+  assert.equal('https://private.example/recipe' in host.state().titles,false,'a removed bookmark forgets its name');
+ });
+});
+
+test('a bookmark saved without a page name shows its site',async()=>{
+ await browser(async({host,page,type})=>{
+  host.rendered().openPrivate();await host.sync();
+  const id=await type('https://untitled.example/a');await page(id,'https://untitled.example/a','');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  host.rendered().openLib();await host.sync();
+  assert.equal(host.rendered().libRows[0].name,'untitled.example');
+  assert.deepEqual(host.state().titles,{});
+ });
+});
+
+test('clearing browsing data keeps the names saved with bookmarks',async()=>{
+ await browser(async({host,page,type})=>{
+  const id=await type('https://kept.example/recipe');await page(id,'https://kept.example/recipe','Lentil soup');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  const other=await type('https://visited.example/');await page(other,'https://visited.example/','Visited only');
+  host.rendered().clearData();await host.settle();
+  const approve=[...host.page.window.document.querySelectorAll('button')].find(button=>button.textContent==='Clear data');
+  assert.ok(approve,'Clear browsing data asks first');approve.click();await host.settle();await host.sync();
+  assert.deepEqual(host.state().visits,[]);
+  assert.deepEqual(host.state().titles,{'https://kept.example/recipe':'Lentil soup'},'the bookmark keeps its name; the visit-only name is cleared');
+ });
+});
+
+test('the Downloads list\'s Show in Files opens Files at Downloads for this Browser only',async()=>{
+ await browser(async({host})=>{
+  host.rendered().openDownloads();await host.sync();
+  const session=host.calls.find(call=>call.name==='downloads').input.session;
+  host.emit('showDownloads',{session:'another-browser'});
+  assert.deepEqual(host.presets,[],'another Browser document\'s list opens nothing here');
+  host.emit('showDownloads',{session});
+  assert.deepEqual(host.presets,['files:folder']);
  });
 });

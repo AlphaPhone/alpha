@@ -1,6 +1,7 @@
 package ai.alphacompute.alphaphone;
 
 import ai.alphacompute.alphaphone.browser.AlphaBrowserCopy;
+import ai.alphacompute.alphaphone.browser.LinkHandoff;
 import ai.alphacompute.alphaphone.browser.AlphaBrowserDownloads;
 import ai.alphacompute.alphaphone.browser.AlphaReviewedReading;
 import ai.alphacompute.alphaphone.browser.AlphaSignInFields;
@@ -846,28 +847,30 @@ public class AlphaBrowserPlugin extends Plugin {
   Tab opener=t.opener==null?null:tabs.get(t.opener);
   boolean fresh=opener!=null&&!t.handedOff&&!t.committed&&t.lastCommittedUrl.isEmpty();
   Tab report=fresh?opener:t;
-  if(fresh){t.handedOff=true;if(!Objects.equals(presentedId,t.id)&&!Objects.equals(presentedId,opener.id)){closePopup(t);return;}}
-  else{
-   if(!Objects.equals(presentedId,t.id))return;
-   if(!gesture){notice(t,"Blocked a link to another app that opened without a tap.");return;}
-  }
-  Intent intent=BrowserExternalHandoff.intentFor(raw,getContext().getPackageName(),config().hostSchemes);
-  if(intent==null||(!BrowserExternalLinkPolicy.systemLink(raw)&&ownsRoute(intent))){notice(report,"This link type is not supported.");if(fresh)closePopup(t);return;}
+  if(fresh)t.handedOff=true;
+  boolean shownSelf=Objects.equals(presentedId,t.id),shownOpener=fresh&&Objects.equals(presentedId,opener.id);
+  // Resolve the app link only for a tab that may hand off at all.
+  Intent intent=(fresh?(shownSelf||shownOpener):(shownSelf&&gesture))?BrowserExternalHandoff.intentFor(raw,getContext().getPackageName(),config().hostSchemes):null;
+  boolean supported=intent!=null&&(BrowserExternalLinkPolicy.systemLink(raw)||!ownsRoute(intent));
   // A private tab leaves private browsing only after the owner says so, as the menu's
-  // "Open in another browser" does. The tap and pop-up rules above already held.
-  if(t.priv||report.priv){
-   // A fresh pop-up may be the shown tab rather than its opener, so the answer checks that
-   // the presentation did not change instead of which tab is shown.
-   long revision=report.navigation,shown=presentationRevision;
-   AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE).setMessage(AlphaBrowserCopy.LEAVE_PRIVATE_LINK)
-    .setPositiveButton(AlphaBrowserCopy.OPEN_APP,(d,w)->{siteDialogCancel=null;
-     if(paused||destroyed||report.dead||tabs.get(report.id)!=report||report.navigation!=revision||presentationRevision!=shown||(fresh&&tabs.get(t.id)!=t)){if(fresh)closePopup(t);return;}
-     launchHandoff(t,report,fresh,raw,intent);})
-    .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
-   showSiteDialog(report,dialog,()->{if(fresh)closePopup(t);});
-   return;
+  // "Open in another browser" does. The tap and pop-up rules hold first (LinkHandoff).
+  switch(LinkHandoff.decide(fresh,shownSelf,shownOpener,gesture,supported,t.priv||report.priv)){
+   case IGNORE:return;
+   case CLOSE_POPUP:closePopup(t);return;
+   case BLOCKED:notice(t,"Blocked a link to another app that opened without a tap.");return;
+   case UNSUPPORTED:notice(report,"This link type is not supported.");if(fresh)closePopup(t);return;
+   case ASK:{
+    long revision=report.navigation,shown=presentationRevision;
+    AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE).setMessage(AlphaBrowserCopy.LEAVE_PRIVATE_LINK)
+     .setPositiveButton(AlphaBrowserCopy.OPEN_APP,(d,w)->{siteDialogCancel=null;
+      if(!LinkHandoff.answerStillValid(!paused&&!destroyed,!report.dead&&tabs.get(report.id)==report,revision,report.navigation,shown,presentationRevision,fresh,tabs.get(t.id)==t)){if(fresh)closePopup(t);return;}
+      launchHandoff(t,report,fresh,raw,intent);})
+     .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
+    showSiteDialog(report,dialog,()->{if(fresh)closePopup(t);});
+    return;
+   }
+   default:launchHandoff(t,report,fresh,raw,intent);
   }
-  launchHandoff(t,report,fresh,raw,intent);
  }
  private void launchHandoff(Tab t,Tab report,boolean fresh,String raw,Intent intent) {
   for(Tab tab:tabs.values())disableAutofill(tab);
@@ -1070,7 +1073,7 @@ public class AlphaBrowserPlugin extends Plugin {
   for(Tab tab:tabs.values())disableAutofill(tab);
   try{getActivity().startActivity(chooser);call.resolve();}catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
  }); }
- @PluginMethod public void downloads(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);downloads.show();call.resolve();}); }
+ @PluginMethod public void downloads(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);String shown=requested;downloads.show(()->{if(destroyed||!Objects.equals(session,shown))return;JSObject event=new JSObject();event.put("session",shown);notifyListeners("showDownloads",event);});call.resolve();}); }
  /** Whether website password fill can work in this browser (no secrets, no tab state). */
  @PluginMethod public void loginFillStatus(PluginCall call) { JSObject result=new JSObject(); boolean available=BrowserLoginFields.supported(); result.put("available",available); if(!available)result.put("reason",BrowserFieldOrigin.UNSUPPORTED); call.resolve(result); }
  @PluginMethod public void close(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return; if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t=tabs.remove(call.getString("id")); if(t!=null) dispose(t); call.resolve(); }); }

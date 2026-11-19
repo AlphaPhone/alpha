@@ -287,6 +287,94 @@ async function replayOpen(DeviceActions, browserNavigationSummary, options) {
 }
 
 
+/** The tab part: the installed adapter's approved open (browserNavigateApproved) and reviewed
+ * controls (browserControl), each followed at once by the presentation it returns. Owner steps go
+ * through the rendered Browser view (new tab, private tab, a tab card, the address bar). The
+ * native plugin, page events and the multiple-match choice are controlled ports. */
+async function replayTabs(name, steps) {
+  const host = await browserAdapterHost({instant:[...browserCalls, 'find', 'clearFind', 'command']});
+  const signal = new AbortController().signal;
+  const reached = [];
+  let refusals = 0, sequence = 0;
+  const index = id => host.state().tabs.findIndex(tab => tab.id === id);
+  const observe = () => ({
+    's.tabs':host.state().tabs.map(tab => ({priv:!!tab.priv,
+      untouched:!host.calls.some(call => call.name === 'create' && call.input.id === tab.id)})),
+    's.sel':index(host.state().cur), 's.inBrowser':host.shellState.view === 'browser',
+    's.native':host.host.native, 's.foreground':!host.page.document.hidden,
+    's.reached':reached.map(row => ({...row})), 's.refusals':refusals,
+    's.findOpened':!!host.state().finding,
+    's.stopped':host.calls.some(call => call.name === 'command' && call.input.command === 'stop'),
+  });
+  const r = recorder(name, observe);
+  const fromPrivate = () => host.shellState.view === 'browser' && !!host.state().tabs[index(host.state().cur)]?.priv;
+  const privacy = id => !!host.state().tabs.find(tab => tab.id === id)?.priv;
+  /** Run a reviewed control; a refusal is thrown before any effect, otherwise its presentation runs. */
+  const run = async control => {
+    try {
+      const present = await control();
+      await host.settle();
+      if (typeof present === 'function') present();
+      await host.sync();
+      return true;
+    } catch (error) {
+      assert.equal(error?.name, 'BrowserOpenRefused', String(error?.message));
+      refusals++;
+      await host.sync();
+      return false;
+    }
+  };
+  const choose = async () => 0;
+  const actions = {
+    async agentOpen(op, newTab) {
+      const from = fromPrivate(), before = host.calls.filter(call => call.name === 'navigate').length;
+      const ok = await run(() => op === 'search'
+        ? host.component.browserControl({type:'browser_search', query:'alpha phone'}, {signal, choose})
+        : host.component.browserNavigateApproved(url, signal, true, newTab));
+      const navigations = host.calls.filter(call => call.name === 'navigate');
+      if (ok) { assert.equal(navigations.length, before + 1); reached.push({op, fromPrivate:from, priv:privacy(navigations.at(-1).input.id)}); }
+      else assert.equal(navigations.length, before, 'A refused open has no effect');
+    },
+    async agentTabNew(priv) { await run(() => host.component.browserControl({type:'browser_tab_new', private:priv}, {signal, choose})); },
+    async agentSwitch(target) {
+      const from = fromPrivate(), tab = host.state().tabs[target];
+      // The few words that name the tab: its New tab label, as matchingTabs reads it.
+      const words = tab.priv ? 'new private tab' : 'new tab';
+      if (await run(() => host.component.browserControl({type:'browser_tab_switch', target:words}, {signal, choose})))
+        reached.push({op:'switch', fromPrivate:from, priv:!!tab.priv});
+    },
+    async agentClose(target) {
+      const from = fromPrivate(), tabs = host.state().tabs, gone = target < 0 ? tabs[index(host.state().cur)] : tabs[target];
+      const operation = target < 0 ? {type:'browser_tab_close'} : {type:'browser_tab_close', target:gone.priv ? 'new private tab' : 'new tab'};
+      if (await run(() => host.component.browserControl(operation, {signal, choose})) && index(gone.id) < 0)
+        reached.push({op:'close', fromPrivate:from, priv:!!gone.priv});
+    },
+    async agentFind() { await run(() => host.component.browserControl({type:'browser_find', text:'alpha'}, {signal, choose})); },
+    async agentStop() { await run(() => host.component.browserControl({type:'browser_history', action:'stop'}, {signal, choose})); },
+    async ownerSelect(i) { host.rendered().tabCards[i].pick(); await host.sync(); },
+    async ownerNewTab(priv) { const view = host.rendered(); if (priv) view.openPrivate(); else view.newTab(); await host.sync(); },
+    async ownerLoad() {
+      host.rendered().onAddrKey({key:'Enter', preventDefault() {}, target:{value:url}});
+      await host.sync();
+      sequence++;
+      host.emit('stateChanged', {id:host.state().cur, sequence, navigation:'n' + sequence, url, title:'Synthetic browser page',
+        committed:true, loading:true, canBack:false, canForward:false, error:''});
+      await host.sync();
+    },
+    async place(native, inBrowser) { host.host.native = native; host.shellState.view = inBrowser ? 'browser' : 'home'; await host.sync(); },
+    async leaveForeground() { host.page.setHidden(true); await host.sync(); },
+  };
+  try {
+    for (const [action, ...args] of steps) {
+      await actions[action](...args);
+      r.step(r.action(action, ...(action === 'place' ? [...args, false] : args)));
+    }
+    return r.trace;
+  } finally {
+    await host.teardown();
+  }
+}
+
 export async function checkBrowserAgentOpen(extraSources = []) {
   const driverHashes = captureReplayClosure([self, ...extraSources]);
   const traces = [];
@@ -311,11 +399,31 @@ export async function checkBrowserAgentOpen(extraSources = []) {
     {name:'HTTP creates no proposal card or tab', invalidScheme:'http'},
     {name:'credentialed HTTPS creates no proposal card or tab', invalidScheme:'userinfo'},
   ]) traces.push(await replayOpen(DeviceActions, browserNavigationSummary, options));
+  const limit = [['ownerLoad']];
+  for (let i = 1; i < 8; i++) limit.push(['ownerNewTab', false], ['ownerLoad']);
+  for (const [name, steps] of [
+    ['an open reuses the untouched tab, then the agent tab unless a new tab is asked for',
+      [['agentOpen', 'open', false], ['agentOpen', 'search', false], ['agentOpen', 'open', true]]],
+    ['an open from a private tab stays private; one from elsewhere reuses a normal tab',
+      [['ownerNewTab', true], ['ownerLoad'], ['agentOpen', 'open', false], ['place', true, false], ['ownerSelect', 2], ['agentOpen', 'open', true]]],
+    ['the tab limit refuses an open and a new tab before any effect',
+      [...limit, ['agentOpen', 'open', false], ['agentTabNew', true]]],
+    ['a private tab is hidden from a request made elsewhere',
+      [['ownerNewTab', true], ['place', true, false], ['agentClose', -1], ['ownerSelect', 0], ['agentSwitch', 1],
+        ['place', true, true], ['ownerSelect', 1], ['agentClose', -1]]],
+    ['a hidden Browser keeps its showing tab and closes another at once',
+      [['ownerNewTab', false], ['leaveForeground'], ['agentClose', -1], ['agentClose', 0]]],
+    ['stop needs a loading page and find needs the native page',
+      [['agentStop'], ['ownerLoad'], ['agentStop'], ['agentFind'], ['place', false, true], ['agentFind']]],
+    ['a new tab opens in the profile asked for and is switched away from',
+      [['agentTabNew', true], ['agentTabNew', false], ['agentSwitch', 1], ['agentSwitch', 0]]],
+  ]) traces.push(await replayTabs(name, steps));
   return checkTraces({model:'BrowserAgentOpen', traces, sources:Object.keys(driverHashes), driverHashes, scope:'bounded-component',
     assumptions:[
       'The whole view navigation client and installed Browser adapter execute over synthetic tab state, server claim and receipt ports.',
       'Claim count is the capture of an in-flight or granted view claim. A replayed frame may request another grant, which the synthetic server denies. It never duplicates the native call.',
       'The real proposal coordinator drives the installed Browser in its executor port using the actual receipt formatter, with synthetic agent and durable-journal IO. The model tracks source tab creation, receipt ordering and attempted presentation. The complete agent adapter, server or Android nav host are separate.',
       'The bound/send phases run synchronously before the native call. The replay checks the exact tab, session, and navigation passed to the bridge rather than modeling Android admission internals.',
+      'The tab replays call the installed adapter\'s browserNavigateApproved and browserControl and run the presentation each returns at once. A tab counts as untouched until the native plugin is asked to create it. The profile of each reached tab is read from the adapter\'s tab list. Tab words name a tab by its New tab label, and the multiple-match choice always picks the first match.',
     ]});
 }

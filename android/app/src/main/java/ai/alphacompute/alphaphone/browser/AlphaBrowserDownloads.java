@@ -708,6 +708,15 @@ public final class AlphaBrowserDownloads {
 
   /** Shows the download list with live status. */
   public void show() {
+    show(null);
+  }
+
+  /**
+   * Shows the download list with live status. {@code showInFiles}, when given, is the list's
+   * "Show in Files" action: it closes the list and opens Alpha's Files at Downloads, where every
+   * finished download is saved.
+   */
+  public void show(Runnable showInFiles) {
     if (closed)
       return;
     if (listing != null) {
@@ -720,7 +729,10 @@ public final class AlphaBrowserDownloads {
     layout.setPadding(padding, padding, padding, padding);
     ScrollView scroll = new ScrollView(context);
     scroll.addView(layout);
-    listing = new AlertDialog.Builder(context).setTitle("Downloads").setView(scroll).setPositiveButton("Close", null).create();
+    AlertDialog.Builder builder = new AlertDialog.Builder(context).setTitle("Downloads").setView(scroll).setPositiveButton("Close", null);
+    if (showInFiles != null)
+      builder.setNeutralButton(SHOW_IN_FILES, (dialog, which) -> showInFiles.run());
+    listing = builder.create();
     AlertDialog list = listing;
     Rows rows = new Rows(layout);
     // Provider queries run on a worker; only the main thread touches the rows.
@@ -819,6 +831,8 @@ public final class AlphaBrowserDownloads {
   }
 
   private static final String SAVED = "Saved to Downloads · ";
+  /** The list's action that opens Alpha's Files at Downloads. */
+  public static final String SHOW_IN_FILES = "Show in Files";
 
   private String localLabel(BrowserDownloadPolicy.Entry entry) {
     if (entry.running)
