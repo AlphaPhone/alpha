@@ -11,7 +11,7 @@ test('history controls export exact text and compact only after confirmation',as
  await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('Notice history flow',{exact:true}).click();
  const run=page.getByRole('button',{name:'Run now',exact:true});
  await expect(run).toBeVisible();
- await expect(run.locator('span')).toBeHidden();
+ await expect(run.locator('.workflow-run-label')).toBeHidden();
  await expect(page.getByRole('button',{name:'Change',exact:true})).toHaveCount(0);
  await page.getByLabel('Workflow actions',{exact:true}).click();
  await expect(page.getByRole('button',{name:'Change',exact:true})).toBeVisible();

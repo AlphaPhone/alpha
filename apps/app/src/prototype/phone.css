@@ -1010,7 +1010,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .schedule-controls > button,.schedule-controls summary { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border-radius:22px; cursor:pointer; }
 .schedule-controls > button { padding:0 16px; background:var(--fg); color:var(--bg); }
 .schedule-controls > button[aria-label="Run now"] { width:44px; flex:none; padding:0; }
-.schedule-controls > button[aria-label="Run now"] > span { display:none; }
+.schedule-controls > button[aria-label="Run now"] > .workflow-run-label { display:none; }
 .schedule-controls > .workflow-primary-run { background:var(--acc); color:var(--alpha-white); }
 .schedule-controls summary { width:44px; background:var(--s2); list-style:none; }
 .schedule-controls summary::-webkit-details-marker { display:none; }
