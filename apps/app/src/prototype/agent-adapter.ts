@@ -275,6 +275,15 @@ async function transportSettled(attempt:SendAttempt){
   if(!attempt.settled)return;
   await Promise.race([attempt.settled,new Promise(resolve=>setTimeout(resolve,5000))]);
 }
+/** Showing another view changes the context, and a context change cancels the active request. A
+ * directly requested action (a Browser open, the keypad, an SMS draft, a filtered Contacts list) runs
+ * inside the chat request that still carries its reply: its view comes in front once that request
+ * settles, so the reply stays whole instead of ending as "May still finish". A step that is no longer
+ * current by then throws, and its journaled receipt stands. */
+function afterActiveRequest(show:()=>void){
+  if(!alphaClient.getState().pending){show();return;}
+  const stop=alphaClient.subscribe(()=>{if(alphaClient.getState().pending)return;stop();setTimeout(()=>{try{show();}catch{/* A retired view keeps its journaled receipt. */}},0);});
+}
 function selectedCloudName():string {
   const snapshot=connectionController.getSnapshot();
   return cloudServiceName(connectionController.getCloudEnvironment()??snapshot.cloudAccount?.environment??snapshot.signIn?.environment??'production');
@@ -1149,15 +1158,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
           // changes the view, so it runs after the receipt and only while this review is still current.
-          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>{current();step();});},
+          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>afterActiveRequest(()=>{current();step();}));},
           showContacts:async query=>{
             const step=showContactsStep(query),access=step?await book.status():null;
             if(!step||access?.available!==true||access.readable!==true)return null;
             const listed=await book.list({query,limit:1});current();
-            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
+            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>afterActiveRequest(()=>{current();step();}):'not-found';
           },
           // The keypad opens after the receipt, like a filtered Contacts list; nothing is dialed.
-          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>{current();step();});},
+          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>afterActiveRequest(()=>{current();step();}));},
           openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
@@ -1452,11 +1461,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
           present?.();
         };
-        // Showing Browser changes the view, and a view change cancels the active request. A directly
-        // requested open runs inside the chat request that still carries its reply: show Browser after
-        // that request settles, so the reply stays whole instead of "Stopped." with a stop notice.
-        if(!alphaClient.getState().pending){show();return;}
-        const stop=alphaClient.subscribe(()=>{if(alphaClient.getState().pending)return;stop();setTimeout(()=>{try{show();}catch{/* A retired tab keeps its journaled receipt. */}},0);});
+        afterActiveRequest(show);
       } };
     });
     context(this);
