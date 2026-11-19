@@ -1853,10 +1853,23 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           void restoreRows([...trashItems]);
         },
         canSelectTrash: at.kind === "trash" && trashItems.length > 0 && !busy,
-        selectTrash: () => {
+        selectTrash: (event?: Event) => {
           if (busy || !trashItems.length) return;
           selection = new Set();
           repaint();
+          // The button leaves with the header; keyboard focus moves to the selection header.
+          const view =
+            event?.currentTarget instanceof HTMLElement
+              ? event.currentTarget.closest("[data-alpha-subview]")
+              : null;
+          if (view)
+            requestAnimationFrame(() =>
+              view
+                .querySelector<HTMLElement>(
+                  'button[aria-label="Cancel selection"]',
+                )
+                ?.focus(),
+            );
         },
         menuRows: [
           ...(["name", "date", "size"] as SortMode[]).map((mode) => ({

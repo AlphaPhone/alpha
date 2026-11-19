@@ -85,7 +85,7 @@ test('a pending share chooser keeps the selection busy and dispatches only once'
 test('Trash selects several items, restores them together, and deletes the rest only after confirming (FILE-16)',async({page})=>{
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles');for(const name of ['a.txt','b.txt','c.txt'])await f.importFile(new File([name],name,{type:'text/plain'}));await f.storageTrash({paths:['a.txt','b.txt','c.txt']});});
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Trash',exact:true}).click();
- await page.getByRole('button',{name:'Select items',exact:true}).click();
+ await page.getByRole('button',{name:'Select items',exact:true}).click();await expect(page.getByRole('button',{name:'Cancel selection',exact:true})).toBeFocused();
  for(const name of ['a.txt','c.txt'])await page.getByRole('button',{name:'Select '+name,exact:true}).click();
  await expect(page.getByText('2 selected',{exact:true})).toBeVisible();
  const bar=page.getByRole('toolbar',{name:'Selection actions'});
