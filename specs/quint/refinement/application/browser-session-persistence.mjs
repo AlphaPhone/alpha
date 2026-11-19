@@ -13,6 +13,7 @@ import vm from 'node:vm';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {browsingSnapshot, restoreBrowsing, DEFAULT_BROWSING_LIMITS} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
 import {BrowserTabSession} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts';
+import {browserVisitTimes} from '../../../../apps/app/src/browser/history.ts';
 import {modelTraces, replayTraces, repositoryRoot, settle} from './browser-model-traces.mjs';
 
 const model = {path: 'specs/quint/application/BrowserSessionPersistence.qnt', module: 'BrowserSessionPersistence'};
@@ -30,7 +31,8 @@ export async function sessionPersistenceDriver() {
     const tabs = new BrowserTabSession({session: 'session'});
     const h = {time: 0, disk: 1, writes: [], read: null, clear: null, tickSize: 0, failures: 0, fresh: 0, reports: []};
     const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return {promise, resolve, reject}; };
-    const context = {MAX_TABS: DEFAULT_BROWSING_LIMITS.tabs, browsingSnapshot, restoreBrowsing, tabs, session: 'session', restored: new Map(),
+    const context = {MAX_TABS: DEFAULT_BROWSING_LIMITS.tabs, browsingSnapshot, restoreBrowsing, browserVisitTimes, tabs,
+      session: 'session', restored: new Map(), restoringTabs: new Set(),
       Date: {now: () => h.time}, Promise,
       snapshotRevision: 0, snapshotInputs: undefined, snapshotValue: null, snapshotJson: '',
       lastSaved: '', saveQueue: Promise.resolve(), saveEpoch: 0, failedSnapshot: '', retryAt: 0, retryDelay: 2000, saveWarning: false,

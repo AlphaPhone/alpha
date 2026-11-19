@@ -23,6 +23,7 @@ import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {parseBrowserAddressInput} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/address-input.ts';
 import {browsingSnapshot, restoreBrowsing} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
 import {BrowserTabSession} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts';
+import {browserVisitTimes} from '../../../../apps/app/src/browser/history.ts';
 import {modelTraces, replayTraces, repositoryRoot, settle} from './browser-model-traces.mjs';
 
 const model = {path: 'specs/quint/application/BrowserTabLifecycle.qnt', module: 'BrowserTabLifecycle'};
@@ -44,7 +45,8 @@ export async function browserTabLifecycleDriver() {
     const native = new Set(), messages = [], calls = [], listeners = {};
     let fresh, read;
     const call = (kind, id) => { const item = {kind, id}; item.promise = new Promise((resolve, reject) => { item.resolve = resolve; item.reject = reject; }); calls.push(item); return item.promise; };
-    const context = {URL, MAX_TABS: Cap, agentTab: undefined, BrowserOpenRefused, searchAddress, tabLimitRefusal, parseBrowserAddressInput, browsingSnapshot, restoreBrowsing, createSessionSaver, tabs, session, restored: new Map(), restoreAttempts: new Map(),
+    const context = {URL, MAX_TABS: Cap, agentTab: undefined, BrowserOpenRefused, searchAddress, tabLimitRefusal, parseBrowserAddressInput,
+      browsingSnapshot, restoreBrowsing, browserVisitTimes, createSessionSaver, tabs, session, restored: new Map(), restoringTabs: new Set(), restoreAttempts: new Map(),
       disposed: false, sessionRead: false, sessionHydrated: false, clearingData: false, profileUnsupportedTab: undefined, PROFILE_UNSUPPORTED_NATIVE_MESSAGE: 'unsupported',
       // This component never calls Clear; BrowserSessionPersistence exercises epoch changes.
       saveEpoch: 0, lastSaved: '', snapshotRevision: 0, snapshotInputs: undefined, snapshotValue: null, snapshotJson: '',

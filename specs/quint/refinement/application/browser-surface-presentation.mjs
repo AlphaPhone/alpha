@@ -6,7 +6,7 @@
  * withdraws the page and otherwise the geometry number of its width; `lastRequest` is the adapter's
  * last sent request (-1 when forgotten); `acknowledged` is the request it keeps for blocking page
  * input; `native` is what the port last accepted; `reports` are the errors shown and `recoveries`
- * the times a shown failure was followed by an accepted request. The overlay is the Browser menu. */
+ * the times a shown failure was followed by an accepted request. The overlay is the Browser Library. */
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -43,7 +43,7 @@ export async function browserSurfacePresentationDriver() {
     const run = vm.runInNewContext('(function(){' + region + ';return {update, hide};})()', context);
     return {
       async poll(geometry) { width = widths[geometry]; void run.update(); await settle(); },
-      // A render off the Browser or under the menu withdraws the page at once.
+      // A render off the Browser or under the Library withdraws the page at once.
       async withdraw() { run.hide(); await settle(); },
       async answer(ok) {
         const call = calls.shift(), failedBefore = context.presentationFailed;
@@ -54,11 +54,11 @@ export async function browserSurfacePresentationDriver() {
       forget() { context.lastGeometry = ''; },
       enterBrowser() { view.view = 'browser'; },
       leaveBrowser() { view.view = 'notes'; },
-      setOverlay(shown) { state.menu = shown; },
+      setOverlay(shown) { state.lib = shown ? 'history' : null; },
       setAppHidden(hidden) { document.hidden = hidden; },
       tabCreated() { ready = true; },
       dispose() { context.disposed = true; },
-      observe: () => ({inBrowser: view.view === 'browser', overlay: !!state.menu, appHidden: document.hidden, tabReady: ready, disposed: context.disposed,
+      observe: () => ({inBrowser: view.view === 'browser', overlay: !!state.lib, appHidden: document.hidden, tabReady: ready, disposed: context.disposed,
         lastRequest: context.lastGeometry === '' ? -1 : number(JSON.parse(context.lastGeometry)), unanswered: calls.map(call => call.number),
         acknowledged: context.lastPresented ? number(context.lastPresented) : 0, native, failed: context.presentationFailed, reports: errors.length, recoveries,
         backdrop: attributes.has('data-alpha-browser-underlay')}),
