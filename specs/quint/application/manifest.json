@@ -544,7 +544,11 @@
       "changedOwnerTest",
       "editedEarlierDraftTest",
       "failedInsertNeedsNewReviewTest",
-      "revokedReadTest"
+      "revokedReadTest",
+      "duplicateShareRefusedTest",
+      "appendToEarlierCanaryTest",
+      "discardedEarlierCanaryTest",
+      "duplicateShareCanaryTest"
     ],
     "sources": [
       "apps/app/src/prototype/file-email-review.ts",
@@ -557,11 +561,13 @@
     ],
     "abstractions": [
       "Finite representative identities and contents. Exact source symbols and modeling limits are documented in the family README.",
+      "Broken-share canaries are deliberately excluded from step and must violate the invariants their tests name.",
       "Model safety checks do not establish implementation refinement or device acceptance."
     ],
     "invariants": [
       "ExactDraft",
       "EarlierDraftKept",
+      "NoDuplicateShare",
       "FailedReviewInert",
       "CancelledHoldsNoBytes"
     ],
@@ -569,7 +575,9 @@
       "FailedInsertWitness",
       "StaleReadWitness",
       "InsertedThenSourceChangedWitness",
-      "EditedEarlierKeptWitness"
+      "EditedEarlierKeptWitness",
+      "DuplicateRefusedWitness",
+      "KeptEarlierBytesWitness"
     ]
   },
   {
