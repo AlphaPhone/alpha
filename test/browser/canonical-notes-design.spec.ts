@@ -3,10 +3,9 @@ import {canonicalNotesFixture,openCanonicalNotes} from './helpers/canonical-note
 import {setTextScale} from './accessibility-states';
 
 // Live agent Notes are drawn by Alpha's own Notes template, the one mock mode shows, in the view refresh
-// layout: header with Back, title, Record and +, the folder chips, and a one-column
-// list (title, date, two-line preview) with a Pinned section. Recently deleted is a folder chip while it
-// has items; Notes options is available in the list header. Screenshots land in test-results/notes-restore for side-by-side review
-// with the mock-mode reference.
+// layout: header with Back, title, Record, New note and Notes options, and a one-column
+// list with a Pinned section. Recently deleted is accessed through Notes options.
+// Screenshots land in test-results/notes-restore for side-by-side review with mock mode.
 const SHOTS='test-results/notes-restore';
 const at='2026-10-30T09:00:00.000Z';
 const note=(id:string,title:string,body:string,format?:{kind:string;data:Record<string,unknown>})=>({id,title,body:body?'\n'+body:'',color:'yellow',createdAt:at,updatedAt:at,...(format?{format}:{})});
@@ -161,7 +160,10 @@ test('live agent Notes light editor, checklist and restore-only Recently deleted
  await card(page,'Gift ideas').click();
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.state.trash.length)).toBe(1);
+ await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Notes options',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Notes options',exact:true}).getByRole('button',{name:'Recently deleted',exact:true})).toBeEnabled();
+ await shot(page,'notes-options-with-deleted-note');
  await page.getByRole('dialog',{name:'Notes options',exact:true}).getByRole('button',{name:'Recently deleted',exact:true}).click();
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Gift ideas',exact:true})).toBeVisible();

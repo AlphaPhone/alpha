@@ -222,7 +222,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
   // Notes opened: purge due entries. Navigation resets this flag, so every open checks again.
   if(!state.trashChecked){queueMicrotask(()=>{api.set({trashChecked:true});void trash.maintain();});}
   const rows:NotesTrashEntry[]=state.trash||[],now=Date.now(),disabled=!!state.trashBusy;
-  // Recently deleted is the last folder of the list (state.folder 'deleted'), shown while it has notes.
+  // Recently deleted is reached through Notes options.
   view.openTrash=()=>{trash.forget();api.set({folder:'deleted',open:null,sheet:null,q:null,trashConfirm:null,trashFull:null});void trash.maintain();};
   view.closeTrash=()=>api.set({folder:null,trashConfirm:null,trashAsk:null});
   view.trashOpen=state.folder==='deleted';

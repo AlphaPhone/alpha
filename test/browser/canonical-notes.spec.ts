@@ -1,3 +1,4 @@
+import {openNotesTrash} from './helpers/notes-menu';
 import {test,expect,type Page} from '@playwright/test';
 import {canonicalNotesFixture,openCanonicalNotes} from './helpers/canonical-notes';
 const snapshot=(page:import('@playwright/test').Page)=>page.evaluate(()=>(window as any).canonicalNotesFixture.state);
@@ -17,7 +18,7 @@ async function replaceTrashEntry(page:Page,deletedAt:string){
 
 test('canonical Trash dates the deletion and requires a fresh review after its selected entry changes',async({page})=>{
  await canonicalNotesFixture(page,{trash:[{note:trashedNote,deletedAt:'2026-11-08T12:00:00Z'}]});await openCanonicalNotes(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]'),row=trash.getByRole('button',{name:'A trashed note',exact:true});
  await row.click();const review=page.getByRole('dialog',{name:'Recover “A trashed note”?',exact:true});await expect(review).toBeVisible();
  const revision=await replaceTrashEntry(page,'2026-11-09T12:00:00Z');
@@ -123,7 +124,7 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.length)).toBe(0);
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  // The agent's restore-only Trash is the Recently deleted folder: no retention line, no Empty, no Delete now.
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Empty Recently deleted',exact:true})).toHaveCount(0);
  await trash.getByRole('button',{name:'Canonical browser note',exact:true}).click();
@@ -464,7 +465,7 @@ test('read recovery cannot replace a no-draft uncertain interaction with a read-
   f.state.trash=[{note:{id:'restore-uncertain',title:'Uncertain restore',body:'\nExact recoverable body',color:'yellow',createdAt:'2026-10-31T10:00:00.000Z',updatedAt:'2026-10-31T10:00:00.000Z'},deletedAt:'2026-10-31T10:01:00.000Z'}];
  });
  await refreshCanonicalRead(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const restore=page.locator('[data-alpha-subview="notes-trash"]').getByRole('button',{name:'Uncertain restore',exact:true});
  await expect(restore).toBeVisible();
  await page.evaluate(()=>(window as any).canonicalNotesFixture.failAfterApplied=true);

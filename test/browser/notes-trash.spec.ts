@@ -1,3 +1,4 @@
+import {openNotesTrash as openDeleted} from './helpers/notes-menu';
 import {toastObservation,finishUndoWindow} from './helpers/undo-feedback';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { returnToApps } from './app-navigation';
@@ -18,15 +19,14 @@ async function deleteOpenNote(page:Page){
  await page.getByRole('button',{name:'More',exact:true}).click();
  await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
 }
-/** The "Recently deleted" folder chip, shown while it has notes. */
-async function openDeleted(page:Page){await page.getByRole('button',{name:'Recently deleted',exact:true}).click();}
 /** Row → Recover in the action sheet. */
 async function recover(page:Page,title:string,left:string){
  await page.getByRole('button',{name:`${title}, ${left}`,exact:true}).click();
  await page.getByRole('dialog',{name:title}).getByRole('button',{name:'Recover',exact:true}).click();
 }
 async function deleteNote(page:Page,title:string){
- await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
+ // Keep any queued Undo offer visible while using the exposed part of the note row.
+ await page.getByRole('button',{name:`Open ${title}`,exact:true}).click({position:{x:12,y:24}});
  await deleteOpenNote(page);
  await expect(page.getByText('Deleted',{exact:true}).last()).toBeVisible();
  await expect(page.getByRole('button',{name:`Open ${title}`,exact:true})).toHaveCount(0);
@@ -59,7 +59,7 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
  await page.screenshot({path:test.info().outputPath('notes-trash.png')});
  await recover(page,'Trash audit','30 days left');
  await expect(page.getByText('Trash audit restored',{exact:true})).toBeVisible();
- // The last note left: Recently deleted closes and its chip disappears.
+ // Recovering the last deleted note closes Recently deleted.
  await expect(trash).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Open Trash audit',exact:true}).click();

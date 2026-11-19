@@ -2527,11 +2527,10 @@
   <sc-if value="{{notes.previousNotesMenu}}"><div ref="{{notes.previousNotesModal}}" data-alpha-popup style="display:contents">
     <button aria-hidden="true" tabindex="-1" onClick="{{notes.closePreviousNotesMenu}}" style="position:absolute;inset:0;z-index:11;background:transparent"></button>
     <div class="notes-menu" role="dialog" aria-label="Notes options">
-      <sc-if value="{{notes.notesMenuTrash}}"><button disabled="{{notes.notesMenuTrashDisabled}}" onClick="{{notes.notesMenuTrash}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></sc-if>
+      <sc-if value="{{notes.notesMenuTrash}}"><button data-agent-id="notes-trash" disabled="{{notes.notesMenuTrashDisabled}}" onClick="{{notes.notesMenuTrash}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></sc-if>
       <sc-if value="{{notes.previousNotesAction}}"><button onClick="{{notes.previousNotesAction}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg>On this phone</button></sc-if>
     </div>
   </div></sc-if>
-  <sc-if value="{{notes.hasDeleted}}"><div style="padding:0 16px 10px"><button class="tap notes-chip" data-agent-id="notes-trash" onClick="{{notes.openTrash}}"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></div></sc-if>
   <sc-if value="{{notes.filterOn}}">
     <div style="display: flex; padding: 0 16px 10px; flex-shrink: 0">
       <span class="notes-filter-chip" role="status" style="display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; padding: 0 4px 0 12px; border-radius: 16px; background: var(--s2); font-size: 13px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; flex-shrink: 0"><path d="{{ic.search}}"></path></svg><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{notes.filterLabel}}</span><button class="ib" aria-label="Clear filter" onClick="{{notes.clearFilter}}" style="width: 48px; height: 48px; margin: -8px 0"><svg class="i" viewBox="0 0 24 24" style="width: 14px; height: 14px"><path d="{{ic.x}}"></path></svg></button></span>

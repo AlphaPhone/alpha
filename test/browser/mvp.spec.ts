@@ -1,3 +1,4 @@
+import {openNotesTrash} from './helpers/notes-menu';
 import {openRetainedDigests} from './helpers/retained-digests';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { test, expect } from '@playwright/test';
@@ -38,7 +39,7 @@ for (const theme of ['light', 'dark']) {
 test('Notes create, edit, reload and delete to Recently deleted', async ({ page }) => {
   await page.goto('/');
   await openLegacyNotes(page);
-  // Header: Record and New note only; no search pill, Trash icon or empty-state copy.
+  // Keep search, Trash and empty-state copy out of the Notes list.
   await expect(page.getByRole('button', { name: 'Search notes', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open Trash', exact: true })).toHaveCount(0);
   await expect(page.getByText('No notes yet', { exact: false })).toHaveCount(0);
@@ -59,7 +60,7 @@ test('Notes create, edit, reload and delete to Recently deleted', async ({ page 
   await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
   // Deletion is not immediate erasure: the note waits in Recently deleted for 30 days.
   await expect(page.getByText('Deleted', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
+  await openNotesTrash(page);
   await expect(page.getByRole('button', { name: 'Browser audit note, 30 days left', exact: true })).toBeVisible();
 });
 // Folder controls were removed at the owner's request. Canonical Notes CRUD and

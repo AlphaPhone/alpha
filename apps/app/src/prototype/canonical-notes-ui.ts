@@ -385,15 +385,17 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  const notes=views.notes,render=notes.render;
  notes.render=(state:Bag,value:Bag)=>{
   const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
-  if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
+  const canonical=value.notesSourceMode==='canonical';
+  const previousNotesAction=canonical&&!older?.selected?older?.chooseFromMenu:undefined;
   const withNotesMenu=(view:Bag)=>{
    if(view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
-   if(!ui&&(!older||older.selected))return view;
+   if(!view.openTrash&&!previousNotesAction)return view;
    const close=()=>value.set({previousNotesMenu:false});
-   return {...view,previousNotesAction:!older?.selected?older?.chooseFromMenu:undefined,previousNotesMenu:!!state.previousNotesMenu,
+   return {...view,previousNotesAction,previousNotesMenu:!!state.previousNotesMenu,
     openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:close,
-    notesMenuTrash:ui?()=>{close();view.openTrash();}:undefined,notesMenuTrashDisabled:!view.hasDeleted};
+    notesMenuTrash:view.openTrash?()=>{close();view.openTrash();}:undefined,notesMenuTrashDisabled:!view.hasDeleted};
   };
+  if(!canonical)return withNotesMenu({...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose});
   if(ui)return withNotesMenu(ui.decorate(render(state,value),value,state));
   // A pending New note request waits for the binding instead of drafting into no collection.
   const waiting={...state,...DEVICE_ONLY_STATE,list:[],open:null,compose:false,trashOpen:false,storageStatus:state.storageStatus||agentAvailabilityNotice(undefined,UNAVAILABLE)};

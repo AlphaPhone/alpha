@@ -101,7 +101,8 @@ test('Notes follows each note change a chat reply reports: create, update, move,
  await row('pack').click();await expect(body).toHaveValue('Passport\nCharger\nAdapter');
  await say(page,'Delete the packing list','Done: delete.');
  await expect(body).toHaveCount(0);await expect(row('pack')).toHaveCount(0);await expect(row('old')).toHaveCount(1);
- await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(1);
+ await expect.poll(async()=>(await fixture(page)).state.trash.map((entry:any)=>entry.note.id)).toEqual(['pack']);
+ await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  await say(page,'Restore it','Done: restore.');
  await expect(row('pack')).toContainText('Packing list');await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
 });
