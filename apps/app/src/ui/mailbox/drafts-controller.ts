@@ -116,6 +116,21 @@ const ATTACHMENT_REFUSED = `This file can't be attached. ${ATTACHMENT_TYPES}`;
 const ATTACHMENT_UNAVAILABLE = "Attachment unavailable";
 
 /**
+ * Why a file shared from Files or Photos started no email. Inbox is not on screen then, so each
+ * says where to act and that nothing was added.
+ */
+const SHARE_NOT_ADDED = "The new email could not be started. Nothing was added.";
+const SHARE_ACCOUNT_CHANGED = "The email account changed. Nothing was added.";
+const SHARE_RELOAD =
+  "Reload the saved draft in Inbox before starting another email. Nothing was added.";
+const SHARE_RECOVER =
+  "Recover the retained draft in Inbox before starting another email. Nothing was added.";
+const SHARE_DRAFTS_FULL =
+  "Local drafts are full. Delete one in Inbox, then share again. Nothing was added.";
+const SHARE_DUPLICATE =
+  "This file is already attached to your unfinished email in Inbox. Nothing was added.";
+
+/**
  * Alpha's sentence for each known refusal from the file pickers and the shared attachment review,
  * keyed by the reviewed text they raise. That text is never shown itself.
  */
@@ -329,6 +344,8 @@ interface MailDraftsControllerOptions {
 }
 
 const DRAFT_BYTES = 8 * 1024 * 1024;
+/** The most set-aside emails the Drafts shelf holds. */
+const SHELF_ROWS = 50;
 const BODY_LIMIT = 64000;
 
 const forwardValid = (f: unknown) => {
@@ -457,7 +474,7 @@ export function createMailDraftsController(
       value.version === 1 &&
       value.owner === owner &&
       Array.isArray(value.items) &&
-      value.items.length <= 50 &&
+      value.items.length <= SHELF_ROWS &&
       new Set(value.items.map((row: Shelved) => row?.draft?.id)).size ===
         value.items.length &&
       value.items.every(
@@ -905,57 +922,87 @@ export function createMailDraftsController(
     }
   }
 
+  /** Whether a set-aside row holds anything the owner wrote, chose or forwarded. */
+  const meaningful = (row: Shelved) =>
+    !!(
+      row.toQ.trim() ||
+      row.draft.to.length ||
+      row.draft.cc?.length ||
+      row.draft.bcc?.length ||
+      row.draft.subject.trim() ||
+      row.draft.body.trim() ||
+      row.draft.attachments?.length ||
+      row.draft.forward?.parts.length
+    );
+
   /**
-   * Persist the current email before replacing its composer; no provider operation runs. `say`
-   * receives why it could not, so a caller that words the outcome itself shows one notice.
+   * The Drafts shelf once the current email, the retained copy `kept` and the saved draft are set
+   * aside, or null when none of them exists. `copy` snapshots them for the save; a check that only
+   * measures the shelf reads them in place.
    */
-  async function setAside(say: (text: string) => void = toast): Promise<boolean> {
-    if (!ready || busy) return false;
-    if (retained?.error || retained?.conflict || staleBase) {
-      say(
-        "Reload the saved draft before starting another email. Your edits are retained.",
-      );
-      return false;
-    }
-    const kept = retained?.peek();
-    if (retained?.available && !kept) {
-      say("Recover the retained draft before starting another email.");
-      return false;
-    }
-    const meaningful = (row: Shelved) =>
-      !!(
-        row.toQ.trim() ||
-        row.draft.to.length ||
-        row.draft.cc?.length ||
-        row.draft.bcc?.length ||
-        row.draft.subject.trim() ||
-        row.draft.body.trim() ||
-        row.draft.attachments?.length ||
-        row.draft.forward?.parts.length
-      );
+  function asideShelf(
+    kept: InboxUnsaved | null | undefined,
+    copy = true,
+  ): Shelf | null {
+    if (!saved && !kept && !draft) return null;
+    const own = <T>(value: T): T => (copy ? structuredClone(value) : value);
     const copies = new Map<string, Shelved>();
     for (const row of shelf?.items || []) copies.set(row.draft.id, row);
-    if (saved) copies.set(saved.id, { draft: structuredClone(saved), toQ: "" });
+    if (saved) copies.set(saved.id, { draft: own(saved), toQ: "" });
     const savedIds = new Set(copies.keys());
     if (kept)
       copies.set(kept.draft.id, {
-        draft: structuredClone(kept.draft) as LocalMailDraft,
+        draft: own(kept.draft) as LocalMailDraft,
         toQ: kept.toQ,
       });
-    if (draft) copies.set(draft.id, { draft: structuredClone(draft), toQ });
-    if (!saved && !kept && !draft) return true;
-    const next: Shelf = {
+    if (draft) copies.set(draft.id, { draft: own(draft), toQ });
+    return {
       version: 1,
       owner,
       items: [...copies.values()].filter(
         (row) => savedIds.has(row.draft.id) || meaningful(row),
       ),
     };
+  }
+
+  /**
+   * Persist the current email before replacing its composer; no provider operation runs. `say`
+   * receives why it could not, so a caller that words the outcome itself shows one notice. A
+   * `share` from Files or Photos is worded for an owner who is not in Inbox.
+   */
+  async function setAside(
+    say: (text: string) => void = toast,
+    share = false,
+  ): Promise<boolean> {
+    if (!ready || busy) return false;
+    if (retained?.error || retained?.conflict || staleBase) {
+      say(
+        share
+          ? SHARE_RELOAD
+          : "Reload the saved draft before starting another email. Your edits are retained.",
+      );
+      return false;
+    }
+    const kept = retained?.peek();
+    if (retained?.available && !kept) {
+      say(
+        share
+          ? SHARE_RECOVER
+          : "Recover the retained draft before starting another email.",
+      );
+      return false;
+    }
+    const next = asideShelf(kept);
+    if (!next) return true;
     if (
       !shelfValid(next) ||
       new TextEncoder().encode(JSON.stringify(next)).length > DRAFT_BYTES
     ) {
-      say("Draft storage is full. Your current email is still here.");
+      say(
+        share
+          ? SHARE_DRAFTS_FULL
+          : "Draft storage is full. Your current email is still here.",
+      );
       return false;
     }
     const token = epoch;
@@ -984,9 +1031,11 @@ export function createMailDraftsController(
     } catch (error) {
       if (token === epoch)
         say(
-          error instanceof Error
-            ? error.message
-            : "The draft could not be saved. Your edits remain here.",
+          share
+            ? "Your unfinished email could not be saved to Drafts. Nothing was added."
+            : error instanceof Error
+              ? error.message
+              : "The draft could not be saved. Your edits remain here.",
         );
       return false;
     } finally {
@@ -1211,11 +1260,17 @@ export function createMailDraftsController(
     return begin(target, mode, forwardedBody, undefined, copied);
   }
 
-  /** A share starts a separate email after preserving the previous local work. */
+  /**
+   * A share starts a separate email after preserving the previous local work. `share` marks a
+   * share from Files or Photos: refusals are worded for an owner outside Inbox, and when the
+   * earlier email went to Drafts but the new one cannot start, `say` hears both, with `share()`
+   * as the reason.
+   */
   async function newSharedEmail(
     prefill: ComposePrefill,
     current: () => boolean,
     say: (text: string) => void = toast,
+    share?: () => string,
   ) {
     if (!current()) return false;
     if (!owner) {
@@ -1227,8 +1282,20 @@ export function createMailDraftsController(
       return false;
     }
     const token = epoch,
-      target = structuredClone(prefill);
-    if (!(await setAside(say)) || token !== epoch || !current()) return false;
+      target = structuredClone(prefill),
+      // Setting aside moves an email into Drafts when it adds a row the shelf does not hold yet.
+      shelved = new Set(shelf?.items),
+      moving = !!asideShelf(retained?.peek(), false)?.items.some(
+        (row) => !shelved.has(row),
+      );
+    if (!(await setAside(say, !!share))) return false;
+    if (token !== epoch || !current()) {
+      if (share && token === epoch) {
+        const reason = share().replace(/([^.!?])$/, "$1.");
+        say(moving ? `Your unfinished email is in Drafts. ${reason}` : reason);
+      }
+      return false;
+    }
     return begin(undefined, undefined, "", target, {}, say);
   }
 
@@ -1792,7 +1859,7 @@ export function createMailDraftsController(
     });
     if (options.identity().sessionId !== session)
       return blocked(
-        "Open Inbox to refresh the selected account first. Nothing was added.",
+        "The email account changed. Open Inbox to refresh it, then share again. Nothing was added.",
       );
     if (!owner || !ready || busy)
       return blocked(
@@ -1800,15 +1867,29 @@ export function createMailDraftsController(
           ? "The local email draft is still loading. Try again in a moment."
           : status || "Connect a Gmail account first.",
       );
-    // The checks setAside() makes before it keeps the earlier draft.
+    // The checks setAside() makes before it keeps the earlier draft, made before any read.
     if (retained?.error || retained?.conflict || staleBase)
-      return blocked(
-        "Reload the saved draft in Inbox before starting another email. Nothing was added.",
-      );
-    if (retained?.available && !retained.peek())
-      return blocked(
-        "Recover the retained draft in Inbox before starting another email. Nothing was added.",
-      );
+      return blocked(SHARE_RELOAD);
+    const kept = retained?.peek();
+    if (retained?.available && !kept) return blocked(SHARE_RECOVER);
+    // Drafts that cannot take the earlier email refuse now rather than after both reads. The row
+    // cap is exact; the attachment text alone is a lower bound on the shelf's size, so this never
+    // refuses what setAside() would keep, and setAside() still makes the exact check.
+    const next = asideShelf(kept, false);
+    if (
+      next &&
+      (next.items.length > SHELF_ROWS ||
+        next.items.reduce(
+          (sum, row) =>
+            sum +
+            (row.draft.attachments || []).reduce(
+              (bytes, file) => bytes + file.dataBase64.length,
+              0,
+            ),
+          0,
+        ) > DRAFT_BYTES)
+    )
+      return blocked(SHARE_DRAFTS_FULL);
     return {
       ready: true,
       kind: "new",
@@ -1847,17 +1928,26 @@ export function createMailDraftsController(
      * unfinished is set aside to Drafts unchanged first; no existing draft takes the file. When
      * that email already holds these bytes, nothing is added (the duplicate refusal).
      * Resolves to null once the new composer holds the file, or to the reason nothing was
-     * added. It shows no notice itself, so the caller shows that one reason.
+     * added. It shows no notice itself, so the caller shows that one reason. `current` is the
+     * caller's own fence (navigation); `blocked` names why the caller's destination is gone.
      */
     async attachReviewed(
       file: OutgoingMailAttachment,
       expected: string,
       current: () => boolean = () => true,
+      blocked: () => string | null = () => null,
     ): Promise<string | null> {
-      const changed = "The email account changed. Nothing was added.";
-      const target = newDraftTarget();
-      if (!target.ready) return target.reason;
-      if (target.token !== expected || !current()) return changed;
+      // Why the reviewed destination is gone now: the drafts' own reason, another account (a new
+      // token), or the caller's reason. Never an account change that did not happen.
+      const stopped = (): string | null => {
+        const now = newDraftTarget();
+        if (!now.ready) return now.reason;
+        if (now.token !== expected) return SHARE_ACCOUNT_CHANGED;
+        return blocked();
+      };
+      const refused = stopped();
+      if (refused) return refused;
+      if (!current()) return SHARE_NOT_ADDED;
       const attachments = [
         {
           name: file.name,
@@ -1877,7 +1967,7 @@ export function createMailDraftsController(
           (item) => item.dataBase64 === file.dataBase64,
         )
       )
-        return "This file is already attached to your unfinished email in Inbox. Nothing was added.";
+        return SHARE_DUPLICATE;
       let refusal = "";
       const started = await newSharedEmail(
         {
@@ -1888,12 +1978,13 @@ export function createMailDraftsController(
           status:
             "Selected file added to a new local draft. Review recipients, text and attachments before sending; nothing has been sent.",
         },
-        () => current() && newDraftTarget().token === expected,
+        () => current() && !stopped(),
         (text) => {
           refusal ||= text;
         },
+        () => stopped() || SHARE_NOT_ADDED,
       );
-      return started ? null : refusal || changed;
+      return started ? null : refusal || stopped() || SHARE_NOT_ADDED;
     },
     /**
      * "Use in email": agent text becomes a local draft for the selected message

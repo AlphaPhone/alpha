@@ -1135,10 +1135,10 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   };
   /** Resolves to null once a new composer holds the file, or to the reason nothing was added. */
   view.attachReviewedFile = (file: import('../runtime/inbox-attachment').MailAttachment,token:string,current:()=>boolean):Promise<string|null> => {
-    const target=view.fileEmailTarget() as EmailTarget;
-    if(!target.ready)return Promise.resolve(target.reason);
-    if(target.token!==token)return Promise.resolve('The email account changed. Nothing was added.');
-    return drafts.attachReviewed(file,drafts.newDraftTarget().token,()=>current()&&(view.fileEmailTarget() as EmailTarget).token===token);
+    // Why the reviewed destination is gone: a blocked Inbox or drafts give their own reason; only a new token is another account.
+    const moved=():string|null=>{const now=view.fileEmailTarget() as EmailTarget;return !now.ready?now.reason:now.token!==token?'The email account changed. Nothing was added.':null;};
+    const refused=moved();if(refused)return Promise.resolve(refused);
+    return drafts.attachReviewed(file,drafts.newDraftTarget().token,current,moved);
   };
   view.voicePhrase = 'Help me write an email';
   /** Content shared from Notes, Photos or Files becomes a new local draft for review; nothing is sent. */

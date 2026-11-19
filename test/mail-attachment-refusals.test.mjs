@@ -171,3 +171,45 @@ test('a reviewed Files attachment starts its own draft, keeps the unfinished one
   assert.deepEqual(single.shelved().map(draft => (draft.attachments ?? []).map(file => file.name)), [['a.pdf']]);
   assert.deepEqual(single.toasts, []);
 });
+
+const FULL = 'Local drafts are full. Delete one in Inbox, then share again. Nothing was added.';
+test('a share the Drafts shelf has no room for is refused in words for Files and Photos, before any read when it can be', async () => {
+  // Two 3.5 MiB shares: setting the second aside would overfill Drafts, and the target says so up front.
+  const c = await composer();
+  const add = file => c.drafts.attachReviewed(file, c.drafts.newDraftTarget().token);
+  const large = (name, fill, bytes = 3.5 * MiB) => ({...pdf(name, bytes), dataBase64: b64(bytes, fill)});
+  assert.equal(await add(large('one.pdf', 1)), null);
+  assert.equal(await add(large('two.pdf', 2)), null);
+  const target = c.drafts.newDraftTarget();
+  assert.deepEqual([target.ready, target.reason], [false, FULL]);
+  assert.equal(await c.drafts.attachReviewed(pdf('three.pdf'), target.token), FULL);
+  assert.deepEqual(c.attached(), ['two.pdf']);
+  assert.deepEqual(c.shelved().map(draft => draft.attachments.map(file => file.name)), [['one.pdf']]);
+  assert.deepEqual(c.toasts, []);
+  // The bytes alone fit exactly, so only the set-aside's exact check refuses: the same words, still no toast.
+  const exact = await composer();
+  const put = file => exact.drafts.attachReviewed(file, exact.drafts.newDraftTarget().token);
+  assert.equal(await put(large('a.pdf', 1, 3 * MiB)), null);
+  assert.equal(await put(large('b.pdf', 2, 3 * MiB)), null);
+  assert.equal(exact.drafts.newDraftTarget().ready, true);
+  assert.equal(await put(pdf('c.pdf')), FULL);
+  assert.deepEqual(exact.attached(), ['b.pdf']);
+  assert.deepEqual(exact.shelved().map(draft => draft.attachments.map(file => file.name)), [['a.pdf']]);
+  assert.deepEqual(exact.toasts, []);
+});
+
+test('a share that stops gives its own reason, never an account change, and says when the unfinished email went to Drafts', async () => {
+  const c = await composer();
+  c.drafts.render().c.onBody({target: {value: 'Earlier text'}});
+  c.drafts.close();
+  const target = c.drafts.newDraftTarget();
+  // The caller's destination is blocked from the start: nothing moves.
+  assert.equal(await c.drafts.attachReviewed(pdf('a.pdf'), target.token, () => true, () => 'Review open'), 'Review open');
+  assert.deepEqual(c.shelved(), []);
+  // It becomes blocked once the earlier email is in Drafts: the owner hears both.
+  const blocked = () => c.shelved().length ? 'Finish selecting mail first' : null;
+  assert.equal(await c.drafts.attachReviewed(pdf('a.pdf'), target.token, () => true, blocked), 'Your unfinished email is in Drafts. Finish selecting mail first.');
+  assert.deepEqual(c.shelved().map(draft => [draft.body, draft.attachments ?? []]), [['Earlier text', []]]);
+  assert.equal(c.drafts.email(), null, 'no new email started');
+  assert.deepEqual(c.toasts, []);
+});
