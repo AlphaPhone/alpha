@@ -1697,12 +1697,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
     const camera=shell.cameraAttachment;
-    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding){
+    // A pick retired by Home, page hide or a connection change only waits for its late read to be discarded.
+    const picking=!!shell.chatAttachmentAbort&&!shell.chatAttachmentAbort.signal.aborted;
+    if(picking||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding){
       // Ask Alpha from a Files menu closes the menu first, so a refusal here names what blocks it.
-      if(selection)shell.toast(shell.chatAttachmentAbort?'Already attaching a file.'
+      if(selection)shell.toast(picking?'Already attaching a file.'
+        :shell.draftSendPending?'Wait for the message to finish sending.'
         :shell.messageEditTarget?'Finish or cancel the message edit first.'
         :shell.S().typing?'Wait for Alpha to finish replying.'
-        :shell.draftSendPending?'Wait for the message to finish sending.'
         :'Can’t attach the file right now. Try again in a moment.');
       return;
     }

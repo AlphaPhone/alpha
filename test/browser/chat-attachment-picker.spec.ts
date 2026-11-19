@@ -314,3 +314,38 @@ test('Ask Alpha says a file is already attaching while the first read runs, then
  await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(1);
  expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
 });
+
+test('Ask Alpha after leaving Files mid-read attaches at once and discards the abandoned read',async({page})=>{
+ await ready(page);
+ await page.evaluate(async()=>{
+  const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
+  const read=BrowserMailAttachments.prototype.readSelected;
+  const fixture=(window as any).attachmentFixture;
+  BrowserMailAttachments.prototype.readSelected=async function(input){
+   // Only the first read is held; the retry reads normally.
+   if(!fixture.firstHeld){fixture.firstHeld=true;await new Promise<void>(resolve=>{fixture.resumeRead=resolve;});}
+   return read.call(this,input);
+  };
+ });
+ const attach=async()=>{
+  await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
+  await page.getByRole('button',{name:'File actions',exact:true}).click();
+  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ };
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await attach();
+ await expect.poll(()=>page.evaluate(()=>typeof (window as any).attachmentFixture.resumeRead)).toBe('function');
+ await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
+ await expect(page.getByRole('button',{name:'Files',exact:true})).toBeVisible();
+ // The first read is still held, but Home retired it, so the retry is not refused.
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await attach();
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Explain this file');
+ const chip=page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true});
+ await expect(chip).toHaveCount(1);
+ await expect(page.locator('[data-alpha-toast]')).not.toContainText('Already attaching a file.');
+ await page.evaluate(async()=>{(window as any).attachmentFixture.resumeRead();await new Promise(resolve=>setTimeout(resolve,300));});
+ await expect(chip).toHaveCount(1);
+ expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
+});
