@@ -415,7 +415,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       ? 'Maps unavailable' : offRouteCopy(status.text);
     const directionsOpen = view.mode === 'directions' || view.mode === 'origin' || view.mode === 'navigation';
     const isPlace = view.mode === 'place', isResults = view.mode === 'results' || view.mode === 'origin', isNav = view.mode === 'navigation';
-    const sheetHeight = directionsOpen ? 300+(view.directions?.routes.length??0)*50 : isPlace ? 400 : 520;
+    const sheetHeight = directionsOpen ? 300+(view.directions?.routes.length??0)*50 : isPlace ? (view.place?.phone ? 452 : 400) : 520;
     // The ⓘ and recenter buttons share one baseline: just above an open sheet, else above the dock.
     const recBottom = isPlace || isResults || (directionsOpen && !isNav) ? sheetHeight + 14 : 124;
     Object.assign(data, {

@@ -494,12 +494,14 @@ html:not(.alpha-landscape) .alpha-phone [data-screen][data-alpha-chat-half="true
  * for scrollers this rule does not name). */
 html:not(.alpha-landscape) .alpha-phone [data-screen]:not([data-alpha-chat-half="true"]) :is([data-alpha-app-scroll],.calendar-timeline,.calendar-draft-fields) { scroll-padding-bottom:calc(var(--alpha-dock-clearance,102px) + 16px); }
 
-/* Existing inline app dialogs and menus own focus above a nonblocking half sheet too. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],[role="menu"])) [data-alpha-layer="conversation"] { visibility:hidden; }
+/* Existing inline app dialogs and Notes popup menus own focus above a nonblocking half sheet too.
+ * Only the Notes menus, which render only while open: other app menus (Inbox's, inside a closed
+ * <details>) stay in the DOM while shut and must not hide the sheet. */
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-layer="conversation"] { visibility:hidden; }
 /* The sheet is hidden behind that dialog, and in landscape it docks beside the app: neither covers
  * anything, so a touch outside it stays the app's. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],[role="menu"])) [data-alpha-chat-scrim],
-[data-screen]:has([data-alpha-layer="app"] :is([role="dialog"],[role="menu"])) [data-alpha-dock-scrim="true"],
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-chat-scrim],
+[data-screen]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-dock-scrim="true"],
 .alpha-landscape .alpha-phone [data-alpha-chat-scrim]:not([data-alpha-dock-scrim="true"]) { pointer-events:none!important; }
 
 /* Assistant owns only its conversation surface. */
@@ -956,7 +958,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 [data-alpha-device-receipt="true"] { align-self:flex-start; max-width:100%; box-sizing:border-box; padding:10px 14px; border-radius:6px 16px 16px 6px; border-left:3px solid var(--acct); background:var(--s2); font-size:14px!important; line-height:1.45!important; overflow-wrap:anywhere; }
 /* Narrow phones keep New chat and History reachable by dropping the assistant's name beside its mark. */
 @media (max-width: 439px) { [data-alpha-chat-lead] [data-alpha-chat-name] { display:none; } }
-.alpha-action-review button > div > div:last-child { white-space:pre-wrap!important; overflow:visible!important; text-overflow:clip!important; overflow-wrap:anywhere; line-height:1.45; }
+.alpha-action-review button > div > div:nth-child(2) { white-space:pre-wrap!important; overflow:visible!important; text-overflow:clip!important; overflow-wrap:anywhere; line-height:1.45; }
 
 /* Older Android WebViews ignore popover; React visibility must still hide the menu. */
 .mail-folder-menu[hidden]{display:none!important}

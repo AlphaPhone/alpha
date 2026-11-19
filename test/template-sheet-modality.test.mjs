@@ -26,7 +26,8 @@ test('every sheet over a scrim is an aria-modal dialog', () => {
     if (owner < 0 || !/^\s*<div ref="\{\{[\w.]+\}\}"/.test(lines[owner])) unowned.push(label);
   });
   assert.ok(sheets.length >= 8, `found ${sheets.length} sheets over a scrim`);
-  for (const label of ['Reply', 'Share page', 'Share photo', 'Move to', 'Share file', 'Step editor']) assert.ok(sheets.includes(label), label);
+  // The fixture-only Files Move/Share sheets were removed (FILE-20); Files' real move picker is not a template sheet.
+  for (const label of ['Add to Home', 'Reply', 'Share page', 'Share photo', 'Delete photos forever', 'Step editor']) assert.ok(sheets.includes(label), label);
   assert.deepEqual(missing, []);
   assert.deepEqual(unowned, [], 'each modal sheet and its scrim sit inside an inline-modal ref');
 });

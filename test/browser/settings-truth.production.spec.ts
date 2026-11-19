@@ -212,7 +212,10 @@ test('every Settings row is a control backed by real state, with no fixture valu
  }
  await openSettings(page,'Privacy');
  // The product build names where speech goes (SET-17).
- await expect(current(page).getByText('Voice',{exact:true})).toBeVisible();
+ // The row's description sits inside its label, so the label reads as the two together.
+ const voiceRoute=current(page).locator('.settings-info-description',{hasText:'Recordings, replies →'});
+ await expect(voiceRoute).toBeVisible();await expect(voiceRoute).toHaveText('Recordings, replies → Eliza Cloud');
+ await expect(voiceRoute.locator('..')).toHaveText('VoiceRecordings, replies → Eliza Cloud');
  const review=()=>current(page).getByRole('switch',{name:'Ask before Alpha acts',exact:true});
  await expect(review()).toHaveAttribute('aria-checked','false');
  await review().click();await expect(review()).toHaveAttribute('aria-checked','true');

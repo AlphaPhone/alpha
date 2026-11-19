@@ -63,9 +63,6 @@ var IC = {
   down: "M6 9l6 6 6-6",
   up: "M6 15l6-6 6 6",
   right: "M9 6l6 6-6 6",
-  // Page history arrows, distinct from the chevron that leaves an app.
-  arrowLeft: "M19 12H5M11 6l-6 6 6 6",
-  arrowRight: "M5 12h14M13 6l6 6-6 6",
   kbd: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8",
   stop: "M7 7h10v10H7z",
   user: "M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0",
@@ -3043,7 +3040,8 @@ registerView("maps", {
     var results = st.query != null ? mapsSearch(st.query) : [];
     var mode = st.nav ? "nav" : (dst ? "dir" : (place ? "place" : (st.query != null ? "results" : "base")));
     var SH = { peek: 250, half: 520, full: 811 };
-    var sheetH = mode === "results" ? SH[st.sheet || "half"] : (mode === "place" ? 372 : (mode === "dir" ? 300 : 0));
+    // The place card's phone row (48px and its 4px margin) makes the sheet taller when the place has a number.
+    var sheetH = mode === "results" ? SH[st.sheet || "half"] : (mode === "place" ? (place && place.phone ? 424 : 372) : (mode === "dir" ? 300 : 0));
 
     /* camera */
     var cx = MAPS_ME[0] + 36, cy = MAPS_ME[1] - 40, s = 1, fy = (170 + 805) / 2;
@@ -3137,7 +3135,7 @@ registerView("maps", {
         name: place.name, meta: place.cat + " · " + place.area + " · " + mapsMi(place.mi) + " mi", addr: place.addr, d: IC[place.icon],
         hasHours: !!ph, openTxt: ph ? (ph.open ? "Open" : "Closed") : "", hoursTxt: ph ? ph.text : "", openCss: ph && ph.open ? "color: var(--fg)" : "color: var(--mut)",
         min: mapsFmtMin(place.min[0]),
-        hasPhone: !!place.phone, canDir: !place.far, hasWeb: !!place.web, fixed: mapsFixed(place.id),
+        hasPhone: !!place.phone, phone: place.phone || "", canDir: !place.far, hasWeb: !!place.web, fixed: mapsFixed(place.id),
         saved: saved, starD: IC.star, starCss: saved ? "color: var(--acct)" : "", starFill: saved ? "fill: currentColor" : "", saveLabel: saved ? "Remove from saved" : "Save",
         close: function () { api.set({ place: null, pan: null }); },
         dirs: function () { api.set({ directions: place.id, pan: null }); },

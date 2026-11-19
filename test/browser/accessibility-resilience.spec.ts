@@ -227,7 +227,7 @@ test.describe('menus and sheets over a scrim own focus', () => {
       for (let step = 0; step < 2; step++) { await page.keyboard.press('Shift+Tab'); expect(await inside()).toBe(true); }
       await page.keyboard.press('Escape');
       await expect(dialog).toHaveCount(0);
-      if (opener) await expect(opener==='Photo actions'?page.getByLabel(opener,{exact:true}):page.getByRole('button', { name: opener, exact: true }).first()).toBeFocused();
+      if (opener) await expect(opener==='Photo actions'?page.getByLabel(opener,{exact:true}):page.getByRole(noteShare ? 'menuitem' : 'button', { name: opener, exact: true }).first()).toBeFocused();
       const stranded = await page.evaluate(() => Array.from(document.querySelectorAll('.os button, .os input, .os textarea, .os a[href]'))
         .filter(el => (el as any).__alphaBefore && el.isConnected && !!el.closest('[inert],[aria-hidden="true"]')).map(el => el.getAttribute('aria-label') || el.textContent));
       expect(stranded).toEqual([]);

@@ -37,7 +37,7 @@ async function askAboutDocument(page: Page) {
   await button(page, 'Files').click();
   await button(page, 'Documents').click();
   await button(page, 'Open garden-report.txt').click();
-  await expect(page.getByText('PRIVATE OMIT: do not send this line.', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-alpha-files-text]')).toHaveText(contents);
   // Documents lists the file from storage; opening it selected that one path, and nothing was sent.
   expect(await harness(page, f => f.documents.picks)).toEqual([{ action: 'files', path: 'Documents/garden-report.txt' }]);
   await button(page, 'File actions').click();

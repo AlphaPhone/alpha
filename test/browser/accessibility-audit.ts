@@ -704,7 +704,8 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
     if (!el || el === document.body || el === document.documentElement) return { key: 'body', hidden: false, visible: true, behind: false, under: '', modal: false, stops: 0, segmented: false, text: 'body' };
     const anyEl = el as any; anyEl.__alphaTabId ||= Math.random().toString(36).slice(2);
     const rect = el.getBoundingClientRect();
-    const dialog = el.closest('dialog,[role=dialog],[role=alertdialog]');
+    // A menu over a scrim ([data-alpha-popup]) owns focus the way a dialog does (runtime/inline-modal.ts).
+    const dialog = el.closest('dialog,[role=dialog],[role=alertdialog],[data-alpha-popup] [role=menu]');
     const stops = dialog ? Array.from(dialog.querySelectorAll('button,a[href],input:not([type=hidden]),select,textarea,summary,[tabindex]'))
       .filter(item => !item.matches(':disabled,[tabindex="-1"]') && !item.closest('[inert]') && item.getClientRects().length > 0).length : 0;
     // A scrim is an empty button laid over (nearly) the whole phone to close a menu or sheet.

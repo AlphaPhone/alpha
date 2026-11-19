@@ -96,13 +96,14 @@ test('live agent Notes in dark mode, the text editor and the checklist editor',a
   // The editor header keeps its compact 44px controls; Share is in More.
   expect(box.height).toBeGreaterThanOrEqual(43.5);
  }
+ // More says it opens a menu (checked before opening: the open menu takes the header out of the accessibility tree).
+ await expect(page.getByRole('button',{name:'More',exact:true})).toHaveAttribute('aria-haspopup','menu');
  // More contains only the note actions and fits its content below the header.
  await page.getByRole('button',{name:'More',exact:true}).click();
  const menu=page.getByRole('menu',{name:'Note actions'});
  for(const name of ['Share note','Unpin','Delete'])await expect(menu.getByRole('menuitem',{name,exact:true})).toBeVisible();
  await expect(menu.getByRole('menuitem')).toHaveCount(3);
- // A menu: More says it opens one, focus starts on the first entry, and the arrow keys move through the entries.
- await expect(page.getByRole('button',{name:'More',exact:true})).toHaveAttribute('aria-haspopup','menu');
+ // A menu: focus starts on the first entry, and the arrow keys move through the entries.
  await expect(menu.getByRole('menuitem',{name:'Share note',exact:true})).toBeFocused();
  await page.keyboard.press('ArrowDown');await expect(menu.getByRole('menuitem',{name:'Unpin',exact:true})).toBeFocused();
  await page.keyboard.press('End');await expect(menu.getByRole('menuitem',{name:'Delete',exact:true})).toBeFocused();

@@ -873,7 +873,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const vf=document.querySelector<HTMLElement>(finder),screen=vf?.closest<HTMLElement>('[data-alpha-camera-root]')||vf?.closest<HTMLElement>('[data-alpha-layer]')||vf?.closest<HTMLElement>('[data-screen]');if(!screen)return;
     const label=kind==='unavailable'?'Can’t start camera':kind==='camera'?'Camera off':'Mic off';
     const panel=document.createElement('div');panel.setAttribute('role','alert');panel.setAttribute('aria-label',label);panel.dataset.alphaCameraAccess=kind;
-    panel.style.cssText='position:absolute;left:16px;right:16px;top:38%;z-index:50;padding:16px;border-radius:20px;background:var(--alpha-gray-1c);color:var(--alpha-white);font:inherit;display:flex;flex-direction:column;gap:12px;text-align:center';
+    // With the explanation line, large text can make the panel taller than the room above the dock: it then
+    // scrolls inside that room, so its buttons never sit under the pill or composer.
+    panel.style.cssText='position:absolute;left:16px;right:16px;top:38%;max-height:max(160px,calc(62% - var(--alpha-dock-reserve,108px)));overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;z-index:50;padding:16px;border-radius:20px;background:var(--alpha-gray-1c);color:var(--alpha-white);font:inherit;display:flex;flex-direction:column;gap:12px;text-align:center';
     const title=document.createElement('strong');title.textContent=label;
     // One line says why access is needed, or what went wrong, and what the buttons below do.
     const detail=document.createElement('p');detail.dataset.alphaCameraAccessDetail='';detail.style.cssText='margin:0;font-size:14px;line-height:1.35;color:rgba(255,255,255,.72)';

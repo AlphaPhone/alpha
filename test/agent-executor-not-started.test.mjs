@@ -37,6 +37,6 @@ test('pre-effect executor guards refuse as not started',()=>{
 });
 
 test('an unsupported foreground review says what happened without promising a later release',()=>{
-  assert.ok(adapter.includes("summary:'This phone can’t review that request. Nothing was shared or changed.'"));
+  assert.ok(adapter.includes("summary:'This phone can’t review that request, so nothing was shared or changed.'"));
   assert.ok(!adapter.includes('This review is not available on this phone yet.'));
 });
