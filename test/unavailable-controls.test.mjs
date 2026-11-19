@@ -1,12 +1,12 @@
 // A control whose only effect would be a toast saying the feature is unavailable is not shown.
 // native-adapter marks such handlers; dc-lite drops any element bound to a marked handler.
-import test from 'node:test';
+import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
@@ -17,8 +17,9 @@ const stubbed = stubs => ({name: 'stubs', setup(b) {
 }});
 // Bundles live inside the repository so an external 'react' resolves to the same copy as this test.
 const root = resolve(import.meta.dirname, '..');
-const dir = mkdtempSync(join(root, '.unavailable-controls-test-'));
-process.on('exit', () => rmSync(dir, {recursive: true, force: true}));
+mkdirSync(join(root, 'test-results'), {recursive: true});
+const dir = mkdtempSync(join(root, 'test-results/unavailable-controls-'));
+after(() => rmSync(dir, {recursive: true, force: true}));
 let bundles = 0;
 const load = async (entry, stubs, external = []) => {
   const output = await build({entryPoints: [join(root, entry)], bundle: true, format: 'esm', platform: 'node', write: false, external, plugins: [stubbed(stubs)]});
