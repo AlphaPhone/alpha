@@ -96,3 +96,20 @@ test('spoken Camera navigation keeps the voice sheet and acknowledges the switch
  // Camera's own preview asks for media here, so only the voice conversation's end is checked.
  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect(voice(page)).toHaveCount(0);
 });
+
+
+test('a voice draft suggestion speaks naturally while chat keeps the full recipient, subject and body',async({page})=>{
+ await setup(page);
+ const answer="Got it. Here's the draft:\n\nTo: owner@example.com\nSubject: Tomorrow's shoot\n\nBring the tripod at 9:30.\n\nReady to send whenever you are.";
+ await page.evaluate(answer=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.answer=answer;
+  f.prompt='Draft an email about the shoot.';
+ },answer);
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken)).toEqual(['The suggested email is in the chat.']);
+ expect(await page.evaluate(()=> (window as any).ownedVoiceNavigation.shell.S().msgs.filter((m:any)=>m.from==='agent').at(-1)?.text)).toBe(answer);
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ await expect(voice(page)).toHaveCount(0);
+ expect(await page.evaluate(()=> (window as any).ownedVoiceNavigation.shell.S().msgs.filter((m:any)=>m.from==='agent').at(-1)?.text)).toBe(answer);
+});
