@@ -306,14 +306,14 @@ test('F-10: a saved older version of a sent email is kept, labelled as such, and
   const earlier = await localDraftRow(page,'Local draft, Versioned plan');
   await expect(earlier).toContainText('Earlier version of a sent email');
   // Declining the confirmation leaves it closed; accepting opens it, still unsent.
-  const prompts: string[] = [];
-  page.once('dialog', dialog => { prompts.push(dialog.message()); void dialog.dismiss(); });
+  const reopen = page.getByRole('dialog', {name: 'Open an earlier sent version?', exact: true});
   await earlier.click();
-  await expect.poll(() => prompts.length).toBe(1);
-  expect(prompts[0]).toContain('earlier version of a sent email');
+  await expect(reopen).toContainText('earlier version of a sent email');
+  await reopen.getByRole('button', {name: 'Cancel', exact: true}).click();
+  await expect(reopen).toHaveCount(0);
   await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveCount(0);
-  page.once('dialog', dialog => { prompts.push(dialog.message()); void dialog.accept(); });
   await earlier.click();
+  await reopen.getByRole('button', {name: 'Open draft', exact: true}).click();
   await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Saved first text');
   const state = await provider(page);
   expect(state.sent).toEqual(['Versioned plan']);
