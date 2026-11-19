@@ -29,3 +29,20 @@ test('canceling or retiring a canonical deletion review dispatches no record mut
  await chooseCalendarEventAction(page,'Delete event');await expect(review).toBeVisible();const before=await state(page);await state(page,{open:null});await expect(review).toHaveCount(0);await state(page,{open:before.open});
  expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'))).toEqual([]);
 });
+test('a confirmed deletion waits behind Undo and is sent only when the window ends',async({page})=>{
+ await page.clock.setFixedTime(new Date('2027-06-10T12:00Z'));
+ await openCanonicalCalendar(page,{eventTitle:'Undo deletion',begin:Date.parse('2027-06-10T13:00Z'),end:Date.parse('2027-06-10T14:00Z'),organizerSelf:true});
+ const writes=()=>page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET').map((r:any)=>r.method));
+ const row=page.getByRole('button',{name:/^Undo deletion,/});
+ await row.click();await chooseCalendarEventAction(page,'Delete event');
+ await page.getByRole('dialog',{name:'Delete event?',exact:true}).getByRole('button',{name:'Delete event',exact:true}).click();
+ await expect(page.getByText('Event deleted',{exact:true})).toBeVisible();await expect(row).toHaveCount(0);
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ await expect(row).toBeVisible();expect(await writes()).toEqual([]);
+ await row.click();await chooseCalendarEventAction(page,'Delete event');
+ await page.getByRole('dialog',{name:'Delete event?',exact:true}).getByRole('button',{name:'Delete event',exact:true}).click();
+ await expect(row).toHaveCount(0);expect(await writes()).toEqual([]);
+ // The fixture refuses every write, so the sent deletion is refused and the event shows again.
+ await expect.poll(writes,{timeout:20000}).toEqual(['DELETE']);
+ await expect(row).toBeVisible();
+});
