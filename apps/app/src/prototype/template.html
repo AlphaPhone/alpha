@@ -4544,6 +4544,7 @@
                 <sc-if value="{{m.emailDraft.editing}}">
                   <sc-if value="{{m.emailDraft.from}}"><small>From {{m.emailDraft.from}}</small></sc-if>
                   <label>To<input type="text" aria-label="Email recipients" value="{{m.emailDraft.to}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeTo}}"></label>
+                  <sc-if value="{{m.emailDraft.recipientCount}}"><small>{{m.emailDraft.recipientCount}}</small><ul class="chat-email-draft-recipients" aria-label="Email recipient list"><sc-for list="{{m.emailDraft.recipients}}" as="r"><li>{{r.address}}</li></sc-for></ul></sc-if>
                   <label>Subject<input type="text" aria-label="Email subject" maxlength="998" value="{{m.emailDraft.subject}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeSubject}}"></label>
                   <textarea aria-label="Email body" rows="4" maxlength="64000" value="{{m.emailDraft.body}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeBody}}"></textarea>
                   <sc-if value="{{m.emailDraft.missingAccount}}"><button onClick="{{m.emailDraft.openInbox}}">Open Inbox</button></sc-if>

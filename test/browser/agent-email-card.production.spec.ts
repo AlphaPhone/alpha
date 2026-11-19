@@ -171,3 +171,44 @@ for (const decision of [
       expect(foreign).toEqual([]);
     },
   );
+
+test('every recipient of a chat draft is on screen before Send', async ({ page }) => {
+  const foreign = await fenceNetwork(page);
+  const crew = [
+    'lighting.crew@example.invalid',
+    'camera.operator@example.invalid',
+    'location.manager@example.invalid',
+  ];
+  await flagOffAndroid(page, {
+    accounts: [
+      {
+        connectionId: 'owned-grant',
+        email: 'owner@example.invalid',
+        connected: true,
+        messages: [],
+      },
+    ],
+    emailDraft: { to: crew, subject: 'Tomorrow’s shoot', body: 'Bring the tripod.' },
+  });
+  await residentHome(page);
+  await openRetainedNativeNotes(page);
+  await button(page, 'Open conversation').click();
+  const composer = page.getByRole('textbox', { name: 'Message Alpha', exact: true });
+  await composer.fill('Draft an email to the crew with the shoot plan.');
+  await composer.press('Enter');
+  const draft = page.getByRole('region', { name: 'Email draft', exact: true });
+  const to = draft.getByRole('textbox', { name: 'Email recipients' });
+  await expect(to).toHaveValue(crew.join(', '), { timeout: 15000 });
+  await expect(to).toBeEnabled();
+  // The single-line field shows only the start of this list at phone width; the inline Send has
+  // no review sheet, so each address is listed in full under the field.
+  const listed = draft.getByRole('list', { name: 'Email recipient list' });
+  await expect(draft.getByText('3 recipients', { exact: true })).toBeVisible();
+  await expect(listed.getByRole('listitem')).toHaveText(crew);
+  await listed.scrollIntoViewIfNeeded();
+  for (const row of await listed.getByRole('listitem').all()) {
+    await expect(row).toBeInViewport({ ratio: 1 });
+    expect(await row.evaluate((item) => item.scrollWidth <= item.clientWidth)).toBe(true);
+  }
+  expect(foreign).toEqual([]);
+});

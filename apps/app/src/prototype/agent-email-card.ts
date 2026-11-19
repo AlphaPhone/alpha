@@ -4,6 +4,7 @@ import { inboxLocalStore } from '../runtime/inbox-local-store';
 import {
   agentEmailDraft,
   draftMailRecipients,
+  draftRecipientList,
 } from '../ui/mailbox/agent-email-draft';
 
 type Bag = Record<string, any>;
@@ -218,8 +219,13 @@ export function installAgentEmailCards(
         }
       };
       const busy = shelf.busy.has(card.messageId);
+      // The single-line field shows only the start of a long list, and this Send has no review
+      // sheet, so every recipient is listed under the field.
+      const listed = draftRecipientList(to);
       return { ...message, canUseInEmail: false, emailDraft: {
         ...card, from: card.from || account?.from, to, busy,
+        recipients: listed.map(address => ({ address })),
+        recipientCount: listed.length ? listed.length + (listed.length === 1 ? ' recipient' : ' recipients') : '',
         editing: card.state === 'draft',
         settled: card.state !== 'draft',
         locked: busy || card.state !== 'draft' || !account,
