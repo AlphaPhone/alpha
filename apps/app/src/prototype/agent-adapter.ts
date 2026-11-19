@@ -1690,7 +1690,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
     return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
   };
-  const selectedFiles=new WeakMap<ChatFile,{source:Source; selection:SelectedChatFile; thumbnail?:string}>();
+  const selectedFiles=new WeakMap<ChatFile,{selection:SelectedChatFile; thumbnail?:string}>();
   async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile){
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
@@ -1712,7 +1712,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     try{
       const selected=selection ? await selection.read(current) : undefined;
       if (!current() || (selection && !selected)) return;
-      const files:File[]=selected ? [selected.file] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
+      const files:File[]=selected ? [selected] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
       if(!current()||!files.length)return;
       const encoded=await encodeChatAttachments(files);
       if(!current())return;
@@ -1722,7 +1722,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (selection && selected) {
         const file=additions[0];
         const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
-        selectedFiles.set(file, {source:selected.source,selection,thumbnail});
+        selectedFiles.set(file, {selection,thumbnail});
       }
       shell.fileAttachments=[...existing,...additions];
       if (selected) {
@@ -2145,7 +2145,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       finally{this.draftSendPending=false;}
     }
     let sourceDraft=fromComposer&&this.reviewedSourceDraft?.draft===text?sourceOf(this.reviewedSourceDraft.source):undefined;
-    if (filesAtStart?.length===1 && !sourceDraft) sourceDraft=selectedFiles.get(filesAtStart[0])?.source;
     context(this);
     const transcript=fromComposer?this.transcriptAttachment:null;
     const mail=fromComposer?(this.mailAttachment??null):null;

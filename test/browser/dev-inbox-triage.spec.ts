@@ -75,7 +75,13 @@ test('preview selection confirms only selected email changes and survives reload
 });
 test('preview select all marks read then finishes selection without deleting peers',async({page})=>{
  await mailMenu(page,'Select emails');await mailMenu(page,'Select all');await expect(page.getByRole('heading',{name:'2 selected',exact:true})).toBeVisible();
- await mailMenu(page,'Mark as read');await page.getByRole('dialog',{name:'Mark as read 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ await page.getByLabel('Mail options',{exact:true}).click();
+ const markRead=page.getByRole('menuitem',{name:'Mark as read',exact:true});
+ await expect(markRead.locator('.mail-toolbar-icon')).toHaveCSS('mask-image',/\/icons\/lucide\/mail-open\.svg/);
+ const icon=await page.request.get('/icons/lucide/mail-open.svg');
+ expect(icon.headers()['content-type']).toContain('image/svg+xml');
+ await markRead.click();
+ await page.getByRole('dialog',{name:'Mark as read 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
  expect((await stored(page)).mails.map((row:any)=>row.unread)).toEqual([false,false]);
  await mailMenu(page,'Select emails');await mailMenu(page,'Finish selection');await expect(page.getByRole('checkbox')).toHaveCount(0);await expect(page.getByRole('button',{name:/Sender One, Planning notes/})).toBeVisible();
 });

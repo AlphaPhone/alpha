@@ -10205,44 +10205,27 @@
     ]
   },
   {
-    "path": "specs/quint/application/NoteSourceDialog.qnt",
-    "module": "NoteSourceDialog",
+    "path": "specs/quint/application/NoteSourceAttachment.qnt",
+    "module": "NoteSourceAttachment",
     "init": "init",
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "linkRetainsReferenceAndReleasesSelectionTest",
-      "changedNoteStopsLinkTest",
-      "closedDialogLeavesReferenceForMaintenanceTest",
-      "verifyRefusesOtherFileTest",
-      "removeDropsLinkAndAsksMaintenanceTest",
-      "refusedReleaseIsReportedTest",
-      "abandonedActionFinishesWithoutDialogTest",
-      "linkedReferenceOpensWithoutPickerTest",
-      "abandonedRemovalStillAsksMaintenanceTest",
-      "unsavedLinkKeepsOldSourceTest"
+      "retainedLinkOpensDirectlyTest",
+      "matchingSelectionOpensTest",
+      "changedLinkReleasesSelectionTest",
+      "pickerResultAfterLeaveIsReleasedTest",
+      "differentSelectionNeverOpensTest"
     ],
     "invariants": [
-      "SelectionHeldOnlyByRunningAction",
-      "FinishedActionHoldsNothing",
-      "LinkedReferenceRetained",
-      "DialogShowsStoredLinkWhileFresh",
-      "ViewerCancelledOncePerDialog",
-      "WaitingStagesKnown",
-      "StatusOnlyFromShownDialog"
+      "OpenRequiresExactSource",
+      "SelectionOwnedByActiveOperation",
+      "RetainedLinkSkipsPicker"
     ],
     "witnesses": [
-      "StaleActionReleasedWitness",
-      "OrphanReferenceWitness",
-      "LinkSaveIssuedWitness",
-      "LinkSavedWitness",
-      "ReleaseRefusedWitness",
-      "ReplacedReferenceMaintainedWitness",
-      "MatchingFileOpenedWitness",
-      "OtherFileRefusedWitness",
-      "LinkedReferenceOpenedWitness",
-      "ViewerAnsweredWitness",
-      "AbandonedActionOutlivesDialogWitness"
+      "OpeningReference",
+      "OpeningMatchedSelection",
+      "ReleasingRetiredSelection"
     ],
     "sources": [
       "apps/app/src/prototype/note-source-adapter.ts"
@@ -10254,27 +10237,7 @@
       },
       {
         "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "releaseUnusedSourceReferences"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
         "name": "sourceDocument"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "closeCurrent"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "forgetSelected"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "retainSourceReference"
-      },
-      {
-        "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "openReviewed"
       },
       {
         "path": "apps/app/src/prototype/note-source-adapter.ts",
@@ -10282,25 +10245,20 @@
       },
       {
         "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "releaseSourceReferences"
+        "name": "openReviewed"
       },
       {
         "path": "apps/app/src/prototype/note-source-adapter.ts",
-        "name": "saveImportedNote"
+        "name": "forgetSelected"
       }
     ],
     "stateMapping": {
-      "visit/rev/link/linkRef": "The Notes view being active, the stored note revision and its documentSource with its a1: reference",
-      "gen/open/expected/source/sourceRef/status": "The dialog on screen, the note JSON it reviewed, the source it shows and its status line",
-      "op/opGen": "The action in flight, the port call it waits on, its picker selection and the dialog that started it",
-      "grants/leaked/refs": "Picker selections not yet given back through forgetSelected, selections whose release was refused, and references Android retains",
-      "views/cancels/maintains": "Viewer opens, AlphaMailAttachments.cancel calls on close and Notes Trash maintenance requests"
+      "active/owned": "Notes visit and current attachment selection",
+      "linked/referenced": "Persisted fingerprint and optional file reference",
+      "stage/grant/exact": "Pending attachment operation, temporary selection and exact byte verification"
     },
     "abstractions": [
-      "The Android path with one note, two files, three dialogs, three picks and two outside edits. The browser path uses the owned file picker of SystemPickerVisibility and holds no grant.",
-      "The read of the selected bytes and their review are one step. At most one action is followed at a time: a newer dialog starts an action only after the abandoned action of an earlier dialog has finished.",
-      "Maintenance keeps a reference retained by the action in flight; the source keeps any reference retained within three days.",
-      "Trace replay: test/quint-note-source-dialog.test.mjs replays simulator traces step by step against installNoteSourceAdapter mounted in a DOM with the picker, attachment plugin and Notes api as ports and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
+      "The picker, file read and viewer are represented by their outcomes. Direct attachment opening has no note mutation. The browser and host tests exercise the actual source."
     ],
     "sharedSources": [
       "plugins/plugin-files/src/documents/source-links.ts"

@@ -21,7 +21,7 @@ export function decodedFile(value: AttachmentBytes): File {
 
 export type SelectedChatFile = {
   current(): boolean;
-  read(current: () => boolean): Promise<{file: File; source: SummarySource} | undefined>;
+  read(current: () => boolean): Promise<File | undefined>;
   edit(compose: (draft: string, source?: SummarySource) => void, current: () => boolean, question?: string): void;
 };
 

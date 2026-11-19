@@ -173,7 +173,7 @@ export const LIVE_STATES: State[] = [
   live('Browser address', ['Browser', 'Edit address']),
   live('Workflow alarms', ['Workflows', 'New automation', 'Clock alarms']),
   legacyNotes('Notes note menu', ['New note', 'More']),
-  {name:'live Notes source document',open:async(page,theme)=>{await page.addInitScript(offline);await goto(page, theme ? `/?theme=${theme}` : '/');await openLegacyAttachment(page);await settle(page);}},
+  {name:'live Notes attachment preview',open:async(page,theme)=>{await page.addInitScript(offline);await goto(page, theme ? `/?theme=${theme}` : '/');await openLegacyAttachment(page);await settle(page);}},
   legacyNotes('Notes recorder', ['Record voice note'], 'notes-recorder'),
   live('Workflows new automation', ['Workflows', 'New automation'], 'automations-detail'),
 ];

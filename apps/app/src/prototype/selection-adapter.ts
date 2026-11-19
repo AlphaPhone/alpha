@@ -189,7 +189,6 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         if (!questionCurrent()) throw Error('The selected file changed.');
         return {version:1,name:file.name,mimeType:file.mimeType,sha256:file.sha256,size:file.size,...(reference ? {reference} : {})};
       };
-      let attachedSource: Source | undefined;
       const editExcerpt: SelectedChatFile['edit'] = (compose, current, question) => {
         if (!current() || !questionCurrent()) return;
         closeQuestion?.();
@@ -197,7 +196,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           name: selected.pdf ? name+' · page '+(selected.pdf.page+1) : name,
           text:selected.text??'', question, current:()=>current() && questionCurrent(),
           validate:text=>!sensitiveReadingText(text), compose,
-          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>attachedSource ?? await link(await readSelected())} : {}),
+          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>link(await readSelected())} : {}),
           ...(image||selected.pdf ? {image:async(signal:AbortSignal)=>(await fetch(image||selected.pdf!.image,{signal})).blob()} : {}),
         });
       };
@@ -215,9 +214,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
             try {
               const file=await readSelected();
               if (!stillCurrent()) return undefined;
-              const attachment=decodedFile(file);
-              attachedSource=await link(file);
-              return {file:attachment,source:attachedSource};
+              return decodedFile(file);
             } catch(error) {
               if (!(error instanceof SourceUnavailableError)) throw error;
               if (stillCurrent() && current) {

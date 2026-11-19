@@ -166,7 +166,7 @@ export function installSimulatedInbox(view:Bag){
    if(folder==='trash')add('Restore','rotate-cw','restoreTrash');
    else if(folder==='archive')add('Move to Inbox','rotate-cw','restoreArchive');
    else add('Archive','archive','archive');
-   add('Mark as read','check','read');add('Mark as unread','mail','unread');
+   add('Mark as read','mail-open','read');add('Mark as unread','mail','unread');
    if(folder!=='trash')add('Move to Trash','trash-2','trash');
   }
  }
