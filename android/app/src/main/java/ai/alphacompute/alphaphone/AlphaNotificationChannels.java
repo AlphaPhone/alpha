@@ -17,28 +17,29 @@ import android.content.Context;
  */
 final class AlphaNotificationChannels {
  private AlphaNotificationChannels(){}
- /** Channel ID, display name (null keeps the installed name), description. */
- static final String[][] ROWS={
-  {"eliza_alerts",null,"Notices Alpha marks as urgent."},
-  {"eliza_notifications",null,"Notices Alpha marks as important."},
-  {"eliza_updates",null,"Routine notices from Alpha."},
-  {"eliza_quiet",null,"Low-priority notices from Alpha. Shown without sound."},
+ /** Channel ID, then the string resources (alpha-notices.xml) for its display name (0 keeps the installed name) and description. */
+ static final class Row {final String id;final int name,description;Row(String id,int name,int description){this.id=id;this.name=name;this.description=description;}}
+ static final Row[] ROWS={
+  new Row("eliza_alerts",0,R.string.alpha_channel_alerts_description),
+  new Row("eliza_notifications",0,R.string.alpha_channel_notifications_description),
+  new Row("eliza_updates",0,R.string.alpha_channel_updates_description),
+  new Row("eliza_quiet",0,R.string.alpha_channel_quiet_description),
   // The shared reminder store names this channel after the older one plus " (due)"; it is the one in use.
-  {AlphaReminders.CONFIGURATION.channelId,"Reminders (not used)","Kept so your earlier sound and alert choices carry over. Reminder alerts use Reminders."},
-  {AlphaReminders.CONFIGURATION.dueChannelId(),"Reminders","Reminders you set on this phone. Android may delay them."},
+  new Row(AlphaReminders.CONFIGURATION.channelId,R.string.alpha_channel_reminders_old_name,R.string.alpha_channel_reminders_old_description),
+  new Row(AlphaReminders.CONFIGURATION.dueChannelId(),R.string.alpha_channel_reminders_name,R.string.alpha_channel_reminders_description),
  };
  /** Safe to repeat: a channel whose name and description already match is left alone. */
  static void describe(Context context){
   try{
    NotificationManager manager=context.getSystemService(NotificationManager.class);
    if(manager==null)return;
-   for(String[] row:ROWS){
-    NotificationChannel existing=manager.getNotificationChannel(row[0]);
+   for(Row row:ROWS){
+    NotificationChannel existing=manager.getNotificationChannel(row.id);
     if(existing==null)continue;
-    String name=row[1]==null?String.valueOf(existing.getName()):row[1];
-    if(name.contentEquals(existing.getName())&&row[2].equals(existing.getDescription()))continue;
-    NotificationChannel next=new NotificationChannel(row[0],name,existing.getImportance());
-    next.setDescription(row[2]);
+    String name=row.name==0?String.valueOf(existing.getName()):context.getString(row.name),description=context.getString(row.description);
+    if(name.contentEquals(existing.getName())&&description.equals(existing.getDescription()))continue;
+    NotificationChannel next=new NotificationChannel(row.id,name,existing.getImportance());
+    next.setDescription(description);
     manager.createNotificationChannel(next);
    }
   }catch(RuntimeException unavailable){/* Presentation only; retried on the next start or return to the app. */}

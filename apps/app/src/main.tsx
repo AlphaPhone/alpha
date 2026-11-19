@@ -71,6 +71,8 @@ import { installPrototypeVoiceAdapter } from './prototype/voice-adapter';
 import { installPrototypeBrowserAdapter } from './prototype/browser-adapter';
 import { installCalendarAdapter } from './prototype/calendar-adapter';
 import { installSystemBarAppearance, type SystemBars } from './prototype/system-bar-appearance';
+import {installPredictiveBack} from './runtime/predictive-back';
+import {installHaptics,type HapticDevice} from './runtime/haptics';
 import { automaticUpdateIdle, hasAppearancePreview, installSettingsAdapter, readAppearanceChoice, resolveAppearance } from './prototype/settings-adapter';
 import { ConnectionChooser, connectionController, connectionChooserVisible, residentAlwaysPresent } from './runtime/connection-ui';
 import { protectedPowerLaunchState } from './runtime/power-launch-state';
@@ -192,6 +194,9 @@ installOngoingCallBar(Component,VIEWS,isAndroid&&aospImage&&!fixture?registerPlu
 installReplyAnnouncer(Component);
 installSystemShade(Component,{native:isAndroid});
 installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBars>('AlphaDevice'));
+// Android's held Back gesture previews the layer it closes; switches, confirmed deletes and the Home long press give touch feedback.
+installPredictiveBack();
+installHaptics(isAndroid?registerPlugin<HapticDevice>('AlphaDevice'):null);
 // The shared agenda, mail and brief cards render the final Home values of every adapter above.
 installHomeCardVisibility(Component, () => googleConnectionController.open());
 // Messages and Phone cards exist on the verified image only; elsewhere this installs nothing.

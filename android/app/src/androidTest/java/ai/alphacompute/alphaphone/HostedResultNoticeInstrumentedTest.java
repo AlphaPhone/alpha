@@ -94,14 +94,17 @@ public final class HostedResultNoticeInstrumentedTest {
   assertNull("An ordinary result keeps the channel alert behavior",result.getGroup());
   assertEquals(android.app.Notification.GROUP_ALERT_ALL,result.getGroupAlertBehavior());
   long now=System.currentTimeMillis(),expiresAt=now+5*3600000L;String source=UUID.randomUUID().toString();
-  android.app.Notification renewal=poster.renewal(source,expiresAt,now).build();
+  android.app.Notification renewal=poster.renewal(source,expiresAt,now,"calendar").build();
   assertEquals(5*3600000L,renewal.getTimeoutAfter());
+  assertEquals("Calendar access for your daily brief expires soon",renewal.extras.getCharSequence(android.app.Notification.EXTRA_TITLE).toString());
+  assertEquals("Alpha Phone",renewal.publicVersion.extras.getCharSequence(android.app.Notification.EXTRA_TITLE).toString());
+  assertEquals("Access for your daily brief expires soon",poster.renewal(source,expiresAt,now,null).build().extras.getCharSequence(android.app.Notification.EXTRA_TITLE).toString());
   // Renew opens the review (it never renews by itself); Ask Alpha opens a question about this source and needs unlock.
   assertEquals(2,renewal.actions.length);assertEquals("Renew",renewal.actions[0].title.toString());assertEquals("Renew only opens the review",renewal.contentIntent,renewal.actions[0].actionIntent);
   assertEquals("Ask Alpha",renewal.actions[1].title.toString());assertNull("Ask has no inline send input",renewal.actions[1].getRemoteInputs());assertNotEquals("Ask is its own route, not the Renew review",renewal.contentIntent,renewal.actions[1].actionIntent);
   if(android.os.Build.VERSION.SDK_INT>=31)assertTrue("Ask requires unlock",renewal.actions[1].isAuthenticationRequired());
   assertEquals(android.app.Notification.VISIBILITY_PRIVATE,renewal.visibility);assertNotNull(renewal.publicVersion);
   assertFalse(renewal.extras.toString().contains(source));assertTrue(HostedNoticePoster.renewalTag(source).endsWith(source));
-  assertThrows(IllegalArgumentException.class,()->poster.renewal("../escape",expiresAt,now));
+  assertThrows(IllegalArgumentException.class,()->poster.renewal("../escape",expiresAt,now,null));
  }
 }

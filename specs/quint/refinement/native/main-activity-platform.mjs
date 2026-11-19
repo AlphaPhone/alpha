@@ -370,6 +370,18 @@ public class ActivityManager {
 public abstract class OnBackPressedCallback {
   public OnBackPressedCallback(boolean enabled) {}
   public abstract void handleOnBackPressed();
+  public void handleOnBackStarted(BackEventCompat backEvent) {}
+  public void handleOnBackProgressed(BackEventCompat backEvent) {}
+  public void handleOnBackCancelled() {}
+}`,
+    // androidx.activity 1.8.0 (the pinned androidxActivityVersion): the held predictive Back gesture.
+    'androidx/activity/BackEventCompat.java': `package androidx.activity;
+public final class BackEventCompat {
+  public static final int EDGE_LEFT = 0, EDGE_RIGHT = 1;
+  private final float progress; private final int edge;
+  public BackEventCompat(float touchX, float touchY, float progress, int swipeEdge) { this.progress = progress; edge = swipeEdge; }
+  public float getProgress() { return progress; }
+  public int getSwipeEdge() { return edge; }
 }`,
     'androidx/activity/OnBackPressedDispatcher.java': `package androidx.activity;
 public class OnBackPressedDispatcher {

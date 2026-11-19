@@ -8,6 +8,7 @@ import {ALPHA_PRODUCT, alphaViews} from '../product/alpha-product';
 import {InstalledAppsGridDrawer, appsDrawerEntries} from '../ui/mobile-shell/InstalledAppsGridDrawer';
 import {DEFAULT_HOLD_MS, LAUNCHER_PRESS_SLOP} from '../ui/gestures/constants';
 import {createInlineModal} from '../runtime/inline-modal';
+import {haptic} from '../runtime/haptics';
 type Bag = Record<string, any>;
 
 /** Opens Android's App info for exactly one listed entry (and profile). */
@@ -205,7 +206,7 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
             if (press !== started) return;
             press = null;
             if (!ownsHomeGesture(self, target)) return;
-            swallow = key; self.setState({homeEdit: true, homeAdd: false});
+            swallow = key; haptic('long-press'); self.setState({homeEdit: true, homeAdd: false});
           }, DEFAULT_HOLD_MS)};
           press = started; return;
         }
@@ -249,7 +250,7 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
         const key = keyOf(tileOf(event.target));
         if (!key || !inventory) return;
         event.preventDefault(); endPress();
-        if (!editing) { swallow = key; self.setState({homeEdit: true, homeAdd: false}); }
+        if (!editing) { swallow = key; haptic('long-press'); self.setState({homeEdit: true, homeAdd: false}); }
       },
       onClickCapture: (event: MouseEvent) => {
         const target = tileOf(event.target), key = keyOf(target);
