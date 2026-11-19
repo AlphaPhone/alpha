@@ -16,7 +16,7 @@ import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,medi
 import {createInlineModal} from '../runtime/inline-modal';
 import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
-import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,resolveRequestedRows,type HostOperation} from './photo-library-adapter';
+import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,runHostItemsRequest,type HostOperation} from './photo-library-adapter';
 import type {PhotosViewResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
 import {virtualGrid,newestFirst,mergeWindow,readWindow,keepThumbnails,changeBatches,runBatches,thumbnailPlan,groupSections,patchRows,insertRows,patchSelection,favoriteTarget,batches,daysLeft,pinchColumns,dragRange,filterMatches,filterLabel,viewerTitle,formatBytes,shotAt,albumOf,GRID_COLUMNS,type PhotosFilter} from '../ui/mobile-shell/photos-view';
 import {LIBRARY_LIMITS,type LibraryAgentOperation,type LibraryAgentResult} from '../runtime/photo-library';
@@ -238,6 +238,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   function closeVideo() { if (video) { video.pause(); video.removeAttribute('src'); video.load(); video.remove(); } video = undefined; videoId = ''; videoRevision = ''; }
   let captures: SavedPhoto[] = [];
   let photosApi: Bag | undefined, loaded = false, loading = false, next = '', libraryEpoch = 0;
+  /** One Photos visit for agent item requests: leaving Photos or hiding the page ends it. */
+  let hostVisit = 0;
   let libraryAccess:LibraryAccess|undefined,requestingLibraryAccess=false;
   /** Reload the whole retained window so unrelated changes preserve the scrolled-to rows. */
   const WINDOW=LIBRARY_LIMITS.kept,BATCH=20,SHARE_BATCH=100;
@@ -1552,7 +1554,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     reviewChanged:()=>{photosApi?.set({nativeAgentReview:Date.now()});const note=deviceLibrary.takeStatus();if(note&&photosApi?.isActive())photosApi.toast(note);},
     trashed:(ids:string[])=>{const owner=photosApi;if(!owner||!ids.length)return;void (async()=>{await loadTrash(owner);await refresh();const rows=trash.filter(row=>ids.includes(nativeId(row.id)));if(owner.isActive())owner.toast('Deleted',rows.length?{undo:()=>{void changeSelection(owner,'restore',rows);}}:undefined);})();},
     async run(operation:HostOperation,signal:AbortSignal):Promise<LibraryAgentResult|PhotosViewResult>{
-      const owner=photosApi;if(!owner?.isActive()||disposed)throw new LibraryAgentRefusal('Open Photos, then ask again.');
+      const owner=photosApi,visit=hostVisit;if(!owner?.isActive()||disposed)throw new LibraryAgentRefusal('Open Photos, then ask again.');
       if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy right now.');
       if(!loaded)await refresh();signal.throwIfAborted();
       if(operation.type==='photos_filter'){
@@ -1574,27 +1576,21 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         await openSaved(row.id,owner);
         return {kind:'photos_open',opened:owner.get('photos').open===row.id};
       }
-      // Items older than the loaded window are read from the library before they count as missing.
-      const {rows,missing}=await resolveRequestedRows(captures,operation.ids,row=>nativeId(row.id),async id=>{const row=normalize(await library.read({id}));return row.trashed?undefined:row;},signal);
-      if(disposed||!owner.isActive())throw new LibraryAgentRefusal('Open Photos, then ask again.');
-      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy right now.');
-      if(operation.type==='photo_library_select'){
-        if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos.');
-        selection=rows;selectionTab='lib';photosFilter=undefined;
-        owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
-        return {kind:'photo_library_select',selected:rows.length,missing};
-      }
-      if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos.');
-      if(albumReview||shareReview)throw new LibraryAgentRefusal('Finish the open review first.');
-      if(operation.type==='photos_share'){
-        // Reviewed: the owner confirms over the grid, then picks a target in Android's share sheet.
-        shareReview={items:rows.map(row=>({...row})),missing};
-        owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
-        return {kind:'photos_share',status:'review_opened',count:rows.length,missing};
-      }
-      albumReview={name:operation.name,items:rows.map(row=>({...row})),missing};
-      owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
-      return {kind:'photos_album_create',status:'review_opened',count:rows.length,missing};
+      // Items older than the loaded window are read from the library before they count as missing;
+      // the reads can outlast the visit, so the same visible visit is checked again (PhotosAgentHost).
+      return runHostItemsRequest(operation,{
+        loaded:()=>captures,idOf:row=>nativeId(row.id),read:async id=>{const row=normalize(await library.read({id}));return row.trashed?undefined:row;},
+        current:()=>!disposed&&!document.hidden&&owner.isActive()&&visit===hostVisit,
+        busy:()=>!!(edit||closeVideoEdit||mutating||sharing),
+        reviewOpen:()=>!!albumReview||!!shareReview||deviceLibrary.reviewBusy(),
+        select:rows=>{selection=rows;selectionTab='lib';photosFilter=undefined;owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});},
+        openReview:(request,rows,missing)=>{
+          // Reviewed: the owner confirms over the grid; a share then picks a target in Android's share sheet.
+          if(request.type==='photos_share')shareReview={items:rows.map(row=>({...row})),missing};
+          else albumReview={name:request.name,items:rows.map(row=>({...row})),missing};
+          owner.set({tab:'lib',album:null,open:null,nativeAgentReview:Date.now()});
+        },
+      },signal);
     },
   };
   const releaseHost=setMainLibraryHost(host);
@@ -1815,7 +1811,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     return data;
   };
   if (views.photos) views.photos.back = (st: Bag, currentApi: Bag) => { if(edit){void requestCancelEdit(currentApi);return true;}if(selection){cancelPhotoSelection(currentApi);return true;}if(st.sheet==='owned-album'){manager=undefined;currentApi.set({sheet:null});return true;}if(st.sheet==='empty'){cancelPermanent(currentApi);return true;}if(st.sheet)return photosBack?.(st,currentApi); if(st.from==='camera'&&currentApi.S?.stack?.length)return photosBack?.(st,currentApi); if (preview?.id === st.open || captures.some(c => c.id === st.open) || albumRows.some(c => c.id === st.open)) { retirePhotoRead();currentApi.set({ open: null, nativePhotoSelection: null }); preview = undefined; photoViewport.clear(); closeVideo(); return true; } return photosBack?.(st, currentApi); };
-  if(views.photos)views.photos.onLeave=(owner:Bag)=>{photoViewport.clear();cancelScan();retirePhotoRead();window.clearTimeout(thumbTimer);deviceLibrary.leave();shareReview=undefined;albumReview=undefined;closeQuestion?.();closeQuestion=undefined;void photoAttachments.cancelPhotoSelected().catch(()=>{});cancelEdit();editRecoveryChecked=false;automaticEditRecovery='';selection=undefined;selectionTab=undefined;swallowedTap='';endHold();manager=undefined;const old=prepared;prepared=undefined;if(old)void library.cancelDeleteTrash({confirmation:old.confirmation}).catch(()=>{});owner.set({sheet:null});photosLeave?.(owner);};
+  if(views.photos)views.photos.onLeave=(owner:Bag)=>{photoViewport.clear();cancelScan();retirePhotoRead();window.clearTimeout(thumbTimer);deviceLibrary.leave();++hostVisit;shareReview=undefined;albumReview=undefined;closeQuestion?.();closeQuestion=undefined;void photoAttachments.cancelPhotoSelected().catch(()=>{});cancelEdit();editRecoveryChecked=false;automaticEditRecovery='';selection=undefined;selectionTab=undefined;swallowedTap='';endHold();manager=undefined;const old=prepared;prepared=undefined;if(old)void library.cancelDeleteTrash({confirmation:old.confirmation}).catch(()=>{});owner.set({sheet:null});photosLeave?.(owner);};
   async function playVideo(selected: SavedPhoto, owner: Bag) {
     if (selected.kind !== 'video') return;
     const token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
@@ -1864,7 +1860,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   // not from observing every DOM mutation in the document.
   const removePresence = installViewPresence(_Component, schedule);
   const resize = () => { if (session.phase === 'ready') mask(true); schedule(); };
-  const visibility = () => { if (document.hidden) { retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);watchLibrary(false);cancelEdit();closeVideo();if(!browserMode){++libraryEpoch;captures=[];albumRows=[];trash=[];trashLoaded=false;albumNext='';trashNext='';albumKey='';counts=undefined;++countsEpoch;countsBusy=false;++albumsEpoch;albumsBusy=false;albumsLoaded=false;customAlbums=[];++albumEpoch;++trashEpoch;preview=undefined;shareReview=undefined;albumReview=undefined;selection=undefined;next='';loaded=false;photosApi?.set({open:null,nativePhotoSelection:null,nativeCaptureRevision:Date.now()});}void stop(); } else { loaded = false; if (photosApi?.isActive()) { void refresh(); if (!trashLoaded && libraryAvailable()) void loadTrash(photosApi); } schedule(); } };
+  const visibility = () => { if (document.hidden) { ++hostVisit;retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);watchLibrary(false);cancelEdit();closeVideo();if(!browserMode){++libraryEpoch;captures=[];albumRows=[];trash=[];trashLoaded=false;albumNext='';trashNext='';albumKey='';counts=undefined;++countsEpoch;countsBusy=false;++albumsEpoch;albumsBusy=false;albumsLoaded=false;customAlbums=[];++albumEpoch;++trashEpoch;preview=undefined;shareReview=undefined;albumReview=undefined;selection=undefined;next='';loaded=false;photosApi?.set({open:null,nativePhotoSelection:null,nativeCaptureRevision:Date.now()});}void stop(); } else { loaded = false; if (photosApi?.isActive()) { void refresh(); if (!trashLoaded && libraryAvailable()) void loadTrash(photosApi); } schedule(); } };
   let libraryChangeHandle:{remove():Promise<void>}|undefined;
   /** A MediaStore change: re-read what is loaded and patch it (FixPatch). The selection keeps rows that
    * still exist and the viewer stays open unless its item is gone. `hard` (the edited source changed

@@ -8045,6 +8045,80 @@
     ]
   },
   {
+    "path": "specs/quint/application/PhotosAgentHost.qnt",
+    "module": "PhotosAgentHost",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "olderItemReadThenSelectedTest",
+      "missingItemCountedTest",
+      "windowOnlyRequestFinishesAtOnceTest",
+      "hiddenDuringReadOpensNothingTest",
+      "leftAndReturnedDuringReadTest",
+      "libraryReviewDuringReadRefusesAlbumTest",
+      "busyDuringReadRefusesTest",
+      "nothingFoundRefusedTest",
+      "windowRowFoundFromWindowTest"
+    ],
+    "invariants": [
+      "SingleReview",
+      "ReviewOnlyWhileShown",
+      "SelectionOnlyWhileShown",
+      "SelectionWasAsked",
+      "ExactMissingCount"
+    ],
+    "witnesses": [
+      "OlderItemSelectedWitness",
+      "MissingCountedWitness",
+      "LeftDuringReadWitness",
+      "ReviewRefusedWitness",
+      "BusyRefusedWitness",
+      "AlbumConfirmedWitness"
+    ],
+    "sources": [
+      "apps/app/src/prototype/photo-library-adapter.ts",
+      "apps/app/src/prototype/camera-adapter.ts"
+    ],
+    "symbols": [
+      {
+        "path": "apps/app/src/prototype/photo-library-adapter.ts",
+        "name": "runHostItemsRequest"
+      },
+      {
+        "path": "apps/app/src/prototype/photo-library-adapter.ts",
+        "name": "resolveRequestedRows"
+      },
+      {
+        "path": "apps/app/src/prototype/photo-library-adapter.ts",
+        "name": "createDeviceLibrary"
+      },
+      {
+        "path": "apps/app/src/prototype/photo-library-adapter.ts",
+        "name": "reviewBusy"
+      },
+      {
+        "path": "apps/app/src/prototype/camera-adapter.ts",
+        "name": "hostVisit"
+      }
+    ],
+    "stateMapping": {
+      "inPhotos/hidden/disposed/visit": "The active Photos view, document visibility, disposal and the host's hostVisit, bumped on leave and on hide",
+      "busy": "The editor, a video edit, a change or a share running in the host",
+      "library/window": "Items the library can read (not deleted) and the rows of the loaded Library window",
+      "requests": "Item requests whose library reads are outstanding, with the window rows found at the start and the visit they started in",
+      "selection/selectionAsked": "The Library selection an agent request set and the ids that request named",
+      "albumReview/libraryReview": "The host's album review and the library's own review or Android change (reviewBusy)",
+      "results/confirmed": "Answered select and album requests with their exact missing counts, and album reviews the owner confirmed"
+    },
+    "abstractions": [
+      "Two items, one older than the loaded window, two concurrent requests and three visits. photos_share follows the album review through the same runHostItemsRequest branch and is not driven separately; photos_filter and photos_open are outside this model.",
+      "A request's library reads answer together in one settle step, reading the library as it is then; window rows are the snapshot taken when the request starts. The library's own up-front refusals (an open review, Photos not showing) are preconditions of request.",
+      "Confirming the album review is one step; the album write, its revision checks and the members it skips are PhotosOwnedAlbumDialog and native obligations.",
+      "The owning test replays sampled and witness traces against the actual createDeviceLibrary and runHostItemsRequest, with the library port answering at once and a fixture host whose visit, busy, review and selection ports follow camera-adapter's host.run. The camera-adapter glue itself is read from source, not mounted."
+    ]
+  },
+  {
     "path": "specs/quint/application/AgentPhotoRequest.qnt",
     "module": "AgentPhotoRequest",
     "init": "init",
