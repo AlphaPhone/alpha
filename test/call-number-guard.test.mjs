@@ -42,22 +42,45 @@ test('a text must go to the number written, and a number inside the text being s
 });
 
 const context={view:'home',revision:1,sensitive:false},session={ownerId:'owner',agentId:'agent',origin:'https://agent.example',sessionId:'session'},id='5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20',message='7b0d6c1e-52a4-4f0e-9d3b-2f6a8c1e4d70',digest='d'.repeat(64);
-function fixture(operation){let effects=0;
- const proposal=()=>({id,digest,state:'pending',subjectUserId:'owner',requestedBy:'agent',action:'device_action',expiresAt:new Date(Date.now()+600000).toISOString(),payload:{action:'device_action',version:1,installationId:'device',enrollmentId:'enrollment',requestMessageId:message,operation},execution:null});
- const request=async(path,body)=>{if(body===undefined)return {proposals:[proposal()]};throw Error('nothing may be decided, claimed or receipted: '+path);};
+// The agent's side of a proposal: a reject decision ends it; nothing else may be decided, claimed or receipted.
+function fixture(operation,{offline=false}={}){let effects=0,state='pending';const posts=[];
+ const proposal=()=>({id,digest,state,subjectUserId:'owner',requestedBy:'agent',action:'device_action',expiresAt:new Date(Date.now()+600000).toISOString(),payload:{action:'device_action',version:1,installationId:'device',enrollmentId:'enrollment',requestMessageId:message,operation},execution:null});
+ const request=async(path,body)=>{if(body===undefined)return {proposals:[proposal()]};posts.push({path,body});
+  if(!path.endsWith(`/proposals/${id}/decision`)||body.decision!=='reject')throw Error('only a refusal may reach the agent: '+path);
+  if(offline)throw Error('offline');state='rejected';return {proposal:proposal(),digest};};
  const journal={reserve:async()=>{throw Error('nothing may be reserved');},markApplying:async()=>{},finish:async()=>{},get:async()=>({entry:undefined}),list:async()=>({entries:[]})};
  const client=new DeviceActions(session,{installationId:'device',enrollmentId:'enrollment',key:'a'.repeat(64),capabilities:['phone.call.v1']},'c'.repeat(64),request,journal,async()=>{effects++;return {status:'succeeded',summary:'placed'};});
- return {client,get effects(){return effects;}};}
+ // A reload: a new client for the same agent, with none of the old one's memory.
+ const reloaded=()=>new DeviceActions(session,{installationId:'device',enrollmentId:'enrollment',key:'a'.repeat(64),capabilities:['phone.call.v1']},'c'.repeat(64),request,journal,async()=>{effects++;return {status:'succeeded',summary:'placed'};});
+ return {client,reloaded,posts,get effects(){return effects;},get state(){return state;},online(){offline=false;}};}
 const signal=()=>new AbortController().signal,asked=text=>({messageId:message,text,current(){}});
 
-test('a call card for a number the owner did not write is a notice with nothing to approve',async()=>{
+test('a call card for a number the owner did not write is a notice, and the agent records the refusal',async()=>{
  const f=fixture(call('6505715862'));
  const items=await f.client.pendingReview(context,signal(),asked('call 415-555-0100'));
  assert.deepEqual(items.map(item=>[item.proposal,item.notice]),[[null,`Place call: ${NUMBER_MISMATCH_NOTICE}`]]);
- // A later review carries no request text: the proposal stays refused, and it cannot be approved.
+ assert.deepEqual(f.posts.map(post=>[post.path.split('/').at(-1),post.body.decision,post.body.digest]),[['decision','reject',digest]]);
+ assert.equal(f.state,'rejected');
+ // The refusal is the agent's record now: later reviews and a reloaded app have no card and cannot approve it.
+ assert.deepEqual(await f.client.pendingReview(context,signal()),[]);
+ assert.deepEqual(await f.reloaded().pendingReview(context,signal()),[]);
+ await assert.rejects(f.client.approve(id,context,signal()));
+ await assert.rejects(f.reloaded().approve(id,context,signal()));
+ assert.equal(f.posts.length,1,'refused once');assert.equal(f.effects,0);
+});
+test('a refusal the agent could not take holds on the phone and is recorded on the next review',async()=>{
+ const f=fixture(call('6505715862'),{offline:true});
+ const items=await f.client.pendingReview(context,signal(),asked('call 415-555-0100'));
+ assert.deepEqual(items.map(item=>[item.proposal,item.notice]),[[null,`Place call: ${NUMBER_MISMATCH_NOTICE}`]]);
+ assert.equal(f.state,'pending');
+ // Still pending at the agent: this client keeps refusing it without the request text, and cannot approve it.
  assert.deepEqual((await f.client.pendingReview(context,signal())).map(item=>item.proposal),[null]);
  assert.deepEqual(await f.client.pending(context,signal()),[]);
  await assert.rejects(f.client.approve(id,context,signal()));
+ f.online();
+ assert.deepEqual((await f.client.pendingReview(context,signal())).map(item=>item.proposal),[null]);
+ assert.equal(f.state,'rejected');
+ assert.deepEqual(await f.client.pendingReview(context,signal()),[]);
  assert.equal(f.effects,0);
 });
 test('the number the owner wrote keeps its ordinary review card',async()=>{
