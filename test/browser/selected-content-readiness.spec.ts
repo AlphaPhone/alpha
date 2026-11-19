@@ -30,6 +30,7 @@ test('a selected text file offers Ask only after its readable excerpt arrives',a
  await expect(ask).toHaveCount(0);
  await page.evaluate(()=>(window as any).excerptRead.finish());
  await expect(ask).toBeVisible();await ask.click();
+ await page.getByRole('button',{name:/^Edit excerpt from /}).click();
  const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
  await expect(review.getByRole('textbox',{name:'Content excerpt',exact:true})).toHaveValue('Actual file text');
 });
@@ -55,6 +56,7 @@ test('a selected image keeps the local text and description review',async({page}
  const preview=await openStoredFile(page,'review-image.png');
  await preview.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ await page.getByRole('button',{name:/^Edit excerpt from /}).click();
  const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
  await expect(review.getByRole('button',{name:'Extract text locally',exact:true})).toBeEnabled();
  await expect(review.getByRole('img',{name:'Image for question review',exact:true})).toBeVisible();
