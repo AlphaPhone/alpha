@@ -711,7 +711,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   addPictures([picture]);
  };
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
- function attach(camera:boolean){if(!inFront()||!editable()||picking)return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=!camera;if(camera)input.capture='environment';
+ function attach(camera:boolean){if(!inFront()||!editable()||picking)return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=!camera;if(camera)input.setAttribute('capture','environment');
   /* A result that arrives while the page is still hidden waits for it to show again; pagehide always ends the pick. */
   const done=(event?:Event)=>{if(document.hidden&&event?.type!=='pagehide')return;window.removeEventListener('pagehide',done);if(!picking)return;picking=false;sync();};input.oncancel=()=>done();window.addEventListener('pagehide',done);
   input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files)picked.push(await readPicture(file));

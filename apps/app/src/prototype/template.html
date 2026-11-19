@@ -2847,6 +2847,8 @@
     [data-alpha-contact-detail][data-alpha-compact="true"] [data-alpha-contact-actions]{justify-content:flex-start;gap:10px;padding:0 16px 8px 60px}
     [data-alpha-contact-detail][data-alpha-compact="true"] [data-alpha-contact-actions]>button{width:44px;height:44px;border-radius:22px}
     [data-alpha-contacts-screen] > .alpha-phone-tabs + [data-alpha-contacts-header]{margin-top:0}
+    [data-alpha-contacts-screen]:has(> [data-alpha-contact-detail], > [data-alpha-contact-editor]) > [data-alpha-contacts-header],
+    [data-alpha-contacts-screen]:has(> [data-alpha-contact-editor]) > [data-alpha-contact-detail]{visibility:hidden}
   </style>
   <sc-if value="{{contacts.nativeManaged}}">
     {{contacts.phoneTabSelector}}
