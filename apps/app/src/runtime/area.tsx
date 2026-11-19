@@ -15,6 +15,8 @@ export interface Alpha {
   readonly context: Layer.Layer<Resident, unknown>;
   /** Each view's screen, loaded the first time it shows: an element made once, so it keeps its state across renders. */
   readonly screens: Partial<Record<View, ReactElement>>;
+  /** Ask Alpha, loaded the first time Home shows it. */
+  readonly assistant: ReactElement;
   /** Keeps an area's runtime until Alpha is disposed, before the root. */
   adopt<R>(runtime: ManagedRuntime.ManagedRuntime<R, unknown>): ManagedRuntime.ManagedRuntime<R, unknown>;
   dispose(): Promise<void>;

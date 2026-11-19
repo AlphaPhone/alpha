@@ -23,7 +23,12 @@ export function App({ alpha }: AppProps) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col bg-background font-sans text-base text-foreground">
       {showing === undefined
-        ? <Home offered={(view) => can({ type: "openView", view })} onOpen={(view) => void send({ type: "openView", view })} />
+        ? (
+          <>
+            <Home offered={(view) => can({ type: "openView", view })} onOpen={(view) => void send({ type: "openView", view })} />
+            {alpha.assistant}
+          </>
+        )
         : (
           <>
             <AppHeader

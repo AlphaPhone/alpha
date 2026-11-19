@@ -28,3 +28,5 @@ build/
 **/test/__traces__/bombadil/
 test/__traces__/
 .DS_Store
+# The pinned eliza checkout the agent and the cloud run from: `pnpm --filter @repo/app eliza` links it (eliza.lock.json).
+/.eliza

@@ -20,11 +20,9 @@ function fetching(answer: Answering) {
   }))
 }
 
-/** The world outside Alpha, faked over `world`, keeping machines in `store`: the real agent and cloud clients over the fake services. */
-export function fakeWorld(world: Scene, store: Layer.Layer<KeyValueStore.KeyValueStore>): Layer.Layer<Platform> {
-  const { agent, cloud } = services(world)
+/** The phone itself, faked over `world`: what it admits, its buttons and its secrets. */
+export function fakePhone(world: Scene) {
   return Layer.mergeAll(
-    store,
     Layer.succeed(Device, {
       capabilities: () => sync(() => ({ image: world.image, contacts: world.image })),
       setTextScale: (scale: number) => sync(() => { world.textScale = scale }),
@@ -35,6 +33,15 @@ export function fakeWorld(world: Scene, store: Layer.Layer<KeyValueStore.KeyValu
       write: (slot: string, secret: Redacted.Redacted<string>) => sync(() => { world.secrets.set(slot, Redacted.value(secret)) }),
       remove: (slot: string) => sync(() => { world.secrets.delete(slot) }),
     }),
+  )
+}
+
+/** The world outside Alpha, faked over `world`, keeping machines in `store`: the real agent and cloud clients over the fake services. */
+export function fakeWorld(world: Scene, store: Layer.Layer<KeyValueStore.KeyValueStore>): Layer.Layer<Platform> {
+  const { agent, cloud } = services(world)
+  return Layer.mergeAll(
+    store,
+    fakePhone(world),
     Layer.provide(agentAt("http://agent.test"), fetching(agent)),
     Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)),
   )

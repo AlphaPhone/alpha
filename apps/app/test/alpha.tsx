@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "../src/App.tsx";
 import { areas } from "../src/areas.ts";
 import { boot } from "../src/boot.tsx";
+import type { Platform } from "../src/platform/platform.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import type { Scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
@@ -31,9 +32,17 @@ export async function closeAll() {
   localStorage.clear();
 }
 
+/** This page's localStorage, where Alpha keeps its machines. */
+export const stored = KeyValueStore.layerStorage(() => localStorage);
+
 /** Alpha as main.tsx opens it, over this page's localStorage, the fake world and a clock the test moves. `close` is the process dying. */
-export async function open(world: Scene) {
-  const alpha = boot(Layer.merge(fakeWorld(world, KeyValueStore.layerStorage(() => localStorage)), TestClock.layer()));
+export function open(world: Scene) {
+  return openOver(Layer.merge(fakeWorld(world, stored), TestClock.layer()));
+}
+
+/** Alpha over `platform`, which a journey with real services builds itself (test/eliza/world.vibe). */
+export async function openOver(platform: Layer.Layer<Platform>) {
+  const alpha = boot(platform);
   const root = createRoot(document.body.appendChild(document.createElement("div")));
   await drawn(() => root.render(<App alpha={alpha} />));
   let open = true;
@@ -50,7 +59,7 @@ export async function open(world: Scene) {
 /** Wait, with every area's screen loaded, until the machine `key` names reaches a state `ok` accepts, and React has drawn it. */
 export async function until<I, S>(runtime: ManagedRuntime.ManagedRuntime<I, unknown>, key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) {
   await drawn(async () => {
-    await Promise.all(Object.values(areas).map((load) => load()));
+    await Promise.all([...Object.values(areas).map((load) => load()), import("../src/ask/index.tsx")]);
     await runtime.runPromise(Effect.flatMap(key, (machine) => Stream.runHead(Stream.filter(machine.changes, ok))));
   });
 }
@@ -65,6 +74,14 @@ export const press = (name: string) => drawn(() => {
   const found = button(name);
   if (!found) throw new Error(`no button ${name}`);
   found.click();
+});
+
+/** Type `text` into the field whose accessible name is `name`, as a person does: React hears the input event. */
+export const fill = (name: string, text: string) => drawn(() => {
+  const found = [...document.querySelectorAll("input")].find((field) => field.getAttribute("aria-label") === name);
+  if (!found) throw new Error(`no field ${name}`);
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
+  found.dispatchEvent(new Event("input", { bubbles: true }));
 });
 
 /** Hand Alpha a hardware button, as the phone does. */

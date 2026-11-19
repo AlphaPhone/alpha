@@ -12,10 +12,12 @@ export function boot(platform: Layer.Layer<Platform>): Alpha {
   const runtime = ManagedRuntime.make(Layer.provideMerge(resident, platform));
   const adopted: ManagedRuntime.ManagedRuntime<never, unknown>[] = [];
   const screens: Partial<Record<View, ReactElement>> = {};
+  const Assistant = lazy(async () => ({ default: (await import("./ask/index.tsx")).default.open(alpha) }));
   const alpha: Alpha = {
     runtime,
     context: Layer.effectContext(runtime.contextEffect),
     screens,
+    assistant: <Suspense fallback={null}><Assistant /></Suspense>,
     adopt: (area) => { adopted.push(area); return area; },
     async dispose() {
       for (const area of adopted.splice(0)) await area.dispose();

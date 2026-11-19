@@ -1,0 +1,46 @@
+// spec/app/ask/index.md, "Story: Talk to my agent"
+import { Machine, machine } from "../../gen/app__ask.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__ask.effect.vibe"
+import { Aborted, Agent, Created, Frame } from "../platform/agent.vibe"
+import { ask, listen } from "../platform/remote.vibe"
+import { type Job, answer, reacting, stream } from "../runtime/reactor.vibe"
+
+const json = (path: string, body: object) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), body)
+
+// spec/app/ask/index.md, "The conversation is the one the agent names in answer to that opening, or none when it does not"
+effect function opened(id: number): Event!!Agent {
+  return effect {
+    const { conversation } = try ask(Agent, json("/api/conversations", { title: "Ask Alpha" }), Created)
+    if (conversation.id === "") return { type: "unopened", id, known: true }
+    return { type: "opened", id, conversation: conversation.id, room: conversation.roomId }
+  } catch (error) => ({ type: "unopened", id, known: error._tag === "Refused" })
+}
+
+// spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
+function said(id: number, conversation: string, text: string): Stream.Stream<Event, never, Agent> {
+  return listen(Agent, json(`/api/conversations/${conversation}/messages/stream`, { text }), Frame)
+    |> Stream.map(%, (frame): Event => match (frame) {
+      when { type: "token", let fullText }: { type: "heard", id, text: fullText };
+      when { type: "done", let fullText }: { type: "answered", id, text: fullText };
+      when { type: "error" }: { type: "unanswered", id, known: true };
+    })
+    |> Stream.catch(%, (error) => Stream.succeed<Event>({ type: "unanswered", id, known: error._tag === "Refused" }))
+    |> Stream.concat(%, Stream.succeed<Event>({ type: "unanswered", id, known: false }))
+}
+
+// spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"
+// The empty body makes it a POST for eliza's client, which sends a request without one as a GET.
+function stopped(room: string): Stream.Stream<Event, never, Agent> {
+  return Stream.fromEffectDrain(ignore(ask(Agent, json(`/api/turns/${room}/abort`, {}), Aborted)))
+}
+
+function carry(fx: Out): Job<Event, Agent> {
+  return match (fx) {
+    when { tag: "Open", let id }: answer("open", opened(id));
+    when { tag: "Say", let id, let conversation, let text }: stream("say", said(id, conversation, text));
+    when { tag: "Stop", let room }: stream("stop", stopped(room));
+  }
+}
+
+/** Ask Alpha's one conversation, kept in memory: it is the agent's, and is opened when the screen first loads. */
+export const asking = reacting(Machine, machine(), carry, { type: "begin" })

@@ -8,9 +8,12 @@
     "build": "vite build",
     "typecheck": "vibelang --noEmit -p .",
     "test": "vitest run",
-    "test:browser": "vitest run --project browser"
+    "test:browser": "vitest run --project browser",
+    "eliza": "node test/eliza/checkout.ts",
+    "eliza:page": "node test/eliza/page.ts"
   },
   "dependencies": {
+    "@elizaos/agent": "link:../../.eliza/packages/agent",
     "@repo/design-system": "workspace:*",
     "@repo/ui": "workspace:*",
     "effect": "4.1.1",
@@ -20,7 +23,9 @@
   },
   "devDependencies": {
     "@antithesishq/bombadil": "0.7.10",
+    "@effect/platform-node": "4.1.1",
     "@effect/vitest": "4.1.1",
+    "@elizaos/cloud": "link:../../.eliza/packages/cloud",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",

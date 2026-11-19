@@ -1,14 +1,118 @@
 // spec/kit/read.md, "Story: Read from outside"
-import { relayed } from "./bridge.vibe"
-import { type Remote, remoteAt } from "./remote.vibe"
+import type { ReplyFrame, TurnReply } from "@elizaos/agent"
+import { type RuntimeJsonBridge, RuntimeRequestError, type RuntimeStatus, createRuntimeJsonClient } from "@elizaos/agent/client"
+import { Bridge, relayed } from "./bridge.vibe"
+import { type Failure, type Remote, Refused, Unreachable, remoteAt } from "./remote.vibe"
 
-/** The resident agent's HTTP and event-stream API. Areas reach it with `ask(Agent, …)` and `listen(Agent, …)` of remote.vibe. */
+/** The resident agent's HTTP and event-stream API: eliza's agent. Areas reach it with `ask(Agent, …)` and `listen(Agent, …)` of remote.vibe. */
 export service Agent: Remote {}
 
-/** The agent over HTTP at `base`: in a browser the page's own `/agent`, which the dev server answers. */
-export function agentAt(base: string) {
-  return Layer.effect(Agent, remoteAt(base))
+/** A conversation as eliza's agent names it. It exports no type for one: this follows `packages/agent/src/conversation/turns.vibe` at the commit of eliza.lock.json. */
+export schema Conversation { readonly id: string; readonly roomId: string; readonly title: string; readonly createdAt: number; readonly updatedAt: number }
+
+/** What the agent answers to `POST /api/conversations`. */
+export schema Created { readonly conversation: Conversation }
+
+schema Token { readonly type: "token"; readonly text: string; readonly fullText: string }
+schema Done { readonly type: "done"; readonly fullText: string }
+schema Broken { readonly type: "error"; readonly message: string }
+
+/** One frame of a reply as the agent streams it: eliza's `ReplyFrame`, so a change of theirs fails here and not on a phone. */
+export const Frame: Schema.Decoder<ReplyFrame> = Schema.Union([Token, Done, Broken])
+
+schema Whole { readonly fullText: string }
+
+/** A whole reply, where it is not streamed: eliza's `TurnReply`. */
+export const Reply: Schema.Decoder<TurnReply> = Whole
+
+/** What the agent answers to `POST /api/turns/{roomId}/abort`. */
+export schema Aborted { readonly aborted: boolean }
+
+/** How long eliza's client waits for a stopped agent to run, between two looks at it, and for one answer. */
+const patience = { startupTimeoutMs: 30_000, pollMs: 250, requestTimeoutMs: 10_000 }
+
+schema Health { readonly ready: boolean }
+
+/** `request` as eliza's client takes one, a path and a JSON body or none; it carries only GET, and POST with a body. */
+function plain(request: HttpClientRequest.HttpClientRequest): { readonly path: string; readonly body?: unknown } | undefined {
+  const query = UrlParams.toString(request.urlParams)
+  const path = query === "" ? request.url : `${request.url}?${query}`
+  if (request.method === "GET") return { path }
+  if (request.method !== "POST" || request.body._tag !== "Uint8Array") return undefined
+  return Result.match(Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(new TextDecoder().decode(request.body.body)), {
+    onFailure: () => undefined,
+    onSuccess: (body) => ({ path, body }),
+  })
 }
 
-/** The agent on the phone, through the `Agent` plugin. */
-export const relayedAgent = Layer.effect(Agent, relayed("Agent"))
+/**
+ * eliza's bridge to an agent that `direct` reaches over HTTP: it is running once its health route says it is ready,
+ * and nothing on this side can start it. A refusal keeps its status and loses its body.
+ */
+function httpBridge(direct: Remote): RuntimeJsonBridge {
+  const status = (): Promise<RuntimeStatus> => runPromise(effect {
+    return effect {
+      const health = try Schema.decodeUnknownEffect(Health)(try direct.call(HttpClientRequest.get("/api/health")))
+      return { available: true, state: health.ready ? "running" as const : "starting" as const }
+    } catch () => ({ available: true, state: "starting" as const })
+  })
+  return {
+    status,
+    start: status,
+    restart: status,
+    request: (input) => runPromise(effect {
+      const request = input.method === "GET" ? HttpClientRequest.get(input.path) : HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(input.path), input.body)
+      return effect {
+        return { status: 200, data: try direct.call(request) }
+      } catch effect (cause) => {
+        if (cause._tag !== "Refused") throw cause
+        return { status: cause.status, data: null }
+      }
+    }),
+  }
+}
+
+/** eliza's bridge to the agent the phone runs, through the plugin its Android package registers: what it answers is decoded by eliza's client. */
+effect function pluginBridge(plugin: string): RuntimeJsonBridge!!Bridge {
+  const bridge = try Bridge
+  const said = <A>(method: string, options: unknown) => runPromise(bridge.call(plugin, method, options)) as Promise<A>
+  return {
+    status: () => said("getStatus", {}),
+    start: () => said("start", {}),
+    restart: () => said("restart", {}),
+    request: (input) => said("request", input),
+  }
+}
+
+/**
+ * The agent through eliza's own runtime client over `bridge`, which waits for an agent that is starting and tells a
+ * refusal from a failure. That client carries GET, and POST with a JSON body, and no stream: every other request, and
+ * each stream, goes to `direct`.
+ */
+function over(bridge: RuntimeJsonBridge, direct: Remote): Remote {
+  const client = createRuntimeJsonClient({ bridge: () => bridge, ...patience })
+  return {
+    effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
+      const sent = plain(request)
+      if (sent === undefined) return try direct.call(request)
+      return try tryPromise({
+        try: () => client.request(sent.path, sent.body),
+        catch: (cause): Failure => cause instanceof RuntimeRequestError ? new Refused({ status: cause.status }) : new Unreachable({ cause }),
+      })
+    },
+    events: (request: HttpClientRequest.HttpClientRequest) => direct.events(request),
+  }
+}
+
+/** The agent over HTTP at `base`: in a browser the page's own `/agent`, which the dev server answers, adding the token the page never holds. */
+export function agentAt(base: string) {
+  return Layer.effect(Agent, effect {
+    const direct = try remoteAt(base)
+    return over(httpBridge(direct), direct)
+  })
+}
+
+/** The agent on the phone, through the `EmbeddedAgent` plugin of eliza's Android package, which holds the launch token. */
+export const relayedAgent = Layer.effect(Agent, effect {
+  return over(try pluginBridge("EmbeddedAgent"), try relayed("EmbeddedAgent"))
+})

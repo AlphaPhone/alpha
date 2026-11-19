@@ -28,3 +28,18 @@ imports beside them, and checks this package's types, proofs, tests and traces (
 | `pnpm dev` | the app, with Vite |
 | `pnpm typecheck`, `pnpm build` | `vibelang --noEmit`; `vite build` to `dist/` |
 | `pnpm test`, `pnpm test:browser` | the tests in Node, with the derived property tests; the browser tests in Chromium |
+
+## eliza's agent and cloud
+
+Alpha's resident agent and its cloud are eliza's (`elizaOS/eliza`, branch `vibestack`), pinned in
+[`eliza.lock.json`](../../eliza.lock.json). They run as their own Node 26 processes from a checkout outside the
+repository, built once per pinned commit and shared by every worktree; the page imports only eliza's agent client and
+its reply types (`src/platform/agent.vibe`), through `.eliza`, a link to that checkout.
+
+| Command | Does |
+|---|---|
+| `pnpm eliza` | once after cloning, and after the pin moves: clones eliza at the pin into `~/.cache/alpha/eliza-vibestack/<commit>` (`ALPHA_ELIZA_DIR` names another place, `ALPHA_ELIZA_SOURCE` a local clone to copy), installs it, builds core, the agent, the agent's device bundle and the cloud Worker, and links `.eliza` |
+| `pnpm dev` | the page over a local eliza cloud and agent: one signed-in, funded owner, a scripted model, state kept in `.cache/eliza` |
+| `ALPHA_FAKES=1 pnpm dev` | the page over the journeys' fakes, with no eliza: what the explore stage serves |
+| `pnpm test` | the journeys; `test/*.eliza.test.tsx` start the real cloud and agent on free ports over their own state (`test/eliza/services.ts`) |
+| `pnpm eliza:page` | `pnpm dev` and one conversation through the page in Chromium |
