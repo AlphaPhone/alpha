@@ -218,6 +218,7 @@ export const MOCK_STATES: State[] = [
   mock('browser', ['Edit address']),
   mock('photos:albums', ['Favorites'], 'photos-album'),
   mock('photos:viewer', ['Edit photo'], 'photos-edit'),
+  mock('photos:viewer', ['Edit photo', 'Crop'], 'photos-edit'),
   mock('photos:viewer', ['Photo info']),
   mock('photos:viewer', ['Share photo']),
   mock('photos', ['Photos tools', 'Select photos']),

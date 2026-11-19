@@ -2247,6 +2247,13 @@
 
   <sc-if value="{{photos.editing}}">
     <div ref="{{photos.editFocus}}" data-alpha-subview="photos-edit" class="fadein" style="position: absolute; inset: 0; z-index: 14; background: var(--alpha-black); color: var(--alpha-white); display: flex; flex-direction: column">
+      <sc-if value="{{photos.v.ed.cropping}}">
+      <div data-alpha-app-header="detail" style="display: flex; align-items: center; justify-content: space-between; height: 56px; margin-top: 44px; padding: 0 8px; flex-shrink: 0">
+        <button class="ib" aria-label="Cancel crop" onClick="{{photos.v.ed.cropping.cancel}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
+        <button aria-label="Apply crop" disabled="{{photos.v.ed.cropping.busy}}" onClick="{{photos.v.ed.cropping.apply}}" style="height: 36px; margin-right: 8px; padding: 0 18px; border-radius: 18px; background: var(--acc); color: var(--alpha-white); font-size: 15px; font-weight: 600">Done</button>
+      </div>
+      </sc-if>
+      <sc-if value="{{photos.v.ed.tools}}">
       <div data-alpha-app-header="detail" style="display: flex; align-items: center; justify-content: space-between; height: 56px; margin-top: 44px; padding: 0 8px; flex-shrink: 0">
         <button class="ib" aria-label="Cancel edit" onClick="{{photos.v.ed.cancel}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
         <div style="display: flex; align-items: center; gap: 8px; margin-right: 8px">
@@ -2254,13 +2261,33 @@
           <button aria-label="Save copy" disabled="{{photos.v.ed.saveDisabled}}" onClick="{{photos.v.ed.save}}" style="height: 36px; padding: 0 18px; border-radius: 18px; background: var(--acc); color: var(--alpha-white); font-size: 15px; font-weight: 600">Save copy</button>
         </div>
       </div>
+      </sc-if>
       <sc-if value="{{photos.v.ed.status}}"><div role="status" style="font-size:12px;padding:0 20px;color:rgba(255,255,255,.7)">{{photos.v.ed.status}}</div></sc-if>
       <div style="position: relative; width: 348px; height: 464px; margin: 18px auto 0; overflow: hidden; flex-shrink: 0">
         <span style="position: absolute; inset: 0; display: block; background: {{photos.v.ed.bg}}; transform: {{photos.v.ed.tf}}; filter: {{photos.v.ed.flt}}; transition: transform .3s, filter .2s"></span>
+        <sc-if value="{{photos.v.ed.cropping}}">
+          <div data-alpha-crop-image style="position: absolute; left: {{photos.v.ed.cropping.left}}px; top: {{photos.v.ed.cropping.top}}px; width: {{photos.v.ed.cropping.width}}px; height: {{photos.v.ed.cropping.height}}px; background: {{photos.v.ed.cropping.bg}}">
+            <div role="button" tabindex="0" data-alpha-crop-frame aria-label="Crop area. Drag it or use the arrow keys to move it. Drag a corner, or hold Shift with the arrow keys, to resize it." onPointerDown="{{photos.v.ed.cropping.down}}" onPointerMove="{{photos.v.ed.cropping.move}}" onPointerUp="{{photos.v.ed.cropping.up}}" onPointerCancel="{{photos.v.ed.cropping.up}}" onLostPointerCapture="{{photos.v.ed.cropping.up}}" onKeyDown="{{photos.v.ed.cropping.key}}" style="position: absolute; {{photos.v.ed.cropping.frame}}; box-sizing: border-box; border: 2px solid var(--alpha-white); box-shadow: 0 0 0 9999px rgba(0,0,0,.6); touch-action: none; cursor: move; background-image: linear-gradient(to right, transparent calc(33.33% - .5px), rgba(255,255,255,.45) calc(33.33% - .5px), rgba(255,255,255,.45) calc(33.33% + .5px), transparent calc(33.33% + .5px), transparent calc(66.67% - .5px), rgba(255,255,255,.45) calc(66.67% - .5px), rgba(255,255,255,.45) calc(66.67% + .5px), transparent calc(66.67% + .5px)), linear-gradient(to bottom, transparent calc(33.33% - .5px), rgba(255,255,255,.45) calc(33.33% - .5px), rgba(255,255,255,.45) calc(33.33% + .5px), transparent calc(33.33% + .5px), transparent calc(66.67% - .5px), rgba(255,255,255,.45) calc(66.67% - .5px), rgba(255,255,255,.45) calc(66.67% + .5px), transparent calc(66.67% + .5px))">
+              <span aria-hidden="true" data-alpha-crop-handle="nw" onPointerDown="{{photos.v.ed.cropping.nw}}" onPointerMove="{{photos.v.ed.cropping.move}}" onPointerUp="{{photos.v.ed.cropping.up}}" onPointerCancel="{{photos.v.ed.cropping.up}}" style="position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; touch-action: none; cursor: nwse-resize; background: radial-gradient(circle, var(--alpha-white) 6px, transparent 7px)"></span>
+              <span aria-hidden="true" data-alpha-crop-handle="ne" onPointerDown="{{photos.v.ed.cropping.ne}}" onPointerMove="{{photos.v.ed.cropping.move}}" onPointerUp="{{photos.v.ed.cropping.up}}" onPointerCancel="{{photos.v.ed.cropping.up}}" style="position: absolute; right: -14px; top: -14px; width: 28px; height: 28px; touch-action: none; cursor: nesw-resize; background: radial-gradient(circle, var(--alpha-white) 6px, transparent 7px)"></span>
+              <span aria-hidden="true" data-alpha-crop-handle="sw" onPointerDown="{{photos.v.ed.cropping.sw}}" onPointerMove="{{photos.v.ed.cropping.move}}" onPointerUp="{{photos.v.ed.cropping.up}}" onPointerCancel="{{photos.v.ed.cropping.up}}" style="position: absolute; left: -14px; bottom: -14px; width: 28px; height: 28px; touch-action: none; cursor: nesw-resize; background: radial-gradient(circle, var(--alpha-white) 6px, transparent 7px)"></span>
+              <span aria-hidden="true" data-alpha-crop-handle="se" onPointerDown="{{photos.v.ed.cropping.se}}" onPointerMove="{{photos.v.ed.cropping.move}}" onPointerUp="{{photos.v.ed.cropping.up}}" onPointerCancel="{{photos.v.ed.cropping.up}}" style="position: absolute; right: -14px; bottom: -14px; width: 28px; height: 28px; touch-action: none; cursor: nwse-resize; background: radial-gradient(circle, var(--alpha-white) 6px, transparent 7px)"></span>
+            </div>
+          </div>
+        </sc-if>
       </div>
+      <sc-if value="{{photos.v.ed.cropping}}">
+        <div role="group" aria-label="Crop shape" style="display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 26px; padding: 0 12px; flex-shrink: 0">
+          <sc-for list="{{photos.v.ed.cropping.aspects}}" key="{{a.id}}" as="a">
+            <button aria-label="{{a.name}}" aria-pressed="{{a.on}}" disabled="{{photos.v.ed.cropping.busy}}" onClick="{{a.pick}}" style="height: 36px; padding: 0 14px; border-radius: 18px; font-size: 14px; font-weight: 600; {{a.css}}">{{a.label}}</button>
+          </sc-for>
+          <button aria-label="Reset crop" disabled="{{photos.v.ed.cropping.resetDisabled}}" onClick="{{photos.v.ed.cropping.reset}}" style="height: 36px; padding: 0 14px; border-radius: 18px; font-size: 14px; font-weight: 600; background: rgba(255,255,255,.12); color: var(--alpha-white)">Reset</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{photos.v.ed.tools}}">
       <div style="display: flex; justify-content: center; gap: 16px; margin-top: 26px; flex-shrink: 0">
         <button class="ib" aria-label="Rotate" onClick="{{photos.v.ed.rotate}}" style="background: rgba(255,255,255,.12)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phRotate}}"></path></svg></button>
-        <button class="ib" aria-label="Center crop" aria-pressed="{{photos.v.ed.cropOn}}" onClick="{{photos.v.ed.crop}}" style="{{photos.v.ed.cropCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phCrop}}"></path></svg></button>
+        <button class="ib" aria-label="Crop" aria-pressed="{{photos.v.ed.cropOn}}" onClick="{{photos.v.ed.crop}}" style="{{photos.v.ed.cropCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.phCrop}}"></path></svg></button>
       </div>
       <div class="scr" style="display: flex; gap: 12px; overflow-x: auto; padding: 22px 20px 0; touch-action: pan-x; flex-shrink: 0">
         <sc-for list="{{photos.v.ed.filters}}" key="{{f.id}}" as="f">
@@ -2272,6 +2299,7 @@
           </button>
         </sc-for>
       </div>
+      </sc-if>
     </div>
   </sc-if>
 

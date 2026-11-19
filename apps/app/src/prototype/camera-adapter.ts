@@ -36,6 +36,7 @@ import {cameraFocusTarget} from '../browser/camera-focus';
 import {BrowserReviews} from '../browser/review';
 import {testMocksEnabled} from '../build-flags';
 import {createPhotoViewport} from './photo-viewport';
+import {cropView,rotateCropQuarter,validCropRect,WHOLE_PHOTO,type CropRect,type CropSession} from './photo-crop';
 import {accessDetail,flashFromReceipt,flashLabel,nextFlashMode,nextTimer,recordingLabel,timerLabel,type FlashMode,type TimerSeconds} from './camera-controls';
 
 type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult;cancelledBeforeCapture?:true};
@@ -85,8 +86,9 @@ const nativeLibrary = registerPlugin<{
   openLibrarySettings():Promise<void>;
   listPermitted(options:{before?:string;query?:string;kind?:'all'|'image'|'video';thumbnails?:boolean;filter?:'all'|'favorites'|'trash'}):Promise<{items:SavedPhoto[];next:string;access:LibraryAccess}>;
   beginEdit(options:{id:string;revision:string}):Promise<EditPreview>;
-  previewEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string}):Promise<EditPreview>;
-  saveEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string;replace?:boolean}):Promise<EditReceipt>;
+  /** cropRect (fractions of the rotated photo) keeps a chosen area; crop alone is the fixed centred crop. */
+  previewEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string;cropRect?:CropRect}):Promise<EditPreview>;
+  saveEdit(options:{sessionId:string;rotation:number;crop:boolean;filter:string;cropRect?:CropRect;replace?:boolean}):Promise<EditReceipt>;
   editResult(options:{operationId:string}):Promise<EditReceipt>;
   cancelEdit(options:{sessionId:string}):Promise<void>;
   beginVideoEdit(options:{id:string;revision:string}):Promise<{sessionId:string;operationId:string;duration:number;width:number;height:number}>;
@@ -254,13 +256,16 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let preview: SavedPhoto | undefined, reading = '', sharing = false;
   let photoReadEpoch=0;
   const retirePhotoRead=()=>{++photoReadEpoch;reading='';};
-  let edit: (EditPreview & {source:string;rotation:number;crop:boolean;busy:boolean;uncertain?:boolean})|undefined,editEpoch=0;
+  /** cropRect is the applied crop; cropping is the open crop step, over the whole rotated photo. */
+  let edit: (EditPreview & {source:string;rotation:number;cropRect?:CropRect;cropping?:CropSession;busy:boolean;uncertain?:boolean})|undefined,editEpoch=0;
   let editRecoveryChecked=false,copyRecovery:AbortController|undefined;
   let closeVideoEdit:(()=>void)|undefined,videoEditSource:string|undefined,nativeVideoSession:string|undefined,nativeVideoOpening:number|undefined;
   type PendingNativeVideoCopy={source:SavedPhoto;epoch:number;refresh:boolean;checkAgain:boolean;checking?:Promise<void>};
   let pendingNativeVideoCopy:PendingNativeVideoCopy|undefined;
   function cancelEdit(){mediaReviews.cancelAll();copyRecovery?.abort();copyRecovery=undefined;const oldVideo=nativeVideoSession,opening=nativeVideoOpening;nativeVideoSession=undefined;nativeVideoOpening=undefined;closeVideoEdit?.();closeVideoEdit=undefined;videoEditSource=undefined;++editEpoch;const old=edit;edit=undefined;if(old)void library.cancelEdit({sessionId:old.sessionId}).catch(()=>{});if(oldVideo||opening!==undefined)void nativeLibrary.cancelVideoEdit(oldVideo?{sessionId:oldVideo}:{}).catch(()=>{});}
-  const editChanged=(value:NonNullable<typeof edit>)=>value.rotation!==0||value.crop||value.filter!=='none';
+  const editChanged=(value:NonNullable<typeof edit>)=>value.rotation!==0||!!value.cropRect||value.filter!=='none';
+  /** The crop fields of an edit request: a chosen area, or none (never the old fixed centred crop). */
+  const cropRequest=(rect:CropRect|undefined)=>rect?{crop:false,cropRect:rect}:{crop:false};
   const editCurrent=(value:NonNullable<typeof edit>,owner:Bag,epoch:number)=>edit===value&&editEpoch===epoch&&!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===value.source;
   async function requestCancelEdit(owner:Bag){
     const value=edit;if(!value)return;const epoch=editEpoch;
@@ -307,14 +312,33 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         return;
       }
       const value=await library.beginEdit({id:nativeId(row.id),revision:row.mutationRevision});if(!current()){void library.cancelEdit({sessionId:value.sessionId});return;}
-      edit={...value,source:row.id,rotation:0,crop:false,busy:false};owner.set({nativeEditRevision:Date.now()});
+      edit={...value,source:row.id,rotation:0,busy:false};owner.set({nativeEditRevision:Date.now()});
     }catch(error){if(videoSessionId){void nativeLibrary.cancelVideoEdit({sessionId:videoSessionId}).catch(()=>{});if(nativeVideoSession===videoSessionId)nativeVideoSession=undefined;}else if(nativeVideoOpening===token){nativeVideoOpening=undefined;void nativeLibrary.cancelVideoEdit({}).catch(()=>{});}if(current()){owner.set({nativeCopyRecovery:row.kind!=='video'||!copyIntentChecked});owner.toast(photosErrorText(error,'Photo editor unavailable.'));}}
   }
-  async function transformEdit(owner:Bag,rotate:boolean,chosenFilter?:string){const current=edit;if(!current||current.busy||current.uncertain)return;current.busy=true;const rotation=rotate?(current.rotation+90)%360:current.rotation,crop=chosenFilter!==undefined?current.crop:rotate?current.crop:!current.crop,filter=chosenFilter??current.filter;owner.set({nativeEditRevision:Date.now()});
-    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation,crop,filter});if(edit===current)edit={...current,...value,rotation,crop,busy:false};}
+  async function transformEdit(owner:Bag,rotate:boolean,chosenFilter?:string){const current=edit;if(!current||current.busy||current.uncertain||current.cropping)return;current.busy=true;
+    // Rotate turns the applied crop with the photo, so the same area stays kept.
+    const rotation=rotate?(current.rotation+90)%360:current.rotation,cropRect=rotate&&current.cropRect?validCropRect(rotateCropQuarter(current.cropRect)):current.cropRect,filter=chosenFilter??current.filter;owner.set({nativeEditRevision:Date.now()});
+    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation,...cropRequest(cropRect),filter});if(edit===current)edit={...current,...value,rotation,cropRect,busy:false};}
     catch(error){if(edit===current){current.busy=false;owner.toast(photosErrorText(error,'No preview'));}}
     finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
   }
+  /** Opens the crop step: the whole rotated, filtered photo with the applied crop (or all of it) marked. */
+  async function startCrop(owner:Bag){const current=edit;if(!current||current.busy||current.uncertain||current.cropping)return;current.busy=true;owner.set({nativeEditRevision:Date.now()});
+    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation:current.rotation,crop:false,filter:current.filter});
+      if(edit===current)edit={...current,busy:false,cropping:{rect:{...(current.cropRect||WHOLE_PHOTO)},aspect:'free',image:value.image,width:value.width,height:value.height}};}
+    catch(error){if(edit===current){current.busy=false;owner.toast(photosErrorText(error,'No preview'));}}
+    finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
+  }
+  /** Keeps the marked area: previews the cropped photo and closes the step. The whole photo is no crop. */
+  async function applyCrop(owner:Bag){const current=edit,step=current?.cropping;if(!current||!step||current.busy||current.uncertain)return;
+    let cropRect:CropRect|undefined;try{cropRect=validCropRect(step.rect);}catch(error){owner.toast(photosErrorText(error,'No preview'));return;}
+    current.busy=true;owner.set({nativeEditRevision:Date.now()});
+    try{const value=await library.previewEdit({sessionId:current.sessionId,rotation:current.rotation,...cropRequest(cropRect),filter:current.filter});if(edit===current)edit={...current,...value,cropRect,cropping:undefined,busy:false};}
+    catch(error){if(edit===current){current.busy=false;owner.toast(photosErrorText(error,'No preview'));}}
+    finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
+  }
+  /** Leaves the crop step without changing the applied crop. */
+  function cancelCrop(owner:Bag){const current=edit;if(!current?.cropping||current.busy)return;edit={...current,cropping:undefined};owner.set({nativeEditRevision:Date.now()});}
   type EditCompletion={token:string;epoch:number;source:string|undefined;intent?:MediaCopyIntent;replace?:boolean};
   const completionCurrent=(ticket:EditCompletion,owner:Bag)=>!disposed&&!document.hidden&&owner.isActive()&&editEpoch===ticket.epoch&&owner.get('photos').open===ticket.source&&(!edit||edit.operationId===ticket.token);
   async function finishEdit(value:EditReceipt,owner:Bag,ticket:EditCompletion){
@@ -354,7 +378,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     try{
       ticket.intent=await admitMediaCopyIntent(ticket.token);automaticEditRecovery=ticket.token;
       if(!completionCurrent(ticket,owner)){await acknowledgeMediaCopyIntent(ticket.intent);return;}
-      const value=await library.saveEdit({sessionId:current.sessionId,rotation:current.rotation,crop:current.crop,filter:current.filter,...(replace?{replace:true}:{})});
+      const value=await library.saveEdit({sessionId:current.sessionId,rotation:current.rotation,...cropRequest(current.cropRect),filter:current.filter,...(replace?{replace:true}:{})});
       if(!await finishEdit(value,owner,ticket)){if(edit===current)current.uncertain=true;await recoverEdit(owner,ticket);}
     }catch{if(edit===current)current.uncertain=true;if(ticket.intent)await recoverEdit(owner,ticket);else if(completionCurrent(ticket,owner)){owner.set({nativeCopyRecovery:true});owner.toast(browserMode&&testMocksEnabled?'Couldn’t save a copy. Try again.':'Save failed');}}
     finally{if(edit===current){current.busy=false;if(completionCurrent(ticket,owner))owner.set({nativeEditRevision:Date.now()});}}
@@ -1784,7 +1808,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         const infoControl=document.querySelector<HTMLElement>(`[data-alpha-subview="photos-viewer"] button[aria-label="${data.v.infoLabel}"]`)||undefined;
         openAlbumManager(currentApi,selected,undefined,infoControl);if(manager)manager.choosing=true;currentApi.set({nativeAlbumDraft:Date.now()});}};
       data.infoOpen=st.sheet==='photo-info'||!!data.infoOpen;
-      if(edit?.source===selected.id){const current=edit;data.v.ed={bg:`url("${current.image}") center / contain no-repeat`,tf:'',flt:'none',cropOn:current.crop,cropCss:current.crop?'background:#ffffff;color:#000000':'background:rgba(255,255,255,.12);color:#ffffff',status:current.uncertain?'Unconfirmed':'',saveLabel:'Save copy',saveDisabled:current.busy||!current.uncertain&&!editChanged(current),canReplace:!!current.canReplace&&!current.uncertain,replace:()=>void requestReplaceEdit(currentApi),rotate:()=>void transformEdit(currentApi,true),crop:()=>void transformEdit(currentApi,false),cancel:()=>{void requestCancelEdit(currentApi);},save:()=>void saveEdit(currentApi),filters:[['none','Original'],['vivid','Vivid'],['warm','Warm'],['cool','Cool'],['mono','Mono'],['fade','Fade'],['noir','Noir']].map(([id,label])=>({id,label,bg:`url("${selected.image}") center / cover no-repeat`,flt:({none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'} as Record<string,string>)[id],on:current.filter===id,ring:current.filter===id?'box-shadow:0 0 0 2px #000,0 0 0 4px #fff':'',lc:current.filter===id?'#fff':'rgba(255,255,255,.6)',pick:()=>void transformEdit(currentApi,false,id)}))};}
+      if(edit?.source===selected.id){const current=edit;const step=current.cropping,liveStep=()=>edit===current&&!current.busy?current.cropping:undefined;data.v.ed={bg:step?'none':`url("${current.image}") center / contain no-repeat`,tf:'',flt:'none',tools:!step,cropping:step?cropView(step,liveStep,next=>{if(edit===current&&current.cropping){current.cropping=next;currentApi.set({nativeEditRevision:Date.now()});}},()=>void applyCrop(currentApi),()=>cancelCrop(currentApi),current.busy):undefined,cropOn:!!current.cropRect,cropCss:current.cropRect?'background:#ffffff;color:#000000':'background:rgba(255,255,255,.12);color:#ffffff',status:current.uncertain?'Unconfirmed':'',saveLabel:'Save copy',saveDisabled:current.busy||!current.uncertain&&!editChanged(current),canReplace:!!current.canReplace&&!current.uncertain,replace:()=>void requestReplaceEdit(currentApi),rotate:()=>void transformEdit(currentApi,true),crop:()=>void startCrop(currentApi),cancel:()=>{void requestCancelEdit(currentApi);},save:()=>void saveEdit(currentApi),filters:[['none','Original'],['vivid','Vivid'],['warm','Warm'],['cool','Cool'],['mono','Mono'],['fade','Fade'],['noir','Noir']].map(([id,label])=>({id,label,bg:`url("${selected.image}") center / cover no-repeat`,flt:({none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'} as Record<string,string>)[id],on:current.filter===id,ring:current.filter===id?'box-shadow:0 0 0 2px #000,0 0 0 4px #fff':'',lc:current.filter===id?'#fff':'rgba(255,255,255,.6)',pick:()=>void transformEdit(currentApi,false,id)}))};}
     }
     data.closeActions=(event:Event)=>{(event.currentTarget as HTMLElement)?.closest('details')?.removeAttribute('open');};
     if(data.alb)data.alb.menu=!!(data.alb.canSelect||data.alb.isCustom||data.alb.canEmpty);

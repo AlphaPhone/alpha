@@ -2737,7 +2737,7 @@ registerView("photos", {
       if (ed) {
         var el = phLook(cur, "view", ed);
         vw.ed = {
-          bg: el.bg, tf: el.tf, flt: el.flt,
+          bg: el.bg, tf: el.tf, flt: el.flt, tools: true,
           cropCss: ed.crop ? "background:var(--alpha-white);color:var(--alpha-black)" : "background:rgba(255,255,255,.12);color:var(--alpha-white)",
           cropOn: !!ed.crop,
           rotate: function () { var e2 = api.get("photos").edit; api.set({ edit: Object.assign({}, e2, { rot: ((e2.rot || 0) + 90) % 360 }) }); },
