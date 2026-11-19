@@ -36,14 +36,25 @@ export function parseCallState(value: unknown): CallState | null {
 let current: CallState = UNKNOWN;
 /** Each listener event advances this; a read that began before the latest event is not applied. */
 let generation = 0;
+/** When a reading last showed a live call; 0 before any. */
+let callSeenAt = 0;
+const apply = (state: CallState) => {
+	current = state;
+	if (state.inCall === true) callSeenAt = Date.now();
+};
 export const currentCallState = (): CallState => current;
+/**
+ * Whether a reading at or after `time` showed a live call. A call can start and end while Alpha's
+ * page is hidden behind the call screen, so the current reading alone cannot say one happened.
+ */
+export const callSeenSince = (time: number): boolean => callSeenAt !== 0 && callSeenAt >= time;
 
 /** A fresh native reading for the display. A failed read keeps the last one. */
 export async function readCallState(plugin: CallStatePlugin): Promise<CallState> {
 	const started = generation;
 	try {
 		const parsed = parseCallState(await plugin.callState());
-		if (parsed && started === generation) current = parsed;
+		if (parsed && started === generation) apply(parsed);
 	} catch {
 		// keep the last reading
 	}
@@ -67,7 +78,7 @@ export function watchCallState(plugin: CallStatePlugin, changed: () => void): ()
 		if (!parsed || !live) return;
 		const before = JSON.stringify(current);
 		generation++;
-		current = parsed;
+		apply(parsed);
 		if (JSON.stringify(current) !== before) changed();
 	}).then(registered => { if (live) handle = registered; else void registered.remove(); }, () => {});
 	const visible = () => { if (!document.hidden) void refresh(); };
@@ -82,6 +93,7 @@ export function watchCallState(plugin: CallStatePlugin, changed: () => void): ()
 		void handle?.remove();
 		setEmergencySource(null);
 		current = UNKNOWN;
+		callSeenAt = 0;
 	};
 }
 
@@ -111,7 +123,7 @@ export async function telephonyEffectAllowed(plugin: CallStatePlugin): Promise<b
 	}
 	if (!state) return false;
 	// A Telephony event that arrived during the read is newer: it can only add a refusal.
-	if (started === generation) current = state;
+	if (started === generation) apply(state);
 	else if (current.emergencyLive || current.inCall === null) return false;
 	return state.inCall !== null && !state.emergencyLive;
 }

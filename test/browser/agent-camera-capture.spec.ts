@@ -9,24 +9,34 @@ import {returnToApps} from './app-navigation';
 // proposal-only-ask-first: the agent only proposes the photo on an ask-first phone, with an earlier turn's photo still pending. As the agent does there, the proposal names
 // no requesting message; the reply's own device receipt names it, so Camera still opens first and the card waits there.
 // Both proposal-only modes also list an earlier turn's web search review, which is reviewable on Home and must not keep Camera closed.
-// open-only: "open camera". The agent shows Camera and proposes nothing; the chat closes to its bar over a clear viewfinder.
+// open-only: "open camera" typed in the open chat. The agent shows Camera and proposes nothing; the chat stays open and Camera
+// is laid out above it. open-only-full: the same with the chat at full height, which stays full.
 // unrelated-reply: an earlier turn's photo and search reviews are pending, and this reply proposed neither; Camera stays closed.
 // proposal-only-unreadable: device settings cannot be read, so the phone asks first; Camera opens and the card waits there.
 // maps-proposal-only-ask-first: the same ask-first photo asked for from Maps; Camera opens from there and the card waits there.
 // Every shutter is checked to fire on the live Camera viewfinder, never from Home, with nothing of the chat over it:
-// chat opening Camera closes the conversation to its bar, and a photo waiting for review is approved on that bar.
-for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','proposal-only','proposal-only-ask-first','proposal-only-unreadable','maps-proposal-only-ask-first','unrelated-reply','stop','selfie','selfie-ask-first'] as const)test(`${mode.startsWith('maps-')?'Maps':'Home'} camera request: ${mode}`,async({page})=>{
+// chat opening Camera keeps the conversation where it was, the viewfinder and shutter above the open sheet, and a photo
+// waiting for review is approved on its card in the sheet, or on Camera's bar once the owner closes the chat.
+for(const mode of ['open-only','open-only-full','capture','lost-ack','old-message','ask-first','proposal-only','proposal-only-ask-first','proposal-only-unreadable','maps-proposal-only-ask-first','unrelated-reply','stop','selfie','selfie-ask-first'] as const)test(`${mode.startsWith('maps-')?'Maps':'Home'} camera request: ${mode}`,async({page})=>{
  await page.addInitScript(mode=>{
   const w=window as any,store=new Map(),agentId='12345678-1234-4234-8234-123456789abc',userMessageId='87654321-4321-4321-8321-cba987654321';
-  // The viewfinder (above its zoom row, when the lens has one) and the shutter are what is on top at each of their points, and the chat is closed.
+  // The viewfinder (below the header's buttons and above its zoom, mode and capture rows) and the shutter, the selected mode and the
+  // camera flip are what is on top at each of their points, whether the chat is closed or open below them.
   w.cameraViewClear=()=>{
-   const finder=document.querySelector('[data-alpha-camera="viewfinder"]'),zoom=document.querySelector('[data-alpha-camera="zoom"]'),conversation=document.querySelector('[data-alpha-layer="conversation"]');
+   const finder=document.querySelector('[data-alpha-camera="viewfinder"]'),zoom=document.querySelector('[data-alpha-camera="zoom"]'),header=document.querySelector('[data-alpha-camera-root] [data-alpha-app-header]');
    const shutter=[...document.querySelectorAll('[data-alpha-camera="capture"] button')].find(button=>button.getBoundingClientRect().width>=70);
-   if(!finder||!shutter||conversation?.getAttribute('aria-hidden')!=='true')return false;
-   const r=finder.getBoundingClientRect(),bottom=Math.min(r.bottom,zoom?zoom.getBoundingClientRect().top:r.bottom)-2,s=shutter.getBoundingClientRect();
-   if(r.height<=0||bottom<=r.top)return false;
-   for(const fx of [.05,.25,.5,.75,.95])for(const fy of [.02,.25,.5,.75,.98])if(!finder.contains(document.elementFromPoint(r.left+r.width*fx,r.top+(bottom-r.top)*fy)))return false;
-   return shutter.contains(document.elementFromPoint(s.left+s.width/2,s.top+s.height/2));
+   const controls=[shutter,document.querySelector('[data-alpha-camera-root] [aria-label="Switch camera"]'),document.querySelector('[data-alpha-camera="modes"] [aria-label="Photo mode"]')].filter(Boolean) as Element[];
+   if(!finder||!shutter)return false;
+   const r=finder.getBoundingClientRect(),top=Math.max(r.top,header?header.getBoundingClientRect().bottom:r.top)+2,bottom=Math.min(r.bottom,...[zoom,...document.querySelectorAll('[data-alpha-camera="modes"],[data-alpha-camera="capture"]')].filter(Boolean).map(row=>row!.getBoundingClientRect().top))-2;
+   if(r.height<=0||bottom-top<60)return false;
+   for(const fx of [.05,.25,.5,.75,.95])for(const fy of [0,.25,.5,.75,1])if(!finder.contains(document.elementFromPoint(r.left+r.width*fx,top+(bottom-top)*fy)))return false;
+   return controls.every(control=>{const c=control.getBoundingClientRect();return c.width>0&&control.contains(document.elementFromPoint(c.left+c.width/2,c.top+c.height/2));});
+  };
+  // The conversation's detent as the owner sees it: closed (bar or pill), the open sheet, or full.
+  w.cameraChatDetent=()=>{
+   const conversation=document.querySelector('[data-alpha-layer="conversation"]');
+   if(!conversation||conversation.getAttribute('aria-hidden')==='true')return 'closed';
+   return document.querySelector('[data-screen]')!.getAttribute('data-alpha-chat-half')==='true'?'sheet':'full';
   };
   const f=w.cameraRequestFixture={posts:0,captures:0,claims:0,acks:0,decisions:0,otherRoutes:0,receipts:[],log:[] as string[],shutterViews:[] as string[],advertised:'',proposal:null as any,stale:[] as any[],entry:null as any};
   const proposalOf=(id:string,operation:any,requestMessageId?:string,ttl=600000)=>({id,digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+ttl).toISOString(),subjectUserId:'fixture-owner',requestedBy:agentId,action:'device_action',payload:{action:'device_action',version:1,installationId:w.cameraInstallation,enrollmentId:'camera-enrollment',operation,...(requestMessageId?{requestMessageId}:{})}});
@@ -64,10 +74,10 @@ for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','p
     // Camera's bar offers only the newest photo; approving it must decide this reply's photo, never the earlier one.
     if(mode==='proposal-only-ask-first')f.stale.push(proposalOf('earlier-photo',{type:'camera_capture_photo'},undefined,540000));
     if(mode==='unrelated-reply'){f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo'});return ok({text:'It is sunny.',agentName:'Camera fixture',userMessageId,actionResults:[]});}
-    if(mode!=='open-only')f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},unbound?undefined:mode==='old-message'?'old-message':userMessageId);
+    if(!mode.startsWith('open-only'))f.proposal=proposalOf('camera-proposal',{type:'camera_capture_photo',...(mode.startsWith('selfie')?{lens:'front'}:{})},unbound?undefined:mode==='old-message'?'old-message':userMessageId);
     if(unbound)return ok({text:'Review this request on your phone before it can run.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
     if(mode==='proposal-only')return ok({text:'Opening Camera to take the photo.',agentName:'Camera fixture',userMessageId,actionResults:[proposed('camera-proposal')]});
-    if(mode==='open-only')return ok({text:'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
+    if(mode.startsWith('open-only'))return ok({text:'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
     return ok({text:mode==='selfie'?'Opening Camera to take the photo.':'Opening Camera.',agentName:'Camera fixture',userMessageId,actionResults:[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'camera',viewPath:'/camera',viewType:'gui',completedActionDelivered:false,completedActionHandoffId:'camera-handoff',navigationPrepared:true,navigationBinding:{requestId:'camera-handoff',clientId:body.metadata.viewClientId,viewId:'camera',viewType:'gui',installationId:w.cameraInstallation}}}]});
    }
    if(path==='/api/views/interact-claim'){f.claims++;return ok({claimId:'camera-owned-claim'});}
@@ -124,7 +134,13 @@ for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','p
   await expect(page.locator('html')).toHaveAttribute('data-active-view','maps');
   await page.getByRole('button',{name:'Type',exact:true}).click();
  }
- const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Take a photo');await input.press('Enter');
+ if(mode==='open-only-full'){
+  // The owner opens the chat and raises it to full height before asking.
+  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+  await page.getByRole('button',{name:'Expand chat',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).cameraChatDetent())).toBe('full');
+ }
+ const input=page.getByRole('textbox',{name:mode==='open-only-full'?'Message Alpha':'Ask Alpha',exact:true});await input.fill(mode.startsWith('open-only')?'Open camera':'Take a photo');await input.press('Enter');
  const fixture=()=>page.evaluate(()=>(window as any).cameraRequestFixture);
  const notice=page.getByText('Take photo: Open Camera to take the requested photo.',{exact:true}),saved=page.locator('[data-alpha-message-text]').filter({hasText:/^Saved$/});
  if(mode.includes('proposal-only')||mode==='unrelated-reply')await expect.poll(async()=>(await fixture()).posts).toBe(1);
@@ -137,14 +153,26 @@ for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','p
   await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
   return;
  }
- if(mode==='open-only'){
-  // Camera has the screen: the reply is behind Camera's resting bar, which reopens it, and nothing is taken.
+ if(mode.startsWith('open-only')){
+  // The chat stays exactly where it was: the reply shows in the open sheet with Camera laid out above it
+  // (viewfinder visible, shutter, mode and flip reachable), and nothing is taken.
   await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
   await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
-  await expect.poll(()=>page.evaluate(()=>(window as any).cameraViewClear())).toBe(true);
-  await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();
+  await expect(page.getByText('Opening Camera.',{exact:true}).first()).toBeVisible();
   await expect(page.locator('[data-alpha-bar-review]')).toHaveCount(0);
-  const f=await fixture();expect(f.captures).toBe(0);expect(f.claims).toBe(1);
+  const f=await fixture();expect(f.captures).toBe(0);expect(f.claims).toBe(1);expect(f.acks).toBe(1);
+  if(mode==='open-only-full'){
+   // Full stays full: Camera waits behind it until the owner lowers the chat.
+   await expect.poll(()=>page.evaluate(()=>(window as any).cameraChatDetent())).toBe('full');
+   await page.waitForTimeout(500);expect(await page.evaluate(()=>(window as any).cameraChatDetent())).toBe('full');
+   return;
+  }
+  await expect.poll(()=>page.evaluate(()=>(window as any).cameraChatDetent())).toBe('sheet');
+  await expect.poll(()=>page.evaluate(()=>(window as any).cameraViewClear())).toBe(true);
+  // The open sheet holds; nothing closes it behind the owner's back.
+  await page.waitForTimeout(500);expect(await page.evaluate(()=>(window as any).cameraChatDetent())).toBe('sheet');
+  // Every Camera control above the sheet ends at or above the sheet's top edge.
+  expect(await page.evaluate(()=>{const sheet=document.querySelector('[data-alpha-layer="conversation"]')!.getBoundingClientRect().top;return [...document.querySelectorAll('[data-alpha-camera="capture"] button,[data-alpha-camera="modes"] button')].every(b=>b.getBoundingClientRect().bottom<=sheet+1);})).toBe(true);
   return;
  }
  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
@@ -179,19 +207,30 @@ for(const mode of ['open-only','capture','lost-ack','old-message','ask-first','p
   const f=await fixture();expect(f.captures).toBe(0);expect(f.decisions).toBe(0);
   if(reviewOnCamera){await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');expect(f.claims).toBe(0);}
   if(mode==='lost-ack')return;
-  // Camera is open, so the pending photo is its review card there, never "Open Camera".
-  const approve=page.getByRole('button',{name:/^Take photo\b.*Approve$/s});
-  await expect(approve).toHaveCount(1);
+  // Camera is open, so the pending photo is its review card there, never "Open Camera". The chat stays open as it
+  // was: the card is in the sheet, on top and tappable at its centre, with the viewfinder and shutter clear above it.
+  const sheetCard=page.locator('[data-alpha-layer="conversation"]').getByRole('button',{name:/^Take photo\b.*Approve$/s}).last();
+  await expect(sheetCard).toBeVisible();
   await expect(notice).toHaveCount(0);
-  // The card waits on the closed bar, below the shutter: the viewfinder and shutter stay clear and the card stays tappable.
-  const review=page.locator('[data-alpha-bar-review]');
-  await expect(review.getByRole('button',{name:/^Take photo\b.*Approve$/s})).toBeVisible();
-  await expect(review.getByRole('button',{name:'Decline',exact:true})).toBeVisible();
-  // Once the dock clearance has settled, the card lies wholly below the shutter row and on screen.
-  await expect.poll(()=>page.evaluate(()=>{
-   const card=document.querySelector('[data-alpha-bar-review]')!.getBoundingClientRect(),row=document.querySelector('[data-alpha-camera="capture"]')!.getBoundingClientRect(),screen=document.querySelector('[data-screen]')!.getBoundingClientRect();
-   return (window as any).cameraViewClear()&&card.top>=row.bottom&&card.bottom<=screen.bottom;
-  })).toBe(true);
+  await expect(page.locator('[data-alpha-bar-review]')).toHaveCount(0);
+  await expect.poll(()=>page.evaluate(()=>(window as any).cameraChatDetent())).toBe('sheet');
+  const onTop=async(locator:import('@playwright/test').Locator)=>locator.evaluate(card=>{card.scrollIntoView({block:'nearest'});const r=card.getBoundingClientRect();return card.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));});
+  await expect.poll(async()=>await page.evaluate(()=>(window as any).cameraViewClear())&&await onTop(sheetCard)).toBe(true);
+  // Closing the chat on Camera moves the newest photo's card onto Camera's bar, below the shutter row.
+  const barCard=mode==='proposal-only-ask-first';
+  if(barCard){
+   await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
+   await expect.poll(()=>page.evaluate(()=>(window as any).cameraChatDetent())).toBe('closed');
+   const review=page.locator('[data-alpha-bar-review]');
+   await expect(review.getByRole('button',{name:/^Take photo\b.*Approve$/s})).toBeVisible();
+   await expect(review.getByRole('button',{name:'Decline',exact:true})).toBeVisible();
+   // Once the dock clearance has settled, the card lies wholly below the shutter row and on screen.
+   await expect.poll(()=>page.evaluate(()=>{
+    const card=document.querySelector('[data-alpha-bar-review]')!.getBoundingClientRect(),row=document.querySelector('[data-alpha-camera="capture"]')!.getBoundingClientRect(),screen=document.querySelector('[data-screen]')!.getBoundingClientRect();
+    return (window as any).cameraViewClear()&&card.top>=row.bottom&&card.bottom<=screen.bottom;
+   })).toBe(true);
+  }
+  const approve=barCard?page.locator('[data-alpha-bar-review]').getByRole('button',{name:/^Take photo\b.*Approve$/s}):sheetCard;
   if(!mode.endsWith('ask-first')&&mode!=='proposal-only-unreadable')return;
   // The card names the camera the request asked for.
   await expect(approve).toContainText(mode==='selfie-ask-first'?'Use the front camera and save one photo in Photos.':'Use the current camera and save one photo in Photos.');

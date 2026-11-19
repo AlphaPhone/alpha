@@ -133,6 +133,15 @@ final class AlphaCallPresentation {
     }
 
     /**
+     * Everything a call's notice shows or offers: who it is, the state line, and whether it rings
+     * (which picks its channel and its Answer, Decline or End call actions). Two calls to this with
+     * equal results describe the same notice, so the second need not be posted.
+     */
+    static String noticeContent(String label, int state) {
+        return label + '\n' + stateLabel(state) + '\n' + (state == Call.STATE_RINGING);
+    }
+
+    /**
      * What the WebView's ongoing-call bar is told a call is doing (AlphaOngoingCallPlugin): one of
      * {@code dialing}, {@code ringing}, {@code active} or {@code held}, or null for a call that is
      * ending, ended, or in a state the owner does not see.
