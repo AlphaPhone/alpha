@@ -7,10 +7,10 @@ import {captureSources, read, root} from './support.mjs';
 
 /**
  * The installed phone device executor (agent-adapter.ts, `connectionController.setDeviceExecutor`)
- * mounted without the renderer. The callback text and the module helper it calls for Previous
- * notes refusals are sliced from the actual source and run unchanged; every contract, predicate,
- * registry, store and presenter it reaches is the real module, bundled from the path the adapter
- * imports. Only effect boundaries are ports: native plugins, durable Trash, the shell, the view
+ * mounted without the renderer. The callback text and the module helpers it calls for Previous
+ * notes refusals and internal navigation are sliced from the actual source and run unchanged;
+ * every contract, predicate, registry, store and presenter it reaches is the real module, bundled
+ * from the path the adapter imports. Only effect boundaries are ports: native plugins, durable Trash, the shell, the view
  * context publisher and the connection. A name the fixture does not provide throws when reached.
  */
 const adapter = 'apps/app/src/prototype/agent-adapter.ts';
@@ -38,6 +38,8 @@ export {presentDeviceRecordOperation} from './apps/app/src/runtime/device-record
 export {formatDeviceRecordDateTime} from './apps/app/src/ui/device-actions/device-record-presentation';
 export {notesActionFailureText,previousNotesRefusal} from './apps/app/src/ui/notes/notes-action-messages';
 export {proposalContextNotice} from './apps/app/src/ui/device-actions/client-coordinator';
+export {FILES_DIRECT_TYPES} from './.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+export {alphaViewKey} from './apps/app/src/product/alpha-product';
 `;
 
 let bundled;
@@ -80,7 +82,8 @@ export async function mountDeviceExecutor(shell, ports) {
   // The callback's body closes on the `    });` line that ends the registration call.
   const callback = slice(text, marker, '\n    });\n').slice(marker.length) + '\n    }';
   const refusal = slice(text, '  async function previousNotesRefusalNow(', '  async function previousNotesObservation(');
-  const code = stripTypeScriptTypes(`${refusal}\nglobalThis.__install = function(){ return (${callback}); };`, {mode: 'strip'});
+  const navigation = slice(text, '  function openInternalView(', '  /** Opens Camera for a photo');
+  const code = stripTypeScriptTypes(`${refusal}\n${navigation}\nglobalThis.__install = function(){ return (${callback}); };`, {mode: 'strip'});
   const context = vm.createContext({console, JSON, Promise, Error, TypeError, Array, Object, String, Number, Set, Map,
     Date, Intl, URL, AbortController, AbortSignal, DOMException, Event, EventTarget, CustomEvent, TextEncoder,
     structuredClone, crypto, setTimeout, clearTimeout, ...exports, ...ports});
