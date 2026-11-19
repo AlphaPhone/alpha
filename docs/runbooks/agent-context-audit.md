@@ -103,6 +103,27 @@ What the replay leaves: on the stable-reference requests, a Stage 1 request re-s
 tables sit before the transcript, so a turn that records an action re-sends the
 transcript after it.
 
+### What the replay says about a smaller device tool
+
+The device tool is about 7K tokens on every planner call that carries it. Tool
+definitions sit between the system prompt and the messages in the cached prefix, so a
+tool that differs from the previous turn's also makes the messages a miss. The same
+replayed requests, with the device tool swapped for three measured prototypes:
+
+| Device tool on a planner call | All input | Planner tokens reused | Uncached in any 60 s (median, p90, max) |
+| --- | --- | --- | --- |
+| Whole tool, same every turn (today, 28.8K characters) | 2.52M | 82% | 5K, 16K, 32K |
+| Whole tool with duplication removed, same every turn (21.8K) | 2.38M | 82% | 5K, 15K, 28K |
+| Operations chosen per request (14.4K), differing on half the turns | 2.24M | 45% | 10K, 20K, 37K |
+| The same, differing on every turn | 2.24M | 11% | 14K, 26K, 47K |
+| One tool per family (6.5K), differing on half the turns | 2.09M | 45% | 9K, 18K, 33K |
+| The same, differing on every turn | 2.09M | 14% | 12K, 22K, 42K |
+
+A tool chosen per request sends fewer tokens and more of them uncached, and the
+uncached limit is the one a phone reaches. Only the tool that stays the same and gets
+shorter improves both. Its wording changes still need the routing eval below before
+they ship; none of the three is in the runtime.
+
 ## 2. Compare action routing before and after a change
 
 `scripts/eval-phone-actions.ts` sends 36 fixed requests to a loopback resident that has
