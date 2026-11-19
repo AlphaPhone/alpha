@@ -252,13 +252,18 @@ export function automaticUpdateIdle(shell: {screen?:unknown;view?:unknown;voice?
     busy: !!connection.busy, open: !!connection.open && !signInIdle, editor: !!editor,
   });
 }
-/** The Privacy page's voice fact: the speech route in use now (voice-selection.ts) and what it sends.
- * It replaces the prototype's on-device model row; device settings links are untouched. */
-export function voicePrivacyRow(label: string, route: SpeechRoute, serviceName = 'Cloud'): [string, string] | null {
-  if (label !== 'On-device model') return null;
-  if (route === 'cloud') return ['Voice', `Recordings, replies → ${serviceName}`];
-  if (route === 'direct') return ['Voice', 'Recordings, replies → Cartesia'];
-  return ['Voice', 'On this phone'];
+/** Settings › Privacy › Voice: where speech goes now (voice-selection.ts) and what it sends. */
+export function voicePrivacyRow(route: SpeechRoute, serviceName = 'Cloud'): { val: string; sub: string } {
+  if (route === 'cloud') return { val: serviceName, sub: `Recordings, replies → ${serviceName}` };
+  if (route === 'direct') return { val: 'Cartesia', sub: 'Recordings, replies → Cartesia' };
+  return { val: 'On this phone', sub: '' };
+}
+/** Attachments waiting in the chat composer. Changing chats clears them (agent-adapter), so
+ * Settings asks first, as chat search refuses to change chats while one is waiting. */
+export function composerAttachmentCount(shell: { fileAttachments?: unknown[] | null; cameraAttachment?: unknown; transcriptAttachment?: unknown; mailAttachment?: unknown } | null | undefined): number {
+  if (!shell) return 0;
+  return (Array.isArray(shell.fileAttachments) ? shell.fileAttachments.length : 0)
+    + (shell.cameraAttachment ? 1 : 0) + (shell.transcriptAttachment ? 1 : 0) + (shell.mailAttachment ? 1 : 0);
 }
 /** A stale or direct Developer selection cannot open the page in a product build. */
 export function settingsPage(page: string | null | undefined, developerSurfaces: boolean): string | null | undefined {
@@ -1036,9 +1041,15 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           if(activityRows.length)groups.push(group(activityRows));
           if(connection.session){
             const historyRows:Bag[]=[];
+            // Drafts are kept per chat; attachments waiting in the composer are not, so ask first.
+            const changeChat=(id:string,title:string,label:string,go:()=>void)=>async()=>{
+              const waiting=composerAttachmentCount(owner);
+              if(waiting&&!await review(id,title,waiting===1?'The attachment waiting in chat will be removed.':`The ${waiting} attachments waiting in chat will be removed.`,label))return;
+              go();
+            };
             if(!connection.busy){
-              historyRows.push({...action('New',()=>void connectionController.newConversation()),lbl:'New conversation',lucide:'plus',chev:false},{...action('History',()=>void connectionController.listHistory()),lbl:'Load conversations',lucide:'clock'});
-              for(const item of connection.conversations)historyRows.push({...action(item.title,()=>void connectionController.restoreHistory(item.id),`conversation:${item.id}`),lbl:`Restore conversation: ${item.title}`,lucide:'undo-2',chev:false});
+              historyRows.push({...action('New',changeChat('new-conversation','Start a new conversation?','Start',()=>void connectionController.newConversation())),lbl:'New conversation',lucide:'plus',chev:false},{...action('History',()=>void connectionController.listHistory()),lbl:'Load conversations',lucide:'clock'});
+              for(const item of connection.conversations)historyRows.push({...action(item.title,changeChat(`restore-conversation:${item.id}`,'Open this conversation?','Open',()=>void connectionController.restoreHistory(item.id)),`conversation:${item.id}`),lbl:`Restore conversation: ${item.title}`,lucide:'undo-2',chev:false});
             }
             if(connection.historyError){historyRows.push(info('History',connection.historyError));if(!connection.busy)historyRows.push({...action('Retry',()=>void connectionController.retrySavedHistory()),lbl:'Retry saved conversation',lucide:'rotate-cw',chev:false});}
             groups.push(group(historyRows));
@@ -1149,11 +1160,11 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         const crossState:[string,string]=typeof cross.accessGranted!=='boolean'?['Unavailable','off']:!cross.enabled?['Off','off']:cross.paused?['Paused','warn']:!cross.accessGranted?['No access','err']:!cross.connected?['Waiting','warn']:['On','ok'];
         const crossRows:Bag[]=showCrossAppNotifications&&!cross.revision ? [{...info('Other apps',crossState[0]),hasDot:true,dot:crossState[1],hasSub:true,sub:'Not shared with agent'}] : [];
         if(showCrossAppNotifications && cross.revision){
-          crossRows.push(toggleRow('Other apps',cross.enabled?'Turn off other-app collection':'Enable selected-app collection',!!cross.enabled,async()=>{
-            if(Capacitor.isNativePlatform()&&!cross.enabled&&!await review('notification-collection','Collect selected-app notifications?','Reads selected apps only.','Turn on',()=>cross.revision===policyRevision))return;
+          crossRows.push(toggleRow('Other apps','Read notifications from other apps',!!cross.enabled,async()=>{
+            if(Capacitor.isNativePlatform()&&!cross.enabled&&!await review('notification-collection','Read notifications from other apps?','Only the apps you choose.','Turn on',()=>cross.revision===policyRevision))return;
             policy({enabled:!cross.enabled});
           },{hasSub:true,sub:'Not shared with agent',hasBadge:crossState[0]!=='On'&&crossState[0]!=='Off',badge:crossState[0]}),{...custom('Android access',()=>void run(async()=>{await notifications.openNotificationAccess();})),lbl:Capacitor.isNativePlatform()?'Manage notification access in Android':'Manage development notification access',hasExt:!notificationBusy,chev:false});
-          if(cross.paused)crossRows.push({...custom('Resume',async()=>{if(await review('notification-resume','Resume notification collection?','','Resume',()=>cross.revision===policyRevision))void run(async()=>{await notifications.resumeCrossApp({expectedRevision:policyRevision});});}),lbl:'Resume selected-app collection',lucide:'play'});
+          if(cross.paused)crossRows.push({...custom('Resume',async()=>{if(await review('notification-resume','Resume reading notifications?','','Resume',()=>cross.revision===policyRevision))void run(async()=>{await notifications.resumeCrossApp({expectedRevision:policyRevision});});}),lbl:'Resume reading notifications',lucide:'play'});
           // Per-app chips: name, preview (eye) and remove; a changed app is outlined amber.
           const apps=(chips:Bag[])=>({id:'notification-apps',kAppChips:true,label:'Notification apps',chips});
           if(selected.length)crossRows.push(apps(selected.map(app=>({id:app.packageName,label:app.label,warn:app.available===false,busy:notificationBusy,canPreview:app.available!==false,preview:!!app.preview,previewIcon:'eye',previewAria:`${app.preview?'Hide':'Allow'} previews: ${app.label}`,
@@ -1167,38 +1178,16 @@ export function installSettingsAdapter(Component: any, views: Bag) {
             void run(async()=>{const next=await notifications.notificationApps();choices=next.apps;});
           }),lbl:choices?'Hide app choices':'Choose notification apps',lucide:choices?'chevron-up':'plus',chev:false});
           const choosable=(choices||[]).filter(app=>!selected.some(a=>a.packageName===app.packageName));
-          if(choosable.length)crossRows.push({...apps(choosable.map(app=>({id:app.packageName,label:app.label,busy:notificationBusy,canPreview:false,actionIcon:'plus',actionAria:`Select ${app.label} (${app.packageName})`,action:()=>{if(!notificationBusy)policy({apps:[...selected.map(({packageName,preview})=>({packageName,preview})),{packageName:app.packageName,preview:false}]});}}))),id:'notification-app-choices',label:'Choose notification apps'});
-          crossRows.push(toggleRow('History',cross.history?'Turn off local metadata history':'Enable local metadata history',!!cross.history,async()=>{
+          if(choosable.length)crossRows.push({...apps(choosable.map(app=>({id:app.packageName,label:app.label,busy:notificationBusy,canPreview:false,actionIcon:'plus',actionAria:`Add ${app.label}`,action:()=>{if(!notificationBusy)policy({apps:[...selected.map(({packageName,preview})=>({packageName,preview})),{packageName:app.packageName,preview:false}]});}}))),id:'notification-app-choices',label:'Choose notification apps'});
+          crossRows.push(toggleRow('History','Keep 24-hour history',!!cross.history,async()=>{
             if(Capacitor.isNativePlatform()&&!cross.history&&!await review('notification-history','Keep notification history?','100 events · 24 h · no text','Turn on',()=>cross.revision===policyRevision))return;
             policy({history:!cross.history});
-          },{hasSub:true,sub:cross.historyUnavailable?'Unavailable':'24 h · no message text',hasBadge:history!==null&&history.length>0,badge:history?String(history.length):''}),{...custom('View',()=>{if(notificationBusy)return;notificationBusy=true;const current=owner;void notifications.notificationHistory().then(result=>{if(owner===current){history=result.items;owner?.vset('settings',{notificationChanged:Date.now()});}}).catch(()=>api.toast('Unavailable')).finally(()=>{notificationBusy=false;});}),lbl:'View local metadata history'},{...custom('Clear',async()=>{if(await review('notification-clear-history','Clear notification history?','Can’t be undone.','Clear',()=>cross.revision===policyRevision))void run(async()=>{await notifications.clearNotificationHistory();history=[];});}),lbl:'Clear local metadata history',lucide:'trash-2',chev:false});
+          },{hasSub:true,sub:cross.historyUnavailable?'Unavailable':'24 h · no message text',hasBadge:history!==null&&history.length>0,badge:history?String(history.length):''}),{...custom('View',()=>{if(notificationBusy)return;notificationBusy=true;const current=owner;void notifications.notificationHistory().then(result=>{if(owner===current){history=result.items;owner?.vset('settings',{notificationChanged:Date.now()});}}).catch(()=>api.toast('Unavailable')).finally(()=>{notificationBusy=false;});}),lbl:'View history'},{...custom('Clear',async()=>{if(await review('notification-clear-history','Clear notification history?','Can’t be undone.','Clear',()=>cross.revision===policyRevision))void run(async()=>{await notifications.clearNotificationHistory();history=[];});}),lbl:'Clear history',lucide:'trash-2',chev:false});
           if(history!==null){if(!history.length)crossRows.push(info('History','None'));for(const row of history)crossRows.push(info(row.appLabel,`${notificationHistoryState(row.state)} · ${new Date(row.at).toLocaleString()}`,`notice:${row.id??JSON.stringify([row.packageName,row.at,row.state])}`));}
         }
         const alerts=topValues.Notifications;
         page.groups = [group(Capacitor.isNativePlatform()?[{...info('Alpha notifications',alerts),hasDot:alerts!=='Unavailable',dot:alerts==='On'?'ok':alerts==='Some off'?'warn':'off'},info('Do Not Disturb',interruptionLabels[delivery.interruption]||'Not available'),nav('Notifications','notifications','Manage Alpha notifications')]:[{kTog:true,label:'Alerts',aria:'Allow alerts',on:delivery.appEnabled===true,track:delivery.appEnabled?'background:var(--acc)':'background:var(--line)',kx:delivery.appEnabled?20:0,toggle:()=>void run(async()=>{await notifications.setAlertPreferences({appEnabled:delivery.appEnabled!==true});})}]),
           ...(Capacitor.isNativePlatform()?(delivery.channels||[]).map((channel:Bag)=>group([{id:`notification-channel:${channel.id}`,kNav:true,label:channel.name,lbl:channel.name,chev:true,noAB:true,go:()=>void notifications.openChannelSettings({id:channel.id})}],`notification-channel:${channel.id}`)):[]),...(crossRows.length?[group(crossRows)]:[])];
-      } else if (page.title === 'Privacy & data') {
-        page.groups = page.groups.map((g: Bag) => ({ ...g, rows: g.rows.map((row: Bag) => {
-          const fact = voicePrivacyRow(row.label, voiceRoute, serviceName);
-          return fact ? info(...fact) : row;
-        }) }));
-        // Alpha declares no Contacts permission; Calendar is the fourth runtime grant it uses.
-        const permissionLabels=new Set(['Microphone','Location','Camera','Calendar']);
-        const permissionValue=(label:string)=>{
-          if(!Capacitor.isNativePlatform())return ({granted:'Allowed',prompt:'Ask',denied:'Off',unknown:'—'} as Bag)[facts.permissionStates?.[label]]??'—';
-          if(typeof facts.permissions?.[label]!=='boolean')return 'Unavailable';
-          if(label==='Location')return facts.locationAccess==='precise'?'Precise':facts.locationAccess==='approximate'?'Approx.':'Off';
-          return facts.permissions[label]?'Allowed':'Off';
-        };
-        const permissionRow=(label:string)=>permissionInfo(label,permissionValue(label));
-        // Keep connection privacy and Activity; replace only prototype permission rows.
-        page.groups=page.groups.map((g:Bag)=>{
-          if(!g.rows.some((row:Bag)=>permissionLabels.has(row.label)||row.label==='Contacts'))return g;
-          const rows=g.rows.filter((row:Bag)=>row.label!=='Contacts').map((row:Bag)=>permissionLabels.has(row.label)?permissionRow(row.label):row);
-          if(!rows.some((row:Bag)=>row.label==='Calendar'))rows.push(permissionRow('Calendar'));
-          return {...g,rows};
-        });
-        page.groups.push(group([...(Capacitor.isNativePlatform()?[info('Device location',reported(facts.locationEnabled)),nav('Location','location','Location in Android')]:[]),nav('Permissions','privacy','Manage Alpha permissions')]));
       } else if (page.title === 'Sound & vibration') {
         const volume = (label: string, stream: string) => {
           const value = controls.volumes?.find((v: Bag) => v.stream === stream);
@@ -1221,13 +1210,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
             return {...row,opts:([['system','System'],['light','Light'],['dark','Dark']] as Array<[AppearanceChoice,string]>).map(([value,label])=>{const on=value===choice;return {label,on,aria:`Theme: ${label}`,css:on?'background:var(--acc);color:#fff':'color:var(--mut)',pick:pick(value)};})};
           }
           if(row.label==='Brightness')return {...nav('Brightness','display','Manage brightness in Android'),...(facts.adaptiveBrightness===true?{val:'Auto',hasVal:true}:{})};
-          if(row.label!=='Text size')return row;
-          if(!Number.isInteger(facts.textScalePercent))return info('Text size','—');
-          const percent=facts.textScalePercent;
-          return {...row,valueLabel:`${percent}%`,v:percent<=100?(percent-75)*2:percent-50,set:(event:Event)=>{
-            const value=Number((event.target as HTMLInputElement).value),requested=Math.round(value<=50?75+value/2:value+50);
-            void changeTextScale(requested,api);
-          }};
+          return row;
         });
         page.groups=page.groups.map((g:Bag)=>({...g,rows:g.rows.filter((row:Bag)=>row.label!=='Text size'&&(Capacitor.isNativePlatform()||row.lbl!=='Manage brightness in Android'))})).filter((g:Bag)=>g.rows.length);
         const percent=Number.isInteger(facts.textScalePercent)?facts.textScalePercent:100;
@@ -1299,8 +1282,13 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         const direct=new Set(['browser','files',...(Capacitor.isNativePlatform()?[]:['photos'])]);
         if(key==='settings-apps')groups=[group(appCatalog.map(([label,id])=>({kNav:true,label,lbl:label,chev:true,noAB:true,go:()=>{const existing=existingAppRow(id);if(existing&&id!=='workflows'){api.set({settingsCategory:'settings-apps'});existing.go();}else if(direct.has(id)){api.set({settingsCategory:'settings-apps'});owner?.openView(id);}else api.set({page:'app-settings-'+id,settingsCategory:'settings-apps'});}})))];
         if(key==='settings-privacy'){
+          // Where speech goes now, in every build (the Character page that also shows it is developer-only).
+          const voice=voicePrivacyRow(developmentCartesiaVoiceEnabled?'direct':voiceRoute,serviceName);
+          groups.push(group([{...info('Voice',voice.val,'voice-route'),...(voice.sub?{hasSub:true,sub:voice.sub}:{})}],'voice'));
           const listening=listenerRows();
           if(listening.length)groups.push(group(listening,'image-listening'));
+          // Permissions opens the per-app list; this reopens the first-run access walkthrough to review it.
+          if(typeof api.reopenStartupAccess==='function')groups.push(group([{...action('Access setup',()=>api.reopenStartupAccess()),lbl:'Review access setup',lucide:'list-checks'}],'access-setup'));
         }
         if(key==='settings-general'&&phoneLoader())groups.push(group([{kNav:true,label:'Phone',lbl:'Phone',chev:true,noAB:true,go:()=>api.set({page:'phone-info',settingsCategory:'settings-general'})}]));
         out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title,hasTitle:true,backLabel:'Back to Settings',back:()=>{api.set({page:null,settingsCategory:null});},hero:{},groups});

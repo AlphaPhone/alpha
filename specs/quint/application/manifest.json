@@ -582,6 +582,7 @@
       "rotationKeepsGeometryTest",
       "largeTextTest",
       "preferenceReadbackTest",
+      "failedSaveIsSessionOnlyTest",
       "invalidCalendarResultCanaryTest",
       "invalidLargeTextSplitCanaryTest",
       "invalidAgendaCanaryTest"
@@ -611,7 +612,7 @@
     "stateMapping": {
       "renderedDays/renderedSplit/renderedAgenda": "Actual surfaceLayout return values, projected by the geometry source adapter",
       "width/freeHeight/visibleHeight/editing": "Controlled measured layout and keyboard inputs",
-      "theme/savedTheme": "Preference readback abstraction only"
+      "theme/savedTheme": "Preference readback abstraction: a failed save changes the session theme only and the stored choice returns after a restart"
     }
   },
   {
@@ -9708,6 +9709,77 @@
       "The binding hash, the record write (read, compare-and-set, read back) and the outcome validation of the shared journal are one retained step; a full or unreadable journal is not modeled.",
       "Native applies or ignores a decision atomically and keeps a receipt for every applied one; that contract is assumed.",
       "ReminderIntents counts creation and operation records across reminders; this model is one reminder revision with its conflict, read-back and stale gates."
+    ]
+  },
+  {
+    "path": "specs/quint/application/SettingsNavigation.qnt",
+    "module": "SettingsNavigation",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "categoryBackTest",
+      "aboutNestedBackTest",
+      "privacyPermissionsBackTest",
+      "passwordBackTest",
+      "sectionOpensInCategoryTest",
+      "sectionRefusedTest"
+    ],
+    "invariants": [
+      "NoDeveloperPage",
+      "SectionsAllowlisted",
+      "PasswordOnlyFromSettings",
+      "CategoryMatchesIndex",
+      "CategoryKnown",
+      "ShownResolved"
+    ],
+    "witnesses": [
+      "PasswordEntryWitness",
+      "SectionRefusedWitness"
+    ],
+    "sources": [
+      "apps/app/src/prototype/settings-adapter.ts",
+      "apps/app/src/prototype/model.js"
+    ],
+    "symbols": [
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "categoryNames"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "settingsParents"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "definition.back"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "SETTINGS_SECTIONS"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "settingsSectionPatch"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "settingsPage"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "categoryPage"
+      }
+    ],
+    "stateMapping": {
+      "page/category": "Settings view state page and settingsCategory (empty string for none)",
+      "open": "Settings is the view on screen; Back from the root returns false and leaves it",
+      "shown": "The page render draws: the category index (categoryPage), settingsPage(page) in a product build, or the root",
+      "via": "Ghost: how the last step arrived (root row, child row, alpha:settings-page section, Back, or a refused section)"
+    },
+    "abstractions": [
+      "Product build only (developer surfaces off). Sheets, password locking, app-settings pages and the rows inside each page are not modelled; CHILDREN lists representative links, not every row.",
+      "test/quint-settings-navigation.test.mjs checks the tables against the source and replays each named run through the adapter's own Back, section allowlist and page resolution. It does not mount Settings or prove installed behaviour."
     ]
   },
   {
