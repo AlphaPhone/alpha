@@ -531,14 +531,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   const renderVals=Component.prototype.renderVals;
   // Later adapters wrap renderVals too, so disposal leaves this wrapper in place as a pass-through.
   Component.prototype.renderVals=function(this: Bag,...args: unknown[]){if(!disposed){shell=this;queueMicrotask(()=>void notificationOpen.flush());}return renderVals.apply(this,args);};
-  // The owner's chat request opens Maps over Home or the open app (Browser, say) on an unlocked,
+  // The owner's chat request opens Maps over Home or any open app (Phone, Browser) on an unlocked,
   // visible, non-sensitive launcher screen; agent-present.ts names the screens it keeps.
   const surface = screen.surface(async () => {
     const showable=()=>{
       const value=shell?.S?.();
       return !disposed&&!!value&&agentMapsShowable({live:!!shell?.live,hidden:document.hidden,suspended:!!shell?.pageSuspended,
         assistantSurface:!!shell?.props?.assistantSurface,connectionOpen:!!connectionController.getSnapshot().open,
-        screen:value.screen,secure:value.secure,shade:value.shade,view:value.view});
+        screen:value.screen,secure:value.secure,shade:value.shade,view:value.view,incomingCall:!!shell?.vget?.('phone')?.incoming});
     };
     if(!showable())return false;
     if(!api?.isActive()){

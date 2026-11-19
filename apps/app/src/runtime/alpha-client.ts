@@ -200,6 +200,8 @@ export class AlphaClient {
   private activeRevision = 0;
   /** A page the request in flight changes itself (the agent's own Browser back, forward or reload). */
   private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
+  /** A view the request in flight brings forward itself (the agent's own Maps navigation request). */
+  private ownViewOpen: { active: AbortController; view: string } | null = null;
   /** Each context an own page change published, keyed by its revision, with the context it replaced. */
   private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
@@ -261,6 +263,7 @@ export class AlphaClient {
     this.active = null;
     this.activeWorkflow = false;
     this.ownPageChange = null;
+    this.ownViewOpen = null;
     this.ownMoves.clear();
     const old = this.transport;
     this.transport = null;
@@ -280,7 +283,7 @@ export class AlphaClient {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
-    const ownChange = this.isOwnPageChange(next, selection), previous = this.context;
+    const ownChange = this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
@@ -292,7 +295,7 @@ export class AlphaClient {
       this.ownMoves.set(this.context.revision, previous);
     } else {
       this.ownMoves.clear();
-      if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;}
+      if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;this.ownViewOpen=null;}
     }
     this.emit();
   }
@@ -311,6 +314,25 @@ export class AlphaClient {
     const prior = this.ownPageChange?.active === active ? this.ownPageChange : null;
     const admitted = this.ownPageChange = { active, kind: page.kind, id: page.id };
     return () => { if (this.ownPageChange === admitted) this.ownPageChange = prior; };
+  }
+  /**
+   * Called while the request in flight runs a phone command that brings `view` forward itself:
+   * the agent's own Maps navigation request (MAPS_NAVIGATION_START) opens Maps over whatever the
+   * owner asked from. Until that request ends (or the release), a context change that lands on
+   * `view` with observation not paused is that request's own move, so the reply continues; leaving
+   * `view`, a sensitive screen or any change after it still cancels the reply, as Stop does. Approvals
+   * bound to the earlier context are retired either way.
+   */
+  admitOwnViewOpen(view: string): () => void {
+    const active = this.active;
+    if (!active || this.activeWorkflow || !view || this.context.sensitive) return () => {};
+    const prior = this.ownViewOpen?.active === active ? this.ownViewOpen : null;
+    const admitted = this.ownViewOpen = { active, view };
+    return () => { if (this.ownViewOpen === admitted) this.ownViewOpen = prior; };
+  }
+  private isOwnViewOpen(next: ContextEnvelope): boolean {
+    const own = this.ownViewOpen;
+    return !!own && own.active === this.active && !!this.active && !this.activeWorkflow && !next.sensitive && !this.context.sensitive && next.view === own.view;
   }
   /**
    * True when the published context is `expected`, or was reached from it only by own page
@@ -429,6 +451,7 @@ export class AlphaClient {
       if (abortListener)
         controller.signal.removeEventListener("abort", abortListener);
       if (this.ownPageChange?.active === controller) this.ownPageChange = null;
+      if (this.ownViewOpen?.active === controller) this.ownViewOpen = null;
       if (this.active === controller) {
         this.active = null;
         this.activeWorkflow = false;
