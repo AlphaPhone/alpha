@@ -358,3 +358,11 @@ test('the Removed status is offered only when the agent keeps removed workflows'
   assert.equal(Array.from(app.document.querySelector('dialog').querySelectorAll('button')).some(button=>button.textContent==='Removed'),false);
  }finally{app.close();await f.close();}
 });
+test('the add sheet opens the scheduled digest panel and closes itself, sending nothing',async()=>{
+ const f=await fixture(read);const app=adapterFixture(f.request);let opened=0;app.window.addEventListener('alpha:hosted-digests',()=>opened++);
+ try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);
+  app.render().newFlow();assert.equal(app.render().automation.creating,true);
+  app.render().automation.createDigest();assert.equal(opened,1);assert.equal(app.render().automation.creating,false);assert.equal(app.render().automation.detail,false);
+  assert.equal(f.calls.some(call=>call.method!=='GET'),false);
+ }finally{app.close();await f.close();}
+});
