@@ -101,6 +101,11 @@ export function agentEmailDraft(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/** Each distinct entry of a To line, in order, as the owner checks it before Send. */
+export function draftRecipientList(input: string) {
+  return [...new Set(input.split(',').map((address) => address.trim()).filter(Boolean))];
+}
+
 export function draftMailRecipients(input: string) {
   const values = input.split(',').map((address) => address.trim());
   return values.length <= 20 && values.every(literalMailAddress)

@@ -4,6 +4,7 @@ import {
   agentEmailDraft,
   agentEmailSend,
   draftMailRecipients,
+  draftRecipientList,
 } from '../apps/app/src/ui/mailbox/agent-email-draft.ts';
 const id = 'fda73825-d24c-4bf8-b188-52287e34c4c4';
 const draft = {
@@ -89,6 +90,19 @@ test('an edited address list must be complete before Send', () => {
     'self',
     'one@example.invalid,',
     'one@example.invalid, not an address',
+    'one@example.invalid\ntwo@example.invalid',
+    '<one@example.invalid>',
+    'one@example.invalid; two@example.invalid',
   ])
     assert.equal(draftMailRecipients(value), undefined);
+});
+test('every entry of a To line is listed once, in order, for the owner to check', () => {
+  assert.deepEqual(
+    draftRecipientList('one@example.invalid, two@example.invalid,three@example.invalid, one@example.invalid'),
+    ['one@example.invalid', 'two@example.invalid', 'three@example.invalid'],
+  );
+  assert.deepEqual(draftRecipientList('one@example.invalid, Bob,'), ['one@example.invalid', 'Bob']);
+  assert.deepEqual(draftRecipientList(' , '), []);
+  const twenty = Array.from({ length: 20 }, (_, n) => `crew${n}@example.invalid`);
+  assert.deepEqual(draftRecipientList(twenty.join(', ')), twenty);
 });
