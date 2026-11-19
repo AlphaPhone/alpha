@@ -687,7 +687,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // so a proposal for an earlier document cannot retain current authority.
     this.browserSelection = () => tabs.selection(state()?.cur);
     const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||b.menu||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
-  let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any;
+  let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any, showDownloadsListener: any;
   void Browser.addListener('findResult',(event:BrowserFindResult)=>{
     const s=state(),found=s&&!disposed?tabs.findResult(event,s.findTab):undefined;if(!found)return;
     if(found.cleared){if(s.finding)shell.vset('browser',{...findIdle,findTab:null});return;}
@@ -695,6 +695,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   }).then((value:any)=>{findListener=value;}).catch(()=>{});
   // A page's video fullscreen is a native view above everything; close renderer overlays.
   void Browser.addListener('fullscreen',(event:BrowserFullscreen)=>{if(!disposed&&tabs.owns(event)&&event.active)shell?.vset('browser',{menu:false,tabsOpen:false,share:false});}).then((value:any)=>{fullscreenListener=value;}).catch(()=>{});
+  // The Downloads list's Show in Files: Alpha's Files opens at Downloads, where finished downloads are saved.
+  void Browser.addListener('showDownloads',(event:{session?:string})=>{if(!disposed&&event?.session===session)shell?.preset('files:folder');}).then((value:any)=>{showDownloadsListener=value;}).catch(()=>{});
   void DailyApps.addListener('appResumed', () => { if (shell?.S().view === 'browser') refreshBookmarks(); }).then(value => { resumeListener=value; }).catch(()=>{});
   void Browser.addListener('stateChanged',(event:BrowserTabState)=>{
     // Only this document's events, in each tab's native order, for tabs it created or was given.
@@ -821,5 +823,5 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   chromeObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','inert','aria-hidden']});
   const chromeTransition=(event:Event)=>{if(chromeChanged(event.target as Node))schedulePresentation();};
   for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.addEventListener(event,chromeTransition,true);
-  return ()=>{window.removeEventListener('alpha:bookmarks-document-changed',bookmarksDocumentChanged);window.removeEventListener('alpha:browser-open-view',openBrowserView);stopReading();unsubscribeReading();disposed=true;clearInterval(timer);if(presentationFrame!==undefined)window.cancelAnimationFrame(presentationFrame);browserBackdrop();window.removeEventListener('pointermove',schedulePresentation,true);chromeObserver.disconnect();for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.removeEventListener(event,chromeTransition,true);window.removeEventListener('resize',update);document.removeEventListener('visibilitychange',visibility);void resumeListener?.remove();void listener?.remove();void openedListener?.remove();void closedListener?.remove();void noticeListener?.remove();void findListener?.remove();void fullscreenListener?.remove();window.clearTimeout(findTimer);for(const id of tabs.dispose())void Browser.close({session,id}).catch(()=>{});};
+  return ()=>{window.removeEventListener('alpha:bookmarks-document-changed',bookmarksDocumentChanged);window.removeEventListener('alpha:browser-open-view',openBrowserView);stopReading();unsubscribeReading();disposed=true;clearInterval(timer);if(presentationFrame!==undefined)window.cancelAnimationFrame(presentationFrame);browserBackdrop();window.removeEventListener('pointermove',schedulePresentation,true);chromeObserver.disconnect();for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.removeEventListener(event,chromeTransition,true);window.removeEventListener('resize',update);document.removeEventListener('visibilitychange',visibility);void resumeListener?.remove();void listener?.remove();void openedListener?.remove();void closedListener?.remove();void noticeListener?.remove();void findListener?.remove();void fullscreenListener?.remove();void showDownloadsListener?.remove();window.clearTimeout(findTimer);for(const id of tabs.dispose())void Browser.close({session,id}).catch(()=>{});};
 }

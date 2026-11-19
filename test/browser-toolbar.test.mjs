@@ -8,7 +8,7 @@ async function browser(run){
  // The native bookmark store keeps addresses only.
  let marks=[];
  const setBookmark=input=>{marks=input.saved?[...marks.filter(url=>url!==input.url),input.url]:marks.filter(url=>url!==input.url);return {urls:marks};};
- const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark'],results:{bookmarks:()=>({urls:marks}),setBookmark}});
+ const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark','downloads'],results:{bookmarks:()=>({urls:marks}),setBookmark}});
  let sequence=0;
  const page=async(id,url,title)=>{host.emit('stateChanged',{id,sequence:++sequence,navigation:'n'+sequence,url,title,committed:true,loading:false,canBack:false,canForward:false,error:''});await host.sync();};
  const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
@@ -105,5 +105,16 @@ test('a bookmark saved without a page name shows its site',async()=>{
   host.rendered().openLib();await host.sync();
   assert.equal(host.rendered().libRows[0].name,'untitled.example');
   assert.deepEqual(host.state().titles,{});
+ });
+});
+
+test('the Downloads list\'s Show in Files opens Files at Downloads for this Browser only',async()=>{
+ await browser(async({host})=>{
+  host.rendered().openDownloads();await host.sync();
+  const session=host.calls.find(call=>call.name==='downloads').input.session;
+  host.emit('showDownloads',{session:'another-browser'});
+  assert.deepEqual(host.presets,[],'another Browser document\'s list opens nothing here');
+  host.emit('showDownloads',{session});
+  assert.deepEqual(host.presets,['files:folder']);
  });
 });
