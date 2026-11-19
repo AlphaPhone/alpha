@@ -93,7 +93,9 @@ test('sharing the same file again while its email is unfinished adds nothing',as
  // The duplicate refusal sets nothing aside and starts no second email: the one email holds the file once.
  expect(await savedInboxDrafts(page,owner)).toEqual([]);
  await page.evaluate(()=>(window as any).fileEmail.shell.openView('inbox',{}));
- await page.getByRole('button',{name:'Continue draft',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
+ // Drafts lists the unfinished email (Continue draft) and nothing set aside.
+ await (await localDraftRow(page)).click();
  await expect(page.getByRole('list',{name:'Attachments',exact:true}).getByRole('listitem')).toHaveCount(1);
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toHaveCount(1);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
