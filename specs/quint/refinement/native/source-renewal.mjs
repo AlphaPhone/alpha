@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {captureInputs,checkTraces,qmap,qset} from '../check-traces.mjs';
 import {app,directory,javaTraceCampaign,root} from './java.mjs';
 import {renewalBridge,renewalOwner,sourceRenewalPlatform} from './source-renewal-platform.mjs';
+import {noticeStrings} from './string-resources.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {upstreamNativeSource} from '../../../../scripts/upstream-native-source.ts';
 
@@ -25,7 +26,7 @@ export async function checkNativeSourceRenewal(extraSources=[]) {
     const nativeManifest='android/upstream-native-sources.json';
     const sources=[...product,core,renewalBridge,app+'NativeDigestHost.java',app+'NativeDigestSources.java',
       nativeManifest,'upstream.lock.json','scripts/upstream-native-source.ts','test/fixtures/jvm-tools.mjs',
-      join(directory,harness),join(directory,'Trace.java'),join(directory,'java.mjs'),join(directory,'source-renewal-platform.mjs'),
+      join(directory,harness),join(directory,'Trace.java'),join(directory,'java.mjs'),join(directory,'source-renewal-platform.mjs'),join(directory,'string-resources.mjs'),noticeStrings,
       fileURLToPath(import.meta.url),...(jsonJar?[jsonJar]:[]),...ports,...extraSources];
     const driverHashes=captureInputs(sources);
     const manifest=JSON.parse(readFileSync(join(root,nativeManifest),'utf8'));

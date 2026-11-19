@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Owner-facing text of Alpha's daily-brief and Gmail notices and their channels (PROD-08). -->
+<resources>
+    <!-- Shared by the notices below: the lock-screen version and the question action. -->
+    <string name="alpha_notice_public_title">Alpha Phone</string>
+    <string name="alpha_notice_tap_to_open">Tap to open.</string>
+    <string name="alpha_notice_ask">Ask Alpha</string>
+    <!-- Daily briefs (HostedNoticePoster). -->
+    <string name="alpha_brief_channel_name">Daily briefs</string>
+    <string name="alpha_brief_channel_description">Tells you when a scheduled brief ran. Never shows what it says.</string>
+    <string name="alpha_brief_renew">Renew</string>
+    <string name="alpha_brief_renewal_text">Renew it to keep your brief updated.</string>
+    <string name="alpha_brief_renewal_title">Access for your daily brief expires soon</string>
+    <string name="alpha_brief_renewal_title_calendar">Calendar access for your daily brief expires soon</string>
+    <string name="alpha_brief_renewal_title_reminders">Reminders access for your daily brief expires soon</string>
+    <string name="alpha_brief_renewal_title_calendar_reminders">Calendar and reminders access for your daily brief expires soon</string>
+    <!-- New Gmail messages (GmailNoticePoster). -->
+    <string name="alpha_gmail_channel_name">New Gmail messages</string>
+    <string name="alpha_gmail_channel_description">Tells you when new unread mail arrives. Never shows the sender or subject. Android may delay checks.</string>
+    <string name="alpha_gmail_title">New mail in Gmail</string>
+    <string name="alpha_gmail_text">Tap to open Inbox.</string>
+</resources>

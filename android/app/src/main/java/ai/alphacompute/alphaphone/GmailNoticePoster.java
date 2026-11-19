@@ -28,8 +28,7 @@ import android.service.notification.StatusBarNotification;
 final class GmailNoticePoster implements MailBackgroundDelivery.Notices {
  static final String CHANNEL="alpha-gmail",ACTION="ai.alphacompute.alphaphone.OPEN_GMAIL_NOTICE";
  private static final String OPEN_PREFIX="alpha-gmail:",ASK_PREFIX="alpha-gmail-ask:",TAG_PREFIX="alpha-gmail-";
- private static final String CHANNEL_NAME="New Gmail messages",CHANNEL_DESCRIPTION="Tells you when new unread mail arrives. Never shows the sender or subject. Android may delay checks.";
- private static final String TITLE="New mail in Gmail",TEXT="Tap to open Inbox.",PUBLIC_TITLE="Alpha Phone",PUBLIC_TEXT="Tap to open.",ASK_LABEL="Ask Alpha";
+ // Owner-facing text lives in res/values/alpha-notices.xml.
  private static final int SMALL_ICON=R.drawable.notification_icon;
  /** A tap on one of these notices: the ledger key and whether it was the Ask action. */
  static final class Tap {final String key;final boolean question;private Tap(String key,boolean question){this.key=key;this.question=question;}}
@@ -37,7 +36,7 @@ final class GmailNoticePoster implements MailBackgroundDelivery.Notices {
  private final Context context;private final NotificationManager manager;
  GmailNoticePoster(Context context){
   this.context=context.getApplicationContext();manager=this.context.getSystemService(NotificationManager.class);
-  NotificationChannel channel=new NotificationChannel(CHANNEL,CHANNEL_NAME,NotificationManager.IMPORTANCE_DEFAULT);channel.setDescription(CHANNEL_DESCRIPTION);channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);manager.createNotificationChannel(channel);
+  NotificationChannel channel=new NotificationChannel(CHANNEL,this.context.getString(R.string.alpha_gmail_channel_name),NotificationManager.IMPORTANCE_DEFAULT);channel.setDescription(this.context.getString(R.string.alpha_gmail_channel_description));channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);manager.createNotificationChannel(channel);
  }
  /** The tap an intent carries, or null for any other intent. */
  Tap tap(Intent intent){
@@ -54,9 +53,9 @@ final class GmailNoticePoster implements MailBackgroundDelivery.Notices {
  @Override public void post(String key){
   PendingIntent tap=PendingIntent.getActivity(context,0,intent(key,false),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent askTap=PendingIntent.getActivity(context,0,intent(key,true),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-  Notification.Action.Builder ask=new Notification.Action.Builder(null,ASK_LABEL,askTap);if(Build.VERSION.SDK_INT>=31)ask.setAuthenticationRequired(true);
-  Notification redacted=new Notification.Builder(context,CHANNEL).setSmallIcon(SMALL_ICON).setContentTitle(PUBLIC_TITLE).setContentText(PUBLIC_TEXT).build();
-  manager.notify(TAG_PREFIX+key,0,new Notification.Builder(context,CHANNEL).setSmallIcon(SMALL_ICON).setContentTitle(TITLE).setContentText(TEXT).setPublicVersion(redacted).setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(tap).addAction(ask.build()).setOnlyAlertOnce(true).setAutoCancel(true).setTimeoutAfter(LIFETIME_MS).setCategory(Notification.CATEGORY_EMAIL).setGroup(TAG_PREFIX).build());
+  Notification.Action.Builder ask=new Notification.Action.Builder(null,context.getString(R.string.alpha_notice_ask),askTap);if(Build.VERSION.SDK_INT>=31)ask.setAuthenticationRequired(true);
+  Notification redacted=new Notification.Builder(context,CHANNEL).setSmallIcon(SMALL_ICON).setContentTitle(context.getString(R.string.alpha_notice_public_title)).setContentText(context.getString(R.string.alpha_notice_tap_to_open)).build();
+  manager.notify(TAG_PREFIX+key,0,new Notification.Builder(context,CHANNEL).setSmallIcon(SMALL_ICON).setContentTitle(context.getString(R.string.alpha_gmail_title)).setContentText(context.getString(R.string.alpha_gmail_text)).setPublicVersion(redacted).setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(tap).addAction(ask.build()).setOnlyAlertOnce(true).setAutoCancel(true).setTimeoutAfter(LIFETIME_MS).setCategory(Notification.CATEGORY_EMAIL).setGroup(TAG_PREFIX).build());
   // A bounded observation distinguishes posted from uncertain; the caller never replays an uncertain post.
   long until=SystemClock.elapsedRealtime()+500;
   while(!active(key)&&SystemClock.elapsedRealtime()<until){try{Thread.sleep(25);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}}

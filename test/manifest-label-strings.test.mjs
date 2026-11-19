@@ -34,3 +34,18 @@ test('the PRD states that the app is English only today', () => {
   assert.match(prd, /supportsRtl="false"/);
   assert.match(read(MANIFEST), /android:supportsRtl="false"/);
 });
+
+// The daily-brief and Gmail notices read their owner-facing text from alpha-notices.xml. The
+// refinement harnesses (source-renewal, gmail-background) check that text through the same file.
+test('notice posters take their owner-facing text from string resources', () => {
+  const NOTICES = 'android/app/src/main/res/values/alpha-notices.xml';
+  const defined = new Set([...read(NOTICES).matchAll(/<string name="([a-z0-9_]+)">[^<]+<\/string>/g)].map(m => m[1]));
+  for (const poster of ['HostedNoticePoster', 'GmailNoticePoster']) {
+    const source = read(`android/app/src/main/java/ai/alphacompute/alphaphone/${poster}.java`);
+    const literal = /(setContentTitle|setContentText|setDescription|setTicker|setSubText)\("|new NotificationChannel\([^,]+,"|Action\.Builder\(null,"/.exec(source);
+    assert.equal(literal, null, `${poster} passes owner-facing text as a literal: ${literal?.[0]}`);
+    const used = [...source.matchAll(/R\.string\.([a-z0-9_]+)/g)].map(m => m[1]);
+    assert.ok(used.length >= 5, `${poster} uses string resources`);
+    for (const name of used) assert.ok(defined.has(name), `${poster} uses ${name}, defined in ${NOTICES}`);
+  }
+});
