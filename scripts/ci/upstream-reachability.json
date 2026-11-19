@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
-  "head": "0273bec7e4629e11823d29b53d2d95fa72f17ad3",
+  "head": "cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
   "recordedAt": "2026-11-19",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...0273bec7e4629e11823d29b53d2d95fa72f17ad3",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
   "status": "ahead",
-  "aheadBy": 25,
+  "aheadBy": 27,
   "behindBy": 0,
   "mergeBase": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
   "pinOnlyCommits": [
@@ -70,6 +70,14 @@
     {
       "sha": "e1b6f97c920e2d32bb49cc16fe1505093c72ad12",
       "subject": "Preserve a settled read when view navigation is prepared"
+    },
+    {
+      "sha": "7da8e4147e88e0fe801cd4300d264cd508140c54",
+      "subject": "Keep SMS drafts in the conversation the owner has open"
+    },
+    {
+      "sha": "cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
+      "subject": "Sort Assistant draft and navigation imports"
     }
   ],
   "pullRequests": [
