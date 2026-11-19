@@ -124,7 +124,8 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       if(old&&response.selectionId){if(old.selectionId!==response.selectionId)filesIndex.remove(old.key);for(const evicted of filesIndex.record({kind:old.kind,...(old.treeId?{treeId:old.treeId}:{}),name:response.name||'Selected document',mimeType:response.mimeType||'application/octet-stream',selectionId:response.selectionId}))if(evicted!==response.selectionId)release(evicted);}
       if(response.selectionId&&old?.kind==='selected'&&rememberedPicker(response.selectionId))filesIndex.setOpen(response.selectionId);
       else if(filesIndex.open()===selected.result.selectionId)filesIndex.setOpen(null);
-      current={...selected,result:response,pdf:undefined,renames:(selected.renames||0)+1};api.set({renaming:false});publish();refresh();
+      // A rename keeps the bytes, so the size the listing showed still holds.
+      current={...selected,result:{...response,size:response.size??selected.result.size},pdf:undefined,renames:(selected.renames||0)+1};api.set({renaming:false});publish();refresh();
       if(response.mimeType==='application/pdf')await pdfPage(selected.pdf?.page || 0,api);
     } catch {if(current === selected)api.toast('Unconfirmed');}
     finally {renameBusy=false;}
@@ -247,7 +248,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
-          // Offered only when Messages can take this picture: a PNG or JPEG whose size the selection reports within its limit.
+          // Offered only when Messages can take this picture: a PNG or JPEG whose listed size is within its limit. readPicture rechecks the bytes.
           canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg')&&views.messages.pictureFits?.(mime,selected.result.size)===true,
           message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: mime + ' · selected on this device', d: '',

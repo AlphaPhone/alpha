@@ -48,7 +48,8 @@ export type NativeResult = {
   uri?: string;
   name?: string;
   mimeType?: string;
-  /** Bytes, only when the selection reports them; an unknown size is never assumed small. */
+  /** Bytes, when known: the size the Files listing showed for a file opened there. A hint only,
+   * since readers recheck the bytes; an unknown size is never assumed small. */
   size?: number;
   transcript?: string;
 };

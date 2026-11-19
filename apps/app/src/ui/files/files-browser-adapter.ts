@@ -144,6 +144,8 @@ type FilesSelection = {
   status: string;
   selectionId?: string;
   message?: string;
+  /** The byte count the listing showed for a file opened here. A hint only: readers recheck the bytes. */
+  size?: number;
 };
 type FilesBrowserHost<Selection extends FilesSelection> = {
   storage: FilesStoragePort<Selection>;
@@ -661,7 +663,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       };
       // A File actions menu opened for the previous preview must not act on this file.
       if (renderedMenu === "file") currentApi.set({ menu: false });
-      await accept("files", value, currentApi, false);
+      // The listing knows the file's size; the selection result does not carry one.
+      await accept("files", { ...value, size: entry.size }, currentApi, false);
     } catch {
       if (current()) toast("This file could not open.");
     } finally {
