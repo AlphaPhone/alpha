@@ -172,7 +172,7 @@ for (const decision of [
     },
   );
 
-test('every recipient of a chat draft is on screen before Send', async ({ page }) => {
+test('every recipient of a chat draft is on screen before Send, and edits keep each typed character', async ({ page }) => {
   const foreign = await fenceNetwork(page);
   const crew = [
     'lighting.crew@example.invalid',
@@ -210,5 +210,29 @@ test('every recipient of a chat draft is on screen before Send', async ({ page }
     await expect(row).toBeInViewport({ ratio: 1 });
     expect(await row.evaluate((item) => item.scrollWidth <= item.clientWidth)).toBe(true);
   }
+  // Each keystroke shows at once and is kept: nothing is dropped while the edit is saved.
+  await to.press('End');
+  await to.pressSequentially(', owner@example.invalid');
+  await expect(to).toHaveValue(crew.join(', ') + ', owner@example.invalid');
+  await expect(listed.getByRole('listitem')).toHaveText([...crew, 'owner@example.invalid']);
+  await expect(draft.getByText('4 recipients', { exact: true })).toBeVisible();
+  const body = draft.getByRole('textbox', { name: 'Email body' });
+  await body.press('ControlOrMeta+End');
+  await body.pressSequentially(' And the blue notebook.');
+  await expect(body).toHaveValue('Bring the tripod. And the blue notebook.');
+  expect(await harness(page, (f) => [f.mail.prepares.length, f.mail.dispatches.length])).toEqual([0, 0]);
+  // Send prepares exactly the email on screen.
+  await draft.getByRole('button', { name: 'Send email' }).click();
+  await expect.poll(() => harness(page, (f) => f.mail.prepares.length)).toBe(1);
+  const proof = await harness(page, (f) => ({ prepares: f.mail.prepares, dispatches: f.mail.dispatches }));
+  expect(proof.prepares[0]).toMatchObject({
+    to: [...crew, 'owner@example.invalid'],
+    subject: 'Tomorrow’s shoot',
+    bodyText: 'Bring the tripod. And the blue notebook.',
+  });
+  expect(proof.dispatches.length).toBeLessThanOrEqual(1);
+  for (const dispatch of proof.dispatches)
+    expect(dispatch.bodyText).toBe('Bring the tripod. And the blue notebook.');
+  await expect(draft.getByRole('status')).toBeVisible();
   expect(foreign).toEqual([]);
 });
