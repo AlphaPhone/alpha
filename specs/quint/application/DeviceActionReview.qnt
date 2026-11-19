@@ -107,9 +107,12 @@ module DeviceActionReview {
     passOpen: s.passOpen and (s.authority != "request" or (result == "succeeded" and not(s.aborted)))}
   action finish(synced: bool): bool = all {s.busy, s.journal == "terminal",
     s' = {...leave(s.status), synced: synced}}
-  /// An unclaimed reservation may survive failure; it is not evidence of an effect.
-  /// The public call still answers "unknown" (see UnknownOnlyAfterDispatch).
-  action abandon = all {s.busy, s' = leave("unknown")}
+  /// A failure outside the executor's own result. An unclaimed reservation may survive it; it is
+  /// not evidence of an effect, so the call answers "failed" unless this attempt dispatched.
+  action abandon = all {s.busy, s' = leave(if (s.dispatches == 1) "unknown" else "failed")}
+  /// The journal already holds an applying or finished attempt for this proposal: it is not
+  /// repeated, and the call cannot say what that earlier attempt did.
+  action duplicate = all {s.busy, s.journal.in(Set("applying", "terminal")), s' = leave("unknown")}
   action step = any {
     prefer("off"), prefer("on"), prefer("unreadable"),
     propose("open_view", false, true, false, false), propose("open_view", false, false, false, false),
@@ -124,7 +127,7 @@ module DeviceActionReview {
     review(true), review(false), reviewWorkflow, restart, changeContext, sensitive, expire, abort,
     begin(true), begin(false), refused, directRefused, reserve(true), reserve(false), existing,
     decide, claim, applying, dispatch, settle("succeeded"), settle("failed"), settle("unknown"),
-    upload, finish(true), finish(false), abandon, s' = s}
+    upload, finish(true), finish(false), abandon, duplicate, s' = s}
 
   val effect = s.dispatches == 1
   /// The authority under which this proposal's one effect entered the executor. A later
@@ -157,6 +160,12 @@ module DeviceActionReview {
   val ReceiptAfterTerminalJournal = s.receipts > 0 implies s.journal == "terminal"
   /// The durable journal records "unknown" only for an attempt that entered the executor.
   val UnknownJournalOnlyAfterDispatch = s.status == "unknown" implies effect
+  /// The public call answers "unknown" only for an attempt that entered the executor, or for a
+  /// proposal whose journal already held an applying or finished attempt (app review AGENT-06).
+  val UnknownOnlyAfterDispatch = s.returned == "unknown" implies
+    (effect or s.journal.in(Set("applying", "terminal")))
+  /// Reachable: a failure before dispatch settles the public call as "failed".
+  val FailedWithoutDispatch = s.returned == "failed" and not(effect) and not(s.busy)
   val FiniteOutcome = s.status.in(Set("none", "succeeded", "failed", "unknown")) and
     s.returned.in(Set("none", "succeeded", "failed", "unknown"))
   val safety = DirectOnlyAllowlisted and DirectRunNeedsCurrentRequest and AtMostFourDirectPerMessage and
@@ -164,22 +173,15 @@ module DeviceActionReview {
     ExpiredNeverDispatches and ContextChangeRetiresProposal and SensitiveNeverDispatches and
     SettingsIsNavigationOnly and WorkflowStepsNeverDirect and OneAutoOpenPerMessage and
     AuthorizedEffect and ConsumedBeforeAwait and ReceiptAfterTerminalJournal and
-    UnknownJournalOnlyAfterDispatch and FiniteOutcome
-
-  /// KNOWN DIVERGENCE (app review AGENT-06). The intended rule is false of the pinned coordinator:
-  /// a failure before any dispatch (reservation, decision or claim) still answers "unknown" from
-  /// the public call. It is not part of `safety`; the manifest registers it under
-  /// `expectedViolations` and requires the counterexample `UnknownWithoutDispatch` to be reachable.
-  val UnknownOnlyAfterDispatch = s.returned == "unknown" implies effect
-  val UnknownWithoutDispatch = s.returned == "unknown" and not(effect) and not(s.busy)
+    UnknownJournalOnlyAfterDispatch and UnknownOnlyAfterDispatch and FiniteOutcome
 
   run reviewedEffectTest = init.then(review(true)).then(begin(false)).then(reserve(true))
     .then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded"))
     .then(upload).then(finish(true)).expect(safety and s.returned == "succeeded")
   run failedUploadDoesNotReplayTest = init.then(review(true)).then(begin(false)).then(reserve(true))
     .then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded"))
-    .then(upload).then(finish(false)).then(review(true)).then(begin(false)).then(existing).then(abandon)
-    .expect(safety and s.dispatches == 1 and not(s.synced))
+    .then(upload).then(finish(false)).then(review(true)).then(begin(false)).then(existing).then(duplicate)
+    .expect(safety and s.dispatches == 1 and not(s.synced) and s.returned == "unknown")
   run abortBeforeEffectTest = init.then(review(true)).then(begin(false)).then(reserve(true))
     .then(decide).then(claim).then(applying).then(abort).then(settle("failed"))
     .then(upload).then(finish(false)).expect(safety and s.dispatches == 0)
@@ -197,11 +199,11 @@ module DeviceActionReview {
   run reviewedTypeNeverDirectTest = init.then(propose("create_reminder", false, true, false, false))
     .then(review(true)).then(directRefused).expect(safety and s.card and not(canDirect))
   run changedJournalIdentityTest = init.then(review(true)).then(begin(false)).then(reserve(false)).then(abandon)
-    .expect(safety and s.dispatches == 0 and s.returned == "unknown")
-  /// The registered divergence: nothing was dispatched, yet the call answers "unknown".
-  run unknownWithoutDispatchTest = init.then(review(true)).then(begin(true)).then(reserve(true))
+    .expect(safety and s.dispatches == 0 and s.returned == "failed")
+  /// A failure before dispatch (here the decision request) answers "failed" and ends the pass.
+  run failedBeforeDispatchTest = init.then(review(true)).then(begin(true)).then(reserve(true))
     .then(decide).then(abandon)
-    .expect(safety and UnknownWithoutDispatch and not(UnknownOnlyAfterDispatch) and not(s.passOpen))
+    .expect(safety and s.dispatches == 0 and s.returned == "failed" and not(s.passOpen))
   run directOne = review(true).then(begin(true)).then(reserve(true)).then(decide).then(claim)
     .then(applying).then(dispatch).then(settle("succeeded")).then(upload).then(finish(true))
   run nextNote = propose("create_note", false, true, false, true)

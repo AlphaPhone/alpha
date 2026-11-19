@@ -6,13 +6,13 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | Module | Source symbols | Modeled state and abstraction |
 | --- | --- | --- |
 | `Application` | `AlphaClient.attachVerifiedTransport`, `disconnect`, `setViewContext`, native startup/reset gates | Two owners, three non-reused epochs, lifecycle, sensitive observation, pending work, reviewed dispatch, voice and owner-scoped visible cache |
-| `DeviceActionReview` | Current `DeviceActions` binding and shared `DeviceActionCoordinator.pendingReview`, `performRequested`, `approve` | One focused proposal at a time with its operation class (direct, reviewed, workflow step, outside the contract), request-message binding, typed-address grounding for Browser, the Review-first preference (off, on, unreadable), one direct pass of at most four approvals that stops on the first non-success, exact context, expiry, consumed card, durable reservation identity, server decision/claim, applying marker, one effect per proposal, terminal journal and receipt. `UnknownOnlyAfterDispatch` is a registered expected violation (the public call answers `unknown` for a failure before any dispatch) |
+| `DeviceActionReview` | Current `DeviceActions` binding and shared `DeviceActionCoordinator.pendingReview`, `performRequested`, `approve` | One focused proposal at a time with its operation class (direct, reviewed, workflow step, outside the contract), request-message binding, typed-address grounding for Browser, the Review-first preference (off, on, unreadable), one direct pass of at most four approvals that stops on the first non-success, exact context, expiry, consumed card, durable reservation identity, server decision/claim, applying marker, one effect per proposal, terminal journal and receipt. `UnknownOnlyAfterDispatch` holds: a failure before any dispatch answers `failed`, and `unknown` is answered only after dispatch or for a proposal the journal already holds |
 | `BrowserAgentOpen` | `BrowserAdapter.browserNavigateApproved`, `browserCommand`, `ViewNavigationClient.receiveInteraction`, shared `browserAllowed`/`consumeBrowserRequest` | Typed-address admission, one automatic open per message, a receipt for the created tab, presentation after the receipt attempt, and one unjournaled command bound to the exact tab navigation. Replayed through the installed Browser and device-action coordinator. |
 | `CameraAgentCapture` | camera adapter `takeRequestedPhoto`, `active`, phone executor camera branch | One agent photo request: visible Camera required, chat closed on admission and its closing panel awaited, preview hold, queued start, second check before the shutter that refuses an open chat or a painted panel, unknown only after the shutter. The mounted Chromium replay (`test/quint-camera-agent-capture.test.mjs`) observes coverage at dispatch for ready and starting previews, owner reopen, a request admitted during the owner's chat close, a panel reopened and closed before the shutter, and abort during chat close |
 | `FilesAgentActions` | phone executor Files branch, shared Files runner `run`/`reviewedIdentities`, `filesContextAllowed` | Direct filter/open (may bring Files forward) versus reviewed share, new folder, move and trash; move/trash bound to the identity read when the card was built. Model-only |
 | `NotesAgentSource` | phone executor `create_note`, Notes query and selected-note branches | Phone-side Notes operations act only on Previous notes; selected-note binding, trash copy before tombstone, reviewed reads. The canonical Notes write outside the Review-first preference is an explicit assumption and a registered expected violation. Model-only |
-| `CalendarAgentWrites` | phone executor Calendar branch | No direct Calendar operation, native review after the card, selected-record binding, queued delete reported unknown until its Undo window settles. `UnknownOnlyAfterNativeCall` is a registered expected violation. Model-only |
-| `MapsSelectedRead` | `readMapsSelection`, `validateMapsSelectedObject`, shared `assertMapsContext` | Selected place/route read bound on the card, in the executor and before the receipt; search results are not readable. `UnknownOnlyAfterRead` is a registered expected violation. Model-only |
+| `CalendarAgentWrites` | phone executor Calendar branch | No direct Calendar operation, native review after the card, selected-record binding, queued delete reported unknown until its Undo window settles. `UnknownOnlyAfterNativeCall` holds: a refusal before the native call is not started. Model-only |
+| `MapsSelectedRead` | `readMapsSelection`, `validateMapsSelectedObject`, shared `assertMapsContext` | Selected place/route read bound on the card, in the executor and before the receipt; search results are not readable. `UnknownOnlyAfterRead` holds: a changed selection is not started and nothing is shared. Model-only |
 | `CalendarApprovalReview` | `CalendarApprovalClient.read`, `resolve`, exact Calendar DTO and finite result parsers | One authenticated read object and revision, captured owner/context, consumed admission before typed POST, cancellation and late-result fencing |
 | `ShellNavigation` | `ViewNavigationClient.capture`, `deliver`, `cancel`, shell `back`, `goHome`, `openView` | All 19 `AlphaView` values, modal/shade/composer ordering, focus, draft and one completed-action claim. View-specific record bodies use their domain models |
 | `StartupPermissions` | `createStartupPermissionFlow`, `readStartupPermissionMemory`, `readStartupPermissionProgress`, `writeStartupPermissionProgress` | One representative permission transaction, seven ordered native setup steps, durable prompt attempt and progress, legacy completed installation |
@@ -164,16 +164,17 @@ before approval are compared exactly; host retirement during approval is supplie
 through its AbortSignal. Crypto hashing is real and time is held constant across
 each synchronous port observation.
 
-Known divergence, kept visible rather than weakened: the intended rule
-`UnknownOnlyAfterDispatch` is false of the pinned coordinator. A reservation,
-decision or claim failure returns `unknown` from the public call although nothing
-was dispatched (app review AGENT-06; the journal itself records `failed` or stays
-reserved, so `UnknownJournalOnlyAfterDispatch` holds). The manifest lists it under
-`expectedViolations`, requires the witness `UnknownWithoutDispatch`, and six
-replayed schedules reproduce it. A product executor that throws for a pre-effect
-guard after it was entered is likewise journaled `unknown`; that is executor
-behaviour outside this model's ports. Remove the registration when the shared
-coordinator answers `failed` for a not-dispatched attempt.
+`UnknownOnlyAfterDispatch` is part of `safety` (app review AGENT-06). A
+journal lookup, reservation, identity, decision or claim failure returns `failed`
+from Alpha's coordinator because nothing was dispatched; the witness
+`FailedWithoutDispatch` is required and six replayed schedules reach it. The
+public call still answers `unknown` for a proposal whose journal already holds an
+applying or finished attempt (`duplicate`), since it cannot say what that earlier
+attempt did. A product executor that throws `DeviceActionNotStarted` from a
+pre-effect guard closes as failed/not started; any other throw after entry is
+journaled `unknown`. That is executor behaviour outside this model's ports. The
+shared upstream coordinator's outer catch still answers `unknown` for a
+not-dispatched attempt; Alpha binds its own copy.
 
 Camera, Files, Photos, Notes-organise and SMS-reply direct types, workflow-run
 review, navigation-only review destinations, domain-specific result validators,
@@ -191,9 +192,11 @@ proposal custody that `DeviceActionReview` replays against the real coordinator.
 Each known divergence between an intended rule and the code is kept as a named
 property outside `safety`, listed under `expectedViolations` in the manifest,
 with its counterexample required as a witness by the default gate:
-`NotesAgentSource.ReviewFirstCoversCanonicalNotes`,
+`NotesAgentSource.ReviewFirstCoversCanonicalNotes`.
 `CalendarAgentWrites.UnknownOnlyAfterNativeCall` and
-`MapsSelectedRead.UnknownOnlyAfterRead`. `CameraAgentCapture` is replayed
+`MapsSelectedRead.UnknownOnlyAfterRead` are now in `safety`: the executor
+throws `DeviceActionNotStarted` for those pre-effect refusals and the
+coordinator journals them as failed/not started. `CameraAgentCapture` is replayed
 against the mounted Camera adapter instead: `ShutterNeverCovered` is in its
 `safety` and follows from the shutter gate's chat and painted-panel checks,
 while the replay shows each check is needed. Photos agent operations are not modeled:

@@ -13,7 +13,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -1062,7 +1062,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // The shared read words its result in its own English; Alpha's sentence replaces it.
         return {...result,summary:namedCalendarReadSummary(result)};
       }
-      if(operation.type!=='calendar_availability')return {status:'failed',summary:'This review is not available on this phone yet.'};
+      if(operation.type!=='calendar_availability')return {status:'failed',summary:'This phone can’t review that request. Nothing was shared or changed.'};
       const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
       const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||expectedContext.sensitive||!['home','calendar'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Availability review context changed');};
       return executeCalendarAvailability(registerPlugin<AvailabilityProvider>('AlphaCalendar'),operation,expectedContext.timeZone,signal,current,availabilityReview);
@@ -1076,8 +1076,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!this.live||document.hidden)throw Error('Files changed');
       return identities;
     });
-    // A refusal proven to happen before any effect returns `failed` with its reason; a throw is
-    // recorded by the coordinator as an unknown outcome and its message never reaches the owner.
+    // A refusal proven to happen before any effect returns `failed` with its reason, or throws
+    // DeviceActionNotStarted, which the coordinator records as not started with its message. Any
+    // other throw is recorded as an unknown outcome and its message never reaches the owner.
     connectionController.setDeviceExecutor(async (operation, operationId, expectedContext, signal, bindingHash, workflowRoute, journalIdentity, agendaSource) => {
       signal.throwIfAborted(); context(this);
       if(operation.type==='notes_list_filter'){
@@ -1108,7 +1109,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           });
         });
       }
-      if (!this.live || JSON.stringify(alphaClient.getState().context) !== JSON.stringify(expectedContext)) throw new Error('Phone context changed');
+      if (!this.live || JSON.stringify(alphaClient.getState().context) !== JSON.stringify(expectedContext)) throw new DeviceActionNotStarted('The screen changed');
       if(isCameraCapture(operation)){
         const ownerSession=connectionController.getSnapshot().session;
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||expectedContext.sensitive||expectedContext.view!=='camera'||ownerSession!==connectionController.getSnapshot().session||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Camera request changed');};
@@ -1183,7 +1184,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(isClockOperation(operation)){
         if(Capacitor.getPlatform()!=='android'&&!browserDevProfile)return {status:'failed',summary:'Clock handoff is unavailable in browser development.'};
         assertClockTimeZone(operation,expectedContext.timeZone);signal.throwIfAborted();
-        if(expectedContext.sensitive||document.hidden)throw Error('Return to Alpha Phone and review again');
+        if(expectedContext.sensitive||document.hidden)throw new DeviceActionNotStarted('Return to Alpha Phone and review again');
         const clockSession=connectionController.getSnapshot().session;const clockEnrollment=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const {type,...request}=operation;
         const result=browserDevProfile?await DailyApps.clockHandoff({...request,reviewed:true}):null;
@@ -1193,8 +1194,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status,clockResult,summary:browserDevProfile&&clockResult.status==='opened'?result!.message:clockResult.status==='opened'?(operation.action==='dismiss'||operation.action==='snooze'?'Opened Clock to choose the alarm.':'Sent the request to Clock.'):clockResult.status==='unknown'?'The Clock result is unknown.':clockResult.status==='unavailable'?'No installed Clock app handles this request.':clockResult.status==='denied'?'Android did not allow this Clock request.':'The Clock request was not sent.'};
       }
       if(isMapsOperation(operation)){
-        const mapsResult=readMapsSelection(operation);signal.throwIfAborted();context(this);
-        if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Maps context changed');
+        // A local read of the registered selection: until the result is returned nothing is shared,
+        // so a selection that changed or went away refuses as not started.
+        let mapsResult;try{mapsResult=readMapsSelection(operation);}catch{throw new DeviceActionNotStarted('The selected Maps place changed');}
+        signal.throwIfAborted();context(this);
+        // The selection was read on the phone only; nothing is shared unless the screen still matches.
+        if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The Maps screen changed');
         return {status:'succeeded',summary:'Shared the selected Maps place.',mapsResult};
       }
       if(isFilesOperation(operation)){
@@ -1257,7 +1262,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status:photoLibraryResult.kind==='photo_library_select'&&photoLibraryResult.selected===0?'failed':'succeeded',summary,photoLibraryResult};
       }
       if(isCalendarOperation(operation)){
-        if(operation.type==='calendar_create_local'||operation.type==='calendar_read_next'){if(operation.type==='calendar_read_next'&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()!=='android'||expectedContext.sensitive||document.hidden)throw Error('Return to the supported foreground Calendar');const permission=await registerPlugin<{requestAccess():Promise<{status:string}>;requestWorkflowReadAccess():Promise<{status:string}>}>('AlphaCalendar')[operation.type==='calendar_create_local'?'requestAccess':'requestWorkflowReadAccess']();signal.throwIfAborted();context(this);if(permission.status!=='granted'||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Calendar permission or phone context changed');}
+        if(operation.type==='calendar_create_local'||operation.type==='calendar_read_next'){if(operation.type==='calendar_read_next'&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()!=='android'||expectedContext.sensitive||document.hidden)throw new DeviceActionNotStarted('Open Calendar on the unlocked phone');const permission=await registerPlugin<{requestAccess():Promise<{status:string}>;requestWorkflowReadAccess():Promise<{status:string}>}>('AlphaCalendar')[operation.type==='calendar_create_local'?'requestAccess':'requestWorkflowReadAccess']();signal.throwIfAborted();context(this);if(permission.status!=='granted'||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted(permission.status!=='granted'?'Calendar access is off':'The screen changed');}
         const calendar=registerPlugin<{executeAgent(input:{operation:unknown;operationId:string;journalIdentity?:{scope:string;proposalId:string}}):Promise<{status:string;result?:unknown}>;cancelAgent(input:{operationId:string}):Promise<unknown>}>('AlphaCalendar');
         const cancel=()=>{void calendar.cancelAgent({operationId}).catch(()=>{});};signal.addEventListener('abort',cancel,{once:true});
         let result:{status:string;result?:unknown};try{signal.throwIfAborted();result=await calendar.executeAgent({operation,operationId,journalIdentity});}finally{signal.removeEventListener('abort',cancel);}
@@ -1395,7 +1400,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(isReminderCreate(operation)){
         const support=await DailyApps.surfaceInfo();signal.throwIfAborted();
-        context(this);if(!this.live||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');
+        context(this);if(!this.live||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The screen changed');
         if(support.reminderCreationVersion!==1)return {status:'failed',summary:'This phone does not support reviewed reminder creation.'};
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
         if(result.status!=='succeeded')return {status:'unknown',summary:'The reminder creation outcome is unknown.'};
@@ -1403,12 +1408,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status:'succeeded',reminderResult,summary:reminderDeliveryProblemText('reminder_create',reminderResult.status)??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary};
       }
       if(isReminderOperation(operation)){
-        signal.throwIfAborted();context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||document.hidden)throw Error('Reminder context changed');
+        signal.throwIfAborted();context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||document.hidden)throw new DeviceActionNotStarted('The reminder screen changed');
         const target=await DailyApps.selectedReminder({id:operation.target.reminderId});signal.throwIfAborted();
         if(JSON.stringify(target)!==JSON.stringify(operation.target)) { // property order is normalized below
           for(const key of ['sourceId','sourceRevision','reminderId','occurrenceId','revision','timingVersion'] as const)if(target[key]!==operation.target[key])return {status:'failed',summary:'Nothing was changed because this reminder changed.'};
         }
-        context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Reminder context changed');
+        context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The reminder screen changed');
         signal.throwIfAborted();
         if(operation.type==='reminder_cancel'){
           const queued=await deletions.reviewAgentReminder({operationId,bindingHash,operation,journalIdentity});
