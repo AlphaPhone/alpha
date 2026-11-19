@@ -463,4 +463,102 @@ public class AlphaCallPresentationTest {
             org.junit.Assert.assertFalse(AlphaOngoingCallPlugin.end(null));
         } finally { owner.onDestroy(); }
     }
+    private static final int EARPIECE = android.telecom.CallAudioState.ROUTE_EARPIECE, SPEAKER = android.telecom.CallAudioState.ROUTE_SPEAKER,
+        WIRED = android.telecom.CallAudioState.ROUTE_WIRED_HEADSET, BLUETOOTH = android.telecom.CallAudioState.ROUTE_BLUETOOTH;
+
+    @Test public void theDisplayTurnsOffAtTheEarOnlyForACallOffTheHookOnTheEarpiece() {
+        for (int state : new int[] {Call.STATE_CONNECTING, Call.STATE_DIALING, Call.STATE_ACTIVE, Call.STATE_HOLDING, Call.STATE_PULLING_CALL})
+            org.junit.Assert.assertTrue("off the hook: " + state, AlphaCallPresentation.proximityLock(new int[] {state}, true, EARPIECE));
+        // A call that only rings needs the screen to answer; an ending or ended call needs nothing.
+        for (int state : new int[] {Call.STATE_RINGING, Call.STATE_NEW, Call.STATE_SELECT_PHONE_ACCOUNT, Call.STATE_DISCONNECTING, Call.STATE_DISCONNECTED})
+            org.junit.Assert.assertFalse("not off the hook: " + state, AlphaCallPresentation.proximityLock(new int[] {state}, true, EARPIECE));
+        // Off the earpiece the phone is not at the ear.
+        for (int route : new int[] {SPEAKER, WIRED, BLUETOOTH})
+            org.junit.Assert.assertFalse("route " + route, AlphaCallPresentation.proximityLock(new int[] {Call.STATE_ACTIVE}, true, route));
+        // No audio state from Telecom, or no call: the screen is left alone.
+        org.junit.Assert.assertFalse(AlphaCallPresentation.proximityLock(new int[] {Call.STATE_ACTIVE}, false, EARPIECE));
+        org.junit.Assert.assertFalse(AlphaCallPresentation.proximityLock(new int[] {}, true, EARPIECE));
+        // A second call ringing while the owner is on one keeps the lock.
+        org.junit.Assert.assertTrue(AlphaCallPresentation.proximityLock(new int[] {Call.STATE_RINGING, Call.STATE_ACTIVE}, true, EARPIECE));
+    }
+
+    @Test public void theDisplayReturnsAtOnceOnlyWhenALiveCallLeavesTheEarpiece() {
+        org.junit.Assert.assertTrue(AlphaCallPresentation.screenOnAtRelease(new int[] {Call.STATE_ACTIVE}, true, SPEAKER));
+        org.junit.Assert.assertTrue(AlphaCallPresentation.screenOnAtRelease(new int[] {Call.STATE_DIALING}, true, BLUETOOTH));
+        // The call ended at the ear: the display waits until the phone is taken away.
+        org.junit.Assert.assertFalse(AlphaCallPresentation.screenOnAtRelease(new int[] {}, true, EARPIECE));
+        org.junit.Assert.assertFalse(AlphaCallPresentation.screenOnAtRelease(new int[] {Call.STATE_DISCONNECTED}, true, EARPIECE));
+        org.junit.Assert.assertFalse(AlphaCallPresentation.screenOnAtRelease(new int[] {}, true, SPEAKER));
+        org.junit.Assert.assertFalse(AlphaCallPresentation.screenOnAtRelease(new int[] {Call.STATE_ACTIVE}, false, 0));
+    }
+
+    private static android.telecom.CallAudioState audio(int route) {
+        return new android.telecom.CallAudioState(false, route, EARPIECE | SPEAKER | BLUETOOTH);
+    }
+
+    private static boolean proximityHeld() {
+        android.os.PowerManager.WakeLock lock = org.robolectric.shadows.ShadowPowerManager.getLatestWakeLock();
+        return lock != null && lock.isHeld();
+    }
+
+    @Test public void theCallServiceHoldsTheProximityLockWhileACallIsAtTheEar() throws Exception {
+        AlphaInCallService owner = owner();
+        // The lock level is asked of the service's own power manager.
+        Shadows.shadowOf(owner.getSystemService(android.os.PowerManager.class)).setIsWakeLockLevelSupported(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, true);
+        try {
+            Call call = activeCall();
+            ReflectionHelpers.setField(call, "mState", Call.STATE_DIALING);
+            // The route Telecom last reported decides, here a call placed with the speaker on.
+            owner.onCallAudioStateChanged(audio(SPEAKER));
+            owner.onCallAdded(call);
+            org.junit.Assert.assertFalse("placed on the speaker", proximityHeld());
+            owner.onCallAudioStateChanged(audio(EARPIECE));
+            org.junit.Assert.assertTrue("dialing on the earpiece", proximityHeld());
+            android.os.PowerManager.WakeLock lock = org.robolectric.shadows.ShadowPowerManager.getLatestWakeLock();
+            assertEquals(AlphaInCallService.PROXIMITY_TAG, Shadows.shadowOf(lock).getTag());
+            // The speaker means the owner is looking at the phone.
+            owner.onCallAudioStateChanged(audio(SPEAKER));
+            org.junit.Assert.assertFalse("on the speaker", proximityHeld());
+            owner.onCallAudioStateChanged(audio(EARPIECE));
+            org.junit.Assert.assertTrue("back on the earpiece", proximityHeld());
+            org.junit.Assert.assertSame("one lock for the service", lock, org.robolectric.shadows.ShadowPowerManager.getLatestWakeLock());
+            // Connected and on hold keep it; the call ending drops it.
+            ReflectionHelpers.setField(call, "mState", Call.STATE_ACTIVE); queueState(call);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            org.junit.Assert.assertTrue("connected", proximityHeld());
+            ReflectionHelpers.setField(call, "mState", Call.STATE_DISCONNECTED); queueState(call);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            org.junit.Assert.assertFalse("ended", proximityHeld());
+            // A removed call and a destroyed service hold nothing.
+            ReflectionHelpers.setField(call, "mState", Call.STATE_ACTIVE); queueState(call);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            org.junit.Assert.assertTrue(proximityHeld());
+            owner.onCallRemoved(call);
+            org.junit.Assert.assertFalse("removed", proximityHeld());
+            Call again = activeCall(); owner.onCallAdded(again);
+            org.junit.Assert.assertTrue("a second call on the earpiece", proximityHeld());
+        } finally { owner.onDestroy(); }
+        org.junit.Assert.assertFalse("destroyed", proximityHeld());
+    }
+
+    @Test public void aRingingCallAndAPhoneWithoutTheSensorKeepTheScreenOn() throws Exception {
+        AlphaInCallService owner = owner();
+        try {
+            // No proximity lock level on this phone: nothing is created or held.
+            Call call = activeCall(); owner.onCallAdded(call);
+            owner.onCallAudioStateChanged(audio(EARPIECE));
+            org.junit.Assert.assertNull(org.robolectric.shadows.ShadowPowerManager.getLatestWakeLock());
+            owner.onCallRemoved(call);
+            // With the sensor, an incoming call that only rings leaves the screen on to answer it.
+            Shadows.shadowOf(owner.getSystemService(android.os.PowerManager.class)).setIsWakeLockLevelSupported(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, true);
+            Call ringing = activeCall();
+            ReflectionHelpers.setField(ringing, "mState", Call.STATE_RINGING);
+            owner.onCallAdded(ringing);
+            owner.onCallAudioStateChanged(audio(EARPIECE));
+            org.junit.Assert.assertFalse("ringing", proximityHeld());
+            ReflectionHelpers.setField(ringing, "mState", Call.STATE_ACTIVE); queueState(ringing);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            org.junit.Assert.assertTrue("answered", proximityHeld());
+        } finally { owner.onDestroy(); }
+    }
 }

@@ -705,8 +705,12 @@ export class DeviceActionCoordinator<
     string,
     { context: string; expiresAt: number }
   >();
-  /** Pending call and text proposals whose number is not the one the owner wrote. */
-  private contradictedNumbers = new Set<string>();
+  /**
+   * Pending call and text proposals whose number is not the one the owner
+   * wrote, and whether the agent has recorded the refusal. Until it has, the
+   * refusal lives only here and would not survive a reload.
+   */
+  private contradictedNumbers = new Map<string, boolean>();
   constructor(
     ports: DeviceActionCoordinatorPorts<C, R>,
     private readonly options: {
@@ -1250,7 +1254,7 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
-    for (const id of this.contradictedNumbers)
+    for (const id of this.contradictedNumbers.keys())
       if (!pendingIds.has(id)) this.contradictedNumbers.delete(id);
     const items: ReviewItem[] = [];
     for (const proposal of valid) {
@@ -1311,10 +1315,28 @@ export class DeviceActionCoordinator<
         this.options.currentRequestTelephonyPolicy &&
         proof &&
         proposal.requestMessageId === proof.messageId &&
+        !this.contradictedNumbers.has(proposal.id) &&
         numberContradictsRequest(proposal.operation, proof.text)
       )
-        this.contradictedNumbers.add(proposal.id);
+        this.contradictedNumbers.set(proposal.id, false);
       if (this.contradictedNumbers.has(proposal.id)) {
+        // The agent records the refusal, so the proposal cannot come back as a
+        // card after a reload, when this memory and the request text are gone.
+        // A refusal the agent could not take is asked again on the next review.
+        if (!this.contradictedNumbers.get(proposal.id)) {
+          try {
+            await this.mutation(
+              proposal,
+              "decision",
+              { decision: "reject" },
+              signal,
+            );
+            this.contradictedNumbers.set(proposal.id, true);
+          } catch (error) {
+            if (signal.aborted) throw error;
+          }
+          assertCurrentReview();
+        }
         items.push({
           proposalId: proposal.id,
           proposal: null,
@@ -3323,14 +3345,26 @@ function sameLine(a: string, b: string): boolean {
     a === b || (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10))
   );
 }
+/** Lower-case words, apostrophes and a possessive "'s" aside ("Maya's cell" names Maya). */
+function requestWords(text: string): string {
+  return ` ${text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\u2019\u2018]/g, "'")
+    .replace(/'s(?![\p{L}\p{N}])/gu, "")
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .trim()} `;
+}
 /**
  * A call or text for a number other than the one the owner wrote in the
  * message that asked for it. The model sometimes returns a different number
  * than the message says (seen on a Pixel: "call 415-555-0100" produced a card
  * for another number), and a card only protects an owner who reads it. A
- * message that writes no number (a contact name, "the number in that email")
- * is not judged here and keeps its ordinary card; a number that is part of the
- * text being sent is the message's content, not its addressee.
+ * contact the model chose in place of the written number contradicts it too,
+ * unless the owner also wrote that name. A message that writes no number (a
+ * contact name, "the number in that email") is not judged here and keeps its
+ * ordinary card; a number that is part of the text being sent is the
+ * message's content, not its addressee.
  */
 export function numberContradictsRequest(
   operation: ReviewableDeviceOperation,
@@ -3338,28 +3372,50 @@ export function numberContradictsRequest(
 ): boolean {
   const op = operation as {
     type: string;
-    target?: { kind?: string; number?: string };
+    target?: { kind?: string; number?: string; query?: string };
+    query?: string;
     recipients?: string[];
     body?: string;
   };
+  if (
+    op.type !== "phone_call" &&
+    op.type !== "phone_dial" &&
+    op.type !== "sms_compose" &&
+    op.type !== "sms_send"
+  )
+    return false;
   const proposed =
     op.type === "sms_send"
       ? (op.recipients ?? [])
-      : (op.type === "phone_call" ||
-            op.type === "phone_dial" ||
-            op.type === "sms_compose") &&
-          op.target?.kind === "number" &&
-          op.target.number
+      : op.target?.kind === "number" && op.target.number
         ? [op.target.number]
         : [];
-  if (!proposed.length) return false;
-  const body = typeof op.body === "string" ? op.body.replace(/\D/g, "") : "";
-  const written = [...request.matchAll(/\+?[\d(][\d ().-]*\d/g)]
+  const contact =
+    op.target?.kind === "contact"
+      ? op.target.query
+      : op.type === "sms_compose" && typeof op.query === "string"
+        ? op.query
+        : undefined;
+  if (!proposed.length && contact === undefined) return false;
+  // The body as the owner wrote it is taken out of the request, so its numbers
+  // are never the addressee and a body that repeats the addressee does not
+  // hide it. A body the model reworded can only keep its own numbers out.
+  const body = typeof op.body === "string" ? op.body.trim() : "";
+  const at = body ? request.toLowerCase().indexOf(body.toLowerCase()) : -1;
+  const addressed =
+    at >= 0 ? `${request.slice(0, at)} ${request.slice(at + body.length)}` : request;
+  const bodyDigits = at >= 0 ? "" : body.replace(/\D/g, "");
+  const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
     .map(([text]) => dialDigits(text))
     .filter(
-      (digits) => digits.length >= 7 && !(body && body.includes(digits)),
+      (digits) =>
+        digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
     );
   if (!written.length) return false;
+  if (contact !== undefined) {
+    const name = requestWords(contact).trim();
+    return !name || !requestWords(addressed).includes(` ${name} `);
+  }
   return proposed.some((number) => {
     const digits = dialDigits(number);
     return !written.some((wrote) => sameLine(wrote, digits));
