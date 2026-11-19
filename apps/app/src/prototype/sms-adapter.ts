@@ -855,7 +855,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   let newestIn=-1;bubbles.forEach((row,index)=>{if(row.inbound)newestIn=index;});
   return {
    needsAccess:access&&!showNew,showList:!access&&!state.thread&&!composing,showThread,showNew,showComposer:showComposer&&!picker,
-   attachmentMenu:showComposer&&!picker&&status?.mmsSend?{busy:!editable()||state.busy||picking,media:()=>attach(false),camera:()=>attach(true)}:null,
+   attachmentMenu:status?.mmsSend?{busy:!editable()||state.busy||picking,media:()=>attach(false),camera:()=>attach(true)}:null,
    showNewButton:!state.thread&&!composing,readFailed:!status&&!state.busy,showEmpty:!!status&&!state.busy&&state.threads.length===0,
    compose:()=>compose(),closeNew,
    recipientValue:picker?picker.query:recipients,recipientPlaceholder:picker?'Recipient '+(sendingTo.length+1):'To',

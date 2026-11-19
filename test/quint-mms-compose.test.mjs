@@ -85,8 +85,8 @@ function create() {
   return {
     openView: () => view('messages'), closeView: () => view('home'), hide: () => visibility(true), show: () => visibility(false),
     async pageHide() { window.dispatchEvent(new Event('pagehide')); await settled(); },
-    async attach() { page().nativeAttach(); await settled(); },
-    async attachAtLimit() { page().nativeAttach(); await settled(); },
+    async attach() { page().attachmentMenu.media(); await settled(); },
+    async attachAtLimit() { page().attachmentMenu.media(); await settled(); },
     async chooserAnswers(count, readable) {
       const chooser = input; input = null;
       chooser.files = Array.from({length: count}, () => picture(readable));

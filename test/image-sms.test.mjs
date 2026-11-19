@@ -103,7 +103,7 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
   assert.equal(views.messages.back({},{}),true,'Back in a conversation stays in Messages');assert.equal(shellBack,1);
   assert.equal(model().nativeInThread,false);assert.equal(model().nativeBody,'hello');assert.equal(model().nativeRecipients,'+15555550100');
 
-  model().nativeAttach();globalThis.document.hidden=true;visibility();
+  model().attachmentMenu.media();globalThis.document.hidden=true;visibility();
   assert.equal(model().nativeBody,'hello','the chooser hiding the page keeps the draft');
   inputs[0].files=[{type:'image/jpeg',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];await inputs[0].onchange();
   globalThis.document.hidden=false;visibility();
@@ -137,11 +137,11 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   const views={messages:{}};installSmsAdapter(Component,views);const owner=new Component();owner.componentDidMount();await tick();await tick();
   assert.deepEqual(globalThis.__mmsFixture.profiles,[globalThis.__mmsFixture.port],'the image client the adapter uses is the shared Messages and Phone profile');
   const model=()=>views.messages.render();model().nativeSims[0].pick();
-  assert.equal(model().nativeMmsAvailable,true);
+  assert.equal(typeof model().attachmentMenu?.media,'function');
   model().nativeSendMms();await tick();await tick();assert.equal(calls.length,0,'an invalid draft is refused before native review');assert.match(model().nativeNotice,/at least one phone number/);
-  model().nativeAttach();inputs[0].files=[file('image/webp',[1])];await inputs[0].onchange();assert.match(model().nativeNotice,/JPEG, PNG and GIF/);assert.equal(model().nativeAttachments.length,0);
+  model().attachmentMenu.media();inputs[0].files=[file('image/webp',[1])];await inputs[0].onchange();assert.match(model().nativeNotice,/JPEG, PNG and GIF/);assert.equal(model().nativeAttachments.length,0);
   model().nativeOnRecipients({target:{value:'+15555550100, +15555550101'}});model().nativeOnBody({target:{value:'hi all'}});
-  model().nativeAttach();inputs[1].files=[file('image/jpeg',[1,2,3]),file('image/png',[4,5])];await inputs[1].onchange();
+  model().attachmentMenu.media();inputs[1].files=[file('image/jpeg',[1,2,3]),file('image/png',[4,5])];await inputs[1].onchange();
   assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.jpg · 1 KB','picture-2.png · 1 KB']);
   model().nativeSendMms();await tick();await tick();assert.equal(calls.length,1);
   assert.deepEqual(calls[0].review.recipients,['+15555550100','+15555550101']);assert.deepEqual(calls[0].review.attachments.map(a=>[a.name,a.contentType,[...a.bytes]]),[['picture-1.jpg','image/jpeg',[1,2,3]],['picture-2.png','image/png',[4,5]]]);
@@ -158,7 +158,7 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   assert.equal(reads[1].review,calls[0].review,'the result is bound to the reviewed content');
   assert.equal(model().nativeNotice,'','successful read-back shows no status text');
   assert.equal(model().nativeAttachments.length,0,'a sent MMS clears the composer and its pictures');assert.equal(model().nativeBody,'');
-  model().nativeOnBody({target:{value:'one more'}});model().nativeAttach();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
+  model().nativeOnBody({target:{value:'one more'}});model().attachmentMenu.media();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
   pending[2].resolve({status:'cancelled'});await tick();await tick();assert.equal(model().nativeNotice,'','cancellation shows no status text');
   assert.equal(model().nativeBody,'one more','cancellation preserves the draft');
   model().nativeClear();assert.equal(model().nativeAttachments.length,0);
@@ -252,7 +252,7 @@ test('durable native drafts survive remount and settle a late receipt for the ex
   let owner=await mount();
   await open(0);type('first draft');await flush(owner);
   model().nativeBack();await settle();await open(1);type('picture draft');
-  model().nativeAttach();inputs[0].files=[{type:'image/png',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];
+  model().attachmentMenu.media();inputs[0].files=[{type:'image/png',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];
   await inputs[0].onchange();await flush(owner);
   owner.componentWillUnmount();
 

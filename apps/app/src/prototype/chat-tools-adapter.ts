@@ -110,7 +110,8 @@ export function installChatTools(Component: {prototype: Shell}) {
       }));
     };
     const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
-    const attachments=output.showComposer&&output.barTarget==='person'?output.messages?.attachmentMenu:null;
+    const messages=output.messages;
+    const attachments=output.showComposer&&output.barTarget==='person'&&(!messages?.nativeManaged||messages.showComposer)?messages?.attachmentMenu:null;
     if((turning&&this.chatToolsOpen==='chat')||(!attachments&&this.chatToolsOpen==='messages'))this.chatToolsOpen=false;
     const inMessages=this.chatToolsOpen==='messages';
     const toggle=(menu:'chat'|'messages')=>{shell.chatToolsOpen=shell.chatToolsOpen===menu?false:menu;shell.setState({});};
