@@ -3,6 +3,7 @@ import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import { nextDefaultNoteTitle } from '../runtime/note-default-title';
 import { accessibilityTimeoutScale } from '../runtime/accessibility-timeout';
 import { recordRendererFailure } from '../runtime/crash-log';
+import { errorNotice, ERROR_TOAST } from "../runtime/error-notice";
 import iconCatalog from '../icon-catalog.json';
 import { callsBriefing, matchesCallQuery } from "./telephony-presenters";
 /* Seeds, scripted replies and fixture images. Production builds resolve this
@@ -1798,7 +1799,7 @@ registerView("calendar", {
     if (f) {
       var fp = function (p) { set({ form: Object.assign({}, f, p) }); };
       var inputs=calendarFormInputs(f,new Date(api.now==null?Date.now():api.now));
-      var inputChange=function(kind){return function(event){if(api.get('calendar').form!==f)return;try{fp(calendarFormInputPatch(f,kind,event.target.value,new Date(api.now==null?Date.now():api.now)));}catch(error){api.toast(error.message);fp({});}};};
+      var inputChange=function(kind){return function(event){if(api.get('calendar').form!==f)return;try{fp(calendarFormInputPatch(f,kind,event.target.value,new Date(api.now==null?Date.now():api.now)));}catch(error){api.toast(errorNotice(error,'Choose a valid date and time.'),ERROR_TOAST);fp({});}};};
       var dayChips = [];
       var first = f.off === 0 ? 1 : (f.off > 0 ? Math.max(1, f.off - 3) : f.off - 3);
       var offsets = [0];

@@ -17,6 +17,8 @@ const POPUPS:Record<string,Popup[]>={
  files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()],['moveModal',out=>!!out.moveSheet,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()]],
  workflows:[['stepModal',out=>!!out.b?.sheetOn,out=>out.b?.closeSheet?.()]],
  settings:[['sheetModal',out=>!!out.hasSheet,out=>out.sheet?.close?.()]],
+ // The quick-reply sheet over a ringing call: Back and Escape close the sheet, not the call screen.
+ phone:[['replyModal',out=>!!out.rsOpen,out=>out.closeReply?.()]],
 };
 function popupFocus(name:string,current:()=>Bag){
  const popups=(POPUPS[name]||[]).map(([key,open,close])=>({key,open,modal:reviewFocus(()=>close(current()))}));
@@ -85,6 +87,13 @@ export function installSubviewAccessibility(views:Bag){
   let output:Bag={};
   const popups=popupFocus('settings',()=>output);
   views.settings.render=(state:Bag,api:Bag)=>{const out=output=render(state,api);return {...out,...popups(out)};};
+ }
+ {
+  // Phone has one sheet: quick replies over an incoming call.
+  const render=views.phone.render;
+  let output:Bag={};
+  const popups=popupFocus('phone',()=>output);
+  views.phone.render=(state:Bag,api:Bag)=>{const out=output=render(state,api);return {...out,...popups(out)};};
  }
 
 }
