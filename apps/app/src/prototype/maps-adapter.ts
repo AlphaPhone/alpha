@@ -325,6 +325,10 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       queueMicrotask(()=>{if(!disposed&&currentApi.isActive()){screen.openDirections();screen.locate();}});
      }
     }
+    // Opening Maps to nothing in particular: with location already allowed, the screen shows
+    // where the phone is (once per visit, never a prompt). A hand-off or card keeps its own flow.
+    if(!st.query&&!st.nearMe&&!st.agentPlace&&!st.agentRoute&&!st.fromHere&&!pendingHandoff&&!pendingPlace&&!pendingRoute&&!nearSearch&&!fromHere)
+      queueMicrotask(()=>{if(active())screen.showPositionOnOpen();});
     placeShown = !!view.place;
     // Calling the original with neutral state retains visual tokens without
     // generating sample place cards, address guesses, routes or timers.

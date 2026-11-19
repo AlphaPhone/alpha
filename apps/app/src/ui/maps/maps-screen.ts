@@ -348,6 +348,12 @@ export class MapsScreenController {
   private contextKey = "";
   private contextRevision = 0;
   private recenterOnly = false;
+  /** This visit already looked for the phone's position on open. */
+  private openedLocate = false;
+  /** The pending location request is the quiet one made on open: a failure shows nothing. */
+  private quietLocate = false;
+  /** The quiet request's failure, which the status does not show. */
+  private quietFailure?: unknown;
   private recenterSelection?: MapsScreenSelection;
   private recenterPosition?: Coordinate;
   private locationTimeout?: ReturnType<typeof setTimeout>;
@@ -441,6 +447,10 @@ export class MapsScreenController {
     clearTimeout(this.locationTimeout);
     this.locationTimeout = undefined;
     this.recenterOnly = false;
+    // A provider switch keeps the visit: the position is not looked up again.
+    if (cancelIntent) this.openedLocate = false;
+    this.quietLocate = false;
+    this.quietFailure = undefined;
     this.recenterSelection = undefined;
     this.recenterPosition = undefined;
     this.sharing?.abort.abort();
@@ -512,6 +522,8 @@ export class MapsScreenController {
     this.locationTimeout = undefined;
     this.locating = false;
     this.recenterOnly = false;
+    this.quietLocate = false;
+    this.openedLocate = false;
     ++this.searchIntent;
     for (const listener of [...this.releaseListeners]) listener();
     void this.host.agentLocation.stop().catch(() => {});
@@ -950,21 +962,62 @@ export class MapsScreenController {
 
   // ---- location -------------------------------------------------------------
 
+  /**
+   * Maps opened with nothing chosen yet: when location is already allowed, show where the
+   * phone is, once per visit. Never asks for permission and never replaces a choice.
+   */
+  showPositionOnOpen(): void {
+    if (this.openedLocate || !this.usable()) return;
+    this.openedLocate = true;
+    const idle = () =>
+      this.usable() &&
+      !this.locating &&
+      !this.selected &&
+      !this.searching &&
+      !this.query.trim() &&
+      !this.directions &&
+      !this.navigating &&
+      this.state?.position.phase !== "ready";
+    if (!idle()) return;
+    void this.host.locationGranted().then(
+      (granted) => {
+        if (!granted || !idle()) return;
+        this.quietLocate = true;
+        this.requestLocation();
+      },
+      () => {},
+    );
+  }
+
   /** An explicit location request; the platform may show its permission prompt. */
   locate(): void {
+    // The owner's own request replaces the quiet one made on open, so its outcome is shown.
+    if (this.quietLocate) {
+      const recenterOnly = this.recenterOnly;
+      this.cancelLocate();
+      this.recenterOnly = recenterOnly;
+    }
+    this.requestLocation();
+  }
+
+  private requestLocation(): void {
     if (this.disposed || this.locating || !this.host.active()) return;
-    this.host.discardHandoff?.();
+    if (!this.quietLocate) this.host.discardHandoff?.();
+    this.quietFailure = undefined;
     this.message = "";
     this.locating = true;
-    if (!this.directions && !this.recenterOnly) this.selected = undefined;
+    if (!this.directions && !this.recenterOnly && !this.quietLocate)
+      this.selected = undefined;
     this.searching = false;
     const controller = this.ensure();
     this.locationTimeout = setTimeout(() => {
       if (!this.locating || this.controller !== controller) return;
       this.locating = false;
       this.recenterOnly = false;
-      this.message =
-        "Couldn't find your location. Try again or enter a starting point.";
+      if (!this.quietLocate)
+        this.message =
+          "Couldn't find your location. Try again or enter a starting point.";
+      this.quietLocate = false;
       void controller.suspend().catch(() => {});
       this.invalidate();
     }, 15_000);
@@ -974,6 +1027,7 @@ export class MapsScreenController {
 
   /** A newer choice replaces a pending location request. A late fix does not change it. */
   private cancelLocate(): void {
+    this.quietLocate = false;
     if (!this.locating) return;
     this.locating = false;
     this.recenterOnly = false;
@@ -1425,11 +1479,12 @@ export class MapsScreenController {
     const choosingOrigin = this.choosingOrigin();
     const error =
       snapshot.saved.error ||
-      snapshot.position.error ||
+      (snapshot.position.error !== this.quietFailure &&
+        snapshot.position.error) ||
       (choosingOrigin ? snapshot.originSearch.error : snapshot.search.error) ||
       snapshot.route.error;
     const pending =
-      this.locating ||
+      (this.locating && !this.quietLocate) ||
       (choosingOrigin
         ? snapshot.originSearch.phase === "loading"
         : snapshot.search.phase === "loading");
@@ -1797,8 +1852,22 @@ export class MapsScreenController {
       this.locating = false;
       clearTimeout(this.locationTimeout);
       this.locationTimeout = undefined;
+      // The quiet request on open only shows the position and centres on it. Once the owner
+      // has begun something else, the fix changes nothing they see but the position mark.
+      const quiet = this.quietLocate;
       const recenterOnly = this.recenterOnly;
       this.recenterOnly = false;
+      this.quietLocate = false;
+      if (quiet) {
+        if (!this.selected && !this.directions && !this.searching) {
+          this.recenterSelection = undefined;
+          this.recenterPosition = position.coordinate;
+          if (position.precision === "approximate")
+            this.message = "Approximate location";
+        }
+        this.invalidate();
+        return;
+      }
       if (recenterOnly) {
         this.recenterSelection = this.selected;
         this.recenterPosition = position.coordinate;
@@ -1821,9 +1890,12 @@ export class MapsScreenController {
       clearTimeout(this.locationTimeout);
       this.locationTimeout = undefined;
       this.recenterOnly = false;
-      this.message = next.position.error
-        ? mapsFailureText(next.position.error)
-        : "Location unavailable.";
+      if (this.quietLocate) this.quietFailure = next.position.error;
+      else
+        this.message = next.position.error
+          ? mapsFailureText(next.position.error)
+          : "Location unavailable.";
+      this.quietLocate = false;
     }
     this.invalidate();
   }

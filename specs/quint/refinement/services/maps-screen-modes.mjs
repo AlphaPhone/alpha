@@ -50,7 +50,9 @@ async function driver(code) {
   };
   const m = await mountMapsAdapter(code, {
     storage: {'alpha.maps.saved-places.v1': JSON.stringify({version: 1, items: [{id: 'saved-1', label: 'Home', coordinate: {latitude: 1.02, longitude: 1.02}, savedAt: now}]})},
-    configure: app => app.configureMapsProvider(providerConfig, provider),
+    // The model starts before location is allowed, so opening Maps makes no location request
+    // of its own; the granted actions below allow it. maps-place-route-sheets covers that request.
+    configure: (app, harness) => { harness.locationGranted = false; app.configureMapsProvider(providerConfig, provider); },
   });
   const {harness} = m;
   let requests = 0, offered = [];
@@ -75,7 +77,8 @@ async function driver(code) {
     pickSaved: () => act(() => data().chips[0].go()),
     closePlace: () => act(() => data().pc.close()),
     openDirections: () => act(() => { harness.locationGranted = false; data().pc.dirs(); }),
-    openGrantedDirections: () => act(() => { harness.locationGranted = true; data().pc.dirs(); }),
+    // The model grants location for this action only, so a later show() makes no request on open.
+    openGrantedDirections: async () => { await act(() => { harness.locationGranted = true; data().pc.dirs(); }); harness.locationGranted = false; },
     locate: () => act(() => data().nativeLocation()),
     async fixArrives(usable) {
       const location = watch(), run = location?.run;

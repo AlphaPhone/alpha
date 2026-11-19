@@ -1,6 +1,6 @@
 // The Maps screen as the launcher mounts it (installPrototypeMapsAdapter over the real
-// MapsScreenController and MapsController, native plugins as controlled ports): the place
-// sheet's phone row, a long press dropping a pin, the route's step list, guidance copy without
+// MapsScreenController and MapsController, native plugins as controlled ports): the position
+// shown on open when location is already allowed, the place sheet's phone row, a long press dropping a pin, the route's step list, guidance copy without
 // a screen-off session, and the arrival notice when guidance ends with Maps off screen.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,8 @@ async function mount(options = {}) {
       return Promise.resolve(route);
     },
   };
-  const m = await mountMapsAdapter(code, {...options, configure: app => app.configureMapsProvider(providerConfig, provider)});
+  const {granted = true, ...rest} = options;
+  const m = await mountMapsAdapter(code, {...rest, configure: (app, harness) => { harness.locationGranted = granted; app.configureMapsProvider(providerConfig, provider); }});
   const toasts = [], opened = [];
   m.api.toast = text => toasts.push(text);
   m.api.open = (...args) => opened.push(args);
@@ -142,5 +143,65 @@ test('arriving with Maps on screen ends the session without a notice', async () 
     assert.equal(m.render().dr.nav.arrived, true);
     assert.deepEqual(m.harness.bridge.arrivals, []);
     assert.deepEqual(m.harness.bridge.stops, [start.sessionId]);
+  } finally { m.restore(); }
+});
+
+/** The location requests the screen made with a one-fix watch (not guidance's continuous one). */
+const oneFix = m => m.harness.locations.filter(location => location.run?.oneShot);
+
+test('opening Maps with location already allowed shows where the phone is, selecting nothing', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    assert.ok(request, 'Maps asks for one fix on open');
+    assert.equal(m.harness.locationStarts, 1);
+    request.run.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
+    const view = m.harness.screen.view();
+    assert.deepEqual(view.map.overlay.position?.coordinate, from);
+    assert.deepEqual(view.map.selected, from, 'the map centres on the position');
+    assert.equal(view.place, undefined, 'the position is shown, not chosen');
+    assert.equal(m.render().mode, 'base');
+    // Further renders in the same visit ask nothing more.
+    m.render(); await settle();
+    assert.equal(m.harness.locationStarts, 1);
+  } finally { m.restore(); }
+});
+
+test('opening Maps without location allowed makes no location request', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    await settle();
+    assert.equal(m.harness.locationStarts, 0);
+    assert.equal(m.harness.screen.view().map.overlay.position, null);
+  } finally { m.restore(); }
+});
+
+test('a place chosen before the position arrives keeps the map on that place', async () => {
+  const {m, cafe} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    await openCafe(m);
+    request.run?.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
+    const view = m.harness.screen.view();
+    assert.equal(view.place?.name, 'Cafe');
+    assert.deepEqual(view.map.selected, cafe.coordinate);
+  } finally { m.restore(); }
+});
+
+test('a failed position on open shows no message', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    request.run.onError({code: 'unavailable', message: 'No fix'}); await settle();
+    const view = m.harness.screen.view();
+    assert.equal(view.map.overlay.position, null);
+    assert.doesNotMatch(view.status.text, /could not|location/i);
+    // The owner's own request afterwards shows its outcome as before.
+    m.harness.screen.locate(); await settle();
+    oneFix(m).at(-1).run.onError({code: 'unavailable', message: 'No fix'}); await settle();
+    assert.notEqual(m.harness.screen.view().status.text, view.status.text);
   } finally { m.restore(); }
 });
