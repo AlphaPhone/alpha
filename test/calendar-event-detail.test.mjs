@@ -59,3 +59,13 @@ test('the event detail renders the repeat, invitation, Google notice and Google 
   assert.match(template,/aria-label="Open in Google Calendar" onClick="\{\{calendar\.ev\.openProvider\}\}"/);
   assert.doesNotMatch(adapter,/providerNotice='Open in Google'/,'the managed Google notice says what to do there');
 });
+
+test('an unanswered invitation can be declined from its notice, and the event form says Alpha sends no alert',()=>{
+  const template=readFileSync('apps/app/src/prototype/template.html','utf8'),adapter=readFileSync('apps/app/src/prototype/agent-calendar-adapter.ts','utf8');
+  // Decline reuses the reviewed, Undo-able delete; only for an invitee, never for a managed Google calendar (del is null there).
+  assert.ok(adapter.includes("out.ev.inviteDecline=out.ev.inviteNotice&&out.ev.singleDelete&&!out.ev.readOnly&&cancellationModeForEditorEvent(e)==='decline_invitation'?out.ev.del:null"));
+  assert.ok(adapter.indexOf('out.ev.inviteDecline=')>adapter.indexOf('if(managed){out.ev.del=null;'),'set after the managed Google rule removes delete');
+  assert.ok(template.includes('aria-label="Decline this invitation" disabled="{{calendar.ev.busy}}" onClick="{{calendar.ev.inviteDecline}}"'));
+  assert.ok(adapter.includes("out.f.alerts=null;out.f.alertNote='Alpha won’t alert you about this event.';"));
+  assert.ok(template.includes('{{calendar.f.alertNote}}'));
+});

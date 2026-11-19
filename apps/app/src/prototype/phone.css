@@ -775,6 +775,9 @@ button[aria-label$=" on or off"][aria-pressed]::before { content:""; position:ab
 .calendar-agenda-event { display:flex; flex-direction:column; gap:4px; width:100%; min-height:48px; padding:12px 16px; margin-bottom:8px; border-radius:14px; background:var(--s2); color:var(--fg); text-align:left; box-sizing:border-box; overflow-wrap:anywhere; }
 .calendar-agenda-event span { font-size:13px; color:var(--mut); }
 .calendar-agenda-event strong { font-size:16px; line-height:1.35; }
+/* Calendar Schedule and search (calendar-schedule.ts): the day layout stays mounted, hidden, under the list. */
+[data-alpha-calendar-list="true"] :is([data-alpha-calendar-week],[data-alpha-calendar-invites],[data-alpha-calendar-all-day],[data-alpha-calendar-day-heads],.calendar-timeline,.calendar-agenda) { display:none!important; }
+.calendar-month-dialog [role="group"] button[aria-pressed="true"] { background:var(--fg)!important; color:var(--bg)!important; }
 /* Large text in a short canvas (200% text, launcher Home): the header, notices and the day strip
  * above the agenda can outgrow the screen and leave the day strip under the dock. The whole list
  * then scrolls as one column whose end clears the dock (runtime/dock-clearance.ts); the agenda
@@ -897,7 +900,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .mail-sender-avatar{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--s2);font-size:14px;font-weight:700;overflow:hidden}
 .mail-sender-avatar img{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;object-fit:contain;padding:9px;background:var(--s2)}
 
-.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
+.calendar-search-input::-webkit-search-cancel-button,.calendar-search-input::-webkit-search-decoration,.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
 .content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
 .content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}
