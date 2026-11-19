@@ -5601,8 +5601,16 @@ class Component extends DCLogic {
     this.setState({ notices: this.persistentNotices.slice() });
   }
   dismissNotice(msg) {
+    var doc = typeof document !== "undefined" ? document : null;
+    var fromNotice = !!doc?.activeElement?.closest?.("[data-alpha-persistent-notice]");
+    var sheet = fromNotice ? doc.activeElement.closest(".alpha-chat-notices")?.parentElement : null;
     this.persistentNotices = (this.persistentNotices || []).filter(function (text) { return text !== msg; });
-    this.setState({ notices: this.persistentNotices.slice() });
+    this.setState({ notices: this.persistentNotices.slice() }, function () {
+      // Focus left with the dismissed notice: hand it to the next notice, else the chat header.
+      if (!sheet || !sheet.isConnected || (doc.activeElement && doc.activeElement !== doc.body)) return;
+      var next = sheet.querySelector("[data-alpha-persistent-notice] button") || sheet.querySelector("[data-alpha-chat-home]");
+      if (next) next.focus({ preventScroll: true });
+    });
   }
   showToast(msg, opts) {
     opts = opts || {};

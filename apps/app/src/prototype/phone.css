@@ -34,12 +34,12 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
 [data-alpha-toast] > * { flex-shrink:0; }
 /* Persistent notices (lost work, a privacy state left on) stay in the chat's notice area, in the
  * page flow so they cover nothing, until dismissed. */
-.alpha-persistent-notice { margin:0 20px 8px; min-height:44px; box-sizing:border-box; padding:4px 4px 4px 16px; border-radius:22px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; display:flex; gap:12px; align-items:center; }
+.alpha-persistent-notice { margin:0 20px 8px; min-height:56px; box-sizing:border-box; padding:4px 4px 4px 16px; border-radius:28px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; display:flex; gap:12px; align-items:center; }
 .alpha-persistent-notice > span { flex-grow:1; min-width:0; padding:6px 0; overflow-wrap:anywhere; }
 /* A reply that says to check history carries the way there. */
-.alpha-history-link { align-self:flex-start; min-height:44px; padding:0 14px; margin-left:26px; border-radius:22px; background:var(--s2); color:var(--fg); font:inherit; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:8px; }
+.alpha-history-link { align-self:flex-start; min-height:48px; padding:0 16px; margin-left:26px; border-radius:24px; background:var(--s2); color:var(--fg); font:inherit; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:8px; }
 .alpha-history-link .i { width:16px; height:16px; }
-.alpha-persistent-notice > button { flex-shrink:0; min-height:40px; padding:0 14px; border-radius:20px; color:var(--fg); background:var(--s1); font-weight:700; font-size:14px; }
+.alpha-persistent-notice > button { flex-shrink:0; min-height:48px; padding:0 16px; border-radius:24px; color:var(--fg); background:var(--s1); font-weight:700; font-size:14px; }
 .alpha-chat-notices { max-height:30%; overflow:auto; flex-shrink:0; }
 .alpha-chat-notices:empty { display:none; }
 /* Full-screen chat on the launcher is drawn under Android's status bar. Its header starts 16

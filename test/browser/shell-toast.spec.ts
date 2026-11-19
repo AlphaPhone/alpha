@@ -176,6 +176,11 @@ test('a persistent notice is announced once, then stays in the chat until Dismis
   await expect(listed).toHaveCount(1);
   await expect(listed).toContainText(lost);
   expect(await listed.evaluate(element => getComputedStyle(element).position)).toBe('static');
-  await listed.getByRole('button', { name: 'Dismiss notice', exact: true }).click();
+  const dismiss = listed.getByRole('button', { name: 'Dismiss notice', exact: true });
+  expect((await dismiss.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  await dismiss.focus();
+  await page.keyboard.press('Enter');
   await expect(listed).toHaveCount(0);
+  // Focus does not fall to the page when its notice goes.
+  await expect(page.locator('[data-alpha-chat-header] [data-alpha-chat-home]')).toBeFocused();
 });
