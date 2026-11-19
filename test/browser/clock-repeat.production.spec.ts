@@ -38,7 +38,7 @@ const handoffs = (page: Page) => page.evaluate(() => (window as any).clockHandof
 async function openClock(page: Page) {
   await residentHome(page);
   await button(page, 'Workflows').click();
-  await button(page, 'New automation').click();
+  await button(page, 'Add to Workflows').click();
   await button(page, 'Clock alarms').click();
   return page.getByRole('dialog', { name: 'Clock alarms', exact: true });
 }

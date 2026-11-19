@@ -89,8 +89,8 @@ async function createSchedules(page:Page){
  await panel.getByRole('button',{name:'Review snapshot',exact:true}).click();
  await expect(panel.getByText(/^Share this tasks snapshot with the connected agent\./)).toBeVisible();
  await panel.getByRole('button',{name:'Confirm',exact:true}).click();
- await panel.getByRole('combobox',{name:'Reviewed source',exact:true}).selectOption({index:1});
- await panel.getByLabel('Time zone',{exact:true}).fill('UTC');
+ await panel.getByRole('combobox',{name:'Source',exact:true}).selectOption({index:1});
+ await panel.getByLabel('Time zone',{exact:true}).selectOption('UTC');
  for(const [template,label,time] of [['morning','Morning','07:00'],['evening','Evening','19:00']] as const){
   await panel.getByLabel(label,{exact:true}).fill(time);
   await panel.getByRole('button',{name:`Review ${template} schedule`,exact:true}).click();

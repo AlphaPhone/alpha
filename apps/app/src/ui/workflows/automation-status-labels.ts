@@ -42,6 +42,8 @@ export const AUTOMATION_STATUS_LABELS: ReadonlyMap<string, string> = new Map([
   ["posted", "Shown"],
   ["permission-denied", "Notifications not allowed"],
   ["scheduling-failed", "Couldn’t schedule"],
+  // Removed agent workflows (RemoteWorkflow.removed), listed under the Removed filter.
+  ["removed", "Removed"],
 ]);
 
 /**

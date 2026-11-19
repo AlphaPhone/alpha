@@ -39,6 +39,7 @@ import {
  digestStatusLabel,
  digestRan,
  digestZoneNote,
+ digestZoneChoices,
  missedRunNowOffers,
  type MissedRunNow,
  rememberRetainedDigests,
@@ -584,7 +585,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 		}
 		const source = sources.find((s) => s.id === (sourceId || old?.spec.sourceId));
 		if (!source) {
-			setMessage("Choose a reviewed source first.");
+			setMessage("Choose a source first.");
 			return;
 		}
 		if (template === "evening" && source.live?.provider === "native" && !features.nativeEvening) {
@@ -681,7 +682,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
                         {review.path==='loops'&&(review.body.spec as {enabled?:boolean}|undefined)?.enabled===true&&
                             <p role="note">{digestScheduleTiming}</p>}
 						{(review.path==='loops'||review.path==='dossier')&&<p><span aria-hidden="true" style={{...iconStyle("info"),width:'16px',height:'16px',marginRight:6,verticalAlign:'middle'}}/>{billing}</p>}
-						<button disabled={busy} onClick={() => void submit(review)}>
+						<button className="alpha-btn--primary" disabled={busy} onClick={() => void submit(review)}>
 							Confirm
 						</button>
 						<button disabled={busy} onClick={() => setReview(null)}>
@@ -691,7 +692,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 				) : (
 					available && (
 						<>
-							{isAndroid&&connection.kind==='resident'&&nativeReady&&nativeSourceProtocol&&<details open={nativeOpen} onToggle={e=>setNativeOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>Selected phone sources</summary><label>Source name<input maxLength={200} value={nativeLabel} onChange={e=>setNativeLabel(e.target.value)}/></label><button disabled={busy} onClick={()=>void loadNativeCalendars()}>Choose calendars</button>{calendarChoices.map(c=><label key={c.id}><input type="checkbox" checked={selectedCalendars.includes(c.id)} onChange={e=>setSelectedCalendars(ids=>e.target.checked?[...ids,c.id]:ids.filter(id=>id!==c.id))}/>{c.name} · {c.account}</label>)}<label><input type="checkbox" aria-label="Open phone reminders due today and overdue" checked={selectedReminders} onChange={e=>setSelectedReminders(e.target.checked)}/>Reminders</label><label>Expires (h)<input type="number" aria-label="Consent expires in hours" min={1} max={DIGEST_SOURCE_MAX_HOURS} value={hours} onChange={e=>setHours(Number(e.target.value))}/></label><button disabled={busy} onClick={()=>void reviewNativeSource()}>{renewing&&sources.find(s=>s.id===renewing)?.live?.provider==='native'?'Review renewal':'Review'}</button></details>}
+							{isAndroid&&connection.kind==='resident'&&nativeReady&&nativeSourceProtocol&&<details open={nativeOpen} onToggle={e=>setNativeOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>Selected phone sources</summary><label>Source name<input maxLength={200} value={nativeLabel} onChange={e=>setNativeLabel(e.target.value)}/></label><button disabled={busy} onClick={()=>void loadNativeCalendars()}>Choose calendars</button>{calendarChoices.map(c=><label key={c.id}><input type="checkbox" checked={selectedCalendars.includes(c.id)} onChange={e=>setSelectedCalendars(ids=>e.target.checked?[...ids,c.id]:ids.filter(id=>id!==c.id))}/>{c.name} · {c.account}</label>)}<label><input type="checkbox" aria-label="Open phone reminders due today and overdue" checked={selectedReminders} onChange={e=>setSelectedReminders(e.target.checked)}/>Reminders</label><label>Access lasts (hours)<input type="number" min={1} max={DIGEST_SOURCE_MAX_HOURS} value={hours} onChange={e=>setHours(Number(e.target.value))}/></label><button disabled={busy} onClick={()=>void reviewNativeSource()}>{renewing&&sources.find(s=>s.id===renewing)?.live?.provider==='native'?'Review renewal':'Review'}</button></details>}
                             {liveBinding && <HostedLiveSourcePicker key={liveBinding.sessionId} client={liveBinding.client} scope={liveBinding.notices.scope} signal={liveBinding.controller.signal} current={() => binding.current === liveBinding && openRef.current} busy={busy} onRevoked={() => void refresh(true)} review={value=>{const renews=renewing&&sources.find(s=>s.id===renewing)?.live?.provider==='google'?renewing:null;setReview(renews?{...value,renews,rebind:renewalLoops(renews),summary:value.summary+renewalNote(renews)}:value);}} />}
 							<details open={snapshotOpen} onToggle={e=>setSnapshotOpen((e.currentTarget as HTMLDetailsElement).open)}>
 								<summary>Share a snapshot</summary>
@@ -777,7 +778,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 								</button>
 							</details>
 							<label>
-								Reviewed source
+								Source
 								<select
 									value={sourceId}
 									onChange={(e) => setSourceId(e.target.value)}
@@ -796,7 +797,9 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 {features.dossier&&sources.find(s=>s.id===sourceId)?.live?.provider==='native'&&<button disabled={busy} onClick={()=>{const source=sources.find(s=>s.id===sourceId)!;setReview({path:'dossier',body:{sourceId:source.id,sourceRevision:source.revision,mutationId:crypto.randomUUID(),confirmed:true},summary:`Prepare a brief now from ${source.label}? This sends one read of these sources to your agent’s AI. It creates no schedule. It can’t send email or act on your phone. ${billing}`});}}>Review on-demand brief</button>}
 							<label>
 								Time zone
-								<input value={zone} onChange={(e) => setZone(e.target.value)} />
+								<select value={zone} onChange={(e) => setZone(e.target.value)}>
+									{digestZoneChoices(zone, deviceZone).map((z) => <option value={z} key={z}>{z}</option>)}
+								</select>
 							</label>
 							<label>
 								Morning
