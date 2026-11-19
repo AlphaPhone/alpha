@@ -149,7 +149,7 @@ test('a verified email code goes straight to access setup while the agent restar
  await expect(agentSheet).toHaveCount(0);
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
  await expect(agentSheet.getByRole('region',{name:'Agent status',exact:true}).getByText('Running',{exact:true})).toBeVisible();
- await expect(agentSheet.getByRole('region',{name:'AI inference'}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
+ await expect(agentSheet.getByRole('region',{name:'AI service'}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
  await expect(agentSheet.getByText('No plan',{exact:true})).toBeVisible();
  await shot(page,info,'06-your-agent-running');
  expect(host.bound).toBe(true);expect(host.starts).toBe(2);

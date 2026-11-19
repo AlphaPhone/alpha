@@ -171,7 +171,7 @@ test('Settings uses its normalized provider status read and keeps the retained M
   await page.getByRole('button', {name: 'Settings', exact: true}).click();
   await page.getByRole('button', {name: 'About', exact: true}).click();
   await expect(page.getByRole('button', {name: 'Status', exact: true})).toBeVisible();
-  await expect(page.getByText('Inference model', {exact: true})).toHaveCount(0);
+  await expect(page.getByText('AI model', {exact: true})).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as any).providerFixture.settingsRefreshes)).toBeGreaterThan(0);
   const reads = await page.evaluate(() => {
     const fixture = (window as any).providerFixture;
@@ -187,7 +187,7 @@ test('Settings uses its normalized provider status read and keeps the retained M
     while (fiber && typeof fiber.stateNode?.vset !== 'function') fiber = fiber.return;
     fiber.stateNode.vset('settings', {page: 'models'});
   });
-  const model = page.getByText('Inference model', {exact: true}).locator('..');
+  const model = page.getByText('AI model', {exact: true}).locator('..');
   await expect(model).toContainText('Eliza Cloud · qwen-3.8-27b (Cerebras)');
   async function refreshModel(value: string, unavailable = false) {
     return page.evaluate(async ({value, unavailable}) => {
@@ -203,7 +203,7 @@ test('Settings uses its normalized provider status read and keeps the retained M
   await expect.soft(model).toContainText('Cerebras · qwen-current-fixture', {timeout: 2000});
   expect(await refreshModel('qwen-current-fixture', true)).toBe(before.sessionId);
   await expect.soft(model).toContainText('Not reported', {timeout: 2000});
-  await expect(page.getByText('Inference provider', {exact: true}).locator('..')).toContainText('—');
+  await expect(page.getByText('AI service', {exact: true}).locator('..')).toContainText('—');
   expect(await refreshModel('unsafe model label')).toBe(before.sessionId);
   await expect.soft(model).toContainText('Not reported', {timeout: 2000});
   expect(await refreshModel('qwen-recovered-fixture')).toBe(before.sessionId);

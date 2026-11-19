@@ -225,7 +225,7 @@ test('synthetic provider: reviewed send leaves exactly one receipt and one messa
     await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
     await expect(review).toContainText('"messageId":"sent-1"');
     await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
-    await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+    await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
     await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
     await review.getByRole('button', {name: 'Close receipt', exact: true}).click();
     await expect(review).toHaveCount(0);
@@ -268,7 +268,7 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await openProviderInbox(page, true);
   await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Delivery outcome is unknown. Check the saved receipt; do not send this message again.');
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
@@ -283,7 +283,7 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
 
   // The provider later resolves the receipt; an explicit check reconciles to exactly one message.
   await setProvider(page, {unsure: false});
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
   await expect(review).toContainText('"messageId":"sent-1"');
   // Only now, with the provider's confirmation, is the retained copy of that email removed.
@@ -318,7 +318,7 @@ test('synthetic provider: a send reply that names another operation is not shown
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
   // Its own receipt, read back by request ID, reconciles to exactly one message.
   await setProvider(page, {wrongReceipt: false});
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
   await expect(review).toContainText('"messageId":"sent-1"');
   expect(await provider(page)).toEqual({prepares: 1, dispatches: 1, sent: ['Journey wrong receipt'], receipts: ['succeeded']});

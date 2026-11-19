@@ -532,7 +532,7 @@ test('F-13: a lost Trash reply is an unknown outcome, handled like an unknown se
   await openInbox(page, {}, true);
   await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
   await expect(review.getByRole('button', {name: 'Confirm this change', exact: true})).toHaveCount(0);
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('The outcome of this change is unknown. Check the saved receipt; do not repeat the change.');
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
@@ -547,7 +547,7 @@ test('F-13: a lost Trash reply is an unknown outcome, handled like an unknown se
 
   // The provider later resolves the receipt; an explicit check reconciles to exactly one change.
   await setProvider(page, {unsure: false});
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
   await expect(review.getByRole('button', {name: 'Review undo mailbox change', exact: true})).toBeVisible();
   state = await provider(page);

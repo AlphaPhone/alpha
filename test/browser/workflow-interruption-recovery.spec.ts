@@ -181,7 +181,7 @@ test('a new-workflow save that never reached the agent can be sent again once an
  // The draft stays locked across a reload; the resend is offered only after the agent reports no record.
  await page.reload();await setup(page);await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await newWorkflow(page);
  await expect(builder).toContainText('Pending');await expect(page.getByRole('button',{name:'Resend',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Refresh save receipt',exact:true}).click();await expect(builder).toContainText('Not received · Resend');expect(await posts(page,'/api/workflow/phone/workflows')).toHaveLength(0);
+ await page.getByRole('button',{name:'Check if it saved',exact:true}).click();await expect(builder).toContainText('Not received · Resend');expect(await posts(page,'/api/workflow/phone/workflows')).toHaveLength(0);
  await page.getByRole('button',{name:'Resend',exact:true}).click();await expect(builder).toContainText('Resend once');expect(await posts(page,'/api/workflow/phone/workflows')).toHaveLength(0);
  await page.getByRole('button',{name:'Confirm resend',exact:true}).click();await expect(page.getByRole('heading',{name:'Recovered save',exact:true})).toBeVisible();await expect(runNow(page)).toBeVisible();
  const sent=await posts(page,'/api/workflow/phone/workflows');expect(sent).toHaveLength(1);const data=await stored(page);expect(data.workflows.map(row=>row.name)).toEqual(['Recovered save']);expect(data.receipts).toHaveLength(1);expect(data.receipts[0].mutationId??data.receipts[0].id??sent[0].mutationId).toBe(sent[0].mutationId);expect(data.workflows[0].active).toBe(false);
@@ -195,7 +195,7 @@ test('an edit the agent refused because the workflow changed saves nothing and u
  await page.getByRole('button',{name:'Save workflow',exact:true}).click();await expect(page.getByLabel('Workflow save review',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Save workflow',exact:true}).click();
  await expect(page.locator('[role=status]').filter({hasText:'Changed on agent'})).toBeVisible();
  // A known refusal is not an unknown outcome: no receipt to wait for, and the draft can be edited or discarded.
- await expect(page.getByRole('button',{name:'Refresh save receipt',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Resend',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Discard local draft',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Check if it saved',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Resend',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Discard local draft',exact:true})).toBeVisible();
  await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Edited too late');expect(await posts(page,'/phone-spec')).toHaveLength(1);
  expect((await stored(page)).workflows.map(row=>row.name)).toEqual(['Execution fixture']);
  await page.getByRole('button',{name:'Discard local draft',exact:true}).click();await page.getByRole('button',{name:'Confirm discard local draft',exact:true}).click();

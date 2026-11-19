@@ -58,7 +58,7 @@ test('lost photo-copy response and reload recover the same durable receipt witho
   library.forgetEdit=async input=>{(window as any).copyFixture.acknowledgements++;return forget(input);};
  });
  await page.getByRole('button',{name:'Save copy',exact:true}).click();
- await expect(page.getByText('Copy outcome could not be checked. Use saved-copy recovery; no additional copy was created.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Couldn’t confirm the copy was saved. Check Photos before trying again.',{exact:true})).toBeVisible();
  const request=await page.evaluate(()=>(window as any).savedEdit);
  const unacknowledged=await page.evaluate(async request=>{
   const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');const f=(window as any).copyFixture;
@@ -149,7 +149,7 @@ for(const mode of ['failed','cancelled'])test(`photo copy waits for durable requ
  },mode);
  await page.getByRole('button',{name:'Save copy',exact:true}).click();
  if(mode==='cancelled'){await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseCopyAdmission)).toBe('function');await page.getByRole('button',{name:'Cancel edit',exact:true}).click();await page.getByRole('dialog',{name:'Close photo editor?',exact:true}).getByRole('button',{name:'Close editor',exact:true}).click();await page.evaluate(()=>(window as any).releaseCopyAdmission());}
- else await expect(page.getByText('Copy request could not be retained. Check saved-copy recovery before another save.',{exact:true})).toBeVisible();
+ else await expect(page.getByText('Couldn’t save a copy. Try again.',{exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/media-copy-intent.ts')).readMediaCopyIntent())).toBeNull();expect(await page.evaluate(()=>(window as any).copyDispatches)).toBe(0);expect(await page.evaluate(async()=>(await(await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary.list()).items.length)).toBe(1);
 });
 test('a late pending-request read cannot open an editor after Home',async({page})=>{

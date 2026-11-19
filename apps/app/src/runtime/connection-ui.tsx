@@ -4024,7 +4024,7 @@ export function ConnectionChooser() {
       <ResidentRecoveryPanel snapshot={snapshot}/>
       {snapshot.session&&!residentFirstSignIn&&<div className="alpha-connection-actions"><button disabled={snapshot.busy} onClick={()=>void connectionController.startLocal()}>Reconnect</button></div>}
     </section>}
-    <section aria-label="AI inference" hidden={ownProviderSelected()&&!planPanel}>{!planPanel&&<ul className="alpha-status-rows"><li><span aria-hidden="true" data-alpha-icon="/icons/lucide/cpu.svg" style={iconStyle('cpu')}/><span className="alpha-row-name">AI</span><StatusDot tone={residentAi[0]}>{residentAi[1]}</StatusDot></li></ul>}
+    <section aria-label="AI service" hidden={ownProviderSelected()&&!planPanel}>{!planPanel&&<ul className="alpha-status-rows"><li><span aria-hidden="true" data-alpha-icon="/icons/lucide/cpu.svg" style={iconStyle('cpu')}/><span className="alpha-row-name">AI</span><StatusDot tone={residentAi[0]}>{residentAi[1]}</StatusDot></li></ul>}
       {residentAiStarting?accountCreatedNotice:snapshot.cloudAccount&&!residentSignInRejected?<>
         {accountCreatedNotice}
         {!residentMembershipVisible&&(planPanel||residentNeedsPlan)&&<p>{snapshot.cloudAccount.email||`Account ${snapshot.cloudAccount.userId}`}</p>}
