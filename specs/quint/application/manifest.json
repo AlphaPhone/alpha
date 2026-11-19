@@ -12065,20 +12065,38 @@
       "movedAnchorNeedsNewReviewTest",
       "cancelledRunIsRefusedTest",
       "expiredStepCannotBeDecidedTest",
-      "expiredStepIsNotOfferedAgainTest"
+      "expiredStepIsNotOfferedAgainTest",
+      "expiryDuringReadIsRefusedByCoordinatorTest",
+      "digestChangeAfterReadIsRefusedByAgentTest",
+      "cancelAfterReadIsRefusedByAgentTest",
+      "leavingBeforeTheExecutorLeavesTheOutcomeUnknownTest",
+      "suspendAbortsTheDecisionTest",
+      "suspendWhileRunningIsSyncedLaterTest",
+      "lostReceiptIsSyncedOnceTest",
+      "receiptOfAnOlderDigestIsNotSyncedTest",
+      "anchorMoveAfterReadDoesNotStopAnAdmittedStepTest",
+      "quietAgentChangesNothingTest"
     ],
     "invariants": [
       "TypeOK",
       "AtMostOneEffect",
-      "EffectWasApproved",
+      "EffectWasAdmitted",
       "EffectMatchesReview",
-      "ShownIsPending",
-      "ConfirmIsOfShownStep"
+      "EffectOnApprovedScreen",
+      "ReceiptIsJournaled",
+      "AppliedReceiptHadEffect",
+      "EffectReceiptedTruthfully",
+      "ExecutingIsJournaled",
+      "ShownIsUndecided",
+      "ConfirmIsOfShownStep",
+      "StatusTruthful"
     ],
     "sources": [
       "apps/app/src/prototype/workflow-adapter.ts",
       "apps/app/src/runtime/workflow-device-contract.ts",
-      "apps/app/src/runtime/connection-ui.tsx"
+      "apps/app/src/runtime/connection-ui.tsx",
+      "apps/app/src/ui/device-actions/client-coordinator.ts",
+      "apps/app/src/prototype/agent-adapter.ts"
     ],
     "symbols": [
       {
@@ -12104,20 +12122,45 @@
       {
         "path": "apps/app/src/runtime/connection-ui.tsx",
         "name": "rejectWorkflowPhoneAction"
+      },
+      {
+        "path": "apps/app/src/ui/device-actions/client-coordinator.ts",
+        "name": "pendingForWorkflow"
+      },
+      {
+        "path": "apps/app/src/ui/device-actions/client-coordinator.ts",
+        "name": "syncReceipts"
+      },
+      {
+        "path": "apps/app/src/runtime/workflow-device-contract.ts",
+        "name": "workflowStepScreenCurrent"
+      },
+      {
+        "path": "apps/app/src/prototype/agent-adapter.ts",
+        "name": "workflowStepScreenCurrent"
+      },
+      {
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "syncPhone"
       }
     ],
     "stateMapping": {
-      "digest/anchor/closed": "the run's phone review as the agent reports it: spec digest, Calendar anchor and cancellation request",
-      "proposal/expired": "the one proposal the agent issued for the step, its decision and its expiry",
-      "foreground": "this exact run open in the foreground Workflows view (phoneContext)",
-      "shown/reviewedDigest/reviewedAnchor/confirm/status": "phoneSteps, the phone review it was read from (phoneReview), the first tap (phoneConfirm) and phoneStatus",
-      "effects/denials/effectsReviewed": "decisions that reached the connection controller, and whether each effect matched its review"
+      "digest/anchor/closed/expired": "the run's phone review as the agent reports it (spec digest, Calendar anchor, cancellation request) and the shared clock against the proposals' expiry",
+      "issued/proposal/proposalDigest/receipt": "the agent's current proposal for the step (a spec digest change supersedes a pending one), its state, the spec digest it is bound to and the receipt outcome it recorded",
+      "foreground/open": "document.hidden, and whether the run's receipt view is open (cleared by the visibility event's workflowSuspend)",
+      "shown/shownIssue/reviewedDigest/reviewedAnchor/confirm/status": "phoneSteps and which proposal it shows, the phone review it was read from (phoneReview), the first tap (phoneConfirm) and phoneStatus",
+      "inflight/approving/journal": "the second tap's awaited stage (phone review read, agent decision and claim, executor, receipt upload), its decision, and the coordinator's terminal journal outcome",
+      "effects/denials": "device effects run by the executor and denials the agent accepted",
+      "tapped*/readAnchor/admitted*/effectForeground/effectOpen": "ghosts: what the owner confirmed, the anchor the phone's last read found, what the agent admitted, and the screen the executor ran on",
+      "quiet": "exploration only: no source counterpart; the replay maps quietAgent to no change"
     },
     "abstractions": [
-      "One run and one phone step with one proposal. The spec digest and the Calendar anchor each change at most once; the agent abstracts the device action coordinator, which issues the proposal and refuses a decided, expired or cancelled one.",
-      "Each owner action and its awaited reads are one step. Foreground loss between the second tap's re-read and the decision is not interleaved.",
-      "The replay drives the real workflow adapter in its renderer fixture. The executor's own context checks in agent-adapter (Calendar, Notes, notification and speech steps), native notification delivery, approval notices and receipt sync are separate obligations.",
-      "Expiry is enforced by the disabled control here and by the agent's coordinator; the tap handler itself does not check it."
+      "One run and one phone step. The spec digest and the Calendar anchor each change at most once; a digest change supersedes a pending proposal with one new proposal. Expiry is one clock step past every issued proposal.",
+      "The replay drives the real workflow adapter and the real DeviceActionCoordinator (Alpha's device-action profile, its parse, review cache, journal protocol, claim, receipt and receipt sync). The agent's proposal endpoints, the journal store and the executor port are stand-ins; the executor stand-in applies the real workflowStepScreenCurrent guard that agent-adapter's workflow read and presentation executors use. connection-ui's thin port wrappers (execute, workflowPhoneActions, rejectWorkflowPhoneAction, syncWorkflowPhoneReceipts) are reproduced in the replay, not imported.",
+      "The second tap is interleaved at four awaited points: the phone review read, the agent's decision request (the claim follows in the same step), the executor's final screen check and the receipt upload. The coordinator's own short awaits (journal, binding hash) are not interleaved, so its pre-dispatch expiry check is not separately exercised.",
+      "An aborted request is refused before it reaches the agent; a request the agent processed whose response was lost is not modeled. Deny is decided at the phone review read in one step.",
+      "Native notification delivery, OS approval notices and speech are separate obligations; the executor's effect is one recorded step.",
+      "Agent events and leaving the app are explored once the owner has started a decision or a receipt is awaited, and quietAgent (a ghost with no source counterpart) lets random walks reach the end of an uninterrupted decision. Agent events before the owner's first tap are not explored; a review reads the agent's current state either way."
     ]
   }
 ]
