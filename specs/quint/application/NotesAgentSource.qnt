@@ -58,8 +58,10 @@ module NotesAgentSource {
   /// Deletion: the restorable copy is written first, then the tombstone.
   action writeTrashCopy = all {running, previous, bound, s.op == "notes_delete", s.targetCurrent,
     not(s.trashFull), not(s.trashCopy), s' = {...s, trashCopy: true}}
+  /// An unconfirmed commit marks Previous notes storage failed, so nothing more runs until it is reopened.
   action writeTombstone(confirmed: bool): bool = all {running, s.op == "notes_delete", s.trashCopy, not(s.tombstone),
-    s' = {...s, tombstone: confirmed, outcome: if (confirmed) "succeeded" else "unknown"}}
+    s' = {...s, tombstone: confirmed, outcome: if (confirmed) "succeeded" else "unknown",
+      storageFailed: s.storageFailed or not(confirmed)}}
   action settle = all {not(idle), s.outcome != "none", s' = {...s, authority: "none", outcome: "none"}}
   /// ASSUMPTION made visible: the agent's own Notes action writes canonical notes with no phone
   /// card, whatever "Review phone actions first" says.
