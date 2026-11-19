@@ -205,7 +205,7 @@ test('an edit the agent refused because the workflow changed saves nothing and u
 test('a typed workflow is presented as manual-trigger only: no schedule is offered, implied or enabled',async({page})=>{
  await setup(page);await seed(page);await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();
  // Creation: the workflow entry says it runs when started; the editor's only trigger is the explicit Run.
- await page.getByRole('button',{name:'New automation',exact:true}).click();await page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:'More options',exact:true}).click();await expect(page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:/^Steps/})).toBeEnabled();
+ await page.getByRole('button',{name:'Add to Workflows',exact:true}).click();await page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:'More options',exact:true}).click();await expect(page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:/^Steps/})).toBeEnabled();
  await page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:/^Steps/}).click();await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toBeEditable();
  await expect(page.getByText('Manual',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Edit When step',exact:true}).click();await expect(page.getByText('Manual',{exact:true}).first()).toBeVisible();

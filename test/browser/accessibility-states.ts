@@ -171,11 +171,11 @@ export const LIVE_STATES: State[] = [
   live('Settings password manager', ['Settings', 'Apps', 'Passwords']),
   live('Browser menu', ['Browser', 'Menu']),
   live('Browser address', ['Browser', 'Edit address']),
-  live('Workflow alarms', ['Workflows', 'New automation', 'Clock alarms']),
+  live('Workflow alarms', ['Workflows', 'Add to Workflows', 'Clock alarms']),
   legacyNotes('Notes note menu', ['New note', 'More']),
   {name:'live Notes source document',open:async(page,theme)=>{await page.addInitScript(offline);await goto(page, theme ? `/?theme=${theme}` : '/');await openLegacyAttachment(page);await settle(page);}},
   legacyNotes('Notes recorder', ['Record voice note'], 'notes-recorder'),
-  live('Workflows new automation', ['Workflows', 'New automation'], 'automations-detail'),
+  live('Workflows new automation', ['Workflows', 'Add to Workflows'], 'automations-detail'),
 ];
 
 /** The simulated browser inventory exists only in test-mocks builds. */
@@ -232,7 +232,7 @@ export const MOCK_STATES: State[] = [
   mock('workflows:flow', ['Change'], 'workflows-builder'),
   // The builder's trigger and step sheets. (Settings' Connections page and its per-service sheets
   // were removed; the Google accounts panel is swept live as 'Settings Google'.)
-  mock('workflows', ['New automation', 'Edit When step'], 'workflows-builder'),
+  mock('workflows', ['Add to Workflows', 'Edit When step'], 'workflows-builder'),
   mock('workflows:new', ['Add Read step'], 'workflows-builder'),
   mock('settings', ['About']),
   // Calendars exists only in the live Settings adapter. Its accessibility audits

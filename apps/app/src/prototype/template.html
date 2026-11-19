@@ -3694,7 +3694,7 @@
     <sc-if value="{{showAppBack}}"><button class="app-header-back" aria-label="Back to apps" onClick="{{backToApps}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
     <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">Workflows</h1>
     <sc-if value="{{workflows.localHistory}}"><button aria-label="Manage workflow history" onClick="{{workflows.localHistory}}" style="min-height:44px;padding:8px">History</button></sc-if>
-    <button class="ib workflow-new" aria-label="New automation" onClick="{{workflows.newFlow}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button>
+    <button class="ib workflow-new" aria-label="Add to Workflows" onClick="{{workflows.newFlow}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button>
   </div>
   <sc-if value="{{workflows.automation}}">
     <div class="workflow-toolbar">
