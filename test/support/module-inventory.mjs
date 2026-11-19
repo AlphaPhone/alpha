@@ -32,6 +32,8 @@ export const moduleInventory = {
     actions: []
   },
   reviewedHelpers: {
+    "apps/app/src/browser/history.ts": {"owner": "apps/app/src/browser/browser-surface.ts", "reason": "Keeps visit timestamps and applies the selected History clear range.", "tests": ["test/browser/browser-signins.spec.ts", "test/native-browser-view-binding.test.mjs"]},
+    "android/app/src/main/java/ai/alphacompute/alphaphone/ViewRequestDiagnostic.java": {"owner": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java", "reason": "Correlates failed navigation phases without recording request paths or payloads.", "tests": ["test/view-request-diagnostic.test.mjs"]},
     "apps/app/src/browser/workflow-app-state.ts": {"owner": "apps/app/src/browser/simulated-workflows.ts", "reason": "Reads one development workflow state from the simulator and its saved overlay.", "tests": ["test/browser/dev-workflow-execution.spec.ts", "test/browser/dev-workflow-messages.spec.ts"]},
     "apps/app/src/prototype/attachment-picker.ts": {"owner": "apps/app/src/prototype/agent-adapter.ts", "reason": "Reviews current Files and Photos selections before attaching their exact bytes to the assistant draft.", "tests": ["test/browser/chat-attachment-picker.spec.ts"]},
     "apps/app/src/prototype/chat-attachment-files.ts": {"owner": "apps/app/src/prototype/agent-adapter.ts", "reason": "Validates attachment records when restoring the assistant draft and conversation history.", "tests": ["test/quint-chat-attachments.test.mjs"]},
@@ -221,6 +223,7 @@ export const moduleInventory = {
     "android/app/src/main/java/ai/alphacompute/alphaphone/SourceRenewalHost.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/SourceRenewalNotices.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/UpdateConfirmationReceipt.java",
+    "android/app/src/main/java/ai/alphacompute/alphaphone/ViewRequestDiagnostic.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/VoiceEventAdmission.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowNoticeDelivery.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowNoticePoster.java",
@@ -306,6 +309,7 @@ export const moduleInventory = {
     "apps/app/src/browser/file-picker.ts",
     "apps/app/src/browser/files.ts",
     "apps/app/src/browser/focus-state.ts",
+    "apps/app/src/browser/history.ts",
     "apps/app/src/browser/hosted-results.ts",
     "apps/app/src/browser/incoming-simulation.ts",
     "apps/app/src/browser/journal-retention.ts",
