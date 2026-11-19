@@ -26,7 +26,7 @@ const compiled=await build({
 function fixture({read=async()=>({status:'read',text:'Readable excerpt'}),pdf=async()=>({status:'rendered',page:0,pageCount:1,imageUri:'blob:pdf-page'}),native=false,
   sourceRead=async()=>{throw Error('Source read outside fixture');},sourceRetain=async()=>({reference:'fixture-source'}),
   index={record:()=>[],setOpen(){},list:()=>[],open:()=>null,has:()=>true},
-  describe=async()=>({status:'unavailable'}),rename=async()=>({status:'unavailable'})}={}){
+  describe=async()=>({status:'unavailable'}),rename=async()=>({status:'unavailable'}),messages}={}){
  const state={open:null},document={hidden:false,querySelector:()=>null},attachments=[],reviews=[],forgotten=[],retained=[];
  let active=true;
  const api={active:true,isActive:()=>active,get:()=>state,set:patch=>Object.assign(state,patch),setView(){},
@@ -42,7 +42,7 @@ function fixture({read=async()=>({status:'read',text:'Readable excerpt'}),pdf=as
  const module={exports:{}};
  new Function('require','module','exports','__ports','window','document','navigator',compiled.outputFiles[0].text)(
   createRequire(import.meta.url),module,module.exports,ports,new EventTarget(),document,{});
- const views={files:{render:()=>({})},inbox:{}},Component=class {};
+ const views={files:{render:()=>({})},inbox:{},...(messages?{messages}:{})},Component=class {};
  const accept=module.exports.installSelectedDocumentAdapter(Component,views);
  return {accept:(result,recent)=>accept('files',result,api,recent),render:()=>views.files.render(state,api),api,state,document,attachments,reviews,forgotten,retained,
   active(value){active=value;},leave:()=>views.files.onLeave?.(api),close:()=>views.files.back(state,api)};
@@ -196,4 +196,19 @@ test('a picked file shows its type, size and date, never a MIME type, and only w
  const g=fixture();
  await g.accept(selected('plain'));
  assert.equal(g.render().pv.meta,'Text');
+});
+
+test('Files offers Messages only for a PNG or JPEG whose known size Messages accepts, and a rename keeps that size',async()=>{
+ // Messages publishes its limit as pictureFits; this stand-in has sms-adapter's rule (mmsPictureFits).
+ const messages={sharePicture:async()=>{},pictureFits:(type,size)=>['image/png','image/jpeg','image/gif'].includes(type)&&Number.isInteger(size)&&size>0&&size<=1024*1024};
+ const offered=async(result,renamed)=>{
+  const f=fixture({messages,rename:async()=>renamed});await f.accept(result,false);
+  if(renamed){f.api.set({rn:renamed.name});await f.render().pv.saveRn();}
+  return f.render().pv.canMessage;
+ };
+ assert.equal(await offered({...selected('small','image/png'),size:68}),true);
+ assert.equal(await offered(selected('unknown','image/png')),false,'an unknown size is never assumed small');
+ assert.equal(await offered({...selected('large','image/jpeg'),size:1024*1024+1}),false);
+ assert.equal(await offered({...selected('text','text/plain'),size:68}),false);
+ assert.equal(await offered({...selected('small','image/png'),size:68},{...selected('renamed','image/png'),name:'renamed.png'}),true);
 });
