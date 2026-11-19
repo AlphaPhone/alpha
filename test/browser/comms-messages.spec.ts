@@ -219,6 +219,31 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(false);
   });
 
+  test('an Alpha draft keeps its addressee and text in view above a long conversation', async ({page}) => {
+    await setupTelephony(page);
+    // A thread with real history: the stage must not shrink the draft to its action row.
+    await page.evaluate(() => {
+      const rows = (window as any).messages['thread:101'], first = rows[0];
+      for (let i = 0; i < 40; i++) rows.unshift({...first, id: `sms:${2000 + i}`, date: first.date - (i + 1) * 60_000, body: `Earlier message ${i + 1} about who is bringing what to dinner.`});
+    });
+    await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
+    await page.getByRole('button', {name: /^Ada Okafor/}).click();
+    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    await expect(page.getByText('Earlier message 1 about who is bringing what to dinner.', {exact: true})).toHaveCount(1);
+    expect(await sms(page, 'placeAskedSmsDraft', 'Ten minutes away')).toBe('drafted');
+    await openAlpha(page);
+    const draft = page.locator(bubble), body = draft.getByRole('textbox', {name: 'Message draft', exact: true});
+    await expect(body).toHaveValue('Ten minutes away');
+    await expect(draft.locator('.alpha-draft-label')).toBeInViewport({ratio: 1});
+    await expect(body).toBeInViewport({ratio: 1});
+    await expect(page.locator('[data-alpha-draft-send]')).toBeInViewport({ratio: 1});
+    const [card, label, text] = await Promise.all([draft.boundingBox(), draft.locator('.alpha-draft-label').boundingBox(), body.boundingBox()]);
+    expect(card && label && text, 'draft parts are laid out').toBeTruthy();
+    expect(label!.y, 'the addressee is inside the card, not scrolled out of it').toBeGreaterThanOrEqual(card!.y - 1);
+    expect(text!.y + text!.height, 'the whole text box is inside the card').toBeLessThanOrEqual(card!.y + card!.height + 1);
+    expect(await inputs(page, 'sendComposedSms')).toEqual([]);
+  });
+
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
     await setupTelephony(page);
     // The first send fails in transport; the retry returns a receipt bound to the reviewed text.
