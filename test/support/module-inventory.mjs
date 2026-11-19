@@ -699,6 +699,7 @@ export const moduleInventory = {
     "apps/app/src/runtime/view-focus.ts",
     "apps/app/src/runtime/view-navigation.ts",
     "apps/app/src/runtime/voice-assistant.ts",
+    "apps/app/src/runtime/voice-call-pause.ts",
     "apps/app/src/runtime/voice-entry-policy.ts",
     "apps/app/src/runtime/voice-selection.ts",
     "apps/app/src/runtime/voice-states.ts",
