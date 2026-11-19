@@ -15,7 +15,7 @@ import { registerPlugin } from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {telephonyProfile} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {createPhoneInfoLoader,identifiersElsewhere,phoneDefaultRows,phoneLineSections} from './phone-info-page';
-import { broaderPageNotice, switchValue } from './native-adapter';
+import { broaderPageNotice } from './native-adapter';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps } from '../daily';
 import { agentPendingText, connectionController, RESIDENT_UNPACKAGED } from '../runtime/connection-ui';
@@ -286,7 +286,7 @@ export function settingsNavigationRows<T extends NavigationRow>(rows: T[], devel
 /** Sections another surface may open directly (alpha:settings-page), with the category whose page
  * Back returns to. Developer, password and credential pages are never addressable this way. */
 const SETTINGS_SECTIONS: Record<string, string | null> = {
-  display: 'settings-general', sound: 'settings-general', notifications: 'settings-general', battery: 'settings-general', 'settings-general': 'settings-general',
+  display: 'settings-general', sound: 'settings-general', notifications: 'settings-general', 'settings-general': 'settings-general',
   privacy: 'settings-privacy', 'settings-permissions': 'settings-privacy', 'settings-privacy': 'settings-privacy',
   'settings-account': 'settings-account',
   'settings-apps': 'settings-apps', calendar: 'settings-apps', 'app-settings-workflows': 'settings-apps', 'app-settings-inbox': 'settings-apps',
@@ -295,6 +295,14 @@ const SETTINGS_SECTIONS: Record<string, string | null> = {
 /** The view-state patch that opens a section, or null for anything outside the allowlist. */
 export function settingsSectionPatch(section: unknown): { page: string; settingsCategory: string | null } | null {
   return typeof section === 'string' && Object.hasOwn(SETTINGS_SECTIONS, section) ? { page: section, settingsCategory: SETTINGS_SECTIONS[section] } : null;
+}
+/** Reference pages the live Settings never opens: no row or other surface leads to them, and Android
+ * owns these settings. A stale or direct selection (a development jump) draws Settings instead of
+ * their sample content. */
+export const RETIRED_SETTINGS_PAGES: readonly string[] = ['wifi', 'bluetooth', 'mobile', 'battery', 'accounts'];
+/** The page the live render draws for a selection: none for a retired page, settingsPage otherwise. */
+export function liveSettingsPage(page: string | null | undefined, developerSurfaces: boolean): string | null | undefined {
+  return typeof page === 'string' && RETIRED_SETTINGS_PAGES.includes(page) ? null : settingsPage(page, developerSurfaces);
 }
 // settings-facts:end
 /** Saved appearance choice. 'system' follows prefers-color-scheme, which Android WebView also reports. */
@@ -807,7 +815,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const categoryPage=typeof state.page==='string'&&Object.hasOwn(categoryNames,state.page)?state.page:!state.page?activeSettingsCategory:null;
     const phonePage=state.page==='phone-info'&&!!phoneLoader();
     phoneInfo?.sync(phonePage&&!document.hidden);
-    const out = render({ ...state, page: categoryPage||appSettingsPage||permissionsPage||phonePage?null:settingsPage(state.page, developerTools), acct: null, adding: false, sheet: ['conn', 'voice', 'wipe', 'wifiPw', 'forget'].includes(state.sheet?.kind) ? null : state.sheet }, api);
+    const out = render({ ...state, page: categoryPage||appSettingsPage||permissionsPage||phonePage?null:liveSettingsPage(state.page, developerTools), acct: null, adding: false, sheet: ['conn', 'voice', 'wipe', 'wifiPw', 'forget'].includes(state.sheet?.kind) ? null : state.sheet }, api);
     // Prototype personality values are mock-only until the agent reports them.
     out.persona = 'Voice & personality';
     const connection = connectionController.getSnapshot();
@@ -827,7 +835,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const providerModelPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
     const inferenceModel=residentProvider?.configured===true&&typeof residentProvider.model==='string'&&providerModelPattern.test(residentProvider.model)
       ?modelLabel(providerName,residentProvider.model):'Not reported';
-    const cloudLabel = account ? account.email||`Account ${account.userId.slice(0, 8)}` : 'Not signed in';
     const manage = (page: string) => () => void device.openSettings({ page }).then(opened => { const notice = broaderPageNotice(page, opened); if (notice) api.toast(notice); }, () => api.toast('Unavailable'));
     const info = (label: string, val: string, id = label): Bag => ({ id, kInfo: true, label, val, hasVal: true, noAB: true });
     const note = (label: string, sub: string): Bag => ({ kInfo: true, label, val: '', hasVal: false, hasSub: true, sub, noAB: true });
@@ -871,22 +878,12 @@ export function installSettingsAdapter(Component: any, views: Bag) {
     const problemsRow = (): Bag => ({ kNav:true, label:'Problem log', lbl:problemCount?`Problem log, ${problemCount}`:'Problem log', val: problemCount === null ? 'Unavailable' : problemCount ? String(problemCount) : '', hasVal:problemCount !== 0, valCss:problemCount?'padding:2px 9px;border-radius:11px;background:var(--bg);color:var(--fg);font-variant-numeric:tabular-nums':'', chev:true, noAB:true, go:()=>{ api.set({ page:'problems' }); void refresh(); void refreshResidentDiagnostics(); } });
     const diagnosticsRow = (): Bag => ({ kNav:true, label:'Export diagnostics', lbl:'Export diagnostics', hasSpin:diagnosticsBusy, chev:!diagnosticsBusy, noAB:true, go:()=>void exportDiagnostics(api) });
     const licensesRow = (): Bag => ({ kNav:true, label:'Licenses', lbl:'Licenses', chev:true, noAB:true, go:()=>{ api.set({ page:'licenses',licenseQuery:'' }); void loadLicenses(changed); } });
-    const percent = typeof facts.batteryPercent === 'number' ? `${facts.batteryPercent}%` : 'Unavailable';
-    const active = (key: string) => typeof facts[key] === 'boolean' ? facts[key] ? 'Active' : 'Inactive' : 'Unavailable';
-    // System switches as Android reported them (AlphaDevice.snapshot). Alpha cannot change any of
-    // them; a switch Android did not answer for keeps its earlier wording and is never shown as off.
-    const wifiValue = switchValue(facts.wifiEnabled, active('wifiActive'), { on: facts.wifiActive === true ? 'Connected' : 'On' });
-    const bluetoothValue = switchValue(facts.bluetoothEnabled, Capacitor.isNativePlatform() ? '' : active('bluetoothActive'));
-    const mobileValue = facts.airplaneMode === true ? 'Airplane mode' : switchValue(facts.mobileDataEnabled, active('cellularActive'), { on: facts.cellularActive === true ? 'In use' : 'On' });
-    const reported = (value: unknown) => switchValue(value, '—');
     const interruptionLabels:Bag={all:'Off',priority:'Priority only',alarms:'Alarms only',none:'On',unknown:'Not available'};
     const browserNotifications = delivery.scope === 'browser';
     const topValues: Bag = {
-      'Wi-Fi': wifiValue, 'Bluetooth': bluetoothValue, 'Mobile data': mobileValue,
       'Accounts': account ? 'Connected' : 'Signed out', 'Connections': gmail,
-      'Battery': percent, 'Models': target, 'About': facts.appVersion || 'Unavailable',
+      'Models': target, 'About': facts.appVersion || 'Unavailable',
       'Notifications': typeof delivery.appEnabled !== 'boolean' ? 'Unavailable' : !delivery.appEnabled || !delivery.permissionGranted ? 'Off' : delivery.channels?.some((c:Bag)=>c.blocked||c.groupBlocked) ? 'Some off' : 'On',
-      'Sound & vibration': '',
     };
     for (const page of out.stack) {
       if (page.isTop) {
@@ -1098,25 +1095,19 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         }
 
         {
+          // The system owns these settings; Settings has no page for them.
           const systemOnly = new Set(['Wi-Fi', 'Bluetooth', 'Mobile data', 'Battery', 'Sound & vibration']);
           page.groups = page.groups.map((g:Bag) => ({...g, rows:g.rows.filter((row:Bag) => !systemOnly.has(row.label))})).filter((g:Bag) => g.rows.length);
         }
-        // Status words carry a dot; Android-only hand-off pages open Android directly.
+        // Status words carry a dot.
         const topDots: Bag = { Accounts: account ? 'ok' : 'off', Notifications: topValues.Notifications === 'On' ? 'ok' : topValues.Notifications === 'Some off' ? 'warn' : 'off' };
-        const handoffs: Bag = Capacitor.isNativePlatform() ? { 'Wi-Fi': 'wifi', 'Bluetooth': 'bluetooth', 'Sound & vibration': 'sound' } : {};
         for (const g of page.groups) for (const row of g.rows) if (row.label in topValues) {
           row.sub = topValues[row.label]; row.hasSub = !!row.sub; row.val = ''; row.hasVal = false;
           if (row.label in topDots && row.sub !== 'Unavailable') { row.hasSubDot = true; row.dot = topDots[row.label]; }
-          if (row.label in handoffs) { row.go = manage(handoffs[row.label]); row.hasExt = true; row.chev = false; }
         }
         continue;
       }
-      if (page.title === 'Accounts') {
-        const plan=connectionController.residentPlanSettings();
-        const expires=plan?.keyExpiring&&typeof plan.keyExpiresAt==='number'?new Date(plan.keyExpiresAt).toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';
-        // A single destination opens directly (owner decision): no intermediate Account page.
-        page.groups = [group([{ kNav:true, label:'Account & plan', lbl:`${serviceName} account & plan`, sub:plan?.keyExpiring?(expires?`Expires ${expires}`:'Expiring'):cloudLabel, hasSub:true, hasSubDot:!!plan?.keyExpiring, dot:'warn', chev:true, noAB:true, go:()=>plan?connectionController.openPlan():connectionController.openCloudAccount() }, ...(Capacitor.isNativePlatform()?[nav('Device accounts', 'accounts', 'Device accounts in Android')]:[])])];
-      } else if (page.title === 'Connections') {
+      if (page.title === 'Connections') {
         page.groups = [group([{kNav:true,label:'Google accounts',lbl:'Manage Google accounts',chev:true,noAB:true,go:()=>googleConnectionController.open()}])];
       } else if (state.page === 'character' && page.hero?.kChar === true) {
         // The reference character page deliberately has no visible title.
@@ -1125,24 +1116,10 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           {kNav:true,label:'Open conversation',lbl:'Open conversation',chev:true,noAB:true,go:()=>api.composeContentQuestion('')},
           {kNav:true,label:'Agent connection',lbl:'Agent connection',chev:true,noAB:true,go:()=>connectionController.open()},
         ])]:[group(speechRows())];
-      } else if (page.title === 'Battery') {
-        page.hero = { ...page.hero, big: percent, sub: facts.charging === true ? 'Charging' : '', hasMeter: typeof facts.batteryPercent === 'number', meter: facts.batteryPercent ?? 0 };
-        page.groups = [group([info('Battery saver', typeof facts.powerSave === 'boolean' ? facts.powerSave ? 'On' : 'Off' : 'Unavailable'), nav('Battery', 'battery', 'Manage battery in Android')])];
       } else if (page.title === 'About') {
         const native=Capacitor.isNativePlatform();
         page.hero={kAlpha:true,version:native?versionLabel(facts.appVersion||buildVersion,facts.appVersionCode):buildVersion==='Unavailable'?'Development preview':'Version '+buildVersion};
         page.groups=[...(native&&facts.androidRelease?[group([info('Android version',facts.androidRelease)])]:[]),group([...(native&&!testMocksEnabled?[{...action('Agent activity',()=>api.set({page:'agent-activity'})),lucide:'clock'}]:[]),...(testMocksEnabled?[{...action('Status',()=>connectionController.open()),val:connection.name,hasVal:true,lucide:'link'}]:[]),licensesRow()])];
-      } else if (page.title === 'Wi-Fi') {
-        page.hasHdrTog = false; page.hdrTog = null;
-        page.hero = { ...page.hero, big: wifiValue, sub: '' };
-        page.groups = [group([nav('Networks', 'wifi', 'Manage Wi-Fi networks')])];
-      } else if (page.title === 'Bluetooth') {
-        page.hasHdrTog = false; page.hdrTog = null;
-        page.groups = [group([...(typeof facts.bluetoothEnabled === 'boolean' ? [info('Bluetooth', bluetoothValue)] : []), nav('Devices', 'bluetooth', 'Pair or manage devices')])];
-      } else if (page.title === 'Mobile data') {
-        page.groups = [group([info('Mobile connection', active('cellularActive')),
-          ...(Capacitor.isNativePlatform() ? [info('Mobile data', reported(facts.mobileDataEnabled)), info('Airplane mode', reported(facts.airplaneMode))] : []),
-          nav('Networks', 'mobile', 'Manage mobile networks'), ...(Capacitor.isNativePlatform() ? [nav('Airplane mode', 'airplane', 'Airplane mode in Android')] : [])])];
       } else if (page.title === 'Models') {
         const native=Capacitor.isNativePlatform();
         page.hero = { ...page.hero, big: target, sub: '' };
@@ -1253,21 +1230,17 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         });
         return {...group(selected), cap:caption, hasCap:true};
       }).filter(section => section.rows.length);
-      // General: network hand-offs, the device, updates, then the destructive reset alone and last.
+      // General: the device, updates, then the destructive reset alone and last.
       const take = (names: string[]) => names.flatMap(name => { const row = rows.get(name); rows.delete(name); return row ? [row] : []; });
-      const network = take(['Wi-Fi', 'Bluetooth', 'Mobile data']);
       const updates = take(['Allow automatic updates', 'Automatic updates', 'Update', 'Check', 'Update check']);
       const reset = take(['Erase all data']);
-      settingsTop.groups.splice(2, 0, ...[['Network', network], ['Device', [...rows.values()]], ['Updates', updates], ['Reset', reset]]
+      settingsTop.groups.splice(2, 0, ...[['Device', [...rows.values()]], ['Updates', updates], ['Reset', reset]]
         .filter(([, list]) => (list as Bag[]).length).map(([cap, list]) => ({...group(list as Bag[]), cap, hasCap:true})));
-      for (const page of out.stack) {
-        if (page.title === 'Accounts') page.title = 'Account & plan';
-        if (page.title === 'Connections') page.title = 'Google & email';
-      }
+      for (const page of out.stack) if (page.title === 'Connections') page.title = 'Google & email';
     }
     if(settingsTop){
       const detailGroups=settingsTop.groups;
-      const categories=[['settings-account','Account',['Account']],['settings-general','General',['Preferences','Network','Device','Updates','Reset']],['settings-privacy','Privacy',['Privacy']],['settings-apps','Apps',['Apps']],['settings-help','About',['Help']]] as const;
+      const categories=[['settings-account','Account',['Account']],['settings-general','General',['Preferences','Device','Updates','Reset']],['settings-privacy','Privacy',['Privacy']],['settings-apps','Apps',['Apps']],['settings-help','About',['Help']]] as const;
       settingsTop.groups=categories.filter(([key])=>key!=='settings-account').map(([key,title])=>group([{kNav:true,label:title,lbl:title,chev:true,noAB:true,go:()=>{api.set({page:key==='settings-help'?'about':key,settingsCategory:key==='settings-help'?null:key});}}]));
       if(Capacitor.isNativePlatform())settingsTop.groups.push(group([{...nav('Android settings','system'),lucide:'settings'}]));
       if(wakeListeningStopUnconfirmed())settingsTop.groups.unshift(group([micMayBeOn()],'wake-stop-unconfirmed'));
