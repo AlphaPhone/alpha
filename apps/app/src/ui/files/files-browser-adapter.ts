@@ -293,6 +293,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
     filterUnavailable = false;
   let dialog: Dialog | undefined,
     dialogTrigger: HTMLElement | null = null,
+    menuOpener: HTMLElement | null = null,
     opened: { path: string; volume?: string; selectionId?: string } | undefined;
   let selectionEpoch = 0;
   let generation = 0,
@@ -967,7 +968,13 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
     volume?: string,
   ) {
     if (busy || !paths.length) return;
-    dialogTrigger = trigger instanceof HTMLElement ? trigger : null;
+    // A menu row unmounts with its menu, so focus returns to the button that opened the menu.
+    dialogTrigger =
+      trigger instanceof HTMLElement
+        ? trigger.closest(".files-actions-menu")
+          ? menuOpener
+          : trigger
+        : null;
     dialog = {
       kind: "dest",
       op,
@@ -1416,8 +1423,13 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         (place.kind === "category" && place.category === "downloads"),
       canSort: listing,
       newFolder,
-      sort: () => {
-        if (listing && !busy) currentApi.set({ menu: true });
+      sort: (event?: Event) => {
+        if (!listing || busy) return;
+        menuOpener =
+          event?.currentTarget instanceof HTMLElement
+            ? event.currentTarget
+            : null;
+        currentApi.set({ menu: true });
       },
       toggleView: () => {
         if (listing && !busy) currentApi.set({ grid: !state.grid });
@@ -1665,7 +1677,6 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           repaint();
         },
         hasMenu: at.kind !== "trash",
-        openMenu: () => currentApi.set({ menu: true }),
         moreD: ICONS.more,
         menuRows: [
           ...(["name", "date", "size"] as SortMode[]).map((mode) => ({
@@ -1761,7 +1772,6 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       out.canRename = selection?.size === 1;
       out.icons = ICONS;
       out.menuOpen = !!state.menu;
-      out.closeMenu = () => currentApi.set({ menu: false });
     } else {
       out.fd = null;
       out.menuOpen = false;
@@ -1807,6 +1817,23 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         .filter(Boolean)
         .join(" · ");
     } else if (!out.isPreview) opened = undefined;
+
+    if (out.isPreview) {
+      // The preview and a folder shown beside it share one popup. Only the preview's
+      // own button opens File actions; the folder's button keeps Sort and more.
+      const fileMenu = state.menu === "file";
+      out.menuOpen = fileMenu || (!!state.menu && !!out.fd);
+      out.fileMenu = fileMenu;
+      out.folderMenu = !fileMenu;
+      out.menuLabel = fileMenu ? "File actions" : "Sort and more";
+      out.openMenu = (event?: Event) => {
+        menuOpener =
+          event?.currentTarget instanceof HTMLElement
+            ? event.currentTarget
+            : null;
+        currentApi.set({ menu: "file" });
+      };
+    }
 
     const d = dialog;
     out.nativeTreeDialog = null;

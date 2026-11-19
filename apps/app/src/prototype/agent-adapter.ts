@@ -1,6 +1,6 @@
 import {createImagePreview} from '../runtime/image-preview';
 import {ChatAttachmentPicker,encodeChatAttachments} from './attachment-picker';
-import {storedChatFiles,type ChatFile} from './chat-attachment-files';
+import {storedChatFiles,type ChatFile,type SelectedChatFile} from './chat-attachment-files';
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
 import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
@@ -1645,6 +1645,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.transcriptAttachment={title,selection:JSON.stringify(selection)};
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
+    api.attachSelectedFile=(selection: SelectedChatFile)=>pickChatAttachments(this, selection);
     api.composeContentQuestion=(draft:string,source?:Source)=>{
       this.reviewedSourceDraft={draft,source:sourceOf(source)};
       context(this);this.setState({chat:'sheet',shade:false,draft});
@@ -1691,29 +1692,48 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
     return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
   };
-  async function pickChatAttachments(shell:Shell){
+  const selectedFiles=new WeakMap<ChatFile,{source:Source; selection:SelectedChatFile; thumbnail?:string}>();
+  async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile){
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
     const camera=shell.cameraAttachment;
+    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding){
+      // Ask Alpha from a Files menu closes the menu first, so a refusal here needs words.
+      if(selection)shell.toast('Can’t attach the file right now. Try again in a moment.');
+      return;
+    }
+    if (selection && shell.fileAttachmentScope===binding && existing.some(file=>selectedFiles.get(file)?.selection.current())) {
+      shell.setState({chat:'sheet',shade:false});
+      return;
+    }
     const maximum=MAX_CHAT_UPLOAD_ATTACHMENTS-existing.length-(camera?1:0);
     if(maximum<1){shell.toast('Remove an attachment before adding another.');return;}
-    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding)return;
     const abort=shell.chatAttachmentAbort=new AbortController();
-    const current=()=>!abort.signal.aborted&&shell.live&&!document.hidden&&shell.S().view===view&&
+    const current=()=>!abort.signal.aborted&&(!selection||selection.current())&&shell.live&&!document.hidden&&shell.S().view===view&&
       attachmentBinding()===binding&&shell.fileAttachments===existing&&shell.cameraAttachment===camera&&
       !connectionController.getSnapshot().open&&!shell.S().typing&&!shell.messageEditTarget&&!shell.draftSendPending&&!shell.composerDraft?.holding;
     const retire=()=>abort.abort();
     for(const event of ['pagehide','launcher-home','alpha:device-state'])window.addEventListener(event,retire,{signal:abort.signal});
     const unsubscribe=connectionController.subscribe(()=>{if(!current())abort.abort();});
     try{
-      const files:File[]=await shell.chooseLocalAttachments(abort.signal,maximum,current);
+      const selected=selection ? await selection.read(current) : undefined;
+      if (!current() || (selection && !selected)) return;
+      const files:File[]=selected ? [selected.file] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
       if(!current()||!files.length)return;
       const encoded=await encodeChatAttachments(files);
       if(!current())return;
       if(!attachmentBatchFits([...existing,...encoded],camera?.image)){shell.toast('Choose fewer or smaller files.');return;}
       shell.fileAttachmentScope=binding;
-      shell.fileAttachments=[...existing,...encoded.map(file=>({...file,id:crypto.randomUUID()}))];
-      if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
+      const additions = encoded.map(file=>({...file,id:crypto.randomUUID()}));
+      if (selection && selected) {
+        const file=additions[0];
+        const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
+        selectedFiles.set(file, {source:selected.source,selection,thumbnail});
+      }
+      shell.fileAttachments=[...existing,...additions];
+      if (selected) {
+        shell.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Explain this file'}));
+      } else if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
     }catch(error){
       if(current())shell.toast(errorNotice(error,'The attachment could not open.'),ERROR_TOAST);
     }finally{
@@ -1818,13 +1838,30 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.attachFiles=()=>void pickChatAttachments(this);
     out.attachFilesDisabled=!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding||this.messageEditTarget);
     out.hasPendingFiles=!!this.fileAttachments?.length;
-    out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>({
-      id:file.id,name:file.name,removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
+    out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>{
+      const item=selectedFiles.get(file);
+      return {
+      id:file.id,name:file.name,reviewable:!!item,plain:!item,thumbnail:item?.thumbnail,document:!item?.thumbnail,
+      editLabel:'Edit excerpt from '+file.name,edit:()=>{
+        const binding=attachmentBinding(), draft=this.S().draft;
+        const current=()=>this.live && !document.hidden && this.fileAttachmentScope===binding &&
+          attachmentBinding()===binding && this.fileAttachments?.includes(file) && this.S().draft===draft &&
+          !this.S().typing && !this.draftSendPending && !this.composerDraft?.holding;
+        if(!item || !current())return;
+        if(!item.selection.current()){this.toast('Reopen the file to edit its excerpt.');return;}
+        item.selection.edit((text,source)=>{
+          if(!current())return;
+          this.fileAttachments=this.fileAttachments.filter((entry:ChatFile)=>entry!==file);
+          this.api(this.S().view).composeContentQuestion(text,source);
+        },current,draft==='Explain this file'?undefined:draft);
+      },
+      removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
         if(this.S().typing||this.draftSendPending||this.composerDraft?.holding)return;
         this.fileAttachments=(this.fileAttachments??[]).filter((item:ChatFile)=>item!==file);
         this.setState({});
       },
-    }));
+      };
+    });
     out.onKey=(event:KeyboardEvent&{nativeEvent?:KeyboardEvent})=>{
       if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&!event.nativeEvent?.isComposing&&event.keyCode!==229){event.preventDefault();sendFromComposer(this);}
     };
@@ -2112,6 +2149,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       finally{this.draftSendPending=false;}
     }
     let sourceDraft=fromComposer&&this.reviewedSourceDraft?.draft===text?sourceOf(this.reviewedSourceDraft.source):undefined;
+    if (filesAtStart?.length===1 && !sourceDraft) sourceDraft=selectedFiles.get(filesAtStart[0])?.source;
     context(this);
     const transcript=fromComposer?this.transcriptAttachment:null;
     const mail=fromComposer?(this.mailAttachment??null):null;

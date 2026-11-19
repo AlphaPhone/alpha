@@ -106,7 +106,9 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open garden-report.txt',exact:true}).click();
  await expect(page.getByText('PRIVATE OMIT: do not send this line.',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ await page.getByRole('button',{name:/^Edit excerpt from /}).click();
  const question=page.getByRole('dialog',{name:'Ask about selected content'});
  await expect(question.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(contents);
  await expect(question.getByRole('checkbox',{name:'Link source'})).toBeChecked();
