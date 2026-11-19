@@ -274,9 +274,10 @@ test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async 
   await page.getByRole('button', { name: 'Camera', exact: true }).click();
   await expect.poll(() => page.locator('[aria-label^="Viewfinder."] video').evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
   // Scanning is reached by asking Alpha in Camera: one frame opens scan review, which builds the PDF.
-  const scan = async () => {
-    await page.getByRole('button', { name: 'Type', exact: true }).click();
+  const scan = async (openComposer = true) => {
+    if (openComposer) await page.getByRole('button', { name: 'Type', exact: true }).click();
     const input = page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
+    await expect(input).toBeVisible();
     await input.fill('Scan this'); await input.press('Enter');
     await page.getByRole('button', { name: 'Multi-page', exact: true }).click();
     await expect(page.getByRole('img', { name: 'Document page 1', exact: true })).toBeVisible();
@@ -291,7 +292,8 @@ test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async 
   const textReview = page.getByRole('dialog', { name: 'Review scanned text' });
   await textReview.getByRole('button', { name: 'Close scan', exact: true }).click();
   await expect(textReview).toHaveCount(0);
-  await scan();
+  // Closing Scan keeps the current composer open.
+  await scan(false);
   await page.getByRole('button', { name: 'Download searchable PDF', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'Review searchable PDF' });
   // Local OCR runs in a worker with WebAssembly: the policy must admit both.
