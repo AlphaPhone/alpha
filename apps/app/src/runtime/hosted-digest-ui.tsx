@@ -39,6 +39,7 @@ import {
  digestStatusLabel,
  digestRan,
  digestZoneNote,
+ digestZoneChoices,
  missedRunNowOffers,
  type MissedRunNow,
  rememberRetainedDigests,
@@ -796,7 +797,9 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 {features.dossier&&sources.find(s=>s.id===sourceId)?.live?.provider==='native'&&<button disabled={busy} onClick={()=>{const source=sources.find(s=>s.id===sourceId)!;setReview({path:'dossier',body:{sourceId:source.id,sourceRevision:source.revision,mutationId:crypto.randomUUID(),confirmed:true},summary:`Prepare a brief now from ${source.label}? This sends one read of these sources to your agent’s AI. It creates no schedule. It can’t send email or act on your phone. ${billing}`});}}>Review on-demand brief</button>}
 							<label>
 								Time zone
-								<input value={zone} onChange={(e) => setZone(e.target.value)} />
+								<select value={zone} onChange={(e) => setZone(e.target.value)}>
+									{digestZoneChoices(zone, deviceZone).map((z) => <option value={z} key={z}>{z}</option>)}
+								</select>
 							</label>
 							<label>
 								Morning

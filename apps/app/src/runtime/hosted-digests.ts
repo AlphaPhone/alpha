@@ -46,6 +46,7 @@ export {
   digestStatusLabel,
   digestSummaryText,
   digestZoneNote,
+  digestZoneChoices,
   digestCalendarErrorText,
   DIGEST_CALENDAR_PERMISSION_DENIED,
   DIGEST_CALENDARS_UNAVAILABLE,
