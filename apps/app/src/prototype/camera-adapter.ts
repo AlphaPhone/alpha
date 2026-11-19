@@ -871,7 +871,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       changed(){settle();schedule();takePendingShot();void takePendingZoom();if(lightOffPending&&!session.busy)void lightOff();},
     },
   });
-  function hideAccess(){accessPanel?.remove();accessPanel=undefined;}
+  /** A notice opening or closing changes whether the volume keys are Camera's shutter: tell Android
+   * at once, so the first press behind a notice changes the volume and the first press after it shoots. */
+  function noticeChanged(){queueMicrotask(()=>{if(!disposed)volumeShutter?.(volumeShutterWanted());});}
+  function hideAccess(){const had=!!accessPanel;accessPanel?.remove();accessPanel=undefined;if(had)noticeChanged();}
   function showAccess(kind:AccessKind|'unavailable'){
     hideAccess();
     const vf=document.querySelector<HTMLElement>(finder),screen=vf?.closest<HTMLElement>('[data-alpha-camera-root]')||vf?.closest<HTMLElement>('[data-alpha-layer]')||vf?.closest<HTMLElement>('[data-screen]');if(!screen)return;
@@ -895,7 +898,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const icon=document.createElement('span');icon.setAttribute('aria-hidden','true');icon.style.cssText='position:relative;align-self:center;display:flex';icon.append(glyph);
     if(kind!=='microphone'){const slash=document.createElement('span');slash.style.cssText='position:absolute;left:50%;top:-2px;width:2.5px;height:36px;margin-left:-1px;border-radius:2px;background:currentColor;box-shadow:0 0 0 2px var(--alpha-gray-1c);transform:rotate(-45deg)';icon.append(slash);}
     panel.append(icon,title,detail,actions);
-    screen.append(panel);accessPanel=panel;
+    screen.append(panel);accessPanel=panel;noticeChanged();
   }
   let noticeTimer:number|undefined,noticeGeneration=0;
   /** One short line, only for an outcome the person has to act on. */
