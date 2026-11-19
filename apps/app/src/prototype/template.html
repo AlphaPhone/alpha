@@ -3056,7 +3056,7 @@
       <sc-if value="{{files.filterEmpty}}">
         <div class="files-empty-state" role="status">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 40px; height: 40px"><path d="{{ic.search}}"></path></svg>
-          <span>No results to show</span>
+          <span>{{files.filterEmptyText}}</span>
         </div>
       </sc-if>
     </sc-if>
@@ -3069,7 +3069,7 @@
         <button onClick="{{files.browse.grant}}">Allow</button>
       </div>
     </sc-if>
-    <sc-if value="{{files.browse.unavailable}}"><div class="files-storage-status" role="alert">Storage unavailable</div></sc-if>
+    <sc-if value="{{files.browse.unavailable}}"><div class="files-storage-status"><div role="alert">Storage unavailable</div><button onClick="{{files.browse.retry}}">Retry</button></div></sc-if>
     <sc-if value="{{files.browse.loading}}"><p class="files-read-status" role="status">{{files.loadingText}}</p></sc-if>
     <sc-if value="{{files.browse.ready}}">
       <button onClick="{{files.browse.allFiles}}" aria-label="All files" class="tap" style="display:flex;align-items:center;gap:14px;width:100%;min-height:60px;padding:8px;border-radius:18px;text-align:left"><span style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--s2);color:var(--fg)"><svg class="i" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="{{files.browse.allFilesIcon}}"></path></svg></span><span style="font-size:16px;font-weight:500">All files</span></button>
@@ -3104,6 +3104,7 @@
         <div data-alpha-app-header="detail" style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px; gap: 2px; flex-shrink: 0">
           <button class="ib" aria-label="Back" onClick="{{files.fd.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
           <h1 data-alpha-app-title class="serif" style="margin: 0 0 0 6px; font-size: 26px; flex-grow: 1; min-width: 0; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{files.fd.name}}</h1>
+          <sc-if value="{{files.fd.canRestoreAll}}"><button onClick="{{files.fd.restoreAll}}" style="min-height: 44px; padding: 0 14px; font-size: 15px; font-weight: 600">Restore all</button></sc-if>
           <sc-if value="{{files.fd.canEmpty}}"><button onClick="{{files.fd.empty_}}" style="min-height: 44px; padding: 0 14px; color: var(--warn); font-size: 15px; font-weight: 600">Empty</button></sc-if>
           <sc-if value="{{files.toolbar.ready}}"><button class="ib" aria-label="Files options" onClick="{{files.toolbar.sort}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
         </div>
@@ -3133,13 +3134,13 @@
             <button onClick="{{files.browse.grant}}">Allow</button>
           </div>
         </sc-if>
-        <sc-if value="{{files.browse.unavailable}}"><div class="files-storage-status" role="alert">Storage unavailable</div></sc-if>
+        <sc-if value="{{files.browse.unavailable}}"><div class="files-storage-status"><div role="alert">Storage unavailable</div><button onClick="{{files.browse.retry}}">Retry</button></div></sc-if>
         <sc-if value="{{files.fd.loading}}"><p class="files-read-status" role="status">{{files.loadingText}}</p></sc-if>
         <sc-if value="{{files.fileReadNotice}}"><p class="files-read-status" role="status">{{files.fileReadNotice}}</p></sc-if>
         <sc-if value="{{files.fd.empty}}">
           <div class="files-empty-state" role="status">
             <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 44px; height: 44px"><path d="{{files.fd.emptyD}}"></path></svg>
-            <span>No files to show</span>
+            <span>{{files.fd.emptyText}}</span>
           </div>
         </sc-if>
         <sc-if value="{{files.isList}}">
@@ -3243,117 +3244,33 @@
         <sc-if value="{{files.pv.mediaImage}}"><img src="{{files.pv.mediaUrl}}" alt="{{files.pv.name}}" decoding="async" onError="{{files.pv.mediaError}}" style="display:block;width:100%;max-height:55dvh;margin:20px auto 0;object-fit:contain"></sc-if>
         <sc-if value="{{files.pv.mediaVideo}}"><video ref="{{files.pv.mediaRef}}" src="{{files.pv.mediaUrl}}" aria-label="{{files.pv.name}}" preload="metadata" onError="{{files.pv.mediaError}}" style="display:block;width:100%;max-height:55dvh;margin:20px auto 0"></video></sc-if>
         <sc-if value="{{files.pv.mediaAudio}}"><audio ref="{{files.pv.mediaRef}}" src="{{files.pv.mediaUrl}}" aria-label="{{files.pv.name}}" preload="metadata" onError="{{files.pv.mediaError}}" style="display:block;width:100%;margin:20px auto 0"></audio></sc-if>
-        <sc-if value="{{files.pv.isPages}}">
-          <sc-if value="{{files.pv.isPdf}}">
-            <div style="margin-top: 20px; border-radius: 8px; background: {{files.pv.paper}}; box-shadow: 0 0 0 1px var(--line), 0 8px 24px var(--shc); overflow: hidden">
-              <img src="{{files.pv.pdfImage}}" alt="{{files.pv.pdfLabel}}" style="display: block; width: 100%; height: auto">
-            </div>
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--mut)">
-              <sc-if value="{{files.pv.pdfHasPrevious}}"><button class="ib" aria-label="Previous PDF page" onClick="{{files.pv.pdfPrevious}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
-              <span>{{files.pv.pdfLabel}}</span>
-              <sc-if value="{{files.pv.pdfHasNext}}"><button class="ib" aria-label="Next PDF page" onClick="{{files.pv.pdfNext}}"><svg class="i" viewBox="0 0 24 24" style="transform: rotate(180deg)"><path d="{{ic.back}}"></path></svg></button></sc-if>
-            </div>
-          </sc-if>
-          <sc-for list="{{files.pv.pages}}" as="pg">
-            <div style="margin-top: 20px; aspect-ratio: 0.77; border-radius: 8px; background: {{files.pv.paper}}; box-shadow: 0 0 0 1px var(--line), 0 8px 24px var(--shc); padding: 30px 26px; box-sizing: border-box; color: var(--alpha-gray-1a); position: relative">
-              <sc-if value="{{pg.first}}">
-                <div style="font-family: 'Denton', 'Fraunces', Georgia, serif; font-size: 21px; font-weight: 400; margin-bottom: 18px">{{pg.heading}}</div>
-                <sc-for list="{{pg.rows}}" as="r">
-                  <div style="display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--alpha-gray-e4); font-size: 11.5px"><span style="width: 84px; flex-shrink: 0; color: var(--alpha-gray-55)">{{r.k}}</span><span style="font-weight: 500">{{r.v}}</span></div>
-                </sc-for>
-                <div style="height: 16px"></div>
-              </sc-if>
-              <sc-for list="{{pg.lines}}" as="l">
-                <div style="height: 6px; border-radius: 3px; background: var(--alpha-gray-dd); margin: 9px 0; width: {{l.w}}%"></div>
-              </sc-for>
-              <div style="position: absolute; bottom: 12px; right: 16px; font-size: 10px; color: var(--alpha-gray-55)">{{pg.num}}</div>
-            </div>
-          </sc-for>
-        </sc-if>
-        <sc-if value="{{files.pv.isReceipt}}">
-          <div style="margin: 20px auto 0; width: 230px; background: {{files.pv.paper}}; color: var(--alpha-gray-1a); padding: 26px 20px 30px; box-sizing: border-box; box-shadow: 0 0 0 1px var(--line), 0 8px 24px var(--shc); border-radius: 4px; font-family: 'Public Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 11px">
-            <div style="text-align: center; font-size: 15px; letter-spacing: .2em; font-weight: 700">{{files.pv.receipt.shop}}</div>
-            <div style="text-align: center; color: var(--alpha-gray-88); margin: 4px 0 16px">600 Guerrero St</div>
-            <sc-for list="{{files.pv.receipt.rows}}" as="r">
-              <div style="display: flex; justify-content: space-between; padding: 3px 0"><span>{{r.k}}</span><span>{{r.v}}</span></div>
-            </sc-for>
-            <div style="border-top: 1px dashed var(--alpha-gray-aa); margin-top: 10px; padding-top: 10px; display: flex; justify-content: space-between; font-weight: 700; font-size: 13px"><span>TOTAL</span><span>{{files.pv.receipt.total}}</span></div>
+        <sc-if value="{{files.pv.isPdf}}">
+          <div style="margin-top: 20px; border-radius: 8px; background: {{files.pv.paper}}; box-shadow: 0 0 0 1px var(--line), 0 8px 24px var(--shc); overflow: hidden">
+            <img src="{{files.pv.pdfImage}}" alt="{{files.pv.pdfLabel}}" style="display: block; width: 100%; height: auto">
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--mut)">
+            <sc-if value="{{files.pv.pdfHasPrevious}}"><button class="ib" aria-label="Previous PDF page" onClick="{{files.pv.pdfPrevious}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
+            <span>{{files.pv.pdfLabel}}</span>
+            <sc-if value="{{files.pv.pdfHasNext}}"><button class="ib" aria-label="Next PDF page" onClick="{{files.pv.pdfNext}}"><svg class="i" viewBox="0 0 24 24" style="transform: rotate(180deg)"><path d="{{ic.back}}"></path></svg></button></sc-if>
           </div>
         </sc-if>
-        <sc-if value="{{files.pv.isPhoto}}">
-          <div style="margin-top: 20px; height: 300px; border-radius: 24px; background: {{files.pv.photoBg}}; position: relative; overflow: hidden">
-            <div style="position: absolute; left: 50%; top: 44%; width: 70px; height: 70px; margin-left: -35px; border-radius: 35px; background: var(--alpha-highlight-amber); opacity: .9; display: {{files.pv.photoSun}}"></div>
-          </div>
-        </sc-if>
-        <sc-if value="{{files.pv.isAudio}}">
-          <div style="margin-top: 20px; padding: 22px 18px; border-radius: 24px; background: var(--s2)">
-            <div style="display: flex; align-items: center; gap: 2px; height: 56px">
-              <sc-for list="{{files.pv.wave}}" as="b"><span style="flex-grow: 1; height: {{b.h}}px; border-radius: 1px; background: {{b.c}}"></span></sc-for>
-            </div>
-            <div style="display: flex; align-items: center; gap: 12px; margin-top: 16px">
-              <button aria-label="{{files.pv.playLabel}}" onClick="{{files.pv.play}}" style="width: 52px; height: 52px; border-radius: 26px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; {{files.pv.playCss}}"><path d="{{files.pv.playIcon}}"></path></svg></button>
-              <span style="flex-grow: 1; font-size: 13px; color: var(--mut)">{{files.pv.time}}</span>
-              <button onClick="{{files.pv.transcribe}}" aria-label="Transcribe in Notes" style="height: 44px; padding: 0 16px; border-radius: 22px; background: var(--bg); display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px; color: var(--acct)"><path d="{{ic.notes}}"></path></svg>Transcribe</button>
-            </div>
-          </div>
-        </sc-if>
-        <sc-if value="{{files.pv.isArchive}}">
-          <div style="margin-top: 20px; border-radius: 24px; background: var(--s2); padding: 6px 0">
-            <sc-for list="{{files.pv.contents}}" as="c">
-              <div style="display: flex; align-items: center; gap: 14px; padding: 12px 18px"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--mut)"><path d="{{c.d}}"></path></svg><span style="font-size: 15px">{{c.name}}</span></div>
-            </sc-for>
-          </div>
-        </sc-if>
+        <sc-if value="{{files.pv.textBody}}"><pre data-alpha-files-text style="margin: 20px 0 0; font-family: ui-monospace, Menlo, monospace; font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere">{{files.pv.textBody}}</pre></sc-if>
       </div>
     </div>
   </sc-if>
 
   
-  <sc-if value="{{files.moveSheet}}">
-    <div ref="{{files.moveModal}}" data-alpha-popup style="display: contents">
-    <button data-alpha-backdrop tabindex="-1" aria-label="Close move" onClick="{{files.closeSheet}}" style="position: absolute; inset: 0; z-index: 8; background: var(--scrim)"></button>
-    <div class="enter" role="dialog" aria-label="Move to" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 9; max-height: 100%; overflow-y: auto; box-sizing: border-box; background: var(--bg); border-radius: 28px 28px 0 0; padding: 8px 12px 40px; box-shadow: 0 -10px 40px var(--shc)">
-      <div style="width: 36px; height: 4px; border-radius: 2px; background: var(--s3); margin: 0 auto 6px"></div>
-      <div style="display: flex; align-items: center; padding-left: 12px; margin-bottom: 6px"><h2 class="serif" style="margin: 0; flex-grow: 1; font-size: 26px; font-weight: 300">Move to</h2><button class="ib" aria-label="Close" onClick="{{files.closeSheet}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></div>
-      <sc-for list="{{files.moveTo}}" as="m" key="{{m.id}}">
-        <button onClick="{{m.go}}" aria-label="Move to {{m.name}}" class="tap" style="display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 12px; border-radius: 18px; text-align: left">
-          <span style="width: 44px; height: 44px; border-radius: 14px; background: var(--s2); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{m.d}}"></path></svg></span>
-          <div style="flex-grow: 1; min-width: 0"><div style="font-size: 16px">{{m.name}}</div><sc-if value="{{m.sub}}"><div style="font-size: 13px; color: var(--mut)">{{m.sub}}</div></sc-if></div>
-          <sc-if value="{{m.here}}"><svg class="i" viewBox="0 0 24 24" style="color: var(--acct)"><path d="{{ic.check}}"></path></svg></sc-if>
-        </button>
-      </sc-for>
-    </div>
-    </div>
-  </sc-if>
-
-  
-  <sc-if value="{{files.shareSheet}}">
-    <div ref="{{files.shareModal}}" data-alpha-popup style="display: contents">
-    <button data-alpha-backdrop tabindex="-1" aria-label="Close share" onClick="{{files.closeSheet}}" style="position: absolute; inset: 0; z-index: 8; background: var(--scrim)"></button>
-    <div class="enter" role="dialog" aria-label="Share file" style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 9; background: var(--bg); border-radius: 28px 28px 0 0; padding: 8px 20px 40px; box-shadow: 0 -10px 40px var(--shc)">
-      <div style="width: 36px; height: 4px; border-radius: 2px; background: var(--s3); margin: 0 auto 6px"></div>
-      <div style="display: flex; align-items: center; margin-right: -8px"><h2 class="serif" style="margin: 0; flex-grow: 1; font-size: 26px; font-weight: 300">Share</h2><button class="ib" aria-label="Close" onClick="{{files.closeSheet}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></div>
-      <div style="display: flex; gap: 12px; padding-top: 14px">
-        <!-- MVP-DEFERRED: SMS sharing follows the feature profile; restore after native SMS scope acceptance. -->
-        <sc-if value="{{mvpMessages}}">
-        <button onClick="{{files.shareMsg}}" aria-label="Share in Messages" class="tap" style="flex: 1 1 0; height: 108px; border-radius: 24px; background: var(--s2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 14px"><svg class="i" viewBox="0 0 24 24" style="width: 26px; height: 26px"><path d="{{ic.bubble}}"></path></svg>Messages</button>
-        </sc-if>
-        <button onClick="{{files.shareMail}}" aria-label="Share by email" class="tap" style="flex: 1 1 0; height: 108px; border-radius: 24px; background: var(--s2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 14px"><svg class="i" viewBox="0 0 24 24" style="width: 26px; height: 26px"><path d="{{ic.mail}}"></path></svg>Email</button>
-      </div>
-    </div>
-    </div>
-  </sc-if>
-
   <sc-if value="{{files.dlg}}">
     <div ref="{{files.dlg.modalRef}}" role="dialog" aria-modal="true" aria-label="{{files.dlg.title}}" style="position: absolute; inset: 0; z-index: 20; background: var(--scrim); display: flex; align-items: flex-end; padding: 16px 16px 120px; box-sizing: border-box">
       <div style="width: 100%; max-height: 75%; overflow-y: auto; background: var(--bg); border-radius: 28px; padding: 22px 20px 24px; box-sizing: border-box">
         <h2 class="serif" style="font-size: 26px; margin: 0 0 6px; overflow-wrap: anywhere">{{files.dlg.title}}</h2>
         <sc-if value="{{files.dlg.message}}"><p style="font-size: 15px; color: var(--mut); line-height: 1.5; margin: 0 0 12px; overflow-wrap: anywhere">{{files.dlg.message}}</p></sc-if>
-        <sc-if value="{{files.dlg.isName}}"><input disabled="{{files.dlg.busy}}" aria-label="Name" value="{{files.dlg.value}}" onChange="{{files.dlg.onValue}}" onKeyDown="{{files.dlg.onKey}}" maxLength="255" style="width: 100%; min-width: 0; height: 48px; border: 0; border-radius: 14px; background: var(--s2); color: var(--fg); padding: 0 14px; box-sizing: border-box; font-size: 16px"></sc-if>
+        <sc-if value="{{files.dlg.isName}}"><input disabled="{{files.dlg.busy}}" aria-label="Name" value="{{files.dlg.value}}" onChange="{{files.dlg.onValue}}" onKeyDown="{{files.dlg.onKey}}" onFocus="{{files.dlg.onFocus}}" maxLength="255" style="width: 100%; min-width: 0; height: 48px; border: 0; border-radius: 14px; background: var(--s2); color: var(--fg); padding: 0 14px; box-sizing: border-box; font-size: 16px"></sc-if>
         <sc-if value="{{files.dlg.isDest}}">
           <div style="display: flex; align-items: center; gap: 4px; min-height: 40px; font-size: 13px; color: var(--mut)">
             <sc-if value="{{files.dlg.canUp}}"><button class="ib" aria-label="Parent folder" disabled="{{files.dlg.busy}}" onClick="{{files.dlg.up}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
-            <span style="overflow-wrap: anywhere">{{files.dlg.at}}</span>
+            <span style="flex-grow: 1; min-width: 0; overflow-wrap: anywhere">{{files.dlg.at}}</span>
+            <sc-if value="{{files.dlg.canNewFolder}}"><button disabled="{{files.dlg.busy}}" onClick="{{files.dlg.newFolder}}" style="flex-shrink: 0; min-height: 44px; padding: 0 12px; color: var(--fg); font-size: 14px; font-weight: 600">New folder</button></sc-if>
           </div>
           <sc-for list="{{files.dlg.folders}}" as="f" key="{{f.id}}">
             <button disabled="{{files.dlg.busy}}" aria-label="{{f.label}}" onClick="{{f.go}}" class="tap" style="display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 8px; border-radius: 14px; text-align: left"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{f.d}}"></path></svg><span style="overflow-wrap: anywhere">{{f.name}}</span></button>

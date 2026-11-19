@@ -13,6 +13,7 @@ import {
   filterMatches,
   filterTime,
   groupByFolder,
+  joinPath,
   parentOf,
   type SortMode,
   type StorageEntry,
@@ -170,7 +171,6 @@ const ICON_KEYS = {
   move: "filesMove",
   share: "share",
   sort: "filesSort",
-  more: "more",
   check: "check",
   grid: "grid",
   rows: "filesRows",
@@ -199,21 +199,26 @@ type Place =
 type TrashRow = TrashEntry & { volume?: string };
 /** The storage* argument naming a non-primary volume (the primary needs none). */
 const onVolume = (volume?: string) => (volume ? { volume } : {});
+type DestDialog = {
+  kind: "dest";
+  op: "move" | "copy";
+  paths: string[];
+  at: string;
+  folders: StorageEntry[];
+  volume?: string;
+};
 type Dialog =
-  | {
-      kind: "dest";
-      op: "move" | "copy";
-      paths: string[];
-      at: string;
-      folders: StorageEntry[];
-      volume?: string;
-    }
+  | DestDialog
   | {
       kind: "name";
       op: "create" | "rename";
       path: string;
       value: string;
       volume?: string;
+      /** Rename selects the name up to here when the field first takes focus: the extension stays. */
+      selectEnd?: number;
+      /** A folder made from the Move or Copy picker opens back in that picker. */
+      returnTo?: DestDialog;
     }
   /** The rows the owner is shown and confirms; Empty deletes only these. */
   | { kind: "empty"; items: TrashRow[] }
@@ -293,7 +298,15 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
     filterUnavailable = false;
   let dialog: Dialog | undefined,
     dialogTrigger: HTMLElement | null = null,
-    opened: { path: string; volume?: string; selectionId?: string } | undefined;
+    /** The file the preview shows, with the listing row it was opened from when there was one. */
+    opened:
+      | {
+          path: string;
+          volume?: string;
+          selectionId?: string;
+          entry?: Pick<StorageEntry, "size" | "modified">;
+        }
+      | undefined;
   let selectionEpoch = 0;
   let generation = 0,
     stateGeneration = 0,
@@ -316,7 +329,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
   const modal = createInlineModal(
     () => {
       if (!busy) {
-        dialog = undefined;
+        dialog = dialog?.kind === "name" ? dialog.returnTo : undefined;
         repaint();
       }
     },
@@ -656,26 +669,11 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         path: entry.path,
         ...onVolume(volume),
         selectionId: value.selectionId,
+        entry,
       };
       await accept("files", value, currentApi, false);
     } catch {
       if (current()) toast("This file could not open.");
-    } finally {
-      end();
-      repaint();
-    }
-  }
-  /** "Open with" on the preview. The preview keeps its own selection. */
-  async function openElsewhere(path: string, volume?: string) {
-    if (busy || !storage.storageOpen) return;
-    begin();
-    try {
-      const value = await storage.storageOpen({ path, ...onVolume(volume) });
-      if (value.selectionId)
-        await forgetSelected(value.selectionId).catch(() => {});
-      else if (value.status !== "cancelled") failed(value as Result);
-    } catch {
-      toast("This file could not open.");
     } finally {
       end();
       repaint();
@@ -830,6 +828,13 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       void reload();
     }
   }
+  /** Restore all: the rows shown, each back on its own volume. */
+  async function restoreRows(rows: TrashRow[]) {
+    const byVolume = new Map<string | undefined, string[]>();
+    for (const row of rows)
+      byVolume.set(row.volume, [...(byVolume.get(row.volume) ?? []), row.id]);
+    for (const [volume, ids] of byVolume) await restore(ids, volume);
+  }
   /** Undo and Restore. A long Undo list goes back in calls the storage accepts. */
   async function restore(ids: string[], volume?: string) {
     const confirmed: Outcome[] = [];
@@ -928,8 +933,18 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         return;
       }
       if (failed(value)) return;
-      if (d.op === "rename" && opened?.path === d.path) closePreview();
+      if (d.returnTo) {
+        dialog = d.returnTo;
+        void destination(value.path || joinPath(d.path, d.value.trim()));
+        return;
+      }
       dialog = undefined;
+      if (d.op === "rename" && opened?.path === d.path)
+        await reopenRenamed(
+          value.path || joinPath(parentOf(d.path), d.value.trim()),
+          d.volume,
+          epoch,
+        );
     } catch {
       toast("The operation could not be confirmed.");
     } finally {
@@ -937,16 +952,18 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       void reload();
     }
   }
-  async function destination(at: string) {
+  /** Lists `at` in the open Move or Copy picker. False when it could not be read. */
+  async function destination(at: string): Promise<boolean> {
     const d = dialog;
-    if (!d || d.kind !== "dest") return;
+    if (!d || d.kind !== "dest") return false;
+    let shown = false;
     try {
       const value = await storage.storageList({
         path: at,
         ...onVolume(d.volume),
       });
-      if (dialog !== d) return;
-      if (failed(value)) return;
+      if (dialog !== d) return false;
+      if (failed(value)) return false;
       dialog = {
         ...d,
         at,
@@ -955,10 +972,12 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           "name",
         ),
       };
+      shown = true;
     } catch {
       toast("This folder could not be read.");
     }
     repaint();
+    return shown;
   }
   function beginDest(
     op: "move" | "copy",
@@ -977,7 +996,78 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       ...onVolume(volume),
     };
     api?.set({ menu: false });
-    void destination("");
+    // The picker opens where the items are; the storage root when they come from several folders.
+    const start = parentOf(paths[0]);
+    void (async () => {
+      if (
+        !(await destination(
+          paths.every((p) => parentOf(p) === start) ? start : "",
+        )) &&
+        start
+      )
+        await destination("");
+    })();
+  }
+  /** "New folder" inside the Move or Copy picker: name it, then the picker opens it. */
+  function destNewFolder() {
+    const d = dialog;
+    if (!d || d.kind !== "dest" || busy) return;
+    dialog = {
+      kind: "name",
+      op: "create",
+      path: d.at,
+      value: "",
+      ...onVolume(d.volume),
+      returnTo: d,
+    };
+    repaint();
+  }
+  function startRename(
+    path: string,
+    volume: string | undefined,
+    directory: boolean,
+    trigger?: EventTarget | null,
+  ) {
+    if (busy) return;
+    dialogTrigger = trigger instanceof HTMLElement ? trigger : null;
+    const name = baseName(path),
+      dot = name.lastIndexOf(".");
+    dialog = {
+      kind: "name",
+      op: "rename",
+      path,
+      value: name,
+      selectEnd: !directory && dot > 0 ? dot : name.length,
+      ...onVolume(volume),
+    };
+    repaint();
+  }
+  /** After a rename the preview shows the same file under its new name. */
+  async function reopenRenamed(path: string, volume: string | undefined, epoch: number) {
+    const currentApi = api,
+      entry = opened?.entry;
+    if (!currentApi) return;
+    try {
+      const value = await storage.storageSelect({ path, ...onVolume(volume) });
+      if (epoch !== selectionEpoch || !currentApi.isActive()) {
+        if (value.selectionId)
+          await forgetSelected(value.selectionId).catch(() => {});
+        return;
+      }
+      if (value.status !== "selected" || !value.selectionId) {
+        closePreview();
+        return;
+      }
+      opened = {
+        path,
+        ...onVolume(volume),
+        selectionId: value.selectionId,
+        ...(entry ? { entry } : {}),
+      };
+      await accept("files", value, currentApi, false);
+    } catch {
+      closePreview();
+    }
   }
   function closePreview() {
     clearSelected();
@@ -1163,7 +1253,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         if (!current() || !shownCurrent()) return stale;
         if (!state) return unavailable;
         if (state.access !== "granted") return accessRequired;
-        let path: string;
+        let path: string,
+          shownRow: StorageEntry | undefined;
         if ("shown" in op) {
           // The row at that position in the filter results on screen.
           const row =
@@ -1181,6 +1272,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
             };
           }
           path = row.path;
+          shownRow = row;
         } else path = op.path;
         const value = await storage.storageSelect({ path });
         if (!current() || !shownCurrent()) {
@@ -1193,7 +1285,11 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
             status: "failed",
             summary: "That file is not there.",
           };
-        opened = { path, selectionId: value.selectionId };
+        opened = {
+          path,
+          selectionId: value.selectionId,
+          ...(shownRow ? { entry: shownRow } : {}),
+        };
         await accept("files", value, currentApi, false);
         if (!current() || !shownCurrent())
           return {
@@ -1450,6 +1546,9 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         }
         void reload();
       },
+      retry: () => {
+        if (!loading) void reload();
+      },
       allFiles: () => go(rootFolder),
       allFilesIcon: ICONS.folder,
       cats: CATEGORIES.map(({ id, label }) => ({
@@ -1664,9 +1763,11 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           dialog = { kind: "empty", items: [...trashItems] };
           repaint();
         },
-        hasMenu: at.kind !== "trash",
-        openMenu: () => currentApi.set({ menu: true }),
-        moreD: ICONS.more,
+        canRestoreAll: at.kind === "trash" && trashItems.length > 0 && !busy,
+        restoreAll: () => {
+          if (busy || !trashItems.length) return;
+          void restoreRows([...trashItems]);
+        },
         menuRows: [
           ...(["name", "date", "size"] as SortMode[]).map((mode) => ({
             id: "sort:" + mode,
@@ -1745,18 +1846,12 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       out.selRename = (event: Event) => {
         const only = paths();
         if (only.length !== 1 || busy) return;
-        dialogTrigger =
-          event?.currentTarget instanceof HTMLElement
-            ? event.currentTarget
-            : null;
-        dialog = {
-          kind: "name",
-          op: "rename",
-          path: only[0],
-          ...onVolume(volumeHere),
-          value: baseName(only[0]),
-        };
-        repaint();
+        startRename(
+          only[0],
+          volumeHere,
+          entries.find((e) => e.path === only[0])?.directory === true,
+          event?.currentTarget,
+        );
       };
       out.canRename = selection?.size === 1;
       out.icons = ICONS;
@@ -1780,25 +1875,14 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       out.pv.move = (event: Event) =>
         beginDest("move", [path], event?.currentTarget, volume);
       out.pv.del = () => void trash([path], volume);
-      out.pv.canOpenWith = !!storage.storageOpen;
-      out.pv.openWith = () => void openElsewhere(path, volume);
-      out.pv.startRename = (event: Event) => {
-        dialogTrigger =
-          event?.currentTarget instanceof HTMLElement
-            ? event.currentTarget
-            : null;
-        dialog = {
-          kind: "name",
-          op: "rename",
-          path,
-          value: baseName(path),
-          ...onVolume(volume),
-        };
-        repaint();
-      };
+      out.pv.startRename = (event: Event) =>
+        startRename(path, volume, false, event?.currentTarget);
       out.pv.canForget = false;
+      const shown = opened.entry;
       out.pv.meta = [
         out.pv.meta,
+        shown ? formatSize(shown.size) : "",
+        shown ? shortDate(shown.modified) : "",
         [
           volumeLabel(volume),
           ...parentOf(path).split("/").filter(Boolean),
@@ -1930,9 +2014,18 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
               : "Delete now",
           cancel: () => {
             if (!busy) {
-              dialog = undefined;
+              dialog = d.kind === "name" ? d.returnTo : undefined;
               repaint();
             }
+          },
+          canNewFolder: d.kind === "dest",
+          newFolder: destNewFolder,
+          onFocus: (event: Event) => {
+            if (d.kind !== "name" || d.selectEnd === undefined) return;
+            const input = event.target as HTMLInputElement;
+            input.setSelectionRange?.(0, d.selectEnd);
+            // Only the first focus: later taps place the caret where the owner puts it.
+            d.selectEnd = undefined;
           },
         }
       : null;
@@ -1941,7 +2034,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
   module.back = (state: ViewState, currentApi: ViewApi) => {
     if (dialog) {
       if (!busy) {
-        dialog = undefined;
+        dialog = dialog.kind === "name" ? dialog.returnTo : undefined;
         repaint();
       }
       return true;

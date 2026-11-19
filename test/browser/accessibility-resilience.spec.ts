@@ -169,8 +169,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
     ['photos:viewer', ['Share'], 'Share', 'Close share', 'Photo actions'],
     ['notes:editor', ['More', 'Share note'], 'Share', 'Cancel', 'Share note'],
     ['files-storage', ['Files options'], 'Sort and more', 'Close menu', 'Files options'],
-    ['files:preview', ['Move file'], 'Move to', 'Close move', 'Move file'],
-    ['files:preview', ['Share file'], 'Share file', 'Close share', 'Share file'],
     ['workflows:new', ['Add Read step'], 'Step editor', 'Close', null],
     // Settings > Google (live: the panel is not mounted in mock mode). The Google accounts panel
     // has no scrim button; its Close button is the pointer dismissal, and Escape returns focus to

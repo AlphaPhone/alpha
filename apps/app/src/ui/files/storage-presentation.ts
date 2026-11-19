@@ -55,6 +55,21 @@ export function formatSize(bytes: number): string {
     units[unit]
   );
 }
+/** The kind of file an owner recognises, never a raw MIME type. */
+export function typeLabel(mimeType: string, directory = false): string {
+  if (directory) return "Folder";
+  if (mimeType === "application/pdf") return "PDF";
+  if (mimeType.startsWith("image/")) return "Image";
+  if (mimeType.startsWith("audio/")) return "Audio";
+  if (mimeType.startsWith("video/")) return "Video";
+  if (mimeType.startsWith("text/")) return "Text";
+  // Office types all say "officedocument": test the specific kinds first.
+  if (/sheet|excel|csv/.test(mimeType)) return "Spreadsheet";
+  if (/presentation|powerpoint/.test(mimeType)) return "Presentation";
+  if (/word|document|opendocument\.text|rtf/.test(mimeType)) return "Document";
+  if (/zip|tar|compressed|archive/.test(mimeType)) return "Archive";
+  return "File";
+}
 export function formatFree(
   volume: Pick<StorageVolume, "free" | "total" | "usage">,
 ): string {
