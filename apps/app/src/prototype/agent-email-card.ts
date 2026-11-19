@@ -1,6 +1,7 @@
 import type { AgentReply } from '../runtime/alpha-client';
 import { connectionController } from '../runtime/connection-ui';
 import { inboxLocalStore } from '../runtime/inbox-local-store';
+import { editCoalescer, type EditCoalescer } from '../runtime/inbox-edit-coalescer';
 import {
   agentEmailDraft,
   draftMailRecipients,
@@ -20,6 +21,8 @@ type Card = {
   body: string;
   state: 'draft' | 'declined' | 'sending' | 'sent' | 'rejected' | 'uncertain';
 };
+/** An edited draft card waiting to be written, with the shelf revision it was made on. */
+type Edit = { card: Card; revision: number };
 type Shelf = {
   scope: string;
   slot: Promise<string>;
@@ -29,6 +32,7 @@ type Shelf = {
   cards: Map<string, Card>;
   busy: Set<string>;
   notices: Map<string, string>;
+  edits: Map<string, EditCoalescer<Edit>>;
   revision: number;
 };
 
@@ -48,8 +52,7 @@ async function shelfSlot(scope: string) {
   return 'inbox-drafts:v1:chat:' + hash;
 }
 
-function save(shelf: Shelf, card: Card, expected: Card['state'] | undefined) {
-  const revision = shelf.revision;
+function save(shelf: Shelf, card: Card, expected: Card['state'] | undefined, revision = shelf.revision) {
   const write = shelf.writes.then(async () => {
     await shelf.ready;
     const saved = shelf.saved;
@@ -87,6 +90,30 @@ export function installAgentEmailCards(
 ) {
   const shelves = new WeakMap<object, Shelf>();
   const p = Component.prototype, render = p.renderVals;
+  // Leaving the app writes each waiting edit at once, held or not, as the Inbox composer does.
+  const waiting = new Set<EditCoalescer<Edit>>();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) for (const edits of [...waiting]) edits.flush();
+  });
+
+  /** One card's edits, written after each is shown. While a write is in flight only the latest
+   * edit waits, as inbox-unsaved.ts retains Inbox edits, so typing never queues a write per key.
+   * An edit made before a conflict reload is refused with its revision, never written over it. */
+  function editsFor(shell: Bag, shelf: Shelf, messageId: string) {
+    const known = shelf.edits.get(messageId);
+    if (known) return known;
+    const refresh = () => { if (shell.live && draftScope() === shelf.scope) shell.setState({}); };
+    const edits: EditCoalescer<Edit> = editCoalescer<Edit>(({ card, revision }) => {
+      waiting.delete(edits);
+      edits.hold();
+      void save(shelf, card, 'draft', revision).then(
+        () => { if (shelf.cards.get(messageId) === card && shelf.notices.delete(messageId)) refresh(); },
+        () => { shelf.notices.set(messageId, 'Couldn’t save the draft. Try again.'); refresh(); },
+      ).finally(() => edits.release());
+    }, { delay: 0 });
+    shelf.edits.set(messageId, edits);
+    return edits;
+  }
 
   function shelfFor(shell: Bag) {
     const scope = draftScope(), previous = shelves.get(shell);
@@ -97,7 +124,7 @@ export function installAgentEmailCards(
     if (previous?.scope === scope) return previous;
     const shelf: Shelf = {
       scope, slot: shelfSlot(scope), ready: Promise.resolve(), writes: Promise.resolve(),
-      saved: null, cards: new Map(), busy: new Set(), notices: new Map(), revision: 0,
+      saved: null, cards: new Map(), busy: new Set(), notices: new Map(), edits: new Map(), revision: 0,
     };
     shelves.set(shell, shelf);
     shelf.ready = shelf.slot.then(async slot => {
@@ -185,12 +212,12 @@ export function installAgentEmailCards(
         };
         shelf.notices.delete(card.messageId);
         // Show the edit in this event, as the Inbox composer does, so the controlled field keeps
-        // its text, caret and composition. Send itself writes exactly this content before preparing.
+        // its text, caret and composition, then write it. Send writes exactly this content first.
         shelf.cards.set(card.messageId, next);
         refresh();
-        void save(shelf, next, 'draft').then(() => {
-          if (shelf.cards.get(card.messageId) === next) shelf.notices.delete(card.messageId);
-        }, reportError).finally(refresh);
+        const edits = editsFor(this, shelf, card.messageId);
+        waiting.add(edits);
+        edits.push({ card: next, revision: shelf.revision });
       };
       const decide = async (send: boolean) => {
         if (!current() || shelf.busy.has(card.messageId)) return;
@@ -201,6 +228,8 @@ export function installAgentEmailCards(
         if (send && (!account || !recipients || !latest.body.trim() || this.S().typing || !sameAccount())) return;
         shelf.busy.add(card.messageId);
         shelf.notices.delete(card.messageId);
+        // A waiting edit is written before the decision, in order, so it never lands over it.
+        shelf.edits.get(card.messageId)?.flush();
         refresh();
         try {
           const address = account ? { to: addressText, literalTo: true, from: account.from, grant: account.grant } : {};
