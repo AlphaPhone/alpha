@@ -10,7 +10,9 @@ export function reviewFileEmail(options: {
  read: () => Promise<SelectedFile>; current: () => boolean; target: () => EmailTarget;
  insert: (file: MailAttachment, token: string) => boolean; inserted: () => void;
 }): () => void {
- const previous=document.activeElement as HTMLElement|null,dialog=document.createElement('dialog');
+ // A row in an open popup unmounts with it; focus returns to the control that opened the popup.
+ const active=document.activeElement as HTMLElement|null;
+ const previous=active?.closest('[data-alpha-popup]')?document.querySelector<HTMLElement>('[aria-haspopup][aria-expanded="true"]')??active:active,dialog=document.createElement('dialog');
  dialog.className='note-source-dialog';dialog.setAttribute('aria-label','Attach to email');
  const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));}
  const content=document.createElement('div');content.className='note-source-content';
