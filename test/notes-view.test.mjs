@@ -92,6 +92,8 @@ test('list rows: pinned first, newest first, two-line previews and short dates',
  const now=Date.UTC(2026,10,6,15);
  const list=[{id:'old',kind:'text',title:'Old',modifiedAt:now-40*864e5},{id:'new',kind:'text',title:'New',modifiedAt:now-1000},{id:'pin',kind:'text',title:'Pin',pinned:true,modifiedAt:now-90*864e5},{id:'x',kind:'text',title:'Unknown'}];
  assert.deepEqual(view.sortNotes(list).map(n=>n.id),['pin','new','old','x']);
+ // A note with no time stays ahead of every note stored after it, not only the next one.
+ assert.deepEqual(view.sortNotes([{id:'x',title:'Undated'},{id:'old',modifiedAt:now-40*864e5},{id:'new',modifiedAt:now-1000}]).map(n=>n.id),['x','new','old']);
  assert.equal(view.notePreview({kind:'list',items:[{t:'Milk',done:true},{t:'Eggs'}]}),'☑ Milk\n☐ Eggs');
  assert.equal(view.notePreview({kind:'voice',body:'',lines:[{t:'hello'},{t:'there'}]}),'hello there');
  assert.equal(view.notePreview({kind:'link',domain:'example.com'}),'example.com');

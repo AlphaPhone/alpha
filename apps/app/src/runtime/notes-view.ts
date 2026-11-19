@@ -41,12 +41,12 @@ export function noteInstant(note:Note):number{
 }
 /**
  * Pinned notes first, then newest first; ties keep their stored order. A note with no time (an
- * older device note) is placed by its stored position, which is newest first: it counts as at
- * least as new as every note stored after it.
+ * older device note) is placed by its stored position, which is newest first: it takes the time
+ * of the newest note stored after it (specs/quint/application/CanonicalNotesView.qnt).
  */
 export function sortNotes<N extends Note>(list:readonly N[]):N[]{
  const at=list.map(noteInstant);
- for(let i=at.length-2;i>=0;i--)if(at[i]<0)at[i]=Math.max(at[i],at[i+1]);
+ for(let i=at.length-1,newest=-1;i>=0;i--){const own=at[i];if(own<0)at[i]=newest;else newest=Math.max(newest,own);}
  return list.map((note,index)=>({note,index,at:at[index]})).sort((a,b)=>Number(!!b.note.pinned)-Number(!!a.note.pinned)||b.at-a.at||a.index-b.index).map(x=>x.note);
 }
 /** The two-line preview: body text, checklist items with their state, a voice transcript or a link's domain. */

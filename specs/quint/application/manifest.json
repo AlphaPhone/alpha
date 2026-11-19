@@ -1781,17 +1781,23 @@
       "localHandlesNeverReachRowsTest",
       "ownerLossMasksRetainedRowsTest",
       "phaseDrainsNavigationWaitersTest",
-      "retirementClearsProjectionTest"
+      "retirementClearsProjectionTest",
+      "pinnedThenNewestFirstTest",
+      "undatedRowKeepsItsPlaceTest",
+      "newDraftShowsFirstAmongUnpinnedTest",
+      "editKeepsSavedTimeTest"
     ],
     "sources": [
       "apps/app/src/prototype/canonical-notes-ui.ts",
+      "apps/app/src/runtime/notes-view.ts",
       "apps/app/src/prototype/canonical-notes-controller.ts",
       "apps/app/src/ui/notes/notes-editor.ts",
       "apps/app/src/ui/notes/notes-controller.ts"
     ],
     "abstractions": [
       "Source-bound projection of base and draft rows, current-owner public visibility, synthetic draft identities, Trash collection and navigation waiter admission/drain.",
-      "Canonical snapshot and editor callback inputs have separate controller/draft models. Row payload uses bounded text, kind, pin, folder and local-handle classes. Recorder, dictation, Calendar handoff and full competing navigation policies remain obligations."
+      "Canonical snapshot and editor callback inputs have separate controller/draft models. Row payload uses bounded text, kind, pin, folder, update-time and local-handle classes. Recorder, dictation, Calendar handoff and full competing navigation policies remain obligations.",
+      "List order is sortNotes over the public rows: pinned first, newest first, ties in stored order, and a row with no time counts as new as the newest time stored after it. Four update-time classes stand for parsed instants; the Notes filter and folder narrowing applied before sorting in model.js are not modeled here."
     ]
   },
   {
@@ -4487,6 +4493,48 @@
       "maxSamples": 400,
       "maxSteps": 40
     }
+  },
+  {
+    "path": "specs/quint/application/CanonicalNotesListFilter.qnt",
+    "module": "CanonicalNotesListFilter",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "ownMessageFiltersListTest",
+      "reviewFirstNeedsApprovalTest",
+      "openNoteIsNotNamedTest",
+      "unnegotiatedAgentIsRefusedTest",
+      "changedRevisionDeclinesTest",
+      "noteOpenedBeforeRunDeclinesTest",
+      "changeAfterCommitIsUnconfirmedTest",
+      "lostOwnerDeclinesTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/agent-adapter.ts",
+      "apps/app/src/prototype/canonical-notes-ui.ts",
+      "apps/app/src/runtime/phone-context.ts",
+      "apps/app/src/runtime/connection-ui.tsx",
+      "apps/app/src/ui/device-actions/client-coordinator.ts"
+    ],
+    "sharedSources": [
+      "packages/contracts/src/device-reviews.ts",
+      "plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts"
+    ],
+    "abstractions": [
+      "One notes_list_filter proposal at a time over the agent's canonical Notes list, two filter values, three collection revisions and three screens. An open note, menu, sheet, Trash, recorder or pending save is one obstruction flag; any change to the carried context is one flag.",
+      "Admission is the negotiated list-filter capability plus a context that names the canonical-note-source list at its revision. A direct run needs the owner's own current message outside a workflow with Review phone actions first off; otherwise approval. The executor's current() check runs before the commit and again in the commit's when guard.",
+      "The context predicate is refined against the actual shared notesOrganizeContextAllowed by test/quint-canonical-notes-list-filter.test.mjs. The executor, coordinator queueing, journal and React commit are model-only: their rules were read from the listed source; model safety does not establish their refinement or device acceptance."
+    ],
+    "invariants": [
+      "RefusedNeverRuns",
+      "NeedsNegotiation",
+      "OnlyOwnMessageSkipsCard",
+      "FilterOnReviewedList",
+      "DeclinedShowsNothing",
+      "SucceededShowsRequestedFilter",
+      "FilterNeverWrites"
+    ]
   },
   {
     "path": "specs/quint/application/NotesAgentSource.qnt",
