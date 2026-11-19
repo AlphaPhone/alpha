@@ -2,6 +2,8 @@ package ai.alphacompute.alphaphone;
 
 import static org.junit.Assert.*;
 
+import ai.eliza.plugins.actionjournal.ActionJournal;
+import ai.eliza.plugins.actionjournal.ActionJournalConfiguration;
 import ai.eliza.plugins.messages.AlphaTelephonyAccess;
 import ai.eliza.plugins.messages.MessagesTestAccess;
 import ai.eliza.plugins.messages.SmsRecords;
@@ -54,13 +56,15 @@ import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowSubscriptionManager;
 
 /**
- * Alpha's telephony bridge ({@link AlphaTelephonyBase}) and its own native send review: the real
- * bridge methods over controlled worker scheduling, ported from the shared TelephonyPluginReviewTest
- * (plugin-native-messages, elizaOS pin 1803ea88). No radio or provider effect.
+ * Alpha's telephony bridge ({@link AlphaTelephonyBase}) and how a send is confirmed: an agent's text
+ * dispatches only for the card the owner approved in the chat ({@link AlphaApprovedSms}), with no
+ * native dialog, and the Messages composer's own Send. The real bridge methods over controlled
+ * worker scheduling, first ported from the shared TelephonyPluginReviewTest (plugin-native-messages,
+ * elizaOS pin 1803ea88). Robolectric's SmsManager records sends; no radio or provider effect.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 29, manifest = Config.NONE)
-public final class AlphaTelephonyReviewTest {
+public final class AlphaTelephonySendTest {
   public static final class Receiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {}
   }
@@ -111,7 +115,19 @@ public final class AlphaTelephonyReviewTest {
   static final class Host extends AlphaTelephonyBase {
     final AppCompatActivity activity;
     boolean imageAllowed=true, smsAllowed=true;
-    Host(AppCompatActivity activity) { this.activity = activity; }
+    /** The chat's action journal, in memory: the cards the owner approved. */
+    final ActionJournal approvals;
+    final java.util.Set<String> contactNumbers = new java.util.HashSet<>();
+    Host(AppCompatActivity activity) {
+      this.activity = activity;
+      Map<String, String> slots = new HashMap<>();
+      approvals = new ActionJournal(ActionJournalConfiguration.standard("fixture-approvals"), new ActionJournal.Storage() {
+        public String read(String slot) { return slots.get(slot); }
+        public void write(String slot, String value) { slots.put(slot, value); }
+      }, ActionJournal.BOUNDED_RESULTS);
+    }
+    @Override protected ActionJournal approvals() { return approvals; }
+    @Override protected boolean contactNumber(String number) { return contactNumbers.contains(number); }
     @Override public Context getContext() { return activity; }
     @Override public AppCompatActivity getActivity() { return activity; }
     @Override public PermissionState getPermissionState(String alias) { return alias.equals("sms") && !smsAllowed ? PermissionState.DENIED : PermissionState.GRANTED; }
@@ -141,14 +157,60 @@ public final class AlphaTelephonyReviewTest {
     configured.set(host, mms ? config.withMmsFiles("fixture.mms") : config);
     return host;
   }
-  private static Call send(String method) {
-    return new Call(method, new JSObject().put("operationId", "cancel-1").put("recipients", new JSArray(Collections.singletonList("+15555550123"))).put("body", "Original reviewed text").put("subscriptionId", 1).put("attachments", new JSArray()));
+  static final String SCOPE = "a".repeat(64), TEXT = "Original reviewed text", NUMBER = "+15555550123";
+  private static JSObject request(String operationId, String body, JSObject identity) {
+    JSObject data = new JSObject().put("operationId", operationId).put("recipients", new JSArray(Collections.singletonList(NUMBER))).put("body", body).put("subscriptionId", 1).put("attachments", new JSArray());
+    if (identity != null) data.put("journalIdentity", identity);
+    return data;
+  }
+  private static JSObject card(String proposalId) { return new JSObject().put("scope", SCOPE).put("proposalId", proposalId); }
+  /** An agent's text whose card names the proposal the owner approved in the chat. */
+  private static Call send(String method) { return new Call(method, request("cancel-1", TEXT, card("cancel-1"))); }
+  /** The same text with no card: the Messages composer's request, where the owner's Send is the confirmation. */
+  private static Call composed(String method) { return new Call(method, request("cancel-1", TEXT, null)); }
+  private static org.json.JSONObject smsSend(String body, int subscriptionId) throws Exception {
+    return new org.json.JSONObject().put("type", "sms_send").put("recipients", new org.json.JSONArray().put(NUMBER)).put("body", body).put("subscriptionId", subscriptionId);
+  }
+  /**
+   * What the chat records when the owner taps Approve on a card: the proposal reserved under its
+   * operation ID, then marked applying once the server granted the claim. Decline records neither.
+   */
+  private static void approve(Host host, String proposalId, String operationId, org.json.JSONObject operation, long expiresAt, boolean sensitive) throws Exception {
+    org.json.JSONObject record = new org.json.JSONObject().put("operation", operation).put("expiresAt", expiresAt).put("context", new org.json.JSONObject().put("view", "messages").put("sensitive", sensitive));
+    host.approvals.reserve(SCOPE, proposalId, operationId, "b".repeat(64), record);
+    host.approvals.markApplying(SCOPE, proposalId, "attempt-" + proposalId);
+  }
+  private static void approve(Host host, org.json.JSONObject operation) throws Exception { approve(host, "cancel-1", "cancel-1", operation, System.currentTimeMillis() + 600_000, false); }
+  private static SmsTelephonyConfiguration config(Host host) throws Exception {
+    Field configured = AlphaTelephonyBase.class.getDeclaredField("config"); configured.setAccessible(true);
+    return (SmsTelephonyConfiguration) configured.get(host);
+  }
+  /** Whether the send journal holds anything for {@link #send}: a refused card leaves no record. */
+  private static boolean journaled(Host host) throws Exception {
+    return SmsTelephony.journal(host.getContext(), config(host)).existing("cancel-1", SmsSendJournal.sha256(SmsSendJournal.bindingText(new String[] {NUMBER}, TEXT, 1))) != null;
   }
   private static void noRadioAndNoRetainedOwner(Host host) throws Exception {
     assertNull(Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1)).getLastSentTextMessageParams());
     assertNull(Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1)).getLastSentMultimediaMessageParams());
-    Field owners = AlphaTelephonyBase.class.getDeclaredField("pendingReviews"); owners.setAccessible(true);
+    Field owners = AlphaTelephonyBase.class.getDeclaredField("pendingSends"); owners.setAccessible(true);
     assertTrue("settlement releases the pending owner", ((java.util.Set<?>) owners.get(host)).isEmpty());
+  }
+  private static void noDialog() {
+    AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog();
+    assertTrue("the approved card is the confirmation: no native dialog asks again", shown == null || !shown.isShowing());
+  }
+  private static void settle() throws Exception {
+    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
+    ShadowLooper.idleMainLooper();
+    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
+    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
+  }
+  private static void hold(CountDownLatch entered, CountDownLatch release) throws Exception {
+    SmsTelephony.WORK.execute(() -> {
+      entered.countDown();
+      try { assertTrue(release.await(10, TimeUnit.SECONDS)); } catch (InterruptedException stopped) { Thread.currentThread().interrupt(); }
+    });
+    assertTrue(entered.await(10, TimeUnit.SECONDS));
   }
   @Test public void smsEligibilityMatchesTypedMmsReceiverAndEnabledHostComponents() throws Exception {
     Host host = host("role-eligibility");
@@ -194,127 +256,208 @@ public final class AlphaTelephonyReviewTest {
     assertFalse(host.getContext().getSystemService(RoleManager.class).isRoleHeld(RoleManager.ROLE_SMS));
     noRadioAndNoRetainedOwner(host);
   }
-  @Test public void smsCancellationBeforeJournalReplyMustRetireQueuedReview() throws Exception { queuedCancellation("sendSms", false); }
-  @Test public void mmsCancellationBeforeJournalReplyMustRetireQueuedReview() throws Exception { queuedCancellation("sendMms", false); }
-  @Test public void backgroundBeforeJournalReplyMustRetireQueuedReview() throws Exception { queuedCancellation("sendSms", true); }
+  @Test public void approveOnTheCardDispatchesOnceWithNoDialog() throws Exception {
+    Host host = host("approved-sms");
+    Shadows.shadowOf(host.getContext().getSystemService(RoleManager.class)).addAvailableRole(RoleManager.ROLE_SMS);
+    approve(host, smsSend(TEXT, 1));
+    Call send = send("sendSms");
+    host.sendSms(send);
+    settle();
+    noDialog();
+    assertNull(send.error);
+    assertEquals("submitted", send.result.getString("status"));
+    var manager = Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1));
+    assertNotNull("Approve sent the text", manager.getLastSentTextMessageParams());
+    assertEquals(NUMBER, manager.getLastSentTextMessageParams().getDestinationAddress());
+    assertEquals(TEXT, manager.getLastSentTextMessageParams().getText());
+    assertTrue("the approval admitted its one dispatch", host.approvals.get(SCOPE, "cancel-1").has(AlphaApprovedSms.CLAIM));
+    manager.clearLastSentTextMessageParams();
+
+    // The same request again (a retry, a reload) is answered from the send journal and never sends again.
+    Call repeat = send("sendSms");
+    host.sendSms(repeat);
+    settle();
+    assertEquals("submitted", repeat.result.getString("status"));
+    noRadioAndNoRetainedOwner(host);
+  }
+  @Test public void declinedOrUnapprovedCardSendsNothing() throws Exception {
+    Host host = host("declined-sms");
+    // Decline: the chat never marks the proposal applying, or never journals it at all.
+    Call none = send("sendSms");
+    host.sendSms(none);
+    settle();
+    assertEquals("not-approved", none.error);
+    host.approvals.reserve(SCOPE, "cancel-1", "cancel-1", "b".repeat(64), new org.json.JSONObject().put("operation", smsSend(TEXT, 1))
+      .put("expiresAt", System.currentTimeMillis() + 600_000).put("context", new org.json.JSONObject().put("sensitive", false)));
+    Call reserved = send("sendSms");
+    host.sendSms(reserved);
+    settle();
+    assertEquals("not-approved", reserved.error);
+    // A request that names no card at all is not the composer: it cannot send either.
+    Call bare = composed("sendSms");
+    host.sendSms(bare);
+    settle();
+    assertEquals("not-approved", bare.error);
+    noDialog();
+    assertFalse("nothing was journaled", journaled(host));
+    noRadioAndNoRetainedOwner(host);
+  }
+  @Test public void aMismatchedCardCannotDispatch() throws Exception {
+    long later = System.currentTimeMillis() + 600_000;
+    java.util.List<java.util.function.Consumer<Host>> cases = java.util.Arrays.asList(
+      host -> run(() -> approve(host, smsSend("Another text", 1))),
+      host -> run(() -> approve(host, smsSend(TEXT, 2))),
+      host -> run(() -> approve(host, new org.json.JSONObject().put("type", "sms_send").put("recipients", new org.json.JSONArray().put("+15555550199")).put("body", TEXT).put("subscriptionId", 1))),
+      host -> run(() -> approve(host, "cancel-1", "cancel-1", smsSend(TEXT, 1), System.currentTimeMillis() - 1, false)),
+      host -> run(() -> approve(host, "cancel-1", "cancel-1", smsSend(TEXT, 1), later, true)),
+      // Another proposal's approval, or one journaled under another operation ID, cannot lend itself to this text.
+      host -> run(() -> approve(host, "other-card", "other-card", smsSend(TEXT, 1), later, false)),
+      host -> run(() -> approve(host, "cancel-1", "other-operation", smsSend(TEXT, 1), later, false)),
+      host -> run(() -> approve(host, new org.json.JSONObject().put("type", "sms_compose").put("target", new org.json.JSONObject().put("kind", "number").put("number", "+15555550199")).put("body", TEXT))),
+      host -> run(() -> approve(host, new org.json.JSONObject().put("type", "sms_compose").put("target", new org.json.JSONObject().put("kind", "number").put("number", NUMBER)).put("body", TEXT).put("draft", true))),
+      host -> run(() -> approve(host, new org.json.JSONObject().put("type", "phone_call").put("target", new org.json.JSONObject().put("kind", "number").put("number", NUMBER)))));
+    for (int i = 0; i < cases.size(); i++) {
+      Host host = host("mismatch-" + i);
+      cases.get(i).accept(host);
+      Call send = send("sendSms");
+      host.sendSms(send);
+      settle();
+      assertEquals("case " + i, "not-approved", send.error);
+      assertFalse("case " + i + " journaled nothing", journaled(host));
+      noRadioAndNoRetainedOwner(host);
+    }
+  }
+  private interface Step { void run() throws Exception; }
+  private static void run(Step step) { try { step.run(); } catch (Exception failed) { throw new AssertionError(failed); } }
+  @Test public void aReplayedApprovalCannotDispatchAgain() throws Exception {
+    Host host = host("replayed-sms");
+    approve(host, smsSend(TEXT, 1));
+    // The approval already admitted a dispatch whose send record is gone (lost before it was written).
+    AlphaApprovedSms.claim(host.approvals, card("cancel-1"), "cancel-1", new String[] {NUMBER}, TEXT, 1, number -> false, System.currentTimeMillis());
+    Call replay = send("sendSms");
+    host.sendSms(replay);
+    settle();
+    assertEquals("not-approved", replay.error);
+    noDialog();
+    noRadioAndNoRetainedOwner(host);
+    // The claim is written once: a second claim of the same approval is refused.
+    try { AlphaApprovedSms.claim(host.approvals, card("cancel-1"), "cancel-1", new String[] {NUMBER}, TEXT, 1, number -> false, System.currentTimeMillis()); fail("claimed twice"); }
+    catch (SecurityException expected) {}
+  }
+  @Test public void aTextToANumberOrContactMatchesItsApprovedCard() throws Exception {
+    org.json.JSONObject toNumber = new org.json.JSONObject().put("type", "sms_compose").put("target", new org.json.JSONObject().put("kind", "number").put("number", "+1 (555) 555-0123")).put("body", TEXT);
+    assertTrue("the card's number in its dialable form", AlphaApprovedSms.approves(toNumber, "p", "op", new String[] {NUMBER}, TEXT, 1, number -> false));
+    assertFalse(AlphaApprovedSms.approves(toNumber, "p", "op", new String[] {"+15555550199"}, TEXT, 1, number -> true));
+    assertFalse(AlphaApprovedSms.approves(toNumber, "p", "op", new String[] {NUMBER, "+15555550199"}, TEXT, 1, number -> true));
+    org.json.JSONObject toContact = new org.json.JSONObject().put("type", "sms_compose").put("target", new org.json.JSONObject().put("kind", "contact").put("query", "Carmen")).put("body", TEXT);
+    assertTrue("a contact's number the owner picked", AlphaApprovedSms.approves(toContact, "p", "op", new String[] {NUMBER}, TEXT, 1, NUMBER::equals));
+    assertFalse("never a number outside the address book", AlphaApprovedSms.approves(toContact, "p", "op", new String[] {NUMBER}, TEXT, 1, number -> false));
+    assertFalse(AlphaApprovedSms.approves(toContact, "p", "op", new String[] {NUMBER}, "Other", 1, NUMBER::equals));
+    org.json.JSONObject legacy = new org.json.JSONObject().put("type", "sms_compose").put("query", "Carmen").put("body", TEXT);
+    assertTrue(AlphaApprovedSms.approves(legacy, "p", "op", new String[] {NUMBER}, TEXT, 1, NUMBER::equals));
+    assertFalse("an sms_send names its proposal as the operation", AlphaApprovedSms.approves(smsSend(TEXT, 1), "p", "op", new String[] {NUMBER}, TEXT, 1, number -> true));
+
+    Host host = host("compose-contact");
+    Shadows.shadowOf(host.getContext().getSystemService(RoleManager.class)).addAvailableRole(RoleManager.ROLE_SMS);
+    host.contactNumbers.add(NUMBER);
+    approve(host, "compose-card", "cancel-1", toContact, System.currentTimeMillis() + 600_000, false);
+    Call send = new Call("sendSms", request("cancel-1", TEXT, card("compose-card")));
+    host.sendSms(send);
+    settle();
+    noDialog();
+    assertEquals("submitted", send.result.getString("status"));
+    assertNotNull(Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1)).getLastSentTextMessageParams());
+    Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1)).clearLastSentTextMessageParams();
+    noRadioAndNoRetainedOwner(host);
+  }
+  @Test public void theBridgeNeverSendsAnMmsOutsideTheComposer() throws Exception {
+    Host host = host("bridge-mms", true);
+    Call send = send("sendMms");
+    host.sendMms(send);
+    settle();
+    assertEquals("not-approved", send.error);
+    noDialog();
+    noRadioAndNoRetainedOwner(host);
+  }
+  @Test public void smsCancellationBeforeJournalReplyMustRetireQueuedSend() throws Exception { queuedCancellation("sendSms", false); }
+  @Test public void mmsCancellationBeforeJournalReplyMustRetireQueuedSend() throws Exception { queuedCancellation("sendMms", false); }
+  @Test public void backgroundBeforeJournalReplyMustRetireQueuedSend() throws Exception { queuedCancellation("sendSms", true); }
   private void queuedCancellation(String method, boolean background) throws Exception {
-    Host host = host(method.toLowerCase(java.util.Locale.ROOT) + (background ? "-background" : "-cancel"));
+    Host host = host(method.toLowerCase(java.util.Locale.ROOT) + (background ? "-background" : "-cancel"), method.equals("sendMms"));
+    if (method.equals("sendSms")) approve(host, smsSend(TEXT, 1));
+    else Shadows.shadowOf(host.getContext().getSystemService(RoleManager.class)).addHeldRole(RoleManager.ROLE_SMS);
     CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-    SmsTelephony.WORK.execute(() -> {
-      entered.countDown();
-      try { assertTrue(release.await(10, TimeUnit.SECONDS)); } catch (InterruptedException stopped) { Thread.currentThread().interrupt(); }
-    });
-    assertTrue(entered.await(10, TimeUnit.SECONDS));
-    Call send = send(method);
+    hold(entered, release);
+    Call send = method.equals("sendSms") ? send(method) : composed(method);
     Call cancel = new Call("cancelSmsReview", new JSObject().put("operationId", "cancel-1"));
     try {
-      if (method.equals("sendSms")) host.sendSms(send); else host.sendMms(send);
+      if (method.equals("sendSms")) host.sendSms(send); else host.sendFromComposer(send, () -> {});
       if (background) host.pause(); else host.cancelSmsReview(cancel);
       ShadowLooper.idleMainLooper();
       if (!background) assertEquals("cancellation has already acknowledged", 1, cancel.resolutions);
       release.countDown();
-      SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-      ShadowLooper.idleMainLooper();
-      SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
+      settle();
       assertNotNull("retired send must settle explicitly", send.result);
-      assertEquals("a cancellation must not become a later denial or native review", "cancelled", send.result.getString("status"));
-      AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog();
-      assertTrue("no retired review is shown", shown == null || !shown.isShowing());
+      assertEquals("a cancellation must not become a later denial or a send", "cancelled", send.result.getString("status"));
+      noDialog();
       assertEquals(1, send.resolutions);
       noRadioAndNoRetainedOwner(host);
     } finally {
       release.countDown();
-      AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog(); if (shown != null) shown.dismiss();
       SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
     }
   }
-  @Test public void cancellationAfterSendTapFencesQueuedDispatch() throws Exception {
-    Host host = host("after-tap");
+  @Test public void cancellationAfterTheClaimFencesQueuedDispatch() throws Exception {
+    Host host = host("after-claim");
+    approve(host, smsSend(TEXT, 1));
     Call send = send("sendSms");
     host.sendSms(send);
+    // The approval is claimed and the dispatch is queued behind other work when the chat retires the card.
     SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-    ShadowLooper.idleMainLooper();
-    AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog();
-    assertNotNull(shown);
-    assertTrue(shown.isShowing());
-    assertAlphaSmsReview(shown);
+    assertTrue(host.approvals.get(SCOPE, "cancel-1").has(AlphaApprovedSms.CLAIM));
     CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-    SmsTelephony.WORK.execute(() -> {
-      entered.countDown();
-      try { assertTrue(release.await(10, TimeUnit.SECONDS)); } catch (InterruptedException stopped) { Thread.currentThread().interrupt(); }
-    });
-    assertTrue(entered.await(10, TimeUnit.SECONDS));
+    hold(entered, release);
     try {
-      shown.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
       ShadowLooper.idleMainLooper();
       Call cancel = new Call("cancelSmsReview", new JSObject().put("operationId", "cancel-1"));
       host.cancelSmsReview(cancel);
-      ShadowLooper.idleMainLooper();
       assertEquals(1, cancel.resolutions);
       release.countDown();
-      SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-      SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
+      settle();
       assertNotNull(send.result);
       assertEquals("cancelled", send.result.getString("status"));
       assertEquals(1, send.resolutions);
       noRadioAndNoRetainedOwner(host);
     } finally {
       release.countDown();
-      shown.dismiss();
       SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
     }
   }
-  /** The review Alpha shows for {@link #send}: its own words, the exact reviewed facts, and a protected Send. */
-  private static void assertAlphaSmsReview(AlertDialog shown) {
-    org.robolectric.shadows.ShadowAlertDialog review = Shadows.shadowOf(shown);
-    assertEquals("Send this text?", review.getTitle().toString());
-    assertEquals("To: +15555550123\nFrom: SIM 1 · Test SIM (Test carrier)\nYour carrier may charge for texts.\n\nOriginal reviewed text", review.getMessage().toString());
-    android.widget.Button send = shown.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
-    assertEquals("Send", send.getText().toString());
-    assertEquals("Cancel", shown.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).getText().toString());
-    assertTrue("an overlay cannot steer the Send press", send.getFilterTouchesWhenObscured());
-    assertTrue("the review is kept out of screenshots and recents", (shown.getWindow().getAttributes().flags & android.view.WindowManager.LayoutParams.FLAG_SECURE) != 0);
-  }
-  @Test public void groupReviewWordsEachSeparateTextAndEveryPicture() {
-    assertEquals("Send this text to 2 people?", AlphaTelephonyReview.smsTitle(2));
-    assertEquals("To: +15555550100, +15555550101\nFrom: SIM 2 · Work (Carrier A)\nEach person gets their own text. This isn’t a group message.\n"
-      + "Each person gets it as 3 linked texts.\nYour carrier may charge for texts.\n\nhi",
-      AlphaTelephonyReview.smsMessage(new String[] {"+15555550100", "+15555550101"}, 1, "Work", "Carrier A", 3, "hi"));
-    assertEquals("Send a group message to 2 people?", AlphaTelephonyReview.mmsTitle(2));
-    assertEquals("Send this MMS?", AlphaTelephonyReview.mmsTitle(1));
-    SmsSendJournal.Attachment[] pictures = { new SmsSendJournal.Attachment("image/png", "photo.png", "0".repeat(64), 1025) };
-    assertEquals("To: +15555550100, +15555550101\nFrom: SIM 1 · Work (Carrier A)\n"
-      + "One group message: everyone sees who else it went to, and replies go to the whole group.\nPicture: photo.png (2 KB)\n"
-      + "Sent as MMS. Your carrier may charge for messages and data.",
-      AlphaTelephonyReview.mmsMessage(new String[] {"+15555550100", "+15555550101"}, 0, "Work", "Carrier A", pictures, ""));
-    assertEquals("Picture photo.png", AlphaTelephonyReview.attachmentDescription("photo.png"));
-  }
-  @Test public void unrelatedCancellationCannotRetireAnotherReview() throws Exception {
+  @Test public void unrelatedCancellationCannotRetireAnotherSend() throws Exception {
     Host host = host("unrelated");
+    Shadows.shadowOf(host.getContext().getSystemService(RoleManager.class)).addAvailableRole(RoleManager.ROLE_SMS);
+    approve(host, smsSend(TEXT, 1));
+    CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+    hold(entered, release);
     Call send = send("sendSms");
-    host.sendSms(send);
-    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-    ShadowLooper.idleMainLooper();
-    AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog();
-    assertNotNull(shown);
     try {
+      host.sendSms(send);
       Call other = new Call("cancelSmsReview", new JSObject().put("operationId", "other-operation"));
       host.cancelSmsReview(other);
-      ShadowLooper.idleMainLooper();
       assertEquals(1, other.resolutions);
-      assertTrue(shown.isShowing());
-      assertNull(send.result);
-      shown.dismiss();
-      ShadowLooper.idleMainLooper();
-      SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-      assertEquals("cancelled", send.result.getString("status"));
+      release.countDown();
+      settle();
+      assertEquals("submitted", send.result.getString("status"));
+      Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1)).clearLastSentTextMessageParams();
       noRadioAndNoRetainedOwner(host);
-    } finally { shown.dismiss(); }
+    } finally {
+      release.countDown();
+      SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
+    }
   }
   @Test public void cancellationCannotEraseARecordedSubmission() throws Exception {
     Host host = host("recorded");
-    Field configured = AlphaTelephonyBase.class.getDeclaredField("config"); configured.setAccessible(true);
-    SmsSendJournal journal = SmsTelephony.journal(host.getContext(), (SmsTelephonyConfiguration) configured.get(host));
+    SmsSendJournal journal = SmsTelephony.journal(host.getContext(), config(host));
     MessagesTestAccess.recordSubmittedDispatch(journal, "cancel-1", new String[]{"+15555550123"}, "Original reviewed text", 1, new int[]{1}, System.currentTimeMillis(), SmsTelephony.boot(host.getContext()));
     CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
     SmsTelephony.WORK.execute(() -> {
@@ -339,21 +482,14 @@ public final class AlphaTelephonyReviewTest {
       SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
     }
   }
-  private static void settleComposer() throws Exception {
-    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-    ShadowLooper.idleMainLooper();
-    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-    SmsTelephony.WORK.submit(() -> {}).get(10, TimeUnit.SECONDS);
-  }
   @Test public void ownerApprovedSmsUsesTheSameReceiptWithoutDialogOrReplay() throws Exception {
     Host host = host("owner-sms");
     RoleManager roles = host.getContext().getSystemService(RoleManager.class);
     Shadows.shadowOf(roles).addAvailableRole(RoleManager.ROLE_SMS);
-    Call send = send("sendSms");
+    Call send = composed("sendSms");
     host.sendFromComposer(send, () -> {});
-    settleComposer();
-    AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog();
-    assertTrue(shown == null || !shown.isShowing());
+    settle();
+    noDialog();
     assertEquals("submitted", send.result.getString("status"));
     var manager = Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1));
     assertNotNull(manager.getLastSentTextMessageParams());
@@ -361,7 +497,7 @@ public final class AlphaTelephonyReviewTest {
 
     Call repeat = send("sendSms");
     host.sendSms(repeat);
-    settleComposer();
+    settle();
     assertEquals("submitted", repeat.result.getString("status"));
     noRadioAndNoRetainedOwner(host);
   }
@@ -369,32 +505,31 @@ public final class AlphaTelephonyReviewTest {
     Host host = host("owner-mms", true);
     RoleManager roles = host.getContext().getSystemService(RoleManager.class);
     Shadows.shadowOf(roles).addHeldRole(RoleManager.ROLE_SMS);
-    Call send = send("sendMms");
+    Call send = composed("sendMms");
     host.sendFromComposer(send, () -> {});
-    settleComposer();
-    AlertDialog shown = ShadowAlertDialog.getLatestAlertDialog();
-    assertTrue(shown == null || !shown.isShowing());
+    settle();
+    noDialog();
     assertEquals("submitted", send.result.getString("status"));
     var manager = Shadows.shadowOf(SmsManager.getSmsManagerForSubscriptionId(1));
     assertNotNull(manager.getLastSentMultimediaMessageParams());
     manager.clearLastSentMultimediaMessageParams();
 
-    Call repeat = send("sendMms");
-    host.sendMms(repeat);
-    settleComposer();
+    Call repeat = composed("sendMms");
+    host.sendFromComposer(repeat, () -> {});
+    settle();
     assertEquals("submitted", repeat.result.getString("status"));
     noRadioAndNoRetainedOwner(host);
   }
   @Test public void withdrawnComposerApprovalCannotDispatchOrBeReplayed() throws Exception {
     Host host = host("owner-withdrawn");
-    Call send = send("sendSms");
+    Call send = composed("sendSms");
     host.sendFromComposer(send, () -> { throw new IllegalStateException("Composer approval withdrawn"); });
-    settleComposer();
+    settle();
     assertEquals("denied", send.result.getString("status"));
 
-    Call repeat = send("sendSms");
+    Call repeat = composed("sendSms");
     host.sendFromComposer(repeat, () -> {});
-    settleComposer();
+    settle();
     assertEquals("denied", repeat.result.getString("status"));
     noRadioAndNoRetainedOwner(host);
   }
@@ -406,20 +541,20 @@ public final class AlphaTelephonyReviewTest {
     Robolectric.buildContentProvider(OutboxProvider.class).create(threads);
     ProviderInfo messages = new ProviderInfo(); messages.authority = "mms";
     OutboxProvider provider = Robolectric.buildContentProvider(OutboxProvider.class).create(messages).get();
-    Call send = send("sendMms");
+    Call send = composed("sendMms");
     host.sendFromComposer(send, () -> {
       if (!provider.outbox.isEmpty()) throw new IllegalStateException("Composer retired during provider staging");
     });
-    settleComposer();
+    settle();
     assertEquals("denied", send.result.getString("status"));
     assertEquals(1, provider.parts);
     assertEquals(1, provider.deletes);
     assertEquals(Collections.singleton(OutboxProvider.OWN_ROW + 1), provider.outbox.keySet());
     assertEquals(0, MessagesTestAccess.mmsDirectory(host.getContext()).list().length);
 
-    Call repeat = send("sendMms");
+    Call repeat = composed("sendMms");
     host.sendFromComposer(repeat, () -> {});
-    settleComposer();
+    settle();
     assertEquals("denied", repeat.result.getString("status"));
     assertEquals(1, provider.deletes);
     noRadioAndNoRetainedOwner(host);

@@ -65,6 +65,8 @@ public final class AlphaInCallService extends InCallService {
     private final Map<Call, Call.Callback> callbacks = new HashMap<>();
     /** Contact names by call ID and number. An empty name is a lookup that found none or is running. Main thread only. */
     private final Map<String, String> names = new HashMap<>();
+    /** What each call's notice last said, by call ID (AlphaCallPresentation.noticeContent). Main thread only. */
+    private final Map<String, String> posted = new HashMap<>();
     private java.util.concurrent.ExecutorService lookups;
     private static AlphaInCallService activeService;
 
@@ -126,35 +128,42 @@ public final class AlphaInCallService extends InCallService {
     private void openCallSurface(String event, String callId, Call call) {
         NotificationManager notifications = getSystemService(NotificationManager.class);
         if ("removed".equals(event) || call.getState() == Call.STATE_DISCONNECTED) {
-            if (callId != null) notifications.cancel(callId, 1);
+            if (callId != null) { posted.remove(callId); notifications.cancel(callId, 1); }
             publish();
             return;
         }
         String label = callerLabel(callId, call.getDetails());
         boolean ringing = call.getState() == Call.STATE_RINGING;
-        // Only a ringing call alerts. Outgoing and connected calls use the quiet channel.
-        Notification.Builder builder = new Notification.Builder(this, ringing ? CHANNEL_ID : ONGOING_CHANNEL_ID)
-            .setSmallIcon(NOTIFICATION_ICON)
-            .setContentTitle(label)
-            .setContentText(AlphaCallPresentation.stateLabel(call.getState()))
-            .setCategory(Notification.CATEGORY_CALL)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .setContentIntent(callIntent(callId, "show"));
-        if (ringing) builder.setFullScreenIntent(callIntent(callId, "show"), true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && ringing) {
-            Person person = new Person.Builder().setName(label).setImportant(true).build();
-            builder.setStyle(Notification.CallStyle.forIncomingCall(person,
-                callIntent(callId, "reject"), callIntent(callId, "answer")));
-        } else {
-            // A Telecom-bound service is not an FGS. Ongoing CallStyle without
-            // a full-screen intent is rejected by Android; use an ordinary
-            // ongoing call notification rather than creating another service.
-            if (ringing) builder.addAction(new Notification.Action.Builder(null, ANSWER, callIntent(callId, "answer")).build());
-            builder.addAction(new Notification.Action.Builder(null, ringing ? DECLINE : END_CALL, callIntent(callId, ringing ? "reject" : "disconnect")).build());
+        // Telecom reports a burst of state and detail changes as a call starts, and most leave the
+        // notice saying what it already says. Posting it again for each one passes Android's per-app
+        // notice rate, and Android then drops updates, which can leave a stale notice (a ringing
+        // notice on an answered call). The notice is posted only when what it says or offers changes.
+        String content = AlphaCallPresentation.noticeContent(label, call.getState());
+        if (!content.equals(posted.put(callId, content))) {
+            // Only a ringing call alerts. Outgoing and connected calls use the quiet channel.
+            Notification.Builder builder = new Notification.Builder(this, ringing ? CHANNEL_ID : ONGOING_CHANNEL_ID)
+                .setSmallIcon(NOTIFICATION_ICON)
+                .setContentTitle(label)
+                .setContentText(AlphaCallPresentation.stateLabel(call.getState()))
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setContentIntent(callIntent(callId, "show"));
+            if (ringing) builder.setFullScreenIntent(callIntent(callId, "show"), true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && ringing) {
+                Person person = new Person.Builder().setName(label).setImportant(true).build();
+                builder.setStyle(Notification.CallStyle.forIncomingCall(person,
+                    callIntent(callId, "reject"), callIntent(callId, "answer")));
+            } else {
+                // A Telecom-bound service is not an FGS. Ongoing CallStyle without
+                // a full-screen intent is rejected by Android; use an ordinary
+                // ongoing call notification rather than creating another service.
+                if (ringing) builder.addAction(new Notification.Action.Builder(null, ANSWER, callIntent(callId, "answer")).build());
+                builder.addAction(new Notification.Action.Builder(null, ringing ? DECLINE : END_CALL, callIntent(callId, ringing ? "reject" : "disconnect")).build());
+            }
+            notifications.notify(callId, 1, builder.build());
         }
-        notifications.notify(callId, 1, builder.build());
         publish();
         // Open the call once, preserving the dialer's incoming/outgoing entry behavior.
         // Later state updates refresh the existing screen and notification without
@@ -228,6 +237,7 @@ public final class AlphaInCallService extends InCallService {
         for (String id : callIds()) notifications.cancel(id, 1);
         callbacks.clear();
         names.clear();
+        posted.clear();
         if (lookups != null) lookups.shutdownNow();
         ACTIVE_CALLS.clear();
         CALL_IDS.clear();

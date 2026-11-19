@@ -607,10 +607,21 @@ retain the original fabricated-`opened` acceptance. The JVM executes the
 product bridge methods and pinned journal and handoff classes over
 controlled ports.
 
-### Native reviewed SMS dispatch and receipts
+### Native SMS dispatch and receipts
 
-`NativeSmsDispatch` models the Alpha plugin's reviewed tuple, SIM checks,
-journaled radio handoff and immutable callback boundary. The two bridge
+`NativeSmsDispatch` models how Alpha sends an agent's text. There is no
+native dialog. The owner's Approve on the chat card journals an `sms_send`
+entry in the action journal, and the bridge's `sendSms` names that card.
+`AlphaApprovedSms` admits the send only when the card's entry is open
+(applying and unclaimed), unexpired, and for exactly these recipients, text
+and SIM. Admission writes a one-time claim before any dispatch check, so one
+approval admits at most one dispatch. This holds even when the send journal
+then refuses every write. A request with no card, another card's text,
+other recipients or another SIM gets `not-approved`, and nothing is
+journaled or sent. A retained operation ID still answers from the SMS
+journal before any card is read. `RadioNeedsClaimedApproval` and
+`OneClaimPerOperation` state this. The model also checks the SIM, the
+journaled radio handoff and the immutable callback boundary. The two bridge
 instances share the same native journal. The model tracks live and durable
 record evidence separately when a save reports failure. A boot or process
 restart can therefore change readback without another radio attempt.
@@ -621,36 +632,53 @@ and a successful sent callback. A multipart provider status cannot identify
 delivery for an individual part. Carrier delivery and Android role or
 PendingIntent enforcement remain installed-platform obligations.
 
-Two concurrent reviews can share an operation ID before either decides. The
-as-built replay in commit `d35e4bf839` shows the second dialog receiving a
-conflicting tuple's receipt after a single radio call. The staged shared
-TelephonyPlugin now revalidates the saved binding during positive recovery.
-An exact retry returns the original receipt and a conflicting retry is
-rejected. After capacity pruning, a late exact review reports `expired`,
-while a conflicting review reports `invalid`. The source replay drives
-both outcomes through the retained dialog, then reloads the tombstone.
+Cards in two chat scopes can name the same operation ID. Once one card's
+text is journaled, the other card's conflicting text gets `invalid` and an
+exact one gets the first receipt, neither with a radio call nor a claim.
+After capacity pruning, a late exact card reports `expired`, while a
+conflicting card reports `invalid`. The source replay runs the real
+`AlphaApprovedSms` over the pinned shared `ActionJournal` with a synthetic
+store. It holds the send worker so that a cancellation or a pause lands
+while a send is still queued, which records `cancelled` and spends the
+claim. A carrier change on the same subscription ID before the send does
+not refuse it: the card names the subscription, and the dispatch guard
+fixes the slot and carrier at the send.
 
-### Native reviewed MMS dispatch
+The as-built replay in commit `d35e4bf839` showed the shared plugin's
+second dialog receiving a conflicting tuple's receipt after one radio call.
+The historical probe still drives that dialog against the authenticated
+raw pin. The staged shared core revalidates the saved binding during
+positive recovery.
 
-`NativeMmsDispatch` follows the inherited Alpha wrapper through MMS review,
-PDU encoding, durable dispatch admission, outbox storage, and callback
-settlement. The source driver compares the exact decoded attachment bytes
-at review and at radio handoff. It observes temporary PDU cleanup, provider
-rollback after partial storage, and uncertain radio or durable callback
-outcomes. The Android role, bitmap decoder, provider and carrier are controlled
-ports in this campaign.
+### Native MMS dispatch
+
+`NativeMmsDispatch` covers Alpha's MMS send. No agent card proposes an MMS,
+so the bridge's `sendMms` is refused with `not-approved` before anything is
+read, journaled, staged or sent (`AgentBridgeRefusesMms`). Pictures and
+group messages go only through the Messages composer, whose Send is the
+owner's confirmation. The source driver calls the launcher port's
+`AlphaTelephonyPlugin.sendComposed` with its window guard. It follows PDU
+encoding, durable dispatch admission, outbox storage and callback
+settlement. It compares the exact decoded attachment bytes at radio
+handoff. It observes temporary PDU cleanup, provider rollback after partial
+storage, and uncertain radio or durable callback outcomes. The Android
+role, composer window, provider and carrier are controlled ports in this
+campaign.
 
 The as-built replay in commit `96addfb521` records the MMS positive recovery
 returning a row by operation ID after dispatch rejects a reused ID. That
 could return a receipt for another attachment or an SMS wire receipt. Each
-schedule still makes only the original radio handoff.
+schedule still makes only the original radio handoff. The historical probes
+still drive the shared plugin's dialog against the raw pin.
 
 The authenticated shared patch requires the exact MMS binding and record
-kind for recovery. It returns the prior receipt for the exact reviewed
-tuple. The source replay rejects changed body, recipients, SIM or attachment
-bytes, including an ID retained by SMS. It also checks that a pruned exact
-review reports `expired` and a conflicting review reports `invalid`, with
-the newly staged PDU cleaned in both cases.
+kind for recovery. The current replay queues two composer sends with one ID
+on the send worker before either is admitted. The second recovers only the
+receipt of exactly its own binding and kind (`ComposedReceiptMatchesSend`),
+including against an SMS from the same composer. A later composer send with
+a changed body, recipients, SIM or attachment bytes is rejected. After
+pruning, an exact send reports `expired` and a conflicting one reports
+`invalid`, and nothing is staged.
 
 ### Android text scale and accessibility readback
 

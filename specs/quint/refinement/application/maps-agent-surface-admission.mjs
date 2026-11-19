@@ -18,7 +18,8 @@ import {modelTraces, replayTraces} from '../services/maps-model-traces.mjs';
 import {bundleMapsAdapter, mountMapsAdapter, tick, providerId, connectionId, providerConfig} from './maps-adapter-harness.mjs';
 
 const model = {path: 'specs/quint/application/MapsAgentSurfaceAdmission.qnt', module: 'MapsAgentSurfaceAdmission'};
-const realView = {home: 'home', maps: 'maps', other: 'notes'};
+// An open app Maps replaces (Browser, where the owner asked from) and a view it keeps (camera).
+const realView = {home: 'home', maps: 'maps', app: 'browser', kept: 'camera'};
 
 async function driver(code) {
   const provider = {providerId, connectionId, async search() { return []; }, async detail() { return null; }, async route() { throw Error('No route in this fixture.'); }};

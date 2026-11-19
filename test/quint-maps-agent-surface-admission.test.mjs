@@ -6,7 +6,7 @@ import {replayMapsAgentSurfaceAdmission} from '../specs/quint/refinement/applica
 
 test('the Maps adapter agent surface check follows every MapsAgentSurfaceAdmission model trace step by step', {timeout: scaledTimeout(300000)}, async () => {
   const {scenarios, witnesses} = modelNames('specs/quint/application/MapsAgentSurfaceAdmission.qnt');
-  assert.equal(scenarios.length, 8);
+  assert.equal(scenarios.length, 9);
   assert.equal(witnesses.length, 5);
   const result = await replayMapsAgentSurfaceAdmission({scenarios, witnesses});
   console.log(JSON.stringify(result));
