@@ -71,6 +71,8 @@
     "invariant": "safety",
     "tests": [
       "backOrderTest",
+      "backClosesVoiceBeforeConversationTest",
+      "shadeClosesBeforeVoiceTest",
       "staleNavigationTest",
       "deliveryTest",
       "acknowledgeBeforeCommitRefusedTest",
@@ -104,7 +106,8 @@
       "Finite representative identities and contents. Exact source symbols and modeling limits are documented in the family README.",
       "Completed-action navigation models one captured context, its renderer claim, its own view commit and the acknowledged or unknown result. The source campaign observes exact renderer and transport boundaries through controlled ports.",
       "Settings list identity projects About and Finish setup. A Chromium source trace checks one delayed group insertion and keyboard activation. Other mutable lists and native accessibility remain separate obligations.",
-      "The composer draft is one text value with an unsent flag: only Send clears it. A view that replaces the draft through its own chat entry is not modeled."
+      "The composer draft is one text value with an unsent flag: only Send clears it. A view that replaces the draft through its own chat entry is not modeled.",
+      "Back follows model.js `back`: modal (the renderer layer), shade, voice, full then sheet conversation, the Home-only Apps drawer, the raised bar, then Home. Per-view inner pages, the Back stack, bar/pill resting views, launcher edit layers and the native availability flag are BackDispatch; every non-Home view here rests on the pill."
     ],
     "invariants": [
       "CurrentClaim",
