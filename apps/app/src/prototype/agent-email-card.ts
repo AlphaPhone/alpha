@@ -14,6 +14,8 @@ type Card = {
   from: string;
   grant: string;
   to: string;
+  /** The To line is the owner's own text: the agent's `self` was resolved before the first edit. */
+  literalTo?: boolean;
   subject: string;
   body: string;
   state: 'draft' | 'declined' | 'sending' | 'sent' | 'rejected' | 'uncertain';
@@ -154,10 +156,11 @@ export function installAgentEmailCards(
       if (!card) return message;
       const account = selectedAccount && (!card.grant || selectedAccount.grant === card.grant)
         ? selectedAccount : null;
-      const resolveAddress = (text: string) => account ? text.split(',').map(value =>
+      // The agent's `self` names the selected account. The owner's own To text is shown and sent as typed.
+      const addressLine = (row: Card) => !account || row.literalTo ? row.to : row.to.split(',').map(value =>
         ['self', 'me', 'myself'].includes(value.trim().toLowerCase()) ? account.from : value.trim()
-      ).join(', ') : text;
-      const to = resolveAddress(card.to);
+      ).join(', ');
+      const to = addressLine(card);
       const current = () =>
         this.live && !document.hidden && draftScope() === shelf.scope &&
         shelf.cards.get(card.messageId)?.id === card.id;
@@ -169,31 +172,40 @@ export function installAgentEmailCards(
         const next = { ...latest, ...changes };
         await save(shelf, next, latest.state);
         shelf.cards.set(card.messageId, next);
+        return next;
       };
       const reportError = () => { shelf.notices.set(card.messageId, 'Couldn’t save the draft. Try again.'); };
       const edit = (key: 'to' | 'subject' | 'body', event: Event) => {
         if (!account || !sameAccount() || shelf.busy.has(card.messageId)) return;
         const latest = shelf.cards.get(card.messageId)!;
         if (latest.state !== 'draft') return;
-        const next = { ...latest, from: account.from, grant: account.grant, [key]: (event.target as HTMLInputElement).value };
+        const next = {
+          ...latest, from: account.from, grant: account.grant, to: addressLine(latest), literalTo: true,
+          [key]: (event.target as HTMLInputElement | HTMLTextAreaElement).value,
+        };
         shelf.notices.delete(card.messageId);
-        if (key !== 'to') next.to = resolveAddress(latest.to);
+        // Show the edit in this event, as the Inbox composer does, so the controlled field keeps
+        // its text, caret and composition. Send itself writes exactly this content before preparing.
         shelf.cards.set(card.messageId, next);
-        void save(shelf, next, 'draft').catch(reportError).finally(refresh);
+        refresh();
+        void save(shelf, next, 'draft').then(() => {
+          if (shelf.cards.get(card.messageId) === next) shelf.notices.delete(card.messageId);
+        }, reportError).finally(refresh);
       };
       const decide = async (send: boolean) => {
         if (!current() || shelf.busy.has(card.messageId)) return;
         const latest = shelf.cards.get(card.messageId)!;
         if (latest.state !== 'draft') return;
-        const addressText = resolveAddress(latest.to);
+        const addressText = addressLine(latest);
         const recipients = draftMailRecipients(addressText);
         if (send && (!account || !recipients || !latest.body.trim() || this.S().typing || !sameAccount())) return;
         shelf.busy.add(card.messageId);
         shelf.notices.delete(card.messageId);
         refresh();
         try {
-          const address = account ? { to: addressText, from: account.from, grant: account.grant } : {};
-          await update({ ...address, state: send ? 'sending' : 'declined' });
+          const address = account ? { to: addressText, literalTo: true, from: account.from, grant: account.grant } : {};
+          // Nothing is prepared unless this write of the shown content succeeds; Send sends what it stored.
+          const sending = await update({ ...address, state: send ? 'sending' : 'declined' });
           if (!send || !account || !recipients) return;
           if (!sameAccount()) {
             await update({ state: 'draft' });
@@ -201,7 +213,7 @@ export function installAgentEmailCards(
           }
           try {
             const result = await views.inbox.sendAgentEmail(
-              latest.id, { to: recipients, subject: latest.subject, body: latest.body }, account.token, sameAccount,
+              sending.id, { to: recipients, subject: sending.subject, body: sending.body }, account.token, sameAccount,
             );
             await update({ state: result?.state === 'unsent' ? 'draft' :
               result?.state === 'sent' || result?.state === 'rejected' ? result.state : 'uncertain' });
