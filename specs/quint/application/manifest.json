@@ -3774,6 +3774,7 @@
       "privateTappedLinkAsksFirstTest",
       "privateTappedLinkDeclinedTest",
       "privateTappedLinkAfterPageChangeTest",
+      "dispatchOfChangedPageIsNotExactTest",
       "missingHttpsNeverPreparesTest"
     ],
     "sources": [

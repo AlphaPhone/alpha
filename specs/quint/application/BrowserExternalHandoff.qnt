@@ -33,6 +33,14 @@ module BrowserExternalHandoff {
     presenting({...state, sharing: false, confirming: false}, "cleanup")
   pure def changed(state: State): State =
     cleanup({...state, errors: state.errors.append("changed")})
+  /// What the native bridge is handed: the page shown now, compared with the page the owner asked
+  /// about. `exact` is computed from the shown state rather than written as true, so ExactDispatch
+  /// fails if the final presentation check (`current`) stops guarding the dispatch.
+  pure def dispatched(state: State): Launch =
+    {tab: state.selected, revision: if (state.selected == "primary") state.revision else 0,
+      privateConfirmed: state.boundPrivate, approved: state.approved,
+      exact: state.selected == state.boundTab and state.visit == state.boundVisit
+        and (state.selected != "primary" or (state.settled and state.revision == state.boundRevision))}
   pure def beforeDispatch(state: State): State =
     if (current(state)) presenting(state, "present") else changed(state)
 
@@ -56,9 +64,7 @@ module BrowserExternalHandoff {
     s' = if (s.phase == "prepareReview")
       (if (current(s)) {...s, phase: "review", reviews: s.reviews + 1} else changed(s))
       else if (s.phase == "cleanup") {...s, phase: "idle"}
-      else if (current(s)) {...s, phase: "dispatch", launches: s.launches.append(
-        {tab: s.boundTab, revision: s.boundRevision, privateConfirmed: s.boundPrivate,
-          approved: s.approved, exact: true})}
+      else if (current(s)) {...s, phase: "dispatch", launches: s.launches.append(dispatched(s))}
       else changed(s),
   }
   action review(approved: bool): bool = all {
@@ -156,6 +162,12 @@ module BrowserExternalHandoff {
     .expect(not(s.linkPending) and s.linkLaunches.length() == 0 and safety)
   run privateTappedLinkAfterPageChangeTest = initPrivate.then(tapLink(true)).then(navigate(true)).then(answerLink(true))
     .expect(s.linkLaunches.length() == 0 and safety)
+  // ExactDispatch can fail: a dispatch of a page other than the bound one is not exact.
+  run dispatchOfChangedPageIsNotExactTest = initPublic.then(start)
+    .expect(dispatched({...s, revision: s.revision + 1}).exact == false
+      and dispatched({...s, selected: "other"}).exact == false
+      and dispatched({...s, visit: s.visit + 1}).exact == false
+      and dispatched(s).exact)
   run missingHttpsNeverPreparesTest = initHttp.then(start)
     .expect(s.updates == 0 and s.launches.length() == 0 and s.errors == List("no-page") and safety)
 }
