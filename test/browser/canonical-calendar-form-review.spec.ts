@@ -46,3 +46,17 @@ test('a confirmed deletion waits behind Undo and is sent only when the window en
  await expect.poll(writes,{timeout:20000}).toEqual(['DELETE']);
  await expect(row).toBeVisible();
 });
+test('an unanswered invitation offers Decline behind the same review, and the form says Alpha sends no alert',async({page})=>{
+ await page.clock.setFixedTime(new Date('2027-06-10T12:00Z'));
+ await openCanonicalCalendar(page,{eventTitle:'Invited sync',begin:Date.parse('2027-06-10T13:00Z'),end:Date.parse('2027-06-10T14:00Z'),invitedSelf:true});
+ await page.getByRole('button',{name:/^Invited sync,/}).click();
+ const notice=page.getByRole('status').filter({hasText:'You haven’t answered this invitation.'});
+ await expect(notice).toBeVisible();
+ await notice.getByRole('button',{name:'Decline this invitation',exact:true}).click();
+ const review=page.getByRole('dialog',{name:'Decline invitation?',exact:true});await expect(review).toContainText('Invited sync');
+ await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect(review).toHaveCount(0);
+ await page.getByRole('button',{name:'Back to calendar',exact:true}).click();
+ await page.getByRole('button',{name:'New event',exact:true}).click();
+ await expect(page.getByText('Alpha won’t alert you about this event.',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'))).toEqual([]);
+});

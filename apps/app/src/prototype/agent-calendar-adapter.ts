@@ -310,13 +310,16 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
     out.ev.repeatText=calendarRepeatText(e);out.ev.inviteNotice=calendarInvitationPending(e)?'You haven’t answered this invitation.':'';
     out.ev.openProvider=links.provider?openLink(links.provider):null;
     // The host refuses deletes and declines for a managed Google calendar; say so and offer Google Calendar.
-    if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline this invitation in Google Calendar.':'Delete this event in Google Calendar.';}}
+    if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline this invitation in Google Calendar.':'Delete this event in Google Calendar.';}
+    // Declining is the one answer the pinned Calendar service accepts (its delete route's decline_invitation
+    // mode); Accept and Maybe have no route there. The same reviewed, Undo-able action as the menu item.
+    out.ev.inviteDecline=out.ev.inviteNotice&&out.ev.singleDelete&&!out.ev.readOnly&&cancellationModeForEditorEvent(e)==='decline_invitation'?out.ev.del:null;}
   }
   if(out.ev){out.ev.canModify=!out.ev.readOnly;out.ev.sourceLabel=out.ev.readOnly?out.ev.readOnlyLabel:out.ev.calName;
    // Schedule always runs from today: closing an event opened from it returns there.
    if(out.scheduleMode&&typeof out.ev.close==='function'){const close=out.ev.close;out.ev.close=()=>{close();api.set({day:0});};}}
   if(state.form&&state.form.cal!=='alpha-reminders'&&out.f){const f=state.form;
-   const reminderSource=out.f.cals?.filter((c:Bag)=>c.domain==='reminders')??[];out.f.cals=[...cals.filter((c:Bag)=>c.writable).map(c=>({...c,on:f.cal===c.id,pick:()=>api.set({form:{...f,cal:c.id}})})),...reminderSource];out.f.alerts=null;out.f.video=false;out.f.hasVideo=false;out.f.toggleVideo=()=>api.toast('Use a meeting action');
+   const reminderSource=out.f.cals?.filter((c:Bag)=>c.domain==='reminders')??[];out.f.cals=[...cals.filter((c:Bag)=>c.writable).map(c=>({...c,on:f.cal===c.id,pick:()=>api.set({form:{...f,cal:c.id}})})),...reminderSource];out.f.alerts=null;out.f.alertNote='Alpha won’t alert you about this event.';out.f.video=false;out.f.hasVideo=false;out.f.toggleVideo=()=>api.toast('Use a meeting action');
    const original=model?.feed?.events.find(e=>calendarEventKey(e)===f.canonicalEventKey),recurring=!!(original?.recurringEventId||original?.recurrence?.length),managedSeries=recurring&&managedGoogleSource(original);
    const editorTiming=original?canonicalCalendarEditorTiming(original,f.zone||zone()):undefined;
    // A backward clock change can end earlier on the clock while remaining later in real time. Preserve it.
