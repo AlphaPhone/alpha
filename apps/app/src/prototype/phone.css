@@ -572,6 +572,14 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] [d
 html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] [data-alpha-maps-status] { margin-inline:20px; }
 html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > .alpha-map-credits { margin-inline:16px; align-self:stretch; }
 html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-guidance-controls] { margin-inline:12px; }
+/* Full-bleed Maps keeps the assistant dock and lays its own bottom controls out above it.
+   In guidance Recenter joins the stack above the guidance bar instead of a fixed offset
+   that the bar and a taller dock both covered. On the base map, credits and Recenter
+   follow the dock's measured reserve when a long draft makes the dock taller. */
+[data-alpha-maps-guidance="true"] > [data-alpha-maps-recenter] { position:relative!important; inset:auto!important; flex:none; align-self:flex-end; }
+html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-recenter] { margin-right:16px; }
+html:not(.alpha-landscape) [data-alpha-maps-base="true"] > .alpha-map-credits { bottom:max(124px,calc(var(--alpha-dock-reserve,108px) + 16px))!important; }
+html:not(.alpha-landscape) [data-alpha-maps-base="true"] > [data-alpha-maps-recenter] { bottom:min(max(124px,calc(var(--alpha-dock-reserve,108px) + 16px)),calc(100% - 176px))!important; }
 
 /* Keep the guidance controls and credits in flow on the clear side of the
    landscape assistant. Status and maneuvers share the space above the right dock. */
