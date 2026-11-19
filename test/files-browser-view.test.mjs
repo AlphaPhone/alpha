@@ -9,7 +9,7 @@ const template=readFileSync('apps/app/src/prototype/template.html','utf8');
 const MARKER='__native_selected_document';
 
 /** Folders and files by volume-relative path; Trash rows by id. */
-async function harness({state={status:'ready',access:'granted'},files={}}={}){
+async function harness({state={status:'ready',access:'granted'},files={},pv={}}={}){
  const tree=new Map(Object.entries(files)),trash=new Map(),calls=[],toasts=[],accepted=[],forgotten=[];let selections=0;
  const entry=path=>{const value=tree.get(path),name=path.split('/').pop();return value==='dir'?{path,name,directory:true,mimeType:'',size:0,modified:0}:{path,name,directory:false,mimeType:value.mimeType,size:value.size,modified:value.modified};};
  const children=path=>[...tree.keys()].filter(p=>p.slice(0,p.lastIndexOf('/')+1)===(path?path+'/':'')&&p!==path&&!p.slice(path?path.length+1:0).includes('/')).map(entry);
@@ -21,7 +21,7 @@ async function harness({state={status:'ready',access:'granted'},files={}}={}){
   storageQuery:async()=>({status:'ready',entries:[],truncated:false}),
   storageTrashList:async()=>({status:'ready',items:[...trash.values()]}),
   storageRestore:async({ids})=>{calls.push(['restore',ids]);const outcomes=ids.map(id=>{const row=trash.get(id);trash.delete(id);tree.set(row.origin?row.origin+'/'+row.name:row.name,{mimeType:'text/plain',size:1,modified:1});return {path:id,status:'restored',to:row.name};});return {status:'ready',outcomes};},
-  storageEmptyTrash:async()=>({status:'ready',count:0}),
+  storageEmptyTrash:async({ids,confirmed})=>{calls.push(['empty',ids,confirmed]);for(const id of ids)trash.delete(id);return {status:'ready',count:ids.length};},
   storageCreateFolder:async({parent,name})=>{const path=parent?parent+'/'+name:name;calls.push(['create',path]);tree.set(path,'dir');return {status:'ready',path};},
   storageRename:async({path,name})=>{const to=path.includes('/')?path.slice(0,path.lastIndexOf('/')+1)+name:name;calls.push(['rename',path,to]);tree.set(to,tree.get(path));tree.delete(path);return {status:'ready',path:to};},
   storageTransfer:async()=>({status:'ready',outcomes:[]}),
@@ -30,7 +30,7 @@ async function harness({state={status:'ready',access:'granted'},files={}}={}){
   storageSelect:async({path})=>{calls.push(['select',path]);return tree.has(path)?{status:'selected',selectionId:'s'+(++selections),name:path.split('/').pop(),mimeType:tree.get(path).mimeType}:{status:'missing'};},
   storageWatch:async()=>({status:'ready'}),storageUnwatch:async()=>({status:'ready'}),addListener:async()=>({remove:async()=>{}}),
  };
- const view={render:st=>st.open===MARKER?{isPreview:true,pv:{meta:'Text'}}:{},onLeave(){}};
+ const view={render:st=>st.open===MARKER?{isPreview:true,pv:{meta:'Text',...pv}}:{},onLeave(){}};
  const st={},api={ic:{folder:'FOLDER'},get:()=>st,set:patch=>Object.assign(st,patch),isActive:()=>true,toast:text=>toasts.push(text),open(){}};
  const ctx=vm.createContext({setTimeout,clearTimeout,queueMicrotask,window:new EventTarget(),CustomEvent:class{},HTMLElement:class{},document:Object.assign(new EventTarget(),{hidden:false})});
  vm.runInContext(bundle.text+';globalThis.install=filesBrowser.installFilesBrowserAdapter',ctx);
@@ -171,4 +171,93 @@ test('the mock-mode Files fixture gives every Browse icon tile a glyph (VIS-15)'
  const fixture=model.match(/\n {6}browse: \{([^\n]*)\},\n/)?.[1];
  assert.ok(fixture,'the fixture Browse object');
  for(const key of read)assert.match(fixture,new RegExp(`\\b${key}: `),`fixture Browse sets ${key}`);
+});
+
+// Distinct deletion times keep Trash's newest-first order fixed: a, then b, then c.
+const trashed=(h,rows)=>{const now=Date.now();rows.forEach(([id,name],index)=>h.trash.set(id,{id,name,origin:'Docs',size:1,deletedAt:now-index*1000,directory:false,mimeType:'text/plain'}));};
+
+test('Trash selects several items, restores only those, and Select all takes every row (FILE-16)',async()=>{
+ const h=await harness();
+ trashed(h,[['t1','a.txt'],['t2','b.txt'],['t3','c.txt']]);
+ h.render().browse.openTrash();await h.settle();
+ let out=h.render();
+ assert.equal(out.fd.canSelectTrash,true);
+ // A long press (or the context menu) selects, as in a folder.
+ out.fd.items.find(r=>r.name==='a.txt').context({preventDefault(){}});
+ out=h.render();
+ assert.equal(out.isSel,true);assert.equal(out.selTrash,true);assert.equal(out.selFiles,false);
+ out.fd.items.find(r=>r.name==='c.txt').tap({});
+ out=h.render();
+ assert.equal(out.selCount,'2 selected');
+ assert.deepEqual(Array.from(out.fd.items,r=>r.selOn),[true,false,true]);
+ assert.equal(out.dlg,null,'a tap while selecting toggles instead of opening the item');
+ out.selRestore();await h.settle();
+ assert.deepEqual(h.calls.filter(c=>c[0]==='restore').flatMap(c=>c[1]).sort(),['t1','t3']);
+ out=h.render();
+ assert.equal(out.isSel,false);
+ assert.deepEqual(Array.from(out.fd.items,r=>r.name),['b.txt']);
+ out.fd.selectTrash();out=h.render();
+ out.selAll();
+ assert.equal(h.render().selCount,'1 selected');
+ assert.match(template,/\{\{files\.selRestore\}\}/);
+ assert.match(template,/\{\{files\.fd\.selectTrash\}\}/);
+});
+
+test('Delete forever in Trash asks first and deletes only the selected items (FILE-16)',async()=>{
+ const h=await harness();
+ trashed(h,[['t1','a.txt'],['t2','b.txt']]);
+ h.render().browse.openTrash();await h.settle();
+ h.render().fd.selectTrash();
+ h.render().fd.items.find(r=>r.name==='b.txt').tap({});
+ h.render().selDeleteForever({});
+ const dlg=h.render().dlg;
+ assert.equal(dlg.title,'Delete permanently?');
+ assert.equal(dlg.message,'1 item will be deleted permanently.');
+ assert.equal(dlg.confirmLabel,'Delete');
+ assert.deepEqual(h.calls.filter(c=>c[0]==='empty'),[],'nothing is deleted before the owner confirms');
+ dlg.confirm();await h.settle();
+ assert.equal(JSON.stringify(h.calls.filter(c=>c[0]==='empty')),JSON.stringify([['empty',['t2'],true]]));
+ const out=h.render();
+ assert.equal(out.isSel,false);assert.equal(out.dlg,null);
+ assert.deepEqual(Array.from(out.fd.items,r=>r.name),['a.txt']);
+ assert.match(template,/\{\{files\.selDeleteForever\}\}/);
+});
+
+test('File details show type, size, date and place for one selected item (FILE-16)',async()=>{
+ const h=await harness({files:{Docs:'dir','Docs/a.txt':text,'Docs/b.txt':text}});
+ await h.folder('Docs');
+ h.render().fd.menuRows.find(r=>r.id==='select').go();
+ h.render().fd.items.find(r=>r.name==='a.txt').tap();
+ let out=h.render();
+ assert.equal(out.canDetails,true);
+ out.fd.items.find(r=>r.name==='b.txt').tap();
+ assert.equal(h.render().canDetails,false,'details are for one item');
+ h.render().fd.items.find(r=>r.name==='b.txt').tap();
+ h.render().selDetails({});
+ const dlg=h.render().dlg;
+ assert.equal(dlg.isDetails,true);assert.equal(dlg.title,'a.txt');
+ const rows=Object.fromEntries(Array.from(dlg.details,r=>[r.label,r.value]));
+ assert.deepEqual(Object.keys(rows),['Type','Size','Modified','Location']);
+ assert.equal(rows.Type,'Text');
+ assert.equal(rows.Size,'2 KB (2,048 bytes)');
+ assert.match(rows.Modified,/2020/);
+ assert.equal(rows.Location,'Internal storage › Docs');
+ dlg.cancel();
+ assert.equal(h.render().dlg,null);
+ assert.match(template,/\{\{files\.selDetails\}\}/);
+ assert.match(template,/<sc-if value="\{\{files\.dlg\.isDetails\}\}">[\s\S]{0,400}\{\{x\.value\}\}/);
+});
+
+test('the preview takes size and date from storage, and File details reads them (FILE-13, FILE-16)',async()=>{
+ const h=await harness({files:{Docs:'dir','Docs/a.txt':text},pv:{metaType:'Text',metaSize:'5 KB',metaDate:'Mar 3',mimeType:'text/plain',size:5120,modified:Date.UTC(2021,2,3)}});
+ await h.folder('Docs');
+ h.render().fd.items.find(r=>r.name==='a.txt').tap();await h.settle();
+ const out=h.render();
+ assert.equal(out.pv.meta,'Text · 5 KB · Mar 3 · Internal storage › Docs','the storage figures, not the older listing row');
+ assert.equal(out.pv.canDetails,true);
+ out.pv.details({});
+ const rows=Object.fromEntries(Array.from(h.render().dlg.details,r=>[r.label,r.value]));
+ assert.equal(rows.Size,'5 KB (5,120 bytes)');
+ assert.match(rows.Modified,/2021/);
+ assert.match(template,/\{\{files\.pv\.details\}\}/);
 });

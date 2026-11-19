@@ -55,6 +55,31 @@ export function formatSize(bytes: number): string {
     units[unit]
   );
 }
+/** A listing date: the time for today, month and day this year, the full date before that. */
+export function shortDate(time: number): string {
+  if (!Number.isFinite(time) || time <= 0) return "";
+  const date = new Date(time),
+    now = new Date();
+  return date.toDateString() === now.toDateString()
+    ? date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString(
+        undefined,
+        date.getFullYear() === now.getFullYear()
+          ? { month: "short", day: "numeric" }
+          : { year: "numeric", month: "short", day: "numeric" },
+      );
+}
+/** The date and time in a file's details. */
+export function fullDate(time: number): string {
+  if (!Number.isFinite(time) || time <= 0) return "";
+  return new Date(time).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 /** The kind of file an owner recognises, never a raw MIME type. */
 export function typeLabel(mimeType: string, directory = false): string {
   if (directory) return "Folder";

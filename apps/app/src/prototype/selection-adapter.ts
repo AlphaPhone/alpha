@@ -8,7 +8,7 @@ const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promi
 import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
-import { selectedPreviewText, typeLabel } from '../ui/files/storage-presentation.ts';
+import { formatSize, selectedPreviewText, shortDate, typeLabel } from '../ui/files/storage-presentation.ts';
 import { selectedDocumentText } from '../ui/files/selected-document-messages.ts';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
@@ -25,6 +25,16 @@ function previewMedia(result:NativeResult) {
   const kind=mime.split('/')[0];
   if(!['image','video','audio'].includes(kind)||mime==='image/svg+xml')return undefined;
   return {kind,url:native?Capacitor.convertFileSrc(uri):uri};
+}
+
+/** The preview's subtitle: type, then size and date when the provider reported them. The parts
+ * stay separate so the Files browser can add the place the file is in. */
+function previewMeta(result:NativeResult,mime:string) {
+  const metaType=typeLabel(mime);
+  const metaSize=typeof result.size==='number'?formatSize(result.size):'';
+  const metaDate=typeof result.modified==='number'?shortDate(result.modified):'';
+  return {meta:[metaType,metaSize,metaDate].filter(Boolean).join(' · '),metaType,metaSize,metaDate,mimeType:mime,
+    ...(typeof result.size==='number'?{size:result.size}:{}),...(typeof result.modified==='number'?{modified:result.modified}:{})};
 }
 
 /** Install after installPrototypeNativeAdapters so real previews override fixture
@@ -245,7 +255,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
-          name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: typeLabel(mime), d: '',
+          name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, ...previewMeta(selected.result,mime), d: '',
           textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF',
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
           mediaError:()=>{if(!sameSelection()||!current)return;current={...current,mediaFailed:true,status:'Preview unavailable for this file.'};refresh();},

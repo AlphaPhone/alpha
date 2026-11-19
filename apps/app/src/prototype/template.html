@@ -3187,6 +3187,7 @@
           <h1 data-alpha-app-title class="serif" style="margin: 0 0 0 6px; font-size: 26px; flex-grow: 1; min-width: 0; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{files.fd.name}}</h1>
           <sc-if value="{{files.fd.canRestoreAll}}"><button onClick="{{files.fd.restoreAll}}" style="min-height: 44px; padding: 0 14px; font-size: 15px; font-weight: 600">Restore all</button></sc-if>
           <sc-if value="{{files.fd.canEmpty}}"><button onClick="{{files.fd.empty_}}" style="min-height: 44px; padding: 0 14px; color: var(--warn); font-size: 15px; font-weight: 600">Empty</button></sc-if>
+          <sc-if value="{{files.fd.canSelectTrash}}"><button class="ib" aria-label="Select items" onClick="{{files.fd.selectTrash}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.check}}"></path></svg></button></sc-if>
           <sc-if value="{{files.toolbar.ready}}"><button class="ib" aria-label="Files options" onClick="{{files.toolbar.sort}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
         </div>
       </sc-if>
@@ -3194,6 +3195,7 @@
         <div data-alpha-app-header="detail" data-alpha-header-grow style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px; gap: 2px; flex-shrink: 0">
           <button class="ib" aria-label="Cancel selection" disabled="{{files.selectionBusy}}" onClick="{{files.exitSel}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
           <span class="serif" style="flex-grow: 1; min-width: 0; padding-left: 6px; font-size: 24px">{{files.selCount}}</span>
+          <sc-if value="{{files.canDetails}}"><button class="ib" aria-label="Details" disabled="{{files.selectionBusy}}" onClick="{{files.selDetails}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.info}}"></path></svg></button></sc-if>
           <button onClick="{{files.selAll}}" disabled="{{files.selectionBusy}}" style="min-height: 44px; padding: 0 12px; font-size: 15px; font-weight: 600">Select all</button>
         </div>
       </sc-if>
@@ -3250,12 +3252,18 @@
       </div>
       <sc-if value="{{files.isSel}}">
         <div data-alpha-view-actions role="toolbar" aria-label="Selection actions" style="position: absolute; left: 12px; right: 12px; bottom: 96px; display: flex; justify-content: space-around; padding: 6px; border-radius: 26px; background: var(--bg); box-shadow: 0 0 0 1px var(--line), 0 12px 32px var(--shc); z-index: 5">
+          <sc-if value="{{files.selTrash}}">
+          <button disabled="{{files.selectionDisabled}}" onClick="{{files.selRestore}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px; opacity: {{files.selOp}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.reply}}"></path></svg>Restore</button>
+          <button disabled="{{files.selectionDisabled}}" onClick="{{files.selDeleteForever}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px; color: var(--warn); opacity: {{files.selOp}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{files.icons.trash}}"></path></svg>Delete forever</button>
+          </sc-if>
+          <sc-if value="{{files.selFiles}}">
           <button disabled="{{files.selectionDisabled}}" onClick="{{files.selShare}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px; opacity: {{files.selOp}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{files.icons.share}}"></path></svg>Share</button>
           <sc-if value="{{files.filePlacement}}"><button disabled="{{files.selectionDisabled}}" onClick="{{files.selMove}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px; opacity: {{files.selOp}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{files.icons.move}}"></path></svg>Move</button>
           <button disabled="{{files.selectionDisabled}}" onClick="{{files.selCopy}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px; opacity: {{files.selOp}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{files.icons.copy}}"></path></svg>Copy</button></sc-if>
           <sc-if value="{{files.mediaCollection}}"><button aria-label="Add to folder" disabled="{{files.selectionDisabled}}" onClick="{{files.selCopy}}" style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:60px;min-height:52px;justify-content:center;font-size:12px"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg><span>Add to folder</span></button></sc-if>
           <sc-if value="{{files.canRename}}"><button disabled="{{files.selectionBusy}}" onClick="{{files.selRename}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.edit}}"></path></svg>Rename</button></sc-if>
           <button disabled="{{files.selectionDisabled}}" onClick="{{files.selDel}}" style="display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; min-height: 52px; justify-content: center; font-size: 12px; opacity: {{files.selOp}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{files.icons.trash}}"></path></svg>Delete</button>
+          </sc-if>
         </div>
       </sc-if>
     </div>
@@ -3279,6 +3287,9 @@
         </sc-if>
         <sc-if value="{{files.pv.canForget}}">
         <button class="tap file-preview-action" aria-label="Forget selected file" onClick="{{files.pv.forget}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.x}}"></path></svg><span>Forget</span></button>
+        </sc-if>
+        <sc-if value="{{files.pv.canDetails}}">
+        <button class="tap file-preview-action" aria-label="File details" onClick="{{files.pv.details}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.info}}"></path></svg><span>Details</span></button>
         </sc-if>
         <button class="tap file-preview-action" aria-label="Delete file" onClick="{{files.pv.del}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.trash}}"></path></svg><span>Delete</span></button>
       </div>
@@ -3368,6 +3379,12 @@
           <sc-for list="{{files.dlg.folders}}" as="f" key="{{f.id}}">
             <button disabled="{{files.dlg.busy}}" aria-label="{{f.label}}" onClick="{{f.go}}" class="tap" style="display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 8px; border-radius: 14px; text-align: left"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{f.d}}"></path></svg><span style="overflow-wrap: anywhere">{{f.name}}</span></button>
           </sc-for>
+        </sc-if>
+        <sc-if value="{{files.dlg.isDetails}}">
+          <dl data-alpha-files-details style="margin: 8px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; font-size: 15px">
+            <sc-for list="{{files.dlg.details}}" as="x" key="{{x.id}}"><dt style="color: var(--mut)">{{x.label}}</dt><dd style="margin: 0; overflow-wrap: anywhere">{{x.value}}</dd></sc-for>
+          </dl>
+          <div style="display: flex; justify-content: flex-end; margin-top: 18px"><button onClick="{{files.dlg.cancel}}" style="min-height: 44px; padding: 0 18px">Close</button></div>
         </sc-if>
         <sc-if value="{{files.dlg.isTrashItem}}">
           <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px">
