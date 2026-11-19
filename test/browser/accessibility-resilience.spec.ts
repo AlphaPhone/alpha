@@ -303,7 +303,7 @@ test.describe('photo editor in landscape', () => {
     const editor = page.locator('[data-alpha-subview="photos-edit"]');
     await expect(editor).toBeVisible();
     expect(await editor.evaluate(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')).toBe(true);
-    for (const name of ['Rotate', 'Center crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
+    for (const name of ['Rotate', 'Crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
     // Keyboard: a filter is operable without a pointer, and Save is still reachable afterwards.
     const mono = page.getByRole('button', { name: 'Mono filter', exact: true });
     await mono.focus(); await page.keyboard.press('Enter');
