@@ -21,7 +21,7 @@ const extracted=['MmsStore','SmsProviderReader'];
 const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal','MmsPdu'];
 const historicalProduct=['AlphaTelephony','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
 const appBase=app+'AlphaTelephonyBase.java';
-const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaTelephonyReview.java',
+const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaApprovedSms.java',
   app+'SmsNoticeOpenRequest.java','android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java'];
 const roleSource=shared+'SmsRoleConfiguration.java';
 const commonPaths=[...extracted,...compiled].map(name=>shared+name+'.java');

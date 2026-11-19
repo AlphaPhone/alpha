@@ -161,7 +161,7 @@ test('nothing sent is never reported as unknown or as the owner dismissing it', 
   // The review ended while the SIMs were read: nothing was sent.
   const client = smsClient();
   assert.equal(await text(client, home, () => { throw Error('Phone context changed'); }), 'unavailable'); assert.equal(sent(client).length, 0);
-  // The owner's own dismissal of the native review stays a dismissal; a lost answer stays unknown.
+  // A send the chat retired before dispatch stays cancelled; a lost answer stays unknown.
   assert.equal(await text(smsClient({send: async () => ({status: 'cancelled'})})), 'cancelled');
   await assert.rejects(text(smsClient({send: async () => { throw Error('bridge closed'); }})), /bridge closed/);
   // Through the executor each reads as it should.

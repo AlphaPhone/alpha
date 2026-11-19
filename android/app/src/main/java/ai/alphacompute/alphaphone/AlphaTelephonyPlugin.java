@@ -15,10 +15,11 @@ import java.util.function.Consumer;
 
 /**
  * Contacts, Telecom and SMS on the Alpha AOSP image only (issues #420 and #421). The behaviour is
- * {@link AlphaTelephonyBase} (Alpha's fork of the shared TelephonyPlugin, with Alpha's own send review):
- * roles and SIMs, dialer and SMS handoffs, bounded SMS/MMS provider reads and reviewed native sends
- * journaled by the shared core. Alpha supplies its installed identity ({@link AlphaTelephony}) and the
- * bounded contact search over {@link ContactsCatalog} (shared plugin-native-contacts).
+ * {@link AlphaTelephonyBase} (Alpha's fork of the shared TelephonyPlugin, where the approved card or
+ * the composer's Send confirms a text): roles and SIMs, dialer and SMS handoffs, bounded SMS/MMS
+ * provider reads and confirmed native sends journaled by the shared core. Alpha supplies its
+ * installed identity ({@link AlphaTelephony}) and the bounded contact search over
+ * {@link ContactsCatalog} (shared plugin-native-contacts).
  *
  * MainActivity registers this plugin only when {@link AlphaImageCapability} verifies the image, so a
  * sideloaded launcher APK has no such plugin; each method checks the capability

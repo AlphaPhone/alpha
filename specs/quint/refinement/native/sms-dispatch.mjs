@@ -22,7 +22,7 @@ const historicalCompiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJou
 const currentCompiled=[...historicalCompiled,'MmsPdu','SmsRoleConfiguration'];
 const historicalProduct=['AlphaTelephony','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
 const appBase=app+'AlphaTelephonyBase.java';
-const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaTelephonyReview.java',
+const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaApprovedSms.java',
   app+'SmsNoticeOpenRequest.java','android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java'];
 const historicalPaths=['TelephonyPlugin',...members,...historicalCompiled].map(name=>shared+name+'.java');
 const currentPaths=[...members,...currentCompiled].map(name=>shared+name+'.java');

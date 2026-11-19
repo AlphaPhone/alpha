@@ -199,6 +199,7 @@ import { describePhotosViewOperation } from "../photos/photos-view-presentation.
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT } from "../telephony/telephony-messages.ts";
+import { SMS_CARRIER_CHARGES, smsSendFacts } from "../telephony/sms-card-facts.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -1138,7 +1139,8 @@ export class DeviceActionCoordinator<
       return {
         ...base,
         title: "Review SMS",
-        description: `To: ${op.recipients.join(", ")}${sim ? `\nFrom: ${sim}` : ""}\n\n${op.body}\n\nConfirm again in Android.`,
+        // Approve sends it: no dialog follows, so the card says everything the send depends on.
+        description: `To: ${op.recipients.join(", ")}${sim ? `\nFrom: ${sim}` : ""}\n\n${op.body}\n\n${smsSendFacts(op.recipients.length, op.body)}`,
       };
     }
     if (isCameraCapture(op))
@@ -3418,7 +3420,12 @@ function describeTelephonyAction(
           }
         : {
             title: "Review SMS",
-            description: `${to}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
+            // Approve sends it: no dialog follows. A name is still matched on the phone, where
+            // the owner picks the person and number before anything is sent.
+            description:
+              target.kind === "number"
+                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body)}`
+                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_CARRIER_CHARGES}`,
           };
     }
     case "phone_keypad":
