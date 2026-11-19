@@ -57,3 +57,28 @@ test('a bookmark saved in a private tab keeps the page name while the visit is n
  await list.getByRole('button',{name:'History',exact:true}).click();
  await expect(list.getByRole('button',{name:'https://library.example/Lentil%20soup',exact:true})).toHaveCount(0);
 });
+
+test('Show in Files from the Downloads list opens Files at Downloads',async({page})=>{
+ test.slow();
+ // The native Downloads list is an Android dialog. Its Show in Files reaches the renderer as the
+ // plugin's showDownloads event for this Browser's session; the stand-in sends that event, first
+ // for another Browser document, which must open nothing.
+ await page.evaluate(async()=>{
+  const {BrowserSurface}=await import('/src/browser/browser-surface.ts');
+  (BrowserSurface.prototype as any).downloads=async function(input:{session:string}){
+   await this.notifyListeners('showDownloads',{session:'another-browser'});
+   (window as any).stillBrowser=!!document.querySelector('[aria-label="Menu"]');
+   await this.notifyListeners('showDownloads',{session:input.session});
+  };
+ });
+ // A finished download has created the phone's Download folder.
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').storageCreateFolder({parent:'',name:'Download'});});
+ await openBrowser(page);await navigate(page,'Report');
+ await menu(page,'Downloads');
+ expect(await page.evaluate(()=>(window as any).stillBrowser)).toBe(true);
+ await expect(page.getByRole('button',{name:'Menu',exact:true})).toHaveCount(0);
+ const folder=page.locator('[data-alpha-subview="files-folder"]');
+ await expect(folder).toBeVisible();
+ await expect(folder.getByText('Download',{exact:true}).first()).toBeVisible();
+ await page.screenshot({path:test.info().outputPath('files-downloads.png')});
+});
