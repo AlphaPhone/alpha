@@ -2988,7 +2988,7 @@
 
   
   <sc-if value="{{contacts.editing}}">
-    <div class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 5">
+    <div data-alpha-contact-editor data-alpha-navigation-header class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 5">
       <div style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 12px 0 8px; gap: 2px; flex-shrink: 0">
         <button class="ib" aria-label="Cancel" onClick="{{contacts.cancelEdit}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
         <span style="flex-grow: 1"></span>
