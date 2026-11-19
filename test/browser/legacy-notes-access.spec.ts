@@ -60,7 +60,7 @@ test('an unreadable previous collection offers recovery with the agent disconnec
  await selectLegacyNotesSource(page);
  await expect(page.getByText('Previous notes need a recovery review. Nothing was moved or changed.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'New note',exact:true})).toBeDisabled();
- await expect(page.getByRole('button',{name:'Recover browser Notes',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Recover Notes',exact:true})).toBeVisible();
 });
 
 test('a delayed old-owner storage read cannot expose a recovery entry to the next owner',async({page})=>{

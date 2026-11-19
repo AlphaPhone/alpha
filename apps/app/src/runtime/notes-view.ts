@@ -66,3 +66,13 @@ export function noteDateLabel(note:Note,now:number,locale?:string,timeZone?:stri
  const sameYear=new Intl.DateTimeFormat('en',{timeZone,year:'numeric'}).format(at)===new Intl.DateTimeFormat('en',{timeZone,year:'numeric'}).format(now);
  return new Intl.DateTimeFormat(locale,sameYear?{timeZone,month:'short',day:'numeric'}:{timeZone,year:'numeric',month:'short',day:'numeric'}).format(at);
 }
+const CHECK_MARK=/^\[([ xX])\]\s/;
+/** A checklist as text: a checked item becomes an "[x] " line. An unchecked item whose text starts
+ * like a mark gets "[ ] ", so checklistItems reads every item back as it was. */
+export function checklistText(items:unknown):string{
+ return (Array.isArray(items)?items:[]).map(item=>{const it=item as {t?:unknown;done?:unknown}|null;const t=typeof it?.t==='string'?it.t:'';return it?.done?'[x] '+t:CHECK_MARK.test(t)?'[ ] '+t:t;}).join('\n');
+}
+/** Text as a checklist: one item per non-blank line; "[x] " marks it checked and "[ ] " unchecked. */
+export function checklistItems(body:unknown):{t:string;done:boolean}[]{
+ return String(body??'').split('\n').filter(line=>line.trim()).map(line=>{const text=line.trim(),mark=CHECK_MARK.exec(text);return mark?{t:text.slice(mark[0].length).trim(),done:mark[1]!==' '}:{t:text,done:false};});
+}

@@ -27,7 +27,7 @@ import { DCLogic } from "./dc-lite.js";
 import { askedDraftPlaced, draftAdopted, draftStageFit, draftUndone, emptyDraft, typed } from "../runtime/message-draft";
 import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWeek, visibleCalendarDays } from "./calendar-days";
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
-import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
+import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel, checklistText, checklistItems } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
 import { applyListFilter, clearListFilter, deviceEmergencyLive, endPlacement, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
 
@@ -3330,7 +3330,7 @@ registerView("notes", {
       return p && n.actions.length ? ["Share the action items with " + p.name.split(" ")[0], "What did we decide?"] : ["What did we decide?"];
     }
     if (n && n.kind === "text") return ["Make this a checklist", "Summarize this note"];
-    return ["Start recording", "Summarize my last recording", "Take a note: call the landlord Friday"];
+    return ["Start recording", "Summarize my last recording", "Take a note"];
   },
   voicePhrase: "Start recording",
   actions: {
@@ -3447,8 +3447,9 @@ registerView("notes", {
         onBody: function (e) { notesUpd(api, n.id, { body: e.target.value }); },
         listCss: n.kind === "list" ? "color: var(--acct)" : "", listLabel: n.kind === "list" ? "Turn into text" : "Turn into checklist",
         toggleList: function () {
-          if (n.kind === "text") notesUpd(api, n.id, { kind: "list", body: "", items: String(n.body || "").split("\n").filter(function (l) { return l.trim(); }).map(function (l) { return { t: l.trim(), done: false }; }) });
-          else notesUpd(api, n.id, { kind: "text", items: [], body: (n.items || []).map(function (i) { return i.t; }).join("\n") });
+          // Checked items become "[x] " lines, so turning a checklist into text and back keeps them checked.
+          if (n.kind === "text") notesUpd(api, n.id, { kind: "list", body: "", items: checklistItems(n.body) });
+          else notesUpd(api, n.id, { kind: "text", items: [], body: checklistText(n.items) });
         },
         items: (n.items || []).map(function (it, i) {
           var itemLabel = String(it.t || "").trim() || "item";

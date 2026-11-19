@@ -101,3 +101,14 @@ test('list rows: pinned first, newest first, two-line previews and short dates',
  assert.equal(view.noteDateLabel({modifiedAt:Date.UTC(2025,0,5)},now,'en-US','UTC'),'Jan 5, 2025');
  assert.equal(view.noteDateLabel({},now),'');
 });
+
+test('a checklist turned into text and back keeps each item and its checked state',()=>{
+ const items=[{t:'Milk',done:false},{t:'Eggs',done:true},{t:'[x] literal mark',done:false},{t:'Bread',done:true}];
+ const text=view.checklistText(items);
+ assert.equal(text,'Milk\n[x] Eggs\n[ ] [x] literal mark\n[x] Bread');
+ assert.deepEqual(view.checklistItems(text),items);
+ // Plain text still becomes unchecked items; blank lines are dropped and lines are trimmed.
+ assert.deepEqual(view.checklistItems('  Call the vet \n\n[X] Book flights\n[ ] Pack'),[{t:'Call the vet',done:false},{t:'Book flights',done:true},{t:'Pack',done:false}]);
+ assert.equal(view.checklistText(undefined),'');
+ assert.deepEqual(view.checklistItems(undefined),[]);
+});
