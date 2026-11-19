@@ -547,11 +547,14 @@
       "exactCopyTest",
       "changedSourceTest",
       "changedOwnerTest",
+      "editedEarlierDraftTest",
       "failedInsertNeedsNewReviewTest",
       "revokedReadTest"
     ],
     "sources": [
       "apps/app/src/prototype/file-email-review.ts",
+      "apps/app/src/ui/mailbox/drafts-controller.ts",
+      "apps/app/src/prototype/inbox-cloud-adapter.ts",
       "apps/app/src/runtime/media-copy-intent.ts",
       "apps/app/src/runtime/inbox-attachment.ts",
       "apps/app/src/prototype/share-panel-adapter.ts",
@@ -563,13 +566,15 @@
     ],
     "invariants": [
       "ExactDraft",
+      "EarlierDraftKept",
       "FailedReviewInert",
       "CancelledHoldsNoBytes"
     ],
     "witnesses": [
       "FailedInsertWitness",
       "StaleReadWitness",
-      "InsertedThenSourceChangedWitness"
+      "InsertedThenSourceChangedWitness",
+      "EditedEarlierKeptWitness"
     ]
   },
   {
