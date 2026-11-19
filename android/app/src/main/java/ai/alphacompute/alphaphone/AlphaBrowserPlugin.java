@@ -856,10 +856,12 @@ public class AlphaBrowserPlugin extends Plugin {
   // A private tab leaves private browsing only after the owner says so, as the menu's
   // "Open in another browser" does. The tap and pop-up rules above already held.
   if(t.priv||report.priv){
-   long revision=report.navigation;
+   // A fresh pop-up may be the shown tab rather than its opener, so the answer checks that
+   // the presentation did not change instead of which tab is shown.
+   long revision=report.navigation,shown=presentationRevision;
    AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE).setMessage(AlphaBrowserCopy.LEAVE_PRIVATE_LINK)
     .setPositiveButton(AlphaBrowserCopy.OPEN_APP,(d,w)->{siteDialogCancel=null;
-     if(paused||destroyed||report.dead||tabs.get(report.id)!=report||report.navigation!=revision||!Objects.equals(presentedId,report.id)||(fresh&&tabs.get(t.id)!=t)){if(fresh)closePopup(t);return;}
+     if(paused||destroyed||report.dead||tabs.get(report.id)!=report||report.navigation!=revision||presentationRevision!=shown||(fresh&&tabs.get(t.id)!=t)){if(fresh)closePopup(t);return;}
      launchHandoff(t,report,fresh,raw,intent);})
     .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
    showSiteDialog(report,dialog,()->{if(fresh)closePopup(t);});
