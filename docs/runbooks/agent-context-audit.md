@@ -145,19 +145,25 @@ runtime until it answered.
 
 | Dependent requests answered with the fact | Whole history | Window |
 | --- | --- | --- |
-| Window, first notice wording | 39 of 40 | 30 of 40 |
+| First notice wording | 39 of 40 | 30 of 40 |
 | Notice says to read before denying or promising to check | 40 of 40 | 35 of 40 |
-| Plus exchanges recalled by the request's distinctive words, and search by words | 80 of 80 | 78 of 80 |
+| Plus exchanges recalled by the request's distinctive words, and search by words (as shipped on the branch, two rounds) | 78 of 80 | 80 of 80 |
 
 Before the last step the model had to notice the gap and read. It sometimes replied
 that it had no record, and three of five of its searches ("cabin wifi password")
 matched nothing literally. With recall the answer usually comes in one model call and
-fewer tokens than the whole history. The requests that need nothing earlier caused no
-extra read in any row. The standing instruction ("end every reply with Noted") was
-followed in about half the runs with the whole history and with the window alike.
+fewer tokens than the whole history. In the last row one windowed answer gave the time
+in words and one whole-history run returned no reply. The requests that need nothing
+earlier caused no extra read in any row. A question about something never said costs
+one read before the model says so. The standing instruction ("end every reply with
+Noted") was followed in about half the runs with the whole history and with the window
+alike.
 
-On the phone's conversation recall adds messages on 5 of 125 windowed turns and lowers
-reuse by about one point.
+Recall matches words, not meaning: a correction that shares no word with the request
+("it changed to 9920") is not recalled with the message it corrects, and a fact whose
+words appear in three or more messages is left to the model's own read. On the phone's
+conversation recall adds messages on 6 of 125 windowed turns and lowers reuse by less
+than one point.
 
 ### The device tool
 
