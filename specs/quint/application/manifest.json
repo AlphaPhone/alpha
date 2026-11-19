@@ -8854,6 +8854,7 @@
   {
     "path": "specs/quint/application/PhoneCall.qnt",
     "module": "PhoneCall",
+    "verifyBackend": "tlc-bounded",
     "init": "init",
     "step": "step",
     "invariant": "safety",
