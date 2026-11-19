@@ -1,4 +1,5 @@
 import {BrowserDigestDelegation} from '../browser/digest-delegation-ui';
+import {devSurfacesEnabled} from '../build-flags';
 import {connectionController} from './connection-ui';
 import { CloudDelegationPanel } from "./cloud-delegation-ui";
 import { isAndroid } from '../native';
@@ -229,7 +230,7 @@ export function HostedLiveSourcePicker({
 	return (
 		<details ref={liveDetails} onToggle={event => { if (event.target === event.currentTarget && !event.currentTarget.open) retireRemoval(); }}>
 			<summary onClick={() => { if (liveDetails.current?.open) retireRemoval(); }}><span aria-hidden="true" className="alpha-google-icon" style={{ display: "inline-block", width: 18, height: 18, marginRight: 6, verticalAlign: "middle" }} />Live Google</summary>
-            {scope && (connectionController.isDevelopmentConnection()?<BrowserDigestDelegation client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:isAndroid?<CloudDelegationPanel client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:null) }
+            {scope && (devSurfacesEnabled&&connectionController.isDevelopmentConnection()?<BrowserDigestDelegation client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:isAndroid?<CloudDelegationPanel client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:null) }
 			{message && <p>{message === "Sign-in stays on phone" && <span aria-hidden="true" style={{ ...iconStyle("lock-keyhole"), width: "16px", height: "16px", marginRight: 6, verticalAlign: "middle" }} />}{message}</p>}
 			<button disabled={busy || pending} onClick={() => void loadAccounts()}>
 				Refresh connected accounts

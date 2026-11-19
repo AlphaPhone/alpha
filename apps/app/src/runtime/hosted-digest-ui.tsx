@@ -87,7 +87,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 		connectionController.subscribe,
 		connectionController.getSnapshot,
 	);
-	const interactiveDevelopment=connectionController.isDevelopmentConnection();
+	const interactiveDevelopment=devSurfacesEnabled&&connectionController.isDevelopmentConnection();
 	const [nativeReady,setNativeReady]=useState(false),[nativeSourceProtocol,setNativeSourceProtocol]=useState(false);
     // Agent-advertised features: native evening loops and lapsed-source pausing come from patched plugin-workflow.
     const [features,setFeatures]=useState<Pick<DigestCapabilities,'nativeEvening'|'sourcePause'|'dossier'>>({nativeEvening:false,sourcePause:false,dossier:false});
@@ -257,7 +257,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 	};
 	useEffect(() => {
 		const selected = connectionController.getWorkflowClient();
-		const development = connectionController.isDevelopmentConnection();
+		const development = devSurfacesEnabled && connectionController.isDevelopmentConnection();
 		binding.current?.controller.abort();
         if (mutationBusy.current) {mutationBusy.current = null; setBusy(false);}
         questionClose.current?.();
