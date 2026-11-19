@@ -38,6 +38,11 @@ async function begin(page: Page, external: string[], crossOriginReadable: boolea
   // site without CORS denies.
   await page.route(url, route => route.request().resourceType() === 'fetch' && !crossOriginReadable ? route.abort() : route.fulfill({contentType: 'text/html', headers: crossOriginReadable ? {'access-control-allow-origin': '*'} : {}, body: html}));
   await page.goto('/?mode=dev');
+  await page.evaluate(async()=>{
+    const {Component}=await import('/src/prototype/model.js');
+    const render=Component.prototype.renderVals;
+    Component.prototype.renderVals=function(){(window as any).pageQuestionShell=this;return render.call(this);};
+  });
   await button(page, 'Settings').click();
   await openConnectionDiagnostics(page);
   await page.getByRole('textbox', {name: 'Scripted reply'}).fill(answer);
@@ -56,6 +61,20 @@ async function askAboutPage(page: Page) {
   await button(page, 'Chat actions').click();
   await button(page, 'Attach page').click();
   return page.getByRole('dialog', {name: 'Ask about selected content'});
+}
+
+async function startSpokenPageQuestion(page:Page,question:string,holdMicStop=false){
+ await page.evaluate(async({question,holdMicStop})=>{
+  const w=window as any,shell=w.pageQuestionShell;
+  const signal=new AbortController().signal;
+  const prepared=await shell.prepareVoiceConversation(signal);
+  if(holdMicStop){
+   const stop=shell.stopVoiceConversation.bind(shell);
+   shell.stopVoiceConversation=()=>new Promise(resolve=>{w.releasePageMic=()=>{shell.stopVoiceConversation=stop;resolve(stop());};});
+  }
+  w.spokenPageResult=shell.sendVoiceTurn({...prepared,text:question,signal,turnId:crypto.randomUUID(),assertCurrent:()=>{},
+   voiceTurnSignal:{nextSpeaker:'agent',agentShouldSpeak:true,source:'fixture'}}).then(()=> 'sent',(error:Error)=>error.name);
+ },{question,holdMicStop});
 }
 /** Sends the reviewed draft, checks what the agent received and returns the summary review. */
 async function sendAndOpenSummary(page: Page, question: string, excerpt: string) {
@@ -134,6 +153,63 @@ test('reviewed page excerpt, development agent answer and explicit Save leave ex
 
   await expectOneLinkedNoteAfterReload(page, 'Harbour summary', 'Ferry departs at nine from pier four.');
   expect(external).toEqual([]);
+});
+
+test('a spoken question about the open page becomes an owner-reviewed chat draft',async({page})=>{
+ const external:string[]=[];
+ await begin(page,external,true);
+ const question='What time does the ferry leave? Use the page you just opened.';
+ await startSpokenPageQuestion(page,question);
+ const review=page.getByRole('dialog',{name:'Ask about selected content'});
+ await expect(review.getByRole('textbox',{name:'Question about content'})).toHaveValue(question);
+ const excerpt=review.getByRole('textbox',{name:'Content excerpt'});
+ await expect(excerpt).toHaveValue(/The ferry leaves at nine from pier four\./);
+ expect(await page.evaluate(()=>(window as any).spokenPageResult)).toBe('AbortError');
+ expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
+ await excerpt.fill('The ferry leaves at nine from pier four.');
+ await review.getByRole('button',{name:'Use in conversation',exact:true}).click();
+ await expect(review).toHaveCount(0);
+ expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
+ await button(page,'Send').click();
+ await expect(page.getByRole('button',{name:`Message actions: ${answer}`,exact:true})).toBeVisible();
+ const sent=(await agentMessages(page)).filter(message=>message.role==='user');
+ expect(sent).toHaveLength(1);
+ expect(sent[0].text).toContain(question);
+ expect(sent[0].text).toContain('The ferry leaves at nine from pier four.');
+ expect(sent[0].text).not.toContain('OMIT THIS');
+ expect(external).toEqual([]);
+});
+
+test('a spoken page question with no readable excerpt can be cancelled without an agent turn',async({page})=>{
+ const external:string[]=[];
+ await begin(page,external,false);
+ await startSpokenPageQuestion(page,'Summarize this page.');
+ const review=page.getByRole('dialog',{name:'Ask about selected content'});
+ await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('');
+ await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveAttribute('placeholder','Paste an excerpt to continue');
+ await expect(review.getByRole('button',{name:'Use in conversation',exact:true})).toBeDisabled();
+ await review.getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(review).toHaveCount(0);
+ expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
+ expect(external).toEqual([]);
+});
+
+test('a spoken page question cannot follow navigation while the microphone stops',async({page})=>{
+ const external:string[]=[];
+ await begin(page,external,true);
+ await startSpokenPageQuestion(page,'What does this page say about the ferry?',true);
+ await expect.poll(()=>page.evaluate(()=>typeof (window as any).releasePageMic)).toBe('function');
+ const newer=url+'-newer';
+ await page.route(newer,route=>route.fulfill({contentType:'text/html',body:'<h1>A different page</h1>'}));
+ await button(page,'Edit address').click();
+ const address=page.getByRole('textbox',{name:'Address',exact:true});
+ await address.fill(newer);await address.press('Enter');
+ await expect(page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading',{name:'A different page'})).toBeVisible();
+ await page.evaluate(()=>(window as any).releasePageMic());
+ expect(await page.evaluate(()=>(window as any).spokenPageResult)).toBe('AbortError');
+ await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
+ expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
+ expect(external).toEqual([]);
 });
 
 test('when cross-origin reading is denied, pasted text is reviewed instead and still saves one linked note', async ({page}) => {

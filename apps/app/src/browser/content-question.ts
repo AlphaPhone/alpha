@@ -1,5 +1,15 @@
 import type {SummarySource as Source} from '../prototype/summary-source';
 import {recognizeLocalText} from '../prototype/local-ocr';
+
+/** Only an explicit request about the visible page enters the excerpt review. */
+export function asksAboutOpenBrowserPage(text:string):boolean{
+ const question=text.replace(/"[^"\n]*"|“[^”\n]*”/g,'').trim().replace(/^(?:(?:hey alpha|alpha|please)[,\s]+)+/iu,'');
+ const asks=/^(?:(?:can|could|would) you (?:please )?)?(?:summari[sz]e|explain|read|translate|tell me (?:about|what)|use|what|which|who|where|when|why|how|is|does|are)\b/iu;
+ const page=/\b(?:this (?:web ?page|website|site|page)|the (?:open|current|active|visible) (?:web ?page|website|site|page)|the (?:web ?page|website|site|page) (?:you (?:just )?opened|I (?:have open|opened)|we(?:['’]re| are) (?:on|viewing)))\b/iu;
+ const browserOperation=/^how (?:do|can|could|should) I (?:open|reload|refresh|bookmark|close|share|copy)\b/iu;
+ return asks.test(question)&&page.test(question)&&!browserOperation.test(question);
+}
+
 /** A source that cannot be linked for a known reason; its message tells the user what to do. */
 export class SourceUnavailableError extends Error{}
 /** Review local source text before placing it in the conversation composer. */
@@ -15,7 +25,7 @@ export function reviewContentQuestion(input:{sourceDescription?:string;sourceLab
  const report=(message:string)=>{status.textContent=message;status.scrollIntoView({block:'nearest'});};
  const controller=new AbortController();let previewUrl:string|undefined;
  const question=document.createElement('textarea');question.setAttribute('aria-label','Question about content');question.value=input.question||(input.image?'What does this mean?':'Summarize this excerpt.');question.maxLength=2000;question.rows=2;
- const excerpt=document.createElement('textarea');excerpt.setAttribute('aria-label','Content excerpt');excerpt.value=input.text.slice(0,12000);excerpt.maxLength=12000;excerpt.rows=input.image?2:5;excerpt.placeholder=input.image?'Describe or extract':'Text to discuss';
+ const excerpt=document.createElement('textarea');excerpt.setAttribute('aria-label','Content excerpt');excerpt.value=input.text.slice(0,12000);excerpt.maxLength=12000;excerpt.rows=input.image?2:5;excerpt.placeholder=input.image?'Describe or extract':'Paste an excerpt to continue';
  for(const field of [question,excerpt])field.style.cssText='box-sizing:border-box;width:100%;font:inherit;padding:12px;margin:6px 0 16px';
  const status=document.createElement('p');status.setAttribute('role','status');status.textContent=input.text.length>12000?'Truncated':'';
  const linkSource=document.createElement('input');linkSource.type='checkbox';linkSource.checked=true;const sourceLabel=document.createElement('label');sourceLabel.style.cssText='display:flex;align-items:center;gap:8px;min-height:44px;margin:12px 0';linkSource.style.cssText='width:24px;height:24px;flex-shrink:0';sourceLabel.append(linkSource,document.createTextNode(' '+(input.sourceLabel||'Link source')));

@@ -163,15 +163,17 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       await voice.speak(result.readingToken,controller.signal);valid();
     }catch(error){if(!controller.signal.aborted)report(error);}finally{unsubscribe();if(reading===controller){reading=undefined;void Browser.cancelReading({session}).catch(()=>{});}}
   }
-  async function askPage() {
+  async function askPage(spoken?:{question:string;current:()=>boolean}) {
+    const id=state()?.cur,info=tabInfo(id),revision=tabs.revision(id);
+    const samePage=()=>!disposed&&!document.hidden&&!document.documentElement.hasAttribute('data-dev-background')&&shell.S().screen==='home'&&shell.S().view==='browser'&&state()?.cur===id&&tabs.revision(id)===revision&&!connectionController.getSnapshot().open&&(!spoken||spoken.current());
+    if(!samePage())return;
     stopReading();
     if(await readingUnsupported())return;
-    if(reading||disposed)return;
-    const id=state()?.cur,info=tabInfo(id),revision=tabs.revision(id);
+    if(reading||!samePage())return;
     const source=webSourceOf({kind:'web-page',version:1,name:String(info?.title||info?.url||'Web page').replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,120),url:info?.url});
     if(!source||!info?.committed||info.loading||info.error||info.externalOnly){shell.vset('browser',{menu:false});report(new Error('Load a public HTTPS page before asking about it.'));return;}
     const controller=new AbortController();reading=controller;
-    const current=()=>!controller.signal.aborted&&!disposed&&!document.hidden&&!document.documentElement.hasAttribute('data-dev-background')&&shell.S().screen==='home'&&shell.S().view==='browser'&&state()?.cur===id&&tabs.revision(id)===revision&&!connectionController.getSnapshot().open;
+    const current=()=>!controller.signal.aborted&&samePage();
     try{
       shell.vset('browser',{menu:false});
       let text='';
@@ -193,7 +195,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       }
       if(!current())return;questionReview=true;lastGeometry='';await update();
       // A review that fails to open must not leave the page hidden behind a dialog that is not there.
-      try{reviewContentQuestion({name:source.name,text,signal:controller.signal,current,validate:text=>!sensitiveReadingText(text),source:async()=>{if(!current())throw Error('Page changed');return source;},compose:(draft,source)=>shell.api('browser').composeContentQuestion(draft,source),closed:()=>{questionReview=false;lastGeometry='';if(reading===controller)reading=undefined;}});}
+      try{reviewContentQuestion({name:source.name,text,question:spoken?.question,signal:controller.signal,current,validate:text=>!sensitiveReadingText(text),source:async()=>{if(!current())throw Error('Page changed');return source;},compose:(draft,source)=>shell.api('browser').composeContentQuestion(draft,source),closed:()=>{questionReview=false;lastGeometry='';if(reading===controller)reading=undefined;}});}
       catch(error){questionReview=false;lastGeometry='';throw error;}
     }catch(error){if(!controller.signal.aborted)report(error);}finally{if(!questionReview&&reading===controller)reading=undefined;}
   }
@@ -737,6 +739,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // transmitted merely by opening the agent. Navigation changes the revision
     // so a proposal for an earlier document cannot retain current authority.
     this.browserSelection = () => tabs.selection(state()?.cur);
+    this.reviewSpokenBrowserQuestion = (question:string,current:()=>boolean) => askPage({question,current});
     const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||(b.menu&&!menuOverlaysPage)||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
   let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any;
   void Browser.addListener('findResult',(event:BrowserFindResult)=>{

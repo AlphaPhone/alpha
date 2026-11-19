@@ -43,6 +43,7 @@ import {openContactRead,openContactSelection,showContactsStep} from './contacts-
 import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import {BrowserReviews} from '../browser/review';
+import {asksAboutOpenBrowserPage} from '../browser/content-question';
 import type {ConversationMessageTarget} from '../runtime/alpha-client';
 import {formatDeviceRecordDateTime} from "../ui/device-actions/device-record-presentation";
 import {isNativeNotesQuery} from '../../../../.eliza/client-features/packages/contracts/src/native-notes-query.ts';
@@ -2011,6 +2012,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
+    if(input.context.view==='browser'&&asksAboutOpenBrowserPage(text)){
+      const selected=input.context.selectedObject;
+      const pageCurrent=()=>{
+        const page=this.browserSelection?.();
+        return this.live&&!document.hidden&&this.S().view==='browser'&&connectionController.voiceConversationCurrent(binding)
+          &&page?.kind===selected?.kind&&page?.id===selected?.id&&page?.revision===selected?.revision;
+      };
+      // The review owns a draft, not a model turn. The voice signal is retired with the microphone.
+      try{
+        await this.stopVoiceConversation?.();
+        if(pageCurrent()&&!this.voiceConversationActive?.()){
+          if(String(this.S().draft||'').trim())this.toast('Finish the current draft before asking about this page.');
+          else if(!this.reviewSpokenBrowserQuestion)this.toast('Open a public HTTPS page before asking about it.');
+          else {
+            await new Promise<void>(resolve=>this.setState({chat:'input'},resolve));
+            await this.reviewSpokenBrowserQuestion(text,()=>pageCurrent()&&!this.voiceConversationActive?.()&&!String(this.S().draft||'').trim());
+          }
+        }
+      }catch(error){if(pageCurrent())this.toast(errorNotice(error,'Couldn’t review the open page.'),ERROR_TOAST);}
+      throw new DOMException('Page question held for owner review','AbortError');
+    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     try{
