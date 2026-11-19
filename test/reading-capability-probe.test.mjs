@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 // The capability probe is the shared page-reading module from the prepared client features; the
 // wording is Alpha's own (apps/app/src/ui/browser/page-reading.ts). These probes touch no DOM;
 // the web build's menu cases stay in test/browser/reading-capability.spec.ts.
-import {createReadingSupport,SENSITIVE_PAGE} from '../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
+import {createReadingSupport} from '../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import {READING_UNSUPPORTED_MESSAGE,SENSITIVE_PAGE_MESSAGE,SENSITIVE_READING_MESSAGE} from '../apps/app/src/ui/browser/page-reading.ts';
 import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 
@@ -42,36 +42,40 @@ test('the sensitive refusal tells the user what the page may hold and what to do
  assert.equal(SENSITIVE_READING_MESSAGE,'This page may contain credentials or verification codes. Open a different page.');
 });
 
-/** Ask about page in the installed Android Browser adapter, answering reviewQuestion with `answer`. */
-async function askAboutPage(answer){
- const timeout=globalThis.setTimeout;
- // The adapter's 150 ms wait before reading the page; the answer under test is what follows it.
- globalThis.setTimeout=(run,ms,...rest)=>ms===150?timeout(run,0,...rest):timeout(run,ms,...rest);
+/** Read the public source through the installed Browser adapter. */
+async function askAboutPage(answer,address='https://example.test/article'){
  const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate']});
- const questions=[];host.host.question=input=>{questions.push(input);};
+ const urls=[];
+ host.host.pageSource=async url=>{urls.push(url);return answer;};
  try{
-  host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:'https://example.test/article'}});await host.sync();
-  host.emit('stateChanged',{id:host.state().cur,sequence:1,navigation:'n1',url:'https://example.test/article',title:'Article',error:'',loading:false,committed:true});await host.sync();
-  host.rendered().askPage();
-  for(let round=0;round<20&&!host.waiting('reviewQuestion');round++)await new Promise(resolve=>timeout(resolve,5));
-  await host.settleCall('reviewQuestion',answer);await host.sync();
-  return {messages:host.messages,questions:questions.map(input=>input.text)};
- }finally{globalThis.setTimeout=timeout;await host.teardown();}
+  host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();
+  host.emit('stateChanged',{id:host.state().cur,sequence:1,navigation:'n1',url:address,title:'Article',error:'',loading:false,committed:true});await host.sync();
+  const excerpt=await host.view.readPageForQuestion('What does this page say about the garden?',host.component.browserSelection(),new AbortController().signal,()=>{});
+  assert.equal(host.calls.some(call=>call.name==='reviewQuestion'),false);
+  return {text:await excerpt.text(),urls};
+ }finally{await host.teardown();}
 }
-test('Ask about page refuses a sensitive released excerpt in Alpha\'s words and opens no review',async()=>{
- assert.deepEqual(await askAboutPage({value:{text:'Your verification code is 482913. Do not share it.',truncated:false}}),{messages:[SENSITIVE_READING_MESSAGE],questions:[]});
+test('a blocked public source shares neither its address nor text',async()=>{
+ const result=await askAboutPage({blocked:true});
+ assert.deepEqual(result.urls,['https://example.test/article']);
+ assert.match(result.text,/^No readable public page/);
+ assert.doesNotMatch(result.text,/example\.test/);
 });
-test('a native sensitive-page refusal is shown in Alpha\'s words',async()=>{
- const refusal=Object.assign(new Error('Reading unavailable on a sensitive or unverified page'),{code:SENSITIVE_PAGE});
- assert.deepEqual(await askAboutPage({error:refusal}),{messages:[SENSITIVE_PAGE_MESSAGE],questions:[]});
+test('a Browser address with a query is never fetched or shared',async()=>{
+ const result=await askAboutPage(undefined,'https://example.test/article?invite=synthetic');
+ assert.deepEqual(result.urls,[]);
+ assert.match(result.text,/^No readable public page/);
+ assert.doesNotMatch(result.text,/example\.test|synthetic/);
 });
-test('a readable released excerpt opens the question review with that excerpt',async()=>{
- assert.deepEqual(await askAboutPage({value:{text:'Garden journal: the tomatoes ripened early.',truncated:false}}),{messages:[],questions:['Garden journal: the tomatoes ripened early.']});
+test('a readable public source supplies one short passage with its address',async()=>{
+ const result=await askAboutPage({text:'Garden journal: the tomatoes ripened early.',truncated:false});
+ assert.deepEqual(result.urls,['https://example.test/article']);
+ assert.match(result.text,/Garden journal: the tomatoes ripened early/);
 });
-test('a device that cannot read privately says so in the menu note and when asked, and reads nothing',async()=>{
+test('a device that lacks isolated reading support declines local reading without touching the native page',async()=>{
  const host=await browserAdapterHost({results:{readingSupport:()=>({available:false})}});
  try{
-  host.rendered().askPage();await host.sync();
+  host.rendered().readAloud();await host.sync();
   const menu=host.rendered();
   assert.deepEqual({messages:host.messages,note:menu.readingNote,unavailable:menu.readingUnavailable,reads:host.calls.filter(call=>/^review/.test(call.name)).length},
    {messages:[READING_UNSUPPORTED_MESSAGE],note:READING_UNSUPPORTED_MESSAGE,unavailable:true,reads:0});

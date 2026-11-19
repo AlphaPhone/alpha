@@ -114,9 +114,6 @@ export function installChatTools(Component: {prototype: Shell}) {
     const attachments=output.showComposer&&output.barTarget==='person'&&(!messages?.nativeManaged||messages.showComposer)?messages?.attachmentMenu:null;
     if((turning&&this.chatToolsOpen==='chat')||(!attachments&&this.chatToolsOpen==='messages'))this.chatToolsOpen=false;
     const inMessages=this.chatToolsOpen==='messages';
-    const browser = output.browser;
-    const attachPage = !inMessages && shell.S().view==='browser'
-      && browser?.pageContentAvailable && !browser.readingUnavailable ? browser.askPage : undefined;
     const toggle=(menu:'chat'|'messages')=>{shell.chatToolsOpen=shell.chatToolsOpen===menu?false:menu;shell.setState({});};
     output.chatTools = {
       ...output.chatTools,
@@ -136,7 +133,6 @@ export function installChatTools(Component: {prototype: Shell}) {
       ref: this.chatToolsModal.ref,
       camera:()=>{closeMenu();void attachments?.camera();},
       upload:()=>{closeMenu();if(inMessages){void attachments?.media();}else{output.attachFiles?.();}},
-      attachPage:attachPage && (()=>{closeMenu();attachPage();}),
       search: () => {closeMenu();shell.chatSearchOpen = true;shell.chatSearchQuery = '';shell.chatSearchResults = [];shell.chatSearchMore = false;shell.chatSearchBusy = false;shell.chatSearchError = '';shell.setState({chat:'full'});},
     };
     output.chatSearch = {

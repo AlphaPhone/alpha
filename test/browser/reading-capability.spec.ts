@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 // Chromium checks the web renderer. The native capability remains covered by the Android
 // BrowserReadingNavigation test and the shared reading-capability probe.
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');});
-test('a committed page can be attached from chat while the Browser menu stays clear of reading actions',async({page})=>{
+test('Browser and Chat actions stay clear of separate page review controls',async({page})=>{
  await page.route('https://reading.example/**',route=>route.fulfill({contentType:'text/html',body:'<h1>Public reading fixture</h1>'}));
  await page.getByRole('button',{name:'Browser',exact:true}).click();
  await page.getByRole('button',{name:'Search or type address',exact:true}).click();
@@ -16,45 +16,5 @@ test('a committed page can be attached from chat while the Browser menu stays cl
  await expect(menu.locator('[data-alpha-reading-unavailable]')).toHaveCount(0);
  await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'Chat actions',exact:true}).click();
- await expect(page.getByRole('button',{name:'Attach page',exact:true})).toBeVisible();
-});
-test('the chat page attachment is absent for blank, loading, stopped and external-only pages',async({page})=>{
- let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let requests=0;
- await page.route('https://reading.example/**',async route=>{if(++requests===1)await held;await route.fulfill({contentType:'text/html',body:'<h1>Loaded reading fixture</h1>'}).catch(()=>{});});
- const menu=page.getByRole('dialog',{name:'Browser menu'});
- const chatActions=page.getByRole('button',{name:'Chat actions',exact:true});
- const attach=page.getByRole('button',{name:'Attach page',exact:true});
- const unavailable=async()=>{
-  await chatActions.click();
-  await expect(page.getByRole('dialog',{name:'Chat actions'})).toBeVisible();
-  await expect(attach).toHaveCount(0);
-  await page.keyboard.press('Escape');
- };
- await page.getByRole('button',{name:'Browser',exact:true}).click();
- await unavailable();
- await page.getByRole('button',{name:'Search or type address',exact:true}).click();
- await page.getByRole('textbox',{name:'Address',exact:true}).fill('https://reading.example/article');
- await page.getByRole('textbox',{name:'Address',exact:true}).press('Enter');await expect.poll(()=>requests).toBe(1);
- await page.evaluate(async()=>{
-  const {registerPlugin}=await import('/src/platform-plugins.ts');
-  await registerPlugin<any>('AlphaBrowser').addListener('stateChanged',(event:any)=>{(window as any).readingPageEvent=event;});
- });
-
- await unavailable();
- await page.getByRole('button',{name:'Menu',exact:true}).click();
- await menu.getByRole('button',{name:'Stop loading',exact:true}).click();
- await expect(page.getByText('Stopped',{exact:true})).toBeVisible();
- await unavailable();
- await page.getByRole('button',{name:'Menu',exact:true}).click();
- release();await menu.getByRole('button',{name:'Reload page',exact:true}).click();
- await expect(page.frameLocator('iframe[title="Website"]').getByRole('heading',{name:'Loaded reading fixture'})).toBeVisible();
- await chatActions.click();
- await expect(attach).toBeVisible();
- // A fallback provider may return an external destination instead of an embedded page.
- // Even a malformed positive commit must not give that destination reading authority.
- await page.evaluate(async()=>{
-  const {registerPlugin}=await import('/src/platform-plugins.ts'),event=(window as any).readingPageEvent;
-  await registerPlugin<any>('AlphaBrowser').notifyListeners('stateChanged',{...event,sequence:event.sequence+1,externalOnly:true,committed:true});
- });
- await expect(attach).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Attach page',exact:true})).toHaveCount(0);
 });

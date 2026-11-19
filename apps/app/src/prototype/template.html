@@ -61,7 +61,6 @@
     <div role="dialog" aria-label="{{chatTools.label}}" class="chat-tools-menu" onClick="{{chatTools.inside}}">
       <sc-if value="{{chatTools.messageOpen}}"><button onClick="{{chatTools.camera}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.camera}}"></path></svg>Camera</button></sc-if>
       <sc-if value="{{chatTools.messageOpen}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.inboxClip}}"></path></svg>Add media</button></sc-if>
-      <sc-if value="{{chatTools.attachPage}}"><button onClick="{{chatTools.attachPage}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.link}}"></path></svg>Attach page</button></sc-if>
       <sc-if value="{{chatTools.searchable}}"><button onClick="{{chatTools.upload}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.inboxClip}}"></path></svg>Attach media</button><button onClick="{{chatTools.search}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.search}}"></path></svg>Search chat</button></sc-if>
     </div>
   </div>

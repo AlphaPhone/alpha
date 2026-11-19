@@ -507,7 +507,7 @@ test('loops D and F in the web build: digests and mail name the missing account 
   expect(foreign).toEqual([]);
 });
 
-test('loops E and J05 in the web build: page content requires review and no development vault is offered', async ({ page }) => {
+test('loops E and J05 in the web build: page controls and the development vault stay out of the menu', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page, ['public-fixture.test']);
   const url = 'https://public-fixture.test/harbour';
@@ -522,17 +522,12 @@ test('loops E and J05 in the web build: page content requires review and no deve
   // The web build cannot verify TLS for the framed page and does not claim it.
   await expect(page.getByRole('img', { name: 'Secure connection', exact: true })).toHaveCount(0);
   await button(page, 'Menu').click();
-  // A committed web page offers an explicit review of a separately fetched copy;
-  // the frame itself is never certified as TLS or silently added to agent context.
   await expect(button(page, 'Share')).toHaveCount(0);
+  await expect(button(page, 'Ask about page')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await button(page, 'Chat actions').click();
-  await button(page, 'Attach page').click();
-  const review = page.getByRole('dialog', { name: 'Ask about selected content' });
-  await expect(review).toBeVisible();
-  await expect(review.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue(/The ferry leaves at nine from pier four/);
-  await review.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(review).toHaveCount(0);
+  await expect(button(page, 'Attach page')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Ask about selected content' })).toHaveCount(0);
   await page.goto('/');
   await button(page, 'Settings').click();
   await expect(button(page, 'Passwords')).toHaveCount(0);
@@ -638,10 +633,6 @@ async function openHarbour(page: Page) {
   expect(await native(page, f => f.browser.navigations)).toEqual([HARBOUR]);
   return tab;
 }
-async function askAboutHarbour(page: Page) {
-  await button(page, 'Chat actions').click();
-  await button(page, 'Attach page').click();
-}
 /** The notes saved in the Keystore-backed Notes slot of the stub (its envelope holds the collection's bytes). */
 const savedNotes = (page: Page) => native(page, f => { const slot = f.slots['notes-records:v1:device']; return slot ? JSON.parse(JSON.parse(slot).currentRaw).records : []; }) as Promise<any[]>;
 
@@ -656,151 +647,30 @@ async function openRetainedNativeNotes(page:Page){
  await expect(page.getByText('Note text encrypted on this device',{exact:true})).toBeVisible();
 }
 
-test('loop J05 on Android: a reviewed native page excerpt, a resident answer and an explicit Save leave one web-linked note', async ({ page }) => {
-  test.setTimeout(180_000);
-  const foreign = await fenceNetwork(page);
-  await android(page);
-  await residentHome(page);
-  await openRetainedNativeNotes(page);
-  const tab = await openHarbour(page);
-  await native(page, f => { f.browser.excerpt = 'The ferry leaves at nine from pier four.\nOMIT THIS: internal planning detail.'; f.replies.push('The ferry leaves at nine.'); });
-  await askAboutHarbour(page);
-  const review = page.getByRole('dialog', { name: 'Ask about selected content' });
-  const excerpt = review.getByRole('textbox', { name: 'Content excerpt' });
-  await expect(excerpt).toHaveValue(/OMIT THIS/);
-  // The native reviewed read is bound to the session, the tab and the exact committed navigation.
-  const session = (await native(page, f => f.browser.tabs[f.browser.created.at(-1)].session)) as string;
-  expect(await native(page, f => f.browser.questions)).toEqual([{ session, id: tab, url: HARBOUR, navigation: 1 }]);
-  await excerpt.fill('The ferry leaves at nine from pier four.');
-  await review.getByRole('textbox', { name: 'Question about content' }).fill('When does the ferry leave?');
-  await review.getByRole('button', { name: 'Use in conversation', exact: true }).click();
-  await expect(review).toHaveCount(0);
-  // Composed only: nothing reaches the agent before Send.
-  expect(await native(page, f => f.streams)).toBe(0);
-  await button(page, 'Send').click();
-  await expect(bubble(page, 'The ferry leaves at nine.')).toHaveCount(1);
-  // Exactly one turn, carrying the question, the page it came from and only the reviewed excerpt.
-  expect(await native(page, f => f.posts)).toEqual(['When does the ferry leave?\n\nSource: Harbour report\n\nThe ferry leaves at nine from pier four.']);
-  expect(await native(page, f => f.bodies.join('\n'))).not.toContain('OMIT THIS');
-  // An answer alone saves nothing.
-  expect(await savedNotes(page)).toEqual([]);
-  const card = page.getByRole('button', { name: /^Review summary note/ });
-  await expect(card).toHaveCount(1);
-  await card.click();
-  const summary = page.getByRole('dialog', { name: 'Save summary' });
-  await expect(summary).toContainText('Harbour report');
-  await expect(summary.getByRole('textbox', { name: 'Summary note text' })).toHaveValue('The ferry leaves at nine.');
-  await summary.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(summary).toHaveCount(0);
-  expect(await savedNotes(page)).toEqual([]);
-  await card.click();
-  await summary.getByRole('textbox', { name: 'Summary note title' }).fill('Harbour summary');
-  await summary.getByRole('button', { name: 'Save reviewed note', exact: true }).click();
-  await expect(summary).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Summary note saved/ })).toHaveCount(1);
-  await expect(card).toHaveCount(0);
-  const saved = await savedNotes(page);
-  expect(saved).toHaveLength(1);
-  expect(saved[0]).toMatchObject({ title: 'Harbour summary', body: 'The ferry leaves at nine.', webSource: { kind: 'web-page', version: 1, url: HARBOUR } });
-  expect(JSON.stringify(saved)).not.toContain('OMIT THIS');
-
-  // After a restart the note is still the only one and reopens with its web source.
-  await page.reload();
-  await expect.poll(() => native(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
-  await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
-  await openRetainedNativeNotes(page);
-  await expect(page.getByRole('region', { name: 'Notes' }).getByRole('button', { name: /^Open (?!Trash$)/ })).toHaveCount(1);
-  await button(page, 'Open Harbour summary').click();
-  await expect(page.getByRole('textbox', { name: 'Note', exact: true })).toHaveValue('The ferry leaves at nine.');
-  await button(page, 'Web source linked').click();
-  await expect(page.getByRole('dialog', { name: 'Note web source' })).toContainText(HARBOUR);
-  expect(await native(page, f => f.streams)).toBe(0);
-  await expectNoDevelopmentSurface(page);
-  expect(await native(page, f => f.unexpected)).toEqual([]);
-  expect(foreign).toEqual([]);
-});
-
-// An unusable excerpt (too long or empty) is not a refusal: the review opens with an empty excerpt and
-// Continue disabled until the user pastes, as the web CORS-denied path does (J05-5). Nothing is sent.
-for (const [name, text] of [['too long', 'Harbour '.repeat(626)], ['empty', '  ']] as const) {
-  test(`loop J05 on Android: a native page excerpt that is ${name} opens the review empty, with nothing sent`, async ({ page }) => {
-    test.setTimeout(120_000);
-    const foreign = await fenceNetwork(page);
-    await android(page);
-    await residentHome(page);
-    await openHarbour(page);
-    await page.evaluate(value => { (window as any).coreLoops.browser.excerpt = value; }, text);
-    await askAboutHarbour(page);
-    const review = page.getByRole('dialog', { name: 'Ask about selected content' });
-    await expect(review).toBeVisible();
-    await expect(review.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue('');
-    await expect(review.getByRole('button', { name: 'Use in conversation', exact: true })).toBeDisabled();
-    await review.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await expect(review).toHaveCount(0);
-    expect(await native(page, f => f.browser.questions.length)).toBe(1);
-    expect(await native(page, f => f.streams)).toBe(0);
-    await expectNoDevelopmentSurface(page);
-    expect(await native(page, f => f.unexpected)).toEqual([]);
-    expect(foreign).toEqual([]);
-  });
-}
-
-test('loop J05 on Android: a native page excerpt that looks like credentials is refused before any review opens', async ({ page }) => {
+test('loop J05 on Android: an explicit Browser question sends one short public passage without a review', async ({ page }) => {
   test.setTimeout(120_000);
-  const foreign = await fenceNetwork(page);
+  const foreign = await fenceNetwork(page, ['public-fixture.test']);
+  const fact = 'The ferry leaves at nine from pier four.';
+  await page.route(HARBOUR,route=>route.fulfill({contentType:'text/html',headers:{'access-control-allow-origin':'*'},body:'<article><h1>Harbour report</h1><p>'+fact+'</p></article>'}));
   await android(page);
   await residentHome(page);
   await openHarbour(page);
-  await page.evaluate(() => { (window as any).coreLoops.browser.excerpt = 'Enter the verification code 123456 to continue.'; });
-  await askAboutHarbour(page);
-  await expect(page.locator('[data-alpha-toast]')).toContainText('This page may contain credentials or verification codes. Open a different page.');
-  await expect(page.getByRole('dialog', { name: 'Ask about selected content' })).toHaveCount(0);
-  expect(await native(page, f => f.browser.questions.length)).toBe(1);
-  expect(await native(page, f => f.streams)).toBe(0);
-  await expectNoDevelopmentSurface(page);
-  expect(await native(page, f => f.unexpected)).toEqual([]);
-  expect(foreign).toEqual([]);
-});
-
-test('loop J05 on Android: a page navigation closes the open review, and an agent reconnect before Save refuses the summary', async ({ page }) => {
-  test.setTimeout(180_000);
-  const foreign = await fenceNetwork(page);
-  await android(page);
-  await residentHome(page);
-  const tab = await openHarbour(page);
-  await native(page, f => { f.browser.excerpt = 'The ferry leaves at nine from pier four.'; });
-  await askAboutHarbour(page);
-  const review = page.getByRole('dialog', { name: 'Ask about selected content' });
-  await expect(review).toBeVisible();
-  // The page navigates itself while the excerpt is under review: the review closes with nothing composed.
-  await page.evaluate(id => (window as any).coreLoops.commit(id, 'https://public-fixture.test/timetable'), tab);
-  await expect(review).toHaveCount(0);
-  expect(await native(page, f => f.streams)).toBe(0);
-
-  // Asked again on the new page, sent and answered.
   await native(page, f => { f.replies.push('The ferry leaves at nine.'); });
-  await askAboutHarbour(page);
-  await expect.poll(() => native(page, f => f.browser.questions.length)).toBe(2);
-  expect(await native(page, f => f.browser.questions[1])).toMatchObject({ url: 'https://public-fixture.test/timetable', navigation: 2 });
-  await review.getByRole('button', { name: 'Use in conversation', exact: true }).click();
-  await button(page, 'Send').click();
-  await expect(bubble(page, 'The ferry leaves at nine.')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: /^Review summary note/ })).toHaveCount(1);
-  // Reloading opens a new verified session before the answer is saved.
-  await page.reload();
-  await expect.poll(() => native(page, f => f.calls.filter((call: string) => call === 'Agent.start').length)).toBe(1);
-  await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
-  await button(page, 'Open conversation').click();
-  const card = page.getByRole('button', { name: /^Review summary note/ });
-  // The restored conversation keeps the answer, but the review bound to the previous session is
-  // withdrawn: there is nothing left to save under the new one.
-  await expect(bubble(page, 'The ferry leaves at nine.')).toHaveCount(1, { timeout: 30_000 });
-  await expect(card).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Summary note saved/ })).toHaveCount(0);
-  await expect(page.getByRole('dialog', { name: 'Save summary' })).toHaveCount(0);
-  expect(await savedNotes(page)).toEqual([]);
+  const question='What time does the ferry leave according to this page?';
+  await page.locator('[data-alpha-input-bar] textarea').fill(question);
+  await button(page,'Send').click();
+  await expect.poll(()=>native(page,f=>f.posts.length)).toBe(1);
+  expect(await native(page,f=>f.posts)).toEqual([question]);
+  const body=JSON.parse(await native(page,f=>f.bodies[0]));
+  expect(body.images).toHaveLength(1);
+  expect(body.images[0]).toMatchObject({name:'Browser page.txt',mimeType:'text/plain'});
+  const source=Buffer.from(body.images[0].data,'base64').toString('utf8');
+  expect(source).toContain(fact);
+  expect(source.length).toBeLessThan(1250);
+  expect(await native(page,f=>f.browser.questions)).toEqual([]);
+  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
   await expectNoDevelopmentSurface(page);
-  expect(await native(page, f => f.unexpected)).toEqual([]);
+  expect(await native(page,f=>f.unexpected)).toEqual([]);
   expect(foreign).toEqual([]);
 });
 

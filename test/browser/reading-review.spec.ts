@@ -39,19 +39,6 @@ test('without agent speech the excerpt is never spoken and cancel before confirm
  await dialog.getByRole('button',{name:'Close',exact:true}).click();await open(page);dialog=page.getByRole('dialog',{name:'Read page excerpt'});await dialog.getByRole('textbox').fill('Unconfirmed text');await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);expect(await page.evaluate(()=>(window as any).voiceFixture.spoken)).toEqual([]);
 });
 
-test('the Browser attaches page context from chat and HOME cancels the review',async({page})=>{
- await page.route('https://example.com/**',route=>route.fulfill({contentType:'text/html',headers:{'access-control-allow-origin':'*'},body:'<h1>Public article</h1><p>Fixture excerpt.</p>'}));
- await page.getByRole('button',{name:'Browser',exact:true}).click();
- await page.getByRole('button',{name:'Search or type address',exact:true}).click();
- await page.getByRole('textbox',{name:'Address',exact:true}).fill('https://example.com/article');await page.getByRole('textbox',{name:'Address',exact:true}).press('Enter');
- await expect(page.frameLocator('iframe[title="Website"]').getByRole('heading',{name:'Public article'})).toBeVisible();
- await page.getByRole('button',{name:'Chat actions',exact:true}).click();await page.getByRole('button',{name:'Attach page',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Ask about selected content'});await expect(dialog).toBeVisible();
- await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Public article\n\nFixture excerpt.');
- await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await expect(dialog).toHaveCount(0);
- expect(await page.evaluate(()=>(window as any).voiceFixture.spoken)).toEqual([]);
-});
-
 test('compact dark review keeps controls reachable and page hide retires the draft',async({page})=>{
  await page.setViewportSize({width:360,height:640});await page.goto('/?theme=dark');await agentBrowserVoice(page);await open(page);
  const dialog=page.getByRole('dialog',{name:'Read page excerpt'});await dialog.getByRole('textbox').fill('Compact review');

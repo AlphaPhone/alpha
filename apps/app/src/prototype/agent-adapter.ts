@@ -43,7 +43,6 @@ import {openContactRead,openContactSelection,showContactsStep} from './contacts-
 import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import {BrowserReviews} from '../browser/review';
-import {asksAboutOpenBrowserPage} from '../browser/content-question';
 import type {ConversationMessageTarget} from '../runtime/alpha-client';
 import {formatDeviceRecordDateTime} from "../ui/device-actions/device-record-presentation";
 import {isNativeNotesQuery} from '../../../../.eliza/client-features/packages/contracts/src/native-notes-query.ts';
@@ -2012,35 +2011,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
-    if(input.context.view==='browser'&&asksAboutOpenBrowserPage(text)){
-      const selected=input.context.selectedObject;
-      const pageCurrent=()=>{
-        const page=this.browserSelection?.();
-        return this.live&&!document.hidden&&this.S().view==='browser'&&connectionController.voiceConversationCurrent(binding)
-          &&page?.kind===selected?.kind&&page?.id===selected?.id&&page?.revision===selected?.revision;
-      };
-      // The review owns a draft, not a model turn. The voice signal is retired with the microphone.
-      try{
-        await this.stopVoiceConversation?.();
-        if(pageCurrent()&&!this.voiceConversationActive?.()){
-          if(String(this.S().draft||'').trim())this.toast('Finish the current draft before asking about this page.');
-          else if(!this.reviewSpokenBrowserQuestion)this.toast('Open a public HTTPS page before asking about it.');
-          else {
-            await new Promise<void>(resolve=>this.setState({chat:'input'},resolve));
-            await this.reviewSpokenBrowserQuestion(text,()=>pageCurrent()&&!this.voiceConversationActive?.()&&!String(this.S().draft||'').trim());
-          }
-        }
-      }catch(error){if(pageCurrent())this.toast(errorNotice(error,'Couldn’t review the open page.'),ERROR_TOAST);}
-      throw new DOMException('Page question held for owner review','AbortError');
-    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     try{
-      // Treat a spoken question about the open file as a one-turn attachment request.
+      // Explicit questions use the open page or file as a one-turn attachment.
       // Ordinary voice turns continue to send only the opaque selected-object observation.
       const asksAboutFile=/^(?:(?:hey alpha|alpha|please)[,\s]+)*(?:(?:can|could|would) you (?:please )?)?(?:(?:summari[sz]e|explain|read|translate|tell me about)|(?:what|which|who|where|when|why|how)\b[^.!?\n"“”]*\b(?:according to|based on|from|in|does|is|contains?))\s+(?:this|the (?:open|current|selected)) (?:file|document)\b/iu.test(text.trim());
-      const file:File|undefined=input.context.view==='files'&&asksAboutFile
-        ?await views.files.readOpenTextForVoice?.(input.context.selectedObject,current):undefined;
+      const file:File|undefined=input.context.view==='browser'
+        ?await views.browser.readPageForQuestion?.(text,input.context.selectedObject,signal,current)
+        :input.context.view==='files'&&asksAboutFile
+          ?await views.files.readOpenTextForVoice?.(input.context.selectedObject,current):undefined;
       const images=file?await encodeChatAttachments([file]):undefined;
       current();
       // A turn sent at a pause and taken back unheard when the user kept speaking: its local user
@@ -2265,6 +2245,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
       if(sentAttachment?.fileAttachments?.length&&(!sameChat()||!filesCurrent()||!this.live||document.hidden))
         throw new NotDispatched('The chat attachment changed. Nothing was sent.');
+      const attachmentImages = sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)
+        ?[...(sentAttachment.fileAttachments??[]).map(({data,mimeType,name})=>({data,mimeType,name})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]
+        :undefined;
+      const pageAttachment:File|undefined = fromComposer&&!editTarget&&!attachmentImages&&!mail&&!transcript&&view==='browser'
+        ?await views.browser.readPageForQuestion?.(text,alphaClient.getState().context.selectedObject,attempt.stop.signal,()=>{
+          if(!current())throw new NotDispatched('The page changed. Your message is back in the composer.');
+        })
+        :undefined;
+      const images=pageAttachment?await encodeChatAttachments([pageAttachment]):attachmentImages;
+      if(pageAttachment){context(this);if(!current())throw new NotDispatched('The page changed. Your message is back in the composer.');}
       // The planning label shows only until the first reply text; it is never kept as a message.
       const showStatus=(event:Event)=>{if(this.live&&!streamed&&this.sendAttempt===attempt)this.setState({turnStatus:(event as CustomEvent<string>).detail});};
       localTurnStatus.addEventListener('label',showStatus);
@@ -2279,7 +2269,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!streamFrame&&!document.hidden)streamFrame=requestAnimationFrame(()=>{streamFrame=0;if(this.live)flushStream();});
         }
         else{streamed=true;this.setState((previous:Shell)=>({turnStatus:'',msgs:[...previous.msgs,{id:streamedId,from:'agent',text:value,card:null,streaming:true}]}));}
-      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images:sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)?[...(sentAttachment.fileAttachments??[]).map(({data,mimeType,name})=>({data,mimeType,name})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]:undefined});}
+      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images});}
       // Before settlement, stop, or failure renders: a late frame must not overwrite the final text.
       finally{localTurnStatus.removeEventListener('label',showStatus);flushStream();}
       // Only the composer's own send holds its draft; a prompt from elsewhere never settles it.

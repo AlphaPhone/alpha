@@ -1,15 +1,6 @@
 import type {SummarySource as Source} from '../prototype/summary-source';
 import {recognizeLocalText} from '../prototype/local-ocr';
 
-/** Only an explicit request about the visible page enters the excerpt review. */
-export function asksAboutOpenBrowserPage(text:string):boolean{
- const question=text.replace(/"[^"\n]*"|“[^”\n]*”/g,'').trim().replace(/^(?:(?:hey alpha|alpha|please)[,\s]+)+/iu,'');
- const asks=/^(?:(?:can|could|would) you (?:please )?)?(?:summari[sz]e|explain|read|translate|tell me (?:about|what)|use|what|which|who|where|when|why|how|is|does|are)\b/iu;
- const page=/\b(?:this (?:web ?page|website|site|page)|the (?:open|current|active|visible) (?:web ?page|website|site|page)|the (?:web ?page|website|site|page) (?:you (?:just )?opened|I (?:have open|opened)|we(?:['’]re| are) (?:on|viewing)))\b/iu;
- const browserOperation=/^how (?:do|can|could|should) I (?:open|reload|refresh|bookmark|close|share|copy)\b/iu;
- return asks.test(question)&&page.test(question)&&!browserOperation.test(question);
-}
-
 /** A source that cannot be linked for a known reason; its message tells the user what to do. */
 export class SourceUnavailableError extends Error{}
 /** Review local source text before placing it in the conversation composer. */

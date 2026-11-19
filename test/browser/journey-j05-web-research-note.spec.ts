@@ -1,45 +1,36 @@
-import {openLegacyNotes} from './helpers/legacy-notes';
-import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-// Journey J05: Web research -> note, driven through rendered controls in the browser build
-// (development profile, /?mode=dev, with the development agent profile connected).
-//
-// Evidence boundary: a pass is source/test evidence for the browser renderer only. It is NOT
-// APK, emulator, AOSP image, physical-device or real-integration evidence.
-//
-// Synthetic fixtures:
-// - The web page is test-owned: https://public-fixture.test/harbour is fulfilled by Playwright
-//   (page.route), the approach web-summary-note.spec.ts uses. A question source must be a public
-//   HTTPS address, so a plain-HTTP 127.0.0.1 server cannot stand in here (journey E asserts that
-//   refusal). No real site is contacted; any other external request fails the test.
-// - The agent is the development agent profile with a scripted reply saved through Settings.
-//   No model or hosted agent is involved, so answer quality is not evidence of anything.
-//
-// Native-only steps (not provable here):
-// - Excerpt extraction from the isolated native WebView (Browser.reviewQuestion) and its
-//   navigation/revision binding; the browser build re-fetches the public page without credentials.
-// - A real agent answering from the reviewed excerpt.
-// - Encrypted native Notes storage; here the browser Notes document is read back.
 import {test, expect, type Page} from '@playwright/test';
+import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {returnToApps} from './app-navigation';
 
+// The renderer uses a synthetic public page and an explicit dev-agent reply.
 const url = 'https://public-fixture.test/harbour';
-const html = '<article><h1>Harbour report</h1><p>The ferry leaves at nine from pier four.</p><p>OMIT THIS: internal planning detail.</p></article>';
+const publicReader = 'https://search.parallel.ai/mcp';
+const fact = 'The ferry leaves at nine from pier four.';
+const html = '<article><h1>Harbour report</h1><p>' + 'Unrelated background. '.repeat(90) + '</p><p>' + fact + '</p></article>';
 const answer = 'The ferry leaves at nine.';
+const question = 'What time does the ferry leave? Use the page you just opened.';
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
-// The test selects the retained (Older notes) document explicitly, as web-summary-note.spec.ts does.
-const notes = (page: Page) => page.evaluate(async () => JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()) || '{"records":[]}').records as any[]);
-const agentMessages = (page: Page) => page.evaluate(async () => (await (await import('/src/browser/development-agent-document.ts')).readDevelopmentAgent((await import('/src/browser/development-identity.ts')).developmentIdentity('local'))).conversations.flatMap((c: any) => c.messages) as {role: string; text: string}[]);
 const sourceHeading = (page: Page) => page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading', {name: 'Harbour report', exact: true});
+const turns = (page: Page) => page.evaluate(() => (window as any).pageTurns as {text:string;attachments:{data:string;name:string}[]}[]);
+const composer = (page: Page) => page.locator('[data-alpha-input-bar] textarea');
 
-/** Connects the development agent with a scripted reply, then opens the fixture page in Browser. */
-async function begin(page: Page, external: string[], crossOriginReadable: boolean) {
+async function begin(page: Page, external: string[], crossOriginReadable: boolean, body = html) {
   page.on('request', request => { const host = new URL(request.url()).hostname; if (/^https?:/.test(request.url()) && !['127.0.0.1', 'localhost', 'public-fixture.test'].includes(host)) external.push(request.url()); });
   // The frame navigation always loads; the renderer's credential-free re-read is a fetch, which a
   // site without CORS denies.
-  await page.route(url, route => route.request().resourceType() === 'fetch' && !crossOriginReadable ? route.abort() : route.fulfill({contentType: 'text/html', headers: crossOriginReadable ? {'access-control-allow-origin': '*'} : {}, body: html}));
+  await page.route(url, route => route.request().resourceType() === 'fetch' && !crossOriginReadable ? route.abort() : route.fulfill({contentType: 'text/html', headers: crossOriginReadable ? {'access-control-allow-origin': '*'} : {}, body}));
+  await page.route(publicReader, route => route.abort());
   await page.goto('/?mode=dev');
   await page.evaluate(async()=>{
     const {Component}=await import('/src/prototype/model.js');
+    const {alphaClient}=await import('/src/runtime/alpha-client.ts');
+    const send=alphaClient.send.bind(alphaClient);
+    const fixture=window as any;
+    fixture.pageTurns=[];
+    alphaClient.send=(...args)=>{
+      fixture.pageTurns.push({text:args[0],attachments:args[4]?.images??[]});
+      return send(...args);
+    };
     const render=Component.prototype.renderVals;
     Component.prototype.renderVals=function(){(window as any).pageQuestionShell=this;return render.call(this);};
   });
@@ -49,217 +40,144 @@ async function begin(page: Page, external: string[], crossOriginReadable: boolea
   await page.getByRole('button', {name: 'Save development reply'}).click();
   await expect(page.getByRole('status').filter({hasText: 'Development reply saved.'})).toBeVisible();
   await page.getByRole('button', {name: 'Connect development profile'}).click();
-  await returnToApps(page);await openLegacyNotes(page);await returnToApps(page);
+  await returnToApps(page);
   await button(page, 'Browser').click();
   await button(page, 'Search or type address').click();
   await page.getByRole('textbox', {name: 'Address', exact: true}).fill(url);
   await page.getByRole('textbox', {name: 'Address', exact: true}).press('Enter');
   await expect(sourceHeading(page)).toBeVisible();
-  expect(await notes(page)).toEqual([]);
 }
-async function askAboutPage(page: Page) {
-  await button(page, 'Chat actions').click();
-  await button(page, 'Attach page').click();
-  return page.getByRole('dialog', {name: 'Ask about selected content'});
-}
-
-async function startSpokenPageQuestion(page:Page,question:string,holdMicStop=false){
- await page.evaluate(async({question,holdMicStop})=>{
+async function startSpokenPageQuestion(page:Page,question:string){
+ await page.evaluate(async({question})=>{
   const w=window as any,shell=w.pageQuestionShell;
   const signal=new AbortController().signal;
   const prepared=await shell.prepareVoiceConversation(signal);
-  if(holdMicStop){
-   const stop=shell.stopVoiceConversation.bind(shell);
-   shell.stopVoiceConversation=()=>new Promise(resolve=>{w.releasePageMic=()=>{shell.stopVoiceConversation=stop;resolve(stop());};});
-  }
   w.spokenPageResult=shell.sendVoiceTurn({...prepared,text:question,signal,turnId:crypto.randomUUID(),assertCurrent:()=>{},
    voiceTurnSignal:{nextSpeaker:'agent',agentShouldSpeak:true,source:'fixture'}}).then(()=> 'sent',(error:Error)=>error.name);
- },{question,holdMicStop});
-}
-/** Sends the reviewed draft, checks what the agent received and returns the summary review. */
-async function sendAndOpenSummary(page: Page, question: string, excerpt: string) {
-  await expect(page.getByRole('textbox', {name: 'Message Alpha', exact: true})).toHaveValue(new RegExp(question.replace(/[.?]/g, '\\$&')));
-  expect((await agentMessages(page)).filter(message => message.role === 'user')).toEqual([]);
-  await button(page, 'Send').click();
-  await expect(page.getByRole('button', {name: `Message actions: ${answer}`, exact: true})).toBeVisible();
-  const sent = (await agentMessages(page)).filter(message => message.role === 'user').map(message => message.text.split('[USER MESSAGE]\n')[1]);
-  expect(sent).toHaveLength(1);
-  expect(sent[0]).toContain(question);
-  expect(sent[0]).toContain(excerpt);
-  expect(sent[0]).toContain(url);
-  expect(JSON.stringify(await agentMessages(page))).not.toContain('OMIT THIS');
-  // An answer alone saves nothing.
-  expect(await notes(page)).toEqual([]);
-  await page.getByRole('button', {name: /^Review summary note/}).click();
-  return page.getByRole('dialog', {name: 'Save summary'});
-}
-async function expectOneLinkedNoteAfterReload(page: Page, title: string, body: string) {
-  await page.reload();
-  const saved = await notes(page);
-  expect(saved).toHaveLength(1);
-  expect(saved[0]).toMatchObject({title, body, webSource: {kind: 'web-page', version: 1, url}});
-  expect(JSON.stringify(saved)).not.toContain('OMIT THIS');
-  await openLegacyNotes(page);
-  await expect(page.getByRole('region', {name: 'Notes'}).getByRole('button', {name: /^Open (?!Trash$)/})).toHaveCount(1);
-  await button(page, `Open ${title}`).click();
-  await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveValue(title);
-  await expect(page.getByRole('textbox', {name: 'Note', exact: true})).toHaveValue(body);
-  await button(page, 'Web source linked').click();
-  const source = page.getByRole('dialog', {name: 'Note web source'});
-  await expect(source).toContainText(url);
-  await source.getByRole('button', {name: 'Open source page', exact: true}).click();
-  await expect(source).toHaveCount(0);
-  await expect(sourceHeading(page)).toBeVisible();
-  await expect(button(page, 'Edit address')).toContainText('public-fixture.test');
-  // Opening the source is navigation only: the note is unchanged and still the only one.
-  expect(await notes(page)).toEqual(saved);
+ },{question});
 }
 
-test('reviewed page excerpt, development agent answer and explicit Save leave exactly one source-linked note', async ({page}) => {
-  test.setTimeout(240_000);
-  const external: string[] = [];
-  await begin(page, external, true);
+function pageAttachment(turn:{text:string;attachments:{data:string;name:string}[]}){
+  expect(turn.text).toBe(question);
+  expect(turn.attachments.map(attachment=>attachment.name)).toEqual(['Browser page.txt']);
+  return Buffer.from(turn.attachments[0].data,'base64').toString('utf8');
+}
 
-  const review = await askAboutPage(page);
-  const excerpt = review.getByRole('textbox', {name: 'Content excerpt'});
-  await expect(excerpt).toHaveValue(/The ferry leaves at nine from pier four\./);
-  await expect(excerpt).toHaveValue(/OMIT THIS/);
-  await expect(review.getByRole('checkbox', {name: 'Link source'})).toBeChecked();
-  // The user bounds what is shared: the edited excerpt and question are the only page text sent.
-  await excerpt.fill('The ferry leaves at nine from pier four.');
-  await review.getByRole('textbox', {name: 'Question about content'}).fill('When does the ferry leave?');
-  await review.getByRole('button', {name: 'Use in conversation', exact: true}).click();
-  await expect(review).toHaveCount(0);
-
-  const summary = await sendAndOpenSummary(page, 'When does the ferry leave?', 'The ferry leaves at nine from pier four.');
-  await expect(summary).toContainText(url);
-  await expect(summary.getByRole('textbox', {name: 'Summary note text'})).toHaveValue(answer);
-  // Cancel is a real cancel.
-  await summary.getByRole('button', {name: 'Cancel', exact: true}).click();
-  await expect(summary).toHaveCount(0);
-  expect(await notes(page)).toEqual([]);
-  await page.getByRole('button', {name: /^Review summary note/}).click();
-  await summary.getByRole('textbox', {name: 'Summary note title'}).fill('Harbour summary');
-  await summary.getByRole('textbox', {name: 'Summary note text'}).fill('Ferry departs at nine from pier four.');
-  await summary.getByRole('button', {name: 'Save reviewed note', exact: true}).click();
-  await expect(summary).toHaveCount(0);
-  await expect(page.getByText('Summary note saved with its source.', {exact: true})).toBeVisible();
-  expect(await notes(page)).toHaveLength(1);
-  // The saved marker is not a second Save.
-  await expect(page.getByRole('button', {name: /^Review summary note/})).toHaveCount(0);
-  await page.getByRole('button', {name: `Summary note saved ${url}`, exact: true}).click();
-  await expect(summary).toHaveCount(0);
-  expect(await notes(page)).toHaveLength(1);
-
-  await expectOneLinkedNoteAfterReload(page, 'Harbour summary', 'Ferry departs at nine from pier four.');
+for(const mode of ['typed','spoken'])test(`a ${mode} page question sends one bounded passage without a popup`,async({page})=>{
+  const external:string[]=[];
+  await begin(page,external,true);
+  await button(page,'Chat actions').click();
+  await expect(button(page,'Attach page')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  if(mode==='typed'){
+    await composer(page).fill(question);
+    await button(page,'Send').click();
+  }else await startSpokenPageQuestion(page,question);
+  await expect.poll(async()=>(await turns(page)).length).toBe(1);
+  const passage=pageAttachment((await turns(page))[0]);
+  expect(passage).toContain(url);
+  expect(passage).toContain(fact);
+  expect(passage.length).toBeLessThan(1250);
+  if(mode==='spoken'){
+    await expect.poll(()=>page.evaluate(()=>(window as any).spokenPageResult)).toBe('sent');
+    if(await button(page,'Open conversation').isVisible())await button(page,'Open conversation').click();
+  }
+  await expect(page.getByRole('button',{name:'Message actions: '+answer,exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
   expect(external).toEqual([]);
 });
 
-test('a spoken question about the open page becomes an owner-reviewed chat draft',async({page})=>{
- const external:string[]=[];
- await begin(page,external,true);
- const question='What time does the ferry leave? Use the page you just opened.';
- await startSpokenPageQuestion(page,question);
- const review=page.getByRole('dialog',{name:'Ask about selected content'});
- await expect(review.getByRole('textbox',{name:'Question about content'})).toHaveValue(question);
- const excerpt=review.getByRole('textbox',{name:'Content excerpt'});
- await expect(excerpt).toHaveValue(/The ferry leaves at nine from pier four\./);
- expect(await page.evaluate(()=>(window as any).spokenPageResult)).toBe('AbortError');
- expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
- await excerpt.fill('The ferry leaves at nine from pier four.');
- await review.getByRole('button',{name:'Use in conversation',exact:true}).click();
- await expect(review).toHaveCount(0);
- expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
- await button(page,'Send').click();
- await expect(page.getByRole('button',{name:`Message actions: ${answer}`,exact:true})).toBeVisible();
- const sent=(await agentMessages(page)).filter(message=>message.role==='user');
- expect(sent).toHaveLength(1);
- expect(sent[0].text).toContain(question);
- expect(sent[0].text).toContain('The ferry leaves at nine from pier four.');
- expect(sent[0].text).not.toContain('OMIT THIS');
- expect(external).toEqual([]);
-});
-
-test('a spoken page question with no readable excerpt can be cancelled without an agent turn',async({page})=>{
+for(const matches of [true,false])test(`a cross-origin page ${matches?'uses one bounded public excerpt':'rejects a mismatched public excerpt'}`,async({page})=>{
  const external:string[]=[];
  await begin(page,external,false);
- await startSpokenPageQuestion(page,'Summarize this page.');
- const review=page.getByRole('dialog',{name:'Ask about selected content'});
- await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('');
- await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveAttribute('placeholder','Paste an excerpt to continue');
- await expect(review.getByRole('button',{name:'Use in conversation',exact:true})).toBeDisabled();
- await review.getByRole('button',{name:'Cancel',exact:true}).click();
- await expect(review).toHaveCount(0);
- expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
+ const reads:unknown[]=[];
+ await page.route(publicReader,route=>{
+   reads.push(route.request().postDataJSON());
+   const result={results:[{url:matches?url:'https://other.test/',excerpts:[
+     '- [Updates](https://public-fixture.test/ferry/time/leave)\n'+'Background. '.repeat(150),fact,
+   ]}],errors:[]};
+   return route.fulfill({headers:{'access-control-allow-origin':'*'},json:{id:1,jsonrpc:'2.0',result:{content:[{type:'text',text:JSON.stringify(result)}]}}});
+ });
+ await composer(page).fill(question);await button(page,'Send').click();
+ await expect.poll(async()=>(await turns(page)).length).toBe(1);
+ const passage=pageAttachment((await turns(page))[0]);
+ expect(reads).toEqual([expect.objectContaining({params:{name:'web_fetch',arguments:{
+   urls:[url],objective:'Return a few short excerpts from the main public page content. Omit navigation and forms.',full_content:false,
+ }}})]);
+ if(matches){
+   expect(passage).toContain(url);
+   expect(passage).toContain(fact);
+   expect(passage).not.toContain('/ferry/time/leave');
+   expect(passage.length).toBeLessThan(1250);
+ }else{
+   expect(passage).toContain('No readable public page');
+   expect(passage).not.toContain(url);
+   expect(passage).not.toContain(fact);
+ }
+ await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
+ expect(external).toEqual([publicReader]);
+});
+
+test('a sign-in page shares no title, address or page text with the agent',async({page})=>{
+ const external:string[]=[];
+ await begin(page,external,true,'<article><h1>Harbour report</h1><p>private synthetic material</p><input type="password" /></article>');
+ await composer(page).fill(question);await button(page,'Send').click();
+ await expect.poll(async()=>(await turns(page)).length).toBe(1);
+ const passage=pageAttachment((await turns(page))[0]);
+ expect(passage).toContain('No readable public page');
+ expect(passage).not.toContain(url);
+ expect(passage).not.toContain('Harbour report');
+ expect(passage).not.toContain('private synthetic material');
  expect(external).toEqual([]);
 });
 
-test('a spoken page question cannot follow navigation while the microphone stops',async({page})=>{
+test('a question in a private tab sends no page address or excerpt',async({page})=>{
  const external:string[]=[];
  await begin(page,external,true);
- await startSpokenPageQuestion(page,'What does this page say about the ferry?',true);
- await expect.poll(()=>page.evaluate(()=>typeof (window as any).releasePageMic)).toBe('function');
- const newer=url+'-newer';
- await page.route(newer,route=>route.fulfill({contentType:'text/html',body:'<h1>A different page</h1>'}));
- await button(page,'Edit address').click();
+ // Chrome uses the browser host fixture for private tabs in this test.
+ await page.evaluate(()=>{(window as any).Capacitor.isNativePlatform=()=>true;});
+ await button(page,'Menu').click();await button(page,'New private tab').click();
  const address=page.getByRole('textbox',{name:'Address',exact:true});
- await address.fill(newer);await address.press('Enter');
- await expect(page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading',{name:'A different page'})).toBeVisible();
- await page.evaluate(()=>(window as any).releasePageMic());
- expect(await page.evaluate(()=>(window as any).spokenPageResult)).toBe('AbortError');
- await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
- expect((await agentMessages(page)).filter(message=>message.role==='user')).toEqual([]);
+ await address.fill(url);await address.press('Enter');
+ await expect(sourceHeading(page)).toBeVisible();
+ await startSpokenPageQuestion(page,question);
+ await expect.poll(async()=>(await turns(page)).length).toBe(1);
+ const passage=pageAttachment((await turns(page))[0]);
+ expect(passage).toContain('No readable public page');
+ expect(passage).not.toContain(url);
+ expect(passage).not.toContain(fact);
  expect(external).toEqual([]);
 });
 
-test('when cross-origin reading is denied, pasted text is reviewed instead and still saves one linked note', async ({page}) => {
-  test.setTimeout(240_000);
-  const external: string[] = [];
-  await begin(page, external, false);
-
-  const review = await askAboutPage(page);
-  const excerpt = review.getByRole('textbox', {name: 'Content excerpt'});
-  // Nothing was read from the page; nothing can continue until the user supplies text.
-  await expect(excerpt).toHaveValue('');
-  await expect(review.getByRole('button', {name: 'Use in conversation', exact: true})).toBeDisabled();
-  await excerpt.fill('Pasted: the ferry leaves at nine.');
-  await review.getByRole('button', {name: 'Use in conversation', exact: true}).click();
-  await expect(review).toHaveCount(0);
-
-  const summary = await sendAndOpenSummary(page, 'Summarize this excerpt.', 'Pasted: the ferry leaves at nine.');
-  await summary.getByRole('textbox', {name: 'Summary note title'}).fill('Pasted harbour summary');
-  await summary.getByRole('button', {name: 'Save reviewed note', exact: true}).click();
-  await expect(summary).toHaveCount(0);
-  expect(await notes(page)).toHaveLength(1);
-
-  await expectOneLinkedNoteAfterReload(page, 'Pasted harbour summary', answer);
+test('a Browser question unrelated to the page sends no page context',async({page})=>{
+  const external:string[]=[];
+  await begin(page,external,true);
+  await composer(page).fill('What is two plus two?');await button(page,'Send').click();
+  await expect.poll(async()=>(await turns(page)).length).toBe(1);
+  expect((await turns(page))[0]).toEqual({text:'What is two plus two?',attachments:[]});
   expect(external).toEqual([]);
 });
 
-// J05-6: the tab navigates after the question review is already open (the fetch has finished). The
-// review belongs to the page it was made from, so it closes and leaves nothing behind.
-test('navigating after the question review opens closes it: no draft, no message and no note', async ({page}) => {
-  test.setTimeout(240_000);
-  const external: string[] = [];
-  await begin(page, external, true);
-  await page.route('https://public-fixture.test/elsewhere', route => route.fulfill({contentType: 'text/html', body: '<h1>Another page</h1>'}));
-  await page.evaluate(async () => { const {registerPlugin} = await import('/src/platform-plugins.ts'); await registerPlugin<any>('AlphaBrowser').addListener('stateChanged', (event: any) => { (window as any).webNavigation = event; }); });
-  await button(page, 'Menu').click();
-  await button(page, 'Reload page').click();
-  await expect(sourceHeading(page)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => !!(window as any).webNavigation)).toBe(true);
-
-  const review = await askAboutPage(page);
-  await expect(review.getByRole('textbox', {name: 'Content excerpt'})).toHaveValue(/The ferry leaves at nine/);
-  await review.getByRole('textbox', {name: 'Question about content'}).fill('When does the ferry leave?');
-  await page.evaluate(async () => { const {registerPlugin} = await import('/src/platform-plugins.ts'); const event = (window as any).webNavigation; await registerPlugin<any>('AlphaBrowser').navigate({session: event.session, id: event.id, url: 'https://public-fixture.test/elsewhere'}); });
-  await expect(page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading', {name: 'Another page', exact: true})).toBeVisible();
-  await expect(review).toHaveCount(0);
-  // Nothing was placed in the conversation: opening it shows an empty composer.
-  await expect(page.getByRole('textbox', {name: 'Message Alpha', exact: true})).toHaveCount(0);
-  await button(page, 'Open conversation').click();
-  await expect(page.getByRole('textbox', {name: 'Message Alpha', exact: true})).toHaveValue('');
-  expect((await agentMessages(page)).filter(message => message.role === 'user')).toEqual([]);
-  expect(await notes(page)).toEqual([]);
+test('a page change while reading retires an unsent excerpt',async({page})=>{
+  const external:string[]=[];
+  await begin(page,external,true);
+  let release!:()=>void;
+  const reading=new Promise<void>(resolve=>release=resolve);
+  let requested=false;
+  await page.route(url,async route=>{
+    if(route.request().resourceType()==='fetch'){requested=true;await reading;}
+    await route.fulfill({contentType:'text/html',headers:{'access-control-allow-origin':'*'},body:html}).catch(()=>{});
+  });
+  await startSpokenPageQuestion(page,question);
+  await expect.poll(()=>requested).toBe(true);
+  const another='https://public-fixture.test/another';
+  await page.route(another,route=>route.fulfill({contentType:'text/html',body:'<h1>Another page</h1>'}));
+  await button(page,'Edit address').click();
+  const address=page.getByRole('textbox',{name:'Address',exact:true});
+  await address.fill(another);await address.press('Enter');
+  await expect(page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading',{name:'Another page'})).toBeVisible();
+  release();
+  await expect.poll(()=>page.evaluate(()=>(window as any).spokenPageResult)).toBe('AbortError');
+  expect(await turns(page)).toEqual([]);
   expect(external).toEqual([]);
 });
