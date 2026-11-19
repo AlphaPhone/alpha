@@ -120,12 +120,13 @@ public final class AlphaNoteRecordingService extends Service {
  }
  @Override public void onDestroy(){if(activeService==this){activeService=null;foregroundRecording=null;foreground=false;}super.onDestroy();}
 
- /** "Recording" with a chronometer at the recording's length and Pause, or "Paused" with Resume; Stop in both. */
+ /** "Voice note · Recording" with a chronometer at the recording's length and Pause, or "Voice note · Paused"
+  * with Resume; Stop in both. The words are in res/values/alpha-note-recording.xml. */
  static Notification notification(Context context,JSObject status){
   NotificationManager manager=context.getSystemService(NotificationManager.class);
   // Created each time: on a phone that already has the channel this only adds its description.
-  NotificationChannel channel=new NotificationChannel(CHANNEL,"Notes recording",NotificationManager.IMPORTANCE_LOW);
-  channel.setDescription("Shown while Notes is recording, with Pause and Stop.");
+  NotificationChannel channel=new NotificationChannel(CHANNEL,context.getString(R.string.note_recording_channel),NotificationManager.IMPORTANCE_LOW);
+  channel.setDescription(context.getString(R.string.note_recording_channel_description));
   channel.setShowBadge(false);
   manager.createNotificationChannel(channel);
   String recording=status.optString("recordingId","");boolean paused="paused".equals(status.optString("state"));
@@ -135,16 +136,16 @@ public final class AlphaNoteRecordingService extends Service {
   PendingIntent finish=PendingIntent.getService(context,3,intent(context,ACTION_FINISH,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   Notification.Builder builder=new Notification.Builder(context,CHANNEL)
    .setSmallIcon(R.drawable.ic_note_recording)
-   .setContentTitle(paused?"Paused":"Recording")
-   .setContentText("Stop here, then save it in Notes.")
+   .setContentTitle(context.getString(paused?R.string.note_recording_title_paused:R.string.note_recording_title_recording))
+   .setContentText(context.getString(R.string.note_recording_text))
    .setContentIntent(content)
    .setOngoing(true)
    .setOnlyAlertOnce(true)
    .setCategory(Notification.CATEGORY_SERVICE)
    // Nothing here is private: the lock screen shows the state with Pause and Stop.
    .setVisibility(Notification.VISIBILITY_PUBLIC)
-   .addAction(new Notification.Action.Builder(null,paused?"Resume":"Pause",toggle).build())
-   .addAction(new Notification.Action.Builder(null,"Stop",finish).build());
+   .addAction(new Notification.Action.Builder(null,context.getString(paused?R.string.note_recording_resume:R.string.note_recording_pause),toggle).build())
+   .addAction(new Notification.Action.Builder(null,context.getString(R.string.note_recording_stop),finish).build());
   if(paused)builder.setShowWhen(false).setUsesChronometer(false);
   else builder.setUsesChronometer(true).setShowWhen(true).setWhen(System.currentTimeMillis()-Math.max(0,status.optLong("durationMs",0)));
   return builder.build();
