@@ -11,7 +11,8 @@ import {stripTypeScriptTypes} from './support/strip-types.mjs';
 
 // Source-bound check of specs/quint/application/SettingsNavigation.qnt: the model's tables match
 // settings-adapter.ts, and every step of every model run, replayed through the adapter's own Back,
-// section allowlist and page resolution, lands where the model says. It does not mount Settings.
+// section allowlist and page resolution, lands where the model says. It does not mount Settings;
+// test/browser/settings-navigation-refinement.spec.ts drives the installed adapter.
 const read = path => readFileSync(join(repositoryRoot, path), 'utf8');
 const source = read('apps/app/src/prototype/settings-adapter.ts');
 const model = read('specs/quint/application/SettingsNavigation.qnt');
@@ -30,7 +31,7 @@ const objectLiteral = start => between(source, start, '};').slice(start.length).
 const back = between(source, 'definition.back = (state:Bag,api:Bag) => {', '\n  };');
 const categoryPage = between(source, 'const categoryPage=', ';');
 assert.match(reference, /if \(st\.page\) \{ api\.set\(\{ page: null,/, 'the reference Settings Back clears the page');
-assert.match(source, /settingsPage\(state\.page, developerTools\)/, 'render resolves pages through settingsPage');
+assert.match(source, /liveSettingsPage\(state\.page, developerTools\)/, 'render resolves pages through liveSettingsPage');
 
 const context = vm.createContext({});
 vm.runInContext(stripTypeScriptTypes(`${facts.replace(/^export /gm, '')}
@@ -46,9 +47,9 @@ ${back};
 function resolve(state: Bag) {
   const activeSettingsCategory=typeof state.settingsCategory==='string'&&Object.hasOwn(categoryNames,state.settingsCategory)?state.settingsCategory:null;
   ${categoryPage}
-  return categoryPage || (state.page ? settingsPage(state.page, false) : null) || 'root';
+  return categoryPage || (state.page ? liveSettingsPage(state.page, false) : null) || 'root';
 }
-globalThis.adapter = {settingsSectionPatch, settingsPage, categoryNames, settingsParents, back: definition.back, resolve};`), context);
+globalThis.adapter = {settingsSectionPatch, settingsPage, liveSettingsPage, RETIRED_SETTINGS_PAGES, categoryNames, settingsParents, back: definition.back, resolve};`), context);
 const adapter = context.adapter;
 
 // Quint string literals: "a" -> "b" pairs in a Map, or members of a Set.
@@ -60,9 +61,14 @@ test('SettingsNavigation tables match the Settings adapter', () => {
   assert.deepEqual(quintMap('PARENTS'), {...adapter.settingsParents});
   for (const [section, category] of Object.entries(quintMap('SECTIONS')))
     assert.deepEqual({...adapter.settingsSectionPatch(section)}, {page: section, settingsCategory: category || null}, section);
-  for (const refused of ['developer', 'character', 'password-provider', 'password-entry', 'agent-recovery-details', 'problems', 'wifi', 'constructor', '__proto__'])
+  for (const refused of ['developer', 'character', 'password-provider', 'password-entry', 'agent-recovery-details', 'problems', 'wifi', 'battery', 'accounts', 'constructor', '__proto__'])
     assert.equal(adapter.settingsSectionPatch(refused), null, refused);
   for (const page of quintSet('DEVELOPER_PAGES')) assert.equal(adapter.settingsPage(page, false), null, page);
+  assert.deepEqual(quintSet('RETIRED_PAGES'), [...adapter.RETIRED_SETTINGS_PAGES].sort());
+  // A retired page draws nothing in any build; every other page resolves as settingsPage does.
+  for (const page of quintSet('RETIRED_PAGES')) for (const developer of [false, true]) assert.equal(adapter.liveSettingsPage(page, developer), null, page);
+  for (const page of ['display', 'about', 'models', 'connections', 'sound', null]) assert.equal(adapter.liveSettingsPage(page, false), page, String(page));
+  for (const page of quintSet('DEVELOPER_PAGES')) assert.equal(adapter.liveSettingsPage(page, true), page, page);
 });
 
 function modelTrace(scenario) {
@@ -79,7 +85,8 @@ function modelTrace(scenario) {
 }
 
 const view = s => ({page: s.page || null, settingsCategory: s.category || null});
-const runs = ['categoryBackTest', 'aboutNestedBackTest', 'privacyPermissionsBackTest', 'passwordBackTest', 'sectionOpensInCategoryTest', 'sectionRefusedTest'];
+const runs = ['categoryBackTest', 'aboutNestedBackTest', 'privacyPermissionsBackTest', 'passwordBackTest', 'sectionOpensInCategoryTest', 'sectionRefusedTest',
+  'passwordLockTest', 'sectionLocksVaultTest', 'retiredPageTest'];
 
 for (const run of runs) test(`SettingsNavigation ${run} replays through the adapter`, {timeout: scaledTimeout(60000)}, () => {
   const states = modelTrace(run);
@@ -96,8 +103,11 @@ for (const run of runs) test(`SettingsNavigation ${run} replays through the adap
       assert.deepEqual(view(s), {...view(before), ...patch}, `${run} step ${index}: Back`);
     } else if (s.via === 'section') {
       assert.deepEqual(view(s), {...adapter.settingsSectionPatch(s.page)}, `${run} step ${index}: section`);
-    } else if (s.via === 'refused') {
-      assert.deepEqual(view(s), view(before), `${run} step ${index}: refused section changes nothing`);
+    } else if (s.via === 'refused' || s.via === 'unlock') {
+      assert.deepEqual(view(s), view(before), `${run} step ${index}: ${s.via} keeps the page`);
+    } else if (s.via === 'restored') {
+      // A development jump resets the view, then selects the page.
+      assert.deepEqual(view(s), {page: s.page, settingsCategory: null}, `${run} step ${index}: restored page`);
     }
   });
 });

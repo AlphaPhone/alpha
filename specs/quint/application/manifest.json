@@ -9774,23 +9774,30 @@
       "privacyPermissionsBackTest",
       "passwordBackTest",
       "sectionOpensInCategoryTest",
-      "sectionRefusedTest"
+      "sectionRefusedTest",
+      "passwordLockTest",
+      "sectionLocksVaultTest",
+      "retiredPageTest"
     ],
     "invariants": [
       "NoDeveloperPage",
+      "NoRetiredPage",
       "SectionsAllowlisted",
       "PasswordOnlyFromSettings",
       "CategoryMatchesIndex",
       "CategoryKnown",
-      "ShownResolved"
+      "ShownResolved",
+      "UnlockedOnlyOnPasswordPages"
     ],
     "witnesses": [
       "PasswordEntryWitness",
-      "SectionRefusedWitness"
+      "SectionRefusedWitness",
+      "UnlockedEntryWitness"
     ],
     "sources": [
       "apps/app/src/prototype/settings-adapter.ts",
-      "apps/app/src/prototype/model.js"
+      "apps/app/src/prototype/model.js",
+      "apps/app/src/passwords/password-manager.ts"
     ],
     "symbols": [
       {
@@ -9820,17 +9827,35 @@
       {
         "path": "apps/app/src/prototype/settings-adapter.ts",
         "name": "categoryPage"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "RETIRED_SETTINGS_PAGES"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "liveSettingsPage"
+      },
+      {
+        "path": "apps/app/src/passwords/password-manager.ts",
+        "name": "leavePasswordManager"
+      },
+      {
+        "path": "apps/app/src/passwords/password-manager.ts",
+        "name": "passwordManagerHoldsEntries"
       }
     ],
     "stateMapping": {
       "page/category": "Settings view state page and settingsCategory (empty string for none)",
       "open": "Settings is the view on screen; Back from the root returns false and leaves it",
-      "shown": "The page render draws: the category index (categoryPage), settingsPage(page) in a product build, or the root",
-      "via": "Ghost: how the last step arrived (root row, child row, alpha:settings-page section, Back, or a refused section)"
+      "shown": "The page render draws: the category index (categoryPage), liveSettingsPage(page) in a product build (no developer or retired page), or the root",
+      "via": "Ghost: how the last step arrived (root row, child row, alpha:settings-page section, Back, a refused section, Unlock, or a stale or direct page selection)",
+      "unlocked": "passwordManagerHoldsEntries(): the password list was unlocked and Settings has not left the password pages since"
     },
     "abstractions": [
-      "Product build only (developer surfaces off). Sheets, password locking, app-settings pages and the rows inside each page are not modelled; CHILDREN lists representative links, not every row.",
-      "test/quint-settings-navigation.test.mjs checks the tables against the source and replays each named run through the adapter's own Back, section allowlist and page resolution. It does not mount Settings or prove installed behaviour."
+      "Product build only (developer surfaces off). App-settings pages and most rows inside each page are not modelled; CHILDREN lists representative links, not every row. The live render draws no Settings sheet (every reference sheet kind is dropped), so sheets are not modelled.",
+      "test/quint-settings-navigation.test.mjs checks the tables against the source and replays each named run through the adapter's own Back, section allowlist and page resolution.",
+      "test/browser/settings-navigation-refinement.spec.ts drives installSettingsAdapter in the development server (Settings rows, Android Back, alpha:settings-page, a direct page selection and the development password vault) and checks every observed state against this model with checkTraces. It also checks that each modelled link is a rendered row and that no reference sheet is drawn. It does not run on Android."
     ]
   },
   {
