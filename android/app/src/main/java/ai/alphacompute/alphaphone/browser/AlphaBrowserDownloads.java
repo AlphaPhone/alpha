@@ -5,9 +5,11 @@ import ai.eliza.plugins.browsersurface.BrowserWebOrigin;
 
 import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
@@ -759,10 +761,13 @@ public final class AlphaBrowserDownloads {
   private static final class Status {
     final String text;
     final boolean active;
+    /** A finished file that is still in Downloads. */
+    final boolean openable;
 
-    Status(String text, boolean active) {
+    Status(String text, boolean active, boolean openable) {
       this.text = text;
       this.active = active;
+      this.openable = openable;
     }
   }
 
@@ -771,6 +776,7 @@ public final class AlphaBrowserDownloads {
     final LinearLayout layout;
     final Map<Long, TextView> texts = new HashMap<>();
     final Map<Long, Button> controls = new HashMap<>();
+    final Map<Long, Button> opens = new HashMap<>();
     final Set<Long> active = new HashSet<>();
     List<Long> shown;
 
@@ -812,6 +818,8 @@ public final class AlphaBrowserDownloads {
     }
   }
 
+  private static final String SAVED = "Saved to Downloads · ";
+
   private String localLabel(BrowserDownloadPolicy.Entry entry) {
     if (entry.running)
       return "Downloading · " + size(received.getOrDefault(entry.id, 0L));
@@ -819,7 +827,7 @@ public final class AlphaBrowserDownloads {
       return "Failed";
     try (Cursor cursor = context.getContentResolver().query(Uri.parse(entry.uri == null ? "" : entry.uri), new String[] {MediaStore.MediaColumns.SIZE}, null, null, null)) {
       if (cursor != null && cursor.moveToFirst())
-        return "Saved to Downloads · " + size(cursor.getLong(0));
+        return SAVED + size(cursor.getLong(0));
     } catch (Exception unavailable) {
       return "Status unavailable";
     }
@@ -855,11 +863,12 @@ public final class AlphaBrowserDownloads {
         default: label = "Removed from Downloads";
       }
     }
-    if (entry.ephemeral)
-      label += " · Private tab";
     boolean active = (id < 0 && entry.running)
         || (id > 0 && (status == DownloadManager.STATUS_PENDING || status == DownloadManager.STATUS_RUNNING || status == DownloadManager.STATUS_PAUSED));
-    return new Status(entry.name + "\n" + (entry.origin == null ? "" : entry.origin) + "\n" + label, active);
+    boolean openable = id > 0 ? status == DownloadManager.STATUS_SUCCESSFUL : label.startsWith(SAVED);
+    if (entry.ephemeral)
+      label += " · Private tab";
+    return new Status(entry.name + "\n" + (entry.origin == null ? "" : entry.origin) + "\n" + label, active, openable);
   }
 
   /**
@@ -877,6 +886,7 @@ public final class AlphaBrowserDownloads {
       rows.layout.removeAllViews();
       rows.texts.clear();
       rows.controls.clear();
+      rows.opens.clear();
       rows.active.clear();
       if (ids.isEmpty()) {
         TextView empty = new TextView(context);
@@ -884,11 +894,18 @@ public final class AlphaBrowserDownloads {
         rows.layout.addView(empty);
         return;
       }
+      float density = context.getResources().getDisplayMetrics().density;
       for (long id : ids) {
         TextView text = new TextView(context);
-        text.setPadding(0, 12, 0, 8);
+        text.setPadding(0, Math.round(12 * density), 0, Math.round(8 * density));
         rows.layout.addView(text);
         rows.texts.put(id, text);
+        Button open = new Button(context);
+        open.setText("Open");
+        open.setVisibility(android.view.View.GONE);
+        open.setOnClickListener(view -> open(id));
+        rows.layout.addView(open);
+        rows.opens.put(id, open);
         Button control = new Button(context);
         control.setOnClickListener(view -> removeFromList(id, rows.active.contains(id)));
         rows.layout.addView(control);
@@ -905,12 +922,51 @@ public final class AlphaBrowserDownloads {
         rows.active.add(id);
       else
         rows.active.remove(id);
+      Button open = rows.opens.get(id);
+      int openVisibility = status.openable ? android.view.View.VISIBLE : android.view.View.GONE;
+      if (open.getVisibility() != openVisibility) {
+        open.setVisibility(openVisibility);
+        open.setContentDescription("Open " + entry.name);
+      }
       String action = status.active ? "Cancel download" : "Remove from list";
       Button control = rows.controls.get(id);
       if (!action.contentEquals(control.getText())) {
         control.setText(action);
         control.setContentDescription(status.active ? "Cancel download " + entry.name : "Remove " + entry.name + " from list");
       }
+    }
+  }
+
+  /** Opens a finished download in an app that can show it; the file stays in Downloads. */
+  private void open(long id) {
+    BrowserDownloadPolicy.Entry entry = history.get(id);
+    if (entry == null)
+      return;
+    Uri uri = null;
+    String type = null;
+    try {
+      if (id > 0) {
+        uri = manager.getUriForDownloadedFile(id);
+        type = manager.getMimeTypeForDownloadedFile(id);
+      } else if (entry.uri != null) {
+        uri = Uri.parse(entry.uri);
+        type = context.getContentResolver().getType(uri);
+      }
+    } catch (Exception unavailable) {
+      uri = null;
+    }
+    if (uri == null) {
+      message("This file is no longer in Downloads.");
+      return;
+    }
+    Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type == null || type.isEmpty() ? "*/*" : type)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    try {
+      context.startActivity(view);
+    } catch (ActivityNotFoundException missing) {
+      message("No app on this phone can open this file.");
+    } catch (RuntimeException blocked) {
+      message("This file couldn’t be opened.");
     }
   }
 
