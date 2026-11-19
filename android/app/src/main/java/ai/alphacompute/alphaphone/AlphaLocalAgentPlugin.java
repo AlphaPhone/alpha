@@ -706,9 +706,13 @@ private static final class ResidentAttachDiagnostic {
   // to turn. With a fresh reference each turn no two requests shared a prefix, and the hosted
   // model's per-minute limit counted the whole conversation again on every call.
   env.put("ELIZA_SECRET_SWAP_STABLE_REFERENCES","true");
-  // The hosted model reserves a call's output cap against that limit before the call runs. 4096
-  // holds a long note or message in one tool call; the runtime's 8192 only stops a runaway.
+  // The hosted model holds a call's output cap against that limit from the moment the call is
+  // admitted, and 16,384 tokens for a call that sends none (measured). 4096 holds a long note,
+  // message or reply; the planner's own 8192 only stops a runaway, and the first step of a turn
+  // and its check send no cap at all.
   env.put("ELIZA_PLANNER_MAX_TOKENS","4096");
+  env.put("ELIZA_STAGE1_MAX_TOKENS","4096");
+  env.put("ELIZA_EVALUATOR_MAX_TOKENS","4096");
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");
