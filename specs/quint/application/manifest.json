@@ -11592,7 +11592,8 @@
     "invariant": "safety",
     "tests": [
       "opensMapsOverHomeTest",
-      "neverOpensOverAnotherAppTest",
+      "opensMapsOverAnOpenAppTest",
+      "neverOpensOverAKeptViewTest",
       "blockedScreenRefusesWithoutOpeningTest",
       "lockDuringWaitRefusesTest",
       "timeLimitRefusesAndMapsStillOpensTest",
@@ -11602,12 +11603,12 @@
     ],
     "invariants": [
       "TypeOK",
-      "OpensOnlyOverUnblockedHome",
+      "OpensOnlyOverUnblockedHomeOrApp",
       "AdmittedOnlyWithMapsShown",
       "OneOpenPerRequest",
       "RequestsInOrder",
       "LateOpenFollowsOpen",
-      "PendingOpenOverHome"
+      "PendingOpenOverHomeOrApp"
     ],
     "witnesses": [
       "AdmittedAfterOpenWitness",
@@ -11618,6 +11619,7 @@
     ],
     "sources": [
       "apps/app/src/prototype/maps-adapter.ts",
+      "apps/app/src/maps/agent-present.ts",
       "apps/app/src/maps/screen.ts",
       "apps/app/src/maps/agent-navigation.ts",
       "apps/app/src/ui/maps/maps-screen.ts"
@@ -11626,6 +11628,14 @@
       {
         "path": "apps/app/src/prototype/maps-adapter.ts",
         "name": "showable"
+      },
+      {
+        "path": "apps/app/src/maps/agent-present.ts",
+        "name": "agentMapsShowable"
+      },
+      {
+        "path": "apps/app/src/maps/agent-present.ts",
+        "name": "KEPT_VIEWS"
       },
       {
         "path": "apps/app/src/prototype/maps-adapter.ts",
@@ -11649,13 +11659,13 @@
       }
     ],
     "stateMapping": {
-      "view/pendingOpen": "the launcher state's view and an openView('maps') the shell has not committed",
+      "view/pendingOpen": "the launcher state's view (home, maps, an open app agentMapsShowable lets Maps replace, or a KEPT_VIEWS camera or dialer view) and an openView('maps') the shell has not committed",
       "blocks/disposed": "what showable() refuses: a screen other than home, secure, shade, pageSuspended, the assistant surface, the connection sheet, a hidden document, a shell that is not live; and the adapter's disposed flag",
       "requests/begun": "each call of the present check the adapter hands screen.surface: still awaiting the commit or the two-second limit, answered true or answered false, and whether it asked the shell to open Maps",
       "opens/admissions/lateOpens": "what the launcher looked like at each openView call and each true answer, and opens that committed with no request waiting"
     },
     "abstractions": [
-      "Three requests, three views (Home, Maps, one other app) and eight independent blocks. What the agent does with the answer is in MapsNavigation and MapsRerouteOwnership.",
+      "Three requests, four views (Home, Maps, one open app Maps replaces, one kept camera or dialer view) and eight independent blocks. What the agent does with the answer is in MapsNavigation and MapsRerouteOwnership.",
       "A commit applies a pending open and runs every setState callback in one step, as one shell render does. The two-second limit is an action that can fire at any time before the commit.",
       "An admitted request also needs the Maps state to exist; the replay asserts it at every admission and the model does not carry it.",
       "A request refused by its time limit leaves its open pending, so Maps can still come to the front afterwards (MapsOpensAfterRefusalWitness). The agent was told the phone could not show Maps.",
