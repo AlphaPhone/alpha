@@ -1437,7 +1437,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
     // Camera has two modes, Video and Photo; asking about the frame goes through chat.
-    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;cancelCountdown();bindMode(mode);if(mode==='photo'&&light)void lightOff();} currentApi.set({ mode, rec: false, flash: shownFlash(mode) }); } } }));
+    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;cancelCountdown();bindMode(mode);if(mode==='photo'&&light)void lightOff();
+            // The microphone notice belongs to Video: left open in Photo, its buttons would record a video.
+            if(accessPanel?.dataset.alphaCameraAccess==='microphone')hideAccess();} currentApi.set({ mode, rec: false, flash: shownFlash(mode) }); } } }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {

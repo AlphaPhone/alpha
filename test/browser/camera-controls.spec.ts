@@ -246,6 +246,15 @@ test('the self-timer counts down before a photo and a second shutter press cance
  await page.getByRole('button',{name:'Timer 3 seconds',exact:true}).click();await expect(page.getByRole('button',{name:'Timer 10 seconds',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Video mode',exact:true}).click();await expect(page.locator('[data-alpha-camera="timer"]')).toHaveCount(0);
 });
+test('switching to Photo closes the microphone notice, so its buttons cannot record from Photo',async({page})=>{
+ await page.evaluate(()=>{const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async constraints=>{if(constraints?.audio)throw new DOMException('Synthetic microphone denial','NotAllowedError');return original(constraints);};});
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();
+ await page.getByRole('button',{name:'Start recording',exact:true}).click();
+ const notice=page.getByRole('alert',{name:'Mic off',exact:true});await expect(notice).toBeVisible();
+ await page.getByRole('button',{name:'Photo mode',exact:true}).click();
+ await expect(notice).toHaveCount(0);await expect(page.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ await expect(page.getByRole('timer',{name:'Recording',exact:true})).toHaveCount(0);
+});
 test('the framing grid is drawn over the preview only while it is on',async({page})=>{
  const toggle=page.getByRole('button',{name:'Framing grid',exact:true}),grid=page.locator('[data-alpha-camera="grid"]');
  await expect(toggle).toHaveAttribute('aria-pressed','false');await expect(grid).toHaveCount(0);
