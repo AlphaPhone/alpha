@@ -44,7 +44,8 @@ export async function mapsRefinement() {
     if (permitted && fresh) actions.push(action('receiveFix', true));
     actions.push(action('requestRoute'));
     if (result.state !== 'awaiting-location') actions.push(action('routeReply', 1, 0, true));
-    if (result.state === 'navigating') actions.push(action('allowDirectStart'), action('agentStart'));
+    // An agent request never starts guidance, even with direct start offered by the host.
+    assert.notEqual(result.state, 'navigating', 'agent navigation leaves Start to the user');
     trace.steps.push({label: 'actual navigation checks permission and fix before planning', action: actions, expect: {'s.guidance': f.surface.guidance() !== null, 's.route': f.controller.snapshot().route.phase === 'ready' ? 1 : 0, 's.phase': result.state === 'awaiting-confirmation' ? 'ready' : result.state}});
     const stopped = await f.nav.stop();
     trace.steps.push({label: 'real Stop releases guidance', action: action('stop'), expect: {'s.phase': stopped.state, 's.guidance': f.surface.guidance() !== null}});
