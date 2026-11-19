@@ -82,18 +82,20 @@ for(const change of ['account','bytes','revoke'])test(`direct file attachment re
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
-test('sharing the same file again starts another new draft and no draft holds it twice',async({page})=>{
+test('sharing the same file again while its email is unfinished adds nothing',async({page})=>{
  await setup(page);
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
- // Files reopens in the folder it was showing.
+ // Files reopens in the folder it was showing; leaving Inbox keeps the shared email unfinished.
  await page.evaluate(()=>(window as any).fileEmail.shell.openView('files',{}));
  await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
  await chooseEmail(page);
+ await expect(page.getByText('This file is already attached to your unfinished email in Inbox. Nothing was added.',{exact:true}).first()).toBeVisible();
+ // The duplicate refusal sets nothing aside and starts no second email: the one email holds the file once.
+ expect(await savedInboxDrafts(page,owner)).toEqual([]);
+ await page.evaluate(()=>(window as any).fileEmail.shell.openView('inbox',{}));
+ await page.getByRole('button',{name:'Continue draft',exact:true}).click();
  await expect(page.getByRole('list',{name:'Attachments',exact:true}).getByRole('listitem')).toHaveCount(1);
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toHaveCount(1);
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();
- const exact={name:'selected.txt',mimeType:'text/plain',dataBase64:Buffer.from('Café\nExact bytes').toString('base64')};
- expect((await savedInboxDrafts(page,owner)).map(draft=>draft.attachments)).toEqual([[exact],[exact]]);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 test('a shared file never lands in an unfinished reply: a new composer opens with only that file',async({page},info)=>{
