@@ -1,18 +1,23 @@
-// External browser dispatch is admitted at the final presentation boundary.
+// External browser dispatch is admitted at the final presentation boundary. A tapped mail,
+// phone, text, map or app link (the native tab host's handoff) leaves a private tab only after
+// the owner answers the same question.
 module BrowserExternalHandoff {
   type Launch = {tab: str, revision: int, privateConfirmed: bool, approved: bool, exact: bool}
+  type LinkLaunch = {privateTab: bool, approved: bool}
   type State = {privateTab: bool, https: bool, hidden: bool, left: bool, locked: bool, disposed: bool,
     visit: int, boundVisit: int, selected: str,
     revision: int, settled: bool, sharing: bool, confirming: bool, phase: str, menu: bool, clearedGeometry: bool,
     updates: int, reviews: int, requests: int, approved: bool, boundTab: str, boundRevision: int, boundPrivate: bool,
-    launches: List[Launch], errors: List[str]}
+    launches: List[Launch], errors: List[str],
+    // A tapped link in a private tab waits for the owner's answer about this page revision.
+    linkPending: bool, linkRevision: int, linkLaunches: List[LinkLaunch]}
   var s: State
 
   pure def initial(privateTab: bool, https: bool): State = {privateTab: privateTab, https: https,
     hidden: false, left: false, locked: false, disposed: false, visit: 0, boundVisit: 0, selected: "primary", revision: 0, settled: true,
     sharing: false, confirming: false, phase: "idle", menu: true, clearedGeometry: false, updates: 0,
     reviews: 0, requests: 0, approved: false, boundTab: "", boundRevision: 0, boundPrivate: false,
-    launches: List(), errors: List()}
+    launches: List(), errors: List(), linkPending: false, linkRevision: 0, linkLaunches: List()}
   action initPublic = s' = initial(false, true)
   action initPrivate = s' = initial(true, true)
   action initHttp = s' = initial(false, false)
@@ -78,6 +83,23 @@ module BrowserExternalHandoff {
     val retire = left and not(s.left)
     s' = {...s, left: left, visit: s.visit + (if (retire) 1 else 0)},
   }
+  // A tapped link goes to Android only from the shown page and only after a tap; a script's
+  // link to another app opens nothing. In a private tab it first asks the owner.
+  action tapLink(gesture: bool): bool = all {
+    not(s.linkPending), s.linkLaunches.length() < 2, s.selected == "primary", s.https, s.settled,
+    not(s.disposed), not(s.hidden), not(s.left), not(s.locked),
+    s' = if (not(gesture)) s
+      else if (s.privateTab) {...s, linkPending: true, linkRevision: s.revision}
+      else {...s, linkLaunches: s.linkLaunches.append({privateTab: false, approved: false})},
+  }
+  // The answer opens the app only while that same page is still shown.
+  action answerLink(approved: bool): bool = all {
+    s.linkPending,
+    val shown = not(s.disposed) and not(s.hidden) and not(s.left) and not(s.locked)
+      and s.selected == "primary" and s.revision == s.linkRevision
+    s' = {...s, linkPending: false, linkLaunches: if (approved and shown)
+      s.linkLaunches.append({privateTab: true, approved: true}) else s.linkLaunches},
+  }
   action lock(locked: bool): bool = s' = {...s, locked: locked}
   action dispose = s' = {...s, disposed: true, settled: false, revision: 0}
   action navigate(settled: bool): bool = all {
@@ -87,16 +109,19 @@ module BrowserExternalHandoff {
   action step = any {
     start, update, review(true), review(false), complete(true), complete(false),
     selectTab("primary"), selectTab("other"), hide(true), hide(false), leave(true), leave(false),
-    lock(true), lock(false), dispose, navigate(true), navigate(false), s' = s,
+    lock(true), lock(false), dispose, navigate(true), navigate(false),
+    tapLink(true), tapLink(false), answerLink(true), answerLink(false), s' = s,
   }
 
   val ExactDispatch = s.launches.foldl(true, (valid, launch) => valid and launch.exact)
   val PrivateDispatchHasApproval = s.launches.foldl(true,
     (valid, launch) => valid and (launch.privateConfirmed implies launch.approved))
+  val PrivateLinkHasApproval = s.linkLaunches.foldl(true,
+    (valid, launch) => valid and (launch.privateTab implies launch.approved))
   val BusyOwnsPresentation =
     s.sharing == s.phase.in(Set("prepareReview", "review", "present", "dispatch")) and
     s.confirming == s.phase.in(Set("prepareReview", "review"))
-  val safety = ExactDispatch and PrivateDispatchHasApproval and BusyOwnsPresentation
+  val safety = ExactDispatch and PrivateDispatchHasApproval and PrivateLinkHasApproval and BusyOwnsPresentation
 
   run publicExactDispatchTest = initPublic.then(start).then(update)
     .expect(s.launches.length() == 1 and not(s.launches[0].privateConfirmed) and safety)
@@ -120,6 +145,17 @@ module BrowserExternalHandoff {
     .expect(s.launches.length() == 0 and s.errors == List("changed") and safety)
   run retiredPrivateHandoffCannotOpenReviewTest = initPrivate.then(start).then(hide(true)).then(hide(false))
     .then(update).expect(s.reviews == 0 and s.launches.length() == 0 and safety)
+  run publicTappedLinkOpensTest = initPublic.then(tapLink(true))
+    .expect(s.linkLaunches == List({privateTab: false, approved: false}) and not(s.linkPending) and safety)
+  run untappedLinkOpensNothingTest = initPrivate.then(tapLink(false))
+    .expect(s.linkLaunches.length() == 0 and not(s.linkPending) and safety)
+  run privateTappedLinkAsksFirstTest = initPrivate.then(tapLink(true))
+    .expect(s.linkPending and s.linkLaunches.length() == 0 and safety)
+    .then(answerLink(true)).expect(s.linkLaunches == List({privateTab: true, approved: true}) and safety)
+  run privateTappedLinkDeclinedTest = initPrivate.then(tapLink(true)).then(answerLink(false))
+    .expect(not(s.linkPending) and s.linkLaunches.length() == 0 and safety)
+  run privateTappedLinkAfterPageChangeTest = initPrivate.then(tapLink(true)).then(navigate(true)).then(answerLink(true))
+    .expect(s.linkLaunches.length() == 0 and safety)
   run missingHttpsNeverPreparesTest = initHttp.then(start)
     .expect(s.updates == 0 and s.launches.length() == 0 and s.errors == List("no-page") and safety)
 }

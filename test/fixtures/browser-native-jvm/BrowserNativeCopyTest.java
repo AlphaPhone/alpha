@@ -45,6 +45,12 @@ public final class BrowserNativeCopyTest {
     check(AlphaBrowserCopy.permissionMessage("a.example", List.of("camera"), false).contains("Clear site"),
         "a remembered choice names Browser's Clear site");
 
+    // What a private tab asks before a tapped link leaves for another app.
+    equal(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE, "Leave private browsing?", "the link prompt asks what the menu handoff asks");
+    check(AlphaBrowserCopy.LEAVE_PRIVATE_LINK.contains("another app") && AlphaBrowserCopy.LEAVE_PRIVATE_LINK.contains("private"),
+        "the link prompt says the link leaves private browsing for another app");
+    equal(AlphaBrowserCopy.OPEN_APP, "Open app", "the link prompt names its action");
+
     // What the website sign-in prompt says.
     String refused = AlphaBrowserCopy.signInMessage("a.example", "", AlphaBrowserCopy.Manager.REFUSED, null, false);
     check(refused.startsWith("a.example wants you to sign in."), "the prompt names the asking host");

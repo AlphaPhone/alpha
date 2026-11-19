@@ -1280,7 +1280,7 @@ export class DeviceActionCoordinator<
           proposalId: proposal.id,
           proposal: null,
           notice:
-            "Browser action blocked: a matching current user request is required.",
+            'I only open a site or search you ask for yourself, for example "open nytimes.com" or "search for weather in Paris".',
         });
         continue;
       }

@@ -113,3 +113,12 @@ for(const available of [false,true])test(`BrowserSurface shares only an admitted
  expect(await page.evaluate(()=>(window as any).shareCalls)).toEqual(available?[{url}]:[]);
  expect(await page.evaluate(()=>(window as any).copiedUrls)).toEqual([]);
 });
+test('a new tab has one search field, and page arrows look different from leaving Browser',async({page})=>{
+ await page.getByRole('button',{name:'Browser',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Edit address',exact:true})).toContainText('New tab');
+ await expect(page.getByText('Search or address',{exact:true})).toHaveCount(0);
+ await expect(page.getByText('Search or type address',{exact:true})).toHaveCount(1);
+ const glyph=(name:string)=>page.getByRole('button',{name,exact:true}).first().locator('path').getAttribute('d');
+ const [leave,previous,next]=await Promise.all([glyph('Back to apps'),glyph('Previous page'),glyph('Next page')]);
+ expect(leave).toBeTruthy();expect(previous).toBeTruthy();expect(previous).not.toBe(leave);expect(next).not.toBe(previous);
+});

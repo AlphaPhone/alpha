@@ -17,6 +17,7 @@ import { BrowserReviews } from '../browser/review';
 import { createExternalBrowserHandoff } from './browser-external-handoff';
 import { browserErrorMessage, PROFILE_UNSUPPORTED_NATIVE_MESSAGE, PROFILE_UNSUPPORTED_MESSAGE } from '../browser/browser-errors';
 import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-messages';
+import { sectionKey as historySection } from '../ui/mobile-shell/photos-view';
 import { approvedOpenTab, BrowserOpenRefused, matchingTabs, observedTabCurrent, searchAddress, surfacePollIdle, tabLimitRefusal } from '../browser/browser-poll';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
@@ -116,6 +117,11 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     return raw.replace(/^(\s*)http:/i, '$1https:');
   };
   const pageTitle = (title: unknown, url: string) => { const text = String(title || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 120); return text && text !== url ? text : ''; };
+  /** When each page in history was last visited, while Browser has been open since launch; the
+   * saved history holds addresses only. Kept only for addresses still in history. */
+  function visitTimes(times: Bag | undefined, visits: string[] = [], address?: string, at?: number): Bag {
+    return Object.fromEntries(Object.entries({...times, ...(address ? {[address]: at} : {})}).filter(([saved]) => visits.includes(saved)));
+  }
   /** A deleted address must not survive solely as cached display metadata. */
   function retainedTitles(titles: Bag | undefined, visits: string[] = [], marks: string[] = []): Bag {
     return Object.fromEntries(Object.entries(titles ?? {}).filter(([address]) => visits.includes(address) || marks.includes(address)));
@@ -358,7 +364,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     const next = rest.length ? rest : [{ id: newTabId(), hist: ['newtab'], pos: 0 }];
     const opener = s.tabs.find((tab: Bag) => tab.id === s.cur)?.opener;
     const cur = next.some((tab: Bag) => tab.id === s.cur) ? s.cur : next.some((tab: Bag) => tab.id === opener) ? opener : next[0].id;
-    shell.vset('browser', {tabs: next, cur, ...(clearHistory ? {visits: [], titles: {}} : {})}, {afterCommit});
+    shell.vset('browser', {tabs: next, cur, ...(clearHistory ? {visits: [], titles: {}, visitedAt: {}} : {})}, {afterCommit});
   }
   function savedSnapshot() {
     const s = state(); if (!s) return null;
@@ -462,11 +468,11 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   }
   const definition = views.browser;
   const initialTabId = newTabId();
-  definition.state = { ...definition.state, tabs: [{ id: initialTabId, hist: ['newtab'], pos: 0 }], cur: initialTabId, marks: [], visits: [], titles: {}, booked: null, ag: null, confirm: null, finding: false, findTab: null, findQuery: '', findCount: 0, findIndex: 0, findDone: true };
+  definition.state = { ...definition.state, tabs: [{ id: initialTabId, hist: ['newtab'], pos: 0 }], cur: initialTabId, marks: [], visits: [], titles: {}, visitedAt: {}, libQuery: '', booked: null, ag: null, confirm: null, finding: false, findTab: null, findQuery: '', findCount: 0, findIndex: 0, findDone: true };
   // These are in-memory view-reset keys, not disk persistence. Keep the native
   // tab identities while visiting other apps; a cold start begins with a fresh tab until
   // restoreSession replaces it with saved normal tabs.
-  definition.persist = ['tabs', 'cur', 'marks', 'visits', 'titles'];
+  definition.persist = ['tabs', 'cur', 'marks', 'visits', 'titles', 'visitedAt'];
   definition.onLeave = () => {externalHandoff.retire();stopReading();hide();};
   definition.reply = () => null;
   definition.back = (s: Bag, api: Bag) => {
@@ -475,7 +481,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     if (tabInfo(s.cur)?.canBack) { void command('back'); return true; }
     return false;
   };
-  const focusedAddresses = new WeakSet<HTMLInputElement>();
+  // Each mounted address or find field takes focus once, so the keyboard opens with it.
+  const focusedInputs = new WeakSet<HTMLInputElement>();
+  const focusOnce = (input: HTMLInputElement | null) => {
+    if (!input || focusedInputs.has(input)) return;
+    focusedInputs.add(input);
+    input.focus({preventScroll: true});
+    input.select();
+  };
   definition.render = (s: Bag, api: Bag) => {
     if(profileUnsupportedTab&&profileUnsupportedTab!==s.cur)profileUnsupportedTab=undefined;
     const info = tabInfo(s.cur), url = info?.url ? new URL(info.url) : null;
@@ -490,18 +503,23 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // Page names known on this phone: pages committed since Browser started and saved tabs not yet reloaded.
     const savedTitles = new Map<string, string>([...restored.values()].map(page => [page.url, pageTitle(page.title, page.url)]));
     const titleOf = (address: string) => pageTitle(s.titles?.[address], address) || savedTitles.get(address) || '';
+    // Saved pages that match the library's filter (address or name), history grouped by the day of its visit.
+    const libraryQuery=String(s.libQuery||'').trim().toLocaleLowerCase();
+    let lastSection='';
+    const libraryRows=s.lib?Array.from(new Set<string>(historyOpen?s.visits:s.marks)).flatMap((u:string)=>{
+      const address=new URL(u),site=address.hostname.replace(/^www\./,''),named=titleOf(u);
+      if(libraryQuery&&!(u+' '+named).toLocaleLowerCase().includes(libraryQuery))return [];
+      const at=historyOpen?s.visitedAt?.[u]:undefined,section=!historyOpen?null:typeof at==='number'?historySection(at):{key:'earlier',label:'Earlier'};
+      const heading=section&&section.key!==lastSection?section.label:'';if(section)lastSection=section.key;
+      return [{id:u,title:u,name:named||site,host:address.host+(address.pathname==='/'?'':address.pathname)+address.search,ini:(named||site)[0],heading,go:()=>void navigate(u),canRemove:true,removeAria:historyOpen?'Remove from history':'Remove bookmark',remove:historyOpen?()=>{const current=state(),visits=(current?.visits||[]).filter((visit:string)=>visit!==u);api.set({visits,titles:retainedTitles(current?.titles,visits,current?.marks),visitedAt:visitTimes(current?.visitedAt,visits)});}:()=>saveBookmark(u,false)}];
+    }):[];
     const selectedTabStyle = 'background:var(--acc);color:var(--alpha-white)';
     const unselectedTabStyle = 'color:var(--mut)';
     return {
       editing: !!s.editing, notEditing: !s.editing, addr: s.addr || '',
       onAddr: (event: Event) => api.set({addr: (event.target as HTMLInputElement).value}),
       cancelEdit: () => api.set({editing: false}),
-      focusRef: (input: HTMLInputElement | null) => {
-        if (!input || focusedAddresses.has(input)) return;
-        focusedAddresses.add(input);
-        input.focus({preventScroll: true});
-        input.select();
-      },
+      focusRef: focusOnce,
       tabsOpen: !!s.tabsOpen, nTabs: s.tabs.length,
       tabsTitle: s.tabs.length === 1 ? '1 tab' : s.tabs.length + ' tabs',
       openTabs: () => api.set({tabsOpen: true, menu: false, editing: false}),
@@ -511,28 +529,28 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       closeMenu: () => api.set({menu: false}),
       share: !!s.share, closeShare: () => api.set({share: false}),
       lib: !!s.lib, libIsHist: historyOpen && s.visits.length > 0,
-      openLib: () => api.set({lib: 'bookmarks', menu: false}),
+      openLib: () => api.set({lib: 'bookmarks', libQuery: '', menu: false}),
       closeLib: () => api.set({lib: null}),
       libMarks: () => api.set({lib: 'bookmarks'}),
       libHist: () => api.set({lib: 'history'}),
       libMarksCss: historyOpen ? unselectedTabStyle : selectedTabStyle,
       libHistCss: historyOpen ? selectedTabStyle : unselectedTabStyle,
-      clearHist: () => api.set({visits: [], titles: Object.fromEntries(Object.entries(s.titles || {}).filter(([address]) => s.marks.includes(address)))}),
+      clearHist: () => api.set({visits: [], visitedAt: {}, titles: Object.fromEntries(Object.entries(s.titles || {}).filter(([address]) => s.marks.includes(address)))}),
       profileUnsupportedPage:profileUnsupportedTab===s.cur&&!s.editing,profileUnsupportedEditing:profileUnsupportedTab===s.cur&&!!s.editing,profileUnsupportedMessage:PROFILE_UNSUPPORTED_MESSAGE,isNews:false,isEnc:false,isBook:false,isSearch:false,isGeneric:false,isNew:!info,
       privateNotice:Capacitor.isNativePlatform()?'Private · cleared on close':'This tab is not saved in Alpha history. Website cookies and sign-ins are managed by your browser.',isPrivate:priv,openPrivate:()=>openNew(true),clearData:()=>void clearBrowsingData(),clearSite:()=>void clearSiteData(),canClearSite:Capacitor.isNativePlatform()&&!!info?.committed&&!info?.error&&!!url,
       recents:[],sugg:localSuggestions,people:[],agOn:false,confirm:false,clearAddress:(event:Event)=>{api.set({addr:''});(event.currentTarget as HTMLElement).parentElement?.querySelector('input')?.focus();},
       // Find in page is native findAllAsync. A web build's page is an opaque-origin sandboxed frame the host
       // cannot search, so the menu offers no Find there (the template keys on openFind).
       openFind:Capacitor.isNativePlatform()?()=>openFind():undefined,canFind:Capacitor.isNativePlatform()&&!!info?.committed&&!info?.error,finding:!!s.finding&&s.findTab===s.cur,
-      find:{query:s.findQuery||'',count:s.findCount||0,index:s.findIndex||0,
+      find:{focusRef:focusOnce,query:s.findQuery||'',count:s.findCount||0,index:s.findIndex||0,
         label:!s.findQuery?'':s.findCount?`${s.findIndex||1} of ${s.findCount}`:(s.findDone===false?'Searching…':'No matches'),
         onInput:(e:Event)=>findQuery((e.target as HTMLInputElement).value),
         onKey:(e:KeyboardEvent)=>{if(e.key==='Enter'){e.preventDefault();findStep(!e.shiftKey);}else if(e.key==='Escape'){e.preventDefault();closeFind();}},
         next:()=>findStep(true),prev:()=>findStep(false),close:()=>closeFind(),nextOp:s.findCount?1:0.3,prevOp:s.findCount?1:0.3},
-      host:url?.host || 'Search or address',hostCss:url?'':'color:var(--mut)',path:url ? url.pathname + url.search : '', hasLock:Capacitor.isNativePlatform() && !!url && url.protocol==='https:' && !!info?.committed && !info?.loading && !info?.error,
+      host:url?.host || (info ? 'Search or address' : priv ? 'New private tab' : 'New tab'),hostCss:url?'':'color:var(--mut)',path:url ? url.pathname + url.search : '', hasLock:Capacitor.isNativePlatform() && !!url && url.protocol==='https:' && !!info?.committed && !info?.loading && !info?.error,
       pageShareAvailable:Capacitor.isNativePlatform(),canCopyLink:!!info?.committed&&!info.loading&&!info.error,pageContentAvailable:Capacitor.isNativePlatform()||!!info?.committed&&!info.loading&&!info.error&&!info.externalOnly,nativeControls:true,externalBrowserAvailable:Capacitor.isNativePlatform(),openExternalBrowser:()=>void externalHandoff.open(),openPasswordProvider:()=>{api.set({menu:false});api.open('settings',{page:'password-provider'});},openDownloads:()=>{api.set({menu:false});void Browser.downloads({session}).catch(report);},copyLink:()=>void copyPageLink(),reload:()=>{api.set({menu:false});void command('reload');},stopLoading:()=>{api.set({menu:false});void command('stop');},loading:!!info?.loading,goBack:()=>void command('back'),goFwd:()=>void command('forward'),backOp:info?.canBack?1:0.3,fwdOp:info?.canForward?1:0.3,
       startEdit:()=>api.set({editing:true,addr:info?.url||'',menu:false}),onAddrKey:(e:KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();void navigate(secureTypedAddress((e.target as HTMLInputElement).value));} else if(e.key==='Escape')api.set({editing:false}); },
-      toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('HTTPS only');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{id:'bookmark-recovery',title:'Recover saved bookmarks',host:'Bookmarks unavailable',ini:'!',name:'Recover saved bookmarks',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...Array.from(new Set<string>(s.lib==='history'?s.visits:s.marks)).map((u:string)=>{const address=new URL(u),site=address.hostname.replace(/^www\./,''),named=titleOf(u);return {id:u,title:u,name:named||site,host:address.host+(address.pathname==='/'?'':address.pathname)+address.search,ini:(named||site)[0],go:()=>void navigate(u),canRemove:true,removeAria:historyOpen?'Remove from history':'Remove bookmark',remove:historyOpen?()=>{const current=state(),visits=(current?.visits||[]).filter((visit:string)=>visit!==u);api.set({visits,titles:retainedTitles(current?.titles,visits,current?.marks)});}:()=>saveBookmark(u,false)};})],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!(s.lib==='history'?s.visits:s.marks).length,newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,readAloudAvailable:true,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),
+      toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('HTTPS only');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{id:'bookmark-recovery',title:'Recover saved bookmarks',host:'Bookmarks unavailable',ini:'!',name:'Recover saved bookmarks',heading:'',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...libraryRows],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!libraryRows.length&&!libraryQuery,libNoMatches:!!libraryQuery&&!libraryRows.length,libQuery:s.libQuery||'',libSearchLabel:historyOpen?'Search history':'Search bookmarks',onLibQuery:(event:Event)=>api.set({libQuery:(event.target as HTMLInputElement).value}),newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,readAloudAvailable:true,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),
       tabCards:s.tabs.map((tab:Bag)=>{const page=known(tab.id),label=page?.title||(tab.priv?'New private tab':'New tab');return {id:tab.id,title:page?.title || page?.url || (tab.priv?'New private tab':'New tab'),host:(tab.priv?'Private · ':'')+(page?.url||''),css:tab.id===s.cur?'box-shadow:inset 0 0 0 2px var(--acc)':'',prev:tab.priv?'background:var(--fg);opacity:.85':'background:var(--s2)',aria:'Switch to '+(tab.priv?'private tab ':'')+label,closeAria:tab.priv?'Close private tab':'Close tab',pick:()=>api.set({cur:tab.id,tabsOpen:false}),close:()=>closeTab(tab.id)};}),
       rootRef:(element:HTMLElement)=>{if(!element)return; if(window.scrollX||window.scrollY)window.scrollTo(0,0); const screen=element.closest('[data-screen]'); if(screen){screen.scrollTop=0;screen.scrollLeft=0;} const viewport=element.querySelector('[data-bscroll]'); if(viewport){viewport.setAttribute('data-native-browser-viewport','true'); viewport.setAttribute('aria-label',info?.error ? browserPageErrorText(info.error) : (info?.externalOnly?'Open externally':info?.loading?'Loading website':'Browser page'));} },
     };
@@ -690,7 +708,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const current=state(),address=event.url as string,visits=[address,...current.visits.filter((u:string)=>u!==address)].slice(0,MAX_HISTORY),title=pageTitle(event.title,address);
       // Names stay with the saved addresses only: a page dropped from history and bookmarks loses its name too.
       const titles=Object.fromEntries(Object.entries({...current.titles,...(title?{[address]:title}:{})}).filter(([saved])=>visits.includes(saved)||current.marks.includes(saved)));
-      shell.vset('browser',{visits,titles});
+      shell.vset('browser',{visits,titles,visitedAt:visitTimes(current.visitedAt,visits,address,Date.now())});
     }
     // The native page says only that it could not load. Android blocks pages without HTTPS, so say that.
     if(Capacitor.isNativePlatform()&&change.info.error&&!change.previous?.error&&event.id===state()?.cur){try{const failed=new URL(String(change.info.url));if(failed.protocol==='http:'&&!loopbackHost(failed.hostname))shell?.toast('This site has no secure (HTTPS) connection, so it cannot be opened.');}catch{}}
