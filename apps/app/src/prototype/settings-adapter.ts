@@ -962,8 +962,10 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         const preferences=devicePreferencesStatus();
         page.groups.push(group([{
           // Scope as chips; unreadable preferences stay locked on (Alpha asks before every action).
+          // Off, Alpha may read the latest texter's number and draft texts to people the owner names
+          // (directSmsRequest); a draft is sent only by the owner's own Send tap.
           kTog:true,label:'Ask before Alpha acts',aria:'Ask before Alpha acts',hasSub:false,
-          hasTags:preferences==='ready',tags:[{label:'Web'},{label:'Camera'},{label:'Photos'}],
+          hasTags:preferences==='ready',tags:[{label:'Web'},{label:'Camera'},{label:'Photos'},{label:'Who texted'},{label:'Text drafts'}],
           hasIcon:preferences==='unavailable',d:api.ic?.lock,
           on:preferences!=='ready'||cachedDevicePreferences()?.askBeforeAgentActions!==false,
           track:preferences!=='ready'||cachedDevicePreferences()?.askBeforeAgentActions!==false?'background:var(--acc)':'background:var(--line)',
