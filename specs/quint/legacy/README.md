@@ -128,6 +128,15 @@ in [view-refresh-configurations.json](view-refresh-configurations.json). Each
 configuration has an independent `checker<Name>Init` entry point. `checkerInit`
 selects `Design`. `Rename` retains its separate name domain and bounds.
 
+`CameraSession` is not the current camera's behaviour. Its `Shutter`, `RecStart`, `Flip`,
+`SetFlash` and `SetZoom` require a closed chat, while the current camera adapter gates owner
+controls on `active()`, which stays true under a covering chat until its grace ends and while an
+agent capture or scan holds the preview. The current-source successors are
+`application/CameraModes.qnt` (owner controls, modes and their binding, microphone notice,
+recording limit, self-timer, light and volume-key shutter), `application/CameraAgentCapture.qnt`
+(the agent capture) and `application/CameraScanKeep.qnt` (a scanned frame's Keep). The
+translation here is kept unchanged as the historical design comparison.
+
 These models retain every original state field and action, including external
 changes, reviewed revisions, recording visibility and weak/strong fairness.
 The configuration is immutable state. The `history` record observes the exact

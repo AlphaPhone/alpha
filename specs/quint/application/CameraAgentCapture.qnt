@@ -17,12 +17,14 @@ module CameraAgentCapture {
     shutters: int, saved: bool, outcome: str,
     // The bound camera, and the one the request names ("any" when it names none).
     lens: str, wanted: str,
+    // The request already flipped to the camera it names (it flips at most once).
+    flipped: bool,
     // facts frozen when the shutter fires
     shotVisible: bool, shotReady: bool, shotCovered: bool, shotCurrent: bool, shotLens: str}
   var s: State
   action init = s' = {view: "camera", sensitive: false, hidden: false, chat: "full", landscape: false, panel: false, phase: "off",
     recording: false, request: "none", holds: 0, current: true, aborted: false, ownerReopenedChat: false,
-    shutters: 0, saved: false, outcome: "none", lens: "back", wanted: "any",
+    shutters: 0, saved: false, outcome: "none", lens: "back", wanted: "any", flipped: false,
     shotVisible: true, shotReady: true, shotCovered: false, shotCurrent: true, shotLens: "back"}
   val visible = s.view == "camera" and not(s.hidden)
   /// The shutter gate's two separate source checks: `chatCovers()` and `conversationOverViewfinder`.
@@ -38,7 +40,7 @@ module CameraAgentCapture {
     view.in(Set("camera", "home")), chat.in(Set("hidden", "sheet", "full")),
     phase.in(Set("off", "starting", "ready", "failed")), recording implies phase == "ready",
     s' = {...s, view: view, chat: chat, panel: false, phase: phase, recording: recording, outcome: "none",
-      shutters: 0, saved: false, ownerReopenedChat: false, current: true, aborted: false, wanted: "any"}}
+      shutters: 0, saved: false, ownerReopenedChat: false, current: true, aborted: false, wanted: "any", flipped: false}}
   /// The request names its camera (`lens` in `camera_capture_photo`).
   action wantLens(lens: str): bool = all {s.request == "none", not(settled), lens.in(Set("back", "front")),
     s' = {...s, wanted: lens}}
@@ -95,15 +97,16 @@ module CameraAgentCapture {
   /// After the second check, a request that names the other camera flips to it first (`flipLens`).
   /// A flip that does not end on the named camera, or a preview lost on the way, takes no photo.
   action flipForRequest(ok: bool): bool = all {s.request == "armed", admitted, s.phase == "ready",
-    not(lensMatches),
-    s' = if (ok) {...s, lens: s.wanted}
+    not(lensMatches), not(s.flipped),
+    s' = if (ok) {...s, lens: s.wanted, flipped: true}
       else {...s, request: "none", holds: s.holds - 1, outcome: "failed"}}
   /// The owner flips the camera while the request waits.
   action ownerFlips = all {s.request.in(Set("revealing", "queued", "armed")), s.phase == "ready", not(s.recording),
     s' = {...s, lens: if (s.lens == "back") "front" else "back"}}
-  /// The second check, right before the shutter.
+  /// The second check, right before the shutter. Inside the shutter's turn the named camera is checked
+  /// again: an owner flip after the request's own flip refuses ("The camera changed").
   action recheckFails = all {s.request == "armed",
-    not(admitted) or s.phase != "ready" or chatCovers or panelOverViewfinder,
+    not(admitted) or s.phase != "ready" or chatCovers or panelOverViewfinder or (s.flipped and not(lensMatches)),
     s' = {...s, request: "none", holds: s.holds - 1, outcome: "failed"}}
   action shutter = all {s.request == "armed", admitted, not(chatCovers), not(panelOverViewfinder),
     s.phase == "ready", s.shutters == 0, lensMatches,
@@ -200,6 +203,13 @@ module CameraAgentCapture {
   run ownerFlipSatisfiesNamedLensTest = init.then(place("camera", "hidden", "ready", false)).then(wantLens("front"))
     .then(admit).then(ownerFlips).then(shutter).then(written("succeeded"))
     .expect(safety and s.shotLens == "front")
+  /// The owner flips back after the request's own flip: the shutter refuses rather than flipping again.
+  run requestFlipsOnlyOnceTest =init.then(place("camera", "hidden", "ready", false)).then(wantLens("front"))
+    .then(admit).then(flipForRequest(true)).then(ownerFlips)
+    .expect(safety and s.lens == "back" and s.flipped).then(flipForRequest(true).fail())
+  run ownerFlipAfterRequestFlipFailsTest = init.then(place("camera", "hidden", "ready", false)).then(wantLens("front"))
+    .then(admit).then(flipForRequest(true)).then(ownerFlips).then(recheckFails)
+    .expect(safety and s.outcome == "failed" and s.shutters == 0 and s.holds == 0)
   /// Reopened and closed while the preview starts: the committed chat is hidden, the panel is not.
   run paintedPanelRefusesCaptureTest = init.then(admit).then(panelCleared).then(revealed)
     .then(ownerCoversChat("full")).then(ownerClosesChat).then(previewReady).then(recheckFails)
