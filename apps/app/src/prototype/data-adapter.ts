@@ -220,6 +220,7 @@ export function installPrototypeHomeBindings(Component: any) {
     if(!Capacitor.isNativePlatform()&&!storageAccessible()){storageAccessWarning='Saving off';}
     const activeView=this.S().view||'home';
     const chatModal=out.panelPE==='auto'&&this.S().chat==='full';
+    const appHidden = out.shadeY === '0' || chatModal || !!out.voiceOn;
     const attention = mockAttentionRows();
     return {
       ...NEUTRAL_HOME,
@@ -232,7 +233,8 @@ export function installPrototypeHomeBindings(Component: any) {
       // OG's resting half sheet leaves the app interactive. Full chat, shade
       // and voice still retire the covered layer's focus/accessibility controls.
       homeHidden: !!(out.isView || out.shadeY === '0' || chatModal || out.voiceOn || this.S().drawer),
-      appHidden: !!(out.shadeY === '0' || chatModal || out.voiceOn),
+      appHidden,
+      browserSurfaceCovered: appHidden || (activeView === 'browser' && !!out.browser?.menu),
       conversationHidden: out.panelPE !== 'auto' || out.shadeY === '0' || !!out.voiceOn,
       shadeHidden: out.shadeY !== '0' || !!out.voiceOn,
       dockHidden: out.shadeY === '0' || !!out.voiceOn,

@@ -1,5 +1,24 @@
 import {test,expect} from '@playwright/test';
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?mode=dev');});
+test('Recents, Messages and Contacts put their only Back button beside the title', async ({ page }) => {
+ for (const [view, title] of [['Phone', 'Recents'], ['Messages', 'Messages'], ['Contacts', 'Contacts']]) {
+  await page.getByRole('button', { name: view, exact: true }).click();
+  const header = page.locator('[data-alpha-app-header]').filter({
+   has: page.getByRole('heading', { name: title, exact: true }),
+  });
+  const back = page.getByRole('button', { name: 'Back to apps', exact: true });
+  await expect(back).toHaveCount(1);
+  await expect(header.getByRole('button', { name: 'Back to apps', exact: true })).toBeVisible();
+  const [titleBox, backBox] = await Promise.all([
+   header.getByRole('heading', { name: title, exact: true }).boundingBox(),
+   back.boundingBox(),
+  ]);
+  expect(backBox!.x + backBox!.width).toBeLessThanOrEqual(titleBox!.x);
+  expect(backBox!.y).toBeLessThan(titleBox!.y + titleBox!.height);
+  expect(titleBox!.y).toBeLessThan(backBox!.y + backBox!.height);
+  await back.click();
+ }
+});
 test('local call controls and hangup persist one call without external traffic',async({page})=>{
  const requests:string[]=[];page.on('request',r=>{if(/^https?:/.test(r.url())&&!r.url().startsWith('http://127.0.0.1:'))requests.push(r.url());});await page.getByRole('button',{name:'Phone',exact:true}).click();await page.getByRole('button',{name:'Call Maya Chen',exact:true}).first().click();await expect(page.getByRole('button',{name:'End call',exact:true})).toBeVisible();await page.getByRole('button',{name:'Mute',exact:true}).click();await expect(page.getByRole('button',{name:'Unmute',exact:true})).toHaveAttribute('aria-pressed','true');await page.getByRole('button',{name:'Speaker',exact:true}).click();await expect(page.getByRole('button',{name:'Speaker',exact:true})).toHaveAttribute('aria-pressed','true');await page.getByRole('button',{name:'Show keypad',exact:true}).click();await page.getByRole('button',{name:'Tone 1',exact:true}).click();await page.getByRole('button',{name:'End call',exact:true}).click();await expect(page.getByRole('button',{name:'End call',exact:true})).toHaveCount(0);const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).recents);expect(saved[0]).toMatchObject({pid:'maya',dir:'out'});await page.reload();await page.getByRole('button',{name:'Phone',exact:true}).click();expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.phone')!).recents[0].id)).toBe(saved[0].id);await expect(page.getByRole('button',{name:'End call',exact:true})).toHaveCount(0);expect(requests).toEqual([]);
 });

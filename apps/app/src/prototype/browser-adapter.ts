@@ -14,12 +14,14 @@ import {webSourceOf} from './summary-source';
 import {browserCalendarScope} from './agent-calendar-adapter';
 import { connectionController, agentPendingText } from '../runtime/connection-ui';
 import { BrowserReviews } from '../browser/review';
+import {browserHistoryRanges, browserVisitTimes, historyOutsideInterval, type BrowserHistoryInterval, type SavedBrowserHistory} from '../browser/history';
 import { createExternalBrowserHandoff } from './browser-external-handoff';
 import { browserErrorMessage, PROFILE_UNSUPPORTED_NATIVE_MESSAGE, PROFILE_UNSUPPORTED_MESSAGE } from '../browser/browser-errors';
 import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-messages';
 import { approvedOpenTab, BrowserOpenRefused, matchingTabs, observedTabCurrent, searchAddress, surfacePollIdle, tabLimitRefusal } from '../browser/browser-poll';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
+const historyClearReview = 'browser-clear-history';
 type Bag = Record<string, any>;
 /** What a chat request to switch or close a tab asks the owner when its words match several tabs. */
 export type BrowserTabChoice = {verb: 'Switch to' | 'Close'; options: {title: string; host: string; priv: boolean}[]};
@@ -41,6 +43,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   // Cold-start tabs that have not been loaded yet: id -> last committed page.
   const restored = new Map<string, {url: string; title: string}>();
   const restoreAttempts = new Map<string, number>();
+  const restoringTabs = new Set<string>();
   const reviews = new BrowserReviews();
   let profileUnsupportedTab:string|undefined;
   // The tab the last approved open loaded into, until the user navigates it from the address bar.
@@ -50,7 +53,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   // Saving waits for a successful read so a damaged saved record is never overwritten implicitly.
   let sessionRead = false, sessionHydrated = false, lastSaved = '', saveQueue = Promise.resolve();
   let snapshotRevision = 0, snapshotInputs: Bag | undefined;
-  let snapshotValue: ReturnType<typeof browsingSnapshot> | null = null, snapshotJson = '';
+  let snapshotValue: SavedBrowserHistory | null = null, snapshotJson = '';
   let saveEpoch = 0, failedSnapshot = '', retryAt = 0, retryDelay = 2000, saveWarning = false;
   const tabOf = (id: string) => state()?.tabs?.find((tab: Bag) => tab.id === id);
   const isPrivate = (id: string) => !!tabOf(id)?.priv;
@@ -251,14 +254,17 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       if (newTab) shell.vset('browser', { tabs: [...state().tabs, { id, hist: ['newtab'], pos: 0, ...(priv ? {priv: true} : {}) }], ...(!background ? {cur: id} : {}) });
       else if (!background && current.cur !== id) shell.vset('browser', { cur: id });
       tabs.beginNavigation(id, url.href);
+      if (background && saved) restoringTabs.add(id);
+      else restoringTabs.delete(id);
       // A background (restored-tab) load must not close a menu or switcher the
       // user opened while its native tab was being created.
-      if (!background) shell.vset('browser', { editing: false, tabsOpen: false, menu: false, lib: null, share: false });
+      if (!background) shell.vset('browser', {editing:false, tabsOpen:false, menu:false, lib:null, historyClearOpen:false, share:false});
       await Browser.navigate({ session, id, url: url.href });
       refresh();
       restoreAttempts.delete(id);
       return id;
     } catch (error) {
+      restoringTabs.delete(id);
       if (approvedSignal) throw error;
       // A restored tab whose native creation failed transiently (for example while the
       // host document was being replaced) keeps its saved page and retries when shown.
@@ -270,7 +276,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   function closeTab(id: string) {
     const rest = state().tabs.filter((tab: Bag) => tab.id !== id), fallback = newTabId();
     if (tabs.has(id)) void Browser.close({session, id}).catch(report);
-    tabs.forget([id]); restored.delete(id);
+    tabs.forget([id]); restored.delete(id); restoringTabs.delete(id);
     shell.vset('browser', {tabs: rest.length ? rest : [{id: fallback, hist: ['newtab'], pos: 0}], cur: state().cur === id ? (rest[0]?.id || fallback) : state().cur});
   }
   // The open tabs a chat request names by a few words. A private tab is found only for a request
@@ -352,21 +358,33 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   }});
   /** Remove renderer tabs whose native WebView is already gone. A closed pop-up returns to its opener. */
   function forgetTabs(ids: string[], clearHistory = false, afterCommit?: () => void) {
-    tabs.forget(ids); for (const id of ids) restored.delete(id);
+    tabs.forget(ids);
+    for (const id of ids) {
+      restored.delete(id);
+      restoringTabs.delete(id);
+    }
     const s = state(); if (!s) {afterCommit?.();return;}
     const rest = s.tabs.filter((tab: Bag) => !ids.includes(tab.id));
     const next = rest.length ? rest : [{ id: newTabId(), hist: ['newtab'], pos: 0 }];
     const opener = s.tabs.find((tab: Bag) => tab.id === s.cur)?.opener;
     const cur = next.some((tab: Bag) => tab.id === s.cur) ? s.cur : next.some((tab: Bag) => tab.id === opener) ? opener : next[0].id;
-    shell.vset('browser', {tabs: next, cur, ...(clearHistory ? {visits: [], titles: {}} : {})}, {afterCommit});
+    shell.vset('browser', {tabs: next, cur, ...(clearHistory ? {visits: [], visitTimes: {}, titles: {}, lib:null, historyClearOpen:false} : {})}, {afterCommit});
+  }
+  function sessionSnapshot(s: Bag): SavedBrowserHistory {
+    const snapshot = browsingSnapshot({tabs:s.tabs, visits:s.visits, cur:s.cur}, id => {
+      const info = tabInfo(id), saved = restored.get(id);
+      return {url: (!Capacitor.isNativePlatform()&&info?.externalOnly?info.url:info?.savedUrl) || saved?.url, title: info?.title || saved?.title};
+    });
+    const visitTimes = browserVisitTimes(snapshot.history, s.visitTimes);
+    return Object.keys(visitTimes).length ? {...snapshot, visitTimes} : snapshot;
   }
   function savedSnapshot() {
     const s = state(); if (!s) return null;
     // The 100ms native geometry check also runs while another app is open. Only
     // changed tab/history references, selection or native metadata need URL normalization.
-    if (!snapshotInputs || snapshotInputs.tabs !== s.tabs || snapshotInputs.visits !== s.visits || snapshotInputs.cur !== s.cur || snapshotInputs.revision !== snapshotRevision) {
-      snapshotInputs = {tabs: s.tabs, visits: s.visits, cur: s.cur, revision: snapshotRevision};
-      snapshotValue = browsingSnapshot(s, id => { const info = tabInfo(id), saved = restored.get(id); return { url: (!Capacitor.isNativePlatform()&&info?.externalOnly?info.url:info?.savedUrl) || saved?.url, title: info?.title || saved?.title }; });
+    if (!snapshotInputs || snapshotInputs.tabs !== s.tabs || snapshotInputs.visits !== s.visits || snapshotInputs.visitTimes !== s.visitTimes || snapshotInputs.cur !== s.cur || snapshotInputs.revision !== snapshotRevision) {
+      snapshotInputs = {tabs: s.tabs, visits: s.visits, visitTimes: s.visitTimes, cur: s.cur, revision: snapshotRevision};
+      snapshotValue = sessionSnapshot(s);
       snapshotJson = JSON.stringify(snapshotValue);
     }
     return snapshotValue;
@@ -409,14 +427,16 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // only when the tab is shown; nothing is resubmitted.
       for (const tab of added) restored.set(tab.id, { url: tab.url, title: tab.title });
       const rows = added.map(tab => ({ id: tab.id, hist: ['newtab'], pos: 0 }));
-      if (added.length) shell.vset('browser', pristine ? { tabs: rows, cur: next.cur, visits: next.visits } : { tabs: [...s.tabs, ...rows], visits: next.visits });
-      else if (next.visits.length !== s.visits.length) shell.vset('browser', { visits: next.visits });
+      const visitTimes = browserVisitTimes(next.visits, {...saved?.visitTimes, ...s.visitTimes});
+      const history = {visits: next.visits, visitTimes};
+      if (added.length) shell.vset('browser', pristine ? {...history, tabs: rows, cur: next.cur} : {...history, tabs: [...s.tabs, ...rows]});
+      else if (next.visits.length !== s.visits.length || Object.keys(visitTimes).length) shell.vset('browser', history);
       sessionHydrated = true;
       lastSaved = JSON.stringify(savedSnapshot());
     } catch (error) {
       // Restore runs at startup, over any screen: a host without the Browser plugin has no saved tabs to report.
       if (unimplemented(error)) return;
-      report(new Error('Saved tabs and history could not be opened. They were kept unchanged; Clear browsing data resets them.'));
+      report(new Error('Saved tabs and history could not be opened. Use Reset browser data in History to start over.'));
     }
   }
   async function confirmBrowser(id: string, title: string, details: string) {
@@ -425,6 +445,51 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     try { return await reviews.confirm(id, title, details, 'Clear data'); }
     finally { confirming = false; lastGeometry = ''; }
   }
+  function retireSessionSaves() {
+    ++saveEpoch;
+    lastSaved = '';
+    failedSnapshot = '';
+    retryAt = 0;
+    retryDelay = 2000;
+    saveWarning = false;
+  }
+  async function clearHistoryRange() {
+    const range = browserHistoryRanges.find(choice => choice.id === state()?.historyRange);
+    if (!range || !sessionHydrated || clearingData) return;
+    const currentReview = () => !disposed && shell.S().view === 'browser' && state()?.lib === 'history'
+      && state()?.historyClearOpen && state()?.historyRange === range.id;
+    const detail = range.duration === null ? 'Clear your entire browsing history.' : `Clear browsing history from the ${range.label.toLowerCase()}.`;
+    if (!await reviews.confirm(historyClearReview, 'Clear history?', detail, 'Clear history', {current: currentReview}) || !currentReview() || clearingData) return;
+    const until = Date.now();
+    const interval: BrowserHistoryInterval = {since: range.duration === null ? null : until - range.duration, until};
+    clearingData = true;
+    retireSessionSaves();
+    try {
+      await saveQueue;
+      if (disposed) return;
+      const current = state();
+      const visits = historyOutsideInterval(current.visits, current.visitTimes, interval);
+      const snapshot = sessionSnapshot({...current, visits});
+      const receipt: SavedBrowserHistory = await Browser.saveBrowsingState({session, ...snapshot, clearHistory: interval});
+      if (disposed) return;
+      const latest = state();
+      const newVisits = latest.visits.filter((url: string) => latest.visitTimes[url] !== current.visitTimes[url]);
+      const remaining = [...new Set<string>([...newVisits,...receipt.history])].slice(0, MAX_HISTORY);
+      const visitTimes = browserVisitTimes(remaining, {...(receipt.visitTimes ?? snapshot.visitTimes), ...browserVisitTimes(newVisits, latest.visitTimes)});
+      await new Promise<void>(resolve => shell.vset('browser', {
+        visits: remaining,
+        visitTimes,
+        titles: retainedTitles(latest.titles, remaining, latest.marks),
+        historyClearOpen: false,
+      }, {afterCommit: resolve}));
+      lastSaved = JSON.stringify(receipt);
+      shell.toast('History cleared');
+    } catch {
+      if (!disposed) report(new Error('History could not be cleared. Try again.'));
+    } finally {
+      clearingData = false;
+    }
+  }
   async function clearBrowsingData() {
     if (clearingData) return;
     const ok = await confirmBrowser('browser-clear-data', 'Clear browsing data?', Capacitor.isNativePlatform() ? 'Clears history, cookies and tabs.' : 'Clears history and tabs.');
@@ -432,7 +497,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     clearingData = true;
     // Retire queued snapshots and let an already-dispatched save finish before
     // Clear. No old write may restore history after the native clear completes.
-    ++saveEpoch; lastSaved = ''; failedSnapshot = ''; retryAt = 0; retryDelay = 2000; saveWarning = false;
+    retireSessionSaves();
     try {
       await saveQueue;
       if (disposed) return;
@@ -462,14 +527,15 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   }
   const definition = views.browser;
   const initialTabId = newTabId();
-  definition.state = { ...definition.state, tabs: [{ id: initialTabId, hist: ['newtab'], pos: 0 }], cur: initialTabId, marks: [], visits: [], titles: {}, booked: null, ag: null, confirm: null, finding: false, findTab: null, findQuery: '', findCount: 0, findIndex: 0, findDone: true };
+  definition.state = { ...definition.state, tabs: [{ id: initialTabId, hist: ['newtab'], pos: 0 }], cur: initialTabId, marks: [], visits: [], visitTimes: {}, titles: {}, historyRange: browserHistoryRanges[0].id, historyClearOpen: false, booked: null, ag: null, confirm: null, finding: false, findTab: null, findQuery: '', findCount: 0, findIndex: 0, findDone: true };
   // These are in-memory view-reset keys, not disk persistence. Keep the native
   // tab identities while visiting other apps; a cold start begins with a fresh tab until
   // restoreSession replaces it with saved normal tabs.
-  definition.persist = ['tabs', 'cur', 'marks', 'visits', 'titles'];
-  definition.onLeave = () => {externalHandoff.retire();stopReading();hide();};
+  definition.persist = ['tabs', 'cur', 'marks', 'visits', 'visitTimes', 'titles'];
+  definition.onLeave = () => {reviews.cancel(historyClearReview);externalHandoff.retire();stopReading();hide();};
   definition.reply = () => null;
   definition.back = (s: Bag, api: Bag) => {
+    if (s.historyClearOpen) { reviews.cancel(historyClearReview); api.set({historyClearOpen: false}); return true; }
     if (s.finding) { closeFind(); return true; }
     for (const key of ['editing', 'tabsOpen', 'menu', 'lib', 'share']) if(s[key]) { api.set({ [key]: key === 'lib' ? null : false }); return true; }
     if (tabInfo(s.cur)?.canBack) { void command('back'); return true; }
@@ -510,14 +576,20 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       toggleMenu: () => api.set({menu: !api.get('browser').menu, editing: false}),
       closeMenu: () => api.set({menu: false}),
       share: !!s.share, closeShare: () => api.set({share: false}),
-      lib: !!s.lib, libIsHist: historyOpen && s.visits.length > 0,
-      openLib: () => api.set({lib: 'bookmarks', menu: false}),
-      closeLib: () => api.set({lib: null}),
-      libMarks: () => api.set({lib: 'bookmarks'}),
+      lib: !!s.lib, libIsHist: historyOpen,
+      openLib: () => api.set({lib:'bookmarks', menu:false, historyClearOpen:false}),
+      closeLib: () => { reviews.cancel(historyClearReview); api.set({lib:null, historyClearOpen:false}); },
+      libMarks: () => { reviews.cancel(historyClearReview); api.set({lib:'bookmarks', historyClearOpen:false}); },
       libHist: () => api.set({lib: 'history'}),
       libMarksCss: historyOpen ? unselectedTabStyle : selectedTabStyle,
       libHistCss: historyOpen ? selectedTabStyle : unselectedTabStyle,
-      clearHist: () => api.set({visits: [], titles: Object.fromEntries(Object.entries(s.titles || {}).filter(([address]) => s.marks.includes(address)))}),
+      historyClearOpen: historyOpen && !!s.historyClearOpen,
+      toggleHistoryClear: () => api.set({historyClearOpen: !s.historyClearOpen}),
+      historyRanges: browserHistoryRanges,
+      historyRange: s.historyRange,
+      selectHistoryRange: (event: Event) => api.set({historyRange: (event.currentTarget as HTMLSelectElement).value}),
+      cannotClearHistory: !sessionHydrated || clearingData,
+      clearHist: () => void clearHistoryRange(),
       profileUnsupportedPage:profileUnsupportedTab===s.cur&&!s.editing,profileUnsupportedEditing:profileUnsupportedTab===s.cur&&!!s.editing,profileUnsupportedMessage:PROFILE_UNSUPPORTED_MESSAGE,isNews:false,isEnc:false,isBook:false,isSearch:false,isGeneric:false,isNew:!info,
       privateNotice:Capacitor.isNativePlatform()?'Private · cleared on close':'This tab is not saved in Alpha history. Website cookies and sign-ins are managed by your browser.',isPrivate:priv,openPrivate:()=>openNew(true),clearData:()=>void clearBrowsingData(),clearSite:()=>void clearSiteData(),canClearSite:Capacitor.isNativePlatform()&&!!info?.committed&&!info?.error&&!!url,
       recents:[],sugg:localSuggestions,people:[],agOn:false,confirm:false,clearAddress:(event:Event)=>{api.set({addr:''});(event.currentTarget as HTMLElement).parentElement?.querySelector('input')?.focus();},
@@ -530,7 +602,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         onKey:(e:KeyboardEvent)=>{if(e.key==='Enter'){e.preventDefault();findStep(!e.shiftKey);}else if(e.key==='Escape'){e.preventDefault();closeFind();}},
         next:()=>findStep(true),prev:()=>findStep(false),close:()=>closeFind(),nextOp:s.findCount?1:0.3,prevOp:s.findCount?1:0.3},
       host:url?.host || 'Search or address',hostCss:url?'':'color:var(--mut)',path:url ? url.pathname + url.search : '', hasLock:Capacitor.isNativePlatform() && !!url && url.protocol==='https:' && !!info?.committed && !info?.loading && !info?.error,
-      pageShareAvailable:Capacitor.isNativePlatform(),canCopyLink:!!info?.committed&&!info.loading&&!info.error,pageContentAvailable:Capacitor.isNativePlatform()||!!info?.committed&&!info.loading&&!info.error&&!info.externalOnly,nativeControls:true,externalBrowserAvailable:Capacitor.isNativePlatform(),openExternalBrowser:()=>void externalHandoff.open(),openPasswordProvider:()=>{api.set({menu:false});api.open('settings',{page:'password-provider'});},openDownloads:()=>{api.set({menu:false});void Browser.downloads({session}).catch(report);},copyLink:()=>void copyPageLink(),reload:()=>{api.set({menu:false});void command('reload');},stopLoading:()=>{api.set({menu:false});void command('stop');},loading:!!info?.loading,goBack:()=>void command('back'),goFwd:()=>void command('forward'),backOp:info?.canBack?1:0.3,fwdOp:info?.canForward?1:0.3,
+      pageShareAvailable:Capacitor.isNativePlatform(),canCopyLink:!!info?.committed&&!info.loading&&!info.error,pageContentAvailable:!!info?.committed&&!info.loading&&!info.error&&!info.externalOnly&&url?.protocol==='https:',nativeControls:true,externalBrowserAvailable:Capacitor.isNativePlatform(),openExternalBrowser:()=>void externalHandoff.open(),openPasswordProvider:()=>{api.set({menu:false});api.open('settings',{page:'password-provider'});},copyLink:()=>void copyPageLink(),reload:()=>{api.set({menu:false});void command('reload');},stopLoading:()=>{api.set({menu:false});void command('stop');},loading:!!info?.loading,goBack:()=>void command('back'),goFwd:()=>void command('forward'),backOp:info?.canBack?1:0.3,fwdOp:info?.canForward?1:0.3,
       startEdit:()=>api.set({editing:true,addr:info?.url||'',menu:false}),onAddrKey:(e:KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();void navigate(secureTypedAddress((e.target as HTMLInputElement).value));} else if(e.key==='Escape')api.set({editing:false}); },
       toggleMark:()=>{if((!info?.committed&&!(info?.externalOnly&&!Capacitor.isNativePlatform())) || info.loading || info.error || url?.protocol!=='https:'){api.toast('HTTPS only');return;}saveBookmark(info.url);},markLabel:s.marks.includes(info?.url)?'Bookmarked':'Bookmark',markFill:s.marks.includes(info?.url)?'currentColor':'none',libRows:[...(bookmarkRecovery&&s.lib!=='history'?[{id:'bookmark-recovery',title:'Recover saved bookmarks',host:'Bookmarks unavailable',ini:'!',name:'Recover saved bookmarks',go:openBookmarkRecovery,canRemove:false,removeAria:'',remove:()=>{}}]:[]),...Array.from(new Set<string>(s.lib==='history'?s.visits:s.marks)).map((u:string)=>{const address=new URL(u),site=address.hostname.replace(/^www\./,''),named=titleOf(u);return {id:u,title:u,name:named||site,host:address.host+(address.pathname==='/'?'':address.pathname)+address.search,ini:(named||site)[0],go:()=>void navigate(u),canRemove:true,removeAria:historyOpen?'Remove from history':'Remove bookmark',remove:historyOpen?()=>{const current=state(),visits=(current?.visits||[]).filter((visit:string)=>visit!==u);api.set({visits,titles:retainedTitles(current?.titles,visits,current?.marks)});}:()=>saveBookmark(u,false)};})],libEmpty:!(bookmarkRecovery&&s.lib!=='history')&&!(s.lib==='history'?s.visits:s.marks).length,newTab:()=>openNew(false),askPage:()=>void askPage(),readAloud:()=>void readPage(),readingUnavailable:readingSupport?.state==='unavailable',readingNote:READING_UNSUPPORTED_MESSAGE,readAloudAvailable:true,openShare:()=>void sharePage(),shareEmail:()=>sharePageEmail(),
       tabCards:s.tabs.map((tab:Bag)=>{const page=known(tab.id),label=page?.title||(tab.priv?'New private tab':'New tab');return {id:tab.id,title:page?.title || page?.url || (tab.priv?'New private tab':'New tab'),host:(tab.priv?'Private · ':'')+(page?.url||''),css:tab.id===s.cur?'box-shadow:inset 0 0 0 2px var(--acc)':'',prev:tab.priv?'background:var(--fg);opacity:.85':'background:var(--s2)',aria:'Switch to '+(tab.priv?'private tab ':'')+label,closeAria:tab.priv?'Close private tab':'Close tab',pick:()=>api.set({cur:tab.id,tabsOpen:false}),close:()=>closeTab(tab.id)};}),
@@ -665,7 +737,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // transmitted merely by opening the agent. Navigation changes the revision
     // so a proposal for an earlier document cannot retain current authority.
     this.browserSelection = () => tabs.selection(state()?.cur);
-    const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||b.menu||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
+    const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||(b.menu&&!menuOverlaysPage)||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
   let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any;
   void Browser.addListener('findResult',(event:BrowserFindResult)=>{
     const s=state(),found=s&&!disposed?tabs.findResult(event,s.findTab):undefined;if(!found)return;
@@ -686,11 +758,13 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     if(reading && event.id===state()?.cur && change.documentChanged) stopReading();
     // Private tabs never enter history or saved tabs. The web build's frame surface reports a
     // committed load, and a page that navigated inside its frame reports an error instead.
-    if(change.committedPage && state() && !isPrivate(event.id)){
+    const restoring = change.committedPage && restoringTabs.delete(event.id);
+    if (change.info.error) restoringTabs.delete(event.id);
+    if(change.committedPage && !restoring && state() && !isPrivate(event.id)){
       const current=state(),address=event.url as string,visits=[address,...current.visits.filter((u:string)=>u!==address)].slice(0,MAX_HISTORY),title=pageTitle(event.title,address);
       // Names stay with the saved addresses only: a page dropped from history and bookmarks loses its name too.
       const titles=Object.fromEntries(Object.entries({...current.titles,...(title?{[address]:title}:{})}).filter(([saved])=>visits.includes(saved)||current.marks.includes(saved)));
-      shell.vset('browser',{visits,titles});
+      shell.vset('browser',{visits,titles,visitTimes:browserVisitTimes(visits,{...current.visitTimes,[address]:Date.now()})});
     }
     // The native page says only that it could not load. Android blocks pages without HTTPS, so say that.
     if(Capacitor.isNativePlatform()&&change.info.error&&!change.previous?.error&&event.id===state()?.cur){try{const failed=new URL(String(change.info.url));if(failed.protocol==='http:'&&!loopbackHost(failed.hostname))shell?.toast('This site has no secure (HTTPS) connection, so it cannot be opened.');}catch{}}
@@ -714,6 +788,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   const hostModalOpen = (root: { querySelector(selector: string): unknown }, nativeSurface: boolean): boolean => nativeSurface && !!root.querySelector('dialog:modal, .alpha-connection-scrim');
   // host-modal:end
   const nativeUnderlay = () => Capacitor.getPlatform()==='android';
+  const menuOverlaysPage = !Capacitor.isNativePlatform() || nativeUnderlay();
   /** Keep the native page drawn while the host owns interaction with the assistant. */
   const nativeUnderAssistant = () => Capacitor.isNativePlatform() && (['sheet','full'].includes(shell?.S().chat) || !!shell?.chatMotion?.moved);
   function browserBackdrop(rect?:Bag){
@@ -727,7 +802,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   }
   const browserChromeSelector='[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *,[data-alpha-layer="conversation"],.alpha-plan-notice,[data-alpha-toast] > *,[data-screen] > button[aria-label="Home"],[role="search"][aria-label="Find in page"]';
   function browserHostRects(page:Bag){
-    if(nativeUnderAssistant())return [{x:page.x,y:page.y,width:page.width,height:page.height,cornerRadius:0}];
+    if(state()?.menu || nativeUnderAssistant())return [{x:page.x,y:page.y,width:page.width,height:page.height,cornerRadius:0}];
     return [...document.querySelectorAll<HTMLElement>(browserChromeSelector)].flatMap(element=>{
       const style=getComputedStyle(element),rect=element.getBoundingClientRect();
       if(element.closest('[inert],[aria-hidden="true"]')||style.display==='none'||style.visibility==='hidden'||style.pointerEvents==='none'||Number(style.opacity)===0||rect.width<=0||rect.height<=0)return [];
@@ -770,7 +845,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // Off the Browser view with the page already withdrawn there is nothing to measure or send.
     if(surfacePollIdle(S?.view,lastGeometry,hiddenGeometry)){if(reading)stopReading();return;}
     const element=document.querySelector('[data-native-browser-viewport]') as HTMLElement|null;
-    const hidden=questionReview || confirming || hostModalOpen(document, Capacitor.isNativePlatform()) || !s || !element || !element.isConnected || !element.getClientRects().length || S?.view!=='browser' || s.editing || s.tabsOpen || s.menu || s.lib || s.share || s.ag || s.confirm || S?.shade || S?.screen !== 'home' || (!nativeUnderlay()&&nativeUnderAssistant());
+    const hidden=questionReview || confirming || hostModalOpen(document, Capacitor.isNativePlatform()) || !s || !element || !element.isConnected || !element.getClientRects().length || S?.view!=='browser' || s.editing || s.tabsOpen || (s.menu && !menuOverlaysPage) || s.lib || s.share || s.ag || s.confirm || S?.shade || S?.screen !== 'home' || (!nativeUnderlay()&&nativeUnderAssistant());
     if(reading && (disposed || document.documentElement.hasAttribute('data-dev-background') || S?.screen!=='home' || S?.view!=='browser' || s?.tabsOpen || s?.editing || S?.shade || ['sheet','full'].includes(S?.chat)))stopReading();
     const rect=element?.getBoundingClientRect();
     // Measure the full page beneath the overlays. Chat movement must not resize the website.

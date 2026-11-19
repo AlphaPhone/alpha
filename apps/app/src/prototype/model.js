@@ -1039,7 +1039,7 @@ registerView("messages", {
     var fl = st.filter;
     return {
       nativePrototype: true,
-      convos: convos, listStage: listStage,
+      convos: convos, listStage: listStage, listCovered: !listStage,
       newMsg: function () { api.set({ compose: true, q: "", local: true }); },
       filterChip: fl && fl.by === "alpha" ? { label: fl.label, clearLabel: "Clear filter " + fl.label, clear: function () { api.set({ filter: null }); } } : null,
       // Header search (the Inbox pattern): it types the same owner list filter as the bar (AC-22).

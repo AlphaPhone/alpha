@@ -25,9 +25,9 @@ test('a history command sent while the owner is off Browser is claimed and refus
  assert.deepEqual(f.requests.map(([path])=>path.split('/').at(-1)),['interact-claim','interact-result']);assert.equal(f.commands.length,0);
  assert.equal(result.claimId,'owned-claim');assert.equal(result.success,true);assert.equal(result.result.ok,false);assert.equal(result.result.code,'UNAVAILABLE');assert.match(result.result.message,/Open Browser first/);f.client.dispose();
 });
-test('a page-text read is refused as unsupported and names the owner\'s reviewed alternative',async()=>{
+test('a page-text read is refused and directs the owner to paste the excerpt',async()=>{
  for(const view of ['browser','home']){const f=alpha(view);await f.client.ready();const result=await f.send({capability:'get-text',params:{nativeOnly:true}});
-  assert.equal(f.commands.length,0);assert.equal(result.claimId,'owned-claim');assert.equal(result.success,false);assert.match(result.error,/^UNSUPPORTED: /);assert.match(result.error,/Ask about page/);assert.equal(result.result,undefined);f.client.dispose();}
+  assert.equal(f.commands.length,0);assert.equal(result.claimId,'owned-claim');assert.equal(result.success,false);assert.equal(result.error,'UNSUPPORTED: Paste the part of this page you want to ask Alpha about.');assert.equal(result.result,undefined);f.client.dispose();}
 });
 test('commands for a view or capability this phone does not offer are refused by type, never left unknown',async()=>{
  const f=alpha();await f.client.ready();

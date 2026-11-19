@@ -50,8 +50,8 @@ async function openPage(page: Page) {
 }
 const answer = (page: Page, value: Answer) => page.evaluate(value => { (window as any).browserStub.answer = value; }, value);
 async function askAboutPage(page: Page) {
-  await button(page, 'Menu').click();
-  await button(page, 'Ask about page').click();
+  await button(page, 'Chat actions').click();
+  await button(page, 'Attach page').click();
   return page.getByRole('dialog', { name: 'Ask about selected content' });
 }
 const questions = (page: Page) => page.evaluate(() => (window as any).browserStub.questions as number);

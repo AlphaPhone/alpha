@@ -42,7 +42,11 @@ test('a fresh collection keeps previous notes absent without initializing legacy
  await openCanonicalNotes(page);
  await expect.poll(()=>page.evaluate(()=>(window as any).previousNotesReads)).toBe(1);
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
- await expect(page.getByRole('button',{name:'Notes options',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Notes options',exact:true}).click();
+ const optionsMenu=page.getByRole('dialog',{name:'Notes options',exact:true});
+ await expect(optionsMenu).toBeVisible();
+ await expect(optionsMenu.getByRole('button',{name:'On this phone',exact:true})).toHaveCount(0);
+ await page.keyboard.press('Escape');
  expect(await page.evaluate(async()=>(await import('/src/runtime/browser-notes-document.ts')).browserNotesPort.read())).toBeNull();
 });
 
@@ -85,6 +89,10 @@ test('a delayed old-owner storage read cannot expose a recovery entry to the nex
  });
  await expect.poll(()=>page.evaluate(()=>(window as any).finishedNotesReads)).toBe(2);
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
- await expect(page.getByRole('button',{name:'Notes options',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Notes options',exact:true}).click();
+ const optionsMenu=page.getByRole('dialog',{name:'Notes options',exact:true});
+ await expect(optionsMenu).toBeVisible();
+ await expect(optionsMenu.getByRole('button',{name:'On this phone',exact:true})).toHaveCount(0);
+ await page.keyboard.press('Escape');
  await expect(page.getByRole('button',{name:'Open Current note',exact:true})).toBeVisible();
 });

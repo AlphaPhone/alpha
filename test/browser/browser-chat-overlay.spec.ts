@@ -126,3 +126,25 @@ test('a website is not reloaded or scrolled when Browser is left and opened agai
  expect(await site.evaluate(()=>scrollY)).toBe(600);
  expect(loads()).toBe(1);
 });
+
+test('Browser menu keeps the page visible and restores input on dismissal', async ({ page }) => {
+ const { geometry, settled, loads } = await openSite(page);
+ const opener = page.getByRole('button', { name: 'Menu', exact: true });
+ const menu = page.getByRole('dialog', { name: 'Browser menu' });
+ const surfaces = page.locator('[data-alpha-browser-surfaces]');
+
+ await opener.click();
+ await expect(menu).toBeVisible();
+ await expect(menu.getByRole('button', { name: 'Read aloud', exact: true })).toHaveCount(0);
+ await expect(menu.getByRole('button', { name: 'Ask about page', exact: true })).toHaveCount(0);
+ await expect(menu.getByRole('button', { name: 'Downloads', exact: true })).toHaveCount(0);
+ await expect(surfaces).toHaveAttribute('inert', '');
+ await expect.poll(geometry).toEqual(settled);
+
+ await page.keyboard.press('Escape');
+ await expect(menu).toBeHidden();
+ await expect(opener).toBeFocused();
+ await expect(surfaces).not.toHaveAttribute('inert', '');
+ await expect.poll(geometry).toEqual(settled);
+ expect(loads()).toBe(1);
+});

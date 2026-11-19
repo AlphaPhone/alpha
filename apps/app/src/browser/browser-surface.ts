@@ -1,12 +1,20 @@
 import {iconStyle} from '../icon-style';
 import { WebPlugin } from '@capacitor/core';
 import {bookmarkDocument,browsingSessionDocument} from './preference-documents';
-import {normalizeBrowsing as normalize,type SavedBrowsing as Saved} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
+import {normalizeBrowsing as normalize} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
+import {browserVisitTimes, historyOutsideInterval, type BrowserHistoryInterval, type SavedBrowserHistory} from './history';
+
+function savedBrowserState(input: Partial<SavedBrowserHistory>): SavedBrowserHistory {
+  const saved = normalize(input);
+  const visitTimes = browserVisitTimes(saved.history, input?.visitTimes);
+  return Object.keys(visitTimes).length ? {...saved, visitTimes} : saved;
+}
 
 type Tab = { session: string; id: string; private: boolean; frame: HTMLIFrameElement; container: HTMLDivElement; link: HTMLAnchorElement; status:HTMLParagraphElement; history: string[]; position: number; sequence: number; navigation: number; loading: boolean; committed:boolean; error:string };
 /** Unprivileged web surfaces. Remote documents never receive the host bridge. */
 export class BrowserSurface extends WebPlugin {
   private tabs = new Map<string, Tab>();
+  private submittedBrowsingState: SavedBrowserHistory | undefined;
   private key(input: {session:string;id:string}) { return `${input.session}:${input.id}`; }
   private tab(input: {session:string;id:string}) { const tab=this.tabs.get(this.key(input)); if(!tab)throw Error('Reopen this tab.');return tab; }
   private address(raw:string) { const url=new URL(raw);if(!['https:','http:'].includes(url.protocol)||url.username||url.password)throw Error('Enter an HTTP or HTTPS address.');return url.href; }
@@ -66,13 +74,38 @@ export class BrowserSurface extends WebPlugin {
   async bookmarks() {return {urls:await bookmarkDocument.read<string[]>(()=>[])};}
   async setBookmark(input:{url:string;saved:boolean}) {const url=this.address(input.url);return bookmarkDocument.edit<string[],{urls:string[]}>(()=>[],urls=>{const next=urls.filter(value=>value!==url);if(input.saved)next.unshift(url);urls.splice(0,urls.length,...next);return {urls:[...urls]};});}
   async share(input:{session:string;id:string;url:string;navigation:number}) {const tab=this.tab(input);if(!tab.committed||tab.loading||tab.error||document.hidden||tab.container.style.display==='none'||tab.navigation!==input.navigation||tab.history[tab.position]!==input.url)throw Error('The page changed. Share it again.');if(!navigator.share)throw Error('Sharing is unavailable in this browser. Use Copy text.');await navigator.share({url:input.url});}
-  async browsingState() {return browsingSessionDocument.read<Saved>(()=>normalize({})).then(normalize);}
-  async saveBrowsingState(input:Partial<Saved>) {const next=normalize(input);return browsingSessionDocument.edit<Saved,Saved>(()=>normalize({}),state=>{Object.assign(state,next);return next;});}
+  async browsingState() {
+    const saved = savedBrowserState(await browsingSessionDocument.read<SavedBrowserHistory>(()=>normalize({})));
+    this.submittedBrowsingState = saved;
+    return saved;
+  }
+  async saveBrowsingState(input: Partial<SavedBrowserHistory> & {clearHistory?: BrowserHistoryInterval}) {
+    const next = savedBrowserState(input), previous = this.submittedBrowsingState;
+    const saved = await browsingSessionDocument.edit<SavedBrowserHistory, SavedBrowserHistory>(()=>normalize({}), state=>{
+      let {history, visitTimes} = next;
+      if (previous) {
+        // Apply this renderer's changes to current stored history. A stale renderer
+        // cannot write back visits another window removed from the shared document.
+        const added = history.filter(url => !previous.history.includes(url) || previous.visitTimes?.[url] !== visitTimes?.[url]);
+        const kept = state.history.filter(url => history.includes(url) || !previous.history.includes(url) || previous.visitTimes?.[url] !== state.visitTimes?.[url]);
+        visitTimes = {...state.visitTimes, ...browserVisitTimes(added, visitTimes)};
+        history = [...added, ...kept];
+      }
+      if (input.clearHistory) history = historyOutsideInterval(history, visitTimes, input.clearHistory);
+      const persisted = savedBrowserState({...next, history, visitTimes});
+      delete state.visitTimes;
+      Object.assign(state, persisted);
+      return persisted;
+    });
+    this.submittedBrowsingState = input.clearHistory ? saved : next;
+    return saved;
+  }
   /** Clear Alpha-owned tabs and history only. The embedding browser owns remote
    * cookies and site storage; sandboxing does not grant us authority to erase them. */
   async clearBrowsingData(input:{session:string}) {
     const closed:string[]=[];for(const [key,tab] of this.tabs)if(tab.session===input.session&&!tab.private){tab.container.remove();this.tabs.delete(key);closed.push(tab.id);}
-    await browsingSessionDocument.edit<Saved,void>(()=>normalize({}),state=>{Object.assign(state,normalize({}));});
+    await browsingSessionDocument.edit<SavedBrowserHistory,void>(()=>normalize({}),state=>{delete state.visitTimes;Object.assign(state,normalize({}));});
+    this.submittedBrowsingState = normalize({});
     return {closed};
   }
   async clearSiteData(_input:{session:string;id:string;url:string}): Promise<{site:string}> {throw Error('Clear website data in your browser settings.');}

@@ -525,7 +525,9 @@ test('loops E and J05 in the web build: page content requires review and no deve
   // A committed web page offers an explicit review of a separately fetched copy;
   // the frame itself is never certified as TLS or silently added to agent context.
   await expect(button(page, 'Share')).toHaveCount(0);
-  await button(page, 'Ask about page').click();
+  await page.keyboard.press('Escape');
+  await button(page, 'Chat actions').click();
+  await button(page, 'Attach page').click();
   const review = page.getByRole('dialog', { name: 'Ask about selected content' });
   await expect(review).toBeVisible();
   await expect(review.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue(/The ferry leaves at nine from pier four/);
@@ -637,8 +639,8 @@ async function openHarbour(page: Page) {
   return tab;
 }
 async function askAboutHarbour(page: Page) {
-  await button(page, 'Menu').click();
-  await button(page, 'Ask about page').click();
+  await button(page, 'Chat actions').click();
+  await button(page, 'Attach page').click();
 }
 /** The notes saved in the Keystore-backed Notes slot of the stub (its envelope holds the collection's bytes). */
 const savedNotes = (page: Page) => native(page, f => { const slot = f.slots['notes-records:v1:device']; return slot ? JSON.parse(JSON.parse(slot).currentRaw).records : []; }) as Promise<any[]>;

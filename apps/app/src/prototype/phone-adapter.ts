@@ -306,7 +306,7 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   nativeRows:phoneRows(calls,value=>void call(value)),
   nativeOnNumber:(event:Event)=>{if(busy())return;number=(event.target as HTMLInputElement).value;notice='';changed();},
   nativeDial:()=>void call(number),nativeRefresh:()=>void refresh(),nativeRequest:()=>void refresh(true),
-  nativeContacts:openContacts, tabs, phoneTabSelector:phoneTabSelector(tabs),
+  nativeContacts:openContacts, title:TAB_LABEL[tab], tabs, phoneTabSelector:phoneTabSelector(tabs),
   isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
   filterChip:chip?{label:chip,clearLabel:`Clear filter ${chip}`}:null,clearFilter:()=>clearListFilter('phone'),
   recents:rows.map(({entry,row},index)=>{return {...row,last:index===0||undefined,color:row.missed?'var(--alpha-call-red)':'var(--fg)',d:ARROW[row.kind],noCall:!row.canCall||busy(),call:()=>{if(entry.number)void call(entry.number);}};}),
