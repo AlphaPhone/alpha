@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
-const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {spokenActionReply,projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+// One bundle, so the device hour-cycle preference reaches the same locale-time module the helpers read.
+const bundle=await build({stdin:{contents:"export * from './apps/app/src/runtime/action-message-presentation.ts';export {setLocalePreferences} from './apps/app/src/prototype/locale-time.ts';",resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',write:false});
+const {spokenActionReply,projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText,approvalExpiryText,emptyChatNotice,setLocalePreferences}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -281,4 +282,18 @@ test('spoken action responses omit isolated receipt identifiers and keep meaning
  for(const text of ['Bus #7 costs $2.75.','The result is 3/4, or 75%.','The message said: “Use #42 at 8:15.”']){
   assert.equal(spokenActionReply('Check that for me.',{text,completedActions:[{status:'succeeded'}]}),text);
  }
+});
+test('a pending action states the clock time it expires in the device hour cycle, and nothing once expired or unknown',()=>{
+ const now=new Date(2026,10,19,14,0,0).getTime(),at=new Date(2026,10,19,14,5,0).getTime();
+ try{
+  setLocalePreferences({locale:'en-US',hourCycle:'h23'});assert.equal(approvalExpiryText(at,now),'Expires at 14:05');
+  setLocalePreferences({locale:'en-US',hourCycle:'h12'});assert.equal(approvalExpiryText(at,now),'Expires at 2:05 PM');
+ }finally{setLocalePreferences();}
+ assert.equal(approvalExpiryText(now,now),'');assert.equal(approvalExpiryText(now-1,now),'');
+ assert.equal(approvalExpiryText(undefined,now),'');assert.equal(approvalExpiryText(Number.NaN,now),'');assert.equal(approvalExpiryText('soon',now),'');
+});
+test('an empty conversation names the missing agent; any message or a session keeps it quiet',()=>{
+ assert.equal(emptyChatNotice(0,false,'Your agent is starting…'),'Your agent is starting…');
+ assert.equal(emptyChatNotice(1,false,'Your agent is starting…'),'');
+ assert.equal(emptyChatNotice(0,true,'Your agent is starting…'),'');
 });
