@@ -1,6 +1,9 @@
-/// Shell Back ordering and completed-action navigation claim fences.
+/// Shell Back ordering and completed-action navigation claim fences. Back here is the shell's
+/// own order (model.js `back`): shade, voice, the conversation, the Home drawer, then the view.
+/// Per-view inner pages, the Back stack, bar/pill resting views, launcher layers and the native
+/// availability flag are BackDispatch.
 module ShellNavigation {
-  type State = { view: str, chat: str, shade: bool, drawer: bool, modal: bool,
+  type State = { view: str, chat: str, shade: bool, drawer: bool, modal: bool, voice: bool,
     draft: str, revision: int, captured: int, claim: str, destination: str, hidden: bool, focus: bool,
     settingsRows: List[str], focusedSetting: str, intendedSetting: str, activatedSetting: str,
     pageSuspended: bool, contextSensitive: bool, pending: bool, sendEpoch: int,
@@ -15,7 +18,7 @@ module ShellNavigation {
     "calendar", "notifications", "reminders", "workflows", "files", "inbox", "browser",
     "phone", "messages", "contacts", "passwords", "settings")
   action init = s' = { view: "home", chat: "input", shade: false, drawer: false,
-    modal: false, draft: "", revision: 0, captured: 0, claim: "none", destination: "", hidden: false, focus: false,
+    modal: false, voice: false, draft: "", revision: 0, captured: 0, claim: "none", destination: "", hidden: false, focus: false,
       settingsRows: List(), focusedSetting: "", intendedSetting: "", activatedSetting: "",
       pageSuspended: false, contextSensitive: false, pending: false, sendEpoch: 0,
       sendRevision: 0, replyVisible: false, unsent: false }
@@ -50,11 +53,16 @@ module ShellNavigation {
     focusedSetting: "", intendedSetting: "" } }
   action showShade = s' = { ...s, shade: true, focus: false, focusedSetting: "", intendedSetting: "" }
   action showModal = s' = { ...s, modal: true, focus: false, focusedSetting: "", intendedSetting: "" }
+  /// Voice conversation runs above the shell; it is a Back layer of its own.
+  action startVoice = all { not(s.voice or s.modal or s.contextSensitive), s' = { ...s, voice: true } }
+  /// The modal is the renderer's layer above the shell (BackDispatch `rendererBack`); voice closes
+  /// before the conversation, and the Apps drawer only on Home and only under the conversation.
   action back = if (s.modal) s' = { ...s, modal: false }
     else if (s.shade) s' = { ...s, shade: false }
-    else if (s.drawer) s' = { ...s, drawer: false }
+    else if (s.voice) s' = { ...s, voice: false }
     else if (s.chat == "full") s' = { ...s, chat: "sheet", focus: false }
     else if (s.chat == "sheet") s' = { ...s, chat: if (s.view == "home") "input" else "hidden", focus: false }
+    else if (s.drawer and s.view == "home") s' = { ...s, drawer: false }
     else if (s.chat == "input" and s.view != "home") s' = { ...s, chat: "hidden", focus: false }
     else if (s.view != "home" and s.revision < 6) s' = { ...s, view: "home", chat: "input", revision: s.revision + 1, claim: "none", destination: "", focus: false,
       pending: false,
@@ -105,7 +113,7 @@ module ShellNavigation {
     nondet view = Views.oneOf()
     nondet rows = SettingRows.oneOf()
     nondet row = Set("about", "setup", "default-apps", "request-home").oneOf()
-    any { open(view), expand, edit, showShade, showModal, dismissSheet, assistantFromSheet, back, capture, claim(view), commitClaimedView(view), acknowledge, acknowledgementLost,
+    any { open(view), expand, edit, showShade, showModal, startVoice, dismissSheet, assistantFromSheet, back, capture, claim(view), commitClaimedView(view), acknowledge, acknowledgementLost,
       hide, resume, pageHide, pageShow, send, reply(1), reply(2),
       settingsRowsChanged(rows), focusSetting(row), activateSetting, activateExternalSetting, s' = s }
   }
@@ -125,6 +133,12 @@ module ShellNavigation {
   run navigationKeepsDraftTest = init.then(edit).then(open("notes")).then(hide).then(resume).then(back).then(back)
     .expect(s.view == "home" and s.draft == "draft" and s.unsent and safety)
     .then(send).expect(s.draft == "" and not(s.unsent) and safety)
+  run backClosesVoiceBeforeConversationTest = init.then(expand).then(startVoice)
+    .then(back).expect(not(s.voice) and s.chat == "full" and safety)
+    .then(back).expect(s.chat == "sheet" and safety)
+  run shadeClosesBeforeVoiceTest = init.then(startVoice).then(showShade)
+    .then(back).expect(not(s.shade) and s.voice and safety)
+    .then(back).expect(not(s.voice) and s.view == "home" and s.chat == "input" and safety)
   run sheetGripDismissTest = init.then(showModal).then(dismissSheet).expect(not(s.modal) and safety)
   run assistantAboveSheetTest = init.then(showModal).then(assistantFromSheet).expect(not(s.modal) and s.chat == "sheet" and safety)
   run backOrderTest = init.then(edit).then(expand).then(showShade).then(showModal)

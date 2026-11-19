@@ -2211,6 +2211,15 @@ export class DeviceActionCoordinator<
         ...(readReply ? { readReply } : {}),
       };
     } catch {
+      // A failure before `markDispatched` (journal lookup, reservation,
+      // identity, decision or claim) reached no device port, so it closes as
+      // not started. Only an attempt that entered the executor stays uncertain.
+      if (!execution?.dispatched)
+        return {
+          proposalId,
+          status: "failed",
+          summary: NOT_DISPATCHED_SUMMARY,
+        };
       return {
         proposalId,
         status: "unknown",
