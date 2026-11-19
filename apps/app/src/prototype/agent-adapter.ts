@@ -1878,7 +1878,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.barReviews=barReview?barReview.rows.map((row:Shell,index:number)=>({...row,key:`${barReview.id}:${index}`})):[];
     out.hasBarReviews=out.barReviews.length>0;
     out.msgs=projectActionMessages(out.msgs||[],live);
-    out.chatEmptyNotice=emptyChatNotice(out.msgs.length,!!connectionController.getSnapshot().session,agentPendingText());
+    // Where the resident is always present its availability is already the draft status above, and
+    // routine startup stays quiet until an action needs it; elsewhere the empty chat says why it cannot answer.
+    out.chatEmptyNotice=emptyChatNotice(out.msgs.length,!!connectionController.getSnapshot().session,residentAlwaysPresent?'':agentAvailabilityNotice());
     out.canStopReply=!!this.S().typing&&(alphaClient.getState().pending||this.sendAttempt?.capturing===true);
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
     const turn=!!this.S().typing;
