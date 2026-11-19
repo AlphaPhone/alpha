@@ -100,8 +100,9 @@ export type SuggestionTarget =
 type Policy = { maximumOutgoing: number; maximumTotalBytes: number };
 
 /**
- * A refusal Alpha words itself; attach() and attachReviewed() show its message as is, and so does
- * `attachmentRefusalText` (a Files read that checks the selection itself throws one too).
+ * A refusal Alpha words itself; attach() shows its message as is, attachReviewed() returns it for
+ * the Email action to show, and so does `attachmentRefusalText` (a Files read that checks the
+ * selection itself throws one too).
  * Anything else that stops an attachment is worded by `attachmentRefusalText`.
  */
 export class AttachmentNotice extends Error {}
@@ -904,18 +905,21 @@ export function createMailDraftsController(
     }
   }
 
-  /** Persist the current email before replacing its composer; no provider operation runs. */
-  async function setAside(): Promise<boolean> {
+  /**
+   * Persist the current email before replacing its composer; no provider operation runs. `say`
+   * receives why it could not, so a caller that words the outcome itself shows one notice.
+   */
+  async function setAside(say: (text: string) => void = toast): Promise<boolean> {
     if (!ready || busy) return false;
     if (retained?.error || retained?.conflict || staleBase) {
-      toast(
+      say(
         "Reload the saved draft before starting another email. Your edits are retained.",
       );
       return false;
     }
     const kept = retained?.peek();
     if (retained?.available && !kept) {
-      toast("Recover the retained draft before starting another email.");
+      say("Recover the retained draft before starting another email.");
       return false;
     }
     const meaningful = (row: Shelved) =>
@@ -951,7 +955,7 @@ export function createMailDraftsController(
       !shelfValid(next) ||
       new TextEncoder().encode(JSON.stringify(next)).length > DRAFT_BYTES
     ) {
-      toast("Draft storage is full. Your current email is still here.");
+      say("Draft storage is full. Your current email is still here.");
       return false;
     }
     const token = epoch;
@@ -979,7 +983,7 @@ export function createMailDraftsController(
       return true;
     } catch (error) {
       if (token === epoch)
-        toast(
+        say(
           error instanceof Error
             ? error.message
             : "The draft could not be saved. Your edits remain here.",
@@ -999,13 +1003,14 @@ export function createMailDraftsController(
     forwardedBody = "",
     prefill?: ComposePrefill,
     extra: { body?: string; forward?: ForwardSource | null } = {},
+    say: (text: string) => void = toast,
   ): boolean {
     if (!ready || busy) {
-      toast(status || "Connect a Gmail account first.");
+      say(status || "Connect a Gmail account first.");
       return false;
     }
     const refuse = (text: string) => {
-      if (!prefill?.moved) toast(text);
+      if (!prefill?.moved) say(text);
       return false;
     };
     if (draft) {
@@ -1083,7 +1088,7 @@ export function createMailDraftsController(
       mode !== "forward" &&
       !literalMailAddress(reply.replyTo || reply.fromEmail || "")
     ) {
-      toast("This message has no reply address.");
+      say("This message has no reply address.");
       return false;
     }
     const self = provider?.capabilities()?.from?.toLowerCase(),
@@ -1103,7 +1108,7 @@ export function createMailDraftsController(
           )
         : [];
     if ([...to, ...cc].some((a) => !literalMailAddress(a))) {
-      toast(
+      say(
         "A reply recipient is unclear. Start a new email and enter the addresses yourself.",
       );
       return false;
@@ -1210,20 +1215,21 @@ export function createMailDraftsController(
   async function newSharedEmail(
     prefill: ComposePrefill,
     current: () => boolean,
+    say: (text: string) => void = toast,
   ) {
     if (!current()) return false;
     if (!owner) {
-      toast("Connect a Gmail account first.");
+      say("Connect a Gmail account first.");
       return false;
     }
     if (!ready || busy) {
-      toast(status || "Wait for drafts to load.");
+      say(status || "Wait for drafts to load.");
       return false;
     }
     const token = epoch,
       target = structuredClone(prefill);
-    if (!(await setAside()) || token !== epoch || !current()) return false;
-    return begin(undefined, undefined, "", target);
+    if (!(await setAside(say)) || token !== epoch || !current()) return false;
+    return begin(undefined, undefined, "", target, {}, say);
   }
 
   /** A Drafts row becomes the composer's draft; its row is replaced when the draft is set aside again. */
@@ -1772,6 +1778,49 @@ export function createMailDraftsController(
     };
   }
 
+  /**
+   * Where a file shared from Files or Photos lands: always a new local email under this account,
+   * as an Android share starts a new compose. The open or unfinished draft is never the
+   * destination, so its edits do not change the token, which names the owner and binding and
+   * never leaves the host.
+   */
+  function newDraftTarget(): SuggestionTarget {
+    const blocked = (reason: string): SuggestionTarget => ({
+      ready: false,
+      reason,
+      token: JSON.stringify([owner, "blocked", reason]),
+    });
+    if (options.identity().sessionId !== session)
+      return blocked(
+        "Open Inbox to refresh the selected account first. Nothing was added.",
+      );
+    if (!owner || !ready || busy)
+      return blocked(
+        loading || busy
+          ? "The local email draft is still loading. Try again in a moment."
+          : status || "Connect a Gmail account first.",
+      );
+    // The checks setAside() makes before it keeps the earlier draft.
+    if (retained?.error || retained?.conflict || staleBase)
+      return blocked(
+        "Reload the saved draft in Inbox before starting another email. Nothing was added.",
+      );
+    if (retained?.available && !retained.peek())
+      return blocked(
+        "Recover the retained draft in Inbox before starting another email. Nothing was added.",
+      );
+    return {
+      ready: true,
+      kind: "new",
+      append: false,
+      reply: false,
+      subject: "",
+      to: [],
+      room: BODY_LIMIT,
+      token: JSON.stringify([owner, "new-file", epoch]),
+    };
+  }
+
   const composeProposal = (d: LocalMailDraft) => ({
     mode: d.mode || (d.reply ? "reply" : "compose"),
     to: [...d.to],
@@ -1791,17 +1840,24 @@ export function createMailDraftsController(
     newEmail,
     newSharedEmail,
     transfer,
-    /** An explicit Files review adds exact bytes to this account's draft, never a provider operation. */
-    attachReviewed(file: OutgoingMailAttachment, expected: string): boolean {
-      const target = suggestionTarget();
-      if (!target.ready || target.token !== expected) return false;
-      const existing = draft?.attachments || [];
-      if (existing.some((item) => item.dataBase64 === file.dataBase64)) {
-        toast("This file is already attached. Nothing was added.");
-        return false;
-      }
-      const next = [
-        ...existing,
+    newDraftTarget,
+    /**
+     * An explicit Files or Photos Email action: these exact bytes start a new local email under
+     * this account (`newSharedEmail`), never a provider operation. The email that was open or
+     * unfinished is set aside to Drafts unchanged first; no existing draft takes the file.
+     * Resolves to null once the new composer holds the file, or to the reason nothing was
+     * added. It shows no notice itself, so the caller shows that one reason.
+     */
+    async attachReviewed(
+      file: OutgoingMailAttachment,
+      expected: string,
+      current: () => boolean = () => true,
+    ): Promise<string | null> {
+      const changed = "The email account changed. Nothing was added.";
+      const target = newDraftTarget();
+      if (!target.ready) return target.reason;
+      if (target.token !== expected || !current()) return changed;
+      const attachments = [
         {
           name: file.name,
           mimeType: file.mimeType,
@@ -1809,19 +1865,26 @@ export function createMailDraftsController(
         },
       ];
       try {
-        admitOutgoingAttachments(next, policy(), draft?.forward?.parts);
+        admitOutgoingAttachments(attachments, policy());
       } catch (error) {
-        toast(attachmentRefusalText(error));
-        return false;
+        return attachmentRefusalText(error);
       }
-      if (!draft && !begin()) return false;
-      (draft as LocalMailDraft).attachments = next;
-      open = true;
-      status =
-        "Selected file added to this local draft. Review recipients, text and attachments before sending; nothing has been sent.";
-      persist();
-      publish();
-      return true;
+      let refusal = "";
+      const started = await newSharedEmail(
+        {
+          to: [],
+          subject: "",
+          body: "",
+          attachments,
+          status:
+            "Selected file added to a new local draft. Review recipients, text and attachments before sending; nothing has been sent.",
+        },
+        () => current() && newDraftTarget().token === expected,
+        (text) => {
+          refusal ||= text;
+        },
+      );
+      return started ? null : refusal || changed;
     },
     /**
      * "Use in email": agent text becomes a local draft for the selected message
@@ -2069,7 +2132,7 @@ export function createMailDraftsController(
       const proposal = controller.proposal();
       return draft && proposal ? { draftId: draft.id, proposal } : null;
     },
-    prepareSelection: setAside,
+    prepareSelection: () => setAside(),
     async removeSelection(
       selected: ReadonlyMap<string, string>,
       current: () => boolean,

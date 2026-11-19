@@ -1,10 +1,12 @@
 import {choosePhotoAction} from './helpers/owned-photo';
 import {test,expect,type Page} from '@playwright/test';
 import {photosBridge} from './helpers/photos-bridge';
-import {savedInboxAttachments} from './inbox-draft-navigation';
+import {savedInboxAttachments,savedInboxDrafts} from './inbox-draft-navigation';
 import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
 const dialog=(page:Page)=>page.getByRole('dialog',{name:'Attach to email',exact:true});
-async function setup(page:Page,holdRead=false){
+const owner:[string,string,string,string]=['production','file-owner','','file-grant'];
+/** `before` runs in Inbox before Photos opens, for example to leave an unfinished email there. */
+async function setup(page:Page,holdRead=false,before?:(page:Page)=>Promise<void>){
  // Start from Home: Inbox must load its reviewed draft target before Photos hands it a source.
  await photosBridge(page,'full',false);
  await page.evaluate(async()=>{
@@ -26,6 +28,7 @@ async function setup(page:Page,holdRead=false){
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
 
+ await before?.(page);
  await expect.poll(()=>page.evaluate(async()=>{const {VIEWS}=await import('/src/prototype/model.js');return VIEWS.inbox.fileEmailTarget().ready;})).toBe(true);
  await page.evaluate(()=>(window as any).fileEmail.shell.openView('photos',{}));
  await page.getByRole('button',{name:/^Photo, /}).click();
@@ -53,7 +56,7 @@ test('Photos Email puts the selected source directly in an unsent draft',async({
  await page.screenshot({path:info.outputPath('photo-email-draft.png')});
  await page.getByRole('button',{name:'Back from draft',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
- const saved=await savedInboxAttachments(page,['production','file-owner','','file-grant']);
+ const saved=await savedInboxAttachments(page,owner);
  expect(saved[0]).toEqual({name:'source.png',mimeType:'image/png',dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7l8AAAAASUVORK5CYII='});
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='readPhotoSelected').length)).toBe(2);
@@ -65,6 +68,21 @@ for(const change of ['revision','access','owner'])test(`Photos Email refuses cha
  await expect(page.getByText(/changed|unavailable/i).first()).toBeVisible();
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
  await expect(page.getByRole('button',{name:'Remove source.png',exact:true})).toHaveCount(0);
+});
+
+test('Photos Email starts a new draft and leaves an unfinished email as it was',async({page})=>{
+ await setup(page,false,async page=>{
+  await page.getByRole('button',{name:'Compose',exact:true}).click();
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Unfinished note');
+ });
+ await expect(page.getByRole('button',{name:'Remove source.png',exact:true})).toBeVisible();
+ await expect(page.getByRole('list',{name:'Attachments',exact:true}).getByRole('listitem')).toHaveCount(1);
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('');
+ const shape=async()=>(await savedInboxDrafts(page,owner)).map(draft=>[draft.body,(draft.attachments??[]).map(file=>file.name)]);
+ expect(await shape()).toEqual([['Unfinished note',[]]]);
+ await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ expect(await shape()).toEqual([['Unfinished note',[]],['',['source.png']]]);
+ expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 
 test('Photos Share opens an addressed-by-owner picture draft in Messages',async({page})=>{

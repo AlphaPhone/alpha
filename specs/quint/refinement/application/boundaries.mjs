@@ -16,40 +16,78 @@ export async function filesAndSharing() {
   const attachment = await bundledSource('apps/app/src/runtime/inbox-attachment.ts');
   const drafts = await bundledSource('apps/app/src/ui/mailbox/drafts-controller.ts', {'import.meta.env': '{}'});
   const traces = [];
-  for (const changed of [false, true]) {
+  const earlierText = {1: 'Earlier unfinished text', 2: 'Earlier unfinished text, edited'};
+  for (const [name, changed, edited] of [['exact', false, false], ['changed', true, false], ['edited-earlier', false, true]]) {
     const page = new JSDOM('<div></div>', {pretendToBeVisual: true});
-    let inserted = null, readCount = 0, opened = 0, carryNotice = '';
-    const {document} = page.window, held = deferred();
+    let readCount = 0, opened = 0, carryNotice = '';
+    const {document} = page.window, held = deferred(), rows = new Map(), toasts = [];
     const file = {name: 'Owned.txt', mimeType: 'text/plain', dataBase64: Buffer.from('first').toString('base64')};
     const reviewed = await attachment.exports.reviewMailAttachment(file);
     const second = {...file, dataBase64: Buffer.from('changed').toString('base64')};
     const changedReview = await attachment.exports.reviewMailAttachment(second);
+    // The actual drafts controller on in-memory compare-and-exchange slots: no provider, network or device.
+    const identity = {sessionId: 'session', account: {environment: 'test', userId: 'owner', sessionId: 'session'}};
+    const mail = drafts.exports.createMailDraftsController({
+      publish() {}, toast: text => toasts.push(text), identity: () => identity, confirm: () => true,
+      provider: {prepare: async () => { throw Error('No provider operation'); },
+        capabilities: () => ({send: false, providerDrafts: false, from: 'owner@example.invalid', attachmentPolicy: {maximumOutgoing: 10, maximumTotalBytes: 5 * 1024 * 1024}})},
+      store: {read: async key => structuredClone(rows.get(key) ?? null), compareExchange: async (key, before, next) => {
+        if (JSON.stringify(rows.get(key) ?? null) !== JSON.stringify(before)) return {status: 'conflict'};
+        if (next === null) rows.delete(key); else rows.set(key, structuredClone(next));
+        return {status: 'saved'};
+      }},
+      retained: () => ({ready: Promise.resolve(), available: false, peek: () => null, conflict: false, error: false, status: '',
+        edit() {}, resume() {}, replace() {}, retry() {}, clear: async () => {}, recover() {}, retire() {}}),
+      reviewAttachment: async value => value,
+    });
+    await mail.bind('grant', 'owner@example.invalid');
+    for (let attempt = 0; !mail.newDraftTarget().ready && attempt < 12; attempt++) await tick();
+    // The owner's unfinished email, left when they went Home: its composer is closed, the draft is kept.
+    assert.equal(mail.useSuggestion(earlierText[1]), true);
+    const earlierId = mail.email().draftId;
+    mail.close();
+    const observe = () => {
+      const shelf = [...rows].find(([key]) => key.startsWith('inbox-drafts:v1:shelf:'))?.[1];
+      const kept = shelf?.items.find(row => row.draft.id === earlierId)?.draft;
+      const open = mail.email(), fresh = open && open.draftId !== earlierId ? open.proposal : null;
+      const earlier = kept || (open?.draftId === earlierId ? {body: open.proposal.bodyText, attachments: open.proposal.attachments} : null);
+      const content = draft => Number(Object.keys(earlierText).find(key => earlierText[key] === draft?.body) ?? -1);
+      return {'s.inserted': !!fresh && fresh.attachments.length === 1 && fresh.attachments[0].dataBase64 === file.dataBase64 && !fresh.bodyText,
+        's.newDraft': !!fresh, 's.earlier': content(earlier), 's.kept': kept ? content(kept) : 0,
+        's.earlierBytes': earlier ? (earlier.attachments || []).length : -1};
+    };
     const module = sourceContext([source], ['reviewFileEmail'], {window: page.window, document,
       AbortController: page.window.AbortController, reviewMailAttachment: attachment.exports.reviewMailAttachment,
       rethrowAttachmentRefusal: drafts.exports.rethrowAttachmentRefusal});
-    const t = trace(`attachment-${changed ? 'changed' : 'exact'}`, {'s.inserted': false});
+    const t = trace(`attachment-${name}`, observe());
     const close = module.reviewFileEmail({read: async () => {
       if (++readCount === 1) return {...file, ...reviewed};
       await held.promise;
       return changed ? {...second, ...changedReview} : {...file, ...reviewed};
-    }, current: () => true, target: () => ({ready: true, token: 'draft-one'}),
-    insert(value, token) {assert.equal(token, 'draft-one'); inserted = value; return true;},
+    }, current: () => true, target: () => mail.newDraftTarget(),
+    insert: (value, token, live) => mail.attachReviewed(value, token, live),
     inserted() {opened++;}, notify(message) {carryNotice=message;}});
     for(let attempt=0;readCount<2&&attempt<12;attempt++) await tick();
     assert.equal(readCount,2);
-    checkpoint(t, 'Email click binds the local draft and validates the first read', call('read'), {'s.inserted': false});
-    if (changed) checkpoint(t, 'selected bytes change before the second read', call('changeSource'), {'s.inserted': false});
-    held.resolve(); await tick();
+    checkpoint(t, 'Email click binds the account and validates the first read', call('read'), observe());
+    if (changed) checkpoint(t, 'selected bytes change before the second read', call('changeSource'), observe());
+    if (edited) {
+      mail.render().c.onBody({target: {value: earlierText[2]}});
+      checkpoint(t, 'the owner edits the unfinished draft during the read', call('editEarlier'), observe());
+    }
+    held.resolve();
+    for (let attempt = 0; !opened && !carryNotice && attempt < 40; attempt++) await tick();
     assert.equal(document.querySelector('dialog'), null);
     assert.equal(opened, changed ? 0 : 1);
     if (changed) assert.match(carryNotice,/selected file changed/);
-    else assert.deepEqual(inserted,{...file,...reviewed});
-    checkpoint(t, 'only matching bytes open the draft', call(changed ? 'insertFailed' : 'insert'), {'s.inserted': !!inserted});
+    else assert.equal(carryNotice, '');
+    assert.deepEqual(toasts, [], 'the review shows its one outcome; the draft side adds no notice');
+    checkpoint(t, 'only matching bytes start a new draft; the unfinished one is kept as it was', call(changed ? 'insertFailed' : 'insert'), observe());
     close(); page.window.close(); traces.push(t);
   }
   return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...drafts.sources], traces, scope: 'bounded-component', assumptions: [
-    'The actual Email action, shared validator, and exact-byte reread execute with a controlled draft port.',
-    'Native grant changes and cross-tab persistence are separate check boundaries.']});
+    'The actual Email action, shared validator, exact-byte reread and drafts controller execute on in-memory draft slots.',
+    'Native grant changes, the Inbox account binding and cross-tab persistence are separate check boundaries.']});
 }
 
 export async function notificationCollection() {

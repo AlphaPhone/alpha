@@ -1298,7 +1298,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
     closeQuestion=reviewFileEmail({
       read:()=>photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!}),current,
-      target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>current()&&views.inbox.attachReviewedFile(file,token),
+      target:()=>views.inbox.fileEmailTarget(),insert:(file,token,live)=>views.inbox.attachReviewedFile(file,token,live),
       inserted:()=>owner.open('inbox'),notify:message=>owner.toast(message),
     });
   }
