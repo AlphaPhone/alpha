@@ -262,6 +262,26 @@ test('a checklist, pin and Back leave Alpha cards in the same canonical record',
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
+test('removing a checklist item keeps each remaining item in its own row',async({page})=>{
+ const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
+ await page.getByRole('button',{name:'New note',exact:true}).click();
+ await page.getByRole('textbox',{name:'Title',exact:true}).fill('Errands');
+ await page.getByRole('textbox',{name:'Note',exact:true}).fill('Post office\nBank\nPharmacy');
+ await page.getByRole('button',{name:'Turn into checklist',exact:true}).click();
+ const items=page.getByRole('textbox',{name:'Item',exact:true});
+ await expect(items).toHaveCount(3);
+ // Mark the row elements, then remove the first item: each remaining item keeps its own row.
+ await items.nth(1).evaluate((el:any)=>{el.dataset.testRow='bank';});
+ await items.nth(2).evaluate((el:any)=>{el.dataset.testRow='pharmacy';});
+ await page.getByRole('button',{name:'Remove Post office',exact:true}).click();
+ await expect(items).toHaveCount(2);
+ await expect(items.nth(0)).toHaveValue('Bank');await expect(items.nth(0)).toHaveAttribute('data-test-row','bank');
+ await expect(items.nth(1)).toHaveValue('Pharmacy');await expect(items.nth(1)).toHaveAttribute('data-test-row','pharmacy');
+ await page.getByRole('button',{name:'Back to notes',exact:true}).click();
+ await expect.poll(()=>snapshot(page).then((s:any)=>s.notes[0]?.format?.data?.items)).toEqual([{t:'Bank',done:false},{t:'Pharmacy',done:false}]);
+ expect(foreign).toEqual([]);expect(errors).toEqual([]);
+});
+
 test('Delete on a new note that was never saved closes it without a Notes request',async({page})=>{
  const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
  const before=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length);

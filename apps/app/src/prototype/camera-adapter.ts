@@ -1367,7 +1367,20 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
     // Camera has two modes, Video and Photo; asking about the frame goes through chat.
-    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
+    data.modes = (data.modes || []).map((m: Bag) => ({
+      ...m,
+      pick: () => {
+        if (recordingBusy || session.capturing) return;
+        const mode = m.label.toLowerCase();
+        if (mode !== 'photo' && mode !== 'video') return;
+        if (currentApi.get('camera').mode !== mode) {
+          pendingShot = undefined;
+          bindMode(mode);
+          if (mode === 'photo' && accessPanel?.dataset.alphaCameraAccess === 'microphone') hideAccess();
+        }
+        currentApi.set({mode, rec: false});
+      },
+    }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {

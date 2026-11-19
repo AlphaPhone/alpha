@@ -937,15 +937,21 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       void reload();
     }
   }
-  async function destination(at: string) {
+  async function destination(at: string, fallbackToRoot = false) {
     const d = dialog;
     if (!d || d.kind !== "dest") return;
-    try {
-      const value = await storage.storageList({
-        path: at,
-        ...onVolume(d.volume),
-      });
-      if (dialog !== d) return;
+    const value = await storage.storageList({
+      path: at,
+      ...onVolume(d.volume),
+    }).catch(() => undefined);
+    if (dialog !== d) return;
+    if (fallbackToRoot && at && value?.status !== "ready" && value?.status !== "denied") {
+      await destination("");
+      return;
+    }
+    if (!value) {
+      toast("This folder could not be read.");
+    } else {
       if (failed(value)) return;
       dialog = {
         ...d,
@@ -955,8 +961,6 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           "name",
         ),
       };
-    } catch {
-      toast("This folder could not be read.");
     }
     repaint();
   }
@@ -977,7 +981,10 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       ...onVolume(volume),
     };
     api?.set({ menu: false });
-    void destination("");
+    const current = place;
+    const folder = current.kind === "folder" && current.volume === volume &&
+      paths.every((path) => parentOf(path) === current.path) ? current.path : "";
+    void destination(folder, true);
   }
   function closePreview() {
     clearSelected();
@@ -1858,7 +1865,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
               : "",
           canUp: d.kind === "dest" && d.at !== "",
           up: () => {
-            if (d.kind === "dest") void destination(parentOf(d.at));
+            if (d.kind === "dest") void destination(parentOf(d.at), true);
           },
           folders:
             d.kind === "dest"
