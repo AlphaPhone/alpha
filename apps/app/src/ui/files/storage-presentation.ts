@@ -27,16 +27,14 @@ export const SORT_LABELS: Record<SortMode, string> = {
 
 export function breadcrumbs(
   path: string,
-  rootLabel = "Internal storage",
+  rootLabel?: string,
 ): { label: string; path: string }[] {
   const parts = path ? path.split("/") : [];
-  return [
-    { label: rootLabel, path: "" },
-    ...parts.map((label, index) => ({
-      label,
-      path: parts.slice(0, index + 1).join("/"),
-    })),
-  ];
+  const folders = parts.map((label, index) => ({
+    label,
+    path: parts.slice(0, index + 1).join("/"),
+  }));
+  return rootLabel ? [{ label: rootLabel, path: "" }, ...folders] : folders;
 }
 
 export function formatSize(bytes: number): string {

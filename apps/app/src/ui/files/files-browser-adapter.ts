@@ -937,21 +937,15 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       void reload();
     }
   }
-  async function destination(at: string, fallbackToRoot = false) {
+  async function destination(at: string) {
     const d = dialog;
     if (!d || d.kind !== "dest") return;
-    const value = await storage.storageList({
-      path: at,
-      ...onVolume(d.volume),
-    }).catch(() => undefined);
-    if (dialog !== d) return;
-    if (fallbackToRoot && at && value?.status !== "ready" && value?.status !== "denied") {
-      await destination("");
-      return;
-    }
-    if (!value) {
-      toast("This folder could not be read.");
-    } else {
+    try {
+      const value = await storage.storageList({
+        path: at,
+        ...onVolume(d.volume),
+      });
+      if (dialog !== d) return;
       if (failed(value)) return;
       dialog = {
         ...d,
@@ -961,6 +955,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           "name",
         ),
       };
+    } catch {
+      toast("This folder could not be read.");
     }
     repaint();
   }
@@ -981,10 +977,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       ...onVolume(volume),
     };
     api?.set({ menu: false });
-    const current = place;
-    const folder = current.kind === "folder" && current.volume === volume &&
-      paths.every((path) => parentOf(path) === current.path) ? current.path : "";
-    void destination(folder, true);
+    void destination("");
   }
   function closePreview() {
     clearSelected();
@@ -1532,10 +1525,10 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
     out.nativeTreeStatus = error;
     if (place.kind !== "browse") {
       const at = place;
-      const volumeName =
-        at.kind === "folder" && at.volume
-          ? volumes.find((v) => v.id === at.volume)?.name || "Storage"
-          : primary?.name || "Internal storage";
+      const volumeName = at.kind === "folder" && at.volume
+        ? volumeLabel(at.volume)
+        : undefined;
+      const folderCrumbs = at.kind === "folder" ? breadcrumbs(at.path, volumeName) : [];
       const title =
         at.kind === "trash"
           ? "Trash"
@@ -1544,9 +1537,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
               at.category)
             : at.path
               ? baseName(at.path)
-              : at.volume
-                ? volumeName
-                : "All files";
+              : volumeName || "All files";
       let items: Record<string, unknown>[] = [];
       if (at.kind === "trash") {
         items = trashItems.map((item) => ({
@@ -1648,7 +1639,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         close: () => up(),
         crumbs:
           at.kind === "folder"
-            ? breadcrumbs(at.path, volumeName).map((crumb, index, all) => ({
+            ? folderCrumbs.map((crumb, index, all) => ({
                 id: JSON.stringify([at.volume || "primary", crumb.path]),
                 label: crumb.label,
                 last: index === all.length - 1,
@@ -1663,7 +1654,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
                 },
               }))
             : [],
-        hasCrumbs: at.kind === "folder",
+        hasCrumbs: folderCrumbs.length > 0,
         isTrash: at.kind === "trash",
         canEmpty: at.kind === "trash" && trashItems.length > 0 && !busy,
         empty_: () => {
@@ -1856,16 +1847,14 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
             d.kind === "dest"
               ? breadcrumbs(
                   d.at,
-                  d.volume
-                    ? volumes.find((v) => v.id === d.volume)?.name || "Storage"
-                    : primary?.name || "Internal storage",
+                  d.volume ? volumeLabel(d.volume) : undefined,
                 )
                   .map((c) => c.label)
                   .join(" › ")
               : "",
           canUp: d.kind === "dest" && d.at !== "",
           up: () => {
-            if (d.kind === "dest") void destination(parentOf(d.at), true);
+            if (d.kind === "dest") void destination(parentOf(d.at));
           },
           folders:
             d.kind === "dest"
