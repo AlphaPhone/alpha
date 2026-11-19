@@ -3902,7 +3902,7 @@ var FILES_TYPES = {
   audio: { label: "Audio", icon: "wave" },
   archive: { label: "Archive", icon: "filesZip" }
 };
-var FL = { undoT: null, playI: null };
+var FL = { undoT: null };
 
 function filesSplit(name) { var i = name.lastIndexOf("."); return i > 0 ? [name.slice(0, i), name.slice(i)] : [name, ""]; }
 function filesUndoable(api, entries, label) {
@@ -3916,43 +3916,40 @@ function filesNorm(x) { return String(x || "").toLowerCase().replace(/[^a-z0-9]+
 function filesRemove(api, ids) {
   var s = api.get("files"); var entries = [];
   s.files.forEach(function (f, i) { if (ids.indexOf(f.id) >= 0) entries.push({ f: f, idx: i }); });
-  clearInterval(FL.playI);
-  api.set({ files: s.files.filter(function (f) { return ids.indexOf(f.id) < 0; }), open: null, sel: null, sheet: null, renaming: false, playing: false });
+  api.set({ files: s.files.filter(function (f) { return ids.indexOf(f.id) < 0; }), open: null, sel: null, renaming: false });
   filesUndoable(api, entries, entries.length === 1 ? entries[0].f.name + " deleted" : entries.length + " files deleted");
 }
-function filesShare(api, ids, via) {
+/* Fixture Share drafts an email in the fixture Inbox; Move has no fixture destination picker. */
+function filesShare(api, ids) {
   var s = api.get("files"); var fs = s.files.filter(function (f) { return ids.indexOf(f.id) >= 0; });
   var names = fs.map(function (f) { return f.name; });
   var to = fs.length === 1 && fs[0].from ? fs[0].from : null;
-  api.set({ sheet: null, sel: null });
-  if (via === "mail" && VIEWS.inbox) return api.open("inbox", { compose: { to: to, subject: names.length === 1 ? filesSplit(names[0])[0] : names.length + " files", body: "Attached: " + names.join(", "), attach: ids } });
-  if (via === "msg" && VIEWS.messages) return api.open("messages", { compose: to || true, text: names.join(", "), attach: ids });
-  api.toast("Ready to share");
+  api.set({ sel: null });
+  if (VIEWS.inbox) return api.open("inbox", { compose: { to: to, subject: names.length === 1 ? filesSplit(names[0])[0] : names.length + " files", body: "Attached: " + names.join(", "), attach: ids } });
+  if (testMocksEnabled) api.toast("Sharing isn’t available in this preview.");
 }
+function filesMoveUnavailable(api) { if (testMocksEnabled) api.toast("Moving isn’t available in this preview."); }
 function filesCount(list, folder) { return list.filter(function (f) { return f.folder === folder; }).length + FILES_FOLDERS.filter(function (d) { return d.parent === folder; }).length; }
 
 registerView("files", {
   title: "Files", icon: "folder", aliases: ["downloads", "documents", "file"],
   chat: "hidden",
-  state: { files: FILES_SEED, folder: null, open: null, grid: false, sort: "recent", sel: null, sheet: null, renaming: false, rn: "", q: null, menu: false, asked: {}, asking: null, playing: false, pos: 0 },
+  state: { files: FILES_SEED, folder: null, open: null, grid: false, sort: "recent", sel: null, renaming: false, rn: "", q: null, menu: false, asked: {}, asking: null },
   persist: ["files", "grid", "sort"],
   jumps: [[null, "Files"], ["folder", "Folder"], ["preview", "File preview"]],
   preset: function (sub) {
     if (sub === "folder") return { folder: "Downloads" };
     if (sub === "preview") return copy("files").presetPreview || { folder: "Downloads" };
   },
-  immersive: function (st) { return st.sheet ? { noPill: true } : null; },
   back: function (st, api) {
-    if (st.sheet) { api.set({ sheet: null }); return true; }
     if (st.menu) { api.set({ menu: false }); return true; }
     if (st.renaming) { api.set({ renaming: false }); return true; }
-    if (st.open) { clearInterval(FL.playI); api.set({ open: null, playing: false, pos: 0 }); return true; }
+    if (st.open) { api.set({ open: null }); return true; }
     if (st.sel) { api.set({ sel: null }); return true; }
     if (st.folder) { var d = null; FILES_FOLDERS.forEach(function (x) { if (x.id === st.folder) d = x; }); api.set({ folder: d && d.parent ? d.parent : null }); return true; }
     if (st.q !== null && st.q !== undefined) { api.set({ q: null }); return true; }
     return false;
   },
-  onLeave: function () { clearInterval(FL.playI); },
   suggestions: function (st) { return st.open ? ["Summarize this file"] : []; },
   voicePhrase: copy("files").voicePhrase,
 
@@ -3970,7 +3967,7 @@ registerView("files", {
         label: isSel ? ((on ? "Deselect " : "Select ") + f.name) : "Open " + f.name,
         tap: function () {
           if (isSel) { var cur = api.get("files").sel || []; api.set({ sel: cur.indexOf(f.id) >= 0 ? cur.filter(function (x) { return x !== f.id; }) : cur.concat([f.id]) }); return; }
-          clearInterval(FL.playI); api.set({ open: f.id, renaming: false, playing: false, pos: 0 });
+          api.set({ open: f.id, renaming: false });
         }
       };
     }
@@ -4019,43 +4016,15 @@ registerView("files", {
     if (f) {
       var ty = FILES_TYPES[f.type] || FILES_TYPES.pdf;
       var parts = filesSplit(f.name);
-      var paper = api.theme === "dark" ? "var(--alpha-gray-e9)" : "var(--alpha-white)";
-      var pages = [];
-      if (f.type === "pdf" || f.type === "doc") {
-        for (var p = 0; p < Math.min(f.pages || 1, 2); p++) {
-          var lines = []; for (var l = 0; l < (p === 0 ? 8 : 14); l++) lines.push({ w: (l * 37 % 35) + 60 });
-          pages.push({ first: p === 0, rest: p > 0, heading: f.heading || parts[0], rows: (f.rows || []).map(function (r) { return { k: r[0], v: r[1] }; }), lines: lines, num: (p + 1) + " / " + (f.pages || 1) });
-        }
-      }
+      // Fixture documents show their key rows as plain text, as a selected text file does.
+      var textBody = f.type === "pdf" || f.type === "doc" ? [f.heading || parts[0]].concat((f.rows || []).map(function (r) { return r[0] + ": " + r[1]; })).join("\n") : "";
       var fromP = f.from ? api.person(f.from) : null;
       var asked = !!(st.asked || {})[f.id];
-      var wave = []; for (var w = 0; w < 48; w++) wave.push({ h: Math.round(8 + 40 * Math.abs(Math.sin(w * 0.7) * Math.cos(w * 0.29))), c: f.dur && w / 48 < (st.pos || 0) / f.dur ? "var(--acct)" : "var(--s3)" });
       pv = {
         name: f.name, base: parts[0], ext: parts[1],
         meta: (f.type === "pdf" ? "PDF" : ty.label) + " · " + f.size + (fromP ? " · from " + fromP.name.split(" ")[0] : "") + " · " + f.folder,
         d: IC[ty.icon],
-        isPages: pages.length > 0, pages: pages, paper: paper,
-        isReceipt: f.scan === "receipt", isPhoto: f.scan === "photo", photoBg: imgBg("p10", "linear-gradient(180deg, var(--alpha-scan-photo-1) 0%, var(--alpha-scan-photo-2) 45%, var(--alpha-scan-photo-3) 62%, var(--alpha-scan-photo-4) 63%, var(--alpha-scan-photo-5) 100%)"), photoSun: IMG.p10 ? "none" : "block", isAudio: f.type === "audio", isArchive: f.type === "archive",
-        receipt: f.receipt ? { shop: f.receipt.shop, rows: f.receipt.rows.map(function (r) { return { k: r[0], v: r[1] }; }), total: f.receipt.total } : null,
-        contents: (f.contents || []).map(function (c) { return { name: c, d: /\/$/.test(c) ? IC.folder : IC.filesDoc }; }),
-        wave: wave, time: Math.floor((st.pos || 0) / 60) + ":" + pad2(Math.floor(st.pos || 0) % 60) + " / " + Math.floor((f.dur || 0) / 60) + ":" + pad2((f.dur || 0) % 60),
-        playIcon: st.playing ? IC.pause : IC.play, playLabel: st.playing ? "Pause" : "Play", playCss: st.playing ? "" : "fill: currentColor",
-        play: function () {
-          if (api.get("files").playing) { clearInterval(FL.playI); api.set({ playing: false }); return; }
-          api.set({ playing: true, pos: (st.pos || 0) >= f.dur ? 0 : (st.pos || 0) });
-          clearInterval(FL.playI);
-          FL.playI = api.every(function () { var s = api.get("files"); var np = (s.pos || 0) + 1; if (np >= f.dur) { clearInterval(FL.playI); api.set({ pos: f.dur, playing: false }); return; } api.set({ pos: np }); }, 250);
-        },
-        transcribe: function () {
-          if (!VIEWS.notes) return api.toast("Transcribing");
-          var id = "memo-" + f.id;
-          if (recordById((api.get("notes").list || []), id)) return api.open("notes", { open: id });
-          var note = { id: id, kind: "voice", title: "Landlord", when: "Yesterday · 6:20 PM", dur: f.dur, pinned: false,
-            lines: [{ s: "me", t: "Note to self: call the landlord Friday.", at: 0 }, { s: "me", t: "The bedroom radiator clanks all night, and ask when the lease renewal is due.", at: 6 }],
-            summary: f.sum.slice(0, 2), actions: [{ t: "Call the landlord Friday", done: false }, { t: "Ask about the lease renewal date", done: false }] };
-          api.setView("notes", { list: [note].concat(api.get("notes").list || []) });
-          api.open("notes", { open: id });
-        },
+        textBody: textBody,
         renaming: !!st.renaming, notRenaming: !st.renaming,
         rn: st.rn,
         startRename: function () { api.set({ renaming: true, rn: parts[0] }); },
@@ -4069,9 +4038,9 @@ registerView("files", {
           if (e.key === "Enter") { e.preventDefault(); var v = String(api.get("files").rn || "").trim(); if (v) api.set({ files: api.get("files").files.map(function (x) { return x.id === f.id ? Object.assign({}, x, { name: v + parts[1] }) : x; }), renaming: false }); else api.set({ renaming: false }); }
           if (e.key === "Escape") api.set({ renaming: false });
         },
-        close: function () { clearInterval(FL.playI); api.set({ open: null, renaming: false, playing: false, pos: 0 }); },
-        share: function () { api.set({ sheet: "share", renaming: false }); },
-        move: function () { api.set({ sheet: "move", renaming: false }); },
+        close: function () { api.set({ open: null, renaming: false }); },
+        share: function () { filesShare(api, [f.id]); },
+        move: function () { filesMoveUnavailable(api); },
         del: function () { filesRemove(api, [f.id]); },
         asked: asked, asking: st.asking === f.id, canAsk: !asked && st.asking !== f.id,
         sum: f.sum || [],
@@ -4081,27 +4050,13 @@ registerView("files", {
       };
     }
 
-    /* sheets */
-    var targetIds = f ? [f.id] : (sel || []);
-    var curFolder = f ? f.folder : st.folder;
-    var moveTo = FILES_FOLDERS.map(function (d) {
-      var here = d.id === curFolder;
-      return { id: d.id, name: d.id, d: IC[d.icon] || IC.folder, here: here, notHere: !here, sub: d.parent ? d.parent : "",
-        go: function () {
-          if (here) { api.set({ sheet: null }); return; }
-          var ids = targetIds.slice();
-          api.set({ files: api.get("files").files.map(function (x) { return ids.indexOf(x.id) >= 0 ? Object.assign({}, x, { folder: d.id }) : x; }), sheet: null, sel: null });
-          api.toast((ids.length === 1 ? "Moved" : ids.length + " files moved") + " to " + d.id);
-        } };
-    });
-
     return {
       top: !st.folder, searching: st.q !== null && st.q !== undefined, notSearching: st.q === null || st.q === undefined,
       q: st.q || "", onQ: function (e) { api.set({ q: e.target.value }); }, search: function () { api.set({ q: "" }); }, endSearch: function () { api.set({ q: null }); },
       hasQuery: !!q, noQuery: !q, results: results, noResults: !!q && results.length === 0,
       locs: locs, recent: [],
       // Fixture browse (mock mode only): the fixture folders stand in for categories; Trash is an empty folder.
-      browse: { ready: true, cats: locs.map(function (l) { return { name: l.name, d: l.d, count: l.sub.split(" ")[0], label: l.name, go: l.go }; }), vols: [], trashD: IC.trash, trashCount: "", openTrash: function () { api.set({ folder: "Trash", q: null }); } },
+      browse: { ready: true, allFilesIcon: IC.folder, cats: locs.map(function (l) { return { name: l.name, d: l.d, count: l.sub.split(" ")[0], label: l.name, go: l.go }; }), vols: [], trashD: IC.trash, trashCount: "", openTrash: function () { api.set({ folder: "Trash", q: null }); } },
       storageText: copy("files").storageText || "Storage usage unavailable",
       storageW: copy("files").storageW || "0%",
       inFolder: !!fd, fd: fd,
@@ -4109,14 +4064,10 @@ registerView("files", {
       isSel: isSel, notSel: !isSel, selectionBusy: false, selectionDisabled: selCount === 0, selCount: selCount === 0 ? "Select" : String(selCount), hasSel: selCount > 0, selOp: selCount > 0 ? "1" : ".35",
       exitSel: function () { api.set({ sel: null }); },
       selAll: function () { api.set({ sel: files.filter(function (x) { return x.folder === st.folder; }).map(function (x) { return x.id; }) }); },
-      selShare: function () { if (selCount) api.set({ sheet: "share" }); },
-      selMove: function () { if (selCount) api.set({ sheet: "move" }); },
+      selShare: function () { if (selCount) filesShare(api, sel.slice()); },
+      selMove: function () { if (selCount) filesMoveUnavailable(api); },
       selDel: function () { if (selCount) filesRemove(api, sel.slice()); },
       isPreview: !!pv, pv: pv,
-      moveSheet: st.sheet === "move", shareSheet: st.sheet === "share", moveTo: moveTo,
-      closeSheet: function () { api.set({ sheet: null }); },
-      shareMsg: function () { filesShare(api, targetIds, "msg"); },
-      shareMail: function () { filesShare(api, targetIds, "mail"); },
       menuOpen: !!st.menu && (st.menu === "file" ? !!pv : !!fd), fileMenu: st.menu === "file" && !!pv, folderMenu: st.menu !== "file", menuLabel: st.menu === "file" ? "File actions" : "Sort and more",
       openMenu: function () { api.set({ menu: "file" }); }, closeMenu: function () { api.set({ menu: false }); },
       askQ: "Ask " + api.name + ": \u201c" + String(st.q || "").trim() + "\u201d",

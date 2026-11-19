@@ -226,8 +226,6 @@ export const MOCK_STATES: State[] = [
   mock('notes:editor', ['More', 'Share note']),
   {name:'live Files sort',open:async(page,theme)=>{await openFilesStorage(page,theme);await press(page,['Files options']);await settle(page);}},
   mock('files:preview', ['Rename']),
-  mock('files:preview', ['File actions', 'Add to folder']),
-  mock('files:preview', ['File actions', 'Share file']),
   // Deleting a fixture file shows the toast with Undo over the folder.
   mock('files:preview', ['File actions', 'Delete file']),
   mock('workflows:flow', ['Change'], 'workflows-builder'),

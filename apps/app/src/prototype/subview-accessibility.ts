@@ -14,7 +14,7 @@ const POPUPS:Record<string,Popup[]>={
  browser:[['menuModal',out=>!!out.menu,out=>out.closeMenu?.()],['shareModal',out=>!!out.share,out=>out.closeShare?.()]],
  photos:[['infoModal',out=>!!out.infoOpen,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareOpen,out=>out.closeSheet?.()]],
  notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()],['previousNotesModal',out=>!!out.previousNotesMenu,out=>out.closePreviousNotesMenu?.()]],
- files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()],['moveModal',out=>!!out.moveSheet,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()]],
+ files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()]],
  workflows:[['stepModal',out=>!!out.b?.sheetOn,out=>out.b?.closeSheet?.()]],
  settings:[['sheetModal',out=>!!out.hasSheet,out=>out.sheet?.close?.()]],
  // The quick-reply sheet over a ringing call: Back and Escape close the sheet, not the call screen.

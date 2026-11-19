@@ -1805,7 +1805,9 @@
       "staleGrantCannotReviveAccessTest",
       "retiredListingCannotPublishTest",
       "staleAgentReadDoesNotShareTest",
-      "retiredAgentReadDoesNotShareTest"
+      "retiredAgentReadDoesNotShareTest",
+      "openTapAdmittedWhileLoadingTest",
+      "reloadKeepsOpenMutationTest"
     ],
     "sources": [
       "apps/app/src/prototype/selection-adapter.ts",
@@ -1816,8 +1818,8 @@
       "upstream.lock.json"
     ],
     "abstractions": [
-      "Installed folder reader, current access/volume readback and registered agent share admission over deferred storage ports. Two folders, three entries, two volumes and six state-read identities.",
-      "Direct open and late selection release use the shared FilesDirectAdmission model and the Alpha cold-start browser flows. Category/Trash aggregation, filters, mutation dialogs, native watch ownership and durable provider effects remain explicit extensions."
+      "Installed folder reader, current access/volume readback, registered agent share admission and the listing-read/mutation split over deferred storage ports. Two folders, three entries, two volumes and six state-read identities; one open tap stands for the mutation counter.",
+      "Direct open and late selection release use the shared FilesDirectAdmission model and the Alpha cold-start browser flows. Category/Trash aggregation, filters, copy, rename, Undo restore, Empty Trash batching, truncation, mutation dialogs, native watch ownership and durable provider effects remain explicit extensions."
     ]
   },
   {
