@@ -32,6 +32,9 @@ test('a camera capture persists and Ask Alpha attaches it locally without the de
  await expect(frame.getByRole('img',{name:'Image for question review'})).toBeVisible();
  await expect(frame.getByRole('button',{name:'Extract text locally'})).toBeEnabled();
  await frame.getByRole('button',{name:'Cancel',exact:true}).click();await expect(frame).toHaveCount(0);
+ // Cancel returns focus to the active compact composer. Tap the outside surface before taking a photo.
+ await page.locator('[data-alpha-dock-scrim="true"]').click({position:{x:20,y:20}});
+ await expect(page.locator('[data-alpha-dock-scrim="true"]')).toHaveCount(0);
  await page.getByRole('button',{name:'Take photo',exact:true}).click();
  await expect(page.getByRole('button',{name:'Open last photo',exact:true})).toBeVisible();
 

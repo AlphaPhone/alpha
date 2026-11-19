@@ -1930,10 +1930,10 @@
     <div data-alpha-app-header="main" style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px 0 20px; gap: 2px; flex-shrink: 0">
     <sc-if value="{{showAppBack}}"><button class="app-header-back" aria-label="Back to apps" onClick="{{backToApps}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button></sc-if>
       <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">{{photos.title}}</h1>
-        <details class="photo-import-menu"><summary aria-label="Photos tools"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.more}}"></path></svg></summary><div>
-          <sc-if value="{{photos.libTab}}"><button aria-label="Select photos" onClick="{{photos.selStart}}">Select</button></sc-if>
-          <sc-if value="{{photos.isAlb}}"><button aria-label="New album" onClick="{{photos.newAlbum}}">New album</button></sc-if>
-          <sc-if value="{{photos.importAvailable}}"><button onClick="{{photos.importImage}}">{{photos.importLabel}}</button></sc-if>
+        <details class="photo-import-menu photo-actions-menu"><summary aria-label="Photos tools"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/ellipsis.svg')"></span></summary><div>
+          <sc-if value="{{photos.libTab}}"><button aria-label="Select photos" onClick="{{photos.selStart}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/list-checks.svg')"></span>Select</button></sc-if>
+          <sc-if value="{{photos.isAlb}}"><button onClick="{{photos.newAlbum}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/plus.svg')"></span>New album</button></sc-if>
+          <sc-if value="{{photos.importAvailable}}"><button onClick="{{photos.importImage}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/image.svg')"></span>{{photos.importLabel}}</button></sc-if>
         </div></details>
 
     </div>
@@ -2063,10 +2063,10 @@
         <h1 data-alpha-app-title class="serif" style="margin: 0 0 0 4px; font-size: 26px; letter-spacing: -.01em; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{photos.alb.title}}</h1>
         <span style="font-size: 13px; color: var(--mut); padding: 0 8px">{{photos.alb.count}}</span>
         <sc-if value="{{photos.alb.menu}}">
-          <details class="photo-import-menu"><summary aria-label="Album options"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></summary><div>
-            <sc-if value="{{photos.alb.canSelect}}"><button aria-label="Select items" disabled="{{photos.selectionBusy}}" onClick="{{photos.alb.select}}">Select</button></sc-if>
-            <sc-if value="{{photos.alb.isCustom}}"><button class="ib" aria-label="Rename album" onClick="{{photos.alb.manage}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.edit}}"></path></svg></button><button class="ib" aria-label="Delete album" onClick="{{photos.alb.deleteAlbum}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.trash}}"></path></svg></button></sc-if>
-            <sc-if value="{{photos.alb.canEmpty}}"><button aria-label="Delete all forever" onClick="{{photos.alb.emptyTrash}}" style="display:inline-flex;align-items:center;gap:6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Empty</button></sc-if>
+          <details class="photo-import-menu photo-actions-menu"><summary aria-label="Album options"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/ellipsis.svg')"></span></summary><div>
+            <sc-if value="{{photos.alb.canSelect}}"><button aria-label="Select items" disabled="{{photos.selectionBusy}}" onClick="{{photos.alb.select}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/list-checks.svg')"></span>Select</button></sc-if>
+            <sc-if value="{{photos.alb.isCustom}}"><button onClick="{{photos.alb.manage}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/edit.svg')"></span>Rename album</button><button onClick="{{photos.alb.deleteAlbum}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Delete album</button></sc-if>
+            <sc-if value="{{photos.alb.canEmpty}}"><button aria-label="Delete all forever" onClick="{{photos.alb.emptyTrash}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Empty</button></sc-if>
           </div></details>
         </sc-if>
         <sc-if value="{{photos.selAll}}"><button class="tap" aria-label="{{photos.selAllLabel}}" disabled="{{photos.selectionBusy}}" onClick="{{photos.selAll}}" style="min-height:44px;padding:0 12px;font-size:16px;font-weight:600;color:var(--acct)">{{photos.selAllLabel}}</button></sc-if>
@@ -2139,14 +2139,13 @@
             <h2 style="margin: 0; font-size: 15px; font-weight: 600">{{photos.v.day}}</h2>
             <div style="font-size: 12.5px; opacity: .72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{photos.v.sub}}</div>
           </div>
-          <details class="photo-import-menu photo-viewer-menu"><summary aria-label="Photo actions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.more}}"></path></svg></summary><div onClick="{{photos.closeActions}}">
-            <sc-if value="{{photos.v.canZoom}}"><div role="group" aria-label="Photo zoom"><span role="status">{{photos.v.zoomLabel}}</span><button aria-label="Zoom in" disabled="{{photos.v.zoomMax}}" onClick="{{photos.v.zoomIn}}">Zoom in</button><button aria-label="Zoom out" disabled="{{photos.v.zoomMin}}" onClick="{{photos.v.zoomOut}}">Zoom out</button><button aria-label="Fit photo" disabled="{{photos.v.zoomMin}}" onClick="{{photos.v.fit}}">Fit photo</button></div></sc-if>
+          <details class="photo-import-menu photo-actions-menu photo-viewer-menu"><summary aria-label="Photo actions"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/ellipsis.svg')"></span></summary><div onClick="{{photos.closeActions}}">
             <sc-if value="{{photos.v.ask}}"><button onClick="{{photos.v.ask}}"><span class="alpha-compute-mark" aria-hidden="true"></span>Ask Alpha</button></sc-if>
-            <sc-if value="{{photos.v.info2.canAlbum}}"><button aria-label="Add to album" onClick="{{photos.v.info2.addToAlbum}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.phAlbums}}"></path></svg></button></sc-if>
-            <sc-if value="{{photos.v.canEmail}}"><button onClick="{{photos.v.email}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.mail}}"></path></svg>Email</button></sc-if>
-            <sc-if value="{{photos.v.notSecure}}"><button onClick="{{photos.v.share}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.share}}"></path></svg>Share</button></sc-if>
-            <sc-if value="{{photos.v.notDeleted}}"><button aria-label="{{photos.v.deleteLabel}}" onClick="{{photos.v.del}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.trash}}"></path></svg>Delete</button></sc-if>
-            <sc-if value="{{photos.v.isDeleted}}"><button onClick="{{photos.v.recover}}">Recover</button><sc-if value="{{photos.v.canDeleteForever}}"><button aria-label="Delete this item forever" onClick="{{photos.v.deleteForever}}">Delete</button></sc-if></sc-if>
+            <sc-if value="{{photos.v.info2.canAlbum}}"><button onClick="{{photos.v.info2.addToAlbum}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/folder-input.svg')"></span>Add to album</button></sc-if>
+            <sc-if value="{{photos.v.canEmail}}"><button onClick="{{photos.v.email}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/mail.svg')"></span>Email</button></sc-if>
+            <sc-if value="{{photos.v.notSecure}}"><button onClick="{{photos.v.share}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/share-2.svg')"></span>Share</button></sc-if>
+            <sc-if value="{{photos.v.notDeleted}}"><button aria-label="{{photos.v.deleteLabel}}" onClick="{{photos.v.del}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Delete</button></sc-if>
+            <sc-if value="{{photos.v.isDeleted}}"><button onClick="{{photos.v.recover}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/undo-2.svg')"></span>Recover</button><sc-if value="{{photos.v.canDeleteForever}}"><button aria-label="Delete this item forever" onClick="{{photos.v.deleteForever}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/trash-2.svg')"></span>Delete</button></sc-if></sc-if>
           </div></details>
         </div>
       </div>
@@ -2169,13 +2168,19 @@
   <sc-if value="{{photos.albumManager}}">
     <div ref="{{photos.am.modalRef}}" style="position:absolute;inset:0;z-index:20">
     <button aria-hidden="true" tabindex="-1" aria-label="Close album management" onClick="{{photos.am.close}}" style="position:absolute;inset:0;z-index:20;background:var(--scrim)"></button>
-    <div class="enter" data-alpha-album-manager role="dialog" aria-modal="true" aria-label="{{photos.am.title}}" style="color:var(--fg);position:absolute;left:0;right:0;bottom:0;z-index:21;background:var(--s1);border-radius:28px 28px 0 0;padding:24px 24px 44px;max-height:80%;overflow-y:auto;box-sizing:border-box">
+    <div class="enter" data-alpha-album-manager role="dialog" aria-modal="true" aria-label="{{photos.am.title}}">
       <div style="display:flex;align-items:center;gap:12px"><h2 class="serif" style="font-size:26px;flex:1;margin:0">{{photos.am.title}}</h2><button class="ib" aria-label="Close dialog" onClick="{{photos.am.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button></div>
       <div role="status" style="color:var(--mut);font-size:14px;margin-top:12px">{{photos.am.error}}</div>
       <sc-if value="{{photos.am.info}}"><button aria-label="Add to album" onClick="{{photos.am.choose}}" style="width:100%;padding:16px;border-radius:24px;background:var(--s2);color:var(--fg)">Add to album</button></sc-if>
       <sc-if value="{{photos.am.choosing}}">
-        <sc-for list="{{photos.am.items}}" key="{{a.id}}" as="a"><button disabled="{{photos.am.busy}}" aria-label="{{a.label}}" onClick="{{a.go}}" style="display:block;width:100%;padding:16px;margin-top:8px;border-radius:18px;background:var(--s2);text-align:left;color:var(--fg)">{{a.label}}</button></sc-for>
-        <button disabled="{{photos.am.busy}}" aria-label="New album" onClick="{{photos.am.create}}" style="display:block;width:100%;padding:16px;margin-top:12px;border-radius:24px;background:var(--fg);color:var(--bg)">New album</button>
+        <div class="photo-album-choices">
+          <sc-if value="{{photos.am.canFavorite}}"><button disabled="{{photos.am.busy}}" onClick="{{photos.am.addFavorite}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/heart.svg')"></span>Add to Favorites</button></sc-if>
+          <sc-if value="{{photos.am.inFavorites}}"><span class="photo-album-membership">In Favorites</span></sc-if>
+          <sc-if value="{{photos.am.inCamera}}"><span class="photo-album-membership">In Camera</span></sc-if>
+          <sc-if value="{{photos.am.inVideos}}"><span class="photo-album-membership">In Videos</span></sc-if>
+          <sc-for list="{{photos.am.items}}" key="{{a.id}}" as="a"><button disabled="{{photos.am.busy}}" onClick="{{a.go}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/folder.svg')"></span>{{a.label}}</button></sc-for>
+          <button disabled="{{photos.am.busy}}" onClick="{{photos.am.create}}"><span class="photo-action-icon" aria-hidden="true" style="--photo-icon:url('/icons/lucide/plus.svg')"></span>New album</button>
+        </div>
       </sc-if>
       <sc-if value="{{photos.am.naming}}">
         <input aria-label="Album name" maxlength="80" value="{{photos.am.name}}" onChange="{{photos.am.onName}}" style="width:100%;box-sizing:border-box;margin-top:16px;padding:16px;border:0;border-radius:18px;background:var(--s2);color:var(--fg);font-size:16px">
