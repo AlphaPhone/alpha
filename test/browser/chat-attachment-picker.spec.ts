@@ -283,3 +283,33 @@ test('leaving Files during attachment validation discards the late read and allo
  await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(1);
  expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
 });
+
+test('Ask Alpha explains a refusal while another file is still being read, then attaches once',async({page})=>{
+ await ready(page);
+ await page.evaluate(async()=>{
+  const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
+  const read=BrowserMailAttachments.prototype.readSelected;
+  const fixture=(window as any).attachmentFixture;
+  BrowserMailAttachments.prototype.readSelected=async function(input){
+   if(!fixture.readReleased){
+    await new Promise<void>(resolve=>{fixture.resumeRead=()=>{fixture.readReleased=true;resolve();};});
+   }
+   return read.call(this,input);
+  };
+ });
+ const ask=async()=>{
+  await page.getByRole('button',{name:'File actions',exact:true}).click();
+  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ };
+ await page.getByRole('button',{name:'Files',exact:true}).click();
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
+ await ask();
+ await expect.poll(()=>page.evaluate(()=>typeof (window as any).attachmentFixture.resumeRead)).toBe('function');
+ // The second tap cannot start a read; it must say so rather than close the menu silently.
+ await ask();
+ await expect(page.locator('[data-alpha-toast]')).toContainText('Can’t attach the file right now. Try again in a moment.');
+ await page.evaluate(()=>(window as any).attachmentFixture.resumeRead());
+ await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(1);
+ expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
+});

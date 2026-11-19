@@ -1695,7 +1695,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
     const camera=shell.cameraAttachment;
-    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding)return;
+    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding){
+      // Ask Alpha from a Files menu closes the menu first, so a refusal here needs words.
+      if(selection)shell.toast('Can’t attach the file right now. Try again in a moment.');
+      return;
+    }
     if (selection && shell.fileAttachmentScope===binding && existing.some(file=>selectedFiles.get(file)?.selection.current())) {
       shell.setState({chat:'sheet',shade:false});
       return;
