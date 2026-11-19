@@ -670,14 +670,16 @@
       "terminalManualReopenTest",
       "partialAbsenceRetiresDetailTest",
       "failedListCannotDispatchReviewedActionTest",
-      "retiredReplyDoesNotReleaseTest"
+      "retiredReplyDoesNotReleaseTest",
+      "releaseKeepsOtherRetainedIntentTest"
     ],
     "invariants": [
       "SentWithExactIntent",
       "PendingRemainsJournaled",
       "UnconfirmedStaysLocked",
       "TerminalHasReopenOnly",
-      "FailedSourceDisablesControls"
+      "FailedSourceDisablesControls",
+      "OneRetainedSlotPerOwner"
     ],
     "sources": [
       "apps/app/src/prototype/automations-adapter.ts",

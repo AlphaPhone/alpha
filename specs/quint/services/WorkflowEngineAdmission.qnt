@@ -47,6 +47,14 @@ module WorkflowEngineAdmission {
       finished: disposition != "ready"}
   }
   action replayScheduled = all { s.runs == 1, s.mode == "trigger", s' = s }
+  /// The agent's chat WORKFLOW "run" starts the current definition in mode "chat". It carries no
+  /// owner submission, reviewed version or idempotency key, so each request is a new run (one is
+  /// modeled), and a paused definition still starts. Whether the phone keeps this path is an open
+  /// product decision; this records the current behaviour, it does not endorse it.
+  action admitChat = all {
+    s.runs == 0, not(s.removed),
+    s' = {...s, runs: 1, runVersion: s.version, mode: "chat", status: "queued"}
+  }
   action enterWorker = all {
     s.runs == 1, not(s.finished), not(s.workerActive), not(s.cancelRequested), s.workerStarts < 2,
     s' = {...s, status: "running", workerActive: true, workerStarts: s.workerStarts + 1, workerApproval: s.recordedApproval}
@@ -109,7 +117,7 @@ module WorkflowEngineAdmission {
   action step = any {
     definition(1, true, false), definition(2, false, false), definition(2, true, true),
     admitManual(1, 1, 1), admitManual(2, 2, 2), replayManual(1, 1, 1),
-    admitScheduled("ready"), admitScheduled("missed"), admitScheduled("overlap"), replayScheduled,
+    admitScheduled("ready"), admitScheduled("missed"), admitScheduled("overlap"), replayScheduled, admitChat,
     enterWorker, workerResult("finished"), workerResult("failed"), workerResult("cancelled"),
     workerResult("waiting-approval"), workerUnknown, resumeUnavailable, replaceRequest(2), requestCancel,
     cancelReceipt("none"), cancelReceipt("cancelled"), cancelReceipt("finished"),
@@ -122,12 +130,14 @@ module WorkflowEngineAdmission {
   val ManualReceiptMatchesRun = s.receipt implies s.mode == "manual" and s.owner.in(1.to(2)) and s.runVersion.in(1.to(2))
   val NoProcessForUnadmittedRun = s.runs == 0 implies s.status == "none" and not(s.workerActive)
   val TerminalNotRunning = s.finished implies not(s.workerActive) and s.status.in(Set("finished", "failed", "cancelled"))
-  val RecordedDecisionHasCanonicalReceipt = s.recordedApproval.in(Set("approved", "denied")) implies s.recordedApproval == s.approval
+  val ChatRunHasNoOwnerReceipt = s.mode == "chat" implies not(s.receipt) and s.owner == 0
+  val RecordedDecisionHasCanonicalReceipt =s.recordedApproval.in(Set("approved", "denied")) implies s.recordedApproval == s.approval
   val TypeOK = s.runs.in(0.to(1)) and s.workerStarts.in(0.to(2)) and s.controls.in(0.to(3))
     and s.status.in(Set("none", "queued", "running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "failed", "cancelled"))
+    and s.mode.in(Set("none", "manual", "trigger", "chat"))
     and s.approval.in(Set("none", "pending", "approved", "denied")) and s.recordedApproval.in(Set("none", "pending", "approved", "denied"))
   val safety = DurableBeforeProcess and ManualReceiptMatchesRun and NoProcessForUnadmittedRun
-    and TerminalNotRunning and RecordedDecisionHasCanonicalReceipt and TypeOK
+    and TerminalNotRunning and RecordedDecisionHasCanonicalReceipt and ChatRunHasNoOwnerReceipt and TypeOK
   run durableAdmissionTest = initFor(true, false, false).then(admitManual(1, 1, 1)).then(enterWorker).then(replayManual(1, 1, 1))
     .then(workerResult("finished")).expect(s.workerStarts == 1 and safety)
   run mismatchedSubmissionTest = initFor(true, false, false).then(admitManual(1, 1, 1)).then(replayManual(2, 1, 1)).fail()
@@ -154,6 +164,9 @@ module WorkflowEngineAdmission {
     .then(replayDecision(true, 1, 1, 1)).expect(s.recordedApproval == "pending" and safety)
   run otherOwnerDecisionRejectedTest = initFor(true, false, false).then(admitManual(1, 1, 1)).then(enterWorker).then(requestApproval(true, 1))
     .then(canonicalDecision(true, 2)).then(replayDecision(true, 1, 1, 1)).fail()
+  run chatRunStartsPausedDefinitionWithoutReceiptTest = initFor(false, false, false).then(admitChat).then(enterWorker)
+    .expect(s.mode == "chat" and not(s.receipt) and s.runVersion == 1 and s.workerStarts == 1 and safety)
+  run chatRunRemovedRejectedTest = initFor(true, true, false).then(admitChat).fail()
   run conflictingNativeTerminalFailsClosedTest = initFor(true, false, false).then(admitManual(1, 1, 1)).then(requestCancel)
     .then(cancelReceipt("finished")).expect(s.status == "failed" and safety)
 }
