@@ -1583,7 +1583,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const data = photosRender(st, currentApi);data.normalSelecting=true;if(data.v)data.v.notDeleted=true;
     const onAlbums=st.tab==='alb'&&!st.album;
     // Header: "Photos" / "Albums" with text tabs; Select in the Library and in albums.
-    data.tabs=(data.tabs||[]).map((tab:Bag)=>({...tab,iconCss:'mask-image:url(/icons/lucide/'+(tab.label==='Library'?'images':'folder')+'.svg)',pick:()=>{if(mutating||sharing)return;selection=undefined;selectionTab=undefined;drag=undefined;currentApi.set({nativeMultiSelection:Date.now()});tab.pick?.();}}));
+    // The Library and Albums icons come from the shared Photos view, so fixture and live builds match.
+    data.tabs=(data.tabs||[]).map((tab:Bag)=>({...tab,pick:()=>{if(mutating||sharing)return;selection=undefined;selectionTab=undefined;drag=undefined;currentApi.set({nativeMultiSelection:Date.now()});tab.pick?.();}}));
     data.libTab=!onAlbums&&!selection;
     // Access: one row while access is partial or denied; nothing once it is full.
 
