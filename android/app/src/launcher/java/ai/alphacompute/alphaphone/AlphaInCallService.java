@@ -49,8 +49,8 @@ public final class AlphaInCallService extends InCallService {
     static final String CHANNEL_NAME = "Phone calls", ONGOING_CHANNEL_NAME = "Calls in progress";
     /** Distinguishes notice actions per call; the call screen reads only the extras. */
     static final String CALL_SCHEME = "alphaphone-call";
-    /** Status-bar icon of call notices: the platform call glyph. */
-    static final int NOTIFICATION_ICON = android.R.drawable.sym_action_call;
+    /** Status-bar icon of call notices: Alpha's monochrome handset, tinted by Android. */
+    static final int NOTIFICATION_ICON = R.drawable.ic_call;
     static final String ANSWER = "Answer", DECLINE = "Decline", END_CALL = "End call";
 
     /** Process-wide registry of active calls keyed by stable id. */

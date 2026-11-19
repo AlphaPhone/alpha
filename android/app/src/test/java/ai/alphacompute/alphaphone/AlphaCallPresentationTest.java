@@ -142,12 +142,12 @@ public class AlphaCallPresentationTest {
         return Robolectric.buildService(AlphaInCallService.class).create().get();
     }
 
-    @Test public void callNotificationKeepsThePlatformCallGlyphAndOpensAlphasCallScreen() throws Exception {
+    @Test public void callNotificationShowsAlphasCallIconAndOpensAlphasCallScreen() throws Exception {
         AlphaInCallService owner = owner();
         try {
             owner.onCallAdded(activeCall());
             Notification notice = owner.getSystemService(NotificationManager.class).getActiveNotifications()[0].getNotification();
-            assertEquals(android.R.drawable.sym_action_call, notice.getSmallIcon().getResId());
+            assertEquals(R.drawable.ic_call, notice.getSmallIcon().getResId());
             // A call with no handle names nobody.
             assertEquals("Unknown caller", notice.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
             assertEquals("In call", notice.extras.getCharSequence(Notification.EXTRA_TEXT).toString());
