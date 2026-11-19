@@ -380,6 +380,7 @@ export const moduleInventory = {
     "apps/app/src/main.tsx",
     "apps/app/src/maps/agent-context.ts",
     "apps/app/src/maps/agent-navigation.ts",
+    "apps/app/src/maps/agent-present.ts",
     "apps/app/src/maps/background-navigation.ts",
     "apps/app/src/maps/basemap.ts",
     "apps/app/src/maps/cloud-maps.ts",
