@@ -31,10 +31,13 @@ test('compacted receipts distinguish exact JavaScript text including lone surrog
  const conflict=await page.evaluate(async()=>{const m=await import('/src/browser/workflow-notices.ts');const s=new AbortController().signal;const row=await m.publishWorkflowNotice('unicode','Output \ud800',s);await m.actOnWorkflowNotice(row,false);await m.compactWorkflowNotices((await m.workflowNoticeHistory()).recovery,s);try{await m.publishWorkflowNotice('unicode','Output \ud801',s);return false;}catch{return true;}});expect(conflict).toBe(true);
 });
 
-test('notification recovery remains reachable with no saved workflows',async({page})=>{
+test('the empty Workflows header stays clean and stored notifications remain recoverable',async({page})=>{
  await page.evaluate(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[],localRuns:{}})));
  // Override the fixture seed on this reload to exercise the empty list.
- await page.addInitScript(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[],localRuns:{}})));await page.reload();await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByRole('button',{name:'Manage workflow history',exact:true}).click();await expect(page.getByRole('dialog',{name:'Workflow history',exact:true}).getByRole('link',{name:'Download notification history',exact:true})).toBeVisible();
+ await page.addInitScript(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[],localRuns:{}})));await page.reload();await page.getByRole('button',{name:'Workflows',exact:true}).click();await expect(page.getByRole('button',{name:'New automation',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Manage workflow history',exact:true})).toHaveCount(0);
+ await page.evaluate(async()=>{const {openWorkflowHistory}=await import('/src/browser/workflow-history.ts');openWorkflowHistory(()=>({flows:[],localRuns:{}}),()=>{},()=>false);});
+ await expect(page.getByRole('dialog',{name:'Workflow history',exact:true}).getByRole('link',{name:'Download notification history',exact:true})).toBeVisible();
 });
 
 test('abort during receipt hashing commits no partial archive',async({page})=>{
