@@ -3320,14 +3320,26 @@ function sameLine(a: string, b: string): boolean {
     a === b || (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10))
   );
 }
+/** Lower-case words, apostrophes and a possessive "'s" aside ("Maya's cell" names Maya). */
+function requestWords(text: string): string {
+  return ` ${text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\u2019\u2018]/g, "'")
+    .replace(/'s(?![\p{L}\p{N}])/gu, "")
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .trim()} `;
+}
 /**
  * A call or text for a number other than the one the owner wrote in the
  * message that asked for it. The model sometimes returns a different number
  * than the message says (seen on a Pixel: "call 415-555-0100" produced a card
  * for another number), and a card only protects an owner who reads it. A
- * message that writes no number (a contact name, "the number in that email")
- * is not judged here and keeps its ordinary card; a number that is part of the
- * text being sent is the message's content, not its addressee.
+ * contact the model chose in place of the written number contradicts it too,
+ * unless the owner also wrote that name. A message that writes no number (a
+ * contact name, "the number in that email") is not judged here and keeps its
+ * ordinary card; a number that is part of the text being sent is the
+ * message's content, not its addressee.
  */
 export function numberContradictsRequest(
   operation: ReviewableDeviceOperation,
@@ -3335,28 +3347,50 @@ export function numberContradictsRequest(
 ): boolean {
   const op = operation as {
     type: string;
-    target?: { kind?: string; number?: string };
+    target?: { kind?: string; number?: string; query?: string };
+    query?: string;
     recipients?: string[];
     body?: string;
   };
+  if (
+    op.type !== "phone_call" &&
+    op.type !== "phone_dial" &&
+    op.type !== "sms_compose" &&
+    op.type !== "sms_send"
+  )
+    return false;
   const proposed =
     op.type === "sms_send"
       ? (op.recipients ?? [])
-      : (op.type === "phone_call" ||
-            op.type === "phone_dial" ||
-            op.type === "sms_compose") &&
-          op.target?.kind === "number" &&
-          op.target.number
+      : op.target?.kind === "number" && op.target.number
         ? [op.target.number]
         : [];
-  if (!proposed.length) return false;
-  const body = typeof op.body === "string" ? op.body.replace(/\D/g, "") : "";
-  const written = [...request.matchAll(/\+?[\d(][\d ().-]*\d/g)]
+  const contact =
+    op.target?.kind === "contact"
+      ? op.target.query
+      : op.type === "sms_compose" && typeof op.query === "string"
+        ? op.query
+        : undefined;
+  if (!proposed.length && contact === undefined) return false;
+  // The body as the owner wrote it is taken out of the request, so its numbers
+  // are never the addressee and a body that repeats the addressee does not
+  // hide it. A body the model reworded can only keep its own numbers out.
+  const body = typeof op.body === "string" ? op.body.trim() : "";
+  const at = body ? request.toLowerCase().indexOf(body.toLowerCase()) : -1;
+  const addressed =
+    at >= 0 ? `${request.slice(0, at)} ${request.slice(at + body.length)}` : request;
+  const bodyDigits = at >= 0 ? "" : body.replace(/\D/g, "");
+  const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
     .map(([text]) => dialDigits(text))
     .filter(
-      (digits) => digits.length >= 7 && !(body && body.includes(digits)),
+      (digits) =>
+        digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
     );
   if (!written.length) return false;
+  if (contact !== undefined) {
+    const name = requestWords(contact).trim();
+    return !name || !requestWords(addressed).includes(` ${name} `);
+  }
   return proposed.some((number) => {
     const digits = dialDigits(number);
     return !written.some((wrote) => sameLine(wrote, digits));
