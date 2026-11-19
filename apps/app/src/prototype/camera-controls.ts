@@ -55,3 +55,21 @@ export function recordingLabel(duration: number, fileSize: number, limits: { max
   const elapsed = clock(duration), left = recordingLeft(duration, fileSize, limits);
   return left !== undefined && left <= RECORDING_WARNING ? `${elapsed} · ${clock(Math.ceil(left))} left` : elapsed;
 }
+
+/** Video mode's light on the phone: the flash unit held on (the torch), since a flash cannot fire
+ * during a recording. It is chosen before the recording starts. */
+export function videoLightLabel(on: boolean): string {
+  return on ? 'Light on' : 'Light off';
+}
+
+/** Camera's volume-key shutter on Android. The native side takes the volume keys only while it is
+ * told Camera can use them, and starts with them off. The wanted state is sent once per change; a
+ * failed call is sent again on the next update. */
+export function volumeShutterSync(send: (enabled: boolean) => Promise<unknown>): (wanted: boolean) => void {
+  let sent: boolean | undefined = false;
+  return wanted => {
+    if (wanted === sent) return;
+    sent = wanted;
+    void send(wanted).catch(() => { if (sent === wanted) sent = undefined; });
+  };
+}

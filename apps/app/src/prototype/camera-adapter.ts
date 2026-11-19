@@ -36,7 +36,7 @@ import {cameraFocusTarget} from '../browser/camera-focus';
 import {BrowserReviews} from '../browser/review';
 import {testMocksEnabled} from '../build-flags';
 import {createPhotoViewport} from './photo-viewport';
-import {accessDetail,flashFromReceipt,flashLabel,nextFlashMode,nextTimer,recordingLabel,timerLabel,type FlashMode,type TimerSeconds} from './camera-controls';
+import {accessDetail,flashFromReceipt,flashLabel,nextFlashMode,nextTimer,recordingLabel,timerLabel,videoLightLabel,volumeShutterSync,type FlashMode,type TimerSeconds} from './camera-controls';
 
 type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult;cancelledBeforeCapture?:true};
 let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back')=>Promise<CameraCaptureAttempt>)|undefined;
@@ -68,7 +68,8 @@ const nativeCamera = registerPlugin<{
   /** Binds VideoCapture only for Video mode. */
   setCaptureMode?(options: { mode: 'photo' | 'video'; quality?: string; bitrate?: number; frameRate?: number }): Promise<unknown>;
   setZoom(options: { zoom: number }): Promise<void>;
-  setSettings(options: { settings: { flash: 'off' | 'auto' | 'on' } }): Promise<void>;
+  /** 'torch' holds the flash unit on: Video mode's light. */
+  setSettings(options: { settings: { flash: 'off' | 'auto' | 'on' | 'torch' } }): Promise<void>;
   setFocusPoint(options: { x: number; y: number }): Promise<void>;
 }>('ElizaCamera');
 /** A read of the current grant; it never shows Android's permission dialog. */
@@ -110,7 +111,8 @@ const nativeLibrary = registerPlugin<{
   keepCapture(options:{dataBase64:string;operationId:string}): Promise<{status:string;id?:string;message?:string}>;
 }>('AlphaPhotos');
 const photoAttachments=registerPlugin<{readPhotoSelected(input:{id:string;revision:string}):Promise<MailAttachment&{size:number;sha256:string}>;cancelPhotoSelected():Promise<void>}>('AlphaMailAttachments');
-const device=registerPlugin<{openSettings(options:{page:'privacy'}):Promise<{status:string}>}>('AlphaDevice');
+/** `setVolumeShutter`: Android takes the volume keys as Camera's shutter only while it is on. */
+const device=registerPlugin<{openSettings(options:{page:'privacy'}):Promise<{status:string}>;setVolumeShutter(options:{enabled:boolean}):Promise<void>}>('AlphaDevice');
 /** Only an explicit permission denial gets settings recovery (shared camera host rule). */
 export const mediaAccessDenied=cameraAccessDenied;
 let captureQuestion:((item?:{id:string})=>boolean)|undefined;
@@ -223,6 +225,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let flash: FlashMode = 'off', disposed = false;
   /** The self-timer the owner chose (kept while Camera stays mounted), and the countdown a shutter press started. */
   let selfTimer: TimerSeconds = 0, countdown: {left:number;token:number;handle:number}|undefined;
+  /** Phone Video mode's light (the torch), and the framing grid; both kept while Camera stays mounted. */
+  let light = false, grid = false;
   let lens: Lens = { minZoom: 1, maxZoom: 1, hasFlash: false, zoom: 1, flash: false }, zoomRatio = 1;
   /** The last-capture tile: this session's newest capture, or one library row read after the preview is ready. */
   let lastCapture: SavedPhoto | undefined, lastEpoch=0;
@@ -864,7 +868,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       recordingFinishing(){api?.set({rec:false});},
       recordingSaved:adoptVideo,
       recordingFailed(){limitStop=false;if(!disposed)message('Save unconfirmed');},
-      changed(){settle();schedule();takePendingShot();void takePendingZoom();},
+      changed(){settle();schedule();takePendingShot();void takePendingZoom();if(lightOffPending&&!session.busy)void lightOff();},
     },
   });
   function hideAccess(){accessPanel?.remove();accessPanel=undefined;}
@@ -935,6 +939,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   async function stop() {
     agentRequest?.cancelReveal?.();
     pendingShot=undefined;cancelCountdown();
+    // Releasing the preview turns the light off; the next preview's receipt says what it restored.
+    light=false;lightOffPending=false;
     clearCameraInteraction();
     // A scan review that opened a system picker stays open while Android covers the WebView.
     closeQuestion?.();closeQuestion=undefined;if(!systemPickerActive())cancelScan(); mask(false); hideAccess();
@@ -944,7 +950,13 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     if(retry)previewReleased=false;
     // Every start goes through the native layer, which checks camera access again: it may have changed in Android settings.
     const outcome=await session.start(retry);
-    if(outcome.status==='ready'){hideAccess();adoptLens(previewReceipt);mask(true);api?.set({flash:flash!=='off',nativeCameraPhase:'ready'});bindMode(api?.get('camera').mode);void loadLast(session.token());}
+    if(outcome.status==='ready'){
+      hideAccess();adoptLens(previewReceipt);
+      // A new preview restores the last light setting, but the light starts off on every visit.
+      light=!browserMode&&previewReceipt?.flash==='torch';
+      mask(true);api?.set({flash:shownFlash(api.get('camera').mode),nativeCameraPhase:'ready'});bindMode(api?.get('camera').mode);void loadLast(session.token());
+      if(light)void lightOff();
+    }
     else if(outcome.status==='denied'){mask(false);showAccess('camera');}
     else if(outcome.status==='unavailable'){mask(false);showAccess('unavailable');}
   }
@@ -956,6 +968,19 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const outcome=await session.control(async()=>{value=await task();});
     if(outcome==='done')completed(value as T);
     else if(outcome==='failed'){if(replacesPreview)await previewGone();else message('Not supported');}
+  }
+  /** The flash icon: Video mode on the phone shows its light; Photo mode (and the browser) the flash setting. */
+  function shownFlash(mode:unknown){return !browserMode&&mode==='video'?light:flash!=='off';}
+  /** Set while turning the light off waits for another camera control to settle. */
+  let lightOffPending=false;
+  /** Turns Video mode's light off and restores the photo flash setting. A control still settling is waited for. */
+  async function lightOff(){
+    lightOffPending=false;
+    if(!light||session.phase!=='ready')return;
+    const outcome=await session.control(()=>camera.setSettings({settings:{flash}}));
+    if(outcome==='done'){light=false;api?.set({flash:shownFlash(api.get('camera').mode)});}
+    else if(outcome==='skipped'&&session.phase==='ready')lightOffPending=true;
+    else if(outcome==='failed')message('Couldn’t turn off the light');
   }
   /** No preview is left although the session was ready: release it and offer a restart. A
    * recording in progress is finished by the release. */
@@ -1012,9 +1037,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     clearCameraInteraction();cancelCountdown();
     const next = direction === 'back' ? 'front' : 'back';
     return control(async () => {
-      if (flash !== 'off') {
+      if (flash !== 'off' || light) {
         await camera.setSettings({ settings: { flash: 'off' } });
-        flash = 'off';
+        flash = 'off'; light = false;
         owner.set({ flash: false });
       }
       if (Math.abs(zoomRatio - 1) > 1e-3) {
@@ -1026,7 +1051,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     }, receipt => {
       direction = next;
       adoptLens(receipt);
-      owner.set({ front: next === 'front', flash: flash !== 'off' });
+      owner.set({ front: next === 'front', flash: shownFlash(owner.get('camera').mode) });
     }, browserMode);
   }
   const finishVideo=()=>session.finishRecording();
@@ -1378,9 +1403,17 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.flip = () => { void flipLens(currentApi); };
     data.flashAvailable = ready && !recordingBusy && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
     // Native: Off, Auto, On. The browser track has only its torch, on or off.
-    data.flashLabel = browserMode ? browserCamera.lightingLabel(flash !== 'off') : flashLabel(flash);
-    data.flashAuto = !browserMode && flash === 'auto';
-    data.toggleFlash = () => { const next = nextFlashMode(flash, browserMode); void control(() => camera.setSettings({ settings: { flash: next } }), () => { flash = next; currentApi.set({ flash: next !== 'off', flashMode: next }); }); };
+    // Phone Video mode: a flash cannot fire during a recording, so the button is the light (torch), chosen before recording.
+    const videoLight = !browserMode && st.mode === 'video';
+    data.flashLabel = browserMode ? browserCamera.lightingLabel(flash !== 'off') : videoLight ? videoLightLabel(light) : flashLabel(flash);
+    data.flashAuto = !browserMode && !videoLight && flash === 'auto';
+    data.toggleFlash = () => {
+      if (videoLight) { const on = !light; void control(() => camera.setSettings({ settings: { flash: on ? 'torch' : flash } }), () => { light = on; currentApi.set({ flash: on }); }); return; }
+      const next = nextFlashMode(flash, browserMode); void control(() => camera.setSettings({ settings: { flash: next } }), () => { flash = next; currentApi.set({ flash: next !== 'off', flashMode: next }); });
+    };
+    // The framing grid: thirds of the frame, drawn over the preview only (never into the photo).
+    data.gridAvailable = ready; data.gridOn = grid; data.showGrid = ready && grid;
+    data.toggleGrid = () => { grid = !grid; currentApi.set({ nativeGrid: grid }); };
     const stops = ready ? zoomStops(lens) : [];
     data.showZoom = !recordingBusy && stops.length > 1;
     data.zooms = stops.map(([ratio, label]) => ({ label, aria: `Zoom ${label.replace('×', '')}x`, css: Math.abs(ratio - zoomRatio) < 1e-3 ? ZOOM_ON : ZOOM_OFF, pick: () => zoomTo(ratio) }));
@@ -1404,7 +1437,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
     // Camera has two modes, Video and Photo; asking about the frame goes through chat.
-    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;cancelCountdown();bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
+    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;cancelCountdown();bindMode(mode);if(mode==='photo'&&light)void lightOff();} currentApi.set({ mode, rec: false, flash: shownFlash(mode) }); } } }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {
@@ -1833,7 +1866,14 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   // Photos: the library observer, an editor whose photo closed, and the mounted video follow Photos' presence.
   const syncPhotos = () => { watchLibrary(!disposed&&!document.hidden&&!!photosApi?.isActive()&&permittedLibrary());if((edit||videoEditSource)&&(!photosApi?.isActive()||photosApi.get('photos').open!==(edit?.source??videoEditSource)))cancelEdit(); mountVideo(); };
   // Camera: entering (or uncovering) Camera starts the session; leaving, hiding, or a chat sheet left open past the grace releases it.
-  const syncCamera = () => { trackChat(); if (active()) { if (session.phase === 'off'&&!previewReleased) void start(); else if (session.phase === 'ready') mask(true); } else { previewReleased=false; if (session.phase !== 'off') void stop(); } };
+  /** Android's volume keys act as the shutter only while Camera is ready on screen, uncovered, with no
+   * notice, dialog, agent capture or scan in the way. Anywhere else they change the volume as usual. */
+  const volumeShutterWanted = () => !disposed && active() && !chatCovers() && session.phase === 'ready' && !accessPanel &&
+    !agentRequest && !scanning && !document.querySelector('dialog[open]');
+  const volumeShutter = browserMode ? undefined : volumeShutterSync(enabled => device.setVolumeShutter({ enabled }));
+  /** One press is one shutter press: a photo (or the self-timer), or start/stop in Video mode. */
+  const volumeKey = () => { if (volumeShutterWanted()) shoot(); else volumeShutter?.(false); };
+  const syncCamera = () => { trackChat(); volumeShutter?.(volumeShutterWanted()); if (active()) { if (session.phase === 'off'&&!previewReleased) void start(); else if (session.phase === 'ready') mask(true); } else { previewReleased=false; if (session.phase !== 'off') void stop(); } };
   const sync = () => { queued = false; if (disposed) return; syncPhotos(); syncCamera(); };
   function schedule() { if (!queued && !disposed) { queued = true; queueMicrotask(sync); } }
   // View enter/leave and chat cover come from the shell's own commits (and page visibility),
@@ -1880,10 +1920,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   window.addEventListener('alpha:albums-document-changed',albumsChanged);
   const pageHide=()=>{retirePhotoRead();setLast(undefined);window.clearTimeout(thumbTimer);cancelEdit();closeVideo();void stop();};
   document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', pageHide); window.addEventListener('resize', resize); schedule();
+  // MainActivity sends a volume key press here while Camera holds the volume keys.
+  window.addEventListener('alpha:volume-shutter', volumeKey);
   // Returning from Android settings: a camera grant restarts the preview without another tap.
   const resumed=()=>{void restartAfterResume(()=>({denied:session.denied,phase:session.phase,disposed}),()=>cameraAccess.checkPermissions()).then(restart=>{if(restart){session.rearm();schedule();}});};
   let resumeHandle:{remove():Promise<void>}|undefined;
   void DailyApps.addListener('appResumed',resumed).then(handle=>{if(disposed)void handle.remove();else resumeHandle=handle;}).catch(()=>{});
-  return () => { releaseHost();if(requestedPhoto===takeRequestedPhoto)requestedPhoto=undefined;if(browserMode)onBrowserPreviewEnded(undefined);window.clearTimeout(noticeTimer);window.clearTimeout(thumbTimer);noticeGeneration++;watchLibrary(false);deviceLibrary.dispose();captureQuestion=undefined;frameQuestion=undefined;void libraryChangeHandle?.remove();hideAccess();void resumeHandle?.remove();window.removeEventListener('alpha:albums-document-changed',albumsChanged);if(scanApi&&prototype.api===scanApi)prototype.api=originalApi;disposed = true;cancelEdit();endHold();selection=undefined; clearInterval(timer); window.clearTimeout(chatTimer); closeVideo(); removePresence(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pageHide); window.removeEventListener('resize', resize); void stop(); style.remove(); captures = []; module.render = render; module.onLeave = leave; module.back = cameraBack; module.actions = cameraActions; if (scanRequest) scanRequest = undefined; if (views.photos) { views.photos.render = photosRender; views.photos.back = photosBack; views.photos.onLeave = photosLeave; } };
+  return () => { releaseHost();if(requestedPhoto===takeRequestedPhoto)requestedPhoto=undefined;if(browserMode)onBrowserPreviewEnded(undefined);window.clearTimeout(noticeTimer);window.clearTimeout(thumbTimer);noticeGeneration++;watchLibrary(false);deviceLibrary.dispose();captureQuestion=undefined;frameQuestion=undefined;void libraryChangeHandle?.remove();hideAccess();void resumeHandle?.remove();window.removeEventListener('alpha:albums-document-changed',albumsChanged);window.removeEventListener('alpha:volume-shutter',volumeKey);volumeShutter?.(false);if(scanApi&&prototype.api===scanApi)prototype.api=originalApi;disposed = true;cancelEdit();endHold();selection=undefined; clearInterval(timer); window.clearTimeout(chatTimer); closeVideo(); removePresence(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pageHide); window.removeEventListener('resize', resize); void stop(); style.remove(); captures = []; module.render = render; module.onLeave = leave; module.back = cameraBack; module.actions = cameraActions; if (scanRequest) scanRequest = undefined; if (views.photos) { views.photos.render = photosRender; views.photos.back = photosBack; views.photos.onLeave = photosLeave; } };
 
 }

@@ -514,7 +514,24 @@ public class MainActivity extends BridgeActivity {
  }
  @Override public void onStop() {
   keyboardReturnPending = false;
+  // Camera turns the volume shutter on again when it is ready on screen.
+  volumeShutter = false;
   super.onStop();
+ }
+ /** Set by AlphaDevice.setVolumeShutter on the UI thread while Camera is ready on screen. */
+ private boolean volumeShutter;
+ void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
+ /** While Camera holds them, a volume key press is one shutter press (repeats while held are not);
+  * otherwise the volume keys keep Android's own handling. */
+ @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+  int key = event.getKeyCode();
+  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN)
+    && getBridge() != null && getBridge().getWebView() != null) {
+   if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
+    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
+   return true;
+  }
+  return super.dispatchKeyEvent(event);
  }
  @Override public void onDestroy() {
   if (liveInstance.get() == this) liveInstance = new java.lang.ref.WeakReference<>(null);
