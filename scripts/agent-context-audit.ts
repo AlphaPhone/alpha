@@ -13,7 +13,7 @@
  * tool schemas, no output cap and no provider counts, so those figures are lower bounds.
  *
  * The cache hit rate is the provider's where calls carry its usage. For the others it is
- * worked out from the recorded text by the provider's documented rules (simulateProvider),
+ * worked out from the recorded text by the provider's measured rules (simulateProvider),
  * which is what the provider should do, not what it did.
  */
 import type { PGliteOptions } from '@electric-sql/pglite';
@@ -30,8 +30,8 @@ export type RecordedCall = {
   ms: number;
   system: string;
   prompt: string;
-  /** Tool schemas sent with the call, by size. Absent on runtimes that do not record them. */
-  tools?: { name: string; chars: number }[];
+  /** Tool schemas sent with the call, in order, by size and (where recorded) content digest. Absent on runtimes that do not record them. */
+  tools?: { name: string; chars: number; hash?: string }[];
   maxTokens?: number;
   usage?: ProviderUsage;
 };
@@ -257,11 +257,13 @@ export function audit(calls: RecordedCall[], options: { cacheMinutes?: number; t
 }
 
 /**
- * How a hosted model admits and bills requests. Defaults are Cerebras `qwen-3.8-27b` on
- * 18 November 2026: a prompt prefix is reused in 128-token blocks for at least 5 minutes,
- * in the order system prompt, tool definitions, messages; tokens that miss count against
- * the uncached per-minute limit and every token against the total one; a request's
- * output cap is counted before it runs.
+ * How a hosted model admits and bills requests. Defaults are Cerebras `qwen-3.8-27b` as
+ * measured on 18 November 2026 with scripts/agent-cache-probe.ts, which differs from its
+ * documentation in two ways: a prompt prefix is reused in units of 1,024 tokens (not 128),
+ * and the prefix is read as tool definitions, then system prompt, then messages. A prefix
+ * is kept for at least 5 minutes. Tokens that miss count against the uncached per-minute
+ * limit and every token against the total one; a request's output cap is counted before
+ * it runs.
  */
 export type ProviderModel = {
   uncachedTpm: number;
@@ -271,16 +273,18 @@ export type ProviderModel = {
   /** Output tokens to count at admission for a stage whose calls record no cap. */
   outputReserve?: Record<string, number>;
 };
-export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 128, cacheMinutes: 5 };
+export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 5 };
 
 export type ProviderSimulation = ReturnType<typeof simulateProvider>;
 
 /**
  * Applies a provider's prefix cache and per-minute limits to recorded calls. A call's
  * cached tokens are its longest prefix shared with any call that finished inside the
- * cache lifetime before it started, in whole blocks. Tool definitions are recorded by
- * name and size only, so two tool lists with the same names and sizes count as equal.
- * Each 60-second figure sums the calls that started in the 60 seconds up to a call.
+ * cache lifetime before it started, in whole units: the leading tool definitions that
+ * are the same, then, if the whole tool list is, the system prompt, then the messages.
+ * Tool definitions are recorded by name, size and digest; without a digest, two with the
+ * same name and size count as equal. Each 60-second figure sums the calls that started
+ * in the 60 seconds up to a call.
  */
 export function simulateProvider(calls: RecordedCall[], model: ProviderModel = CEREBRAS_QWEN) {
   const cacheMs = model.cacheMinutes * 60_000;
@@ -289,18 +293,25 @@ export function simulateProvider(calls: RecordedCall[], model: ProviderModel = C
     const systemTokens = estimateTokens(call.system);
     const tools = toolTokens(call);
     return {
-      call, stage: stageOf(call), messages, systemTokens, tools, toolsKey: JSON.stringify(call.tools ?? null),
+      call, stage: stageOf(call), messages, systemTokens, tools,
       start: call.at - call.ms,
       input: call.usage?.input ?? systemTokens + tools + estimateTokens(messages),
       cached: 0,
     };
   });
   type Row = (typeof rows)[number];
+  const sameTool = (a: NonNullable<RecordedCall['tools']>[number], b: NonNullable<RecordedCall['tools']>[number]) =>
+    a.name === b.name && a.chars === b.chars && (a.hash === undefined || b.hash === undefined || a.hash === b.hash);
   const sharedTokens = (row: Row, earlier: Row) => {
+    const mine = row.call.tools ?? [];
+    const theirs = earlier.call.tools ?? [];
+    let same = 0;
+    while (same < mine.length && same < theirs.length && sameTool(mine[same], theirs[same])) same++;
+    const sharedTools = toolTokens({ tools: mine.slice(0, same) });
+    if (same < mine.length || mine.length !== theirs.length) return sharedTools;
     const system = commonPrefix(row.call.system, earlier.call.system);
-    if (system < row.call.system.length || earlier.call.system.length !== row.call.system.length) return estimateTokens(row.call.system.slice(0, system));
-    if (row.toolsKey !== earlier.toolsKey) return row.systemTokens;
-    return row.systemTokens + row.tools + estimateTokens(row.messages.slice(0, commonPrefix(row.messages, earlier.messages)));
+    if (system < row.call.system.length || earlier.call.system.length !== row.call.system.length) return sharedTools + estimateTokens(row.call.system.slice(0, system));
+    return sharedTools + row.systemTokens + estimateTokens(row.messages.slice(0, commonPrefix(row.messages, earlier.messages)));
   };
   rows.forEach((row, index) => {
     let best = 0;
@@ -410,8 +421,8 @@ export async function loadCalls(databaseDirectory: string): Promise<RecordedCall
         prompt: typeof row.body.prompt === 'string' ? row.body.prompt : JSON.stringify(row.body.prompt ?? ''),
         tools: Array.isArray(row.body.tools)
           ? (row.body.tools as unknown[]).flatMap(tool => {
-            const entry = tool as { name?: unknown; chars?: unknown };
-            return typeof entry?.name === 'string' && typeof entry.chars === 'number' ? [{ name: entry.name, chars: entry.chars }] : [];
+            const entry = tool as { name?: unknown; chars?: unknown; hash?: unknown };
+            return typeof entry?.name === 'string' && typeof entry.chars === 'number' ? [{ name: entry.name, chars: entry.chars, ...(typeof entry.hash === 'string' ? { hash: entry.hash } : {}) }] : [];
           })
           : undefined,
         maxTokens: typeof row.body.maxTokens === 'number' ? row.body.maxTokens : undefined,
@@ -429,7 +440,7 @@ const percent = (value: number) => `${(100 * value).toFixed(1)}%`;
 
 export function renderSimulation(result: ProviderSimulation): string {
   const { model } = result;
-  const lines = [`Prefix cache and per-minute limits by the provider's documented rules (${model.cacheBlockTokens}-token blocks, ${model.cacheMinutes} min; worked out from the recorded text)`];
+  const lines = [`Prefix cache and per-minute limits by the provider's rules (${model.cacheBlockTokens}-token units, tools then system prompt then messages, ${model.cacheMinutes} min; worked out from the recorded text)`];
   lines.push(`  Cached ${result.cachedTokens} of ${result.inputTokens} input tokens: ${percent(result.hitRate)}`);
   for (const [name, stage] of Object.entries(result.stages).sort((a, b) => b[1].input - a[1].input))
     lines.push(`  ${name.padEnd(22)}${String(stage.calls).padStart(6)} calls${percent(stage.hitRate).padStart(8)} cached`);
