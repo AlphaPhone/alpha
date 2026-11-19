@@ -153,7 +153,8 @@ async function subject() {
   const client = {lifecycleSupported: async () => true, supportsSubmissionReconciliation: async () => true, list: async () => [workflow], removedWorkflows: async () => [],
     detail: async () => workflow, executions: async () => [run()], receipt: async () => run(), approvals: async () => null,
     phoneReview, reconcile: async () => null, reconcileLifecycle: async () => null};
-  const app = await workflowAdapter({client, controller, globals: {document, alphaClient, structuredClone}});
+  let app;
+  try { app = await workflowAdapter({client, controller, globals: {document, alphaClient, structuredClone}}); } catch (error) { Date.now = realNow; throw error; }
   // Settled: the source waits at a gate the model holds, or nothing is in flight.
   const settled = () => wait(() => gate.pending().length > 0 || (calls === 0 && !app.render().r?.phoneBusy), 'the phone step operation did not settle');
   const openRun = async () => {
@@ -162,7 +163,7 @@ async function subject() {
     app.render().fd.runs[0].open();
     await wait(() => app.render().r && !app.render().r.phoneBusy, 'the run did not open');
   };
-  await openRun();
+  try { await openRun(); } catch (error) { app.close(); Date.now = realNow; throw error; }
   const visibility = () => { for (const listener of [...document.listeners]) listener(); };
   const tap = async approved => {
     const step = app.render().r.phoneSteps[0];
