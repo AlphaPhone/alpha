@@ -2,23 +2,15 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "2161a22091e4afb5f0407d38e7d634be91218427",
-  "head": "f85602752e293d40157df22e73e0049a8293deb1",
+  "baseCommit": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
+  "head": "0273bec7e4629e11823d29b53d2d95fa72f17ad3",
   "recordedAt": "2026-11-19",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...f85602752e293d40157df22e73e0049a8293deb1",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...0273bec7e4629e11823d29b53d2d95fa72f17ad3",
   "status": "ahead",
-  "aheadBy": 17,
+  "aheadBy": 25,
   "behindBy": 0,
-  "mergeBase": "2161a22091e4afb5f0407d38e7d634be91218427",
+  "mergeBase": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
   "pinOnlyCommits": [
-    {
-      "sha": "cb4bda9e85f0987a84777523c4af169742e210db",
-      "subject": "Ground Browser opens in spoken hostnames"
-    },
-    {
-      "sha": "6895508ec0d4dee95a70eba52d175c09c8b565a6",
-      "subject": "Keep mixed hostnames and spoken corrections intact"
-    },
     {
       "sha": "9e453f11a0d54b793507b9dac206f9d81d702a73",
       "subject": "Bind SMS reply drafts to the actual latest sender read"
@@ -26,10 +18,6 @@
     {
       "sha": "cd10f18e6ac775ab163778d040fd6ada9da072e2",
       "subject": "Require a persisted sender reply before resolving its address"
-    },
-    {
-      "sha": "dae4495e860c3d5bd68fdea3cf99b2c6aa0fae5a",
-      "subject": "Read spoken hostname spans after the request words"
     },
     {
       "sha": "3b644d2680e5f64e408dcdc15134aff61bd80621",
@@ -50,6 +38,38 @@
     {
       "sha": "e83eea56ed100c2d361567b484a6516eaf0a1770",
       "subject": "Route retries of phone Gmail drafts back to the composer"
+    },
+    {
+      "sha": "b4afc7881bf061765963613da0d7f8d28b8ec529",
+      "subject": "Preserve visit times in native browser history"
+    },
+    {
+      "sha": "d6df73a2c405ca90ab62d61fd7ec928945db55ca",
+      "subject": "Update exhaustive Gmail enrollment fixture"
+    },
+    {
+      "sha": "9755962ab552f810c0f00881d92ea257e1c1602c",
+      "subject": "Require a room listing connector for channel discovery"
+    },
+    {
+      "sha": "e9115abb12579b0e571c53b7ca320b4498e2cca8",
+      "subject": "Keep required view navigation pending until its receipt"
+    },
+    {
+      "sha": "98abd3d37bf2e14c0699190aae7bd927a671f4e5",
+      "subject": "Keep self-addressed Gmail drafts pending without sending"
+    },
+    {
+      "sha": "0172f613a12bdc05e5b58cf13056bf324bc9312d",
+      "subject": "Keep explicit compound view navigation in planning"
+    },
+    {
+      "sha": "448aa9d9212c31fb3552cc8935ba077a6e44dcec",
+      "subject": "Route explicit local email drafts to the composer"
+    },
+    {
+      "sha": "e1b6f97c920e2d32bb49cc16fe1505093c72ad12",
+      "subject": "Preserve a settled read when view navigation is prepared"
     }
   ],
   "pullRequests": [
