@@ -4108,8 +4108,8 @@ registerView("files", {
       closeSheet: function () { api.set({ sheet: null }); },
       shareMsg: function () { filesShare(api, targetIds, "msg"); },
       shareMail: function () { filesShare(api, targetIds, "mail"); },
-      menuOpen: !!st.menu && (!!pv || !!fd), folderMenu: !pv, menuLabel: pv ? "File actions" : "Sort and more",
-      openMenu: function () { api.set({ menu: true }); }, closeMenu: function () { api.set({ menu: false }); },
+      menuOpen: !!st.menu && (st.menu === "file" ? !!pv : !!fd), fileMenu: st.menu === "file" && !!pv, folderMenu: st.menu !== "file", menuLabel: st.menu === "file" ? "File actions" : "Sort and more",
+      openMenu: function () { api.set({ menu: "file" }); }, closeMenu: function () { api.set({ menu: false }); },
       askQ: "Ask " + api.name + ": \u201c" + String(st.q || "").trim() + "\u201d",
       askSearch: function () { var qq = String(api.get("files").q || "").trim(); api.set({ q: null }); api.send("Find the file " + qq); }
     };
