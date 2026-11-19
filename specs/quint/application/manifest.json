@@ -986,7 +986,10 @@
       "missingSelectionTest",
       "revokedReviewTest",
       "permanentTrashReviewTest",
-      "selectionRefreshTest"
+      "selectionRefreshTest",
+      "trashChosenRestoreTest",
+      "trashChosenPermanentTest",
+      "trashChosenRestoredAfterReviewTest"
     ],
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaFilesPlugin.java",
@@ -996,6 +999,7 @@
     "stateMapping": {
       "locations/origins/names": "Volume-relative paths and recorded Trash origins; name clashes keep both entries",
       "selected/folder/stale": "Folder selection and the delayed storageChanged refresh that removes missing selections",
+      "trashSelected/chosenReview": "Trash's long-press selection (trashKey rows) and the rows a Delete permanently? confirmation showed (selDeleteForever)",
       "review/revisions": "Agent FilesIdentity size/modified checks in reviewed storage transfers",
       "access": "Current storage permission admission, rechecked by the native bridge"
     },
