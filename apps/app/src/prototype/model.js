@@ -4059,7 +4059,7 @@ registerView("files", {
       storageW: copy("files").storageW || "0%",
       inFolder: !!fd, fd: fd,
       isList: !st.grid, isGrid: !!st.grid,
-      isSel: isSel, notSel: !isSel, selectionBusy: false, selectionDisabled: selCount === 0, selCount: selCount === 0 ? "Select" : String(selCount), hasSel: selCount > 0, selOp: selCount > 0 ? "1" : ".35",
+      isSel: isSel, notSel: !isSel, selFiles: isSel, selectionBusy: false, selectionDisabled: selCount === 0, selCount: selCount === 0 ? "Select" : String(selCount), hasSel: selCount > 0, selOp: selCount > 0 ? "1" : ".35",
       exitSel: function () { api.set({ sel: null }); },
       selAll: function () { api.set({ sel: files.filter(function (x) { return x.folder === st.folder; }).map(function (x) { return x.id; }) }); },
       selShare: function () { if (selCount) filesShare(api, sel.slice()); },

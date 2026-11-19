@@ -30,8 +30,11 @@ import {
   filterLabel,
   formatFree,
   formatSize,
+  fullDate,
   SORT_LABELS,
+  shortDate,
   storageResultText,
+  typeLabel,
 } from "./storage-presentation.ts";
 
 /** Files views over a host's storage port. The host owns storage authority and document grants. */
@@ -175,19 +178,6 @@ const ICON_KEYS = {
   grid: "grid",
   rows: "filesRows",
 } as const;
-const shortDate = (time: number) => {
-  if (!time) return "";
-  const date = new Date(time),
-    now = new Date();
-  return date.toDateString() === now.toDateString()
-    ? date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-    : date.toLocaleDateString(
-        undefined,
-        date.getFullYear() === now.getFullYear()
-          ? { month: "short", day: "numeric" }
-          : { year: "numeric", month: "short", day: "numeric" },
-      );
-};
 const countLabel = (n: number) => (n === 1 ? "1 item" : n + " items");
 
 type Place =
@@ -220,9 +210,26 @@ type Dialog =
       /** A folder made from the Move or Copy picker opens back in that picker. */
       returnTo?: DestDialog;
     }
-  /** The rows the owner is shown and confirms; Empty deletes only these. */
-  | { kind: "empty"; items: TrashRow[] }
-  | { kind: "trashItem"; item: TrashRow; confirmDelete: boolean };
+  /** The rows the owner is shown and confirms; Empty deletes only these. `chosen` when they are
+   * the rows selected in Trash rather than all of it. */
+  | { kind: "empty"; items: TrashRow[]; chosen?: boolean }
+  | { kind: "trashItem"; item: TrashRow; confirmDelete: boolean }
+  /** File details: read-only rows about one item. */
+  | { kind: "details"; name: string; rows: { label: string; value: string }[] };
+/** What File details shows about one item. */
+type DetailsSource = {
+  name: string;
+  path: string;
+  volume?: string;
+  directory: boolean;
+  mimeType: string;
+  size?: number;
+  modified?: number;
+  children?: number;
+};
+/** One Trash row's identity across volumes: Trash ids are only unique within their volume. */
+const trashKey = (row: TrashRow) =>
+  JSON.stringify([row.volume || "primary", row.id]);
 /** StorageBrowser.BATCH_MAX: ids or paths per storage call that changes files. */
 const EMPTY_BATCH = 500;
 /** Types the host previews in Files. Every other type opens in another app when the host can. */
@@ -423,6 +430,44 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       ? volumes.find((v) => v.id === volume)?.name || "Storage"
       : volumes.find((v) => v.primary)?.name || "Internal storage";
   const here = () => (place.kind === "folder" ? onVolume(place.volume) : {});
+  /** File details for one item: what it is, how big, when it changed and where it is. */
+  function showDetails(item: DetailsSource, trigger?: EventTarget | null) {
+    if (busy) return;
+    dialogTrigger =
+      trigger instanceof HTMLElement
+        ? trigger.closest(".files-actions-menu")
+          ? menuOpener
+          : trigger
+        : null;
+    const size =
+      typeof item.size === "number" && item.size >= 0
+        ? formatSize(item.size) +
+          (item.size >= 1024
+            ? ` (${item.size.toLocaleString()} bytes)`
+            : "")
+        : "";
+    const rows = [
+      { label: "Type", value: typeLabel(item.mimeType, item.directory) },
+      item.directory
+        ? {
+            label: "Contains",
+            value:
+              item.children === undefined ? "" : countLabel(item.children),
+          }
+        : { label: "Size", value: size },
+      { label: "Modified", value: fullDate(item.modified ?? 0) },
+      {
+        label: "Location",
+        value: [
+          volumeLabel(item.volume),
+          ...parentOf(item.path).split("/").filter(Boolean),
+        ].join(" › "),
+      },
+    ].filter((row) => row.value);
+    dialog = { kind: "details", name: item.name, rows };
+    api?.set({ menu: false });
+    repaint();
+  }
   async function loadCounts(ticket: number) {
     if (access !== "granted") return;
     const next: Partial<Record<FilesCategory, number>> = {};
@@ -521,7 +566,11 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       if (filter && !pendingFilter) await runFilter(filter, current);
       if (!current()) return;
       if (selection) {
-        const listed = new Set(entries.map((e) => e.path));
+        const listed = new Set(
+          at.kind === "trash"
+            ? trashItems.map(trashKey)
+            : entries.map((e) => e.path),
+        );
         selection = new Set([...selection].filter((path) => listed.has(path)));
       }
       loaded = true;
@@ -1660,7 +1709,11 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
                 : "All files";
       let items: Record<string, unknown>[] = [];
       if (at.kind === "trash") {
-        items = trashItems.map((item) => ({
+        items = trashItems.map((item) => {
+          const key = trashKey(item),
+            on = !!selection?.has(key),
+            p = press(key);
+          return {
           id: item.id,
           name: item.name,
           sub: [
@@ -1676,16 +1729,27 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           d: iconFor(item),
           isFolder: false,
           isFile: true,
-          selOn: false,
-          selOff: false,
-          rowCss: "",
-          label: item.name,
-          down: () => {},
-          up: () => {},
-          cancel: () => {},
-          context: () => {},
+          selOn: !!selection && on,
+          selOff: !!selection && !on,
+          rowCss: on ? "background: var(--s2)" : "",
+          label: selection
+            ? (on ? "Deselect " : "Select ") + item.name
+            : item.name,
+          // Long press selects, as in a folder; the selection restores or deletes together.
+          down: p.down,
+          up: p.up,
+          cancel: p.cancel,
+          context: p.context,
           tap: (event: Event) => {
+            if (pressed === key) {
+              pressed = "";
+              return;
+            }
             if (busy) return;
+            if (selection) {
+              toggle(key);
+              return;
+            }
             dialogTrigger =
               event?.currentTarget instanceof HTMLElement
                 ? event.currentTarget
@@ -1693,7 +1757,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
             dialog = { kind: "trashItem", item, confirmDelete: false };
             repaint();
           },
-        }));
+          };
+        });
       } else if (
         at.kind === "category" &&
         (at.category === "images" || at.category === "videos")
@@ -1787,6 +1852,12 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           if (busy || !trashItems.length) return;
           void restoreRows([...trashItems]);
         },
+        canSelectTrash: at.kind === "trash" && trashItems.length > 0 && !busy,
+        selectTrash: () => {
+          if (busy || !trashItems.length) return;
+          selection = new Set();
+          repaint();
+        },
         menuRows: [
           ...(["name", "date", "size"] as SortMode[]).map((mode) => ({
             id: "sort:" + mode,
@@ -1851,11 +1922,51 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       };
       out.selAll = () => {
         if (busy) return;
-        const all = entries.map((e) => e.path);
+        const all =
+          at.kind === "trash"
+            ? trashItems.map(trashKey)
+            : entries.map((e) => e.path);
         selection = new Set(selection?.size === all.length ? [] : all);
         repaint();
       };
+      // Trash's selection restores or deletes permanently; a listing's moves, shares and trashes.
+      out.selTrash = !!selection && at.kind === "trash";
+      out.selFiles = !!selection && at.kind !== "trash";
+      const chosenTrash = () =>
+        trashItems.filter((row) => selection?.has(trashKey(row)));
+      out.selRestore = () => {
+        const rows = chosenTrash();
+        if (busy || !rows.length) return;
+        selection = null;
+        void restoreRows(rows);
+      };
+      out.selDeleteForever = (event: Event) => {
+        const rows = chosenTrash();
+        if (busy || !rows.length) return;
+        dialogTrigger =
+          event?.currentTarget instanceof HTMLElement
+            ? event.currentTarget
+            : null;
+        dialog = { kind: "empty", items: rows, chosen: true };
+        repaint();
+      };
       const volumeHere = at.kind === "folder" ? at.volume : undefined;
+      const onlyEntry = () => {
+        const only = selection?.size === 1 ? [...selection][0] : undefined;
+        return entries.find((e) => e.path === only);
+      };
+      out.canDetails = at.kind !== "trash" && !!onlyEntry();
+      out.selDetails = (event: Event) => {
+        const entry = onlyEntry();
+        if (!entry) return;
+        showDetails(
+          {
+            ...entry,
+            ...onVolume(volumeHere),
+          },
+          event?.currentTarget,
+        );
+      };
       out.selShare = () => void share(paths(), volumeHere);
       out.selMove = (event: Event) =>
         beginDest("move", paths(), event?.currentTarget, volumeHere);
@@ -1897,11 +2008,19 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       out.pv.startRename = (event: Event) =>
         startRename(path, volume, false, event?.currentTarget);
       out.pv.canForget = false;
-      const shown = opened.entry;
+      const shown = opened.entry,
+        pv = out.pv;
+      // The storage's own size and date for the opened file, else the listing row's.
+      const part = (key: string) =>
+        typeof pv[key] === "string" ? (pv[key] as string) : "";
+      const reported = (key: "size" | "modified") =>
+        typeof pv[key] === "number" ? (pv[key] as number) : undefined;
+      const size = reported("size") ?? shown?.size,
+        modified = reported("modified") ?? shown?.modified;
       out.pv.meta = [
-        out.pv.meta,
-        shown ? formatSize(shown.size) : "",
-        shown ? shortDate(shown.modified) : "",
+        part("metaType") || pv.meta,
+        part("metaSize") || (size === undefined ? "" : formatSize(size)),
+        part("metaDate") || (modified ? shortDate(modified) : ""),
         [
           volumeLabel(volume),
           ...parentOf(path).split("/").filter(Boolean),
@@ -1909,6 +2028,20 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       ]
         .filter(Boolean)
         .join(" · ");
+      out.pv.canDetails = true;
+      out.pv.details = (event: Event) =>
+        showDetails(
+          {
+            name: baseName(path),
+            path,
+            ...onVolume(volume),
+            directory: false,
+            mimeType: typeof pv.mimeType === "string" ? pv.mimeType : "",
+            ...(size === undefined ? {} : { size }),
+            ...(modified ? { modified } : {}),
+          },
+          event?.currentTarget,
+        );
     } else if (!out.isPreview) opened = undefined;
 
     if (out.isPreview) {
@@ -1938,6 +2071,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
           isName: d.kind === "name",
           isEmpty: d.kind === "empty",
           isTrashItem: d.kind === "trashItem",
+          isDetails: d.kind === "details",
+          details: d.kind === "details" ? d.rows.map((row) => ({ ...row, id: row.label })) : [],
           title:
             d.kind === "dest"
               ? d.op === "move"
@@ -1948,8 +2083,12 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
                   ? "New folder"
                   : "Rename"
                 : d.kind === "empty"
-                  ? "Empty Trash?"
-                  : d.item.name,
+                  ? d.chosen
+                    ? "Delete permanently?"
+                    : "Empty Trash?"
+                  : d.kind === "details"
+                    ? d.name
+                    : d.item.name,
           message:
             d.kind === "empty"
               ? `${countLabel(d.items.length)} will be deleted permanently.`
@@ -2003,7 +2142,9 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
                   ? "Create"
                   : "Rename"
                 : d.kind === "empty"
-                  ? "Empty"
+                  ? d.chosen
+                    ? "Delete"
+                    : "Empty"
                   : "",
           confirmDisabled:
             busy ||
@@ -2016,7 +2157,10 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
             if (d.kind === "dest")
               void transfer(d.paths, d.at, d.op === "copy", d.volume);
             else if (d.kind === "name") void nameDialog();
-            else if (d.kind === "empty") void emptyTrash(d.items);
+            else if (d.kind === "empty") {
+              if (d.chosen) selection = null;
+              void emptyTrash(d.items);
+            }
           },
           value: d.kind === "name" ? d.value : "",
           onValue: (event: Event) => {

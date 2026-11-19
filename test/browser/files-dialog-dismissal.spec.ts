@@ -13,7 +13,7 @@ for(const theme of ['light','dark'])test(`${theme} file rename and delete dialog
  const remove=page.getByRole('button',{name:'Delete file',exact:true});await expect(remove).toHaveCount(0);
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  const actions=page.getByRole('dialog',{name:'File actions',exact:true});
- await expect(actions.getByRole('button')).toHaveText(['Share','Add to folder','Ask Alpha','Download file','Delete']);
+ await expect(actions.getByRole('button')).toHaveText(['Share','Add to folder','Ask Alpha','Download file','Details','Delete']);
  await page.screenshot({path:test.info().outputPath('file-actions.png'),animations:'disabled'});
  await page.keyboard.press('Escape');await expect(remove).toHaveCount(0);
  await expect(page.getByRole('button',{name:'File actions',exact:true})).toBeFocused();
