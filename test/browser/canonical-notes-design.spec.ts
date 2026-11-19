@@ -161,7 +161,8 @@ test('live agent Notes light editor, checklist and restore-only Recently deleted
  await card(page,'Gift ideas').click();
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.state.trash.length)).toBe(1);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await page.getByRole('button',{name:'Notes options',exact:true}).click();
+ await page.getByRole('dialog',{name:'Notes options',exact:true}).getByRole('button',{name:'Recently deleted',exact:true}).click();
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Gift ideas',exact:true})).toBeVisible();
  await expect(trash.getByRole('button',{name:'Empty Recently deleted',exact:true})).toHaveCount(0);

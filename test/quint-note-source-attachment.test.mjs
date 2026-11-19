@@ -80,3 +80,17 @@ test('a native picker returning after leaving Notes releases its selection',asyn
   assert.deepEqual(notices,[]);
  });
 });
+
+test('the Android picker can hide Notes while returning the matching attachment',async()=>{
+ let resolve;
+ const selected=new Promise(done=>{resolve=done;});
+ await run({select:()=>selected,read:()=>Promise.resolve(attachment)},async({attach,calls,notices})=>{
+  const pending=attach();
+  Object.defineProperty(document,'hidden',{value:true});
+  document.dispatchEvent(new window.Event('visibilitychange'));
+  resolve({status:'selected',selectionId:'sel'});
+  await pending;
+  assert.deepEqual(calls.map(([name])=>name),['perform','readSelected','openReviewed','forgetSelected']);
+  assert.deepEqual(notices,[]);
+ });
+});

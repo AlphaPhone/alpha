@@ -45,14 +45,15 @@ export function installNoteSourceAdapter(views:Bag){
    if(!source||pending||!api.isActive()||document.hidden)return;
    const latest=api.get('notes'),record=latest.list.find((n:Bag)=>n.id===note.id);
    if(latest.open!==note.id||JSON.stringify(record?.documentSource)!==JSON.stringify(note.documentSource))return;
-   const operation=pending=new AbortController(),signal=operation.signal;
+   const operation=pending=new AbortController(),signal=operation.signal,native=Capacitor.isNativePlatform();
    let selectionId:string|undefined,opening=false;
-   const current=()=>!signal.aborted&&!document.hidden&&api.isActive()&&api.get('notes').open===note.id&&
+   const current=()=>!signal.aborted&&(native||!document.hidden)&&api.isActive()&&api.get('notes').open===note.id&&
     JSON.stringify(api.get('notes').list.find((n:Bag)=>n.id===note.id)?.documentSource)===JSON.stringify(record.documentSource);
    signal.addEventListener('abort',()=>{if(opening)void attachments.cancel().catch(()=>{});},{once:true});
    const hide=()=>{if(document.hidden)operation.abort();};
    window.addEventListener('pagehide',()=>operation.abort(),{signal});
-   document.addEventListener('visibilitychange',hide,{signal});
+   // Android’s own file picker can hide the WebView while the selection is pending.
+   if(!native)document.addEventListener('visibilitychange',hide,{signal});
    try{
     if(source.reference){
      opening=true;
@@ -60,7 +61,7 @@ export function installNoteSourceAdapter(views:Bag){
      return;
     }
     let file:MailAttachment;
-    if(Capacitor.isNativePlatform()){
+    if(native){
      const choice=await DailyApps.perform({action:'files'});
      selectionId=choice.selectionId;
      if(!current()||choice.status==='cancelled')return;
