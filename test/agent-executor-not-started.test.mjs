@@ -25,10 +25,14 @@ test('pre-effect executor guards refuse as not started',()=>{
   assert.match(adapter,/JSON\.stringify\(expectedContext\)\) throw new DeviceActionNotStarted\('The screen changed'\);\n\s+if\(isCameraCapture\(operation\)\)/);
   // Calendar access is asked before the native calendar is called; a refusal there is not started.
   assert.match(adapter,/throw new DeviceActionNotStarted\(permission\.status!=='granted'\?'Calendar access is off':'The screen changed'\);\}\n\s+const calendar=registerPlugin/);
+  // Dial and SMS send fences run only before the native call (guardedEffect), never after it.
+  assert.match(adapter,/const fence=\(\)=>\{[^\n]*throw new DeviceActionNotStarted\('The screen changed'\);\};\n[^\n]*\n[^\n]*\n\s+const handoff=await imageDialHandoff/);
+  assert.match(adapter,/const current=\(\)=>\{[^\n]*throw new DeviceActionNotStarted\('The screen changed'\);\};\n[^\n]*\n\s+const status=await client\.status\(\);current\(\);/);
   // The old plain throws for these guards were journaled as unknown.
   for(const old of ["throw new Error('Phone context changed')","throw Error('Maps context changed')",
     "throw Error('Calendar permission or phone context changed')","throw Error('Reminder context changed')",
-    "throw Error('Return to the supported foreground Calendar')"])
+    "throw Error('Return to the supported foreground Calendar')","throw Error('Dial review context changed')",
+    "throw Error('SMS review context changed')"])
     assert.ok(!adapter.includes(old),old);
 });
 
