@@ -4635,6 +4635,37 @@
     ]
   },
   {
+    "path": "specs/quint/application/CalendarAvailabilityReview.qnt",
+    "module": "CalendarAvailabilityReview",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "freeShareTest",
+      "busyShareTest",
+      "zoneChangedTest",
+      "deniedTest",
+      "listRetryTest",
+      "listExhaustedTest",
+      "noCalendarsTest",
+      "cancelChoiceTest",
+      "unknownIsNotFreeTest",
+      "declineResultTest",
+      "changedDuringReviewTest",
+      "changedCalendarRefusedTest",
+      "retiredDuringReviewTest"
+    ],
+    "sources": [
+      "apps/app/src/ui/calendar/availability-review.ts",
+      "apps/app/src/runtime/calendar-availability.ts"
+    ],
+    "abstractions": [
+      "One reviewed calendar_availability request. Time-zone agreement, permission, the bounded source-list retry, calendar choice, the reviewed read, owner confirmation and the repeated read before sharing are explicit steps.",
+      "Read results are abstracted to free, busy and refusals (stale or unknown freshness, changed calendar, time zone, too many events, error). Busy intervals, transparent and tentative events, and all-day civil-day mapping are checked by scripts/test-calendar-availability-flow.ts, not here.",
+      "Session, screen, device or signal changes are one retire step; the source checks them between every await. This model has no trace-refinement driver yet."
+    ]
+  },
+  {
     "path": "specs/quint/application/BrowserNoteRecordingJournal.qnt",
     "module": "BrowserNoteRecordingJournal",
     "init": "init",
