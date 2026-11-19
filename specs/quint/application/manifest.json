@@ -9719,6 +9719,77 @@
     ]
   },
   {
+    "path": "specs/quint/application/SettingsNavigation.qnt",
+    "module": "SettingsNavigation",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "categoryBackTest",
+      "aboutNestedBackTest",
+      "privacyPermissionsBackTest",
+      "passwordBackTest",
+      "sectionOpensInCategoryTest",
+      "sectionRefusedTest"
+    ],
+    "invariants": [
+      "NoDeveloperPage",
+      "SectionsAllowlisted",
+      "PasswordOnlyFromSettings",
+      "CategoryMatchesIndex",
+      "CategoryKnown",
+      "ShownResolved"
+    ],
+    "witnesses": [
+      "PasswordEntryWitness",
+      "SectionRefusedWitness"
+    ],
+    "sources": [
+      "apps/app/src/prototype/settings-adapter.ts",
+      "apps/app/src/prototype/model.js"
+    ],
+    "symbols": [
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "categoryNames"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "settingsParents"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "definition.back"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "SETTINGS_SECTIONS"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "settingsSectionPatch"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "settingsPage"
+      },
+      {
+        "path": "apps/app/src/prototype/settings-adapter.ts",
+        "name": "categoryPage"
+      }
+    ],
+    "stateMapping": {
+      "page/category": "Settings view state page and settingsCategory (empty string for none)",
+      "open": "Settings is the view on screen; Back from the root returns false and leaves it",
+      "shown": "The page render draws: the category index (categoryPage), settingsPage(page) in a product build, or the root",
+      "via": "Ghost: how the last step arrived (root row, child row, alpha:settings-page section, Back, or a refused section)"
+    },
+    "abstractions": [
+      "Product build only (developer surfaces off). Sheets, password locking, app-settings pages and the rows inside each page are not modelled; CHILDREN lists representative links, not every row.",
+      "test/quint-settings-navigation.test.mjs checks the tables against the source and replays each named run through the adapter's own Back, section allowlist and page resolution. It does not mount Settings or prove installed behaviour."
+    ]
+  },
+  {
     "path": "specs/quint/application/SettingsReads.qnt",
     "module": "SettingsReads",
     "init": "init",
