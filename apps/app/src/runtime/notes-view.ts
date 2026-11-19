@@ -41,8 +41,8 @@ export function noteInstant(note:Note):number{
 }
 /**
  * Pinned notes first, then newest first; ties keep their stored order. A note with no time (an
- * older device note) is placed by its stored position, which is newest first: it counts as
- * new as the newest note stored after it (specs/quint/application/CanonicalNotesView.qnt).
+ * older device note) is placed by its stored position, which is newest first: it takes the time
+ * of the newest note stored after it (specs/quint/application/CanonicalNotesView.qnt).
  */
 export function sortNotes<N extends Note>(list:readonly N[]):N[]{
  const at=list.map(noteInstant);

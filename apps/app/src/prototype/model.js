@@ -3230,9 +3230,11 @@ var NOTES_RED = "var(--alpha-notes-red)";
 var NOTES_WAVE = []; (function () { for (var i = 0; i < 56; i++) NOTES_WAVE.push(Math.round(8 + 26 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37)) + (i % 3) * 3)); })();
 var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null, itemKeys: null };
 /* Render keys for the open checklist's items, so removing one item does not hand its row (and the
-   focus in it) to the item below. Keys are view-only: saved items carry no id. */
+   focus in it) to the item below. Keys are view-only: saved items carry no id. A new note's first
+   save swaps its draft id for the saved one; the open checklist keeps its keys across that swap. */
 function notesItemKeys(id, count) {
   var k = NT.itemKeys;
+  if (k && k.id !== id && String(k.id).indexOf("draft-") === 0) k.id = id;
   if (!k || k.id !== id) k = NT.itemKeys = { id: id, keys: [], next: 0 };
   while (k.keys.length < count) k.keys.push("item-" + (++k.next));
   if (k.keys.length > count) k.keys.length = count;
