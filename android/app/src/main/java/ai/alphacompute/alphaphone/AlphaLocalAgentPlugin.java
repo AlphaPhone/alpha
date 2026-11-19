@@ -1257,8 +1257,11 @@ private static final class ResidentAttachDiagnostic {
   }
  }
  private static void logRequestFailure(String category,String method,int status,String reason) {
+  logRequestFailure(category,method,status,reason,"");
+ }
+ private static void logRequestFailure(String category,String method,int status,String reason,String hint) {
   String safeMethod=java.util.Arrays.asList("GET","POST","PATCH","DELETE").contains(method)?method:"OTHER";
-  android.util.Log.w("AlphaAgentRequest","category="+category+" method="+safeMethod+" status="+status+" reason="+reason);
+  android.util.Log.w("AlphaAgentRequest","category="+category+" method="+safeMethod+" status="+status+" reason="+reason+hint);
  }
  private static final int LOCAL_REQUEST_TIMEOUT_LIMIT_MS=120_000;
  private static final int RESIDENT_MINIMUM_TIMEOUT_MS=1_000;
@@ -1336,7 +1339,7 @@ private static final class ResidentAttachDiagnostic {
    }
    JSONObject result=raw(path,method,body,token,headers,remainingLocalRequestTimeout(deadline));
    int status=result.getInt("status");
-   if(status>=400)logRequestFailure(group==null?"other":group,method,status,"http");
+   if(status>=400)logRequestFailure(group==null?"other":group,method,status,"http",ViewRequestDiagnostic.failedPostSuffix(method,path,body));
    synchronized(lifecycleLock){
     requireCurrent(epoch);
     if(startupRead){
