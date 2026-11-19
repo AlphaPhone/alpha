@@ -10,13 +10,14 @@ import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {captureInputs, checkTraces, qmap, qset} from '../check-traces.mjs';
 import {modelTraces, plain} from './itf-replay.mjs';
-import {directory, javaTraceCampaign, root} from './java.mjs';
+import {app, directory, javaTraceCampaign, root} from './java.mjs';
 import {withdrawalIds, withdrawalPlatform, withdrawalSource, withdrawalWorkerSource} from './request-withdrawal-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {scaledTimeout} from '../timeouts.mjs';
 
 const model='NativeRequestWithdrawal', renderer='apps/app/src/runtime/local-agent.ts';
 const harness='RequestWithdrawalReplay.java';
+const nativeDependencies=[withdrawalWorkerSource, app+'ViewRequestDiagnostic.java'];
 const fields=['phase','call','renderer','withdrawable','sent','withdrawnAt','answers','outcome'];
 const witnesses=['WithdrawnWhileQueuedWitness','WithdrawnWhileEnrollingWitness','WithdrawnAfterDispatchHoldsWorkerWitness','LateCancellationFindsNothingWitness','QueuedBehindBusyWorkersWitness'];
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
@@ -140,7 +141,7 @@ export async function checkNativeRequestWithdrawal(extraSources=[]){
    plugins:[{name:'withdrawal-closed-platform',setup(builder){builder.onResolve({filter:/^(@capacitor\/core|\.\.\/platform-plugins)$/},args=>({path:args.path,namespace:'withdrawal-platform'}));builder.onLoad({filter:/.*/,namespace:'withdrawal-platform'},()=>({contents:stub,loader:'js'}));}}]};
   const discovery=await build(options),compiled=join(temporary,'renderer.cjs');writeFileSync(compiled,discovery.outputFiles[0].text);
   const generatedSources=[...platform.paths,compiled];
-  const sources=[withdrawalSource,withdrawalWorkerSource,...Object.keys(discovery.metafile.inputs).map(path=>resolve(root,path)).filter(existsSync),
+  const sources=[withdrawalSource,...nativeDependencies,...Object.keys(discovery.metafile.inputs).map(path=>resolve(root,path)).filter(existsSync),
    'upstream.lock.json',fileURLToPath(import.meta.url),join(directory,'request-withdrawal-platform.mjs'),join(directory,harness),join(directory,'java.mjs'),join(directory,'Trace.java'),join(directory,'itf-replay.mjs'),...(jsonJar?[jsonJar]:[]),...generatedSources,...extraSources];
   const driverHashes=captureInputs(sources);
   const second=await build(options);assert.equal(second.outputFiles[0].text,readFileSync(compiled,'utf8'),'Executable closure unchanged after capture');
@@ -150,7 +151,7 @@ export async function checkNativeRequestWithdrawal(extraSources=[]){
   // The generated schedule contains commands only, never model states. Capture it before the
   // JVM reads it, preserving the original pre-execution hashes of every owning source input.
   for(const [path] of schedules){sources.push(path);generatedSources.push(path);driverHashes[path]=createHash('sha256').update(readFileSync(path)).digest('hex');}
-  const observed=javaTraceCampaign(harness,[...platform.paths,withdrawalWorkerSource],schedules);
+  const observed=javaTraceCampaign(harness,[...platform.paths,...nativeDependencies],schedules);
   const traces=[],actualStates=[];
   for(const [index,{name,entries}] of campaigns.entries()){
    assert.equal(observed[index].length,entries.length);const replay=await rendererReplay(readFileSync(compiled,'utf8'),entries,observed[index]);
