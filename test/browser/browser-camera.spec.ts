@@ -81,7 +81,7 @@ test('browser camera permission denial retries explicitly without a saved photo'
  await expect(recovery).toBeVisible();
  await expect(page.locator('[data-alpha-camera="said"]')).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).cameraAttempts)).toBe(1);
- await expect(recovery).toHaveText('Camera offRetry');
+ await expect(recovery).toHaveText('Camera offAlpha needs camera access to take photos and videos. Allow it for this page in your browser, then tap Retry.Retry');
  await expect(recovery.getByRole('button',{name:'Open settings'})).toHaveCount(0);
  await page.getByRole('button',{name:'Take photo',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).cameraAttempts)).toBe(2);
