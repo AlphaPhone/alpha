@@ -85,13 +85,25 @@ test('Photos Email starts a new draft and leaves an unfinished email as it was',
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 
-test('Photos Share opens an addressed-by-owner picture draft in Messages',async({page})=>{
+/** Photos with the telephony bridge; `size` is the listed picture's byte count, unknown when omitted. */
+async function photoWithMessages(page:Page,size?:number){
  await page.addInitScript(installTelephonyFixture,{mms:true});
- await photosBridge(page);
+ await page.addInitScript(size=>{(window as any).__photoSize=size;},size);
+ await photosBridge(page,'full',true,false,false,()=>{const w=window as any;if(typeof w.__photoSize==='number')w.mediaFixture.row.size=w.__photoSize;});
  await page.getByRole('button',{name:/^Photo, /}).click();
  await choosePhotoAction(page,'Share');
+}
+test('Photos Share opens an addressed-by-owner picture draft in Messages',async({page})=>{
+ await photoWithMessages(page,68);
  await page.getByRole('dialog',{name:'Share',exact:true}).getByRole('button',{name:'Messages',exact:true}).click();
  await expect(page.getByRole('button',{name:/Remove picture-1\.png/})).toBeVisible();
  await expect(page.getByRole('textbox',{name:'To',exact:true})).toHaveValue('');
+ expect(await page.evaluate(()=>(window as any).telephonyInputs.filter(([method]:[string])=>method==='sendMms'||method==='sendSms'))).toEqual([]);
+});
+for(const [label,size] of [['an unknown size',undefined],['a size over 1 MB',1024*1024+1]] as const)test(`Photos Share does not offer Messages for a picture of ${label}`,async({page})=>{
+ await photoWithMessages(page,size);
+ const share=page.getByRole('dialog',{name:'Share',exact:true});
+ await expect(share.getByRole('button',{name:'Email',exact:true}).or(share.getByRole('button',{name:'Share',exact:true})).first()).toBeVisible();
+ await expect(share.getByRole('button',{name:'Messages',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).telephonyInputs.filter(([method]:[string])=>method==='sendMms'||method==='sendSms'))).toEqual([]);
 });

@@ -48,6 +48,8 @@ export type NativeResult = {
   uri?: string;
   name?: string;
   mimeType?: string;
+  /** Bytes, only when the selection reports them; an unknown size is never assumed small. */
+  size?: number;
   transcript?: string;
 };
 /** `days` (Sunday=1 … Saturday=7, ascending) is sent only when surfaceInfo reports clockRepeatDaysVersion >= 1. */
