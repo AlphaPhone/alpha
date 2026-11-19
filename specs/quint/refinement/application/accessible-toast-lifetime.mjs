@@ -28,6 +28,8 @@ function fixture(name, code) {
   const running = new Map();
   let requestId, resumed;
   const context = vm.createContext({
+    // The fixture clock stands still: a reading time already spent is abstracted by the model.
+    Date: {now: () => 0},
     setTimeout(callback, delay) {
       timers.set(++timerId, {callback, delay});
       return timerId;
@@ -48,14 +50,17 @@ function fixture(name, code) {
     'state.undo': typeof shell.undoFn === 'function',
     'state.error': shell.state.toast ? shell.toastKind === 'error' : false,
     'state.duration': shell.state.toast ? shell.toastDuration : 0,
+    'state.readMin': shell.state.toast ? shell.toastReadMin : 0,
     'state.held': !!shell.toastHeld,
     'state.timerDelay': timers.values().next().value?.delay ?? 0,
     'state.queued': Array.from(shell.toastQueue ?? [], row => ({message: Number(row.msg[0]), undo: typeof row.undo === 'function', error: row.kind === 'error'})),
+    'state.notices': Array.from(shell.state.notices ?? [], text => Number(text[0])),
   });
   const result = trace(name, observe());
   const save = (label, ...action) => {
     assert.equal(shell.state.toastUndo, typeof shell.undoFn === 'function');
     assert.equal(timers.size, Number(Boolean(shell.state.toast) && !shell.toastHeld));
+    assert.deepEqual([...(shell.state.notices ?? [])], [...(shell.persistentNotices ?? [])]);
     checkpoint(result, label, call(...action), observe());
   };
   const port = {
@@ -103,6 +108,14 @@ function fixture(name, code) {
     show(message, undo, error = false) {
       shell.toast(message === 3 ? '3'.repeat(191) : String(message), undo ? {undo() { assert.fail('expiration must never invoke Undo'); }} : error ? {kind: 'error'} : undefined);
       save('the actual shell schedules, queues or replaces a toast', 'show', message, undo, error);
+    },
+    showPersistent(message) {
+      shell.toast(message === 3 ? '3'.repeat(191) : String(message), {kind: 'persistent'});
+      save('the actual shell lists a persistent notice and announces it once as an error', 'showPersistent', message);
+    },
+    dismiss(message) {
+      shell.dismissNotice(message === 3 ? '3'.repeat(191) : String(message));
+      save('the notice Dismiss button removes only that notice', 'dismiss', message);
     },
     expire() {
       const [id, timer] = timers.entries().next().value;
@@ -182,6 +195,28 @@ globalThis.api = {refresh: refreshAccessibilityTimeout, start: startAccessibilit
   });
   await run('repeated_error_is_shown_once', async f => {
     f.show(2, false, true); f.show(2, false, true); f.show(1, false, true); f.show(1, false, true); f.expire(); f.expire();
+  });
+  await run('passive_notice_waits_behind_passive', async f => {
+    f.show(1, false); f.show(2, false); f.show(3, false); f.show(3, false); f.expire(); f.expire();
+  });
+  await run('long_passive_notice_yields_after_reading_time', async f => {
+    f.request(1); await f.reply(1, 10000, 2); f.show(3, false); f.show(1, false); f.hold(); f.resume(); f.expire(); f.expire();
+  });
+  await run('undo_window_is_not_shortened_by_a_waiting_notice', async f => {
+    f.show(1, true); f.show(2, false); f.expire(); f.expire();
+  });
+  await run('undo_takes_a_passive_notice_place', async f => {
+    f.show(1, false); f.show(2, false); f.show(3, true); f.expire(); f.expire();
+  });
+  await run('persistent_notice_outlives_its_toast', async f => {
+    f.showPersistent(2); f.show(1, false); f.showPersistent(2); f.expire(); f.showPersistent(1); f.dismiss(2); f.dismiss(1);
+  });
+  await run('persistent_notices_keep_newest_three', async f => {
+    f.showPersistent(1); f.showPersistent(2); f.showPersistent(3); f.dismiss(2); f.showPersistent(2);
+  });
+  await run('full_queue_drops_lowest_rank', async f => {
+    f.show(1, false, true); f.show(1, true); f.show(2, false, true); f.show(2, true); f.show(3, false);
+    f.show(3, false, true); f.expire(); f.expire(); f.expire(); f.expire();
   });
 
   return checkTraces(boundInputs({model, modelPath: 'specs/quint/application/AccessibleToastLifetime.qnt',

@@ -92,7 +92,7 @@ import { TEXT_SCALE_PROPERTY } from './runtime/text-scale';
 import { installToastLayer } from './runtime/toast-layer';
 import { startAccessibilityTimeout } from './runtime/accessibility-timeout';
 import { installViewFocus } from './runtime/view-focus';
-import { ERROR_TOAST } from './runtime/error-notice';
+import { ERROR_TOAST, PERSISTENT_NOTICE } from './runtime/error-notice';
 import './prototype/prototype.css';
 import './prototype/phone.css';
 import { installCommsAlpha } from './prototype/comms-alpha';
@@ -236,14 +236,16 @@ let shell: any;
 /** Notices raised while the startup loading screen holds Home unmounted; shown in order once Home
  * mounts. A notice the owner must act on is an error: a later notice waits behind it instead of
  * replacing it unread, here and in the shell's toast. Consecutive passive notices share one slot. */
-let pendingNotices: Array<{text: string; error: boolean}> = [];
-function flushNotices(target: any) { const notices = pendingNotices; pendingNotices = []; for (const notice of notices) target.toast(notice.text, notice.error ? ERROR_TOAST : undefined); }
-function showNotice(text: string, error = false) {
-  if (shell?.live) { flushNotices(shell); shell.toast(text, error ? ERROR_TOAST : undefined); return; }
+type NoticeKind = 'passive' | 'error' | 'persistent';
+let pendingNotices: Array<{text: string; kind: NoticeKind}> = [];
+const noticeOptions = (kind: NoticeKind) => kind === 'error' ? ERROR_TOAST : kind === 'persistent' ? PERSISTENT_NOTICE : undefined;
+function flushNotices(target: any) { const notices = pendingNotices; pendingNotices = []; for (const notice of notices) target.toast(notice.text, noticeOptions(notice.kind)); }
+function showNotice(text: string, kind: NoticeKind = 'passive') {
+  if (shell?.live) { flushNotices(shell); shell.toast(text, noticeOptions(kind)); return; }
   const last = pendingNotices[pendingNotices.length - 1];
-  if (last && last.text === text && last.error === error) return;
-  if (last && !last.error && !error) pendingNotices[pendingNotices.length - 1] = {text, error};
-  else pendingNotices.push({text, error});
+  if (last && last.text === text && last.kind === kind) return;
+  if (last && last.kind === 'passive' && kind === 'passive') pendingNotices[pendingNotices.length - 1] = {text, kind};
+  else pendingNotices.push({text, kind});
 }
 /** A hosted-notice question may fill only the live conversation of the same verified session. */
 function questionTarget(sessionId:string){const snapshot=connectionController.getSnapshot();return Boolean(shell?.live&&!document.hidden&&!snapshot.open&&snapshot.session?.sessionId===sessionId);}
@@ -461,7 +463,7 @@ async function mountPhone() {
   if (isAndroid && !imageSenseAvailable()) void stopWakeListenerForChatOnly().then(stopped => {
     if (stopped) return;
     const notice = 'Wake listening could not be confirmed off. Turn it off in Android settings.';
-    showNotice(notice, true);
+    showNotice(notice, 'persistent');
   });
   // The image's always-on listener heard the wake phrase: start the on-device voice assistant.
   if (imageSenseAvailable() && assistantSurface) installListenerInvocation(() => shell, { authority: () => { const port=connectionController.getAppRecordClient(); if(!port)return null; try{if(!port.current())return null;return JSON.stringify([port.sessionId,port.scope??null,port.identity.ownerId,port.identity.agentId,port.identity.sessionId,port.identity.origin]);}catch{return null;} }, initialRestorePending: () => protectedPowerLaunchState(connectionController.getSnapshot()).initialRestorePending, powerAccountRef: () => protectedPowerLaunchState(connectionController.getSnapshot()).accountRef, connectionOpen: () => connectionController.getSnapshot().open, connected: () => !!connectionController.getSnapshot().session && !connectionController.getSnapshot().busy, voiceActive: () => !!document.querySelector('[data-alpha-chat-recorder]'), subscribe: listener => connectionController.subscribe(listener) });

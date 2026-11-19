@@ -129,3 +129,58 @@ for (const key of ['Enter', 'Space']) {
     await expect(origin).toBeFocused();
   });
 }
+
+/** toast() with an explicit kind, as the persistent-notice callers pass it. */
+const raiseKind = (page: Page, message: string, kind: 'error' | 'persistent') => page.evaluate(({ message, kind }) => {
+  const screen = document.querySelector('[data-screen]') as any;
+  let fiber = screen[Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!];
+  while (fiber && !(fiber.stateNode && typeof fiber.stateNode.toast === 'function')) fiber = fiber.return;
+  fiber.stateNode.toast(message, { kind });
+}, { message, kind });
+
+test('a new notice waits for the reading time of the one on screen instead of replacing it', async ({ page }) => {
+  // A long passive notice would stay 10 s alone; with another waiting it yields after 1.9 s.
+  await raise(page, 'A'.repeat(191));
+  await raise(page, 'Note saved');
+  await raise(page, 'Note saved');
+  await expect(pill(page)).toContainText('AAAA');
+  await page.clock.runFor(1_500);
+  await expect(pill(page)).toContainText('AAAA');
+  await page.clock.runFor(600);
+  await expect(pill(page)).toContainText('Note saved');
+  await page.clock.runFor(2_500);
+  await expect(pill(page)).toHaveCount(0);
+});
+
+test('an Undo offer takes a passive notice\'s place at once', async ({ page }) => {
+  await raise(page, 'Calendar updated');
+  await raise(page, 'Deleted', true);
+  await expect(pill(page)).toContainText('Deleted');
+  await expect(pill(page).getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
+});
+
+test('a persistent notice is announced once, then stays in the chat until Dismiss', async ({ page }) => {
+  const lost = 'Your unsaved edit to “Trip” was lost when the agent connection changed.';
+  const region = page.locator('[data-alpha-toast]'), listed = page.locator('[data-alpha-persistent-notice]');
+  await raiseKind(page, lost, 'persistent');
+  await expect(pill(page)).toContainText(lost);
+  await expect(region).toHaveAttribute('aria-live', 'assertive');
+  // Other feedback is not held back for long behind it, and both toasts end on their own.
+  await raise(page, 'Saved');
+  await page.clock.runFor(60_000);
+  await expect(pill(page)).toHaveCount(0);
+  // The notice is listed once, in the chat's notice area, in the page flow.
+  await raiseKind(page, lost, 'persistent');
+  await page.clock.runFor(60_000);
+  await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
+  await expect(listed).toHaveCount(1);
+  await expect(listed).toContainText(lost);
+  expect(await listed.evaluate(element => getComputedStyle(element).position)).toBe('static');
+  const dismiss = listed.getByRole('button', { name: 'Dismiss notice', exact: true });
+  expect((await dismiss.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  await dismiss.focus();
+  await page.keyboard.press('Enter');
+  await expect(listed).toHaveCount(0);
+  // Focus does not fall to the page when its notice goes.
+  await expect(page.locator('[data-alpha-chat-header] [data-alpha-chat-home]')).toBeFocused();
+});

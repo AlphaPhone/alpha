@@ -103,6 +103,9 @@ test('Delete now and Empty ask first, and checklists use the same Recently delet
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Second','Third']);
  await trash.getByRole('button',{name:'Empty Recently deleted',exact:true}).click();
  await page.getByRole('dialog',{name:'Delete all?'}).getByRole('button',{name:'Delete all',exact:true}).click();
+ // The paused clock stands still: a newer passive notice waits for the 1.9 s reading time of the
+ // passive "Deleted" notice still on screen.
+ await page.clock.runFor(1_900);
  await expect(page.getByText('Recently deleted emptied',{exact:true})).toBeVisible();
  await expect(trash).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);

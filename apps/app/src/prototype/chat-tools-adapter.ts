@@ -4,6 +4,9 @@ import {Capacitor} from '@capacitor/core';
 import {testMocksEnabled} from '../build-flags';
 
 type Shell = Record<string, any>;
+/** This app's own replies and review cards that end by sending the owner to history ("… Check
+ * history before sending again."). Agent prose that merely mentions history is left alone. */
+const HISTORY_HINT = /(?:^|\s)(?:[Cc]heck|Use)(?: phone| connection and| conversation and)? (?:action )?history(?: before (?:trying again|sending again|speaking again|retrying|starting again|requesting it again|sending another request))?\.$/;
 
 /** The composer uses the same file intake and message search as the main Eliza UI. */
 export function installChatTools(Component: {prototype: Shell}) {
@@ -128,6 +131,11 @@ export function installChatTools(Component: {prototype: Shell}) {
       if (historyPage) shell.openView('settings', {page:'agent-activity'});
       else connectionController.open();
     };
+    // A reply or review card that tells the owner to check history carries the way there.
+    const hasHistory = !!connection.session && (historyPage || testMocksEnabled);
+    if (hasHistory && Array.isArray(output.msgs)) output.msgs = output.msgs.map((message: Shell) =>
+      message.isAgent && (HISTORY_HINT.test(String(message.displayText || '')) || HISTORY_HINT.test(String(message.c?.sub || '')))
+        ? {...message, historyLink: history} : message);
     const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
     if(turning)this.chatToolsOpen=false;
     output.chatTools = {
@@ -145,7 +153,7 @@ export function installChatTools(Component: {prototype: Shell}) {
       upload: () => void upload(),
       canNewChat: !!connection.session && !connection.busy,
       newChat,
-      hasHistory: !!connection.session && (historyPage || testMocksEnabled),
+      hasHistory,
       history,
       search: () => {closeMenu();shell.chatSearchOpen = true;shell.chatSearchQuery = '';shell.chatSearchResults = [];shell.chatSearchMore = false;shell.chatSearchBusy = false;shell.chatSearchError = '';shell.setState({chat:'full'});},
     };
