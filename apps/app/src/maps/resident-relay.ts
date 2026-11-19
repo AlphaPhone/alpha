@@ -20,6 +20,9 @@ export function withResidentMapsNavigation<T>(request: Request | undefined, conv
    throw Error('Invalid Maps navigation operation');
   },
   failure:error=>deviceNavigationFailure(error).code,
+  // The phone's own reason ("Open Maps on the phone to continue.", "No location fix arrived."), so the
+  // agent's reply says why instead of what the code alone means.
+  failureMessage:error=>deviceNavigationFailure(error).message,
   connected(value,id){if(value){activeOffer=id;residentMapsNavigationPort.relay=true;}else if(activeOffer===id){activeOffer=undefined;residentMapsNavigationPort.relay=false;}},
  },request,conversationId,signal,send);
 }
