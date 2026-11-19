@@ -27,6 +27,8 @@ export function hapticForClick(target: EventTarget | null): HapticKind | null {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return null;
   const control = target.closest<HTMLElement>('button,[role="switch"],[role="button"]');
   if (!control || disabled(control) || control.closest('[inert]')) return null;
+  // A checkbox switch has already changed when its click is dispatched; a button switch has not.
+  if (control instanceof HTMLInputElement && control.type === 'checkbox') return control.checked ? 'toggle-on' : 'toggle-off';
   if (control.getAttribute('role') === 'switch') return control.getAttribute('aria-checked') === 'true' ? 'toggle-off' : 'toggle-on';
   // Only the confirming button of a dialog: a Delete in a list still opens its own review.
   if (!control.closest('dialog,[role="dialog"],[role="alertdialog"]')) return null;

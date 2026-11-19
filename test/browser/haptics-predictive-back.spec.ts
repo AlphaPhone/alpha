@@ -36,6 +36,20 @@ test('switches, a confirmed delete and nothing else give touch feedback',async({
  expect(await played(page)).toEqual(['toggle-on','toggle-off','confirm']);
 });
 
+test('a checkbox switch plays the state it changed to',async({page})=>{
+ // Checkbox switches (Google access, brief checks) have already changed when the click arrives.
+ const kinds=await page.evaluate(()=>{
+  const w=window as any,box=document.createElement('input');box.type='checkbox';box.setAttribute('role','switch');box.setAttribute('aria-label','Probe');
+  document.body.append(box);w.__haptics.length=0;
+  box.click();
+  const after=[...w.__haptics];box.remove();return {after,checked:box.checked};
+ });
+ expect(kinds).toEqual({after:['toggle-on'],checked:true});
+ await page.clock.runFor(400);
+ const off=await page.evaluate(()=>{const w=window as any,box=document.createElement('input');box.type='checkbox';box.checked=true;box.setAttribute('role','switch');document.body.append(box);w.__haptics.length=0;box.click();box.remove();return [...w.__haptics];});
+ expect(off).toEqual(['toggle-off']);
+});
+
 test('held Back previews the review it would close; cancelling restores it and letting go closes it',async({page},info)=>{
  await button(page,'Save event').click();await expect(page.getByRole('heading',{name:'Harbour pickup',exact:true})).toBeVisible();
  await chooseCalendarEventAction(page,'Delete event');

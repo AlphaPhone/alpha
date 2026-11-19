@@ -59,13 +59,17 @@ export function installPredictiveBack(win: Window = window): () => void {
   };
   // The committed Back closes the layer; capture runs before handlers that stop the event.
   const committed = () => restore(false);
+  // A Back the renderer does not take moves the task away instead; nothing stays half-previewed.
+  const hidden = () => { if (root.hidden) restore(false); };
   win.addEventListener(BACK_PREVIEW_EVENT, preview);
   win.addEventListener('alpha-back', committed, true);
   win.addEventListener('launcher-home', committed, true);
+  root.addEventListener('visibilitychange', hidden);
   return () => {
     restore(false);
     win.removeEventListener(BACK_PREVIEW_EVENT, preview);
     win.removeEventListener('alpha-back', committed, true);
     win.removeEventListener('launcher-home', committed, true);
+    root.removeEventListener('visibilitychange', hidden);
   };
 }
