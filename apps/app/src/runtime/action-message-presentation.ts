@@ -15,6 +15,11 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   if(!prose.trim()||/^[ \t]*(?:```|~~~)|\[\/?CHOICE\b/gim.test(prose))return;
   return prose.trimEnd();
 }
+/** A pending action states when it stops being available; a clock time needs no ticking re-render. */
+export function approvalExpiryText(expiresAt: unknown, now = Date.now()): string {
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= now) return '';
+  return `Expires at ${new Date(expiresAt).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})}`;
+}
 const REVIEW_TEXT = 'Review on phone';
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 // Presentation only: preserve the journal while explaining uncertainty safely.

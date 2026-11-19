@@ -7,7 +7,7 @@ import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {actionResultText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,approvalExpiryText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
 import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
@@ -1848,7 +1848,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',expiry:approving||held?'':approvalExpiryText(c.expiresAt),icon:c.reviewDestination?ic.right:ic.check,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
