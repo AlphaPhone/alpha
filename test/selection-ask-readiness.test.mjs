@@ -186,3 +186,14 @@ test('an exact remembered picker grant survives rename and restores only while F
   assert.equal(index().open(),'picker-renamed');
  }
 });
+
+test('a picked file shows its type, size and date, never a MIME type, and only what the provider reported (FILE-13)',async()=>{
+ const f=fixture();
+ await f.accept({...selected('report','application/vnd.openxmlformats-officedocument.wordprocessingml.document'),size:1536,modified:Date.UTC(2020,0,15)});
+ const pv=f.render().pv;
+ assert.match(pv.meta,/^Document · 1\.5 KB · .*2020$/);
+ assert.equal(pv.metaType,'Document');assert.equal(pv.size,1536);
+ const g=fixture();
+ await g.accept(selected('plain'));
+ assert.equal(g.render().pv.meta,'Text');
+});
