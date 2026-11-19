@@ -6,14 +6,14 @@ import {replayMapsScreenModes} from '../specs/quint/refinement/services/maps-scr
 
 test('the mounted Maps screen follows every MapsScreenModes model trace step by step', {timeout: scaledTimeout(600000)}, async () => {
   const {scenarios, witnesses} = modelNames('specs/quint/services/MapsScreenModes.qnt');
-  assert.equal(scenarios.length, 32);
+  assert.equal(scenarios.length, 34);
   assert.equal(witnesses.length, 9);
   const result = await replayMapsScreenModes({scenarios, witnesses});
   console.log(JSON.stringify(result));
   assert.equal(result.traces, scenarios.length + witnesses.length + 150);
   assert.ok(result.checkpoints > result.traces * 5);
   for (const action of ['focusSearch', 'typeQuery', 'clearQuery', 'submitSearch', 'debounceInput', 'lateInputTimer', 'pickResult', 'pickSaved', 'closePlace', 'openDirections', 'openGrantedDirections',
-    'locate', 'fixArrives', 'editOrigin', 'searchOrigin', 'chooseOrigin', 'submitLocatedOrigin', 'routePlanned', 'start', 'screenOffStarted', 'screenOffRefused',
+    'locate', 'fixArrives', 'editOrigin', 'searchOrigin', 'chooseOrigin', 'submitLocatedOrigin', 'swapEnds', 'routePlanned', 'start', 'screenOffStarted', 'screenOffRefused',
     'screenOffLost', 'end', 'back', 'leave', 'hide', 'show', 'agentShowPlace', 'agentShowDirections', 'agentPlanFrom', 'crossAppQuery',
     'offerHandoff', 'consumeHandoff', 'providerResponse', 'providerChanged']) assert.ok(result.actions[action] > 0, action);
 });

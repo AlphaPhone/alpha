@@ -21,8 +21,8 @@ module MapsScreenModes {
     // "Use current location": the screen's busy flag and the controller's one-fix watch.
     locating: bool, watch: bool,
     // Starting point: the text shown (a name the user typed, coordinates the user typed or an
-    // agent supplied, a chosen candidate's name or the located position), whether the controller
-    // holds an origin, and its route.
+    // agent supplied, a chosen candidate's name, a saved place a swap made the starting point or
+    // the located position), whether the controller holds an origin, and its route.
     originText: str, origin: bool, routeReady: bool,
     // The destination's most recent explicit choice.
     lastChoice: str,
@@ -162,7 +162,7 @@ module MapsScreenModes {
     v.pendingInput == "none" and v.originAccepted and not(v.originFailed) and not(v.handoffQuery or v.handoffPending)
   /// Enter on a name searches for starting points.
   action searchOrigin = all {
-    mode(s).in(Set("dir", "origin")), s.originText.in(Set("typed", "chosen")),
+    mode(s).in(Set("dir", "origin")), s.originText.in(Set("typed", "chosen", "saved")),
     s' = if(originReused(s)) s
       else { ...locateCancelled(s), originMode: true, pendingInput: "none", originAccepted: true, originFailed: s.responseMode == "error", originRequests: s.originRequests + 1, originSearch: s.responseMode }
   }
@@ -179,7 +179,7 @@ module MapsScreenModes {
   /// location request. Coordinates stay in the field; a candidate's name replaces a typed name.
   /// A candidate exists only when the reused search answered with rows, or a new one would.
   action chooseOrigin = all {
-    (mode(s) == "origin" and s.originText.in(Set("typed", "chosen")) and
+    (mode(s) == "origin" and s.originText.in(Set("typed", "chosen", "saved")) and
       (if(originReused(s)) s.originSearch == "ready" else s.responseMode == "ready")) or
       (mode(s).in(Set("dir", "origin")) and s.originText == "coordinates"),
     s' = if(s.originText == "coordinates" and originReused(s)) s
@@ -196,6 +196,17 @@ module MapsScreenModes {
     s.directions, not(s.navigating), s.origin, not(s.hidden), not(s.originAccepted and s.locating),
     s' = { ...if(s.routeReady or s.originFailed) inputsRetired(s) else s, routeReady: ready,
       originFailed: s.originAccepted and not(s.routeReady or s.originFailed) and not(ready) }
+  }
+  /// Swap on a planned route: the starting point becomes the destination and the destination the
+  /// starting point, and the route is planned again. A pending location request ends. The located
+  /// position becomes a fixed destination; a saved place stays a saved place either way round.
+  /// It is outside step: the scenarios below replay it (see the manifest).
+  action swapEnds = all {
+    mode(s) == "dir", s.routeReady, not(s.hidden),
+    s' = { ...inputsRetired(locateCancelled(handoffDiscarded(s))), pendingInput: "none",
+      selected: if (s.originText == "location") "location" else if (s.originText == "saved") "saved" else "place",
+      originText: if (s.selected == "saved") "saved" else "chosen",
+      origin: true, routeReady: false, lastChoice: "place" }
   }
   /// Start ends a pending location request and reserves the native screen-off session at once;
   /// the session's confirmation comes later.
@@ -292,7 +303,7 @@ module MapsScreenModes {
   }
 
   val TypeOK = s.pendingInput.in(Set("none", "query", "origin")) and s.selected.in(Set("none", "place", "saved", "location")) and
-    s.originText.in(Set("empty", "location", "typed", "coordinates", "chosen")) and
+    s.originText.in(Set("empty", "location", "typed", "coordinates", "chosen", "saved")) and
     s.screenOff.in(Set("none", "starting", "running")) and
     s.lastChoice.in(Set("none", "typing", "search", "place", "locate")) and
     s.requests.in(0.to(MaxRequests)) and s.handoffs.in(0.to(MaxRequests)) and
@@ -431,6 +442,18 @@ module MapsScreenModes {
     .then(closePlace).then(locate).then(pickSaved).expect(s.selected == "saved" and s.locating)
     .then(fixArrives(true))
     .expect(s.selected == "location" and not(LateFixKeepsNewerChoiceDesired) and safety)
+
+  run swapEndsTest = init.then(typeQuery).then(submitSearch).then(pickResult)
+    .then(openGrantedDirections).then(fixArrives(true)).then(routePlanned(true))
+    .then(swapEnds).expect(mode(s) == "dir" and s.selected == "location" and s.originText == "chosen" and s.origin and not(s.routeReady) and safety)
+    .then(routePlanned(true)).then(swapEnds).expect(s.selected == "place" and s.originText == "chosen" and safety)
+    .then(back).then(back).then(pickSaved).then(openDirections).then(editOrigin(true)).then(chooseOrigin).then(routePlanned(true))
+    .then(swapEnds).expect(s.selected == "place" and s.originText == "saved" and safety)
+    .then(routePlanned(true)).then(swapEnds).expect(s.selected == "saved" and s.originText == "chosen" and safety)
+    .then(routePlanned(true)).then(start).then(swapEnds.fail())
+  run swapNeedsPlannedRouteTest = init.then(typeQuery).then(submitSearch).then(pickResult)
+    .then(openGrantedDirections).then(fixArrives(true)).expect(mode(s) == "dir" and s.origin and not(s.routeReady))
+    .then(swapEnds.fail())
 
   run originAutomaticPendingReuseTest = init.then(agentShowDirections).then(editOrigin(true)).then(debounceInput)
     .expect(s.originRequests == 1 and s.originAccepted and not(s.routeReady))

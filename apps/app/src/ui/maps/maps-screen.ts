@@ -243,6 +243,8 @@ export interface MapsScreenView {
     routes: readonly MapsScreenRouteChoice[];
     /** The selected route's turn-by-turn steps, in order; empty without a route. */
     steps: readonly { instruction: string; distance: string }[];
+    /** A planned route's ends can be swapped: the starting point becomes the destination. */
+    canSwap: boolean;
   };
   navigation?: {
     arrived: boolean;
@@ -316,6 +318,8 @@ export class MapsScreenController {
   private initialization?: Promise<void>;
   private directions = false;
   private originText = "";
+  /** The place or saved place last chosen as the starting point, for a swap that keeps it. */
+  private originPick?: Place | SavedPlace;
   private originMode = false;
   private navigating = false;
   private arrived = false;
@@ -1200,6 +1204,115 @@ export class MapsScreenController {
     if (this.state?.origin) void controller.planRoute();
   }
 
+  /**
+   * Swap the route's ends: the starting point becomes the destination and the destination the
+   * starting point, and the route is planned again. Only a planned route can be swapped, so
+   * both ends are points the user already chose; a chosen place or saved place keeps its
+   * identity, and the located position becomes a fixed point.
+   */
+  swapEnds(): void {
+    const target = this.selected;
+    const snapshot = this.state;
+    const from = snapshot?.origin;
+    if (
+      !this.usable() ||
+      !target ||
+      !snapshot ||
+      !from ||
+      !this.canSwap() ||
+      snapshot.provider.status !== "configured"
+    )
+      return;
+    const providerId = snapshot.provider.providerId;
+    const controller = this.ensure();
+    const pick = this.originPick;
+    const picked =
+      pick &&
+      pick.coordinate.latitude === from.latitude &&
+      pick.coordinate.longitude === from.longitude &&
+      ("label" in pick ? pick.label : pick.name) === snapshot.originLabel
+        ? pick
+        : undefined;
+    const located =
+      !picked && !snapshot.originLabel && this.originText === CURRENT_LOCATION;
+    const next: MapsScreenSelection = !picked
+      ? located
+        ? { label: "Current location", coordinate: from, origin: "location" }
+        : {
+            label: snapshot.originLabel || "Dropped pin",
+            coordinate: from,
+            origin: "manual",
+          }
+      : "label" in picked
+        ? {
+            label: picked.label,
+            coordinate: picked.coordinate,
+            savedId: picked.id,
+            providerId: picked.providerId,
+            providerPlaceId: picked.providerPlaceId,
+            origin: "saved",
+          }
+        : {
+            label: picked.name,
+            coordinate: picked.coordinate,
+            providerId: picked.providerId,
+            providerPlaceId: picked.id,
+            origin: "provider",
+          };
+    // The old destination, as the starting point it now becomes.
+    const saved = target.origin === "saved" ? this.savedFor(target) : undefined;
+    const detail = target.origin === "provider" ? this.detail() : undefined;
+    this.host.discardHandoff?.();
+    this.cancelLocate();
+    ++this.searchIntent;
+    this.originMode = false;
+    this.selected = next;
+    this.message = "";
+    void controller.select(
+      next.origin === "provider" && picked && !("label" in picked)
+        ? picked
+        : {
+            providerId,
+            id: next.providerPlaceId || "manual",
+            name: next.label,
+            coordinate: next.coordinate,
+            attribution: "User-selected coordinates",
+            fetchedAt: Date.now(),
+          },
+      next.origin === "provider",
+    );
+    const chosen = saved ?? detail;
+    this.originPick = chosen;
+    this.originText = chosen
+      ? "label" in chosen
+        ? chosen.label
+        : chosen.name
+      : target.label;
+    if (chosen) void controller.chooseOrigin(chosen);
+    else {
+      try {
+        controller.setOrigin(target.coordinate, target.label);
+      } catch {
+        controller.setOrigin(target.coordinate);
+      }
+      void controller.planRoute();
+    }
+    this.invalidate();
+  }
+
+  /** A planned route the user can swap; guidance and a starting-point search keep theirs. */
+  private canSwap(): boolean {
+    return (
+      this.directions &&
+      !this.navigating &&
+      !this.choosingOrigin() &&
+      !!this.selected &&
+      !!this.state?.origin &&
+      this.state.route.phase === "ready" &&
+      !!this.state.route.value
+    );
+  }
+
   /** The user's choice among the provider's offered routes; nothing is requested again. */
   chooseRoute(id: string): void {
     if (this.navigating || !this.directions) return;
@@ -1754,6 +1867,7 @@ export class MapsScreenController {
                     : "",
               }))
             : [],
+        canSwap: this.canSwap(),
       };
     }
     if (this.navigating && selected) {
@@ -2079,6 +2193,7 @@ export class MapsScreenController {
     this.cancelLocate();
     this.originMode = false;
     this.originText = "label" in candidate ? candidate.label : candidate.name;
+    this.originPick = candidate;
     this.message = "";
     void this.ensure().chooseOrigin(candidate);
     this.invalidate();
