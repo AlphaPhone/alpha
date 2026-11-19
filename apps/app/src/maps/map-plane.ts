@@ -69,6 +69,8 @@ interface MapPlaneOptions {
   onInteraction?(): void;
   /** The centre and zoom of the visible map, each time the map settles. */
   onViewport?(center: Coordinate, zoom: number): void;
+  /** A long press (or secondary click) on the map, at the pressed point. */
+  onLongPress?(point: Coordinate): void;
   fontUrl: string;
   workerUrl: string;
   accent: string;
@@ -365,6 +367,13 @@ class MapLibrePlane {
     }
     this.map.on("movestart", (event) => {
       if (event.originalEvent) options.onInteraction?.();
+    });
+    // The WebView reports a touch long press as a context menu event.
+    this.map.on("contextmenu", (event) => {
+      if (this.destroyed || !options.onLongPress) return;
+      event.preventDefault();
+      const point = event.lngLat.wrap();
+      options.onLongPress({ latitude: point.lat, longitude: point.lng });
     });
     this.map.on("idle", () => {
       if (this.destroyed) return;
@@ -765,9 +774,9 @@ export function resolveMapColors(container: HTMLElement, colors: Record<string, 
 /** Product palette, typography and space reserved for the Alpha route sheets. The plane
  * reflows the selected place when these sheets move. */
 export class MapPlane extends MapLibrePlane {
- constructor(container:HTMLElement,region:MapBasemap,onError:()=>void,colors:Record<string,string>,onPin?:(id:string)=>void,onCopyright?:(text:string)=>void,onInteraction?:()=>void,onViewport?:(center:Coordinate,zoom:number)=>void) {
+ constructor(container:HTMLElement,region:MapBasemap,onError:()=>void,colors:Record<string,string>,onPin?:(id:string)=>void,onCopyright?:(text:string)=>void,onInteraction?:()=>void,onViewport?:(center:Coordinate,zoom:number)=>void,onLongPress?:(point:Coordinate)=>void) {
   const worldwide=region.kind==='global'||region.kind==='cloud-raster';
-  super(container,region,onError,region.kind==='global'?colors:resolveMapColors(container,colors),{fontUrl,workerUrl,accent:'#1616d8',protocol:'alpha-region',routePadding:{top:220,bottom:280,left:30,right:30},nativeRegion,nativeRequest:nativeRegionRequest,onCopyright,onInteraction,onViewport,selectionPadding:worldwide?()=>{
+  super(container,region,onError,region.kind==='global'?colors:resolveMapColors(container,colors),{fontUrl,workerUrl,accent:'#1616d8',protocol:'alpha-region',routePadding:{top:220,bottom:280,left:30,right:30},nativeRegion,nativeRequest:nativeRegionRequest,onCopyright,onInteraction,onViewport,onLongPress,selectionPadding:worldwide?()=>{
    const bounds=container.getBoundingClientRect();
    const credits=container.parentElement?.querySelector('.alpha-map-credits')?.getBoundingClientRect();
    const header=container.parentElement?.querySelector('[data-alpha-app-header="main"]')?.getBoundingClientRect();

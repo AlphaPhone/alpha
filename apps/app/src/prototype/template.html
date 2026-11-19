@@ -2484,6 +2484,9 @@
         </sc-if>
       </div>
       <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px; font-size: 14px; color: var(--mut)"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px"><path d="{{ic.pin}}"></path></svg>{{maps.pc.addr}}</div>
+      <sc-if value="{{maps.pc.hasPhone}}">
+        <div data-alpha-maps-place-phone style="display: flex; align-items: center; gap: 10px; min-height: 48px; margin-top: 4px; font-size: 14px; color: var(--mut)"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width: 18px; height: 18px; flex-shrink: 0"><path d="{{ic.phone}}"></path></svg><span style="flex-grow: 1; min-width: 0; color: var(--fg)">{{maps.pc.phone}}</span><sc-if value="{{maps.pc.call}}"><button class="tap" aria-label="Call {{maps.pc.phone}}" onClick="{{maps.pc.call}}" style="min-height: 48px; padding: 0 12px; color: var(--acct); font-weight: 600">Call</button></sc-if><sc-if value="{{maps.pc.copyPhone}}"><button class="tap" aria-label="Copy phone number" onClick="{{maps.pc.copyPhone}}" style="min-height: 48px; padding: 0 12px; color: var(--acct); font-weight: 600">Copy</button></sc-if></div>
+      </sc-if>
       <sc-if value="{{maps.pc.nativeEditing}}">
         <div style="display: flex; gap: 8px; margin-top: 14px; align-items: center">
           <input aria-label="Place name" value="{{maps.pc.nativeName}}" onChange="{{maps.pc.nativeRename}}" maxLength="300" style="min-width: 0; flex-grow: 1; height: 44px; padding: 0 14px; border: 0; border-radius: 22px; background: var(--s2); color: var(--fg); font-size: 15px">
@@ -2503,6 +2506,7 @@
         <button onClick="{{maps.dr.start}}" style="flex-grow: 1; height: 56px; border-radius: 28px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 17px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="fill: currentColor"><path d="{{ic.mapsNav}}"></path></svg>Start</button>
         <sc-if value="{{maps.dr.shareEta}}"><button class="ib" aria-label="{{maps.dr.shareLabel}}" onClick="{{maps.dr.shareEta}}" style="width: 56px; height: 56px; border-radius: 28px; background: var(--s2)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.share}}"></path></svg></button></sc-if>
       </div>
+      <sc-if value="{{maps.dr.hasSteps}}"><details data-alpha-maps-steps style="margin-top: 14px"><summary style="min-height: 48px; align-content: center; font-size: 15px; font-weight: 600; cursor: pointer">Steps</summary><ol style="list-style: none; margin: 0; padding: 0"><sc-for list="{{maps.dr.steps}}" as="step"><li style="display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px"><span style="min-width: 0">{{step.text}}</span><span style="flex-shrink: 0; color: var(--mut)">{{step.distance}}</span></li></sc-for></ol></details></sc-if>
     </div>
   </sc-if>
 

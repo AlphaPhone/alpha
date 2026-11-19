@@ -107,6 +107,8 @@ async function fixture({MapsScreenController,MapsController,SavedPlaces,Backgrou
  const background=new BackgroundNavigation(bridge,()=>native);
  const backgroundPort={
   active:()=>background.active(),start:(...args)=>background.start(...args),stop:()=>background.stop(),
+  // Maps stays on screen in these schedules, so arrival ends the session as Stop does.
+  arrive:()=>background.stop(),
   update(title,text){
    const current=background.session;
    if(current&&(current.title!==title||current.text!==text)){

@@ -37,6 +37,8 @@ import { cloudServiceName } from '../runtime/cloud-protocol';
 import { coordinate, place, type Place, type TravelMode } from '../maps/contracts';
 import type { MapsCardPlace } from '../ui/components/chat/message-maps-parser';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
+import {copySelectedText} from '../runtime/text-share';
+import {isMvpView} from './mvp-features';
 
 type Bag = Record<string, any>;
 const PIN = 'M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0zM15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z';
@@ -114,7 +116,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // Navigation speech is deferred; the assistant owns its separate speech lifecycle.
     () => false,
   );
-  const navigationTransport=registerPlugin<NavigationBridge & {consumeNavigationOpen():Promise<{open:boolean}>;clearNavigationOpen():Promise<unknown>}>('AlphaMapsTransport');
+  const navigationTransport=registerPlugin<NavigationBridge & {consumeNavigationOpen():Promise<{open:boolean}>;clearNavigationOpen():Promise<unknown>;navigationArrived(input:{title:string;text:string}):Promise<{shown:boolean}>}>('AlphaMapsTransport');
   const background=new BackgroundNavigation(navigationTransport,()=>Capacitor.isNativePlatform());
   // Alpha's navigation sheet has no Reroute control; the shared off-route copy names one. Point only
   // at the End control that remains (the screen-off notification keeps its own Stop action).
@@ -125,6 +127,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     start:(title:string,text:string,onStopped:(reason:string)=>void)=>background.start(title,offRouteCopy(text),onStopped),
     update:(title:string,text:string)=>background.update(title,offRouteCopy(text)),
     stop:()=>background.stop(),
+    // Arrival with Maps off screen: the owner is told where guidance ended before the ongoing
+    // notification goes. Native posts it only for the session this renderer owns.
+    arrive:async(destination:string)=>{
+      // The notice is best effort; the session ends either way.
+      if(background.active()&&!active())
+        try{await navigationTransport.navigationArrived({title:destination?`Arrived at ${locationText(destination)}`:'Arrived',text:'Navigation ended.'});}catch{}
+      await background.stop();
+    },
   };
   // A Cloud read already made or under way for this account is not repeated: a second read would
   // uninstall the provider an open Maps search is using. An account change retires it first (cloud-maps.ts).
@@ -430,7 +440,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
           mapObserver?.disconnect();plane?.destroy();mapFailed=false;mapCopyright='';planeElement=element;planeBasemap=basemap;const generation=++mapGeneration;delete element.dataset.mapReady;delete element.dataset.mapError;
           const current=()=>generation===mapGeneration&&planeElement===element&&!disposed&&!!api?.isActive();
           try{
-            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();},(center,zoom)=>{if(current())screen.setViewport(center,zoom);});
+            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();},(center,zoom)=>{if(current())screen.setViewport(center,zoom);},point=>{if(current()){retireSearch();screen.dropPin(point);}});
             mapObserver=new MutationObserver(()=>{if(current())screen.setMapState(element.dataset.mapError ? 'error' : element.dataset.mapReady === 'true' ? 'ready' : 'loading');});
             mapObserver.observe(element,{attributes:true,attributeFilter:['data-map-ready','data-map-error']});
           }catch{mapFailed=true;element.replaceChildren();queueMicrotask(()=>{if(current())screen.setMapState('error');});}
@@ -475,10 +485,15 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     const place = view.place;
     if (place) {
       // Provider detail for this exact place: opening hours, phone and website when the
-      // source has them. Phone is shown as text; calling stays deferred with Phone.
+      // source has them. Call opens Phone with the number filled in where Phone exists;
+      // nothing dials until the owner does it there.
+      const phone = place.phone, dial = place.phoneHref?.slice('tel:'.length);
       data.pc = {
         name: locationText(place.name), meta: place.meta==='Coordinates'?'Selected location':place.meta, addr: locationText(place.address),
         hasHours: !!place.hours, openTxt: 'Hours', openCss: '', hoursTxt: place.hours || '',
+        hasPhone: !!phone, phone: phone || '',
+        call: dial && isMvpView('phone') ? () => {if(active())currentApi.open('phone',{prefill:dial});} : undefined,
+        copyPhone: phone && !restrictedPlace ? () => {if(active())void copySelectedText(phone).then(()=>currentApi.toast('Number copied'),()=>currentApi.toast('Couldn’t copy',ERROR_TOAST));} : undefined,
         hasWeb: !!place.website, web: () => screen.openWebsite(),
         canDir: place.canDirections && placeSourceVerified, min: 'Directions', saved: place.saved,
         saveLabel: place.saved ? 'Remove from saved' : 'Save', starCss: place.saved ? 'color:var(--acct)' : '', starFill: place.saved ? 'fill:currentColor' : '',
@@ -507,6 +522,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
        // The provider's ordered route choice (recommended first); choosing requests nothing.
        hasRoutes:directions.routes.length>0,
        routes:directions.routes.map(choice=>({label:`${choice.label}, ${choice.duration}, ${choice.meta}`,t:choice.label,sub:`${choice.duration} · ${choice.meta}`,on:choice.selected,css:choice.selected?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>{retireSearch();screen.chooseRoute(choice.id);}})),
+       hasSteps:directions.steps.length>0,steps:directions.steps.map(step=>({text:step.instruction,distance:step.distance})),
        start:()=>{retireSearch();screen.start();},
        nav:{going:!nav?.arrived,arrived:!!nav?.arrived,dist:nav?.distance||'Locating…',street:nav?.instruction||'Waiting for location',icon:nav?.maneuverIcon||PIN,hasThen:!!nav?.following,thenD:nav?.following?.icon||'',thenText:nav?.following?.text||'',
         left:nav?.remainingTime||'Guidance',meta:nav?.remaining&&nav.remaining===nav.meta?'':nav?.meta||'',remaining:nav?.remaining||'',
