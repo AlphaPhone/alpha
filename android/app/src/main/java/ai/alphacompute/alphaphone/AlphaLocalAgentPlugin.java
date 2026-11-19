@@ -702,6 +702,13 @@ private static final class ResidentAttachDiagnostic {
   // Pseudonymize secrets and PII using the pinned upstream runtime.
   env.put("ELIZA_SECRET_SWAP_ENABLED","true");
   env.put("ELIZA_PII_SWAP_ENABLED","true");
+  // A phone conversation has one owner, so a contact or credential keeps its reference from turn
+  // to turn. With a fresh reference each turn no two requests shared a prefix, and the hosted
+  // model's per-minute limit counted the whole conversation again on every call.
+  env.put("ELIZA_SECRET_SWAP_STABLE_REFERENCES","true");
+  // The hosted model reserves a call's output cap against that limit before the call runs. 4096
+  // holds a long note or message in one tool call; the runtime's 8192 only stops a runaway.
+  env.put("ELIZA_PLANNER_MAX_TOKENS","4096");
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");
