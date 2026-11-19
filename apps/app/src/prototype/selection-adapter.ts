@@ -4,6 +4,7 @@ import {AttachmentNotice} from '../ui/mailbox/drafts-controller';
 import {registerPlugin} from '../platform-plugins';
 import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
 import type {Source} from './note-source-adapter';
+import type {ViewContext} from '../runtime/alpha-client';
 const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promise<MailAttachment & {sha256:string;size:number;sourceReferenceVersion?:1}>;retainSourceReference(input:{selectionId:string;sha256:string}):Promise<{reference?:string}>}>('AlphaMailAttachments');
 import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
@@ -65,7 +66,35 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   };
   const refresh = () => selectedApi?.setView('files', { nativeSelectionEpoch: epoch });
   /** The open selection's exact identity: its picker capability, the epoch it was accepted at and its rename count. */
-  const publish = () => window.dispatchEvent(new CustomEvent('alpha-selected-context', { detail: current?.result.selectionId && current.result.status === 'selected' ? { kind: 'document', id: current.result.selectionId, revision: String(current.epoch) + (current.renames ? '.' + current.renames : '') } : null }));
+  const selectionContext = (selection: Selection | undefined) => selection?.result.selectionId && selection.result.status === 'selected'
+    ? {kind:'document',id:selection.result.selectionId,revision:String(selection.epoch)+(selection.renames ? '.'+selection.renames : '')}
+    : null;
+  const publish = () => window.dispatchEvent(new CustomEvent('alpha-selected-context', {detail:selectionContext(current)}));
+
+  async function readSelected(selected:Selection,stillCurrent:()=>boolean) {
+    const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!}).catch(error=>{
+      if(error?.code==='too-large')throw new SourceUnavailableError('This file is too large to link as a source. Turn off the source link to ask without one.');
+      throw error;
+    });
+    const checked=await reviewMailAttachment(file);
+    if(!stillCurrent()||checked.sha256!==file.sha256||checked.size!==file.size||
+       file.name!==(selected.result.name||'Selected document')||file.mimeType!==(selected.result.mimeType||'application/octet-stream')||
+       (file.mimeType==='text/plain'&&selected.text!==undefined&&checked.text?.replace(/^\uFEFF/,'')!==selected.text))
+      throw Error('The file changed. Reopen it before attaching.');
+    return file;
+  }
+
+  views.files.readOpenTextForVoice = async (expected:ViewContext['selectedObject'],assertCurrent:()=>void):Promise<File|undefined> => {
+    const selected=current,identity=selectionContext(selected);
+    if(!selected||!identity||expected?.kind!==identity.kind||expected.id!==identity.id||expected.revision!==identity.revision||
+       selected.result.mimeType!=='text/plain'||!selected.text?.trim()||selected.excerptOnly)return;
+    const stillOpen=()=>selected===current&&selectedApi?.get('files').open===marker&&!document.hidden;
+    assertCurrent();
+    if(!stillOpen())return;
+    const file=await readSelected(selected,stillOpen);
+    assertCurrent();
+    return decodedFile(file);
+  };
   const open = async (api: Bag, selection:Selection, download=false) => {
     const selectionId = selection.result.selectionId;
     const active=()=>current===selection&&api.isActive()&&!document.hidden;
@@ -169,19 +198,6 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const canAsk=selected.result.status==='selected'&&(!!selected.text?.trim()||!!image||!!selected.pdf?.image);
       const questionCurrent=()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!document.hidden;
       const linkable = !!selected.result.selectionId && ['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime);
-      const readSelected = async () => {
-        const file = await sourceFiles.readSelected({selectionId:selected.result.selectionId!}).catch(error => {
-          if (error?.code === 'too-large') throw new SourceUnavailableError('This file is too large to link as a source. Turn off the source link to ask without one.');
-          throw error;
-        });
-        const checked = await reviewMailAttachment(file);
-        if (!questionCurrent() || checked.sha256 !== file.sha256 || checked.size !== file.size ||
-            file.name !== name || file.mimeType !== mime ||
-            (mime === 'text/plain' && selected.text !== undefined && checked.text?.replace(/^\uFEFF/, '') !== selected.text)) {
-          throw Error('The file changed. Reopen it before attaching.');
-        }
-        return file;
-      };
       const link = async (file: Awaited<ReturnType<typeof readSelected>>): Promise<Source> => {
         const reference = file.sourceReferenceVersion === 1
           ? (await sourceFiles.retainSourceReference({selectionId:selected.result.selectionId!,sha256:file.sha256})).reference
@@ -196,7 +212,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           name: selected.pdf ? name+' · page '+(selected.pdf.page+1) : name,
           text:selected.text??'', question, current:()=>current() && questionCurrent(),
           validate:text=>!sensitiveReadingText(text), compose,
-          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>link(await readSelected())} : {}),
+          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>link(await readSelected(selected,questionCurrent))} : {}),
           ...(image||selected.pdf ? {image:async(signal:AbortSignal)=>(await fetch(image||selected.pdf!.image,{signal})).blob()} : {}),
         });
       };
@@ -212,7 +228,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           current:questionCurrent, edit:editExcerpt,
           read:async stillCurrent=>{
             try {
-              const file=await readSelected();
+              const file=await readSelected(selected,questionCurrent);
               if (!stillCurrent()) return undefined;
               return decodedFile(file);
             } catch(error) {
@@ -248,7 +264,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
           canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg'),
-          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
+          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected(selected,questionCurrent)),questionCurrent),
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: mime + ' · selected on this device', d: '',
           isPages: !!selected.pdf||rows.length>0, pages: selected.pdf ? [] : pages, isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,

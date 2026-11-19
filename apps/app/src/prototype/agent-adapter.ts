@@ -2014,6 +2014,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     try{
+      // Treat a spoken question about the open file as a one-turn attachment request.
+      // Ordinary voice turns continue to send only the opaque selected-object observation.
+      const asksAboutFile=/^(?:(?:hey alpha|alpha|please)[,\s]+)*(?:(?:can|could|would) you (?:please )?)?(?:(?:summari[sz]e|explain|read|translate|tell me about)|(?:what|which|who|where|when|why|how)\b[^.!?\n"“”]*\b(?:according to|based on|from|in|does|is|contains?))\s+(?:this|the (?:open|current|selected)) (?:file|document)\b/iu.test(text.trim());
+      const file:File|undefined=input.context.view==='files'&&asksAboutFile
+        ?await views.files.readOpenTextForVoice?.(input.context.selectedObject,current):undefined;
+      const images=file?await encodeChatAttachments([file]):undefined;
+      current();
       // A turn sent at a pause and taken back unheard when the user kept speaking: its local user
       // message and streamed draft leave the conversation view, and this turn carries the joined text.
       const replaced=input.supersedes&&this.voiceTurnMessages?.turnId===input.supersedes?this.voiceTurnMessages.ids:[];
@@ -2032,7 +2039,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       try{reply=await alphaClient.send(text,(value,frame)=>{current();streamed=true;
         if(frame?.provisional!==false)provisionalSeen=true;
         else if(input.onText&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
-        this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal});}
+        this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal,...(images?{images}:{})});}
       finally{batchVoiceProgressEvents.removeEventListener('progress',progress);batchVoiceReplyEvents.removeEventListener('reply',replyStarted);}
       input.onReplyStarted?.();
       current();const identity=reply.messageBinding;
