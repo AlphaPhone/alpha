@@ -9,7 +9,6 @@ const switchRow={display:'flex',flexDirection:'row',alignItems:'center',justifyC
 const switchInput={width:22,height:22,flex:'none',padding:0};
 import {registerPlugin} from '../platform-plugins';
 import {openDomainRecovery} from '../browser/domain-recovery';
-import {browserDevProfile} from '../browser/dev-profile';
 import {browserScreenLocked} from '../browser/screen-locked';
 import { holdPhoneInert } from './modal-inert';
 import { browserHostedResults } from '../browser/hosted-results';
@@ -88,7 +87,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 		connectionController.subscribe,
 		connectionController.getSnapshot,
 	);
-	const interactiveDevelopment=devSurfacesEnabled&&browserDevProfile&&JSON.parse(localStorage.getItem('alpha.connection.selection.v1')||'null')?.kind==='development';
+	const interactiveDevelopment=connectionController.isDevelopmentConnection();
 	const [nativeReady,setNativeReady]=useState(false),[nativeSourceProtocol,setNativeSourceProtocol]=useState(false);
     // Agent-advertised features: native evening loops and lapsed-source pausing come from patched plugin-workflow.
     const [features,setFeatures]=useState<Pick<DigestCapabilities,'nativeEvening'|'sourcePause'|'dossier'>>({nativeEvening:false,sourcePause:false,dossier:false});
@@ -258,6 +257,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 	};
 	useEffect(() => {
 		const selected = connectionController.getWorkflowClient();
+		const development = connectionController.isDevelopmentConnection();
 		binding.current?.controller.abort();
         if (mutationBusy.current) {mutationBusy.current = null; setBusy(false);}
         questionClose.current?.();
@@ -288,7 +288,6 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 					));
 			if (disposed) return;
             const client=selected.client.hosted();let inbox:ResultInbox;
-            const development=devSurfacesEnabled&&browserDevProfile&&JSON.parse(localStorage.getItem('alpha.connection.selection.v1')||'null')?.kind==='development';
             const storage=development?await (await import('../browser/digest-storage')).browserDigestStore(session,()=>!disposed&&connectionController.getSnapshot().session?.sessionId===session.sessionId,controller.signal):devSurfacesEnabled&&!isAndroid&&browserLocalAgentEnabled&&connection.kind==='resident'?(await import('./local-agent-storage')).developmentDigestStore():secureConnectionStore;
             const notices:HostedResultBinding={scope:slot.slice('hosted-digests:v1:'.length),origin:session.origin,ownerId:session.ownerId,agentId:session.agentId,current:()=>!disposed&&binding.current?.sessionId===session.sessionId&&connectionController.getSnapshot().session?.sessionId===session.sessionId,revalidate:signal=>client.available(signal),history:()=>inbox.history()};
             let ready=false;

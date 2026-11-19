@@ -70,7 +70,7 @@ test('reviewed Files and Photos send exact bytes only on explicit attachment-onl
    const sheet=await picker.boundingBox(),screen=await page.locator('[data-screen]').boundingBox();
    return sheet&&screen?Math.abs(sheet.y+sheet.height-screen.y-screen.height):Infinity;
   }).toBeLessThan(1);
-  expect(await picker.evaluate(el=>{
+  await expect.poll(()=>picker.evaluate(el=>{
    const rect=el.getBoundingClientRect();
    return el.contains(document.elementFromPoint(rect.x+rect.width/2,rect.bottom-2));
   })).toBe(true);
