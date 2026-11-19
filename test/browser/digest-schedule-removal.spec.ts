@@ -45,12 +45,13 @@ test('Remove on a digest schedule opens its workflow with the reviewed removal, 
  const schedules=panel(page).getByRole('region',{name:'Digest schedules',exact:true});
  await expect(schedules).toContainText('Morning at 07:00 (UTC)');
  await schedules.screenshot({path:info.outputPath('digest-schedule-remove-control.png'),animations:'disabled'});
- await schedules.getByRole('button',{name:'Remove Morning schedule',exact:true}).click();
+ await schedules.getByRole('button',{name:'Remove Morning schedule at 07:00',exact:true}).click();
  // The panel closes and the digest's workflow opens with its removal review; nothing has been sent.
  await expect(panel(page)).toHaveCount(0);
  await expect(page.locator('html')).toHaveAttribute('data-active-view','workflows');
  await expect(page.getByText('Keeps history; stops future runs.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).digestRemovalFixture.lifecycle)).toEqual([]);
+ await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeFocused();
  await page.screenshot({path:info.outputPath('digest-schedule-removal-review.png'),animations:'disabled'});
  await page.getByRole('button',{name:'Remove',exact:true}).click();
  await expect(page.getByText('Workflow removed; execution history retained.')).toBeVisible();
