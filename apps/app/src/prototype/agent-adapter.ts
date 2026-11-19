@@ -38,6 +38,7 @@ import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {captureSelectionOpen} from './context-selection';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
@@ -828,7 +829,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if (view === 'maps') providerSelection = getMapsSelectedObject();
     if (view === 'photos') {
       const state = shell.vget('photos');
-      if (state.open === state.nativePhotoSelection?.id) providerSelection = state.nativePhotoSelection;
+      if (captureSelectionOpen(state.open, state.nativePhotoSelection)) providerSelection = state.nativePhotoSelection;
     }
     if (view === 'inbox') {
       const state = shell.vget('inbox');
