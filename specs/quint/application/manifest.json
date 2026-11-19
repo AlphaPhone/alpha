@@ -1846,6 +1846,7 @@
       "hiddenReplyCannotRepopulateTest",
       "resumedPendingReadQueuesCurrentTest",
       "oldHiddenFailureIsQuietTest",
+      "failedTrashWaitsForRetryTest",
       "disposedReplyDoesNotPublishTest"
     ],
     "sources": [
