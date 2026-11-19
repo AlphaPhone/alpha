@@ -48,7 +48,7 @@ public final class AlphaInCallService extends InCallService {
     static final String ONGOING_CHANNEL_ID = "alpha-phone-calls-ongoing";
     static final String CHANNEL_NAME = "Phone calls", ONGOING_CHANNEL_NAME = "Calls in progress";
     static final String CHANNEL_DESCRIPTION = "Incoming calls. Your ringtone plays from the phone, not from this notice.",
-            ONGOING_CHANNEL_DESCRIPTION = "Calls you are making, on or holding. Shown without sound.";
+            ONGOING_CHANNEL_DESCRIPTION = "Calls you are dialing, on, or have on hold. Shown without sound.";
     /** Distinguishes notice actions per call; the call screen reads only the extras. */
     static final String CALL_SCHEME = "alphaphone-call";
     /** Status-bar icon of call notices: Alpha's monochrome handset, tinted by Android. */
