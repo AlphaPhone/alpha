@@ -24,7 +24,7 @@ import { MOBILE_SHELL_CANVAS_WIDTH, MOBILE_SHELL_EDGE, MOBILE_SHELL_HOME_BAR_TOP
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
-import { askedDraftPlaced, draftAdopted, draftStageFit, draftUndone, emptyDraft, typed } from "../runtime/message-draft";
+import { askedDraftPlaced, discardAskedDraft, draftAdopted, draftStageFit, draftUndone, emptyDraft, typed } from "../runtime/message-draft";
 import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWeek, visibleCalendarDays } from "./calendar-days";
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
 import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
@@ -751,10 +751,12 @@ function msgSubmit(api, pid) {
 }
 /* Send on the draft bubble (AC-15): the same Send, then the bubble shows as sent and Alpha notes it quietly. */
 function msgBubbleSend(api, pid) {
+  var asked = msgDraft(api.get("messages"), pid).draft === "asked";
   var id = VIEWS.messages.submit(api, pid); if (!id) return;
   api.set({ sentDraft: id });
   api.later(function () { if (api.get("messages").sentDraft === id) api.set({ sentDraft: null }); }, 1200);
   api.note("Sent to " + msgWho(api, pid).name);
+  if (asked && api.get("messages").thread === pid) api.toPerson();
 }
 function msgOpenThread(api, pid, local) {
   var st = api.get("messages"); var u = Object.assign({}, st.unread); delete u[pid];
@@ -996,9 +998,11 @@ registerView("messages", {
         name: w.name, ini: w.ini, bubbles: bubbles, typing: st.typing === tp,
         who: function () { if (api.person(tp) || messagePeople(api).some(function (p) { return p.id === tp; })) api.open("contacts", { open: tp }); else api.open("contacts", { add: true }); },
         call: function () { api.open("phone", { call: tp }); },
-        draftBubble: open && by && d.text.trim() ? {
-          by: by, alpha: by === "alpha", sent: undefined, text: d.text, canUndo: !!d.undo, canAct: true,
-          label: by === "alpha" ? api.name + "'s draft · not sent" : "Your draft", aria: by === "alpha" ? api.name + "'s draft, not sent" : "Your draft, not sent",
+        draftBubble: open && by && (by === "alpha" || d.text.trim()) ? {
+          by: by, alpha: by === "alpha", sent: undefined, text: d.text, canUndo: false, canAct: true, showText: by !== "alpha", ownerEdit: by !== "alpha", sendDisabled: !d.text.trim(),
+          label: by === "alpha" ? "To " + w.name : "Your draft", aria: by === "alpha" ? "Message draft to " + w.name : "Your draft, not sent",
+          onText: function (event) { if (api.get("messages").thread === tp) msgSetDraft(api, tp, Object.assign({}, msgDraft(api.get("messages"), tp), {text:event.target.value})); },
+          discard: function () { if (api.get("messages").thread === tp) msgSetDraft(api, tp, discardAskedDraft(msgDraft(api.get("messages"), tp))); },
           edit: function () { msgSetDraft(api, tp, draftAdopted(msgDraft(api.get("messages"), tp))); api.toPerson(); },
           send: function () { msgBubbleSend(api, tp); },
           undo: function () { msgSetDraft(api, tp, draftUndone(msgDraft(api.get("messages"), tp))); }

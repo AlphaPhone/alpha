@@ -187,13 +187,13 @@ test.describe('Alpha image: a text to a number, a draft, and Contacts from chat 
     await expect(page.locator('[data-alpha-messages-title]')).toHaveCount(0);
     await present(page);
     await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Carmen Ruiz');
-    await expect(page.getByRole('textbox', {name: 'Text Carmen', exact: true})).toHaveValue('See you at 7');
+    await expect(page.getByRole('textbox', {name: 'Message draft', exact: true})).toHaveValue('See you at 7');
     // A number with no conversation yet: a new message addressed to it.
     outcome = await execute(page, draft('+15550100177'), 'messages');
     expect(outcome.result).toEqual({kind: 'sms-compose', status: 'drafted'});
     await present(page);
     await expect(page.locator('[data-alpha-messages-recipients]')).toHaveValue('+15550100177');
-    await expect(page.getByRole('group', {name: 'Assistant controls'}).getByRole('textbox')).toHaveValue('See you at 7');
+    await expect(page.getByRole('textbox', {name:'Message draft',exact:true})).toHaveValue('See you at 7');
     await expect.poll(() => page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).some(([method]) => method === 'sendSms'))).toBe(false);
     expect(await bridgeEffects(page)).toEqual([]);
   });
