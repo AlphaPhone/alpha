@@ -27,6 +27,7 @@ import {refusalText} from '../ui/utils/native-refusal';
 import {calendarEventLinks,calendarInvitationPending,calendarRepeatText} from './calendar-event-detail';
 import {DailyApps} from '../daily';
 import {DeferredCalendarDeletes,calendarDeletionHides} from './calendar-deferred-delete';
+import {installCalendarListBack,presentCalendarList} from './calendar-schedule';
 import {accessibilityTimeoutScale} from '../runtime/accessibility-timeout';
 import type {LifeOpsCalendarEvent} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
 type Bag=Record<string,any>;
@@ -80,6 +81,7 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
  p.api=function(key:string){const api=originalApi.call(this,key);if(key!=='maps')return api;return {...api,checkCanonicalCalendarReturn:async(origin:CanonicalMapsEventOrigin,signal:AbortSignal)=>{const target=port();if(owner!==this||!this.live||!controller||!target?.current()||mapBinding(target)!==origin.binding||deviceCalendarScope(this))return 'unknown';return controller.verifyEventReturn(origin,signal);}};};
  // Source selection is made in Settings and survives the existing view reset.
  views.calendar.persist=Array.from(new Set([...(views.calendar.persist??[]),'calendarAuthority']));
+ installCalendarListBack(views);
  const markerKey=async(ownerKey:string)=>'alpha.calendar.retention.v1.'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(ownerKey)))).map(n=>n.toString(16).padStart(2,'0')).join('');
  const retention=preservation??legacyCalendarPreservation({
   has:async(ownerKey,fingerprint,signal)=>{
@@ -261,6 +263,9 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   const notConnected=!legacy&&out.calendarSourceText==='Not connected',openCalendarSettings=()=>{const shell=owner;if(shell?.live)shell.openView('settings',{page:'calendar'});};
   out.nativeStatusLabel=model?.status==='ready'&&!unresolvedCalendarSources?'':out.calendarSourceText;out.nativeStatusRetry=notConnected?openCalendarSettings:()=>refresh(true);out.nativeStatusAria=notConnected?'Open Calendar settings':'Retry calendar and reminders';out.nativeStatusOpensSettings=notConnected;out.nativeStatusRetries=!notConnected;out.newEvent=out.addAt=()=>legacy?api.toast('Agent Calendar only'):newForm(api);
   out.calendarAuthorityChoices=choices(state,api);
+  // Schedule and search list the rows already read (calendar-schedule.ts); a date picked from the picker shows that day.
+  Object.assign(out,presentCalendarList(state,api,visibleRows,range(state),legacy?!!model?.legacy?.readable:model?.status==='ready'&&!model.error&&!!model.feed&&!unresolvedCalendarSources,out.calendarSourceText));
+  if(out.scheduleMode&&Array.isArray(out.mdays))out.mdays=out.mdays.map((m:Bag)=>({...m,pick:()=>{api.set({calendarMode:'day'});m.pick?.();}}));
   out.canConfirmCalendarTransition=model?.status==='transition-required';
   if(out.canConfirmCalendarTransition){
    const shell=owner,calendar=controller,target=port(),fingerprint=model?.legacy?.fingerprint,settingsPage=shell?.vget('settings').page;
@@ -307,7 +312,9 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
     // The host refuses deletes and declines for a managed Google calendar; say so and offer Google Calendar.
     if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline this invitation in Google Calendar.':'Delete this event in Google Calendar.';}}
   }
-  if(out.ev){out.ev.canModify=!out.ev.readOnly;out.ev.sourceLabel=out.ev.readOnly?out.ev.readOnlyLabel:out.ev.calName;}
+  if(out.ev){out.ev.canModify=!out.ev.readOnly;out.ev.sourceLabel=out.ev.readOnly?out.ev.readOnlyLabel:out.ev.calName;
+   // Schedule always runs from today: closing an event opened from it returns there.
+   if(out.scheduleMode&&typeof out.ev.close==='function'){const close=out.ev.close;out.ev.close=()=>{close();api.set({day:0});};}}
   if(state.form&&state.form.cal!=='alpha-reminders'&&out.f){const f=state.form;
    const reminderSource=out.f.cals?.filter((c:Bag)=>c.domain==='reminders')??[];out.f.cals=[...cals.filter((c:Bag)=>c.writable).map(c=>({...c,on:f.cal===c.id,pick:()=>api.set({form:{...f,cal:c.id}})})),...reminderSource];out.f.alerts=null;out.f.video=false;out.f.hasVideo=false;out.f.toggleVideo=()=>api.toast('Use a meeting action');
    const original=model?.feed?.events.find(e=>calendarEventKey(e)===f.canonicalEventKey),recurring=!!(original?.recurringEventId||original?.recurrence?.length),managedSeries=recurring&&managedGoogleSource(original);

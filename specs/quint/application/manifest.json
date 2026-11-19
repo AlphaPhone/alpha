@@ -1045,7 +1045,8 @@
       "apps/app/src/prototype/agent-calendar-adapter.ts",
       "apps/app/src/runtime/agent-calendar.ts",
       "apps/app/src/runtime/agent-calendar-view.ts",
-      "apps/app/src/runtime/home-calendar-selection.ts"
+      "apps/app/src/runtime/home-calendar-selection.ts",
+      "apps/app/src/prototype/calendar-schedule.ts"
     ],
     "stateMapping": {
       "view/day/month/search/menu/deleteSheet/chat/openEvent/openDay": "Calendar persistent view choice and transient Back ordering",
@@ -1059,7 +1060,8 @@
       "Calendar writes are modeled in CalendarSync and CalendarDeviceWrites. This module tracks presentation/read/draft state and never gives a restored form provider authority.",
       "Cached rows may remain while a broader/narrower range is loading. Committed-result freshness and owner isolation are checked independently of cache presentation.",
       "The shell lowers the conversation before the view handles Back; the guest picker inside the form is not a separate layer here.",
-      "The removed direct Google view adapter is superseded by the canonical AgentCalendar controller and presentation adapter. The older Android/browser-local Calendar adapter remains an explicitly selected source. This model abstracts their common owner/range/form guards and does not equate their provider data models."
+      "The removed direct Google view adapter is superseded by the canonical AgentCalendar controller and presentation adapter. The older Android/browser-local Calendar adapter remains an explicitly selected source. This model abstracts their common owner/range/form guards and does not equate their provider data models.",
+      "Agent Calendar's Day and Schedule views and its event search are calendar-schedule.ts. The phone offers the day and schedule views (week and month are wide-canvas columns and the date picker). Search filters the window already read and names its dates; it issues no read of its own, so the model's search range change is a re-presentation of that window, not a provider query."
     ],
     "invariants": [
       "ScheduleStartsToday",
