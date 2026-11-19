@@ -211,6 +211,8 @@ test('every Settings row is a control backed by real state, with no fixture valu
   await expect(current(page).getByRole('button',{name:'Developer',exact:true})).toHaveCount(0);
  }
  await openSettings(page,'Privacy');
+ // The product build names where speech goes (SET-17).
+ await expect(current(page).getByText('Voice',{exact:true})).toBeVisible();
  const review=()=>current(page).getByRole('switch',{name:'Ask before Alpha acts',exact:true});
  await expect(review()).toHaveAttribute('aria-checked','false');
  await review().click();await expect(review()).toHaveAttribute('aria-checked','true');
