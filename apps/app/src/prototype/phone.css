@@ -613,10 +613,28 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > 
 }
 
 /* Keep portrait capture controls above the assistant on short windows. */
+/* The Video/Photo switch shows its choice by colour and dot, never a focus box: no ring after a
+ * tap or click; a keyboard user still gets a thin underline under the focused mode's label. */
+[data-alpha-camera-mode]:focus{outline:none}
+[data-alpha-camera-mode]:focus-visible{outline:none;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px}
 html:not(.alpha-landscape) [data-alpha-camera="capture"]{top:min(712px,calc(100% - var(--alpha-dock-clearance,102px) - 106px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="modes"]{top:min(656px,calc(100% - var(--alpha-dock-clearance,102px) - 162px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="zoom"]{top:min(585px,calc(100% - var(--alpha-dock-clearance,102px) - 217px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="viewfinder"]{height:min(549px,calc(100% - var(--alpha-dock-clearance,102px) - 258px))!important}
+/* Camera with the chat open (the sheet stays where it was when Camera opened): Camera is laid out in
+ * the space above the sheet, the way a comms view's stage is (docs/agentic-comms.md AC-02). The live
+ * preview fills that space and the zoom, mode and capture rows sit over its lower edge, so the
+ * viewfinder stays visible and the shutter, mode switch and flip are reachable above the sheet, never
+ * under it. The dock is inside the sheet there, so nothing in Camera reserves room for it. */
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){bottom:var(--alpha-sheet-height,0px)!important;--alpha-dock-clearance:0px;transition:bottom .42s cubic-bezier(.22,1,.36,1)}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-dragging="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){transition:none}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="viewfinder"]{top:0!important;bottom:0!important;height:auto!important}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="capture"]{top:calc(100% - 98px)!important;z-index:2}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="modes"]{top:calc(100% - 146px)!important;z-index:2}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="zoom"]{top:calc(100% - 194px)!important}
+/* A shade under the rows keeps the white controls legible over a bright preview. */
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:160px;background:linear-gradient(transparent,rgba(0,0,0,.55));pointer-events:none}
+@media (prefers-reduced-motion:reduce){html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){transition:none}}
 
 /* Camera in landscape: the portrait stack (viewfinder, zoom, modes, capture row) is 800px tall and
  * would leave every capture control below the screen. The capture controls move to a column on the
