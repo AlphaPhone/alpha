@@ -42,7 +42,8 @@ import { toSpeakableText } from '../ui/voice/voice-chat-playback.ts';
 import { connectionController } from '../runtime/connection-ui';
 import { workflowReplyText } from '../runtime/action-message-presentation';
 import { NoteRecorderSession, addSavedNoteTranscript, formatRecordingClock, type CanonicalNoteSaveIntent, type SavedNoteAudio } from './note-recorder';
-import { createNoteRecorderDriver } from '../runtime/note-recorder-driver';
+import { createNoteRecorderDriver, noteRecordingNotificationOpen } from '../runtime/note-recorder-driver';
+import { createMapsNotificationOpen } from '../runtime/maps-notification-open';
 import { setNotesRecorderControl, type NotesRecordStart } from './notes-recorder-control';
 const voiceServiceName = () => connectionController.getSnapshot().residentInference==='direct'?'Cartesia':cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
 // Reading a note aloud sends only that note's text, never recordings or replies, so Notes names it.
@@ -1618,10 +1619,30 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   });
   const noteRouteChanged = () => noteRecorder.recheckOwner();
   window.addEventListener(voicePreferenceKeys().event, noteRouteChanged);
+  // A tap on Android's recording notification opens Notes, which adopts the open recording again.
+  // The tap waits natively, as a Maps notification tap does, until the launcher can show Notes.
+  let recordingShell: Bag | undefined;
+  const recordingNotificationOpen = createMapsNotificationOpen({
+    ready: () => {
+      const state = recordingShell?.S?.();
+      return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaVoiceCloud') && !!recordingShell?.live && !document.hidden &&
+        !recordingShell.pageSuspended && !recordingShell.props?.assistantSurface && !connectionController.getSnapshot().open &&
+        state?.screen === 'home' && !state.secure && !state.shade;
+    },
+    consume: noteRecordingNotificationOpen.consume,
+    clear: noteRecordingNotificationOpen.clear,
+    open: () => { if (recordingShell!.S().view !== 'notes') recordingShell!.openView('notes'); },
+  });
+  const renderVals = Component.prototype.renderVals;
+  Component.prototype.renderVals = function (this: Bag, ...args: unknown[]) { recordingShell = this; queueMicrotask(() => void recordingNotificationOpen.flush()); return renderVals.apply(this, args); };
+  const requestRecordingOpen = () => recordingNotificationOpen.request();
+  const cancelRecordingOpen = () => recordingNotificationOpen.cancel();
+  window.addEventListener('alpha:note-recording-open', requestRecordingOpen);
+  window.addEventListener('launcher-home', cancelRecordingOpen);
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', pagehide);
   const unmount = Component.prototype.componentWillUnmount;
-  Component.prototype.componentWillUnmount = function () { cancelSavedTranscription();noteRealtimeCancellation(conversationVoice,'component-unmounted');window.removeEventListener('alpha:note-reading',noteReadingChanged);window.removeEventListener(voicePreferenceKeys().event,noteRouteChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
+  Component.prototype.componentWillUnmount = function () { cancelSavedTranscription();noteRealtimeCancellation(conversationVoice,'component-unmounted');window.removeEventListener('alpha:note-reading',noteReadingChanged);window.removeEventListener(voicePreferenceKeys().event,noteRouteChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;if(recordingShell===this)recordingShell=undefined;cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
 }
 
 function ownBrowserVoiceActive(){return !Capacitor.isNativePlatform()&&speechRoute()==='direct';}

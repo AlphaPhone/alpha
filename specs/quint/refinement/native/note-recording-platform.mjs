@@ -239,7 +239,9 @@ public class PendingIntent {
   private static final java.util.Map<String,PendingIntent> services=new java.util.HashMap<>();
   private static final java.util.Map<Integer,PendingIntent> latest=new java.util.HashMap<>();
   private android.content.Intent intent;
-  public static PendingIntent getActivity(android.content.Context context,int request,android.content.Intent intent,int flags){return new PendingIntent();}
+  private static android.content.Intent latestActivity;
+  public static PendingIntent getActivity(android.content.Context context,int request,android.content.Intent intent,int flags){latestActivity=intent;PendingIntent value=new PendingIntent();value.intent=intent;return value;}
+  public static android.content.Intent latestActivity(){return latestActivity;}
   public static PendingIntent getService(android.content.Context context,int request,android.content.Intent intent,int flags){
     String key=request+"/"+intent.filterKey();PendingIntent value=services.get(key);
     if(value==null){value=new PendingIntent();value.intent=intent;services.put(key,value);}

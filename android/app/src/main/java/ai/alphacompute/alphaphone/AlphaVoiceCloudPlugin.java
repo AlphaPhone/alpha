@@ -114,6 +114,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   }
   catch(RuntimeException error){call.reject("Microphone could not start","capture");}
  });}
+ /** A tap on the recording notification, taken once by the launcher renderer when it can show Notes. */
+ @PluginMethod public void consumeNoteRecordingOpen(PluginCall call){JSObject result=new JSObject();result.put("open",AlphaNoteRecordingService.consumeShowNotes());call.resolve(result);}
+ @PluginMethod public void clearNoteRecordingOpen(PluginCall call){AlphaNoteRecordingService.clearShowNotes();call.resolve();}
  @PluginMethod public void noteRecordingStatus(PluginCall call){mainHandler().post(()->call.resolve(noteRecorder().status()));}
  @PluginMethod public void pauseNoteRecording(PluginCall call){mainHandler().post(()->{try{call.resolve(noteRecorder().pause(noteRecordingId(call)));}catch(RuntimeException error){call.reject("Recording changed");}});}
  @PluginMethod public void resumeNoteRecording(PluginCall call){

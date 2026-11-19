@@ -30,12 +30,20 @@ public final class AlphaNoteRecordingService extends Service {
  static final String ACTION_RESUME="ai.alphacompute.alphaphone.notes.recording.RESUME";
  /** Stop in the notification: the microphone is released and the recording is kept for Notes to save. */
  static final String ACTION_FINISH="ai.alphacompute.alphaphone.notes.recording.FINISH";
+ /** A tap on the notification: MainActivity opens Notes, where the open recording is shown again. */
+ static final String ACTION_SHOW_NOTES="ai.alphacompute.alphaphone.notes.recording.SHOW";
  /** True while this service holds the foreground with its notification. */
  private static volatile boolean foreground;
  private static volatile String foregroundRecording;
  private static volatile AlphaNoteRecordingService activeService;
  private volatile int lastStartId;
  static final String EXTRA_RECORDING="recording";
+ /** A notification tap waits this long for a renderer that can show Notes; HOME or one consumption retires it. */
+ private static final long SHOW_NOTES_LIFETIME_MS=30_000;
+ private static long showNotesUntil=-1;
+ static synchronized void offerShowNotes(){showNotesUntil=android.os.SystemClock.elapsedRealtime()+SHOW_NOTES_LIFETIME_MS;}
+ static synchronized void clearShowNotes(){showNotesUntil=-1;}
+ static synchronized boolean consumeShowNotes(){boolean open=showNotesUntil>=0&&android.os.SystemClock.elapsedRealtime()<showNotesUntil;showNotesUntil=-1;return open;}
 
  static void start(Context context,String recordingId){
   try{context.startForegroundService(intent(context,ACTION_START,recordingId));}
@@ -130,7 +138,7 @@ public final class AlphaNoteRecordingService extends Service {
   channel.setShowBadge(false);
   manager.createNotificationChannel(channel);
   String recording=status.optString("recordingId","");boolean paused="paused".equals(status.optString("state"));
-  Intent open=new Intent(context,MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+  Intent open=new Intent(context,MainActivity.class).setAction(ACTION_SHOW_NOTES).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
   PendingIntent content=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent toggle=PendingIntent.getService(context,paused?2:1,intent(context,paused?ACTION_RESUME:ACTION_PAUSE,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent finish=PendingIntent.getService(context,3,intent(context,ACTION_FINISH,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);

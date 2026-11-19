@@ -61,6 +61,18 @@ public class MainActivity extends BridgeActivity {
   if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface())
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
  }
+ /** A tap on the Notes recording notification: the renderer opens Notes once it can show it. */
+ private boolean captureNoteRecordingOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
+  if (AlphaNoteRecordingService.ACTION_SHOW_NOTES.equals(intent.getAction())) {
+   AlphaNoteRecordingService.offerShowNotes();
+   // As for Maps: never replay an already captured tap when the Activity is recreated.
+   intent.setAction(Intent.ACTION_MAIN);
+   return true;
+  }
+  if (isHomeIntent(intent)) AlphaNoteRecordingService.clearShowNotes();
+  return false;
+ }
  private boolean captureSmsNoticeOpen(Intent intent) {
   if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
   if (SmsNoticeOpenRequest.ACTION.equals(intent.getAction())) {
@@ -407,6 +419,7 @@ public class MainActivity extends BridgeActivity {
   // Owner issue 4: the live calls Alpha's InCallService holds, for the WebView's ongoing-call bar.
   if (telephonyAdmitted) registerPlugin(AlphaOngoingCallPlugin.class);
   captureNavigationOpen(getIntent());
+  captureNoteRecordingOpen(getIntent());
   captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());
   rendererDeathsAtCreate = recoveryBudget.deaths();
@@ -476,6 +489,7 @@ public class MainActivity extends BridgeActivity {
  }
  @Override public void onNewIntent(Intent intent) {
   boolean showMaps = captureNavigationOpen(intent);
+  boolean showNotesRecording = captureNoteRecordingOpen(intent);
   boolean showSmsNotice = captureSmsNoticeOpen(intent);
   AlphaCanonicalNotifications.captureTap(this,intent);
   super.onNewIntent(intent);
@@ -487,6 +501,8 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (showMaps) signalNavigationOpen();
+  if (showNotesRecording && getBridge() != null && getBridge().getWebView() != null)
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:note-recording-open'))", null);
   if (showSmsNotice && getBridge() != null && getBridge().getWebView() != null)
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:sms-notice-open'))", null);
   if (getBridge() != null && !isAssistantSurface() && isHomeIntent(intent))
