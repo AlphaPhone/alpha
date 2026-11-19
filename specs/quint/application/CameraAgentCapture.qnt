@@ -168,7 +168,6 @@ module CameraAgentCapture {
     .expect(safety and s.outcome == "succeeded" and not(s.shotCovered))
   run abortDuringRevealTest = init.then(place("camera", "full", "ready", false)).then(admit).then(abort)
     .then(revealFails).expect(safety and s.outcome == "failed" and s.shutters == 0 and s.holds == 0)
-  /// Reopened and closed while the preview starts: the committed chat is hidden, the panel is not.
   run namedLensFlipsBeforeShutterTest = init.then(place("camera", "hidden", "ready", false)).then(wantLens("front"))
     .then(admit).expect(safety and s.request == "armed" and s.lens == "back")
     .then(flipForRequest(true)).then(shutter).then(written("succeeded"))
@@ -180,6 +179,7 @@ module CameraAgentCapture {
   run ownerFlipSatisfiesNamedLensTest = init.then(place("camera", "hidden", "ready", false)).then(wantLens("front"))
     .then(admit).then(ownerFlips).then(shutter).then(written("succeeded"))
     .expect(safety and s.shotLens == "front")
+  /// Reopened and closed while the preview starts: the committed chat is hidden, the panel is not.
   run paintedPanelRefusesCaptureTest = init.then(admit).then(panelCleared).then(revealed)
     .then(ownerCoversChat("sheet")).then(ownerClosesChat).then(previewReady).then(recheckFails)
     .expect(safety and PaintedPanelRefusedWitness)

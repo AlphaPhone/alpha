@@ -220,7 +220,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let api: Bag | undefined;
   let direction: 'front' | 'back' = 'back';
   let flash: FlashMode = 'off', disposed = false;
-  /** The self-timer the owner chose for this Camera visit, and the countdown a shutter press started. */
+  /** The self-timer the owner chose (kept while Camera stays mounted), and the countdown a shutter press started. */
   let selfTimer: TimerSeconds = 0, countdown: {left:number;token:number;handle:number}|undefined;
   let lens: Lens = { minZoom: 1, maxZoom: 1, hasFlash: false, zoom: 1, flash: false }, zoomRatio = 1;
   /** The last-capture tile: this session's newest capture, or one library row read after the preview is ready. */
@@ -1056,7 +1056,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
    * The photo is taken only if the same preview is still ready in Photo mode when it ends. */
   function shoot(){
     if(countdown){cancelCountdown();return;}
-    if(!selfTimer||!api||api.get('camera').mode!=='photo'||session.phase!=='ready'||session.busy||scanning||session.recording||session.recordingStarting||session.finalizing){void capture();return;}
+    // A control still settling (focus, zoom) does not skip the countdown: capture() queues behind it.
+    if(!selfTimer||!api||api.get('camera').mode!=='photo'||session.phase!=='ready'||scanning||session.recording||session.recordingStarting||session.finalizing){void capture();return;}
     const token=session.token(),run={left:selfTimer as number,token,handle:0};
     run.handle=window.setInterval(()=>{
       if(countdown!==run)return;
@@ -1102,7 +1103,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(!cameraViewVisible()||!owner)return {status:'failed',summary:'Open Camera first'};
       if(agentRequest||session.busy)return busy;
       const capture: AgentCaptureRequest = { queued: true, refused: false };
-      request=agentRequest=capture;requestedCaptureHolds++;
+      // An owner self-timer would take a second photo after the agent's: the request cancels it.
+      request=agentRequest=capture;requestedCaptureHolds++;cancelCountdown();
       const closeChat=owner.S.chat!=='hidden';
       // The committed chat state can be hidden while its closing panel still covers Camera.
       if(closeChat||conversationOverViewfinder(conversationPanel())){
@@ -1151,6 +1153,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         if(chatCovers()||conversationOverViewfinder(conversationPanel())){
           return {status:'failed',summary:'Camera viewfinder is covered'};
         }
+        // The owner may have flipped back while the shutter waited its turn: never answer with the other camera.
+        if(wantedLens&&direction!==wantedLens)return {status:'failed',summary:'The camera changed, so no photo was taken.'};
         dispatched=true;shutterFlash(owner);
         let item:SavedPhoto;
         try{item=await writePhoto(owner,false);}
@@ -1533,7 +1537,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // Items older than the loaded window are read from the library before they count as missing.
       const {rows,missing}=await resolveRequestedRows(captures,operation.ids,row=>nativeId(row.id),async id=>{const row=normalize(await library.read({id}));return row.trashed?undefined:row;},signal);
       if(disposed||!owner.isActive())throw new LibraryAgentRefusal('Open Photos, then ask again.');
-      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy. Try again.');
+      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy right now.');
       if(operation.type==='photo_library_select'){
         if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos.');
         selection=rows;selectionTab='lib';photosFilter=undefined;
