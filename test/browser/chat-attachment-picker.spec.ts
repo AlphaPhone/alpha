@@ -68,7 +68,8 @@ test('reviewed Files and Photos send exact bytes only on explicit attachment-onl
   await page.setViewportSize({width:412,height});
   await expect.poll(async()=>{
    const sheet=await picker.boundingBox(),screen=await page.locator('[data-screen]').boundingBox();
-   return sheet&&screen?Math.abs(sheet.y+sheet.height-screen.y-screen.height):Infinity;
+   // Compare only after the screen has taken the new viewport height; before that both boxes are stale.
+   return sheet&&screen&&screen.y+screen.height<=height+1?Math.abs(sheet.y+sheet.height-screen.y-screen.height):Infinity;
   }).toBeLessThan(1);
   expect(await picker.evaluate(el=>{
    const rect=el.getBoundingClientRect();
@@ -284,7 +285,7 @@ test('leaving Files during attachment validation discards the late read and allo
  expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);
 });
 
-test('Ask Alpha explains a refusal while another file is still being read, then attaches once',async({page})=>{
+test('Ask Alpha says a file is already attaching while the first read runs, then attaches once',async({page})=>{
  await ready(page);
  await page.evaluate(async()=>{
   const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
@@ -306,9 +307,9 @@ test('Ask Alpha explains a refusal while another file is still being read, then 
  await page.getByRole('button',{name:'Open Reviewed notes.txt',exact:true}).click();
  await ask();
  await expect.poll(()=>page.evaluate(()=>typeof (window as any).attachmentFixture.resumeRead)).toBe('function');
- // The second tap cannot start a read; it must say so rather than close the menu silently.
+ // The second tap cannot start a read; it says the first file is attaching rather than that attaching failed.
  await ask();
- await expect(page.locator('[data-alpha-toast]')).toContainText('Can’t attach the file right now. Try again in a moment.');
+ await expect(page.locator('[data-alpha-toast]')).toContainText('Already attaching a file.');
  await page.evaluate(()=>(window as any).attachmentFixture.resumeRead());
  await expect(page.getByRole('button',{name:'Remove Reviewed notes.txt',exact:true})).toHaveCount(1);
  expect(await page.evaluate(()=>(window as any).attachmentFixture.sends)).toEqual([]);

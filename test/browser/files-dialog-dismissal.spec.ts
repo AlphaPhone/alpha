@@ -60,13 +60,14 @@ test.describe('wide Files preview',()=>{
   expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').storageList({path:''})).entries.map((row:any)=>row.name);})).toEqual(['split.txt']);
  });
 });
-test('cancelling a question opened from File actions returns focus to the menu opener',async({page})=>{
+test('cancelling an excerpt review opened from File actions returns focus to the menu opener',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/?mode=dev');
- await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Question contents'],'question.txt',{type:'text/plain'}));});
+ // Ask Alpha attaches a plain file directly; a file with a secret opens the excerpt review from the menu instead.
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Your verification code is 482913'],'question.txt',{type:'text/plain'}));});
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open question.txt',exact:true}).click();
  const opener=page.getByRole('button',{name:'File actions',exact:true});
- await opener.click();await page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ await opener.click();await page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Use excerpt',exact:true}).click();
  const question=page.getByRole('dialog',{name:'Ask about selected content'});await expect(question).toBeVisible();
  await question.getByRole('button',{name:'Cancel',exact:true}).click();await expect(question).toHaveCount(0);
  await expect(opener).toBeFocused();
