@@ -704,8 +704,12 @@ export class DeviceActionCoordinator<
     string,
     { context: string; expiresAt: number }
   >();
-  /** Pending call and text proposals whose number is not the one the owner wrote. */
-  private contradictedNumbers = new Set<string>();
+  /**
+   * Pending call and text proposals whose number is not the one the owner
+   * wrote, and whether the agent has recorded the refusal. Until it has, the
+   * refusal lives only here and would not survive a reload.
+   */
+  private contradictedNumbers = new Map<string, boolean>();
   constructor(
     ports: DeviceActionCoordinatorPorts<C, R>,
     private readonly options: {
@@ -1249,7 +1253,7 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
-    for (const id of this.contradictedNumbers)
+    for (const id of this.contradictedNumbers.keys())
       if (!pendingIds.has(id)) this.contradictedNumbers.delete(id);
     const items: ReviewItem[] = [];
     for (const proposal of valid) {
@@ -1310,10 +1314,28 @@ export class DeviceActionCoordinator<
         this.options.currentRequestTelephonyPolicy &&
         proof &&
         proposal.requestMessageId === proof.messageId &&
+        !this.contradictedNumbers.has(proposal.id) &&
         numberContradictsRequest(proposal.operation, proof.text)
       )
-        this.contradictedNumbers.add(proposal.id);
+        this.contradictedNumbers.set(proposal.id, false);
       if (this.contradictedNumbers.has(proposal.id)) {
+        // The agent records the refusal, so the proposal cannot come back as a
+        // card after a reload, when this memory and the request text are gone.
+        // A refusal the agent could not take is asked again on the next review.
+        if (!this.contradictedNumbers.get(proposal.id)) {
+          try {
+            await this.mutation(
+              proposal,
+              "decision",
+              { decision: "reject" },
+              signal,
+            );
+            this.contradictedNumbers.set(proposal.id, true);
+          } catch (error) {
+            if (signal.aborted) throw error;
+          }
+          assertCurrentReview();
+        }
         items.push({
           proposalId: proposal.id,
           proposal: null,
