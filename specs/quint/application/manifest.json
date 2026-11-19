@@ -4409,7 +4409,9 @@
       "paintedPanelRefusesCaptureTest",
       "namedLensFlipsBeforeShutterTest",
       "failedFlipTakesNoPhotoTest",
-      "ownerFlipSatisfiesNamedLensTest"
+      "ownerFlipSatisfiesNamedLensTest",
+      "requestFlipsOnlyOnceTest",
+      "ownerFlipAfterRequestFlipFailsTest"
     ],
     "sources": [
       "apps/app/src/prototype/camera-adapter.ts",
@@ -4426,7 +4428,7 @@
       "One agent capture request over a preview that is off, starting, ready or failed; chat hidden, sheet or full; a closing panel that may still be painted over the viewfinder after the committed chat is hidden; one shutter; portrait or landscape. Portrait Camera is laid out above an open sheet (phone.css, Camera's chat-open layout), so only a full chat or a landscape sheet covers the viewfinder (`chatCovers`). Admission represents the committed close of a covering chat in `takeRequestedPhoto`; a portrait sheet keeps its detent; `revealed` is the wait for the closing panel's transition, and the hold keeps the preview available during it and while preview startup settles. Compositor frames are abstracted to the painted flag, which the mounted replay observes at the shutter. Without a request hold, an open chat releases the preview after its grace (`chatGraceReleases`).",
       "Current-source successor of the agent actions in the historical legacy CameraSession design model. Settlement after the preview settles is checked by scenarios (queued capture, start failure, leave while queued), not as a temporal property; no fairness assumption is made.",
       "The preview hold keeps the camera active while the owner can cover the viewfinder. Inside the camera session's exclusive operation the shutter separately refuses a committed covering chat (`chatCovers`: full, or a landscape sheet) and a painted panel that still overlaps the viewfinder (`conversationOverViewfinder`). ShutterNeverCovered follows directly from those two guard checks and adds no evidence of its own; RequestUncoversViewfinder carries the reveal wait, and the mounted replay shows that removing either painted-panel check in the source fails a trace.",
-      "A request that names a camera flips to it after the second check and before the shutter (`flipForRequest`); a flip that does not end on that camera takes no photo, and an owner flip while the request waits is `ownerFlips`. The lens flip is model-only here: the mounted replay drives no named lens. A recording that starts while a request is queued, flash, zoom, video and scan are outside this model. A context change that the phone executor detects before it reaches the camera adapter is journaled as unknown by the coordinator (see DeviceActionReview).",
+      "A request that names a camera flips to it after the second check and before the shutter (`flipForRequest`); a flip that does not end on that camera takes no photo, and an owner flip while the request waits is `ownerFlips`. The request flips at most once; inside the shutter's turn the named camera is checked again, so an owner flip after the request's flip refuses (`recheckFails`). The lens flip is model-only here: the mounted replay drives no named lens. A recording that starts while a request is queued, flash, zoom, video and scan are outside this model. A context change that the phone executor detects before it reaches the camera adapter is journaled as unknown by the coordinator (see DeviceActionReview).",
       "The owning mounted Camera replay (test/quint-camera-agent-capture.test.mjs) drives the real capture adapter with synthetic preview and shutter ports. It checks a portrait sheet that stays open while the photo is taken, the full chat refusal, a request admitted while the owner's closing panel is still painted, a reopened-then-closed panel refused at the shutter gate, an abort during the closing animation, and one capture each for an already-ready and a newly-ready uncovered preview. Proposal admission, journal reservation, claim and receipt are DeviceActionReview. Android device acceptance is separate."
     ],
     "invariants": [
@@ -4450,6 +4452,111 @@
       "maxSamples": 400,
       "maxSteps": 40
     }
+  },
+  {
+    "path": "specs/quint/application/CameraModes.qnt",
+    "module": "CameraModes",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "graceKeepsControlsTest",
+      "modeChangeCancelsCountdownTest",
+      "previewStoppedOffersRetryTest",
+      "microphoneNoSoundTest",
+      "limitStopSaysMaxLengthTest",
+      "leavingFinishesRecordingTest",
+      "volumeKeyIsTheShutterTest"
+    ],
+    "sources": [
+      "apps/app/src/prototype/camera-adapter.ts",
+      "apps/app/src/prototype/camera-controls.ts",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java"
+    ],
+    "sharedSources": [
+      "plugins/plugin-native-camera/src/session.ts"
+    ],
+    "abstractions": [
+      "One owner Camera visit: preview off, starting or ready; Photo or Video mode with the bound capture mode and one setCaptureMode call in flight; a recording idle, running or finishing; chat hidden, a portrait sheet (Camera laid out above it) or full; the chat grace as one flag; an agent capture or scan as one hold. `sync` is the adapter's `syncCamera`, run after shell commits and session changes.",
+      "Owner controls (shutter, record, flip, light) are gated on `active()` as in the source: visible, and uncovered, or covered within the chat grace, or held. This is the current-source successor of the owner actions of legacy/CameraSession.qnt, whose guards require a closed chat (`ShotUnderChatGraceWitness` reaches a shot under a full chat within its grace).",
+      "Light changes and turning the light off on leaving Video are atomic here; the source runs them as camera controls and retries one that waited behind another control. Zoom, focus, flash modes and the photo write are outside this model (CameraFocusWrites, CameraPreviewRetirement and the shared session cover them). The volume-key shutter's dialog, agent and scan checks are folded into the request hold.",
+      "Model-only: no refinement adapter drives the camera adapter's closure. The rules were read from the listed source. The browser specs in test/browser/camera-controls.spec.ts exercise the microphone notice, the self-timer, the grid and the volume-key event in Chromium; Android key delivery and the light are not device-verified."
+    ],
+    "invariants": [
+      "ControlsOnlyWhileActive",
+      "RecordingOnlyInVideo",
+      "NoOrphanRecording",
+      "SoundlessOnlyWhenChosen",
+      "MicNoticeOnlyAfterDenial",
+      "MaxLengthOnlyAfterLimit",
+      "CountdownOnlyInReadyPhoto",
+      "LightOnlyInReadyVideo",
+      "ReleasedStaysOff"
+    ],
+    "witnesses": [
+      "ShotUnderChatGraceWitness",
+      "SoundlessRecordingWitness",
+      "MaxLengthSavedWitness",
+      "PreviewStoppedRetryWitness"
+    ],
+    "bounds": {
+      "maxSamples": 400,
+      "maxSteps": 40
+    }
+  },
+  {
+    "path": "specs/quint/application/CameraScanKeep.qnt",
+    "module": "CameraScanKeep",
+    "init": "init",
+    "step": "step",
+    "invariant": "safety",
+    "tests": [
+      "retryAfterUnknownReusesIdentityTest",
+      "failureStartsNewIdentityTest",
+      "keepWhileKeepingIsRefusedTest",
+      "savedPageIsNotKeptAgainTest",
+      "closeAbortsKeepInFlightTest"
+    ],
+    "sources": [
+      "apps/app/src/ui/camera/scan-document.ts",
+      "apps/app/src/prototype/camera-adapter.ts"
+    ],
+    "sharedSources": [
+      "plugins/plugin-native-camera/src/host-ports.ts"
+    ],
+    "symbols": [
+      {
+        "path": "apps/app/src/ui/camera/scan-document.ts",
+        "name": "createScanCapture"
+      },
+      {
+        "path": "apps/app/src/prototype/camera-adapter.ts",
+        "name": "keepScan"
+      }
+    ],
+    "stateMapping": {
+      "review/closed": "The capture's Keep state and whether the scan review closed",
+      "identity/inflight": "The capture's operation identity, numbered in the order the host first sees it, and the identity of the host Keep in flight",
+      "aborted": "The in-flight Keep's abort signal",
+      "kept/refused/keptClosed": "Identities the host store holds a row for, Keep presses answered without a host call, and a host call from a closed review"
+    },
+    "abstractions": [
+      "One scanned frame with an unsaved source and a host Keep port, as Camera's scan review creates it. The host store resolves an identity once: a Keep that repeats a kept identity finds that row. A definite failure means nothing was kept for that identity.",
+      "Refused Keep presses are bounded at three. The page image, OCR and the review's text are not modeled; the host port's own retry under an unknown native answer is camera-adapter `keepScan` and is represented by the unknown answer.",
+      "Trace replay: test/quint-camera-scan-keep.test.mjs replays simulator traces step by step against createScanCapture with a host Keep port answered by the driver and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
+    ],
+    "invariants": [
+      "OneRowPerCapture",
+      "RowUnderCurrentIdentity",
+      "SavedHasRow",
+      "NoKeepFromClosedReview",
+      "InFlightOnlyWhileKeeping"
+    ],
+    "witnesses": [
+      "RetriedUnknownWitness",
+      "NewIdentityAfterFailureWitness",
+      "AnsweredAfterCloseWitness"
+    ]
   },
   {
     "path": "specs/quint/application/FilesAgentActions.qnt",

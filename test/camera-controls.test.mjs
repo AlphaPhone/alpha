@@ -37,3 +37,17 @@ test('the recording timer shows the time left once the length or size limit is n
  assert.equal(c.recordingLeft(10,0,{maxDuration:0,maxFileSize:0}),undefined,'no limits, no time left');
  assert.equal(c.recordingLabel(Number.NaN,0,limits),'0:00');
 });
+
+test('Video mode names its light',()=>{
+ assert.equal(c.videoLightLabel(false),'Light off');assert.equal(c.videoLightLabel(true),'Light on');
+});
+
+test('the volume-key shutter state reaches Android once per change and again after a failure',async()=>{
+ const sent=[];let fail=false;
+ const sync=c.volumeShutterSync(enabled=>{sent.push(enabled);return fail?Promise.reject(Error('bridge')):Promise.resolve();});
+ sync(false);assert.deepEqual(sent,[],'Android starts with the keys off: nothing to send');
+ sync(true);sync(true);assert.deepEqual(sent,[true]);
+ fail=true;sync(false);await new Promise(resolve=>setTimeout(resolve));
+ fail=false;sync(false);assert.deepEqual(sent,[true,false,false],'a refused change is sent again');
+ sync(false);assert.deepEqual(sent,[true,false,false]);
+});
