@@ -7,7 +7,7 @@ test('Previous notes Trash names both actions and keeps confirmation above the d
  await openLegacyNotes(page,[{id:'trash-dialog-fixture',kind:'text',title,body:'Synthetic note.'}]);
  await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
  await page.getByRole('button',{name:'More',exact:true}).click();
- await page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await trash.getByRole('button',{name:`${title}, 30 days left`,exact:true}).click();

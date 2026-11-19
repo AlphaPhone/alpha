@@ -492,12 +492,12 @@ html:not(.alpha-landscape) .alpha-phone [data-screen][data-alpha-chat-half="true
  * for scrollers this rule does not name). */
 html:not(.alpha-landscape) .alpha-phone [data-screen]:not([data-alpha-chat-half="true"]) :is([data-alpha-app-scroll],.calendar-timeline,.calendar-draft-fields) { scroll-padding-bottom:calc(var(--alpha-dock-clearance,102px) + 16px); }
 
-/* Existing inline app dialogs own focus above a nonblocking half sheet too. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-layer="conversation"] { visibility:hidden; }
+/* Existing inline app dialogs and menus own focus above a nonblocking half sheet too. */
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],[role="menu"])) [data-alpha-layer="conversation"] { visibility:hidden; }
 /* The sheet is hidden behind that dialog, and in landscape it docks beside the app: neither covers
  * anything, so a touch outside it stays the app's. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-chat-scrim],
-[data-screen]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-dock-scrim="true"],
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],[role="menu"])) [data-alpha-chat-scrim],
+[data-screen]:has([data-alpha-layer="app"] :is([role="dialog"],[role="menu"])) [data-alpha-dock-scrim="true"],
 .alpha-landscape .alpha-phone [data-alpha-chat-scrim]:not([data-alpha-dock-scrim="true"]) { pointer-events:none!important; }
 
 /* Assistant owns only its conversation surface. */
@@ -1025,7 +1025,7 @@ dialog.alarm-page{position:fixed;inset:0 auto auto 0;margin:0;width:100vw;height
 [data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet),[data-alpha-album-manager]{bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
 /* The overflow menu is anchored below its header, so a dock bottom must cap,
  * not stretch, its intrinsic height. Keep short screens scrollable. */
-[data-alpha-popup] .notes-menu[role="dialog"]{bottom:auto!important;height:auto;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
+[data-alpha-popup] .notes-menu[role="menu"]{bottom:auto!important;height:auto;overflow-y:auto;box-sizing:border-box;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
 
 .chat-image-preview{position:absolute;inset:0;z-index:130;background:var(--alpha-black);color:var(--alpha-white);overflow:hidden;touch-action:none}
 .chat-image-preview>[role="dialog"]{height:100%;display:flex;align-items:center;justify-content:center;padding:64px 16px 16px;box-sizing:border-box;overflow:hidden}

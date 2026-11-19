@@ -31,7 +31,7 @@ async function createNote(page:Page,title:string,body:string){
 }
 async function deleteNote(page:Page,title:string){
  await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByText(`Deleted`,{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:`Open ${title}`,exact:true})).toHaveCount(0);
  await expect.poll(async()=>(await savedRecords(page)).some(note=>note.title===title)).toBe(false);
@@ -74,7 +74,7 @@ test('a deletion that would overfill Trash is refused: the note stays saved, Tra
  await finishUndoWindow(page);
  await expect(page.getByText('Deleted',{exact:true})).toHaveCount(0,{timeout:15_000});
  await page.getByRole('button',{name:'Open Charlie',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'Full'});
  await expect(dialog).toBeVisible();
  await expect(page.getByText('Deleted',{exact:true})).toHaveCount(0);
@@ -85,7 +85,7 @@ test('a deletion that would overfill Trash is refused: the note stays saved, Tra
  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(dialog).toHaveCount(0);
  await expect(page.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Charlie');
  // Pressing Delete again is refused again; a second press never forces the deletion through.
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(dialog).toBeVisible();
  expect(await savedRecords(page)).toEqual(saved);
  expect(await trashEntries(page)).toEqual(full);
@@ -159,7 +159,7 @@ test('a deletion that would push Trash past its byte limit is refused: the note 
  await finishUndoWindow(page);
  await expect(page.getByText('Deleted',{exact:true})).toHaveCount(0,{timeout:15_000});
  await page.getByRole('button',{name:'Open Second heavy',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'Full'});
  await expect(dialog).toBeVisible();
  await expect(dialog.getByRole('button',{name:'Delete permanently',exact:true})).toBeVisible();await expect(dialog).not.toContainText('was not deleted');
@@ -192,7 +192,7 @@ test('a deletion that would push Trash past its byte limit is refused: the note 
  expect(await trashEntries(page)).toEqual(three);
  expect((await savedRecords(page)).map(note=>note.title)).toEqual(['Second heavy']);
  await page.getByRole('button',{name:'Open Second heavy',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(dialog).toBeVisible();
  expect(await trashEntries(page)).toEqual(three);
 
