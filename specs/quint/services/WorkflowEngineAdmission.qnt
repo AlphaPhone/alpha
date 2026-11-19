@@ -131,7 +131,7 @@ module WorkflowEngineAdmission {
   val NoProcessForUnadmittedRun = s.runs == 0 implies s.status == "none" and not(s.workerActive)
   val TerminalNotRunning = s.finished implies not(s.workerActive) and s.status.in(Set("finished", "failed", "cancelled"))
   val ChatRunHasNoOwnerReceipt = s.mode == "chat" implies not(s.receipt) and s.owner == 0
-  val RecordedDecisionHasCanonicalReceipt =s.recordedApproval.in(Set("approved", "denied")) implies s.recordedApproval == s.approval
+  val RecordedDecisionHasCanonicalReceipt = s.recordedApproval.in(Set("approved", "denied")) implies s.recordedApproval == s.approval
   val TypeOK = s.runs.in(0.to(1)) and s.workerStarts.in(0.to(2)) and s.controls.in(0.to(3))
     and s.status.in(Set("none", "queued", "running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "failed", "cancelled"))
     and s.mode.in(Set("none", "manual", "trigger", "chat"))
