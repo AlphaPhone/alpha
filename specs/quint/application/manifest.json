@@ -4459,7 +4459,7 @@
       "One Files operation at a time over one representative file; filter and open are the direct types, share, new folder, move and trash need the owner's card. Identity is one boolean: the file is still where the card's identity was read.",
       "Android build with the Files capability negotiated; the browser build has no Files agent path. Current-source successor of the agent actions in the historical legacy FilesBrowser design model.",
       "A share succeeds when the system sheet opens; the owner's choice there is a separate owner action. Storage access state, external volumes beyond the primary-storage rule, and the listing reload are abstracted.",
-      "Model-only: no refinement adapter drives the source. The rules were read from the listed source at the pinned revision; model safety checks do not establish implementation refinement or device acceptance. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
+      "The owning test (test/quint-files-agent-actions.test.mjs) replays traces against the executor callback and openInternalView sliced from agent-adapter.ts, the real Files browser runner (files-browser-adapter.ts) over a primary-storage port, the coordinator context gate and its direct-request list. Primary storage only; Android storage and the owner's choice in the share sheet are not driven. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
     ],
     "invariants": [
       "DirectOnlyFilterAndOpen",
@@ -4503,7 +4503,7 @@
       "One phone-side Notes operation at a time over one representative note, with the Notes source (the agent's Notes by default, or Previous notes). Phone-side operations act only on Previous notes; on the default source they refuse.",
       "KNOWN GAP (app review AGENT-09), stated as an explicit assumption: the agent's own canonical Notes action writes with no phone card and does not read the Review-first preference. ReviewFirstCoversCanonicalNotes is registered under expectedViolations with the required witness CanonicalWriteIgnoresToggle. The server action's own gating was not read.",
       "An update following a shared snapshot is the server tool contract; the phone executor does not re-check it and the model marks it as an assumption. Notes organise, search and named-target operations are not negotiated and are not modeled.",
-      "Model-only: no refinement adapter drives the source. The rules were read from the listed source at the pinned revision; model safety checks do not establish implementation refinement or device acceptance. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
+      "The owning test (test/quint-notes-agent-source.test.mjs) replays the phone side against the executor callback sliced from agent-adapter.ts, the real shared NotesStore over a memory port, the real Trash policy and the coordinator context gate. Not driven: notes_query (its own review sheet), workflow-step create, the Review-first preference, the canonical Notes write and the server-side snapshot rule. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
     ],
     "invariants": [
       "DeviceNotesOpsOnlyOnPreviousNotes",
@@ -4557,7 +4557,7 @@
       "A delete is queued with an Undo window and reported as unknown until the window settles; the deletion journal itself is DeletionJournal and NativeCalendarScopedReview. Free/busy, named reads and the browser-only agenda read are not modeled.",
       "App review AGENT-06, phone side: denied Calendar access or a changed screen before the native calendar is called throws DeviceActionNotStarted in the executor and is journaled as failed/not started. UnknownOnlyAfterNativeCall is part of safety; FailedWithoutNativeCall is a required witness.",
       "The native Java executor was not read; its statuses are taken from the TypeScript call site.",
-      "Model-only: no refinement adapter drives the source. The rules were read from the listed source at the pinned revision; model safety checks do not establish implementation refinement or device acceptance. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
+      "The owning test (test/quint-calendar-agent-writes.test.mjs) replays traces against the executor callback sliced from agent-adapter.ts with the real Calendar contract and the coordinator context gate; AlphaCalendar is a port that holds the native review open and ends it with a status the TypeScript call site handles. Undo and window end are port steps. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
     ],
     "invariants": [
       "NoCalendarOperationIsDirect",
@@ -4603,7 +4603,7 @@
       "One selected Maps object (place, route or search result list) with one revision counter for the card and one for the live selection registry; one approval, one read, one receipt upload.",
       "The selection is checked on the card, by the executor before and after its read, and by the coordinator before the receipt upload. Navigation is a separate tier (MapsRerouteOwnership, services MapsNavigation) and has no state here.",
       "App review AGENT-06, phone side: a selection that changes between approval and the read makes the executor throw DeviceActionNotStarted; nothing is shared and the action is journaled as failed/not started. UnknownOnlyAfterRead is part of safety; FailedWithoutRead is a required witness.",
-      "Model-only: no refinement adapter drives the source. The rules were read from the listed source at the pinned revision; model safety checks do not establish implementation refinement or device acceptance. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
+      "The owning test (test/quint-maps-selected-read.test.mjs) replays traces against the executor callback sliced from agent-adapter.ts, the real Maps selection registry and the coordinator context gate (assertMapsContext through proposalContextNotice) for the card, the approval and the receipt upload. Proposal parsing, journal, claim and upload transport are DeviceActionReview."
     ],
     "invariants": [
       "NoCoordinatesWithoutApproval",
