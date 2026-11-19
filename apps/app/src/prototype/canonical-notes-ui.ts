@@ -18,6 +18,8 @@ const UNAVAILABLE='Agent offline';
 /** Device-local handles (a recording, a picked document, a web source) belong to Older notes adapters, never to an agent record's view. */
 const LOCAL_HANDLES=['audio','documentSource','webSource'];
 /** View identity and presentation fields, never authored rich metadata. */
+// An open note keeps its saved times while edited; its format data never reorders the list.
+const SAVED_TIMES=['createdAt','updatedAt','modifiedAt'];
 const VIEW_FIELDS=new Set(['id','title','body','kind','canonicalRevision','createdAt','updatedAt','modifiedAt','when','color','bodySeparator','authored']);
 /** Older notes state (device recorder, playback, device Trash, recording deletions) is never read for agent Notes. */
 const DEVICE_ONLY_STATE={rec:null,proc:null,record:false,playing:false,dict:false,trash:[],trashConfirm:null,trashFull:null,audioDeletionChecked:true,audioDeletionPending:[],audioDeletionRecoveryFailed:false};
@@ -104,7 +106,7 @@ export class CanonicalNotesUi {
   else if(draft.id&&draft.baseRevision===this.controller.revision){const saved=this.controller.viewNote(draft.id);if(saved)this.draftBase={token:draft.token,print:notePrint(saved)};}
   this.openValue=draft?draft.id??'draft-'+draft.token:null;this.blankCreationValue=draft&&!draft.id?this.openValue:null;
   if(draft){
-   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of LOCAL_HANDLES)delete data[key];
+   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of [...LOCAL_HANDLES,...SAVED_TIMES])delete data[key];
    if(audio&&draft.id)data.audio={...audio,noteId:draft.id,transcript:draft.body};
    const record={...base,...data,id:this.openValue,kind:base?.kind??kind,title:draft.title,body:draft.body,canonicalRevision:draft.baseRevision};
    if(draft.format?.kind==='list'||draft.format?.kind==='text')record.kind=draft.format.kind;

@@ -1781,17 +1781,23 @@
       "localHandlesNeverReachRowsTest",
       "ownerLossMasksRetainedRowsTest",
       "phaseDrainsNavigationWaitersTest",
-      "retirementClearsProjectionTest"
+      "retirementClearsProjectionTest",
+      "pinnedThenNewestFirstTest",
+      "undatedRowKeepsItsPlaceTest",
+      "newDraftShowsFirstAmongUnpinnedTest",
+      "editKeepsSavedTimeTest"
     ],
     "sources": [
       "apps/app/src/prototype/canonical-notes-ui.ts",
+      "apps/app/src/runtime/notes-view.ts",
       "apps/app/src/prototype/canonical-notes-controller.ts",
       "apps/app/src/ui/notes/notes-editor.ts",
       "apps/app/src/ui/notes/notes-controller.ts"
     ],
     "abstractions": [
       "Source-bound projection of base and draft rows, current-owner public visibility, synthetic draft identities, Trash collection and navigation waiter admission/drain.",
-      "Canonical snapshot and editor callback inputs have separate controller/draft models. Row payload uses bounded text, kind, pin, folder and local-handle classes. Recorder, dictation, Calendar handoff and full competing navigation policies remain obligations."
+      "Canonical snapshot and editor callback inputs have separate controller/draft models. Row payload uses bounded text, kind, pin, folder, update-time and local-handle classes. Recorder, dictation, Calendar handoff and full competing navigation policies remain obligations.",
+      "List order is sortNotes over the public rows: pinned first, newest first, ties in stored order, and a row with no time counts as new as the newest time stored after it. Four update-time classes stand for parsed instants; the Notes filter and folder narrowing applied before sorting in model.js are not modeled here."
     ]
   },
   {
