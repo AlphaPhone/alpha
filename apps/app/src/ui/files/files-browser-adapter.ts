@@ -294,6 +294,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
   let dialog: Dialog | undefined,
     dialogTrigger: HTMLElement | null = null,
     menuOpener: HTMLElement | null = null,
+    renderedMenu: unknown = false,
     opened: { path: string; volume?: string; selectionId?: string } | undefined;
   let selectionEpoch = 0;
   let generation = 0,
@@ -989,7 +990,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
   function closePreview() {
     clearSelected();
     opened = undefined;
-    api?.set({ open: null });
+    // A File actions menu opened while this preview's work ran belongs to the preview.
+    api?.set(renderedMenu === "file" ? { open: null, menu: false } : { open: null });
   }
 
   /** Its own counter: a filter never takes a reload's ticket, so the reload still clears `loading`. */
@@ -1368,6 +1370,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
 
   module.render = (state: ViewState, currentApi: ViewApi) => {
     api = currentApi;
+    renderedMenu = state.menu;
     ICONS = Object.fromEntries(
       Object.entries(ICON_KEYS).map(([key, name]) => [
         key,
@@ -1771,7 +1774,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       };
       out.canRename = selection?.size === 1;
       out.icons = ICONS;
-      out.menuOpen = !!state.menu;
+      // A file menu left from a preview that has since closed is not the folder's menu.
+      out.menuOpen = !!state.menu && state.menu !== "file";
     } else {
       out.fd = null;
       out.menuOpen = false;

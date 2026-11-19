@@ -39,6 +39,8 @@ test('selected Files require explicit attachment review, retain exact bytes and 
  await review.getByRole('checkbox',{name:'Attach this file'}).check();await expect(insert).toBeEnabled();
  await review.getByRole('checkbox').uncheck();await expect(insert).toBeDisabled();
  await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect(review).toHaveCount(0);
+ // The review opened from a File actions row; Cancel returns focus to the menu's opener, not the page.
+ await expect(page.getByRole('button',{name:'File actions',exact:true})).toBeFocused();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await expect(page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Use in email',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Use in email',exact:true}).click();await review.getByRole('checkbox').check();await insert.click();
