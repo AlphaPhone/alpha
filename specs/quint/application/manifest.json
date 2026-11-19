@@ -4700,7 +4700,8 @@
       "apps/app/src/prototype/agent-calendar-adapter.ts"
     ],
     "abstractions": [
-      "Two events, at most two confirmations each. The Undo window is one elapse step; its length (the Undo notice length, scaled by the accessibility timeout) is not modelled.",
+      "Two events, at most two confirmations each. The Undo window is one elapse step; its length (the Undo notice length, scaled by the accessibility timeout) is not modelled, nor its extension while the Undo notice is still offered (held open by focus or queued behind another notice): elapse is the moment the notice has gone.",
+        "readWithout also stands for a read that returns a hidden row changed since the confirmation (a declined invitation stays in the feed with a new provider version), which shows the row again.",
       "The reviewed confirmation sheet, organizer/invitee disposition and the provider-version check belong to AgentCalendarMutation; a send here is one delete request to the Calendar service, not a provider outcome.",
       "test/quint-agent-calendar-deferred-delete.test.mjs replays the actual DeferredCalendarDeletes helper against this model with controlled timers and send results."
     ]

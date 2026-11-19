@@ -19,13 +19,13 @@ test('Schedule lists upcoming events from today and search finds events in the r
  await expect(schedule).toBeVisible();expect((await calendarState(page)).day).toBe(0);expect((await calendarState(page)).calendarMode).toBe('schedule');
  await page.getByRole('button',{name:'Search events',exact:true}).click();
  const results=page.getByRole('region',{name:'Search results',exact:true});
- await expect(results).toContainText(/^Searching /);await expect(results.getByRole('button',{name:/^Planning review, /})).toBeVisible();
+ await expect(page.getByRole('searchbox',{name:'Search events',exact:true})).toBeFocused();await expect(results).toContainText(/^Searching /);await expect(results.getByRole('button',{name:/^Planning review, /})).toBeVisible();
  await page.getByRole('searchbox',{name:'Search events',exact:true}).fill('room 4');
  await expect(results.getByRole('button',{name:/^Planning review, /})).toBeVisible();
  await page.getByRole('searchbox',{name:'Search events',exact:true}).fill('dentist');
  await expect(results).toContainText('No matching events');
  await page.getByRole('button',{name:'Close search',exact:true}).click();
- await expect(schedule).toBeVisible();
+ await expect(schedule).toBeVisible();await expect(page.getByRole('button',{name:'Search events',exact:true})).toBeFocused();
  await page.getByRole('button',{name:'Choose date',exact:true}).click();await views.getByRole('button',{name:'Day',exact:true}).click();
  await expect(page.getByRole('region',{name:'Calendar timeline'})).toBeVisible();await expect(schedule).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'))).toEqual([]);

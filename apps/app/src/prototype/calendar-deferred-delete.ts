@@ -6,8 +6,10 @@
  * One deletion waits at a time: confirming another sends the waiting one first, so the only Undo
  * on screen is the newest one. Leaving the app ends the window and sends a waiting deletion at
  * once. A changed account or agent session drops a waiting deletion without sending it, so a
- * deletion is never sent to a session the owner did not confirm it in. A sent deletion keeps its
- * event hidden until a Calendar read no longer has it; a refused one shows the event again.
+ * deletion is never sent to a session the owner did not confirm it in. While its Undo notice is
+ * still offered (held open by focus, or queued behind another notice) the window does not end. A
+ * sent deletion keeps its event hidden until a Calendar read no longer has it unchanged; a refused
+ * one shows the event again.
  *
  * Model: specs/quint/application/AgentCalendarDeferredDelete.qnt.
  */
@@ -18,6 +20,10 @@ export type CalendarDeleteRequest<E>={
  /** Sends the reviewed deletion. A rejection shows the event again. */
  send:()=>Promise<void>;
  failed?:(error:unknown)=>void;
+ /** True while its Undo is still offered (shown, held by focus or queued); the window then waits for it to go. */
+ offered?:()=>boolean;
+ /** After the send: a read that returns a hidden row changed (a declined invitation stays in the feed) shows it again. */
+ unchanged?:(event:E)=>boolean;
 };
 type Phase='waiting'|'sending'|'sent';
 type Entry<E>=CalendarDeleteRequest<E>&{id:number;phase:Phase;timer?:unknown};
@@ -50,7 +56,9 @@ export class DeferredCalendarDeletes<E=unknown>{
  stage(request:CalendarDeleteRequest<E>):{id:number;undo:()=>boolean}{
   for(const entry of this.entries)if(entry.phase==='waiting')this.dispatch(entry);
   const entry:Entry<E>={...request,id:this.next++,phase:'waiting'};
-  entry.timer=this.timers.set(()=>{if(entry.phase==='waiting')this.dispatch(entry);this.changed();},Math.max(0,this.windowMs()));
+  // The Undo notice can be held open by focus or queued behind another; the deletion is not sent while it is offered.
+  const due=()=>{if(entry.phase!=='waiting')return;if(entry.offered?.()){entry.timer=this.timers.set(due,500);return;}this.dispatch(entry);this.changed();};
+  entry.timer=this.timers.set(due,Math.max(0,this.windowMs()));
   this.entries.push(entry);this.changed();
   return {id:entry.id,undo:()=>this.undo(entry.id)};
  }
@@ -67,10 +75,11 @@ export class DeferredCalendarDeletes<E=unknown>{
  /** A sent deletion stops hiding once a read no longer returns its event. */
  prune(events:readonly E[]|undefined){
   if(!events)return;const before=this.entries.length;
-  this.entries=this.entries.filter(entry=>entry.phase!=='sent'||events.some(event=>entry.hides(event)));
+  this.entries=this.entries.filter(entry=>entry.phase!=='sent'||events.some(event=>this.hides(entry,event)));
   if(this.entries.length!==before)this.changed();
  }
- hidden(event:E):boolean{return this.entries.some(entry=>entry.hides(event));}
+ private hides(entry:Entry<E>,event:E){return entry.hides(event)&&(entry.phase!=='sent'||(entry.unchanged?.(event)??true));}
+ hidden(event:E):boolean{return this.entries.some(entry=>this.hides(entry,event));}
  phaseOf(id:number):Phase|'none'{return this.entries.find(entry=>entry.id===id)?.phase??'none';}
  get waiting(){return this.entries.some(entry=>entry.phase==='waiting');}
  /** The send starts now; the adapter's send waits for the Calendar service to be free. */

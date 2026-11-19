@@ -17,6 +17,15 @@ const DAY=86400000;
 export type CalendarListMode='day'|'schedule';
 const midnight=(now:number,off:number)=>{const d=new Date(now);return new Date(d.getFullYear(),d.getMonth(),d.getDate()+off).getTime();};
 const dayOf=(now:number,at:number)=>{const d=new Date(at),today=new Date(now);return Math.round((Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())-Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()))/DAY);};
+/** Moves focus once the element is on screen, for a few frames at most (the Inbox search pattern). */
+function focusWhenShown(selector:string){
+ if(typeof requestAnimationFrame!=='function'||typeof document==='undefined')return;
+ let tries=0;const step=()=>{const target=document.querySelector<HTMLElement>(selector);if(target&&!target.closest('[inert]')){target.focus();return;}if(++tries<5)requestAnimationFrame(step);};
+ requestAnimationFrame(step);
+}
+/** Opening search puts the cursor in the field; closing it returns focus to the Search events button. */
+const focusSearchField=()=>focusWhenShown('.calendar-search-input');
+const focusSearchButton=()=>focusWhenShown('[data-alpha-app-header="main"] button[aria-label="Search events"]');
 const fold=(value:unknown)=>String(value??'').normalize('NFKC').toLocaleLowerCase();
 /** The interval a row covers. All-day rows cover whole civil days by their day offsets. */
 export function calendarRowSpan(row:Bag,now:number):{begin:number;end:number}|null{
@@ -81,9 +90,9 @@ export function presentCalendarList(state:Bag,api:Bag,rows:readonly Bag[],window
   listLabel:searching?'Search results':'Schedule',
   calendarViews:[{label:'Day',pressed:mode==='day',pick:()=>choose('day')},{label:'Schedule',pressed:mode==='schedule',pick:()=>choose('schedule')}],
   searchText:search??'',
-  openSearch:()=>{if(blocked())return;api.set({calendarSearch:'',month:null,open:null,openDay:null});},
+  openSearch:()=>{if(blocked())return;api.set({calendarSearch:'',month:null,open:null,openDay:null});focusSearchField();},
   onSearch:(event:Event)=>api.set({calendarSearch:String((event.target as HTMLInputElement|null)?.value??'')}),
-  closeSearch:()=>api.set({calendarSearch:null,...(mode==='schedule'?{day:0}:{})}),
+  closeSearch:()=>{api.set({calendarSearch:null,...(mode==='schedule'?{day:0}:{})});focusSearchButton();},
  };
 }
 /** Back closes search after the form, the open event and the date picker; an event closed in Schedule returns to today. */
@@ -93,7 +102,7 @@ export function installCalendarListBack(views:Bag){
   const schedule=state.calendarMode==='schedule',closesScheduleEvent=schedule&&!!state.open&&!state.form,searching=typeof state.calendarSearch==='string';
   const handled=back?back.call(this,state,api):false;
   if(handled){if(closesScheduleEvent)api.set({day:0});return true;}
-  if(searching){api.set({calendarSearch:null,...(schedule?{day:0}:{})});return true;}
+  if(searching){api.set({calendarSearch:null,...(schedule?{day:0}:{})});focusSearchButton();return true;}
   return false;
  };
  views.calendar.persist=Array.from(new Set([...(views.calendar.persist??[]),'calendarMode']));

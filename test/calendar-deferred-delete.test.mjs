@@ -76,9 +76,37 @@ test('a series delete hides the series; this-and-following hides from the occurr
 
 test('the Agent Calendar adapter defers its delete behind Undo and ends the window when the app is left',()=>{
   const adapter=readFileSync('apps/app/src/prototype/agent-calendar-adapter.ts','utf8');
-  assert.match(adapter,/deletes\.stage\(\{hides:calendarDeletionHides\(e,scopeValue\)/);
+  assert.match(adapter,/const hides=calendarDeletionHides\(e,scopeValue\)/);
+  assert.match(adapter,/deletes\.stage\(\{hides,offered,unchanged:/,'the window follows the Undo notice, and a changed row shows again');
+  assert.match(adapter,/shell\.undoFn===undoDelete\|\|!!shell\.toastQueue\?\.some/,'a held or queued Undo is still offered');
   assert.match(adapter,/api\.toast\(mode==='decline_invitation'\?'Invitation declined':'Event deleted',\{undo:/);
   assert.match(adapter,/if\(document\.hidden\)\{cancelRetention\(\);deletes\.leave\(\);\}/);
-  assert.match(adapter,/if\(deletes\.waiting\)\{deletes\.drop\(\);/);
+  assert.match(adapter,/if\(deletes\.waiting\)\{deletes\.drop\(\);if\(this\.live\)\{if\(this\.toastActive&&pendingUndo&&this\.undoFn===pendingUndo\)this\.closeToast\(\);this\.toast\('Not deleted'\);\}\}/,'a dropped deletion takes its stale Undo off the screen');
   assert.doesNotMatch(adapter,/confirmCalendarAction\([^;]+\)\|\|!current\(\)\)return;try\{await calendar!\.delete/,'no immediate delete after the review');
+});
+
+test('the window does not end while its Undo is still offered (held by focus or queued)',async()=>{
+  const clock=timers(),sent=[];let offered=true;
+  const deletes=new DeferredCalendarDeletes(()=>10000,clock),event=row('a');
+  const staged=deletes.stage({hides:calendarDeletionHides(event),offered:()=>offered,send:async()=>{sent.push('a');}});
+  clock.fire();await deletes.settled();
+  assert.deepEqual(sent,[],'nothing is sent while the Undo is on screen');assert.ok(deletes.waiting);
+  assert.equal([...clock.pending.values()][0].ms,500,'checked again shortly');
+  clock.fire();await deletes.settled();assert.deepEqual(sent,[]);
+  assert.equal(staged.undo(),true,'Undo still works after a held window');
+  const again=deletes.stage({hides:calendarDeletionHides(event),offered:()=>offered,send:async()=>{sent.push('a');}});
+  clock.fire();offered=false;clock.fire();await deletes.settled();
+  assert.deepEqual(sent,['a'],'sent once the notice has gone');assert.equal(again.undo(),false);
+});
+
+test('a sent decline stops hiding once a read returns its row changed',async()=>{
+  const clock=timers(),deletes=new DeferredCalendarDeletes(()=>10000,clock),event=row('a',{metadata:{etag:'1'}});
+  deletes.stage({hides:calendarDeletionHides(event),unchanged:value=>value.metadata?.etag==='1',send:async()=>{}});
+  const declined={...event,metadata:{etag:'2'}};
+  assert.ok(deletes.hidden(declined),'hidden while it waits, whatever the row');
+  clock.fire();await deletes.settled();
+  assert.ok(deletes.hidden(event),'the old row stays hidden after the send');
+  deletes.prune([declined]);
+  assert.ok(!deletes.hidden(declined),'the declined row shows again, as the next read reports it');
+  assert.ok(!deletes.waiting);
 });
