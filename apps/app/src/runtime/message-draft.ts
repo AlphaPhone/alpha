@@ -77,6 +77,11 @@ export function draftUndone(state: DraftState): DraftState {
   if (undo.draft === 'agent') return {...state, draft: 'agent', text: undo.text, base: undo.base ?? null, declined: undo.declined ?? null, suggest: 'idle', ticket: null, undo: null};
   return {...state, draft: undo.draft, text: undo.text, base: null, suggest: 'idle', ticket: null, undo: null};
 }
+/** Discarding an addressed Alpha draft restores any text it displaced and never dispatches it. */
+export function discardAskedDraft(state: DraftState): DraftState {
+  if (state.draft !== 'asked') return state;
+  return state.undo ? draftUndone(state) : {...emptyDraft(), declined:state.declined};
+}
 /**
  * After a confirmed review. Accepted by the phone: the composer clears. `failed`: the draft stays for
  * another try. `unknown`: the draft stays bound to the same operation, so Send again reads that
