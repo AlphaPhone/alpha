@@ -49,18 +49,25 @@ final class HostedNoticePoster implements HostedResultNotices.Poster {
  static final String ASK_RENEW_ACTION="ai.alphacompute.alphaphone.ASK_HOSTED_SOURCE_RENEWAL";
  static final String RENEW_ACTION="ai.alphacompute.alphaphone.RENEW_HOSTED_SOURCE",RENEW_PREFIX="alpha-hosted-renew:";
  static String renewalTag(String sourceId){return "alpha-source-renewal-"+HostedResultNotices.sourceId(sourceId);}
- /** Redacted: no source label, calendar or reminder content. Renew only opens the review; it never renews by itself. */
- Notification.Builder renewal(String sourceId,long expiresAt,long now){
+ /** Names only the kind of access that expires (from SourceRenewalNotices.access); a null or unknown kind keeps the general title. */
+ static String renewalTitle(String access){
+  if("calendar".equals(access))return "Calendar access for your daily brief expires soon";
+  if("reminders".equals(access))return "Reminders access for your daily brief expires soon";
+  if("calendar-reminders".equals(access))return "Calendar and reminders access for your daily brief expires soon";
+  return "Access for your daily brief expires soon";
+ }
+ /** Redacted: no source label, calendar or reminder content, and the lock screen shows only "Alpha Phone". Renew only opens the review; it never renews by itself. */
+ Notification.Builder renewal(String sourceId,long expiresAt,long now,String access){
   Intent open=new Intent(context,MainActivity.class).setAction(RENEW_ACTION).setData(Uri.parse(RENEW_PREFIX+HostedResultNotices.sourceId(sourceId))).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
   PendingIntent tap=PendingIntent.getActivity(context,sourceId.hashCode(),open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   Notification redacted=new Notification.Builder(context,CHANNEL).setSmallIcon(R.drawable.notification_icon).setContentTitle("Alpha Phone").setContentText("Tap to open.").build();
   PendingIntent ask=PendingIntent.getActivity(context,sourceId.hashCode(),new Intent(open).setAction(ASK_RENEW_ACTION),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);Notification.Action.Builder question=new Notification.Action.Builder(null,"Ask Alpha",ask);if(Build.VERSION.SDK_INT>=31)question.setAuthenticationRequired(true);
-  return new Notification.Builder(context,CHANNEL).setSmallIcon(R.drawable.notification_icon).setContentTitle("Access for your daily brief expires soon").setContentText("Renew it to keep your brief updated.").setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(redacted).setContentIntent(tap).addAction(new Notification.Action.Builder(null,"Renew",tap).build()).addAction(question.build()).setOnlyAlertOnce(true).setAutoCancel(true).setTimeoutAfter(HostedResultNotices.renewalTimeout(expiresAt,now)).setCategory(Notification.CATEGORY_REMINDER);
+  return new Notification.Builder(context,CHANNEL).setSmallIcon(R.drawable.notification_icon).setContentTitle(renewalTitle(access)).setContentText("Renew it to keep your brief updated.").setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(redacted).setContentIntent(tap).addAction(new Notification.Action.Builder(null,"Renew",tap).build()).addAction(question.build()).setOnlyAlertOnce(true).setAutoCancel(true).setTimeoutAfter(HostedResultNotices.renewalTimeout(expiresAt,now)).setCategory(Notification.CATEGORY_REMINDER);
  }
  /** True when the notify call returned. A pre-dispatch refusal keeps the journal retryable. */
- boolean postRenewal(String sourceId,long expiresAt,long now){
+ boolean postRenewal(String sourceId,long expiresAt,long now,String access){
   if(!allowed()||expiresAt<=now)return false;
-  manager().notify(renewalTag(sourceId),0,renewal(sourceId,expiresAt,now).build());
+  manager().notify(renewalTag(sourceId),0,renewal(sourceId,expiresAt,now,access).build());
   return true;
  }
  void cancelRenewal(String sourceId){manager().cancel(renewalTag(sourceId),0);for(String action:new String[]{RENEW_ACTION,ASK_RENEW_ACTION}){Intent intent=new Intent(context,MainActivity.class).setAction(action).setData(Uri.parse(RENEW_PREFIX+sourceId));PendingIntent tap=PendingIntent.getActivity(context,sourceId.hashCode(),intent,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_NO_CREATE);if(tap!=null)tap.cancel();}}
