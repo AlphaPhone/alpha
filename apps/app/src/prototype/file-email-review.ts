@@ -24,7 +24,7 @@ export function reviewFileEmail(options: {
  content.append(title,destination,details,label,policy,status);footer.append(cancel,confirm);dialog.append(content,footer);
  let ended=false,busy=false,file:SelectedFile|undefined,target:EmailTarget|undefined;
  const release=holdPhoneInert(document.querySelector<HTMLElement>('.os'));
- const close=()=>{if(ended)return;ended=true;file=undefined;target=undefined;document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',close);window.removeEventListener('launcher-home',close);window.removeEventListener('blur',close);window.removeEventListener('alpha-back',back,true);dialog.remove();release();if(previous?.isConnected)previous.focus();};
+ const close=()=>{if(ended)return;ended=true;file=undefined;target=undefined;document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',close);window.removeEventListener('launcher-home',close);window.removeEventListener('blur',close);window.removeEventListener('alpha-back',back,true);dialog.remove();release();const focusTarget=[previous,active].find(element=>element?.isConnected&&!element.closest('[inert]'));focusTarget?.focus();};
  const visibility=()=>{if(document.hidden)close();},back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();close();};
  const current=()=>!ended&&!document.hidden&&options.current();
  cancel.onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=close;
