@@ -9,6 +9,7 @@ import {createCameraSession} from '../../../../.eliza/client-features/plugins/pl
 import {createScanCapture} from '../ui/camera/scan-document';
 import type {CameraKeepOutcome} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
 import {reviewFileEmail} from './file-email-review';
+import {decodedFile} from './chat-attachment-files';
 import {connectionController} from '../runtime/connection-ui';
 import type {MailAttachment} from '../runtime/inbox-attachment';
 import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,mediaCopyIntentDocument,type MediaCopyIntent} from '../runtime/media-copy-intent';
@@ -1272,12 +1273,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     return !!live&&!live.trashed===!selected.trashed&&(selected.mutationRevision&&live.mutationRevision?live.mutationRevision===selected.mutationRevision:live.revision===selected.revision)&&(selected.contentRevision===undefined||live.contentRevision===selected.contentRevision);
   }
   function emailPhoto(selected:SavedPhoto,owner:Bag){
-    closeQuestion?.();const session=connectionController.getCloudClient()?.sessionId;
-    const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected)&&connectionController.getCloudClient()?.sessionId===session;
+    closeQuestion?.();
+    const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
     closeQuestion=reviewFileEmail({
       read:()=>photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!}),current,
       target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>current()&&views.inbox.attachReviewedFile(file,token),
-      inserted:()=>owner.open('inbox'),
+      inserted:()=>owner.open('inbox'),notify:message=>owner.toast(message),
     });
   }
   function askCapture(selected:SavedPhoto,owner:Bag):boolean{
@@ -1721,8 +1722,14 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       data.v.hasPrevItem=at>0&&!edit;data.v.hasNextItem=at>=0&&at<shown.length-1&&!edit;data.v.prevItem=step(shown[at-1]);data.v.nextItem=step(shown[at+1]);
       data.v.viewerLabel=selected.kind==='video'?'Video. Tap to show or hide controls, swipe to browse':`Photo. Zoom ${Math.round(viewport.scale*100)} percent. Pinch or double tap to zoom; drag to pan. Use plus, minus, 0 and arrow keys.`;data.v.askLabel=`Ask Alpha about this ${selected.kind==='video'?'video':'photo'}`;
       data.v.editLabel=selected.kind==='video'?'Edit video':'Edit photo';data.v.shareLabel=selected.kind==='video'?'Share video':'Share photo';data.v.infoLabel=selected.kind==='video'?'Video info':'Photo info';data.v.deleteLabel=selected.kind==='video'?'Delete video':'Delete photo';
-      data.v.canEmail=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments')&&typeof views.inbox.fileEmailTarget==='function';
+      const canReadAttachment=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments');
+      data.v.canEmail=canReadAttachment&&typeof views.inbox.fileEmailTarget==='function';
       data.v.email=()=>emailPhoto(selected,currentApi);
+      data.v.canMessage=canReadAttachment&&typeof views.messages?.sharePicture==='function'&&/\.(jpe?g|png)$/i.test(selected.name||'');
+      data.v.message=()=>views.messages.sharePicture(
+        async()=>decodedFile(await photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!})),
+        ()=>!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected),
+      );
       // Info: date, file, size, dimensions, folder and albums.
       const albums=customAlbums.filter(album=>album.memberIds.includes(nativeId(selected.id))).map(album=>album.name);
       const facts=[['Date',`${new Date(shotAt(selected)).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})} ${when.time}`],['File',selected.name||''],['Size',formatBytes(selected.size)],['Dimensions',selected.width&&selected.height?`${selected.width} × ${selected.height}`:''],['Length',durationLabel(selected)],['Folder',(selected.folder||'').replace(/\/$/,'')],['Albums',albums.join(', ')]].filter(([,value])=>value).map(([label,value])=>({label,value}));

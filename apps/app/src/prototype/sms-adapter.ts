@@ -680,13 +680,42 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':sendRefusalText(error,'Couldn’t open');}
  finally{if(token===lifecycle){busy=false;bubbleSent=null;changed();if(mmsOperationId&&dispatched)void reconcileMms(mmsOperationId);}}
   if(sentTo)noteSent(sentTo);}
+ async function readPicture(file:File):Promise<Omit<MmsAttachmentDraft,'name'>>{
+  if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');
+  if(!file.size||file.size>1024*1024)throw Error('Each picture must be smaller than 1 MB.');
+  return {contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())};
+ }
+ function addPictures(pictures:Omit<MmsAttachmentDraft,'name'>[]){
+  if(attachments.length+pictures.length>MMS_MAX_ATTACHMENTS)throw Error('Max 5 pictures');
+  changeDraft(()=>{
+   for(const picture of pictures)attachments.push({...picture,name:`picture-${++pictureSeq}.${MMS_PICTURES[picture.contentType]}`});
+  });
+ }
+ views.messages.sharePicture=async(read:()=>Promise<File>,current:()=>boolean)=>{
+  const shell=owner;
+  if(!shell||shell.props?.assistantSurface||!current()||!editable())throw Error('Messages is unavailable.');
+  const picture=await readPicture(await read());
+  if(shelf)await shelf.flush();
+  if(owner!==shell||!current()||!editable())throw new DOMException('Selection changed','AbortError');
+  shell.openView('messages');
+  await new Promise<void>(resolve=>shell.setState({},()=>resolve()));
+  if(!inFront()||!editable())throw Error('Open Messages to attach the picture.');
+  compose();
+  const visit=lifecycle,ticket=draftTicket;
+  const stillComposing=()=>owner===shell&&visit===lifecycle&&inFront()&&ticket===draftTicket&&composing&&draftThread===null&&!session.state.thread;
+  await until(()=>!stillComposing()||(!draftLoading&&!!session.state.status));
+  if(!stillComposing())throw new DOMException('Messages changed','AbortError');
+  if(!session.state.status?.mmsSend)throw Error('Picture messaging is unavailable.');
+  if(!editable()||body||recipients||attachments.length||operationId||mmsOperationId||(shelf&&!retained))throw Error('Finish your existing message draft before sharing this picture.');
+  addPictures([picture]);
+ };
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
  function attach(){if(!active||!editable())return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
   /* A result that arrives while the page is still hidden waits for it to show again; pagehide always ends the pick. */
   const done=(event?:Event)=>{if(document.hidden&&event?.type!=='pagehide')return;window.removeEventListener('pagehide',done);if(!picking)return;picking=false;sync();};input.oncancel=()=>done();window.addEventListener('pagehide',done);
-  input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files){if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');if(!file.size||file.size>1024*1024)throw Error('Each picture must be smaller than 1 MB.');picked.push({contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())});}
-   if(!active||token!==lifecycle||draft!==draftRevision||busy)return;if(attachments.length+picked.length>MMS_MAX_ATTACHMENTS)throw Error('Max 5 pictures');
-   for(const item of picked)attachments.push({...item,name:`picture-${++pictureSeq}.${MMS_PICTURES[item.contentType]}`});draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();
+  input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files)picked.push(await readPicture(file));
+   if(!active||token!==lifecycle||draft!==draftRevision||!editable())return;
+   addPictures(picked);
   }catch(error){if(active&&token===lifecycle){notice=error instanceof Error?error.message:'Unreadable pictures';changed();}}};
   picking=true;input.click();}
  async function handoff(){if(!inFront()||!editable()||operationId||mmsOperationId||attachments.length)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{

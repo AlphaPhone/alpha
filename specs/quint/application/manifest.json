@@ -558,13 +558,12 @@
     ],
     "invariants": [
       "ExactDraft",
-      "ReviewSelection",
       "FailedReviewInert",
       "CancelledHoldsNoBytes"
     ],
     "witnesses": [
       "FailedInsertWitness",
-      "StaleCheckedReviewWitness",
+      "StaleReadWitness",
       "InsertedThenSourceChangedWitness"
     ]
   },

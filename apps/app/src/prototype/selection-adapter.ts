@@ -236,7 +236,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw new AttachmentNotice('Selected file changed. Select it again.');return file;},
           current:()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
           target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>views.inbox.attachReviewedFile(file,token),
-          inserted:()=>api.open('inbox'),
+          inserted:()=>api.open('inbox'),notify:message=>api.toast(message),
         });
       };
       if (module === 'files') {
@@ -250,6 +250,8 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
+          canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg'),
+          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: mime + ' · selected on this device', d: '',
           isPages: !!selected.pdf||rows.length>0, pages: selected.pdf ? [] : pages, isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
