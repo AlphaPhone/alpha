@@ -234,6 +234,7 @@ export const moduleInventory = {
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/AlphaReviewedReading.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/AlphaSignInFields.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/HostRect.java",
+    "android/app/src/main/java/ai/alphacompute/alphaphone/browser/LinkHandoff.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/TabFrame.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/TabInputRouter.java",
     "android/app/src/main/java/ai/alphacompute/alphaphone/browser/TabLayer.java",
