@@ -10,10 +10,11 @@ async function expectNoPreviousNotesEntry(page:Page){
  await page.getByRole('button',{name:'Notes options',exact:true}).click();
  await expect(menu.getByRole('menuitem')).toHaveText(['Recently deleted']);
  await expect(menu.getByRole('menuitem',{name:'On this phone',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'On this phone',exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toHaveCount(0);
  await page.keyboard.press('Escape');
  await expect(menu).toHaveCount(0);
+ // The open menu hides and inerts the rest of the phone, so the page-wide checks run once it closes.
+ await expect(page.getByRole('button',{name:'On this phone',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Previous notes',exact:true})).toHaveCount(0);
 }
 
 test('retained previous notes have a visible route and return to the current collection',async({page})=>{
