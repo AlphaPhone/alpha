@@ -952,8 +952,9 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       void reload();
     }
   }
-  /** Lists `at` in the open Move or Copy picker. False when it could not be read. */
-  async function destination(at: string): Promise<boolean> {
+  /** Lists `at` in the open Move or Copy picker. False when it could not be read. A `quiet` read
+   * is a first try with a fallback after it, so a missing folder says nothing. */
+  async function destination(at: string, quiet = false): Promise<boolean> {
     const d = dialog;
     if (!d || d.kind !== "dest") return false;
     let shown = false;
@@ -963,6 +964,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         ...onVolume(d.volume),
       });
       if (dialog !== d) return false;
+      if (quiet && value.status !== "ready" && value.status !== "denied")
+        return false;
       if (failed(value)) return false;
       dialog = {
         ...d,
@@ -974,7 +977,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       };
       shown = true;
     } catch {
-      toast("This folder could not be read.");
+      if (!quiet) toast("This folder could not be read.");
     }
     repaint();
     return shown;
@@ -996,17 +999,16 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       ...onVolume(volume),
     };
     api?.set({ menu: false });
-    // The picker opens where the items are; the storage root when they come from several folders.
-    const start = parentOf(paths[0]);
-    void (async () => {
-      if (
-        !(await destination(
-          paths.every((p) => parentOf(p) === start) ? start : "",
-        )) &&
-        start
-      )
-        await destination("");
-    })();
+    // The picker opens in the folder the owner is browsing when the items are all in it; from a
+    // category, Trash or a filter spanning folders it opens at the storage root.
+    const here = place.kind === "folder" ? place.path : "";
+    const start =
+      here && paths.every((p) => parentOf(p) === here) ? here : "";
+    void destinationOrRoot(start);
+  }
+  /** Lists `at`, or the storage root when `at` cannot be read (a folder only the listing knows). */
+  async function destinationOrRoot(at: string) {
+    if (!(await destination(at, at !== "")) && at) await destination("");
   }
   /** "New folder" inside the Move or Copy picker: name it, then the picker opens it. */
   function destNewFolder() {
@@ -1938,7 +1940,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
               : "",
           canUp: d.kind === "dest" && d.at !== "",
           up: () => {
-            if (d.kind === "dest") void destination(parentOf(d.at));
+            if (d.kind === "dest") void destinationOrRoot(parentOf(d.at));
           },
           folders:
             d.kind === "dest"

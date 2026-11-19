@@ -255,9 +255,8 @@ export function installPrototypeNativeAdapters(
       if (key === 'go' && path.startsWith('locs.')) return row.name === 'Photos' ? () => api.open('photos') : native('files', (types => types ? { mime: types } : {})(locationMimeTypes(text(row.name))));
       if (key === 'tap' && row.isFile) return native('files');
       if (key === 'rnKey') return (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void perform(module, api, 'files'); } };
-      if (key === 'go' && path.startsWith('moveTo.')) return native('files');
-      if (['play', 'del', 'saveRn', 'selDel', 'move', 'selMove', 'transcribe'].includes(key)) return native('files');
-      if (['shareMsg', 'shareMail', 'selShare'].includes(key)) return unavailable(api, 'Use Files app');
+      if (['del', 'saveRn', 'selDel', 'move', 'selMove'].includes(key)) return native('files');
+      if (key === 'selShare') return unavailable(api, 'Use Files app');
     }
     if (module === 'wallet') {
       if (key === 'addCal') return native('calendar');

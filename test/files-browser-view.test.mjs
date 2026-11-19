@@ -17,7 +17,7 @@ async function harness({state={status:'ready',access:'granted'},files={}}={}){
   storageState:async()=>{calls.push(['state']);return typeof state==='function'?state():{volumes:[{id:'primary',name:'Internal storage',primary:true,free:1,total:2}],...state};},
   storageRequestAccess:async()=>({status:'ready'}),
   storageList:async({path})=>{calls.push(['list',path]);return path===''||tree.get(path)==='dir'?{status:'ready',entries:children(path)}:{status:'missing'};},
-  storageCategory:async()=>({status:'ready',entries:[],count:0}),
+  storageCategory:async({category})=>{const entries=category==='documents'?[...tree.keys()].filter(p=>tree.get(p)!=='dir'&&tree.get(p).mimeType==='text/plain').map(entry):[];return {status:'ready',entries,count:entries.length};},
   storageQuery:async()=>({status:'ready',entries:[],truncated:false}),
   storageTrashList:async()=>({status:'ready',items:[...trash.values()]}),
   storageRestore:async({ids})=>{calls.push(['restore',ids]);const outcomes=ids.map(id=>{const row=trash.get(id);trash.delete(id);tree.set(row.origin?row.origin+'/'+row.name:row.name,{mimeType:'text/plain',size:1,modified:1});return {path:id,status:'restored',to:row.name};});return {status:'ready',outcomes};},
@@ -100,6 +100,31 @@ test('Copy also opens in the folder the items are in (FILE-16)',async()=>{
  h.render().fd.items.find(r=>r.name==='x.txt').tap();
  h.render().selCopy();await h.settle();
  assert.equal(h.render().dlg.at,'Internal storage › A');
+});
+
+test('from a category the picker opens at the storage root, not inside the item folder (FILE-16)',async()=>{
+ const h=await harness({files:{Docs:'dir',Taxes:'dir','Docs/a.txt':text}});
+ h.render().browse.cats.find(c=>c.id==='documents').go();await h.settle();
+ h.render().fd.menuRows.find(r=>r.id==='select').go();
+ h.render().fd.items.find(r=>r.name==='a.txt').tap();
+ h.render().selCopy();await h.settle();
+ const dlg=h.render().dlg;
+ assert.equal(dlg.at,'Internal storage');
+ assert.deepEqual(Array.from(dlg.folders,f=>f.name),['Docs','Taxes']);
+});
+
+test('Parent folder falls back to the root, without an error, when the parent cannot be listed (FILE-16)',async()=>{
+ const h=await harness({files:{A:'dir','A/B':'dir','A/B/a.txt':text}});
+ await h.folder('A/B');
+ h.render().fd.menuRows.find(r=>r.id==='select').go();
+ h.render().fd.items.find(r=>r.name==='a.txt').tap();
+ h.render().selMove();await h.settle();
+ assert.equal(h.render().dlg.at,'Internal storage › A › B');
+ h.tree.delete('A');h.tree.set('Elsewhere','dir');
+ h.render().dlg.up();await h.settle();
+ assert.deepEqual(h.calls.filter(c=>c[0]==='list').slice(-2),[['list','A'],['list','']]);
+ assert.equal(h.render().dlg.at,'Internal storage');
+ assert.deepEqual(h.toasts,[]);
 });
 
 test('rename selects the name without its extension, and the open file stays open under its new name (FILE-16)',async()=>{
