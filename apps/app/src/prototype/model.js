@@ -6272,6 +6272,8 @@ class Component extends DCLogic {
     var msgs = this.transcriptWindow(S.msgs, panelOpen || (isOn && !!this.chatMotion)).map(function (m) {
       var c = m.card || {}; var t = c.type;
       // PROD-03: a card whose one action could only say it is unavailable offers no control for it.
+      // Draft, summary, flow and proposal cards keep their content; an agenda, event, note or
+      // generic card is itself the control (template.html), so dc-lite.js drops it whole.
       var actOff = cardActionUnavailable(c) && !c.go;
       var shown = m.from === "agent" && typeof m.displayText === "string" ? m.displayText : m.text;
       if (typeof shown === "string" && shown.length > 200000) {
