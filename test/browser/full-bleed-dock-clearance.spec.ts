@@ -18,7 +18,12 @@ function dockBoxes(page: Page) {
     .map(element => { const {x, y, width, height} = element.getBoundingClientRect(); return {x, y, width, height}; }));
 }
 
+/** Recenter animates its `bottom` (.45s) and the dock reserve is measured after layout, so wait for both to settle. */
 async function expectClearOfDock(page: Page, controls: Locator[]) {
+  await expect(async () => checkClearOfDock(page, controls)).toPass({timeout: 5000});
+}
+
+async function checkClearOfDock(page: Page, controls: Locator[]) {
   const dock = await dockBoxes(page);
   expect(dock.length).toBeGreaterThan(0);
   for (const control of controls) {
