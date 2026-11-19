@@ -118,8 +118,10 @@ for(const width of [412,640])test(`a very short window with the keyboard open ke
  const frame=await nativeContent(page,testInfo.project.use.baseURL as string,{top:0,bottom:0,left:0,right:0},width,915,true,{top:24,bottom:0});
  await frame.locator('html').evaluate(async()=>{
   const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   const render=Component.prototype.renderVals;
   Component.prototype.renderVals=function(){(window as any).noticeLayoutShell=this;return render.call(this);};
+  connectionController.close();
  });
  await expect.poll(()=>frame.locator('html').evaluate(()=>!!(window as any).noticeLayoutShell)).toBe(true);
  // The floating dock is up; the soft keyboard then leaves only about 150px of window.
