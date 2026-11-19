@@ -116,3 +116,17 @@ test('the product theme sets the Alpha accent in both appearances', async () => 
   assert.equal(alphaThemeVariables('light')['--acct'], '#0000FF');
   assert.equal(alphaThemeVariables('dark')['--acct'], '#8A93FF');
 });
+
+test('Notes Done is accent text on the link token, legible on both backgrounds', async () => {
+  const {alphaThemeVariables} = await tsImport('../apps/app/src/product/alpha-product.ts', import.meta.url);
+  // --acc is the fill accent: pure blue text on the black editor is 2.44:1.
+  const done = fs.readFileSync('apps/app/src/prototype/template.html', 'utf8').match(/<button[^>]*data-agent-id="notes-done"[^>]*>/)?.[0];
+  assert.ok(done, 'Notes Done button');
+  assert.match(done, /color:var\(--acct\)/);
+  assert.doesNotMatch(done, /var\(--acc\)/);
+  const luminance = hex => hex.slice(1).match(/../g).map(part => {const c = parseInt(part, 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;}).reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+  for (const appearance of ['light', 'dark']) {
+    const theme = alphaThemeVariables(appearance), [hi, lo] = [luminance(theme['--acct']), luminance(theme['--bg'])].sort((a, b) => b - a);
+    assert.ok((hi + 0.05) / (lo + 0.05) >= 4.5, `${appearance} Done contrast`);
+  }
+});
