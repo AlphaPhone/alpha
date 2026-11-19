@@ -659,6 +659,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         ...onVolume(volume),
         selectionId: value.selectionId,
       };
+      // A File actions menu opened for the previous preview must not act on this file.
+      if (renderedMenu === "file") currentApi.set({ menu: false });
       await accept("files", value, currentApi, false);
     } catch {
       if (current()) toast("This file could not open.");

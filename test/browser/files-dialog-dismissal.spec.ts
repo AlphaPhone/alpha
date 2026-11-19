@@ -72,3 +72,23 @@ test('cancelling an excerpt review opened from File actions returns focus to the
  await question.getByRole('button',{name:'Cancel',exact:true}).click();await expect(question).toHaveCount(0);
  await expect(opener).toBeFocused();
 });
+test('a File actions menu opened during a slow delete closes with the preview and leaves folder options working',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
+ await page.goto('/?mode=dev');
+ await page.evaluate(async()=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Slow delete'],'slow.txt',{type:'text/plain'}));
+  const {BrowserFiles}=await import('/src/browser/files.ts');const trash=BrowserFiles.prototype.storageTrash,w=window as any;
+  BrowserFiles.prototype.storageTrash=async function(input){await new Promise<void>(resolve=>{w.releaseTrash=resolve;});return trash.call(this,input);};
+ });
+ await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open slow.txt',exact:true}).click();
+ const opener=page.getByRole('button',{name:'File actions',exact:true}),actions=page.getByRole('dialog',{name:'File actions',exact:true});
+ await opener.click();await actions.getByRole('button',{name:'Delete file',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>typeof (window as any).releaseTrash)).toBe('function');
+ // A second tap while the delete is still running opens a menu that belongs to this preview.
+ await opener.click();await expect(actions).toBeVisible();
+ await page.evaluate(()=>(window as any).releaseTrash());
+ await expect(page.getByRole('button',{name:'Open slow.txt',exact:true})).toHaveCount(0);
+ await expect(actions).toHaveCount(0);
+ await page.getByRole('button',{name:'Files options',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Sort and more',exact:true}).getByRole('button',{name:'New folder',exact:true})).toBeVisible();
+});
