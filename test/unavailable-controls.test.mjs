@@ -71,6 +71,18 @@ test('the walker marks controls that could only say they are unavailable', () =>
   assert.equal(adapter.UNAVAILABLE_CONTROL, MARK);
 });
 
+test('a reference view\'s chat-card actions are marked, so their cards offer no control for them', () => {
+  const sendDraft = () => 'sent';
+  const views = {messages: {render: () => ({}), actions: {sendDraft}}, notes: {render: () => ({}), actions: {save: sendDraft}}};
+  adapter.installPrototypeNativeAdapters(null, views);
+  assert.equal(views.messages.actions.sendDraft[MARK], true);
+  // Notes is this phone's own view; its actions are untouched.
+  assert.equal(views.notes.actions.save, sendDraft);
+  const toasts = [];
+  views.messages.actions.sendDraft({}, {toast: message => toasts.push(message)});
+  assert.deepEqual(toasts, ['Unavailable']);
+});
+
 test('the template drops an element bound to a marked handler', async () => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
   const saved = globalThis.document;

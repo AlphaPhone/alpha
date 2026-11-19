@@ -38,6 +38,15 @@ function canvasBox(el) { var sc = el && el.closest ? el.closest("[data-screen]")
 var SHELL_TOP_ZONE = 90;
 /* System gesture zones (edge Back, top shade, bottom HOME) belong to the shell (resolveMobileShellSwipe). */
 function inShellGestureZone(px, py) { return px < MOBILE_SHELL_EDGE || px > MOBILE_SHELL_CANVAS_WIDTH - MOBILE_SHELL_EDGE || py < SHELL_TOP_ZONE || py > MOBILE_SHELL_HOME_BAR_TOP; }
+// PROD-03: native-adapter.ts and agent-adapter.ts mark a handler whose only effect is to say the
+// feature is unavailable; dc-lite.js drops an element bound to one.
+var UNAVAILABLE_CONTROL = Symbol.for("alpha.unavailableControl");
+function unavailableControl(fn) { return typeof fn === "function" && fn[UNAVAILABLE_CONTROL] === true; }
+var UNAVAILABLE_CARD_ACT = Object.defineProperty(function () {}, UNAVAILABLE_CONTROL, { value: true });
+function cardActionUnavailable(c) {
+  var view = c && c.act ? VIEWS[c.act.mod] : null;
+  return !!(view && view.actions && unavailableControl(view.actions[c.act.fn]));
+}
 
 var IC = {
   inbox: "M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z",
@@ -1287,6 +1296,8 @@ registerView("inbox", {
       if (m.sent) { var r0 = inboxRecips(m.to)[0]; var p0 = r0 ? inboxPerson(api, r0) : null; w.ini = p0 ? p0.ini : (r0 ? r0.charAt(0).toUpperCase() : "?"); }
       var s = api.sw(function (dx, dy) {
         if (st.localMailFolder || m.sent || Math.abs(dx) < Math.abs(dy)) return false;
+        // Swiping right asks for a reply draft; with no way to draft one it does nothing (PROD-03).
+        if (dx >= 0 && unavailableControl(api.say)) return false;
         if (dx < 0) {
           api.set({ slide: { id: m.id, x: -412 } });
           api.later(function () {
@@ -6112,6 +6123,10 @@ class Component extends DCLogic {
     // AC-26: a replaced or finished proposal never acts, however it is reached.
     if (!proposalCanAct(c, this.emergencyLive())) return;
     if ((c.act && DEFERRED_MVP_VIEWS.has(c.act.mod)) || (c.go && DEFERRED_MVP_VIEWS.has(c.go.view))) return this.toast("This action is not available on this phone yet.");
+    // PROD-03: an action that can only say it is unavailable (marked by native-adapter.ts) never
+    // marks its card done; the card opens its view instead when it names one.
+    var action = c.act && VIEWS[c.act.mod] && VIEWS[c.act.mod].actions ? VIEWS[c.act.mod].actions[c.act.fn] : null;
+    if (action && action[Symbol.for("alpha.unavailableControl")] === true) { if (c.go) return this.openView(c.go.view, c.go.patch, c.go.chat || self.defaultChat(c.go.view)); return action(c, this.api(c.act.mod)); }
     var markDone = function () { self.setState({ msgs: self.S().msgs.map(function (x) { return x.id === m.id ? Object.assign({}, x, { card: Object.assign({}, x.card, m.card, { done: true }, c.type === "proposal" ? { state: "done" } : null) }) : x; }) }); };
     if (c.act && VIEWS[c.act.mod] && VIEWS[c.act.mod].actions && VIEWS[c.act.mod].actions[c.act.fn]) {
       if (c.done) { if (c.go) this.openView(c.go.view, c.go.patch, c.go.chat || self.defaultChat(c.go.view)); return; }
@@ -6256,6 +6271,8 @@ class Component extends DCLogic {
 
     var msgs = this.transcriptWindow(S.msgs, panelOpen || (isOn && !!this.chatMotion)).map(function (m) {
       var c = m.card || {}; var t = c.type;
+      // PROD-03: a card whose one action could only say it is unavailable offers no control for it.
+      var actOff = cardActionUnavailable(c) && !c.go;
       var shown = m.from === "agent" && typeof m.displayText === "string" ? m.displayText : m.text;
       if (typeof shown === "string" && shown.length > 200000) {
         var end = 200000 - (/[\uD800-\uDBFF]/.test(shown[199999]) ? 1 : 0);
@@ -6269,12 +6286,12 @@ class Component extends DCLogic {
         // A quiet local note ("Sent to Maya") reads as a muted line.
         lineClass: m.from === "agent" && m.quiet ? "alpha-agent-line alpha-agent-line-quiet" : "alpha-agent-line",
         gIcon: IC[c.icon] || IC.spark, evIcon: c.act && !c.done ? IC.plus : IC.check, callIni: c.ini || ((c.who || "").split(" ").map(function (w) { return w.charAt(0); }).join("").slice(0, 2)),
-        sumSave: t === "summary" && !c.done && !!c.act, sumOpen: t === "summary" && !c.act && !!c.go,
-        draftActs: !c.done && S.editCard !== m.id,
+        sumSave: t === "summary" && !c.done && !!c.act && !actOff, sumOpen: t === "summary" && !c.act && !!c.go,
+        draftActs: !c.done && S.editCard !== m.id && !actOff,
         done: !!c.done || (t === "call" && typeof PN !== "undefined" && !PN.live), notDone: !(c.done || (t === "call" && typeof PN !== "undefined" && !PN.live)),
         rows: (c.rows || []).map(function (r) { return Object.assign({}, r, { dot: r.key ? "var(--acc)" : "var(--line)", icon: IC[r.icon] || IC.right, open: function () { if (r.go) self.openView(r.go.view, r.go.patch, r.go.chat); else self.cardAct(m); } }); }),
         bullets: c.bullets || [],
-        act: function () { self.cardAct(m); },
+        act: actOff ? UNAVAILABLE_CARD_ACT : function () { self.cardAct(m); },
         edit: function () { self.setState({ draft: c.body || "", editCard: m.id }); }
       };
     });

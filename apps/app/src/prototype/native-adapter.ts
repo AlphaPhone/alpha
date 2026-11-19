@@ -388,7 +388,8 @@ export function installPrototypeNativeAdapters(
         ? { ...api, later: () => {}, laterBg: () => {}, every: () => {}, everyBg: () => {} } : api;
       return walk(render(state, renderingApi), module, state, api);
     };
-    if (actions) definition.actions = Object.fromEntries(Object.keys(actions).map(key => [key, (_card: Bag, api: Bag) => notify(api, 'Unavailable')]));
+    // A chat card's action here could only say it is unavailable; marked, its card offers no control (model.js).
+    if (actions) definition.actions = Object.fromEntries(Object.keys(actions).map(key => [key, Object.assign((_card: Bag, api: Bag) => notify(api, 'Unavailable'), { [UNAVAILABLE_CONTROL]: true })]));
     // AP-16: a reference view's bar (runtime/comms-bar.ts) keeps its shape, but every control it
     // offers only says it is unavailable. fit() only measures, so it stays.
     if (typeof bar === 'function') definition.bar = (state: Bag, api: Bag) => unavailableBar(bar(state, api), api);
