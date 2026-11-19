@@ -71,6 +71,8 @@ interface MapPlaneOptions {
   onViewport?(center: Coordinate, zoom: number): void;
   /** A long press (or secondary click) on the map, at the pressed point. */
   onLongPress?(point: Coordinate): void;
+  /** The map's bearing as it turns; `rotated` once it is turned or tilted away from north up. */
+  onRotate?(rotated: boolean, bearing: number): void;
   fontUrl: string;
   workerUrl: string;
   accent: string;
@@ -413,6 +415,20 @@ class MapLibrePlane {
       if (Date.now() - pressedAt < 1000) return;
       longPress(event.lngLat.wrap());
     });
+    // Two-finger gestures can turn and tilt the map; the host offers north up while they have.
+    let rotated = false;
+    const turned = () => {
+      if (this.destroyed || !options.onRotate) return;
+      const bearing = this.map.getBearing();
+      const now = Math.abs(bearing) >= 1 || this.map.getPitch() >= 1;
+      if (now !== rotated || now) {
+        rotated = now;
+        options.onRotate(now, now ? bearing : 0);
+      }
+    };
+    this.map.on("rotate", turned);
+    this.map.on("pitch", turned);
+    this.map.on("moveend", turned);
     this.map.on("idle", () => {
       if (this.destroyed) return;
       container.dataset.mapZoom = String(this.map.getZoom());
@@ -751,6 +767,11 @@ class MapLibrePlane {
       );
     }
   }
+  /** North up and flat again, as the compass control asks. */
+  resetNorth() {
+    if (this.destroyed) return;
+    this.map.easeTo({ bearing: 0, pitch: 0, duration: 300 });
+  }
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
@@ -812,9 +833,9 @@ export function resolveMapColors(container: HTMLElement, colors: Record<string, 
 /** Product palette, typography and space reserved for the Alpha route sheets. The plane
  * reflows the selected place when these sheets move. */
 export class MapPlane extends MapLibrePlane {
- constructor(container:HTMLElement,region:MapBasemap,onError:()=>void,colors:Record<string,string>,onPin?:(id:string)=>void,onCopyright?:(text:string)=>void,onInteraction?:()=>void,onViewport?:(center:Coordinate,zoom:number)=>void,onLongPress?:(point:Coordinate)=>void) {
+ constructor(container:HTMLElement,region:MapBasemap,onError:()=>void,colors:Record<string,string>,onPin?:(id:string)=>void,onCopyright?:(text:string)=>void,onInteraction?:()=>void,onViewport?:(center:Coordinate,zoom:number)=>void,onLongPress?:(point:Coordinate)=>void,onRotate?:(rotated:boolean,bearing:number)=>void) {
   const worldwide=region.kind==='global'||region.kind==='cloud-raster';
-  super(container,region,onError,region.kind==='global'?colors:resolveMapColors(container,colors),{fontUrl,workerUrl,accent:'#1616d8',protocol:'alpha-region',routePadding:{top:220,bottom:280,left:30,right:30},nativeRegion,nativeRequest:nativeRegionRequest,onCopyright,onInteraction,onViewport,onLongPress,selectionPadding:worldwide?()=>{
+  super(container,region,onError,region.kind==='global'?colors:resolveMapColors(container,colors),{fontUrl,workerUrl,accent:'#1616d8',protocol:'alpha-region',routePadding:{top:220,bottom:280,left:30,right:30},nativeRegion,nativeRequest:nativeRegionRequest,onCopyright,onInteraction,onViewport,onLongPress,onRotate,selectionPadding:worldwide?()=>{
    const bounds=container.getBoundingClientRect();
    const credits=container.parentElement?.querySelector('.alpha-map-credits')?.getBoundingClientRect();
    const header=container.parentElement?.querySelector('[data-alpha-app-header="main"]')?.getBoundingClientRect();

@@ -1,6 +1,7 @@
 // The Maps screen as the launcher mounts it (installPrototypeMapsAdapter over the real
 // MapsScreenController and MapsController, native plugins as controlled ports): the position
-// shown on open when location is already allowed, the place sheet's phone row, a long press dropping a pin, the route's step list, guidance copy without
+// shown on open when location is already allowed, the place sheet's phone row, a long press dropping a pin, the route's step list,
+// swapping a route's ends, recent searches, the compass, guidance copy without
 // a screen-off session, and the arrival notice when guidance ends with Maps off screen.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -230,4 +231,139 @@ test('a fix that arrives while the owner types a search leaves the map where it 
     request.run?.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
     assert.equal(m.harness.screen.view().map.selected, undefined);
   } finally { m.restore(); }
+});
+
+test('a planned route swaps its ends: the chosen place becomes the start and the typed point the destination', async () => {
+  const {m, cafe, routes} = await mount();
+  try {
+    let data = await routeToCafe(m);
+    assert.equal(routes.length, 1);
+    assert.equal(data.dr.canSwap, true);
+    data.dr.swap(); await settle();
+    data = m.render();
+    assert.equal(data.mode, 'dir');
+    assert.equal(data.dr.name, 'Dropped pin');
+    assert.equal(data.originText, 'Cafe');
+    assert.equal(routes.length, 2, 'the swapped route is planned once');
+    assert.deepEqual(routes[1].from, cafe.coordinate);
+    assert.deepEqual(routes[1].to, from);
+    // Swapping back keeps the provider place as the destination, read again by its id.
+    m.render().dr.swap(); await settle();
+    data = m.render();
+    assert.equal(data.dr.name, 'Cafe');
+    assert.equal(m.harness.screen.selected.origin, 'provider');
+    assert.equal(m.harness.screen.selected.providerPlaceId, 'cafe-1');
+    assert.equal(data.originText, 'Dropped pin');
+    assert.deepEqual(routes[2].from, from);
+    assert.deepEqual(routes[2].to, cafe.coordinate);
+  } finally { m.restore(); }
+});
+
+test('swapping a route from the located position makes that position the destination', async () => {
+  const {m, cafe, routes} = await mount({granted: false});
+  try {
+    (await openCafe(m)).pc.dirs(); await settle();
+    m.render().originLocation(); await settle();
+    oneFix(m).at(-1).run.onFix({coordinate: from, accuracyMeters: 5, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.equal(m.render().originText, 'My location');
+    assert.equal(routes.length, 1);
+    m.render().dr.swap(); await settle();
+    const data = m.render();
+    assert.equal(data.dr.name, 'Current location');
+    assert.equal(m.harness.screen.selected.origin, 'location');
+    assert.equal(data.originText, 'Cafe');
+    assert.deepEqual(routes.at(-1).from, cafe.coordinate);
+    assert.deepEqual(routes.at(-1).to, from);
+  } finally { m.restore(); }
+});
+
+test('swap is offered only for a planned route, and not during guidance', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    (await openCafe(m)).pc.dirs(); await settle();
+    assert.equal(m.render().dr.canSwap, false, 'no starting point yet');
+    m.harness.screen.swapEnds(); await settle();
+    assert.equal(m.render().dr.name, 'Cafe');
+    m.render().onOrigin({target: {value: '1, 1'}});
+    m.harness.flushInputTimers(); await settle();
+    assert.equal(m.render().dr.canSwap, true);
+    m.render().dr.start(); await settle();
+    assert.equal(m.harness.screen.view().directions.canSwap, false);
+    m.harness.screen.swapEnds(); await settle();
+    assert.equal(m.render().mode, 'nav');
+    assert.equal(m.harness.screen.selected.label, 'Cafe');
+  } finally { m.restore(); }
+});
+
+const enter = {key: 'Enter', preventDefault() {}, target: {blur() {}}};
+async function searchEnter(m, text) {
+  m.render().onQ({target: {value: text}});
+  m.render().qKey(enter); await settle();
+}
+
+test('recent searches list what the owner searched, newest first, kept in memory only', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    await searchEnter(m, 'tea');
+    m.render().clearQ(); await settle();
+    // A typeahead search the owner picks a result from counts; its partial text does not.
+    m.render().onQ({target: {value: 'cafe'}});
+    m.harness.flushInputTimers(); await settle();
+    m.render().results[0].go(); await settle();
+    m.render().pc.close(); m.render().clearQ(); await settle();
+    // Coordinates drop a pin; they are not a search to repeat.
+    await searchEnter(m, '1, 1');
+    m.render().pc.close(); m.render().clearQ(); await settle();
+    let data = m.render();
+    assert.equal(data.emptyQ, true);
+    assert.equal(data.hasRecent, true);
+    assert.deepEqual(data.recentRows.map(row => row.text), ['cafe', 'tea']);
+    data.recentRows[1].go(); await settle();
+    data = m.render();
+    assert.equal(m.harness.screen.view().query, 'tea');
+    assert.equal(data.mode, 'results');
+    m.render().clearQ(); await settle();
+    assert.deepEqual(m.render().recentRows.map(row => row.text), ['tea', 'cafe']);
+    m.render().clearRecent(); await settle();
+    data = m.render();
+    assert.equal(data.hasRecent, false);
+    assert.deepEqual(data.recentRows, []);
+  } finally { m.restore(); }
+});
+
+test('a Maps provider change drops the recent searches', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    await searchEnter(m, 'tea');
+    m.render().clearQ(); await settle();
+    assert.equal(m.render().hasRecent, true);
+    m.app.configureMapsProvider({...providerConfig, revision: 'replacement'}, {providerId, connectionId, search: async () => [], detail: async () => null, route: async () => { throw Error('none'); }});
+    await settle();
+    m.render().clearQ(); await settle();
+    assert.equal(m.render().hasRecent, false);
+  } finally { m.restore(); }
+});
+
+test('the compass shows while the map is turned and puts north back up', async () => {
+  const saved = globalThis.MutationObserver;
+  globalThis.MutationObserver = class { observe() {} disconnect() {} };
+  const {m} = await mount({granted: false});
+  try {
+    m.render().mapRef({dataset: {}, isConnected: true, replaceChildren() {}});
+    const onRotate = m.harness.plane?.[9];
+    assert.equal(typeof onRotate, 'function', 'the adapter hands the plane a rotation callback');
+    assert.equal(m.render().compass, false, 'north up shows no compass');
+    const style = new Map();
+    m.render().compassRef({style: {setProperty: (name, value) => style.set(name, value)}});
+    onRotate(true, 30); await settle();
+    let data = m.render();
+    assert.equal(data.compass, true);
+    assert.equal(style.get('--alpha-map-bearing'), '-30deg', 'the needle turns against the map');
+    data.northUp();
+    assert.equal(m.harness.northUps, 1);
+    onRotate(false, 0); await settle();
+    data = m.render();
+    assert.equal(data.compass, false);
+    assert.equal(style.get('--alpha-map-bearing'), '0deg');
+  } finally { m.restore(); globalThis.MutationObserver = saved; }
 });

@@ -29,7 +29,7 @@ const ports = new Map(Object.entries({
   'native.ts': 'export const isAndroid=false;',
   'maps/navigation-voice.ts': 'export class NavigationVoice{enabled=false;update(){}pause(){}toggle(){this.enabled=!this.enabled;}}',
   'maps/share.ts': 'export const shareMap=async()=>"closed";',
-  'maps/map-plane.ts': 'export class MapPlane{constructor(...args){globalThis.mapsHarness.plane=args;}update(){}destroy(){}}',
+  'maps/map-plane.ts': 'export class MapPlane{constructor(...args){globalThis.mapsHarness.plane=args;}update(){}resetNorth(){globalThis.mapsHarness.northUps++;}destroy(){}}',
   'maps/regional-provider.ts': 'export const regionalMapsConfigured=false,regionalMap=()=>undefined,regionalDiagnostics=()=>({configured:false,error:""}),initializeRegionalMaps=async()=>{};',
   'maps/cloud-maps.ts': 'const cloud=globalThis.mapsHarness.cloud;export const initializeCloudMaps=()=>cloud.initialize(),cloudMapsCoverage=()=>cloud.coverage,cloudMapsDiagnostics=()=>cloud.diagnostics,cloudMapsBasemap=()=>undefined;',
   'maps/native-location.ts': `const harness=globalThis.mapsHarness;
@@ -111,7 +111,7 @@ export async function mountMapsAdapter(code, {storage = {}, configure, view = 'm
   const bridgeListeners = new Set();
   const harness = globalThis.mapsHarness = {
     locations: [], locationStarts: 0, locationGranted: true, handoffs: 0, screen: null, host: null, surface: null, inspect: null,
-    pluginHeaders, plane: null, copied: [], held: null, inputTimers: new Set(), retiredInputTimers: [],
+    pluginHeaders, plane: null, northUps: 0, copied: [], held: null, inputTimers: new Set(), retiredInputTimers: [],
     setTimeout(run,delay) { if(delay!==350)return setTimeout(run,delay);const timer={run};this.inputTimers.add(timer);return timer; },
     clearTimeout(timer) { if(this.inputTimers.delete(timer))this.retiredInputTimers.push(timer);else clearTimeout(timer); },
     flushInputTimers() { for(const timer of [...this.inputTimers]){this.inputTimers.delete(timer);timer.run();} },

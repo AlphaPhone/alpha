@@ -43,6 +43,9 @@ import {isMvpView} from './mvp-features';
 
 type Bag = Record<string, any>;
 const PIN = 'M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0zM15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z';
+const SWAP = 'M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4';
+const NORTH = 'M12 3l6 18-6-4-6 4z';
+const CLOCK = 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 7v5l3 2';
 const locationText = (text: string) => text === 'Your location' ? 'My location' : /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text.trim()) ? 'Selected location' : text;
 const mapsConnected = () => mapsConnection().config.status === 'configured';
 
@@ -61,6 +64,17 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   let planeBasemap:MapBasemap|undefined, plane: MapPlane | undefined, planeElement: HTMLElement | undefined;
   let mapGeneration=0,mapFailed=false,mapObserver:MutationObserver|undefined;
   let mapCopyright='';
+  // The map is turned or tilted away from north up; the compass shows only then.
+  let mapRotated=false,compassElement:HTMLElement|undefined,mapBearing=0;
+  const turnCompass=()=>{compassElement?.style.setProperty('--alpha-map-bearing',`${-mapBearing}deg`);};
+  // The owner's own recent searches, newest first. They stay in memory for this session only:
+  // nothing is stored on the phone or sent anywhere, and a Maps account change drops them.
+  let recentSearches:string[]=[];
+  const rememberSearch=(text:string)=>{
+    const value=text.trim();
+    if(!value||value.length>300||/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(value))return;
+    recentSearches=[value,...recentSearches.filter(item=>item.toLowerCase()!==value.toLowerCase())].slice(0,5);
+  };
   let pendingHandoff: {query:string}|undefined, mapsController:MapsController|undefined;
   let queryTimer:ReturnType<typeof setTimeout>|undefined,originTimer:ReturnType<typeof setTimeout>|undefined;
   let queryDraft:string|undefined,originDraft:string|undefined,searchEpoch=0,submittedQueryEpoch=-1;
@@ -96,7 +110,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   };
   const mapsDiagnostics=()=>regionalMapsConfigured?regionalDiagnostics():cloudMapsDiagnostics();
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
-  const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
+  const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';mapRotated=false;mapBearing=0;turnCompass();plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
   const googleProviders = new Set<string>();
   const isGoogleProvider = (id?: string) => !!id && (googleProviders.has(id) || isGoogleMapsProvider(id, cloudMapsCoverage()));
   const googleContent = () => {
@@ -445,7 +459,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
           mapObserver?.disconnect();plane?.destroy();mapFailed=false;mapCopyright='';planeElement=element;planeBasemap=basemap;const generation=++mapGeneration;delete element.dataset.mapReady;delete element.dataset.mapError;
           const current=()=>generation===mapGeneration&&planeElement===element&&!disposed&&!!api?.isActive();
           try{
-            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();},(center,zoom)=>{if(current())screen.setViewport(center,zoom);},point=>{if(current()){retireSearch();screen.dropPin(point);}});
+            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();},(center,zoom)=>{if(current())screen.setViewport(center,zoom);},point=>{if(current()){retireSearch();screen.dropPin(point);}},(rotated,bearing)=>{if(!current())return;mapBearing=bearing;turnCompass();if(rotated!==mapRotated){mapRotated=rotated;currentApi.set({nativeMapsRevision:++renders});}});
             mapObserver=new MutationObserver(()=>{if(current())screen.setMapState(element.dataset.mapError ? 'error' : element.dataset.mapReady === 'true' ? 'ready' : 'loading');});
             mapObserver.observe(element,{attributes:true,attributeFilter:['data-map-ready','data-map-error']});
           }catch{mapFailed=true;element.replaceChildren();queueMicrotask(()=>{if(current())screen.setMapState('error');});}
@@ -472,7 +486,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       searchLead: () => {retireSearch();screen.searchLead();},
       onQ: (event: Event) => schedule(view.mode==='origin',(event.target as HTMLInputElement).value),
       focusQ: () => {},
-      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin')submitOrigin();else submitQuery();(event.target as HTMLInputElement).blur(); } },
+      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin')submitOrigin();else{rememberSearch(queryDraft??screen.view().query);submitQuery();}(event.target as HTMLInputElement).blur(); } },
       clearQ: () => {retireSearch();screen.clearQuery();},
       chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
       // "Nearest X" from the map itself: around this phone's fix, located first when there is none yet.
@@ -482,7 +496,22 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         else locateThenSearch({query:category.query,located:true,epoch:-1});
       } })),
       savedRows: view.saved.map(item => ({ id: 'saved:' + item.id, name: locationText(item.label), sub: '', d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
-      results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {retireSearch();screen.choose(row.key);} })),
+      results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {if(view.mode==='results')rememberSearch(view.query);retireSearch();screen.choose(row.key);} })),
+      // Recent searches, offered with the saved places while the search field is empty.
+      hasRecent: savedListVisible && recentSearches.length > 0 && queryDraft===undefined,
+      recentRows: savedListVisible ? recentSearches.map(text => ({ id: 'recent:' + text, text, d: CLOCK, go: () => {if(!active())return;retireSearch();rememberSearch(text);screen.searchFor(text);} })) : [],
+      // Clear removes the Recent list it sits in; focus moves on to the sheet's first control.
+      clearRecent: () => {
+        const focused=!!(document.activeElement as HTMLElement|null)?.closest?.('[data-alpha-maps-recent]');
+        recentSearches=[];currentApi.set({nativeMapsRevision:++renders});
+        if(focused)requestAnimationFrame(()=>{if(active())document.querySelector<HTMLElement>('[data-alpha-maps-sheet="results"] button')?.focus();});
+      },
+      // North up: shown while the map is turned or tilted, except while guidance turns it with the heading.
+      compass: mapRotated && !(isNav && view.map.overlay.follow), compassD: NORTH,
+      compassRef: (element: HTMLElement) => {compassElement=element||undefined;turnCompass();},
+      // The compass leaves once the map is north up; focus moves to the map it turned.
+      northUp: () => {if(!active())return;if(compassElement&&document.activeElement===compassElement)planeElement?.querySelector<HTMLElement>('canvas')?.focus({preventScroll:true});plane?.resetNorth();},
+      compassBottom: isNav ? 198 : recBottom + 60,
       hasResults: queryDraft===undefined&&originDraft===undefined&&results.length > 0, noResults: queryDraft===undefined&&originDraft===undefined&&(view.noResults || view.hasResults && results.length === 0), emptyQ: view.emptyQuery,
       recenter: () => {retireSearch();screen.recenter();}, recBottom, recCss: '',
       sheetH: sheetHeight,
@@ -528,6 +557,8 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
        hasRoutes:directions.routes.length>0,
        routes:directions.routes.map(choice=>({label:`${choice.label}, ${choice.duration}, ${choice.meta}`,t:choice.label,sub:`${choice.duration} · ${choice.meta}`,on:choice.selected,css:choice.selected?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>{retireSearch();screen.chooseRoute(choice.id);}})),
        hasSteps:directions.steps.length>0,steps:directions.steps.map(step=>({text:step.instruction,distance:step.distance})),
+       // Shown on the route sheet and unavailable while a route is planned, so focus stays on it.
+       swapShown:!view.navigation,swapOff:!directions.canSwap,swapOpacity:directions.canSwap?1:.4,canSwap:directions.canSwap,swapD:SWAP,swap:()=>{if(!active())return;retireSearch();screen.swapEnds();},
        start:()=>{retireSearch();screen.start();},
        nav:{going:!nav?.arrived,arrived:!!nav?.arrived,dist:nav?.distance||'Locating…',street:nav?.instruction||'Waiting for location',icon:nav?.maneuverIcon||PIN,hasThen:!!nav?.following,thenD:nav?.following?.icon||'',thenText:nav?.following?.text||'',
         left:nav?.remainingTime||'Guidance',meta:nav?.remaining&&nav.remaining===nav.meta?'':nav?.meta||'',remaining:nav?.remaining||'',
@@ -582,7 +613,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   });
   // Coverage is read once the account is bound and the resident is ready, so the agent can navigate
   // before Maps is opened. A new account gets coverage only; its routes still need a new search.
-  const stopSearchConnection=onMapsConnectionChange(()=>{retireSearch();});
+  const stopSearchConnection=onMapsConnectionChange(()=>{retireSearch();recentSearches=[];});
   const stopCoverage=keepCloudMapsCoverage({
     enabled:()=>!regionalMapsConfigured&&!shell?.props?.assistantSurface&&!document.documentElement.classList.contains('alpha-assistant-surface'),
     ready:()=>!!connectionController.getSnapshot().session,
