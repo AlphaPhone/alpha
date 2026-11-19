@@ -32,50 +32,76 @@ input tokens; calls and tokens per turn; input tokens in any 60 seconds against
 request of the same stage, within `--cache-minutes` (default 5), already contained;
 and the text at which requests most often diverge.
 
+It ends with the provider's two limits applied to the recorded requests: the tokens its
+prefix cache would reuse (whole 128-token blocks of a prefix that an earlier request,
+finished within the cache lifetime, also began with), the uncached and total tokens in
+any 60 seconds against `--uncached-tpm` and `--total-tpm` (default 150K and 750K), and
+the turns in which this phone alone goes over one. `--reserve planner=8192` counts an
+output cap for a stage whose calls record none. This is what the documented rules give
+for the recorded text, not a provider measurement.
+
 Runtimes from the pin that records provider usage also store the provider's own
 counts, the tool definitions' sizes and the output cap. The report then uses those
-counts and prints the measured cache hit rate. Older runtimes store messages only:
-token counts are estimates, and tool definitions (about 14K characters for Stage 1 and
-up to 41.6K for the device tool on a planner call) are not included.
+counts, prints the measured cache hit rate, and shows the provider's cached tokens
+beside the rule-derived ones. Older runtimes store messages only: token counts are
+estimates, and tool definitions (about 14K characters for Stage 1 and 26K to 29K for
+the device tool on a planner call) are not included.
 
-### Baseline, Pixel, November 17 to 18, 2026
+### Baseline, Pixel, November 18, 2026
 
-One conversation of 283 messages, 146 turns, runtime pin `f17ac0ccc45`, Eliza Cloud
-route. Estimated from recorded messages; tool definitions excluded.
+One conversation of 283 messages; 323 model calls in 129 turns that day; runtime pin
+`f17ac0ccc45`, Eliza Cloud route. Estimated from recorded messages; tool definitions
+excluded.
 
 | Measure | Value |
 | --- | --- |
-| Stage 1 input per call, last day | 26K tokens median, 34K maximum |
-| Planner input per call, last day | 26K median, 37K maximum |
-| Input per turn | 38K median, 79K at the 90th percentile, 154K maximum |
-| Input in any 60 seconds | 79K median, 214K maximum |
+| Stage 1 input per call | 21K tokens median, 34K maximum |
+| Planner input per call | 17K median, 37K maximum |
+| Evaluator input per call | 9K median, 27K maximum |
+| Input per turn | 34K median, 79K at the 90th percentile, 158K maximum |
 | Share of a Stage 1 request already sent by the previous one | 6% |
+| Tokens the provider's cache rules would reuse | 17% (Stage 1 4%, planner 26%, evaluator 42%) |
+| Uncached tokens in any 60 seconds | 53K median, 124K at the 90th percentile, 193K maximum |
+| Turns in which this phone alone exceeds 150K uncached per minute | 7 of 129 |
 | Turns that ended in HTTP 429, one 38-turn log | 12 |
 
-History caused it. Every call carried the conversation's whole lifetime and a receipt
-for every past action (about 65% of each request), and a fresh reference for each
-phone number and credential on every turn left nothing for the provider's cache to
-match.
+History caused the size: every call carried the conversation's whole lifetime and a
+receipt for every past action, about three quarters of a Stage 1 request. The system
+prompt caused the cache misses: it ended in a list of fresh references to each phone
+number in the request, so every request differed before its tool definitions began.
 
-### The same conversation replayed with a history window
+### The same conversation replayed through the runtime
 
-A host replay, not a phone result. The recorded conversation was rendered turn by turn
-through the upstream Stage 1 renderer, once whole and once with the history window that
-upstream branch `claude/agent-context-budget` adds for hosts where no history reviewer
-runs. The figures cover the Stage 1 user message only: no system prompt, no tool
-definitions, no planner or evaluator, and no reference substitution.
+A host replay, not a phone result. Every turn of the recorded conversation was sent
+through the upstream Stage 1 and planner code with a scripted model, then through the
+runtime's model dispatch with reference substitution on, and the provider's rules were
+applied to the requests that came out. It covers Stage 1 and the first planner call of
+each turn that planned on the phone (205 requests for the 128 turns of November 18).
+The harness loads none of the phone's apps, so the device tool and the phone's Stage 1
+fields are counted as constant sizes, and the view and capability text the phone adds
+after the history is absent.
 
-| Measure | Whole history | With the window |
-| --- | --- | --- |
-| Last turn (272 earlier messages) | 29.7K tokens | 5.5K |
-| Average over the 115 turns with 60 or more earlier messages | 18.2K | 5.6K |
-| Largest turn | 29.7K | 8.1K |
-| All 144 turns | 2.17M | 0.71M |
-| Share of a turn's text the previous turn already sent | 67% | 69% |
+| Measure | Pin `f17ac0ccc45` | History window | Window and stable references |
+| --- | --- | --- | --- |
+| Stage 1 input per call | 18.6K median, 28.9K max | 10.7K, 13.0K | 10.8K, 13.1K |
+| Planner input per call | 21.5K median, 34.7K max | 15.6K, 19.0K | 15.7K, 19.1K |
+| Input per turn | 27.5K median, 56.1K p90 | 20.9K, 29.3K | 21.2K, 29.5K |
+| All input | 4.07M | 2.50M | 2.52M |
+| Tokens the cache rules would reuse | 3% | 23% | 80% |
+| Uncached tokens in any 60 seconds | 46K median, 109K p90, 172K max | 23K, 53K, 88K | 5K, 16K, 32K |
+| Turns over 150K uncached per minute | 3 | 0 | 0 |
 
-The last row is not comparable with the 6% in the baseline, which includes the changing
-references. With the window, about 6 turns in 10 still stop matching in the receipt
-tables, which sit before the transcript and change whenever an action adds a row.
+For turns with fewer than 40 earlier messages, which the window leaves alone, the
+branch's planner request is byte-identical to the pin's when references are not stable:
+same system prompt, same tool definitions, same paragraphs in the same order. Its
+Stage 1 request has the same paragraphs in another order and a tool definition without
+two fields nothing on a phone reads. Stable references add one line after the newest
+user message and the same guidance sentence to every system prompt.
+
+What the replay leaves: on the stable-reference requests, a Stage 1 request re-sends
+27% of its text and a planner request 18%. Most of that is one cause. The outcome
+tables sit before the transcript, so a turn that records an action re-sends the
+transcript after it.
 
 ## 2. Compare action routing before and after a change
 

@@ -5,11 +5,16 @@
  * it does not call a model and proves nothing about replies or action choice.
  *
  *   bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>]
- *       [--cache-minutes <n>] [--json <file>] [--show-text]
+ *       [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>]
+ *       [--reserve <stage>=<tokens>[,...]] [--json <file>] [--show-text]
  *
  * Token counts are estimates (see estimateTokens) unless the recorded call carries the
  * provider's own usage. Runtimes before the usage record store the messages only: no
  * tool schemas, no output cap and no provider counts, so those figures are lower bounds.
+ *
+ * The cache hit rate is the provider's where calls carry its usage. For the others it is
+ * worked out from the recorded text by the provider's documented rules (simulateProvider),
+ * which is what the provider should do, not what it did.
  */
 import type { PGliteOptions } from '@electric-sql/pglite';
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -251,6 +256,112 @@ export function audit(calls: RecordedCall[], options: { cacheMinutes?: number; t
   };
 }
 
+/**
+ * How a hosted model admits and bills requests. Defaults are Cerebras `qwen-3.8-27b` on
+ * 18 November 2026: a prompt prefix is reused in 128-token blocks for at least 5 minutes,
+ * in the order system prompt, tool definitions, messages; tokens that miss count against
+ * the uncached per-minute limit and every token against the total one; a request's
+ * output cap is counted before it runs.
+ */
+export type ProviderModel = {
+  uncachedTpm: number;
+  totalTpm: number;
+  cacheBlockTokens: number;
+  cacheMinutes: number;
+  /** Output tokens to count at admission for a stage whose calls record no cap. */
+  outputReserve?: Record<string, number>;
+};
+export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 128, cacheMinutes: 5 };
+
+export type ProviderSimulation = ReturnType<typeof simulateProvider>;
+
+/**
+ * Applies a provider's prefix cache and per-minute limits to recorded calls. A call's
+ * cached tokens are its longest prefix shared with any call that finished inside the
+ * cache lifetime before it started, in whole blocks. Tool definitions are recorded by
+ * name and size only, so two tool lists with the same names and sizes count as equal.
+ * Each 60-second figure sums the calls that started in the 60 seconds up to a call.
+ */
+export function simulateProvider(calls: RecordedCall[], model: ProviderModel = CEREBRAS_QWEN) {
+  const cacheMs = model.cacheMinutes * 60_000;
+  const rows = [...calls].sort((a, b) => a.at - b.at).map(call => {
+    const messages = wireText(call).slice(call.system.length);
+    const systemTokens = estimateTokens(call.system);
+    const tools = toolTokens(call);
+    return {
+      call, stage: stageOf(call), messages, systemTokens, tools, toolsKey: JSON.stringify(call.tools ?? null),
+      start: call.at - call.ms,
+      input: call.usage?.input ?? systemTokens + tools + estimateTokens(messages),
+      cached: 0,
+    };
+  });
+  type Row = (typeof rows)[number];
+  const sharedTokens = (row: Row, earlier: Row) => {
+    const system = commonPrefix(row.call.system, earlier.call.system);
+    if (system < row.call.system.length || earlier.call.system.length !== row.call.system.length) return estimateTokens(row.call.system.slice(0, system));
+    if (row.toolsKey !== earlier.toolsKey) return row.systemTokens;
+    return row.systemTokens + row.tools + estimateTokens(row.messages.slice(0, commonPrefix(row.messages, earlier.messages)));
+  };
+  rows.forEach((row, index) => {
+    let best = 0;
+    for (let earlier = index - 1; earlier >= 0 && row.start - rows[earlier].call.at <= cacheMs; earlier--)
+      if (rows[earlier].call.at <= row.start) best = Math.max(best, sharedTokens(row, rows[earlier]));
+    row.cached = Math.min(row.input, Math.floor(best / model.cacheBlockTokens) * model.cacheBlockTokens);
+  });
+
+  const reserve = (row: Row) => row.call.maxTokens ?? model.outputReserve?.[row.stage] ?? 0;
+  const byStart = [...rows].sort((a, b) => a.start - b.start);
+  const uncachedWindows: number[] = [];
+  const totalWindows: number[] = [];
+  const refused = new Set<string>();
+  let overUncached = 0;
+  let overTotal = 0;
+  for (let end = 0, first = 0, uncached = 0, total = 0; end < byStart.length; end++) {
+    const row = byStart[end];
+    const output = row.call.usage?.output ?? 0;
+    while (row.start - byStart[first].start > 60_000) {
+      const old = byStart[first++];
+      uncached -= old.input - old.cached + (old.call.usage?.output ?? 0);
+      total -= old.input + (old.call.usage?.output ?? 0);
+    }
+    // Admission counts the cap; what stays in the window afterwards is what was used.
+    const over = uncached + row.input - row.cached + reserve(row) > model.uncachedTpm;
+    const overAll = total + row.input + reserve(row) > model.totalTpm;
+    if (over) overUncached++;
+    if (overAll) overTotal++;
+    if (over || overAll) refused.add(row.call.runId);
+    uncached += row.input - row.cached + output;
+    total += row.input + output;
+    uncachedWindows.push(uncached);
+    totalWindows.push(total);
+  }
+
+  const stages: Record<string, { calls: number; input: number; cached: number }> = {};
+  for (const row of rows) {
+    const stage = (stages[row.stage] ??= { calls: 0, input: 0, cached: 0 });
+    stage.calls++;
+    stage.input += row.input;
+    stage.cached += row.cached;
+  }
+  const input = rows.reduce((sum, row) => sum + row.input, 0);
+  const cached = rows.reduce((sum, row) => sum + row.cached, 0);
+  const measured = rows.filter(row => row.call.usage);
+  return {
+    model,
+    calls: rows.length,
+    inputTokens: input,
+    cachedTokens: cached,
+    hitRate: input ? cached / input : 0,
+    stages: Object.fromEntries(Object.entries(stages).map(([name, stage]) => [name, { ...stage, hitRate: stage.input ? stage.cached / stage.input : 0 }])),
+    /** Calls that carry the provider's own count: its cached tokens beside the simulated ones. */
+    reported: measured.length ? { calls: measured.length, provider: measured.reduce((sum, row) => sum + row.call.usage!.cached, 0), simulated: measured.reduce((sum, row) => sum + row.cached, 0) } : null,
+    uncachedMinute: { p50: quantile(uncachedWindows, 0.5), p90: quantile(uncachedWindows, 0.9), max: quantile(uncachedWindows, 1), callsOver: overUncached },
+    totalMinute: { p50: quantile(totalWindows, 0.5), p90: quantile(totalWindows, 0.9), max: quantile(totalWindows, 1), callsOver: overTotal },
+    turnsOver: refused.size,
+    turns: new Set(rows.map(row => row.call.runId)).size,
+  };
+}
+
 const readUsage = (body: Record<string, unknown>): ProviderUsage | undefined => {
   const raw = (body.usage ?? (body.response as { usage?: unknown } | undefined)?.usage) as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== 'object') return undefined;
@@ -316,6 +427,19 @@ export async function loadCalls(databaseDirectory: string): Promise<RecordedCall
 
 const percent = (value: number) => `${(100 * value).toFixed(1)}%`;
 
+export function renderSimulation(result: ProviderSimulation): string {
+  const { model } = result;
+  const lines = [`Prefix cache and per-minute limits by the provider's documented rules (${model.cacheBlockTokens}-token blocks, ${model.cacheMinutes} min; worked out from the recorded text)`];
+  lines.push(`  Cached ${result.cachedTokens} of ${result.inputTokens} input tokens: ${percent(result.hitRate)}`);
+  for (const [name, stage] of Object.entries(result.stages).sort((a, b) => b[1].input - a[1].input))
+    lines.push(`  ${name.padEnd(22)}${String(stage.calls).padStart(6)} calls${percent(stage.hitRate).padStart(8)} cached`);
+  if (result.reported) lines.push(`  On the ${result.reported.calls} calls with provider usage: provider counted ${result.reported.provider} cached tokens, these rules give ${result.reported.simulated}`);
+  lines.push(`  Uncached tokens in any 60 s: p50 ${result.uncachedMinute.p50}, p90 ${result.uncachedMinute.p90}, max ${result.uncachedMinute.max} (limit ${model.uncachedTpm}); ${result.uncachedMinute.callsOver} of ${result.calls} calls start over it`);
+  lines.push(`  All tokens in any 60 s: p50 ${result.totalMinute.p50}, p90 ${result.totalMinute.p90}, max ${result.totalMinute.max} (limit ${model.totalTpm}); ${result.totalMinute.callsOver} calls start over it`);
+  lines.push(`  Turns with a call that this phone alone puts over a limit: ${result.turnsOver} of ${result.turns}`);
+  return lines.join('\n');
+}
+
 export function renderReport(result: Audit, options: { tpm?: number; showText?: boolean } = {}): string {
   const lines: string[] = [];
   lines.push(`Recorded text-model calls: ${result.calls} (${result.from ?? '-'} to ${result.to ?? '-'})`);
@@ -351,7 +475,7 @@ if (import.meta.main) {
   };
   const directory = args.find((arg, at) => !arg.startsWith('--') && !args[at - 1]?.startsWith('--'));
   if (!directory) {
-    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--json <file>] [--show-text]');
+    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--json <file>] [--show-text]');
     process.exit(2);
   }
   const since = value('--since') ? Date.parse(value('--since')!) : 0;
@@ -361,7 +485,24 @@ if (import.meta.main) {
     process.exit(2);
   }
   const calls = (await loadCalls(directory)).filter(call => call.at >= since);
-  const result = audit(calls, { cacheMinutes: value('--cache-minutes') ? Number(value('--cache-minutes')) : undefined, tpm });
-  if (value('--json')) writeFileSync(value('--json')!, `${JSON.stringify(result, null, 2)}\n`);
-  console.log(renderReport(result, { tpm, showText: args.includes('--show-text') }));
+  const cacheMinutes = value('--cache-minutes') ? Number(value('--cache-minutes')) : undefined;
+  const result = audit(calls, { cacheMinutes, tpm });
+  const outputReserve = Object.fromEntries((value('--reserve') ?? '').split(',').filter(Boolean).map(pair => {
+    const [stage, tokens] = pair.split('=');
+    return [stage, Number(tokens)];
+  }));
+  const model: ProviderModel = {
+    ...CEREBRAS_QWEN,
+    ...(cacheMinutes ? { cacheMinutes } : {}),
+    ...(value('--uncached-tpm') ? { uncachedTpm: Number(value('--uncached-tpm')) } : {}),
+    ...(value('--total-tpm') ? { totalTpm: Number(value('--total-tpm')) } : {}),
+    outputReserve,
+  };
+  if (![model.uncachedTpm, model.totalTpm, model.cacheMinutes, ...Object.values(outputReserve)].every(number => number >= 0 && Number.isFinite(number))) {
+    console.error('Invalid --uncached-tpm, --total-tpm, --cache-minutes or --reserve');
+    process.exit(2);
+  }
+  const simulation = simulateProvider(calls, model);
+  if (value('--json')) writeFileSync(value('--json')!, `${JSON.stringify({ ...result, provider: simulation }, null, 2)}\n`);
+  console.log(`${renderReport(result, { tpm, showText: args.includes('--show-text') })}\n\n${renderSimulation(simulation)}`);
 }

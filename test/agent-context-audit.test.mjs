@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {audit, bucketsOf, estimateTokens, renderReport, stageOf, wireText} from '../scripts/agent-context-audit.ts';
+import {audit, bucketsOf, CEREBRAS_QWEN, estimateTokens, renderReport, renderSimulation, simulateProvider, stageOf, wireText} from '../scripts/agent-context-audit.ts';
 
 const system = 'You are Alpha.\n\n';
 const stage1 = (at, history, message, extra = {}) => ({
@@ -55,4 +55,62 @@ test('provider usage, when recorded, replaces estimates and yields the cache hit
   const report = renderReport(result, {tpm: 15_000});
   assert.match(report, /cached 19968 \(64\.0%\)/);
   assert.doesNotMatch(report, /text mom|three/);
+});
+
+// The provider reuses a prompt prefix in whole 128-token blocks, system prompt first, then
+// tool definitions, then messages, and bills what misses against a smaller per-minute limit.
+test('the provider simulation caches whole prefix blocks in system, tools, messages order', () => {
+  const receipts = JSON.stringify(Array.from({length: 120}, (_, row) => [`history:${row}`, [['NOTES_CREATE', true, [row]]]]));
+  const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000}];
+  const first = stage1(0, receipts, 'one', {tools});
+  const next = stage1(20_000, receipts, 'two', {tools});
+  const result = simulateProvider([first, next]);
+  const [cold, warm] = [result.stages.stage1.input / 2, result.cachedTokens];
+  assert.equal(warm % CEREBRAS_QWEN.cacheBlockTokens, 0);
+  // Everything but the last message differs by a few tokens, so nearly all of it is reused.
+  assert.ok(warm > 0.9 * cold && warm < cold, `${warm} of ${cold}`);
+  assert.equal(result.hitRate, warm / result.inputTokens);
+
+  // One changed character at the end of the system prompt loses the tools and the messages.
+  const drifted = simulateProvider([first, {...next, system: `${system}Current contact reference kinds: a.`}]);
+  assert.ok(drifted.cachedTokens <= estimateTokens(system));
+  // Another tool list keeps the system prompt and nothing after it.
+  const otherTools = simulateProvider([first, {...next, tools: [{name: 'HANDLE_RESPONSE', chars: 14_001}]}]);
+  assert.ok(otherTools.cachedTokens <= estimateTokens(system));
+  // A prefix older than the provider keeps it, or one still being read, is not reused.
+  assert.equal(simulateProvider([first, stage1(400_000, receipts, 'two', {tools})]).cachedTokens, 0);
+  assert.equal(simulateProvider([first, {...next, at: 500, ms: 900}]).cachedTokens, 0);
+});
+
+test('the provider simulation counts a call against both per-minute limits, with its output cap, when it starts', () => {
+  const receipts = 'x '.repeat(4000);
+  const calls = [0, 10_000, 20_000].map((at, index) => stage1(at, `${index}${receipts}`, 'go', {maxTokens: 2000}));
+  const each = simulateProvider([calls[0]]).inputTokens;
+  const fits = simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm: 3 * each + 2000, totalTpm: 10 * each});
+  assert.equal(fits.uncachedMinute.callsOver, 0);
+  assert.equal(fits.uncachedMinute.max, 3 * each);
+  // The third call's cap no longer fits, though what was used so far does.
+  const tight = simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm: 3 * each + 1999, totalTpm: 10 * each});
+  assert.equal(tight.uncachedMinute.callsOver, 1);
+  assert.equal(tight.turnsOver, 1);
+  // A stage with no recorded cap takes the reserve given for it; cached tokens are exempt
+  // from the uncached limit and not from the total one.
+  const shared = [0, 10_000].map(at => stage1(at, receipts, 'go'));
+  const reused = simulateProvider(shared, {...CEREBRAS_QWEN, outputReserve: {stage1: 500}});
+  assert.ok(reused.uncachedMinute.max < reused.totalMinute.max);
+  assert.equal(reused.totalMinute.max, reused.inputTokens);
+  assert.match(renderSimulation(reused), /Cached \d+ of \d+ input tokens: \d+\.\d%/);
+  assert.doesNotMatch(renderSimulation(reused), /x x x/);
+});
+
+test('where the provider reported its own cached count, the simulation shows both', () => {
+  const calls = [
+    stage1(0, '["a"]', 'one', {usage: {input: 9000, output: 30, cached: 0}}),
+    stage1(20_000, '["a"]', 'two', {usage: {input: 9000, output: 30, cached: 8064}}),
+  ];
+  const result = simulateProvider(calls);
+  assert.equal(result.inputTokens, 18_000);
+  assert.equal(result.reported.provider, 8064);
+  assert.ok(result.reported.simulated >= 0);
+  assert.match(renderSimulation(result), /provider counted 8064 cached tokens/);
 });
