@@ -31,8 +31,11 @@ async function fixture() {
     document: {hidden: false},
   });
   helpers = mounted.helpers;
+  let moveDuringRead = false;
   const reader = selectedKind => () => {
     reads.push(live);
+    // The owner picks again while the provider is being read: the registry re-checks after the read.
+    if (moveDuringRead) {moveDuringRead = false; live++; publish();}
     return selectedKind === 'map-route' ? routeFields : fields;
   };
   const publish = () => helpers.publishMapsSelection(kind, owner, live, kind === 'map-search' ? undefined : reader(kind));
@@ -48,9 +51,10 @@ async function fixture() {
     observe: () => ({'s.kind': kind, 's.liveRevision': live, 's.registered': !!helpers.getMapsSelectedObject(),
       's.view': screen.view, 's.sensitive': screen.sensitive, 's.card': !!card && !approved && outcome === 'none',
       's.cardRevision': card ? Number(card.target.revision) : 0, 's.approved': approved, 's.phase': phase,
-      's.read': reads.length > 0, 's.readRevision': reads.length ? reads.at(-1) : -1, 's.uploaded': uploaded,
+      // A read counts once the executor returned its result; a read the registry discarded shares nothing.
+      's.read': !!receipt?.mapsResult, 's.readRevision': receipt?.mapsResult ? reads.at(-1) : -1, 's.uploaded': uploaded,
       's.uploadedRevision': uploadedRevision, 's.outcome': outcome}),
-    pick(next) {kind = next; live = 0; card = null; approved = false; reads = []; outcome = 'none';
+    pick(next) {kind = next; live = 0; card = null; approved = false; reads = []; outcome = 'none'; receipt = null;
       uploaded = false; uploadedRevision = -1; screen.view = 'maps'; screen.sensitive = false; publish();},
     async review() {
       // A search list publishes no readable target: neither kind of card passes the gate.
@@ -66,6 +70,7 @@ async function fixture() {
       return true;
     },
     reselect() {live++; publish();},
+    reselectDuringRead() {moveDuringRead = true;},
     clearSelection() {helpers.clearMapsSelection();},
     /** The owner leaves Maps; the published context no longer names the selection. */
     leave() {screen.view = 'home';},
@@ -139,6 +144,13 @@ const scenarios = {
     await f.approve(); step('approve', call('approve'));
     f.reselect(); step('owner picks again', call('reselect'));
     await f.execute(); step('executor refuses as not started', call('executorThrows'));
+  },
+  'the selection moves during the read': async (f, t, step) => {
+    await f.review(); step('card', call('review'));
+    await f.approve(); step('approve', call('approve'));
+    f.reselectDuringRead();
+    await f.execute(); step('owner picks again mid-read; executor refuses as not started', [call('reselect'), call('executorThrows')]);
+    assert.equal(await f.upload(), 'upload'); step('failed receipt carries nothing', call('upload'));
   },
   'leaving Maps before the read refuses it': async (f, t, step) => {
     await f.review(); step('card', call('review'));
