@@ -3228,7 +3228,16 @@ IC.notesWave = IC.notesWave || "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0";
 var NOTES_RED = "var(--alpha-notes-red)";
 
 var NOTES_WAVE = []; (function () { for (var i = 0; i < 56; i++) NOTES_WAVE.push(Math.round(8 + 26 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37)) + (i % 3) * 3)); })();
-var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null };
+var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null, itemKeys: null };
+/* Render keys for the open checklist's items, so removing one item does not hand its row (and the
+   focus in it) to the item below. Keys are view-only: saved items carry no id. */
+function notesItemKeys(id, count) {
+  var k = NT.itemKeys;
+  if (!k || k.id !== id) k = NT.itemKeys = { id: id, keys: [], next: 0 };
+  while (k.keys.length < count) k.keys.push("item-" + (++k.next));
+  if (k.keys.length > count) k.keys.length = count;
+  return k.keys.slice();
+}
 
 function notesFmt(sec) { if (!Number.isFinite(sec)) return ""; sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + pad2(sec % 60); }
 function notesNowLabel(d) { return formatTime(d); }
@@ -3457,18 +3466,18 @@ registerView("notes", {
           if (n.kind === "text") notesUpd(api, n.id, { kind: "list", body: "", items: checklistItems(n.body) });
           else notesUpd(api, n.id, { kind: "text", items: [], body: checklistText(n.items) });
         },
-        items: (n.items || []).map(function (it, i) {
+        items: (function (items) { var keys = notesItemKeys(n.id, items.length); return items.map(function (it, i) {
           var itemLabel = String(it.t || "").trim() || "item";
           return {
-            t: it.t, done: it.done, idx: i, css: it.done ? "text-decoration: line-through; color: var(--mut)" : "",
+            key: keys[i], t: it.t, done: it.done, idx: i, css: it.done ? "text-decoration: line-through; color: var(--mut)" : "",
             box: it.done ? "background: var(--fg); color: var(--bg)" : "box-shadow: inset 0 0 0 1.5px var(--mut); color: transparent",
             label: (it.done ? "Uncheck " : "Check ") + itemLabel,
             removeLabel: "Remove " + itemLabel,
             toggle: function () { notesUpd(api, n.id, function (x) { return { items: x.items.map(function (y, j) { return j === i ? Object.assign({}, y, { done: !y.done }) : y; }) }; }); },
             onText: function (e) { var v = e.target.value; notesUpd(api, n.id, function (x) { return { items: x.items.map(function (y, j) { return j === i ? Object.assign({}, y, { t: v }) : y; }) }; }); },
-            remove: function () { notesUpd(api, n.id, function (x) { return { items: x.items.filter(function (y, j) { return j !== i; }) }; }); }
+            remove: function () { if (NT.itemKeys && NT.itemKeys.id === n.id) NT.itemKeys.keys.splice(i, 1); notesUpd(api, n.id, function (x) { return { items: x.items.filter(function (y, j) { return j !== i; }) }; }); }
           };
-        }),
+        }); })(n.items || []),
         newItem: st.newItem || "",
         onNew: function (e) { api.set({ newItem: e.target.value }); },
         addItem: function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); },

@@ -2628,7 +2628,7 @@
       </sc-if>
       <sc-if value="{{notes.ed.isList}}">
       <div class="scr note-checklist-column" style="flex-grow: 1; overflow-y: auto; padding: 8px 12px 190px; touch-action: pan-y">
-          <sc-for list="{{notes.ed.items}}" as="it">
+          <sc-for list="{{notes.ed.items}}" key="{{it.key}}" as="it">
             <div style="display: flex; align-items: center; gap: 2px; min-height: 48px">
               <button aria-label="{{it.label}}" onClick="{{it.toggle}}" style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><span style="width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; {{it.box}}"><svg class="i" viewBox="0 0 24 24" style="width: 15px; height: 15px; "><path d="{{ic.check}}"></path></svg></span></button>
               <input aria-label="Item" value="{{it.t}}" onChange="{{it.onText}}" style="flex-grow: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 17px; {{it.css}}">
