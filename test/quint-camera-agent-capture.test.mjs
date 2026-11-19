@@ -61,6 +61,8 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
         const paintedAtGate = scenario === 'painted';
         const alreadyReady = scenario === 'ready' || abortClosing || ownerClosing;
         const reopensChat = scenario === 'sheet' || scenario === 'full';
+        // Portrait Camera is laid out above an open sheet: only a full chat covers its viewfinder.
+        const sheetKept = scenario === 'uncovered';
         if (alreadyReady) {
           await preview.release(1);
           await preview.ready(1);
@@ -68,7 +70,7 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
         const chat = async panel => {
           await page.evaluate(chat => window.quintMountedCalendar.setState({chat}), panel);
           await page.waitForFunction(panel => window.quintMountedCalendar.S().chat === panel &&
-            window.quintMountedCamera().chat === ['sheet', 'full'].includes(panel), panel);
+            window.quintMountedCamera().chat === (panel === 'full'), panel);
         };
         const observe = () => page.evaluate(() => {
           const {shutters, result} = window.quintAgentCapture;
@@ -95,16 +97,17 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
         });
         const frames = () => page.evaluate(() => new Promise(resolve =>
           requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 250)))));
-        const initialChat = alreadyReady ? 'full' : 'sheet';
+        const initialChat = sheetKept ? 'sheet' : 'full';
         await chat(initialChat);
-        if (alreadyReady) await painted();
+        await painted();
         if (abortClosing || ownerClosing) await slowClose();
         const initial = await observe();
         const description = abortClosing ? 'request aborts while the closing panel still covers the ready preview' :
           reopensChat ? `owner opens ${scenario} while the preview is starting` :
             ownerClosing ? 'request admitted while the owner closing panel still covers the ready preview' :
               paintedAtGate ? 'owner reopens and closes the chat so a painted panel reaches the shutter gate' :
-                `${initial['s.phase']} preview saves once after the owner can see it`;
+                sheetKept ? 'an open sheet stays open above Camera while the preview starts and saves once' :
+                  `${initial['s.phase']} preview saves once after the owner can see it`;
         const observed = trace(description,
           {'s.shutters': initial['s.shutters'], 's.outcome': initial['s.outcome']});
         checkpoint(observed, 'Camera is beneath the initial conversation',
@@ -137,14 +140,17 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
           await page.evaluate(() => window.quintAgentCapture.controller.abort());
         }
         if (!alreadyReady) {
-          await page.waitForFunction(() => window.quintMountedCalendar.S().chat === 'hidden');
+          if (sheetKept) await page.waitForFunction(() => window.quintMountedCalendar.S().chat === 'sheet' && window.quintMountedCamera().agentQueued === true);
+          else await page.waitForFunction(() => window.quintMountedCalendar.S().chat === 'hidden');
           const held = await observe();
           assert.equal(held['s.shutters'], 0);
           assert.equal(held['s.outcome'], 'none');
-          checkpoint(observed, 'The agent hides the conversation and waits for the preview', call('admit'), held);
+          checkpoint(observed, sheetKept ? 'The open sheet keeps its detent while the request waits for the preview' :
+            'The agent hides the full conversation and waits for the preview', call('admit'), held);
           if (reopensChat) {
             await chat(scenario);
-            checkpoint(observed, 'The owner covers the live viewfinder before it is ready',
+            checkpoint(observed, scenario === 'full' ? 'The owner covers the live viewfinder before it is ready' :
+              'The owner opens the sheet below the live viewfinder before it is ready',
               call('ownerCoversChat', scenario), await observe());
           }
           if (paintedAtGate) {
@@ -154,10 +160,10 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
             });
             await frames();
             checkpoint(observed, 'The agent close has cleared the viewfinder', [call('panelCleared'), call('revealed')], await observe());
-            await chat('sheet');
+            await chat('full');
             await painted();
             checkpoint(observed, 'The owner reopens the chat while the preview starts',
-              call('ownerCoversChat', 'sheet'), await observe());
+              call('ownerCoversChat', 'full'), await observe());
             await slowClose();
             await chat('hidden');
             await closing();
@@ -184,7 +190,7 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
             [call('previewReady'), call('recheckFails')], final);
           await finishClosing();
           assert.deepEqual(await observe(), final);
-        } else if (reopensChat) {
+        } else if (scenario === 'full') {
           assert.equal(result.status, 'failed', `The ${scenario} must stop a queued shutter`);
           assert.equal(final['s.shutters'], 0);
           assert.equal(result.cameraResult, undefined);
@@ -195,11 +201,14 @@ test('the mounted agent shutter requires the current viewfinder to be uncovered'
         } else {
           assert.equal(result.status, 'succeeded');
           assert.equal(final['s.shutters'], 1);
-          assert.equal(shutterCovered, false, 'The closing conversation must clear the viewfinder before the shutter');
+          assert.equal(shutterCovered, false, 'The conversation must be off the viewfinder before the shutter');
           assert.equal(result.cameraResult.mediaId, mediaId);
           assert.equal(result.cameraResult.operationId, operationId);
+          // An open sheet stays open through the capture; nothing closed it to reveal the viewfinder.
+          if (sheetKept || scenario === 'sheet') assert.equal(final['s.chat'], 'sheet');
+          const reveal = sheetKept ? [] : scenario === 'sheet' ? [call('revealed')] : [call('panelCleared'), call('revealed')];
           checkpoint(observed, 'The uncovered preview completes one identified capture',
-            [...(ownerClosing ? [] : alreadyReady ? [call('admit')] : []), call('panelCleared'), call('revealed'),
+            [...(ownerClosing ? [] : alreadyReady ? [call('admit')] : []), ...reveal,
               ...(alreadyReady ? [] : [call('previewReady')]), call('shutter'), call('written', 'succeeded')], final);
         }
         traces.push(observed);

@@ -3,8 +3,8 @@
  * MessageThreads.qnt, docs/agentic-comms.md AC-10/13-16/24). The slot holds one pending text with
  * its provenance. An automatic suggestion is only ever offered (faint text in the bar): it is held
  * here but is not the field's text until the owner accepts it. A draft the owner asked Alpha for
- * replaces the slot and keeps the previous text for one Undo. Sending is the owner's tap and the
- * native review, outside this file.
+ * replaces the slot and keeps the previous text for one Undo. Sending is the owner's tap on Send,
+ * outside this file.
  */
 export type DraftState = {
   /** Who wrote the composer text: the owner, an automatic suggestion, or a draft the owner asked Alpha for. */

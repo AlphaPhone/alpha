@@ -604,7 +604,7 @@
     <h1 data-alpha-messages-title style="flex-grow:1;min-width:0;margin:0 0 0 6px;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{messages.title}}</h1>
     <sc-if value="{{messages.canCall}}"><button aria-label="{{messages.callLabel}}" onClick="{{messages.call}}" disabled="{{messages.calling}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.phone}}"></path></svg></button></sc-if>
    </div>
-   <div class="scr" data-alpha-messages-thread style="flex-grow:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px 14px;touch-action:pan-y">
+   <div class="scr" data-alpha-messages-thread style="flex-grow:1;flex-basis:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:0 16px 14px;touch-action:pan-y">
     <sc-if value="{{messages.nativeMore}}"><div style="display:flex;justify-content:center"><button aria-label="Older messages" onClick="{{messages.nativeLoadMore}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;border-radius:22px;background:var(--s2);display:flex;align-items:center;justify-content:center"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M6 15l6-6 6 6"></path></svg></button></div></sc-if>
     <div style="flex-grow:1"></div>
     <sc-for list="{{messages.bubbles}}" key="{{m.id}}" as="m">
@@ -650,7 +650,7 @@
     <input type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-alpha-messages-recipients aria-label="To" placeholder="{{messages.recipientPlaceholder}}" disabled="{{messages.nativeBusy}}" value="{{messages.recipientValue}}" onChange="{{messages.onRecipientInput}}" maxlength="230" style="flex-grow:1;min-width:0;height:44px;padding:0 16px;border-radius:22px;background:var(--s2);font-size:16px;font-family:inherit;color:inherit;border:0;outline:0;box-sizing:border-box">
     <button aria-label="{{messages.contactsLabel}}" aria-expanded="{{messages.contactsOpen}}" onClick="{{messages.toggleContacts}}" disabled="{{messages.nativeBusy}}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg class="i" aria-hidden="true" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="{{ic.plus}}"></path></svg></button>
    </div>
-   <div class="scr" data-alpha-messages-picks style="flex-grow:1;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
+   <div class="scr" data-alpha-messages-picks style="flex-grow:1;flex-basis:0;min-height:0;overflow-y:auto;padding-bottom:8px;touch-action:pan-y">
     <sc-if value="{{messages.contactsOpen}}">
      <section aria-label="Choose a contact" data-alpha-messages-contact-picker>
       <sc-if value="{{messages.contacts.busy}}"><p role="status" style="margin:8px 16px;color:var(--mut)">Checking Contacts</p></sc-if>
@@ -1879,7 +1879,7 @@
     <sc-if value="{{camera.rec}}">
       <span role="timer" aria-label="Recording" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:15px;background:rgba(0,0,0,.75);color:var(--alpha-white);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums"><span class="dot" aria-hidden="true" style="width:7px;height:7px;border-radius:4px;background:var(--alpha-record-dot)"></span>{{camera.recTime}}</span>
     </sc-if>
-    <sc-if value="{{camera.scanDocumentAvailable}}"><button class="ib" aria-label="Scan document" onClick="{{camera.scanDocument}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.notes}}"></path></svg></button></sc-if>
+    <sc-if value="{{camera.showFlip}}"><button class="ib" aria-label="Switch camera" onClick="{{camera.flip}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.camFlip}}"></path></svg></button></sc-if>
     <sc-if value="{{camera.flashAvailable}}"><button class="ib" aria-label="{{camera.flashLabel}}" onClick="{{camera.toggleFlash}}"><svg class="i" viewBox="0 0 24 24"><path d="{{camera.flashIcon}}"></path></svg></button></sc-if>
   </div>
 
@@ -1899,7 +1899,7 @@
   <sc-if value="{{camera.showModes}}">
     <div data-alpha-camera="modes" style="position: absolute; left: 0; right: 0; top: 656px; height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px">
       <sc-for list="{{camera.modes}}" as="m">
-        <button onClick="{{m.pick}}" aria-label="{{m.label}} mode" style="min-height: 44px; flex-shrink: 0; padding: 0 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 14.5px; font-weight: 600; transition: color .2s; {{m.css}}">
+        <button data-alpha-camera-mode onClick="{{m.pick}}" aria-label="{{m.label}} mode" style="min-height: 44px; flex-shrink: 0; padding: 0 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 14.5px; font-weight: 600; transition: color .2s; {{m.css}}">
           {{m.label}}
           <span style="width: 4px; height: 4px; border-radius: 2px; background: var(--alpha-white); opacity: {{m.dot}}"></span>
         </button>
@@ -1917,12 +1917,7 @@
     <button aria-label="{{camera.shutterLabel}}" onClick="{{camera.shutter}}" style="width: 80px; height: 80px; border-radius: 40px; box-shadow: inset 0 0 0 4px var(--alpha-white); display: flex; align-items: center; justify-content: center">
       <span style="display: flex; align-items: center; justify-content: center; color: var(--alpha-black); transition: all .25s cubic-bezier(.2,.8,.2,1); {{camera.innerCss}}"></span>
     </button>
-    <sc-if value="{{camera.showFlip}}">
-      <button aria-label="Switch camera" onClick="{{camera.flip}}" style="width: 52px; height: 52px; border-radius: 26px; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.camFlip}}"></path></svg></button>
-    </sc-if>
-    <sc-if value="{{camera.noFlip}}">
-      <span style="width: 52px; height: 52px"></span>
-    </sc-if>
+    <span aria-hidden="true" style="width: 52px; height: 52px"></span>
   </div>
 </div>
 </sc-if>

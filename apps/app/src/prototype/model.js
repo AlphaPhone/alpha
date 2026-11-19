@@ -2308,7 +2308,7 @@ registerView("camera", {
       hasLast: !!last, lastBg: lastLook ? lastLook.bg : "", lastTf: lastLook ? lastLook.tf : "", lastFlt: lastLook ? lastLook.flt : "none",
       lastLabel: last && last.kind === "video" ? "Open last video" : "Open last photo",
       openLast: function () { if (last) api.open("photos", { open: last.id, from: "camera", seq: api.secure ? sess.slice() : null, chrome: true, sheet: null, edit: null, sel: null, searching: false }); },
-      showFlip: !st.rec, noFlip: !!st.rec, noLast: !last,
+      showFlip: !st.rec, noLast: !last,
       // Flash and zoom reset before the lens changes, so the new lens never inherits an unsupported setting.
       flip: function () { var s = api.get("camera"); api.set({ flash: false, zoom: 1, front: !s.front }); },
       vfUp: function () {}

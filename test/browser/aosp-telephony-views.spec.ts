@@ -362,7 +362,9 @@ test('the journal clears a sent draft after the composer reply times out', async
   expect(await inputs(page, 'sendComposedSms')).toHaveLength(1);
 });
 
-test('the registered telephony profile still chooses native review', async ({page}) => {
+// The shared profile's send names no approved card, so Android refuses it ("not-approved") before
+// anything is journaled; only the bridge routing is checked here (AlphaTelephonySendTest covers Android).
+test('the registered telephony profile sends through the bridge, never the composer port', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
   await page.evaluate(() => {

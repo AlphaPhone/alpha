@@ -153,15 +153,25 @@ test('a zoomed recording stops when its camera source ends',async({page})=>{
  expect(saved.count).toBe(1);expect(saved.kind).toBe('video');expect(saved.bytes).toBeGreaterThan(0);expect(saved.size).toBe(saved.bytes);expect(saved.streams).toBeGreaterThan(1);expect(saved.released).toBe(true);
  await expect(page.getByRole('alert',{name:'Can’t start camera',exact:true})).toBeVisible();
 });
-test('Ask mode reviews an unsaved frame and returns to Camera without adding a photo',async({page})=>{
- await page.getByRole('button',{name:'Ask mode',exact:true}).click();
- await page.getByRole('button',{name:'Ask about this',exact:true}).click();
- const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
- await expect(review.getByRole('img',{name:'Image for question review'})).toBeVisible();
- expect(await page.evaluate(async()=>{const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');return (await browserPhotoLibrary.list()).items.length;})).toBe(0);
- await review.getByRole('button',{name:'Cancel',exact:true}).click();
- await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
- await expect(page.getByRole('button',{name:'Ask about this',exact:true})).toBeVisible();
+test('Camera offers only Video and Photo, puts Switch camera in the header and shows no focus box on a tapped mode',async({page})=>{
+ const root=page.locator('[data-alpha-camera-root]');
+ for(const name of ['Scan document','Ask mode','Ask about this'])await expect(root.getByRole('button',{name,exact:true})).toHaveCount(0);
+ await expect(root.locator('[data-alpha-camera="modes"]').getByRole('button')).toHaveText(['Video','Photo']);
+ // Photo is the default, so the shutter takes a photo.
+ await expect(root.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ const flip=root.locator('[data-alpha-app-header="main"]').getByRole('button',{name:'Switch camera',exact:true});
+ await expect(flip).toBeVisible();await expect(root.locator('[data-alpha-camera="capture"]').getByRole('button',{name:'Switch camera'})).toHaveCount(0);
+ const video=root.getByRole('button',{name:'Video mode',exact:true}),photo=root.getByRole('button',{name:'Photo mode',exact:true});
+ const look=(mode:typeof video)=>mode.evaluate(element=>{const style=getComputedStyle(element);return {outline:style.outlineStyle,underline:style.textDecorationLine,visible:element.matches(':focus-visible')};});
+ // A tap or click shows the chosen mode by colour and dot only.
+ await video.tap();await expect(root.getByRole('button',{name:'Start recording',exact:true})).toBeVisible();
+ expect(await look(video)).toEqual({outline:'none',underline:'none',visible:false});
+ await photo.click();await expect(root.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ expect(await look(photo)).toEqual({outline:'none',underline:'none',visible:false});
+ // Keyboard focus keeps a subtle cue (an underline), never the box outline.
+ await page.keyboard.press('Shift+Tab');
+ await expect.poll(()=>root.locator('[data-alpha-camera-mode]:focus-visible').count()).toBe(1);
+ expect(await look(root.locator('[data-alpha-camera-mode]:focus-visible'))).toEqual({outline:'none',underline:'underline',visible:true});
 });
 
 test('the last capture opens directly and Back returns to the Camera viewfinder',async({page})=>{

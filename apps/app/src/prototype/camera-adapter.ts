@@ -25,7 +25,7 @@ import {DEFAULT_HOLD_MS} from '../ui/gestures/constants';
 import {photosErrorText,photosResultText} from '../ui/photos/photos-messages';
 import {cameraCaptureErrorText} from '../ui/camera/camera-capture-messages';
 import {openScanReview,ScanKeepError} from './scan-review';
-import {openScanDocument,pickNativeScanImage} from './scan-document';
+import {pickNativeScanImage} from './scan-document';
 import type {ScanPageCamera} from './scan-page-camera';
 import {systemPickerActive} from './scan-pdf';
 import {DailyApps} from '../daily';
@@ -762,7 +762,11 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let requestedCaptureHolds=0;
   let pendingShot:number|undefined;
   const cameraViewVisible = () => !disposed && !document.hidden && !!api?.isActive() && !!document.querySelector(finder);
-  const chatCovers = () => ['sheet', 'full'].includes(api?.S.chat);
+  /** Portrait Camera with the sheet open is laid out above the sheet (phone.css, Camera's chat-open layout),
+   * so only a full conversation, or a sheet without that layout (landscape), covers the viewfinder. */
+  const chatOpenLayout = () => api?.S.chat === 'sheet' && !document.documentElement.classList.contains('alpha-landscape') &&
+    document.querySelector('[data-screen]')?.getAttribute('data-alpha-chat-half') === 'true';
+  const chatCovers = () => api?.S.chat === 'full' || (api?.S.chat === 'sheet' && !chatOpenLayout());
   const conversationPanel = () => document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]');
   function conversationOverViewfinder(panel: HTMLElement | null): boolean {
     const viewfinder = document.querySelector(finder);
@@ -772,6 +776,27 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     return chat.height > 0 && chat.width > 0 &&
       chat.top < preview.bottom && chat.bottom > preview.top &&
       chat.left < preview.right && chat.right > preview.left;
+  }
+  /** Waits, a bounded number of times, for the conversation panel and Camera's layer to finish moving while
+   * the panel still overlaps the viewfinder. It never changes the conversation's detent. */
+  async function viewfinderSettled(signal: AbortSignal): Promise<void> {
+    for (let pass = 0; pass < 4; pass++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      signal.throwIfAborted();
+      const panel = conversationPanel();
+      if (!conversationOverViewfinder(panel)) return;
+      const layer = document.querySelector(finder)?.closest('[data-alpha-layer="app"]');
+      // Only finite motion is waited for, and never longer than a sheet transition.
+      const moving = [...(panel?.getAnimations?.() || []), ...(layer?.getAnimations?.() || [])]
+        .filter(animation => animation.effect?.getTiming().iterations !== Infinity);
+      if (!moving.length) return;
+      await new Promise<void>(resolve => {
+        const timer = window.setTimeout(() => done(), 1000);
+        const done = () => { window.clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+        signal.addEventListener('abort', done, { once: true });
+        void Promise.allSettled(moving.map(animation => animation.finished)).then(done);
+      });
+    }
   }
   /** When the chat sheet started covering Camera; the session stays bound for CHAT_GRACE_MS after that. */
   let chatCoveredAt: number | undefined, chatTimer: number | undefined;
@@ -1060,14 +1085,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const owner = api;
     await session.exclusive(async token=>{
       shutterFlash(owner);
-      const alpha=owner.get('camera').mode==='alpha';
-      try {
-        const photo=await writePhoto(owner,!alpha);
-        if(alpha&&photo.id&&session.current(token)&&owner.isActive()&&owner.get('camera').mode==='alpha'){
-          owner.open('photos',{tab:'lib',album:null,open:photo.id,nativePhotoSelection:captureSelection(photo),chrome:true});
-          owner.attachCameraPhoto(photo.id,photo.image);
-        }
-      }
+      try { await writePhoto(owner,true); }
       catch { if (session.current(token)) message('Not saved'); }
     });
   }
@@ -1083,8 +1101,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(agentRequest||session.busy)return busy;
       const capture: AgentCaptureRequest = { queued: true, refused: false };
       request=agentRequest=capture;requestedCaptureHolds++;
-      const closeChat=owner.S.chat!=='hidden';
-      // The committed chat state can be hidden while its closing panel still covers Camera.
+      // The conversation keeps its detent where Camera is laid out above it (the open sheet in portrait).
+      // Only a conversation over the viewfinder (full, or a landscape sheet) closes so the owner sees what is
+      // taken. The committed state can also be settled while its moving panel still covers Camera.
+      const closeChat=chatCovers();
       if(closeChat||conversationOverViewfinder(conversationPanel())){
         const revealed=await new Promise<boolean>(resolve=>{
           const finish=(committed:boolean)=>{
@@ -1127,6 +1147,10 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         signal.throwIfAborted();current();
         if(direction!==wantedLens||!active()||session.phase!=='ready')return {status:'failed',summary:'Couldn’t switch camera, so no photo was taken.'};
       }
+      // An open sheet keeps its detent, and Camera's layout above it moves with it (the reply opening the sheet,
+      // the sheet's own motion): a viewfinder that is still settling is waited for, never shot through.
+      if(!chatCovers())await viewfinderSettled(signal);
+      signal.throwIfAborted();current();
       const attempt=await session.exclusive(async():Promise<CameraCaptureAttempt>=>{
         if(chatCovers()||conversationOverViewfinder(conversationPanel())){
           return {status:'failed',summary:'Camera viewfinder is covered'};
@@ -1227,8 +1251,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   scanRequest=()=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    // Close the chat so the viewfinder and scan review are visible.
-    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
+    // The conversation stays where it is: scan review is a modal dialog above it.
     void scanFrame(owner);return true;
   };
   /** Android: the system picker returns one image straight into scan review
@@ -1261,10 +1284,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   frameQuestion=question=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    if(!askCameraFrame(owner,question))return false;
-    // Close the chat so the frame review is visible.
-    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
-    return true;
+    // The conversation stays where it is: the frame review is a modal dialog above it.
+    return askCameraFrame(owner,question);
   };
   /** The reviewed item is still the listed one at the revision the review started with:
    * an edited, replaced or removed capture ends its review instead of continuing under the same id. */
@@ -1319,11 +1340,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.bg = 'transparent'; data.vfBg = ready ? 'transparent' : '#000000'; data.vfOp = 1;
     data.zoomCss = ''; data.rec = session.recording; data.recTime = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`;
     data.shutter = () => { void capture(); };
-    data.ask = () => {
-      if (!askCameraFrame(currentApi)) message(ready ? 'Capture in progress' : 'Camera off');
-    };
-    data.scanDocumentAvailable=!recordingBusy;
-    data.scanDocument=()=>{if(!currentApi.isActive()||recordingBusy)return;cancelScan();if(currentApi.S.chat!=='hidden')currentApi.shell({chat:'hidden'});closeScan=openScanDocument(undefined,documentCamera(currentApi));};
     data.flip = () => { void flipLens(currentApi); };
     data.flashAvailable = ready && !recordingBusy && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
     if (browserMode) data.flashLabel = browserCamera.lightingLabel(flash);
@@ -1350,12 +1366,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     };
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
-    data.modes = [...(data.modes || []),{label:'Ask',mode:'alpha',css:st.mode==='alpha'?'color:var(--alpha-white)':'color:rgba(255,255,255,.55)',dot:st.mode==='alpha'?1:0}].map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.mode || m.label.toLowerCase(); if (mode === 'photo' || mode === 'video' || mode === 'alpha') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
-    if(st.mode==='alpha'){
-      data.shutterLabel='Ask about this';
-      data.shutter=data.ask;
-      data.innerCss="width:62px;height:62px;border-radius:50%;background:var(--alpha-white) url('/logo-mark.svg') center/80% no-repeat";
-    }
+    // Camera has two modes, Video and Photo; asking about the frame goes through chat.
+    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {
@@ -1561,7 +1573,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.importAvailable=browserMode||Capacitor.isPluginAvailable('DailyApps');
     data.importLabel=browserMode?'Choose image':'Scan image text';
     data.importImage=(event?:Event)=>{(event?.currentTarget as HTMLElement|undefined)?.closest('details')?.removeAttribute('open');chooseImage(currentApi);};
-    data.scanDocument=()=>{if(currentApi.isActive()){cancelScan();closeScan=openScanDocument();}};
     data.libraryAccessControl=!browserMode&&!!libraryAccess&&libraryAccess.scope!=='full'&&!st.open&&!st.album&&!selection&&!onAlbums;
     data.libraryAccessBusy=requestingLibraryAccess;
     data.libraryAccessChoose=async()=>{if(requestingLibraryAccess)return;requestingLibraryAccess=true;currentApi.set({nativeLibraryAccessRevision:Date.now()});const before=libraryAccess?.scope;try{libraryAccess=await nativeLibrary.requestLibraryAccess();if(libraryAccess.scope===before&&before==='denied')await nativeLibrary.openLibrarySettings();retirePhotoRead();captures=[];preview=undefined;next='';loaded=false;cancelEdit();closeVideo();currentApi.set({open:null,nativePhotoSelection:null});await refresh();}catch{currentApi.toast('Couldn’t open settings');}finally{requestingLibraryAccess=false;currentApi.set({nativeLibraryAccessRevision:Date.now()});}};

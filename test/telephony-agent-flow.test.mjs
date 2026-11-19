@@ -67,7 +67,12 @@ test('a text to a number, a draft, a single contact value, a contact search and 
   for (const [operation, capability] of [[number, 'sms.compose.v2'], [add, 'contacts.write.v2'], [{type: 'contact_show', query: 'Priya'}, 'contacts.show.v1']])
     await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
   const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
-  assert.match(await card(number), /^Review SMS\nTo: \+14155550100\n\nRunning late/);
+  // Approve sends a text at once: the card, not a dialog after it, says the SIM and the carrier charge.
+  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nApprove sends it right away. Your carrier may charge for texts.');
+  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nApprove sends it right away. Your carrier may charge for texts.`);
+  const toContact = await card({...number, target: {kind: 'contact', query: 'Priya'}});
+  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. Your carrier may charge for texts.');
+  for (const shown of [await card(number), toContact]) assert.doesNotMatch(shown, /Android|again/);
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
   assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
   const change = await card(add);

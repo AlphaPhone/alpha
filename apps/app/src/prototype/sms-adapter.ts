@@ -4,6 +4,7 @@ import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createSmsSession,mmsProblemLabel,mmsReceiptLabel,receiptLabel} from '../runtime/image-sms';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
+import {rememberSmsSims} from '../ui/telephony/sms-card-facts';
 import {createAospTelephony,registerTelephonyProfile,MMS_MAX_ATTACHMENTS,reviewMms,reviewSms,type AlphaTelephonyPlugin,type MmsAttachmentDraft,type MmsReview,type SmsMessage,type SmsReviewProblem,type SmsSendResult} from '../runtime/aosp-telephony';
 import {createNativeSmsDraftShelf,reviewedDraft,type ReviewedSms,type SmsDraft,type SmsDraftStore} from '../runtime/native-sms-drafts';
 import {watchReturnToApp} from './native-adapter';
@@ -937,6 +938,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   this.smsSelection=()=>{
    if(owner!==this||!inFront())return;
    const subscriptions=session.state.status?.subscriptions??[];
+   // A text card proposed from this context names its SIM (runtime/sms-card-facts.ts).
+   rememberSmsSims(subscriptions);
    const soleSubscription=subscriptions.length===1?subscriptions[0]:undefined;
    const selected=sim?subscriptions.find(row=>String(row.id)===sim):soleSubscription;
    if(selected)return {kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)};
