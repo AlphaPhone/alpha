@@ -16,6 +16,7 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   return prose.trimEnd();
 }
 const REVIEW_TEXT = 'Review on phone';
+const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 // Presentation only: preserve the journal while explaining uncertainty safely.
 export function actionResultText(text: string): string {
@@ -84,12 +85,19 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
   }
   let turn: Message[] = [];
   const finish = () => {
-    const actions = turn.filter(message => message.from === 'agent' && (message.card?.proposalId || message.deviceReceipt));
-    if (!actions.length) return;
-    for (const message of turn) if (message.from === 'agent' && message.text === REVIEW_TEXT) hidden.add(message.id);
+    const visibleActions = turn.filter(message => renderedIds.has(message.id) && message.from === 'agent'
+      && (message.card?.proposalId || message.deviceReceipt || message.card?.deviceActionNotice === true));
+    if (!visibleActions.length) return;
+    // A pending proposal still needs its review instruction. A visible outcome supersedes it.
+    const outcomeShown = visibleActions.some(message => message.deviceReceipt
+      || message.card?.deviceActionNotice === true || message.card?.done === true);
+    for (const message of turn) {
+      if (message.from === 'agent' && (message.text === REVIEW_TEXT
+        || (outcomeShown && message.text === REVIEW_INSTRUCTION))) hidden.add(message.id);
+    }
     // A shown agent reply already answers a requested Browser open. Only a succeeded browser receipt
     // carries browserDestination; failures and other device receipts stay visible.
-    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && typeof message.text === 'string' && message.text.trim())) return;
+    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && message.text !== REVIEW_INSTRUCTION && typeof message.text === 'string' && message.text.trim())) return;
     for (const message of turn) if (message.from === 'agent' && message.deviceReceipt === true && !message.card && message.browserDestination) hidden.add(message.id);
   };
   for (const message of source) { if (message.from === 'user') { finish(); turn = []; } turn.push(message); } finish();
@@ -314,4 +322,52 @@ export function workflowReplyText(text:string){
  });
  // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
  return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered,runs};
+}
+
+// The owner can ask for technical details, a literal address, or the wording of an email.
+const literalSpeech = /\b(?:verbatim|word for word|as written|read it (?:back|aloud)|spell it out|repeat (?:it|that) exactly)\b/i;
+const asksForField = /\b(?:read(?: back)?|spell(?: out)?|quote|repeat|recite|give me|tell me|what(?:[’']s| is| are))\s+(?:(?:me|out|aloud|the|this|that|my|its|full|exact|whole|entire|last|four)\s+){0,7}(?:(?:event|request|operation|workflow|run|order|thread|record|confirmation|reference)\s+(?:ID|identifier|number)|receipt|identifier|ID|address|number|digits|code|subject|headers?|body|draft|e-?mail|message|text)\b/i;
+// Managed Gmail can prefix the recipient with its connector or account. Model-written
+// email copy typically has just the To and Subject lines, sometimes with bold labels.
+const mailHeaders = /^(?:[ \t]*(?:\*\*)?From:(?:\*\*)?[^\n]*\r?\n)?[ \t]*(?:\[gmail(?: account [^\]\n]+)?\][ \t]*)?(?:\*\*)?To:(?:\*\*)?[^\n]*\r?\n(?:[ \t]*(?:Cc|Bcc):[^\n]*\r?\n)*[ \t]*(?:\*\*)?Subject:(?:\*\*)?[^\n]*/im;
+const introToDraft = /^(?:(?:Got it|Sure|Okay)[.!,:]?\s*)?(?:(?:Here(?:’s|'s| is) (?:the|your|a) (?:email|draft|suggested wording)(?: draft)?|Drafted gmail message to [^\n]+)[.:!]?\s*)?$/i;
+const receiptKey = String.raw`(?:(?:request|proposal|receipt|operation|message|event|draft|run|workflow|record|conversation|thread|external|resource)\s+(?:id|identifier)|uuid|id)`;
+const opaqueValue = "[`\"']?[a-z0-9_-](?:[a-z0-9_.:-]*[a-z0-9_-])?[`\"']?";
+const receiptField = new RegExp(String.raw`(^|\n|[.!?][ \t]+)[ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}(?:[.;](?=\s|$)|(?=[ \t]*\r?$))[ \t]*`, 'gim');
+const receiptAside = new RegExp(String.raw`[ \t]*\([ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}[ \t]*\)`, 'gi');
+
+/** Presentation for conversation speech. Never mutate the written reply or the action results. */
+export function spokenActionReply(request: string, reply: {
+  text: string; actionResults?: readonly unknown[]; completedActions?: readonly unknown[];
+}, emailCardReady = false): string {
+  const text = reply.text;
+  if (literalSpeech.test(request) || asksForField.test(request)) return text;
+  const results = reply.actionResults ?? [];
+  const asksForMail = /\b(?:draft|compose|write|send|reply)\b/i.test(request) && /\b(?:e-?mail|gmail|inbox)\b/i.test(request);
+  const envelope = mailHeaders.exec(text);
+  if (emailCardReady || (envelope && asksForMail)) {
+    const lead = envelope ? text.slice(0,envelope.index).trim() : '';
+    const rest = envelope ? text.slice(envelope.index+envelope[0].length).trim() : text;
+    const hasMoreWork = /\b(?:and|then|also)\s+(?:check|look up|find|open|create|schedule|book|summarize|tell me|show me)\b/i.test(request);
+    const hasLimitation = /\b(?:(?:failed|unable|couldn[’']t|can[’']t|cannot|could not) (?:to )?(?:send|save|prepare|create|deliver|schedule|open|verify|confirm)|not (?:sent|saved|created|scheduled))\b/i.test(rest);
+    if (rest && !hasMoreWork && introToDraft.test(lead) && !hasLimitation &&
+        results.length <= 1 && !reply.completedActions?.length) {
+      const result = results[0] as {success?: unknown; actionName?: unknown; error?: unknown} | null;
+      if (result?.success === false || result?.error) {
+        if (typeof result.actionName === 'string' && /^MESSAGE(?:_|$)/.test(result.actionName)) {
+          return 'The email action failed. The suggested wording is in the chat.';
+        }
+        return envelope ? (lead+'\n\n'+rest).trim() : text;
+      }
+      // Only the owner's validated local card can confirm that an editable draft is ready.
+      return emailCardReady ? 'Your email draft is ready to review.' : 'The suggested email is in the chat.';
+    }
+    // A compound reply or a refusal can carry additional information after the preview.
+    if (envelope) return (lead+'\n\n'+rest).trim();
+  }
+  if (!results.length && !reply.completedActions?.length) return text;
+  // Only delimited ID fields from action turns. Dates, times, counts, amounts and
+  // numbers in the actual answer remain available to the synthesizer.
+  const spoken = text.replace(receiptAside,'').replace(receiptField,'$1');
+  return spoken === text ? text : spoken.replace(/\n{3,}/g,'\n\n').trim() || 'The details are in the chat.';
 }

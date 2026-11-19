@@ -55,6 +55,59 @@ async function ask(page: Page, text: string) {
 	await input.press('Enter');
 }
 
+test('SMS sender review gives both choices and explains when a follow-up cannot run', async ({page}) => {
+	await setup(page);
+	const review = 'Review this request on your phone before it can run.';
+	const description = 'Share the last four digits of the newest incoming SMS sender.';
+	const blocked = 'Share open messages: Ask again from the open conversation.';
+	const enqueue = (id: string) => page.evaluate(({id, review, description}) => {
+		const f = (window as any).commsAlpha;
+		f.replies.push({text: review, proposals: [{id, title: 'Read latest text sender', description,
+			expiresAt: Date.now() + 600_000, contextRevision: 0}]});
+	}, {id, review, description});
+	const card = page.locator('.alpha-action-review');
+	const approve = card.getByRole('button', {name: /Read latest text sender.*Approve/});
+	const decline = card.getByRole('button', {name: 'Decline Keep things as they are.', exact: true});
+
+	await enqueue('sms-decline');
+	await ask(page, 'Who sent my latest text?');
+	await expect(approve.getByText('Approve', {exact: true})).toBeVisible();
+	await expect(decline.getByText('Decline', {exact: true})).toBeVisible();
+	await decline.click();
+	await expect.poll(async () => (await fixture(page)).declined).toEqual(['sms-decline']);
+	expect((await fixture(page)).approved).toEqual([]);
+	await expect(approve).toHaveCount(0);
+	await expect(decline).toHaveCount(0);
+
+	await page.evaluate(async () => {
+		const {alphaClient} = await import('/src/runtime/alpha-client.ts');
+		const f = (window as any).commsAlpha;
+		alphaClient.approve = async (id: string) => {
+			f.approved.push(id);
+			return {proposalId: id, status: 'succeeded', summary: 'The newest text sender ends in 1234.'} as any;
+		};
+	});
+	await enqueue('sms-approve');
+	await ask(page, 'Look up the newest SMS sender.');
+	await expect(approve).toBeVisible();
+	await approve.click();
+	await expect.poll(async () => (await fixture(page)).approved).toEqual(['sms-approve']);
+	await expect(page.locator('[data-alpha-device-receipt]').filter({hasText: 'The newest text sender ends in 1234.'})).toBeVisible();
+	await expect(approve).toHaveCount(0);
+	await expect(decline).toHaveCount(0);
+
+	await page.evaluate(({review, blocked}) => {
+		(window as any).commsAlpha.replies.push({text: review, notices: [blocked]});
+	}, {review, blocked});
+	await ask(page, 'What is the full phone number for that sender?');
+	await expect(page.getByText(blocked, {exact: true})).toBeVisible();
+	await expect(page.getByText(review, {exact: true})).toHaveCount(0);
+	await expect(approve).toHaveCount(0);
+	await expect(decline).toHaveCount(0);
+	expect((await fixture(page)).approved).toEqual(['sms-approve']);
+	expect((await fixture(page)).declined).toEqual(['sms-decline']);
+});
+
 test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 	test('a second proposal replaces the first, and neither executes without a tap (AC-26)', async ({page}) => {
 		await setup(page, {comms: true});

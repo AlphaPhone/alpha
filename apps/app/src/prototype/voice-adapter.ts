@@ -740,6 +740,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       // what it heard, and the held start with it.
       type CueTurn={signal:AbortSignal;settled?:boolean};
       let cueSpeech:{captureRetired:(()=>boolean)|null;speak(text:string,signal:AbortSignal,turn:CueTurn):Promise<void>}|undefined;
+      let shortenedReplyId:string|undefined;
       const sendTurn=async(input:{turnId:string;text:string;voiceTurnSignal:any;signal:AbortSignal;onText?:(text:string,frame?:AssistantTextFrame)=>void;supersedes?:string})=>{
         const cueTurn:CueTurn={signal:input.signal};try{
         input.signal.throwIfAborted();current();
@@ -781,7 +782,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         if(!sent){if(token===generation&&chatDestination===chat)cancelChat();throw new DOMException('Voice message discarded','AbortError');}
         const result=sent.result;input.signal.throwIfAborted();current();
         if(result.complete){markVoiceTiming('first-token');markVoiceTiming('final-reply');}
-        const spoken=typeof result.text==='string'?workflowReplyText(result.text).text:result.text;
+        const speech=result.speechText??result.text;
+        shortenedReplyId=speech!==result.text?result.assistantMessageId:undefined;
+        const spoken=typeof speech==='string'?workflowReplyText(speech).text:speech;
         conversationLastTranscript=sent.text;conversationLastReply=spoken;conversationReviewRequired=result.reviewRequired===true&&!result.awaitingUserInput;if(result.awaitingUserInput!==undefined)liveCapture?.release(true);
         return spoken===result.text?result:{...result,text:spoken};
         }finally{cueTurn.settled=true;liveCapture?.release();}
@@ -919,6 +922,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
             // and nothing is reported. When a sentence was already read, the owner is told the rest was not.
             if(heard.playbackFailed===true){recordHeardVoiceTiming(timing,'nothing-heard');if(heard.heard)chat.shell.toast('Couldn’t read the rest aloud. The full reply is above.');return;}
             if(heard.replyFailed&&!heard.heard){recordHeardVoiceTiming(timing,'nothing-heard');return;}
+            // A spoken action summary has no verbatim heard prefix in the saved message.
+            if(heard.replyId && heard.replyId===shortenedReplyId){
+              conversationLastReply=heard.heard;recordHeardVoiceTiming(timing,'not-needed');return;
+            }
             const reply=heard.replyId?Promise.resolve({id:heard.replyId,text:''}):recordedReply(heard.turnId);
             void reply.then(found=>found?heardReporter.report({conversationId:binding.conversationId,replyId:found.id,heard:heard.heard,unheard:heard.unheard||found.text,interrupted:true}):'not-found' as const).then(outcome=>{recordHeardVoiceTiming(timing,outcome);},()=>{});
             conversationLastReply=heard.heard;
