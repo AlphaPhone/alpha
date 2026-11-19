@@ -217,8 +217,8 @@ test('a typed workflow is presented as manual-trigger only: no schedule is offer
  // Enabling: a manual workflow has no schedule. The switch says to use Run now and sends nothing to the agent.
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back')));await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await workflowCard(page,'Execution fixture').click();await expect(runNow(page)).toBeVisible();
  // The switch stays visible and greyed (aria-disabled, still tappable); a tap says why.
- const toggle=page.getByRole('button',{name:'Turn Execution fixture on or off',exact:true});await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});
- await expect(status(page)).toHaveText('Manual');await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});await expect(toggle).toHaveAttribute('aria-pressed','false');expect(await posts(page,'/activate')).toHaveLength(0);
+ const toggle=page.getByRole('switch',{name:'Turn Execution fixture on or off',exact:true});await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});
+ await expect(status(page)).toHaveText('Manual');await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});await expect(toggle).toHaveAttribute('aria-checked','false');expect(await posts(page,'/activate')).toHaveLength(0);
  await expect(page.getByText(/scheduled runs/)).toHaveCount(0);
  // Nothing runs until Run now is reviewed and confirmed.
  await page.waitForTimeout(1500);expect(await posts(page,'/run')).toHaveLength(0);expect((await stored(page)).runs).toHaveLength(0);

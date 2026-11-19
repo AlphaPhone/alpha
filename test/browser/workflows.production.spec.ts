@@ -172,16 +172,16 @@ test('the list shows only the agent’s workflows; detail, Run with its receipt,
   await expect(button(page, 'Finished execution')).toBeVisible();
 
   // Enable takes a second tap; pause is immediate and confirmed by the agent.
-  const toggle = button(page, 'Turn Agenda digest on or off');
+  const toggle = page.getByRole('switch', { name: 'Turn Agenda digest on or off', exact: true });
   await toggle.click();
   await expect(page.getByRole('status').filter({ hasText: /^Confirm$/ })).toBeVisible();
   expect(await posts(page, '/activate')).toEqual([]);
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await expect(runStatus(page)).toHaveText('On');
   expect(await posts(page, '/activate')).toHaveLength(1);
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await expect(runStatus(page)).toHaveText('Paused');
   expect(await posts(page, '/deactivate')).toHaveLength(1);
   expect(await posts(page, '/run')).toHaveLength(1);
@@ -347,7 +347,7 @@ test.describe('Calendar range authoring',()=>{
   expect(saved.body.spec).toEqual(checked.body.spec);
   expect(saved.body.spec.trigger.kind).toBe('time');
   expect(saved.body.spec.steps[0].range).toEqual({calendarIds:['owner-calendar'],days:7,timeZone:'America/New_York',maximumEvents:100});
-  await expect(button(page,'Turn Calendar from run day on or off')).toHaveAttribute('aria-pressed','false');
+  await expect(page.getByRole('switch',{name:'Turn Calendar from run day on or off',exact:true})).toHaveAttribute('aria-checked','false');
   expect(await agent(page,s=>s.flows.find((flow:any)=>flow.id==='calendar-created')?.active)).toBe(false);
   expect(await posts(page,'/run')).toEqual([]);
   expect(await posts(page,'/activate')).toEqual([]);
