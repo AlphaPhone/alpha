@@ -14,6 +14,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 public final class AlphaDeviceAppsPlugin extends Plugin {
  @PluginMethod public void platformCapabilities(PluginCall call){
   JSObject result=new JSObject();result.put("aospImage",AlphaImageCapabilities.aospImage(getContext()));
+  result.put("startupPermissionDefaults", AlphaImageCapabilities.startupPermissionDefaults(getContext()));
   result.put("sense",AlphaSenseAdmission.available(getContext()));
   result.put("phone",false);result.put("contacts",AlphaImageCapabilities.aospImage(getContext()));result.put("sms",false);call.resolve(result);
  }

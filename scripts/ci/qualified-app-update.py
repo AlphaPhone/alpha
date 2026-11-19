@@ -23,10 +23,10 @@ import tempfile
 from urllib.parse import quote, urlencode
 import zipfile
 
-from app_update_producer import HOSTED_DISPATCH, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
+from app_update_producer import HOSTED_DISPATCH, RetiredSignerRecord, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
 
 ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY = "eliza-research/alpha"
+REPOSITORY = "alphacompute/alpha"
 REPOSITORY_ID = 1396333361
 SIGNING_WORKFLOW = ".github/workflows/release.yml"
 HEX = re.compile(r"[0-9a-f]{64}")
@@ -196,7 +196,7 @@ def check_signing_run(record, plan, workflow_commit, api):
             run.get("display_title") == f"Release sign on {record['signingWorkflowCommit']}" and
             run.get("event") == "workflow_dispatch" and run.get("head_branch") == "main" and
             run.get("head_sha") == record["signingWorkflowCommit"] and
-            all(repo.get("id") == REPOSITORY_ID and repo.get("full_name") == REPOSITORY for repo in repos) and
+            all(repo.get("id") == REPOSITORY_ID and str(repo.get("full_name")).lower() == REPOSITORY for repo in repos) and
             run.get("path") == SIGNING_WORKFLOW and
             run.get("run_attempt") == record["signingRunAttempt"], "Signing run identity differs")
 
@@ -314,8 +314,6 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
     variants = release_contract(plan)["variants"]
     signed_apks = {variant + "-release.apk" for variant in variants}
     expected = signed_apks | {"signed.sha256", "signing-plan.json", "production-signer.sha256"}
-    if plan.get("rotation") is not None:
-        expected.add("rotation.lineage")
     with open_bounded(signed, STORAGE.MAX_BYTES) as (stream, size):
         require(size == receipt["bytes"] and hashlib.file_digest(stream, "sha256").hexdigest() == receipt["sha256"],
                 "Signed bundle bytes differ")
@@ -336,7 +334,7 @@ def signed_bundle(signed, receipt, plan, plan_bytes):
                 checksum = source.read(257)
             require(len(checksum) <= 256, "Signed checksum receipt differs")
             lines = checksum.decode("ascii").strip().splitlines()
-            matches = [re.fullmatch(r"([0-9a-f]{64})  (standalone|launcher)-release\.apk", line) for line in lines]
+            matches = [re.fullmatch(r"([0-9a-f]{64})  (launcher)-release\.apk", line) for line in lines]
             require(len(matches) == len(variants) and all(matches), "Signed checksum receipt differs")
             apks = {match[2]: match[1] for match in matches}
             require(set(apks) == set(variants), "Signed checksum receipt differs")
@@ -354,24 +352,11 @@ def stage(record, plan, work, product, fetch_unsigned=STORAGE.download, fetch_si
     with signed_bundle(signed, record["signedBundle"], plan, plan_bytes) as (archive, entries, apks):
         require(apks == record["signedApkSHA256"], "Signed checksum receipt differs")
         restore_producer_evidence(unsigned, product, producer_kind(plan), inputs["variants"], contract=inputs)
-        # The historical verifier requires the complete unsigned pair. They are
-        # verification inputs, never signed/exported release outputs. Keep the
-        # signed launcher separate until its unchanged payload is verified.
-        legacy_cloud = inputs["runtimeProfile"] == "cloud"
-        if legacy_cloud:
-            with zipfile.ZipFile(unsigned) as producer:
-                for variant in inputs["variants"]:
-                    name = variant + "-release-unsigned.apk"
-                    member = producer.getinfo(name)
-                    with producer.open(member) as content:
-                        restore_file(product, "artifacts/" + name, content, member.file_size,
-                                     plan["unsignedApkSHA256"][variant], "Unsigned verifier input differs")
         for variant in variants:
             name = variant + "-release.apk"
             member = entries[name]
             with archive.extractfile(member) as content:
-                restore_file(work if legacy_cloud else product,
-                             ("signed/" if legacy_cloud else "artifacts/") + name, content, member.size, apks[variant],
+                restore_file(product, "artifacts/" + name, content, member.size, apks[variant],
                              "Signed APK bytes differ from qualification")
 
 
@@ -433,7 +418,7 @@ def main():
     require(args.record.is_file() and not args.record.is_symlink() and args.record.stat().st_size <= 131072, "Bounded regular qualification record required")
     record_bytes = args.record.read_bytes()
     record = decode(record_bytes)
-    require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY and
+    require(os.environ.get("GITHUB_REPOSITORY", "").lower() == REPOSITORY and
             os.environ.get("GITHUB_REPOSITORY_ID") == str(REPOSITORY_ID) and
             os.environ.get("GITHUB_REF") == "refs/heads/main" and
             os.environ.get("GITHUB_SHA") == args.workflow_commit, "Publication runs only on exact reviewed Alpha main")
@@ -463,5 +448,8 @@ if __name__ == "__main__":
             prepare_cli(sys.argv[2:])
         else:
             main()
+    except RetiredSignerRecord as error:
+        # Repository policy, not provider output: name the edit it needs.
+        raise SystemExit(f"Qualified update refused: {error}")
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError, zipfile.BadZipFile, tarfile.TarError):
         raise SystemExit("Qualified update refused; preserve exact input receipts for review. No publication was performed by admission.")

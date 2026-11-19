@@ -5,7 +5,7 @@ import {createOnDeviceVoice} from './local-voice';
 import {speakCloudText} from './cloud-voice';
 import {confirmSpeechRetirement} from '../local-speech-playback';
 import {connectionController} from './connection-ui';
-import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../../../../.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts';
+import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../ui/voice/tts-playback-activity.ts';
 let retirement:Promise<void>=Promise.resolve();
 function appSpeechError(error: unknown): unknown {
  const notice = speechCleanupNotice(error);

@@ -1,4 +1,4 @@
-import {formatDeviceRecordDateTime} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts';
+import {formatDeviceRecordDateTime} from '../ui/device-actions/device-record-presentation';
 import {calendarEventOverlapsRange} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {parseWorkflowRead} from '../runtime/workflow-device-contract';
 import {calendarSource} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';

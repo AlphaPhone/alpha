@@ -15,7 +15,7 @@ import {reminderEvents,reminderWallTime} from '../runtime/reminder-creations';
 type Bag = Record<string, any>;
 const calendar = registerPlugin<any>('AlphaCalendar');
 const DAY=86400000;
-// Status strings stay parse-compatible with the shared overview state (daily-overview.ts); the calendar screen shows their short form.
+// Status strings stay parse-compatible with the overview state in ui/overview/daily-overview.ts; the calendar screen shows their short form.
 const STATUS_SHORT:Record<string,string>={'Device calendars are available in the Android app.':'','Calendar access denied':'No access','Connect device calendars':'Connect','Calendar range limited to 2,000 events':'2,000 max','Device calendar access allowed':'Allowed','No device calendars found':'No calendars','Calendar range could not be loaded. Open device calendars to retry.':'Couldn’t load','App calendar could not be loaded. Retry or open Calendar recovery.':'Couldn’t load'};
 const shortStatus=(text:string)=>STATUS_SHORT[text]??text;
 // Resolves when Alpha is shown again after another app covered it.
@@ -215,7 +215,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
     out.calendarSourceLabel=Capacitor.isNativePlatform()?'On-device calendars':'Browser calendar';
     out.calendarSourceText=Capacitor.isNativePlatform()?'':'';
     out.nativeStatusLabel=[rangeReady&&truncated?'Incomplete':'',reminderStale?'Stale':''].filter(Boolean).join(' ');
-    out.nativeStatusRetry=()=>{void refresh(false,true);void owner?.refreshReminders();};
+    out.nativeStatusRetry=()=>{void refresh(false,true);void owner?.refreshReminders();};out.nativeStatusAria='Retry calendar and reminders';out.nativeStatusRetries=true;
     out.browserRecovery=!Capacitor.isNativePlatform()&&loadFailed&&!loading;out.openBrowserRecovery=openCalendarRecovery;
     out.reminderRecovery=!Capacitor.isNativePlatform()&&reminderStale;out.openReminderRecovery=openReminderRecovery;out.openReminderCreationRecovery=openReminderCreationRecovery;out.openReminderActionRecovery=openReminderActionRecovery;out.anyRecovery=out.browserRecovery||out.reminderRecovery;
     if(!rangeReady&&!state.open&&!state.form)out.empty=true;
@@ -276,6 +276,10 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
           else api.toast(result.status==='unavailable'?'No calendar app':'Couldn’t open');
         }catch{api.toast('Couldn’t open');}
       };
+      const ownsSaveCompletion=(currentOwner:Bag,epoch:number,targetDay:number)=>{
+        const current=api.get('calendar');
+        return owner===currentOwner&&!document.hidden&&api.isActive()&&creationDraftEpoch===epoch&&!current.form&&!current.open&&Number(current.day||0)===targetDay&&current.month==null;
+      };
       // 0041 direct save: all-day, chosen zone or repeat, with provider readback of each field.
       const saveOptions=async(current:Bag,currentOwner:Bag)=>{
         let event;try{event=calendarOptionEvent(current,deviceZone);}catch(error){api.toast((error as Error).message);return;}
@@ -294,16 +298,19 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
           if(result.status==='read-only'){api.toast('Read-only');return;}
           if(result.status!=='saved'||result.creationId!==creationId)throw Error('Unconfirmed calendar write');
           const readback=await calendar.readOptions({id:result.id});
+          if(!ownsForm())return;
           if(readback.status!=='ready'||readback.allDay!==event.allDay||readback.timeZone!==event.timeZone||readback.rrule!==event.rrule)throw Error('Calendar readback mismatch');
           const targetDay=Number(current.off||0);
-          currentOwner.calendarFormCommitted?.(api.get('calendar').form);
+          currentOwner.calendarFormCommitted?.(submittedForm);
           api.set({form:null,open:null,day:targetDay,month:null});
           if(current.origin&&noteOriginSupported('event'))void rememberNoteOrigin('event',creationId,current.origin).then(linked=>{if(!linked&&owner===currentOwner&&currentOwner.live)api.toast('Saved · note not linked');});
           const ack=await calendar.acknowledgeCreation({creationId});if(ack.status!=='acknowledged')throw Error('Unconfirmed receipt acknowledgement');
+          if(!ownsSaveCompletion(currentOwner,epoch,targetDay))return;
           desired=rangeFor({...currentOwner.vget('calendar'),day:targetDay,month:null});await refresh(false,true);
+          if(!ownsSaveCompletion(currentOwner,epoch,targetDay))return;
           const saved=currentOwner.nativeCalendarRows?.find((e:Bag)=>e.alphaCalendarId===result.id);
-          if(saved&&owner===currentOwner&&!document.hidden&&api.isActive()&&!api.get('calendar').form)api.set({open:saved.id,day:saved.off,openDay:saved.off});
-          api.toast(!event.allDay&&event.timeZone!==deviceZone?'Saved':'Saved');
+          if(saved)api.set({open:saved.id,day:saved.off,openDay:saved.off});
+          api.toast('Saved');
         }catch{try{await readCreations();}catch{if(owner===currentOwner&&creationDraftEpoch===epoch){creationPending=null;creationRecoveryFailed=true;}}if(owner===currentOwner&&!document.hidden&&api.isActive()&&creationDraftEpoch===epoch)api.toast('Unconfirmed');}
         finally{currentOwner.calendarSaving=false;if(owner===currentOwner)api.set({});}
       };
@@ -347,7 +354,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
           // Retire only this exact submitted draft before an acknowledgement can be lost.
           currentOwner.calendarFormCommitted?.(api.get('calendar').form);
           api.set({form:null,open:null,day:targetDay,month:null});
-          const ownsCompletion=()=>owner===currentOwner&&!document.hidden&&api.isActive()&&creationDraftEpoch===epoch&&!api.get('calendar').form&&!api.get('calendar').open&&Number(api.get('calendar').day||0)===targetDay&&api.get('calendar').month==null;
+          const ownsCompletion=()=>ownsSaveCompletion(currentOwner,epoch,targetDay);
           // Edits have not yielded since ownsForm: React may not have committed form:null yet.
           // Creation acknowledgement yields, so recheck its completion before starting refresh.
           if(creationId){const ack=await calendar.acknowledgeCreation({creationId});if(ack.status!=='acknowledged')throw Error('Unconfirmed receipt acknowledgement');if(!ownsCompletion())return;}

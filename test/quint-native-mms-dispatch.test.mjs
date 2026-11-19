@@ -3,11 +3,11 @@ import test from 'node:test';
 import {verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
 import {checkNativeMmsDispatch, mmsSourceProbe} from '../specs/quint/refinement/native/mms-dispatch.mjs';
 
-test('partial source contract: native MMS review, shared ID collisions and PDU custody refine authenticated staged source', async () => {
+test('partial source contract: MMS refused on the agent bridge, composer sends, shared ID collisions and PDU custody refine authenticated staged source', async () => {
   const {receipt}=await checkNativeMmsDispatch();
   assert.equal(receipt.passed,true);
   assert.equal(receipt.traces,20);
-  assert.equal(receipt.observedFields.length,25);
+  assert.equal(receipt.observedFields.length,23);
   assert.equal(verifyRefinementReceiptInputs(receipt),true);
 });
 

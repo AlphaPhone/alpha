@@ -71,13 +71,6 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
   const renderVals = p.renderVals;
   p.renderVals = function () {
     const out = renderVals.call(this);
-    // Offer only connected operations. Reference suggestions name fictional
-    // people and imply image analysis/mail/workflows that are not available yet.
-    const view = this.S().view;
-    const first = view === 'camera' ? 'Open Photos' : view === 'photos' ? 'Open Camera'
-      : view === 'files' || view === 'browser' || view === 'inbox' ? 'Open Notes'
-      : view === 'phone' || view === 'messages' ? 'Open Contacts' : 'Open Calendar';
-    const suggestions = view==='camera' ? ['Scan this', 'What’s this?', 'Take a photo'] : ['Create a note', 'Set a reminder', first];
     const now = Date.now();
     const calendarSource = views.calendar.displaySources?.();
     const calendarState = this.vget('calendar');
@@ -137,7 +130,6 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
       next: following ? {item: itemOf(following), provenance: deviceFresh(following.event, false)} : null} : agendaInput;
     return {
       ...out, shadeN: [],
-      sugg: suggestions.map(label => ({ label, go: () => this.send(label) })),
       ...homeCalendarValues(presentHomeAgendaCard(agendaInput)),
       homeCalendarConfirmedEmpty: cardState === 'ready' && readAt != null && readAt > 0 && readAt <= now
         && !stale && !calendarHidden && !calendarSource?.truncated && !agenda && !following,
@@ -228,6 +220,7 @@ export function installPrototypeHomeBindings(Component: any) {
     if(!Capacitor.isNativePlatform()&&!storageAccessible()){storageAccessWarning='Saving off';}
     const activeView=this.S().view||'home';
     const chatModal=out.panelPE==='auto'&&this.S().chat==='full';
+    const appHidden = out.shadeY === '0' || chatModal || !!out.voiceOn;
     const attention = mockAttentionRows();
     return {
       ...NEUTRAL_HOME,
@@ -240,12 +233,11 @@ export function installPrototypeHomeBindings(Component: any) {
       // OG's resting half sheet leaves the app interactive. Full chat, shade
       // and voice still retire the covered layer's focus/accessibility controls.
       homeHidden: !!(out.isView || out.shadeY === '0' || chatModal || out.voiceOn || this.S().drawer),
-      appHidden: !!(out.shadeY === '0' || chatModal || out.voiceOn),
+      appHidden,
+      browserSurfaceCovered: appHidden || (activeView === 'browser' && !!out.browser?.menu),
       conversationHidden: out.panelPE !== 'auto' || out.shadeY === '0' || !!out.voiceOn,
       shadeHidden: out.shadeY !== '0' || !!out.voiceOn,
       dockHidden: out.shadeY === '0' || !!out.voiceOn,
-      // An open conversation has one bottom bar: its own text field, with Alpha's orb in it.
-      ...(out.is?.messages && out.messages?.ownsDock ? { showPill: false, showComposer: false } : {}),
     };
   };
 }

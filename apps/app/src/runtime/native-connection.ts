@@ -178,7 +178,7 @@ export function createBrowserConnection(options:{fetch?:typeof fetch;secrets?:Br
       if(input.credentialReference)throw new Error('This credential requires its native or development host.');
       if(input.method==='GET'&&input.body!==undefined)throw new Error('Connection request failed');
       const headers=new Headers();
-      for(const [name,value] of Object.entries(input.headers||{})){if(typeof value!=='string'||!allowedHeaders.has(name.toLowerCase())&&!mapsRequestIdentity(name,value,url.pathname,input.method)||value.length>16384||/[\r\n]/.test(value))throw new Error('Connection request failed');headers.set(name,value);}
+      for(const [name,value] of Object.entries(input.headers||{})){if(typeof value!=='string'||!allowedHeaders.has(name.toLowerCase())&&!mapsRequestIdentity(name,value,url.pathname,input.method)&&!(name.toLowerCase()==='idempotency-key'&&url.pathname==='/api/v1/credits/checkout'&&input.method==='POST'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(value))||value.length>16384||/[\r\n]/.test(value))throw new Error('Connection request failed');headers.set(name,value);}
       if(input.body!==undefined)JSON.parse(input.body);
       const controller=new AbortController();requests.set(input.requestId,controller);
       try{

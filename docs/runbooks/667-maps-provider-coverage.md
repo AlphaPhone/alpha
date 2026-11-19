@@ -114,9 +114,11 @@ GraphHopper setup is superseded for production.
    or a release that includes the reviewed Maps fix. Google tile fetches use the `no-store`
    fetch cache mode; both authenticated tile response formats carry
    `Cache-Control: no-store`. Incomplete viewport copyright
-   is refused. The phone also uses the reviewed renderer that withholds imagery outside
-   its attributed area and keeps small navigation movements inside an already
-   attributed margin. Read back both tile response formats after deployment.
+   is refused. The phone draws tiles as they arrive and reads the viewport copyright
+   after the map settles, with one viewport of margin so small navigation movements
+   ask nothing (owner decision, 2026-11-16: the earlier renderer hid the whole map
+   during that read, 3.7 s per zoom step on a Pixel). Until the read answers, the
+   panel the badge opens shows the standing tile attribution. Read back both tile response formats after deployment.
    Alpha source pinning alone does not deploy the Cloud API.
    [Upstream Google rollout change](https://github.com/elizaOS/eliza/pull/39231)
    [Worker fetch cache mode](https://developers.cloudflare.com/workers/runtime-apis/fetch/)
@@ -179,8 +181,8 @@ GraphHopper setup is superseded for production.
    and verify actual Google imagery, search, place details and a route. Grant
    location only when requested. Start and stop navigation on a safe walking route.
 
-   Verify visible Google branding, full copyright where it fits, and the readable
-   in-map **Data sources** control on small or enlarged-text layouts. Pan, zoom,
+   Verify the visible Google Maps badge, and that tapping it opens the viewport's
+   complete copyright and the request disclosure at every text size. Pan, zoom,
    rotate, change text size, use TalkBack, and reopen the map. Verify the credit
    stays reachable above sheets and navigation controls. Confirm failures show an
    honest unavailable state. A Google result must never appear over the
@@ -188,8 +190,8 @@ GraphHopper setup is superseded for production.
 
    Alpha uses the unmodified `GoogleMaps_Logo_DarkGray.svg` from Google's
    attribution asset archive in `apps/app/src/maps/google-maps-attribution.svg`.
-   It remains visible while the complete viewport copyright is displayed beside
-   it or in **Data sources**. [Official attribution assets](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)
+   The badge is the only credit control on a Google map (owner decision,
+   2026-11-16); the complete viewport copyright opens from it. [Official attribution assets](https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip)
    [Attribution placement and size](https://developers.google.com/maps/documentation/tile/policies#display_google_maps_attribution)
 
    Check the content gates through the ordinary Maps controls. Google-derived
@@ -226,7 +228,7 @@ above do not qualify that path.
 
 The production browser regression uses intercepted native HTTP responses, a synthetic
 place and a generated white PNG. It exercises the production renderer, Google branding,
-complete Data sources disclosure in results and active guidance, portrait and landscape
-hit targets, 150% and 200% attribution text, missing or invalid imagery, and
-failed copyright retrieval. Record live Google and Pixel checks separately.
+the copyright and request disclosure the badge opens in results and active guidance,
+portrait and landscape hit targets, 150% and 200% attribution text, missing or invalid
+imagery, and a failed copyright read (tiles stay, with the standing attribution). Record live Google and Pixel checks separately.
 [Google Maps production browser test](../../test/browser/google-maps-raster.production.spec.ts).

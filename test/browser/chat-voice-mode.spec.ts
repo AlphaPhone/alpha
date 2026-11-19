@@ -46,6 +46,63 @@ async function startWithRetainedDraft(page:Page){
  await page.evaluate(()=>(window as any).chatVoiceFixture.shell.startVoice());
 }
 async function utterance(page:Page){await page.evaluate(()=>(window as any).chatVoiceFixture.peak=.25);await page.waitForTimeout(950);await page.evaluate(()=>(window as any).chatVoiceFixture.peak=0);}
+test('stopping voice releases capture and lets the accepted reply finish in chat',async({page})=>{
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const f=(window as any).chatVoiceFixture;
+  connectionController.voiceConversationCurrent=()=>true;
+  Component.prototype.sendVoiceTurn=async function(input:any){
+   f.sends++;f.replySignal=input.signal;
+   await new Promise<void>(resolve=>f.releaseReply=resolve);
+   input.signal.throwIfAborted();input.assertCurrent();
+   const text='The full reply arrives after voice stops.';
+   this.setState((state:any)=>({msgs:[...state.msgs,{id:'finished-reply',from:'agent',text}]}));
+   return {requestId:input.turnId,conversationId:'synthetic-room',userMessageId:'voice-user',assistantMessageId:'finished-reply',text,complete:true};
+  };
+ });
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await page.getByRole('button',{name:'Talk',exact:true}).click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(1);
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ await expect(voice(page)).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).chatVoiceFixture.replySignal.aborted)).toBe(false);
+ await page.evaluate(()=>(window as any).chatVoiceFixture.releaseReply());
+ await expect(page.locator('[data-alpha-layer="conversation"]')).toContainText('The full reply arrives after voice stops.');
+ await expect(page.getByText(/Interrupted before this reply/)).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).chatVoiceFixture.speech)).toBe(0);
+ await noMedia(page);
+});
+
+// Only the owner's Stop keeps a pending voice reply. A send that retires voice aborts it, so the
+// message is never held behind the reply. This fixture has no agent, so delivery is not shown here.
+test('a send while a voice reply is pending aborts that reply',async({page})=>{
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const f=(window as any).chatVoiceFixture;
+  connectionController.voiceConversationCurrent=()=>true;
+  Component.prototype.sendVoiceTurn=async function(input:any){
+   f.sends++;f.replySignal=input.signal;
+   await new Promise<void>(resolve=>input.signal.addEventListener('abort',()=>resolve(),{once:true}));
+   input.signal.throwIfAborted();throw Error('unreachable');
+  };
+ });
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await page.getByRole('button',{name:'Talk',exact:true}).click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(1);
+ await page.evaluate(()=>{void (window as any).chatVoiceFixture.shell.send('Typed while voice replies');});
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.replySignal.aborted)).toBe(true);
+ await expect(voice(page)).toHaveCount(0);
+ await noMedia(page);
+});
+
 // The Home pill is the hidden-chat voice surface off the Cloud route; Cloud speech opens the sheet
 // (voice-adapter startVoice). A refused Cloud request holds this account on on-device speech
 // (voice-selection noteNetworkSpeechFailure): the account stays signed in and the fixture's
@@ -140,7 +197,7 @@ for(const viewport of [{width:390,height:740},{width:800,height:1200},{width:128
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  const panel=page.locator('[data-alpha-layer="conversation"]');
  const settle=()=>panel.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
- const box=()=>panel.locator('textarea[data-alpha-composer]').evaluate(el=>{const node=el.parentElement!,r=node.getBoundingClientRect(),s=getComputedStyle(node);return {x:r.x,y:r.y,width:r.width,height:r.height,radius:s.borderRadius};});
+ const box=()=>panel.locator('textarea[data-alpha-composer]').evaluate(el=>{const node=el.closest<HTMLElement>('.alpha-chat-composer')!,r=node.getBoundingClientRect(),s=getComputedStyle(node);return {x:r.x,y:r.y,width:r.width,height:r.height,radius:s.borderRadius};});
  const voiceBox=()=>voice(page).evaluate(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {x:r.x,y:r.y,width:r.width,height:r.height,radius:s.borderRadius};});
  for(const detent of ['half','full']){
   if(detent==='full')await panel.getByRole('button',{name:'Expand chat',exact:true}).click();await settle();

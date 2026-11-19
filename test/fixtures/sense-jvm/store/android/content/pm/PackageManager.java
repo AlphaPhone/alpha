@@ -1,0 +1,1 @@
+package android.content.pm; public class PackageManager { public static class NameNotFoundException extends Exception {} public static class Info { public long lastUpdateTime=1; } public Info getPackageInfo(String s,int f)throws NameNotFoundException{return new Info();} }

@@ -15,11 +15,15 @@ import importlib.util, json
 spec = importlib.util.spec_from_file_location('calendar_bridge', 'scripts/ci/calendar-bridge.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-print(json.dumps({'sdk': module.SDK, 'host': module.HOST}))`);
+print(json.dumps({'sdk': module.SDK, 'host': module.HOST, 'owning': module.OWNING_SHA256}))`);
   assert.equal(constants.sdk, json('upstream.lock.json').commit);
   const host = fs.readFileSync(path.join(root, 'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCalendarPlugin.java'));
   assert.equal(constants.host, createHash('sha256').update(host).digest('hex'),
     'AlphaCalendarPlugin.java changed: review it and update HOST in scripts/ci/calendar-bridge.py');
+  // The bridge contract is Alpha's own fixture; its recorded digests are the files'.
+  assert.ok(Object.keys(constants.owning).length > 10 && Object.keys(constants.owning).every(file => file.startsWith('test/fixtures/calendar-bridge/')));
+  for (const [file, sha256] of Object.entries(constants.owning))
+    assert.equal(createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex'), sha256, `${file} changed: update OWNING_SHA256 in scripts/ci/calendar-bridge.py`);
 });
 
 test('the voice host record names the Paradee model version the product ships', () => {

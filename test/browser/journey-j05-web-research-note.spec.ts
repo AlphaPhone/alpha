@@ -53,8 +53,8 @@ async function begin(page: Page, external: string[], crossOriginReadable: boolea
   expect(await notes(page)).toEqual([]);
 }
 async function askAboutPage(page: Page) {
-  await button(page, 'Menu').click();
-  await button(page, 'Ask about page').click();
+  await button(page, 'Chat actions').click();
+  await button(page, 'Attach page').click();
   return page.getByRole('dialog', {name: 'Ask about selected content'});
 }
 /** Sends the reviewed draft, checks what the agent received and returns the summary review. */

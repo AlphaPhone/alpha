@@ -418,12 +418,14 @@ public final class UpdateStagingHarness {
  }
  public static void main(String[] args)throws Exception{
   if(args[0].equals("deadline")){System.out.println(deadline());return;}
+  if(args[0].equals("index")){System.out.println(UpdateFlowTest.mixedIndexSelections());return;}
   URL.setURLStreamHandlerFactory(protocol->!protocol.equals("https")?null:new URLStreamHandler(){
    @Override protected URLConnection openConnection(URL url){return new Response(url);}
   });
   Path cache=Files.createTempDirectory("quint-update-staging");
   try{
-   if(args[0].equals("manifest"))System.out.println(manifest(cache,Integer.parseInt(args[1]),args[2]));
+   if(args[0].equals("selfUpdateGrant")){System.out.println(UpdateFlowTest.selfUpdateGrantStatuses(cache.toFile()));UpdateFlowTest.retireFixtureWorkers();}
+   else if(args[0].equals("manifest"))System.out.println(manifest(cache,Integer.parseInt(args[1]),args[2]));
    else{
     var fixture=new UpdateStagingHarness(args[0],cache,new JSONObject(args[1]));
     try{System.out.println(fixture.run(args[0]));}finally{fixture.close();}

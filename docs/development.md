@@ -28,7 +28,7 @@ and build-tools 36.0.0. Set
 `JAVA_HOME` and `ANDROID_HOME`; standard macOS SDK/JDK locations are also detected.
 
 ```sh
-git clone --recurse-submodules https://github.com/eliza-research/alpha.git
+git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url)"
 cd alpha
 bun install --frozen-lockfile
 bun run verify
@@ -73,6 +73,41 @@ deadlines for refinement, host JVM fixtures and LemmaScript, and Playwright serv
 startup. CI uses 1. Dafny's per-proof limits and the update deadlines measured by
 fixtures stay the same.
 
+### Browser test runs
+
+Each browser test boots the app in a fresh context from the development server, so the
+suite's wall time is its total test time divided by the worker count. Locally Playwright
+uses 4 workers; CI (`CI` set) uses 2 per shard. `ALPHA_BROWSER_WORKERS=<n>` or
+`-- --workers=<n>` overrides both. Projected from per-test timings (not yet measured as full
+runs): roughly 75 minutes for `bun run test:browser` and about 10 minutes for
+`bun run test:browser:production` on a quiet 24-CPU host;
+other sessions' builds, emulators and test runs on the same machine lengthen both and push
+timing-sensitive tests over their timeouts. At 6 workers a quiet host
+runs about a quarter faster again (`ALPHA_BROWSER_WORKERS=6`), but with other sessions loading it
+6 and 8 workers time out timing-sensitive tests that pass at 4.
+
+On a shared workstation run the lanes in their own memory-capped unit, so that the out-of-memory
+daemon stops the test run rather than the session that started it (about 0.85 GB per worker
+plus 0.5 GB for the development server):
+
+```sh
+systemd-run --user --wait --pipe -q -p MemoryMax=10G --working-directory="$PWD" \
+  --setenv=PATH="$PATH" --setenv=HOME="$HOME" bun run test:browser
+```
+
+A failing test keeps a trace with its actions, their timings and errors, the screencast and
+the console. DOM snapshots and the network log are off: Playwright records both together,
+including every module body the development server sends, and that cost every test about
+a second even though passing tests discard the trace. `ALPHA_TRACE=1` records them
+again; so does rerunning with `-- --last-failed --trace=on`.
+
+Concurrent runs in one worktree need different `ALPHA_BROWSER_TEST_PORT` values (the
+production lane uses the port after it). A run on a port other than 5317 writes
+`test-results/browser-<port>/` and `test-results/browser-report-<port>/`, and every Vite
+server it starts keeps its dependency cache under `test-results/vite-cache/` scoped by port
+(and, for servers a spec starts itself, by worker), so concurrent runs and workers never
+replace each other's optimized modules.
+
 ## Development
 
 ```sh
@@ -95,6 +130,20 @@ requests. Its default URL is `http://127.0.0.1:5318`.
 `ALPHA_CLOUD_ENVIRONMENT=staging` explicitly selects staging. Private account and
 resident profiles live under `~/.local/share/alphaphone/`. Existing accounts,
 credentials and histories are not copied or reset.
+
+### Maps input and navigation controls
+
+Automatic search and Enter share one accepted input generation for destination and origin
+fields. Loading, ready and successful empty results are reused; an explicit retry after a failed
+request remains available. New edits, provider/account changes, place/origin choices and navigation
+changes retire that ownership. Keep provider-effect counts in the owning browser/model checks.
+
+Maps navigation is visual for now, following the owner's voice deferral. Its footer keeps ETA,
+distance and End, with symmetric space around the centered ETA. The Maps-specific Ask, voice and
+manual Reroute controls and the empty-search Ask prompt are removed. The normal assistant speech
+lifecycle and the always-packaged resident/on-device speech runtime remain separate. Shared speech
+component contracts are retained; the Maps UI tests now verify silence, visual guidance, unrelated
+playback ownership and End rather than advertising deferred controls.
 
 ### Standalone Cloud (development)
 
@@ -140,7 +189,13 @@ bun run android:build:inputs       # report missing build inputs
 bun run android:build:local        # prepare, build worker, stage runtime and build (debug only)
 bun run android:build:local -- --release   # the same, also building the release APK (CI)
 bun run android:verify            # inspect APK contents and signatures
+bun run android:build:fast -- --install   # developer rebuild after build:local; never distributable
 ```
+
+`android:build:fast` (scripts/build-android-fast.ts) is an APK build only, with fewer checks:
+no preflight, lint, instrumentation APK, verify-apks or SBOM. It writes `artifacts/fast/`, marks the
+packaged `build-flags.json` `fastIteration: true` so the production bundle audit refuses it, and is
+not evidence for a distributable build, an emulator HOME-role test or device acceptance.
 
 There is one launcher product/flavor. A local build produces the debug APK under
 `artifacts/` and an instrumentation APK under `artifacts/instrumentation/`; it uses
@@ -152,11 +207,38 @@ not additional release distributions. The same launcher APK can be installed on
 stock Android or preinstalled in the Alpha image. It declares HOME.
 Phone, Contacts and SMS/MMS require an admitted AOSP image capability.
 
-Alpha Compute builds use the same ID for the installed package and native
-namespace. The retained Pixel v44 uses the former package ID. Android
-installs the new package separately, with its own private data, Keystore,
-permissions and roles. Establish a fresh baseline on each distribution form,
-then verify updates and data retention between builds with the new package ID.
+Production and admitted Sense qualification images stage PackageManager component overrides for
+the exact validated Phone/SMS handlers. Their eligibility is an image default rather than something
+that first depends on opening the launcher after an APK update. The existing fresh-device Provision
+flow alone assigns default apps; these component overrides do not change an owner's role choices.
+This is image configuration, so an APK-only update cannot add it to an older image. Fresh-image and
+retained-update qualification on the matching AOSP image remain separate release gates.
+
+Pixel production image staging admits only `ai.alphacompute.alphaphone`. Supply
+`--branding-assets DIR` and `--branding-assets-report-sha256 HASH` to stage its matching
+branding source packet. After the normal signed-release, launcher descriptor, platform
+certificate, source lock and native checks pass, staging publishes the packet as
+`source-packet.zip` with its hash-bound `source-packet.json` receipt beside the launcher;
+it does not apply source, build or flash an image. The packet binds the canonical APK,
+descriptor, signer and qualified Phone/SMS handlers. The planner reads the
+`vendor/alphaphone` preimages from the image stage being published, whose generated
+`product.mk` is pinned before staging adds the branding include, never from an earlier
+install in the source tree. Apply the packet through the existing guarded branding stage
+with a new receipt; preserve any required prior source receipt.
+
+Canonical builds use `app.config.json` unchanged. A local build can set
+`ALPHA_ANDROID_APPLICATION_ID` to an identity declared in `android/consumer-host.json`
+(the historical `ai.elizaresearch.alphaphone`). This selects installation identity,
+not features or another flavor: the renderer, pinned SDK and native profile are
+the same current source. The generated native source view preserves that Java
+namespace, callback names, sockets and update channel without editing the
+canonical sources. Gradle refuses a stale view; APK verification compares the
+packaged identity receipt with that view. No release path admits that identity:
+installations of the historical package carry the retired version 49 signer and
+Alpha signs with one key and no signing-key rotation, so signing admission,
+qualification and update publication accept only `ai.alphacompute.alphaphone`.
+Those phones are wiped and installed again, never upgraded in place.
+
 Qualify the native libraries and APKs for the exact product and SDK revisions.
 
 There is one runtime profile. Every build packages libelizainference with the
@@ -228,6 +310,36 @@ is production staging (reviewed `--descriptor`, distributable release APK) unles
 full AOSP boot, real integrations, physical-device testing and user acceptance
 are independent results.
 
+A development image leaves Phone, Contacts and SMS off. An owner who builds
+and flashes their own Pixel 10a or Cuttlefish image can add
+`--owner-telephony` to a `--development` stage. Production staging is refused
+locally because it needs a reviewed descriptor and a distributable release.
+
+```sh
+bun run aosp:stage -- --target pixel10a --aosp-source <aosp-checkout> --factory-image <factory.zip> \
+  --apk <release-launcher-signed-locally.apk> --development --owner-telephony --applied-build-patch soong-memory \
+  --output <new-dir>
+```
+
+The flag admits only a release (non-debuggable) launcher whose bundle is
+flag-off (`testMocks: false`). It does not need to be distributable. The flag
+refuses a debuggable or test-mocks APK, and a launcher without the first-run
+receiver or every disabled SMS/Dialer role handler. It writes two things:
+
+- the `AlphaImageProvisioning` capability overlay;
+- the `system_ext` sysconfig `<component-override>`
+  (`provisioning/alpha-telephony-components.xml`). The override is intended to
+  enable the role handlers at package scan, before RoleManager re-qualifies the
+  SMS and Dialer holders, so that Alpha keeps its roles after an image update
+  changes the fingerprint. Staging output is not evidence of an image boot or
+  of role retention; only a flashed image shows that.
+
+It writes no default HOME/Autofill provisioning overlay and no fresh-telephony
+Provision feature. It cannot be combined with an activated Sense image. Such an
+image is an owner development image with image telephony enabled. It is not
+distributable or qualified. A sideloaded APK still never gets telephony: the app
+also requires a system-partition install and the image feature (P-36).
+
 The listener verifier reads the installed package grants, privapp enforcement,
 and the running listener's SELinux domain. Pass `--launcher-descriptor` with
 the reviewed launcher descriptor when the image provisions a privileged launcher.
@@ -246,14 +358,20 @@ candidate, signed release and physical acceptance receipts with their exact buil
 
 `scripts/deliver-app-update.ts` publishes an admitted signed launcher APK and
 checks anonymous readback. Merging source does not publish an application update.
-New builds read the `app-stable-alphacompute` release. The previous package
-reads `app-stable`. Publication keeps each package on its own release and
-checks retained versions on both. Android may require installation confirmation.
-New builds use the live `eliza-research/alpha` URL. Previously issued
-`eliza-research/alphaphone` GitHub release URLs use its redirect.
-Protected release jobs check the immutable repository and owner IDs and bind
-dispatches to the reviewed commit on `main`. The
-release owner applies the reviewed workflow reference allowlist in
+Releases use `ai.alphacompute.alphaphone` only; an existing
+`ai.elizaresearch.alphaphone` installation is not updated in place (see above).
+The canonical package reads the `app-stable-alphacompute` release. The publisher
+still checks the version floor from `app-stable`. Android may require
+installation confirmation.
+
+The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
+available there before distribution. Verify anonymous readback of the app
+manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
+release pointers may need their APK URLs updated to the canonical repository.
+
+Protected release jobs bind dispatches to the reviewed commit on `main`.
+After the repository moves, the release owner applies the repository ID,
+Alpha Compute owner ID and workflow reference allowlist in
 [`scripts/ci/private-artifact-identity.json`](../scripts/ci/private-artifact-identity.json)
 to the existing Workload Identity Federation provider before protected signing
 or publication uses private artifact storage.
@@ -338,12 +456,12 @@ operation `sign`, the exact reviewed `workflow_commit` and `signing-plan.json`
 as the `plan` input. Preflight checks the official Actions ZIP. The protected
 job checks the same run attempt and artifact again, then stages the pinned
 private generation before accessing the signing key. Current builds produce one
-native launcher APK on the public update channel. Release tooling also retains
-the reviewed private Cloud producer input contract: its complete original standalone
-and launcher pair must match the approved hashes, Cloud profile and historical
-package identity. Both members are authenticated archive inputs; only the launcher
-is staged for signing, exported, voice-qualified or published. The rotation approval
-also names only the launcher. Input enrollment is not independent attestation of the
+native launcher APK on the public update channel. Signing admission
+(`scripts/ci/app_update_producer.py`) accepts only a
+launcher-only native plan for `ai.alphacompute.alphaphone`, signed with the one
+enrolled key: it refuses another installation identity, a standalone APK pin
+and a plan or signer record that carries a signing-key rotation.
+Input enrollment is not independent attestation of the
 private bytes or release acceptance; protected admission must still read and verify them.
 
 For publication, set `delivery_artifact_id` to the numeric ID of the original
@@ -351,7 +469,7 @@ For publication, set `delivery_artifact_id` to the numeric ID of the original
 Save its ZIP.
 
 ```sh
-gh api "repos/eliza-research/alpha/actions/artifacts/$delivery_artifact_id/zip" > delivery.zip
+gh api "repositories/1396333361/actions/artifacts/$delivery_artifact_id/zip" > delivery.zip
 ```
 
 Read `private-storage-receipt.json` from the ZIP and confirm its
@@ -365,7 +483,7 @@ gcloud storage cp "$signed_uri" signed.tar
 
 Complete Cartesia qualification on each exact signed APK. Record a content-free
 `alpha-cloud-voice-qualification-v1` JSON receipt with one `results` row per
-approved signed APK: exactly one launcher, including a retained Cloud input. Each
+approved signed APK: exactly one launcher. Each
 row names the observed `apkSha256`, `provider` and `outcome`, and records the
 observed booleans in `checks` for `consent`, `session`, `acousticInput`,
 `blueBar`, `transcript`, `audibleSpeakerReply`, `mute`, `unmute` and
@@ -373,16 +491,15 @@ observed booleans in `checks` for `consent`, `session`, `acousticInput`,
 and credentials. The workflow admits passing Cartesia checks for every exact APK
 named in the launcher-only signed output.
 
-For a retained Cloud archive, publication runs its unchanged historical verifier on
-the original unsigned pair and debug inputs. Alpha then independently verifies that
-the signed launcher preserves every ZIP member, compression fact, local header and
-payload byte, passes 16 KiB alignment and the pinned signature/lineage verifier on
-Android APIs 29–37, and has the exact reviewed voice receipt. The original unsigned
-manifest is retained separately. The derived one-row signed manifest names Alpha's
-admission commit, the original producer/SDK commits and the byte-equivalence proof;
-it is not attributed as a new output of the historical producer. Current native
-builds continue through the normal native verifier. Historical v62 receipts keep
-their original source, hashes and qualification scope.
+Publication reverifies every signed launcher with the normal native verifier
+(`bun run android:verify`). Alpha signs with one key and no signing-key rotation:
+phones still on version 49 (the retired signer) are wiped and installed again,
+never upgraded in place, so no release carries a rotation lineage or a standalone
+APK. `android/release-signer.json` must not carry `apkSigningRotation`; the
+signing and admission scripts refuse a record that does and name the edit that
+removes it. A `standalone` pin left in an existing producer approval is inert:
+admission is launcher-only, so the next approval is written launcher-only. Historical v62 receipts keep their original
+source, hashes and qualification scope.
 
 Set `publication_commit` to the exact reviewed commit currently on `main`.
 Prepare the qualification using the original plan bytes and the reviewed voice
@@ -417,7 +534,7 @@ signed `launcher-release.apk`. If you download the public APK asset, save it
 under that filename. For the baked launcher, use the post-signing manifest for
 the exact APK in the image. Both wireless captures verify the installed bytes
 against the reviewed `android/release-signer.json` policy, including for
-versions already recorded as released. The [wireless drill](https://github.com/eliza-research/alpha/issues/889)
+versions already recorded as released. The [wireless drill](https://github.com/alphacompute/alpha/issues/889)
 requires Android 14 or later for package installer provenance. Keep the phone
 offline from baseline installation through HOME selection, any one-time Android
 installation permission, and the `before` capture. Keep the host online and
@@ -524,6 +641,13 @@ Complete it in this order:
 
    For production Cloud acceptance on the Pixel, use the admitted release APK.
    Android requires a separate device or fresh installation when the installed copy uses an incompatible signer.
+   For Google sign-in, verify the installed build's `eliza.app` App Link with
+   `adb shell pm get-app-links --user cur ai.alphacompute.alphaphone` and make
+   sure the image has an external browser that can sign in to Google. A passing
+   Cloud redirect or published App Links file does not verify either condition on
+   the phone. An unregistered debug signer cannot receive the production return.
+   The probe's phone sign-in result checks whether Cloud offers SMS without a
+   captcha; it sends no code and does not establish delivery.
 3. Qualify the exact signed baseline and establish it on both installation
    paths before exposing the phones to a newer offer. If using
    `scripts/provision-unit.ts`, provision before recording the baseline's version
@@ -629,9 +753,66 @@ has its own deployment and operator steps.
 The pin `76c80623c5ee782fbb9893943455d3dafd74befb` includes the upstream
 resident assistant's current-time reply fix ([eliza#39629](https://github.com/elizaOS/eliza/pull/39629)).
 The upstream browser projections and native producer recipe retain the same bytes.
-The current pin `f86b5038f897094df686da9d5a8d901f60b1e20e` preserves years stated
+The pin `f86b5038f897094df686da9d5a8d901f60b1e20e` preserves years stated
 before Calendar dates in the resident runtime ([eliza#39632](https://github.com/elizaOS/eliza/pull/39632)).
 Upstream verified the parser and saved event interval with the Calendar owning tests.
+The pin `6821e9f0ca79c1f7cbe14c11330686461410234c` uses Android's SMS role to authorize incoming and
+outgoing message persistence on the Alpha image
+([eliza#39658](https://github.com/elizaOS/eliza/pull/39658)). Outgoing SMS is stored in the Android provider
+before dispatch. Incoming SMS is stored before its notification. A send result
+and a carrier delivery receipt remain separate.
+The pin `b8526fd56c9aa683889fdc00c286e2db0280f12e` lets Alpha Messages authorize an owner-composed
+SMS or MMS when the owner taps Send. The SDK keeps the native send journal and carrier
+dispatch guards and retires a staged MMS if Android never received it
+([eliza#39660](https://github.com/elizaOS/eliza/pull/39660)).
+Assistant and external compose sends still require confirmation.
+The pin `a81d7059045f9b96b8c85ffa79b731d3ba574159` keeps retrying unexpected
+Android resident crashes with capped backoff and retires stale startup
+probes ([eliza#39661](https://github.com/elizaOS/eliza/pull/39661)).
+The pin `db8071d97d897429e62f01d0a9a53ef0a05138f0` excludes AOSP WebView
+Shell from browser-based Google sign-in and checks for an eligible browser
+when reading cached readiness ([eliza#39666](https://github.com/elizaOS/eliza/pull/39666)).
+The pin `33c5ab4c004a396324994784c4bd76e8c8679286` matches the
+MMS receiver's MIME type when checking eligibility for the Android SMS role
+([eliza#39686](https://github.com/elizaOS/eliza/pull/39686)).
+The pin `c25d0fca2561f9f604bee8e891be772fa678589f` takes the reviewed
+fix for restoring private action targets before resident execution
+([eliza#39690](https://github.com/elizaOS/eliza/pull/39690)).
+The pin `1d436685bb685192dc076f2becdf77ceff68276e` restores native media
+routes, keeps selected chat attachments through intake, binds the selected Cloud
+image model at launch and rechecks a live file selection after storage reads
+([eliza#39683](https://github.com/elizaOS/eliza/pull/39683)).
+The pin `e682daad5a5c70d4334abe7ef287211d3675b8e2` includes the reviewed MIME preflight, private-action restoration and native-media repairs merged in [eliza#39683](https://github.com/elizaOS/eliza/pull/39683), plus the build-core Bun-version and Node-heap guards in [eliza#39743](https://github.com/elizaOS/eliza/pull/39743). All 57 recorded core, mobile-build, formal-sidecar and UUID target hashes were verified unchanged before advancing the pin. The engine and voice assets are unchanged. Normal native receipt admission and signed retained-data qualification remain required; source review does not establish physical-device acceptance.
+The pin `49d8b466043ca6c3316127b616362c9d80836084` adds the fitted chat-sheet open height to the shared
+`chat-panel-layout.ts` ([eliza#39771](https://github.com/elizaOS/eliza/pull/39771), for AP-16 AC-07; Alpha
+still uses its own `fitSheetHeight` until it adopts `resolveChatSheetFitHeight`), awaits and fences local
+Inbox draft reviews ([eliza#39748](https://github.com/elizaOS/eliza/pull/39748)), clears the Files filter
+when its view is left ([eliza#39740](https://github.com/elizaOS/eliza/pull/39740)) and resumes fresh Cloud
+database migrations ([eliza#39754](https://github.com/elizaOS/eliza/pull/39754)). None of the recorded core,
+mobile-build or formal-sidecar targets changed; the eliza `bun.lock` is unchanged.
+The pin `0d775376fd23d96f39f444b1920a8fde7fbce1e8` keeps outgoing and connected call notices off the
+heads-up banner: only a ringing call uses the high-importance call channel, other calls post to a derived
+low-importance `-ongoing` channel ([eliza#39794](https://github.com/elizaOS/eliza/pull/39794)). Only
+`TelecomCallService.java` changed; no recorded target or `bun.lock` changed.
+The pin `568a1cba76d567bebc81b47d110f66b830779b47` re-extracts the local agent after an image-only
+update ([eliza#39806](https://github.com/elizaOS/eliza/pull/39806)). An AOSP image pins every file mtime
+to 2009-01-01 and an image-only update leaves `lastUpdateTime` alone, so the old APK-time `.apk-stamp`
+never moved and a /product priv-app kept booting the agent from its first image. The stamp now also
+covers the APK size, `longVersionCode` and a central-directory digest of every `assets/agent/*` entry;
+existing installs re-extract once. The pin also returns Alpha billing links to the canonical Android
+package in the Cloud native-callback registry ([eliza#39803](https://github.com/elizaOS/eliza/pull/39803))
+and observes the expected PostgreSQL lock rejection in the Stripe checkout test
+([eliza#39804](https://github.com/elizaOS/eliza/pull/39804)). No recorded target or `bun.lock` changed.
+The pin `5c8f2b8564b3c23cb557349dcb574af9f534f9c5` takes the reviewed follow-up to single message deletion
+and contact editing ([eliza#39805](https://github.com/elizaOS/eliza/pull/39805), after
+[eliza#39796](https://github.com/elizaOS/eliza/pull/39796)). Native deletion now answers `not-settled`,
+with nothing deleted, for a draft, queued, outbox or failed row; Messages shows that refusal. A new contact is
+checked with `contactDraftProblem(draft, { create: true })`. `get` omits notes it cannot edit as one value
+(several note rows, longer than 8192 code units, other control characters) and answers a save that supplies
+them `failed`; the Contacts editor then shows notes as unavailable and never sends them. Voice interim
+annotations such as `*Dramatic Mus` no longer interrupt a reply before their final is classified. The three
+NativeMessageDeletion Quint sidecars changed and their inventory hashes moved; no recorded core or
+mobile-build target or `bun.lock` changed.
 Historical native measurements retain their original source attribution.
 New builds use the current source recipe and generated
 output receipts; neither a source update nor a successful APK build qualifies
@@ -658,3 +839,25 @@ Cloud deployment source is `scripts/cloud-deployment-policy.ts`; regenerate its
 renderer and Android bindings with `bun scripts/cloud-deployment.ts`.
 `bun scripts/cloud-deployment.ts --pages-registration` prints the public Pages
 callback registration for an operator without creating a `config/` directory.
+
+The reviewed pin `1803ea88c9460f2e3cb779abe31cd77cfc6f64c5` includes original-preserving message forks and the corrected Pixel source inventory ([eliza#39808](https://github.com/elizaOS/eliza/pull/39808), [eliza#39810](https://github.com/elizaOS/eliza/pull/39810), [eliza#39813](https://github.com/elizaOS/eliza/pull/39813)). Only the conversation-route catalog hash changed and was checked against the selected Git object; no `plugins/plugin-native-messages` file changed, so the three NativeMessageDeletion sidecar entries kept their hashes. The new upstream `packages/agent/quint/ConversationFork.qnt` and `ConversationFork.cases.json` sidecars behind the fork route are not catalogued in `specs/quint/legacy/core/source-inventory.json`. The mobile builder, dependency lock and 23 UUID package files retain their reviewed bytes. This pin does not itself qualify an APK or image.
+
+The subsequent reviewed pin `95532fce36ab4d253c0d848d127704d9b9ace2ac` adds the host-side selected-ABI staging fix ([eliza#39815](https://github.com/elizaOS/eliza/pull/39815)). Core source, mobile builder, dependency lock, 23 UUID files and current formal sidecar hashes were checked and remain unchanged. Native runtime sources are unchanged; this does not itself prove the next APK or Pixel update.
+
+The subsequent reviewed pin `8a5da0e54810ffdb1062ff2f2d4ab30e2db599c0` adds high-DPI Google map tiles in Cloud Maps, per-operation Maps tool descriptions, nearest-first place results and the navigation relay availability answer ([eliza#39829](https://github.com/elizaOS/eliza/pull/39829)). It changes `plugins/plugin-maps/src/action.ts`, `plugins/plugin-maps/src/plugin.ts`, `packages/agent/src/api/maps-navigation-relay.ts` and the Cloud Google Maps provider only; the dependency lock is unchanged. The upstream change was merged on the owner's instruction without a new test run after its rebase, and sharp tiles need a Cloud API deployment. This does not itself prove the next APK or Pixel update.
+
+The subsequent reviewed pin `9382f650d1644a704e92939d122f1970c46cd11e` adds the chat contact-creation fix ([eliza#39830](https://github.com/elizaOS/eliza/pull/39830)): `PROPOSE_DEVICE_ACTION` is offered under the `contacts` context with address-book guidance for `contacts.write.v1`, and the `plugin-relationships` node entry that the mobile bundle aliases exports the identity-merge engine (a contact save threw `foldIdentity4 is not defined` on the phone). It changes `plugins/plugin-assistant/src/services/device-actions/action.ts`, `plugins/plugin-assistant/src/services/message/context-assembly.ts`, `plugins/plugin-relationships/src/index.node.ts`, `plugins/plugin-relationships/src/index.ts` and two test files. None is in the core source catalog, the mobile build policy or the formal-source inventory, so those move their revision only; the eliza `bun.lock` is unchanged. This does not itself prove the next APK or a contact created on a Pixel.
+
+The subsequent reviewed pin `58ccdf9ff49c4e401bcc30acd959f29f9a4cd0de` adds per-phase `Server-Timing` on Cloud Maps responses, one organization policy read per Maps admission and an early, shared Google tile session ([eliza#39832](https://github.com/elizaOS/eliza/pull/39832)), with the default assistant introduction without a city ([eliza#39826](https://github.com/elizaOS/eliza/pull/39826)) and independent speaker mute in native voice playback ([eliza#39827](https://github.com/elizaOS/eliza/pull/39827)). `bun scripts/verify-upstream.ts` verified the source at this pin. The Maps changes take effect only after a Cloud API deployment. This does not itself prove the next APK or Pixel update.
+
+The subsequent reviewed pin `c6db724d13f25ed39fb26c687788c03a6847e29e` lets chat drive every Alpha app ([eliza#39842](https://github.com/elizaOS/eliza/pull/39842)): Phone, Messages and Contacts as agent destinations behind `views.telephony.v1`, native Inbox and Maps kept navigable, texts to a number and drafts (`sms.compose.v2`), single contact values, contact search and the open-contact read (`contacts.write.v2`, `contacts.show.v1`, `contacts.read.v1`), reviewed Browser search, tabs, find and history (`browser.*.v1`), the camera lens (`camera.capture-lens.v1`), workflow rename, removal and restore, all-day, guest and recurring Calendar edits, Notes restore and move, and Maps locate cards that carry their subject. Of the core source catalog only `plugins/plugin-notes/src/service.ts` changes (the chat delete-by-text title fence and restore); its new digest was reviewed with that change. The mobile build policy and the formal-source inventory move their revision only. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The subsequent reviewed pin `9ab2bc8c186a774d2b1ef6288f188d131c915c6d` takes the reviewed phone chat routing ([eliza#39882](https://github.com/elizaOS/eliza/pull/39882)): whole-message call and text commands, the dialer and contacts reach the phone's own reviewed operations, a filled-in keypad (`phone.keypad.v1`) opens without review only for a number the owner typed, a chat-requested address can open in a new tab (`browser.open-new-tab.v1`) and Back on Browser stays on the page, "take a picture" takes the photo, directions, travel and nearest-place requests reach Maps, guarded fetch reads the mobile resolver at call time, an applied Notes update fulfils an append, and chat workflows author without the undocumented view mount and say when they cannot notify. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The subsequent reviewed pin `4f5de23b6750890ebcb2a292fa4c2982c00f78e7` adds the reviewed latest SMS sender read ([eliza#39883](https://github.com/elizaOS/eliza/pull/39883)): the `sms_latest_sender` device action under `sms.latest-sender.v1`, its telephony contract and the native Messages `latestIncomingSender` read that returns only the last four digits, with Messages planner guidance for it ([eliza#39887](https://github.com/elizaOS/eliza/pull/39887)). None of the changed files is in the core source catalog, the mobile build policy or the formal-source inventory, so those move their revision only; the eliza `bun.lock` and the Android runtime classpath are unchanged. No model turn, APK or Pixel run is proven by the pin.
+
+The subsequent reviewed pin `f17ac0ccc45a2ceafa404d320ad5e238f6ce08b8` takes the v610 phone chat fixes ([eliza#39898](https://github.com/elizaOS/eliza/pull/39898)): a document-augmented photo request stays bound to the owner's message, lapsed approval reviews close before pending work is listed, a whole-message dialer request opens the Phone keypad (`phone_keypad`), landmark directions plan without asking and "the first one" binds to the open place question, a typed address opens in its new tab, chat workflow create, rename, remove and list route to `WORKFLOW`, and spoken, coded and single-word "go to" places route to Maps. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The pin `1a61700e4181757a8c926b0065d82ca084753708` keeps a Maps follow-up tied to the displayed place choices and the original route endpoints and mode. Approval lists expire only reviews that match the requested operations. Workflow changes use the operation and names in the owner’s original message. The same upstream range preserves tracked declarations during provisioning and formats a telephony routing test. [Eliza #39903](https://github.com/elizaOS/eliza/pull/39903), [Eliza #39901](https://github.com/elizaOS/eliza/pull/39901), [Eliza #39906](https://github.com/elizaOS/eliza/pull/39906).
+
+The subsequent reviewed pin `2161a22091e4afb5f0407d38e7d634be91218427` takes the phone Maps directions refusal reason ([eliza#39923](https://github.com/elizaOS/eliza/pull/39923)): a chat directions request that the phone declines now says why instead of "could not complete", and with no location fix it asks for a starting place. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.

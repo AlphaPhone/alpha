@@ -1,4 +1,4 @@
-import { installDockClearance as installSharedDockClearance, visibleDocks as sharedVisibleDocks } from '../../../../.eliza/client-features/packages/ui/src/components/shell/dock-clearance.ts';
+import { installDockClearance as installSharedDockClearance, visibleDocks as sharedVisibleDocks } from '../ui/components/shell/dock-clearance.ts';
 /**
  * How much of the bottom of the phone the composer or pill takes, including an expanded chat's
  * text/voice composer, measured in the phone canvas's own pixels.
@@ -29,7 +29,18 @@ const HEADER_CLEARANCE_PROPERTY = '--alpha-header-clearance';
 // in-phone modal sheet (a month picker, a menu): a notice goes below it, or, when the sheet
 // leaves no room, just above the dock as before, never over the sheet's header.
 const APP_HEADERS = '[data-alpha-app-header],[data-alpha-layer="drawer"] div:has(> h1),[role="dialog"][aria-modal="true"]:not([data-alpha-layer="drawer"]),.photo-import-menu[open] > div';
-const DOCK = '[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *,.alpha-chat-composer';
+const DOCK = '[data-alpha-layer="composer"]:not([data-alpha-promoted-editor="true"]),[data-alpha-layer="pill"] > *,.alpha-chat-composer';
+
+/**
+ * AP-16 stage (docs/agentic-comms.md AC-02): the height of the conversation sheet, published on the
+ * phone canvas. On a comms view the app layer ends there (phone.css), so the stage is laid out above
+ * the sheet instead of under it. The shell's render writes it at rest; while a finger drags the sheet,
+ * the drag's paint is the only writer, frame by frame, and hands it back on release.
+ */
+export const SHEET_HEIGHT_PROPERTY = '--alpha-sheet-height';
+export function publishSheetHeight(height: number, root: ParentNode = document): void {
+  root.querySelector<HTMLElement>('[data-screen]')?.style.setProperty(SHEET_HEIGHT_PROPERTY, `${Math.max(0, Math.round(height))}px`);
+}
 
 /** The dock elements on screen now: rendered, and not retired behind the shade or a voice session. */
 export function visibleDocks(root: ParentNode = document): HTMLElement[] {
@@ -39,12 +50,14 @@ export function visibleDocks(root: ParentNode = document): HTMLElement[] {
 let installed: (() => void) | null = null;
 /**
  * Installed once per document; a second call returns the same uninstaller. The measuring and
- * publishing are shared with Eliza (packages/ui/src/components/shell/dock-clearance.ts); Alpha
- * supplies its screen, dock and bar selectors and its installed property names.
+ * publishing are in ui/components/shell/dock-clearance.ts; this binding supplies Alpha's
+ * screen, dock and bar selectors and its installed property names.
  */
 export function installDockClearance(): () => void {
   if (installed) return installed;
-  const uninstall = installSharedDockClearance({ screen: '[data-screen]', docks: DOCK, bar: '[data-alpha-input-bar]', clearanceProperty: DOCK_CLEARANCE_PROPERTY, restProperty: DOCK_REST_PROPERTY });
+  const uninstall = installSharedDockClearance({ screen: '[data-screen]', docks: DOCK, bar: '[data-alpha-input-bar]', clearanceProperty: DOCK_CLEARANCE_PROPERTY, restProperty: DOCK_REST_PROPERTY,
+    revealFocus: {scrollContainers: '[data-alpha-app-scroll],[data-installed-apps-scroll],[data-alpha-layer="home"],.calendar-timeline,.calendar-draft-fields'},
+  });
   const uninstallHeader = installHeaderClearance();
   const stop = () => {
     if (installed !== stop) return;
@@ -64,7 +77,10 @@ function installHeaderClearance(): () => void {
     frame = 0;
     const screen = document.querySelector<HTMLElement>('[data-screen]');
     if (!screen || !screen.offsetWidth) return;
-    const box = screen.getBoundingClientRect(), scale = box.width / screen.offsetWidth || 1;
+    // Measured from the phone canvas top: notices fixed to the canvas read it, and the ongoing-call
+    // bar (runtime/ongoing-call.ts) moves the screen down inside the canvas while it shows.
+    const canvas = screen.parentElement?.classList.contains('alpha-phone') ? screen.parentElement : screen;
+    const box = canvas.getBoundingClientRect(), scale = box.width / canvas.offsetWidth || 1;
     const conversation = screen.querySelector<HTMLElement>('[data-alpha-layer="conversation"]:not([inert])');
     const fullChat = conversation && screen.dataset.alphaChatHalf !== 'true';
     const headers = Array.from((fullChat ? conversation : screen).querySelectorAll<HTMLElement>(fullChat ? '[data-alpha-chat-header]' : APP_HEADERS))

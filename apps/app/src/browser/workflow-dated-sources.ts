@@ -1,3 +1,4 @@
+import {readWorkflowAppState} from './workflow-app-state';
 import {workflowCalendarRange,readWorkflowCalendar} from './workflow-calendar';
 type Bag=Record<string,any>;
 export function workflowDateRange(kind:'today'|'week'|'overnight',now=new Date()){
@@ -14,11 +15,11 @@ export function datedRows(rows:Bag[],range:{begin:number;end:number},kind:'notes
 export async function readDatedWorkflowSource(label:string,api:Bag,calendar:any,signal:AbortSignal,now=new Date()){
  const text=label.toLowerCase().replaceAll('’',"'");
  if(!["today's notes",'overnight inbox',"overnight inbox and today's calendar","this week's calendar, notes and sent mail","today's calendar, notes and sent mail"].includes(text))return undefined;
- signal.throwIfAborted();const current=()=>({...api.get('inbox'),...JSON.parse(localStorage.getItem('alpha.dev.app.inbox')||'{}')});
- if(text==='overnight inbox')return {inbox:datedRows(current().mails.filter((row:Bag)=>!row.arch&&!row.del),workflowDateRange('overnight',now),'received')};
+ signal.throwIfAborted();
+ if(text==='overnight inbox')return {inbox:datedRows(readWorkflowAppState(api,'inbox').mails.filter((row:Bag)=>!row.arch&&!row.del),workflowDateRange('overnight',now),'received')};
  if(text==="today's notes"){const notes=await api.localWorkflowNotes({},signal);signal.throwIfAborted();return {notes:datedRows(notes,workflowDateRange('today',now),'notes')};}
  const week=text.startsWith("this week's"),range=workflowDateRange(week?'week':'today',now);
  const events=await readWorkflowCalendar(calendar,workflowCalendarRange(week?"this week's calendar":"today's calendar",now)!,signal);signal.throwIfAborted();
- if(text.startsWith('overnight'))return {calendar:events,inbox:datedRows(current().mails.filter((row:Bag)=>!row.arch&&!row.del),workflowDateRange('overnight',now),'received')};
- const notes=await api.localWorkflowNotes({},signal);signal.throwIfAborted();return {calendar:events,notes:datedRows(notes,range,'notes'),sentMail:datedRows(current().sent,range,'sent')};
+ if(text.startsWith('overnight'))return {calendar:events,inbox:datedRows(readWorkflowAppState(api,'inbox').mails.filter((row:Bag)=>!row.arch&&!row.del),workflowDateRange('overnight',now),'received')};
+ const notes=await api.localWorkflowNotes({},signal);signal.throwIfAborted();return {calendar:events,notes:datedRows(notes,range,'notes'),sentMail:datedRows(readWorkflowAppState(api,'inbox').sent,range,'sent')};
 }

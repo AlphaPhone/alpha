@@ -11,7 +11,7 @@ Settings, SystemUI, the keyguard, navigation controllers, permissions or account
 | Lock/Home wallpaper | Existing Alpha launcher mark and palette; Android WallpaperManager | True-black wallpaper with no artwork ("Ink"); native clock and notifications remain |
 | Native Settings, Wi-Fi, screen security | Complete AOSP Settings activities and preference hierarchy | DeviceDefault/Material color roles and app label |
 | Shade and Quick Settings | Complete AOSP SystemUI controllers, tiles and notification layouts | Shared system palette and Alpha labels |
-| Navigation | Existing Android Back/Home gesture engine and security gates | Home and edge Back only; overview and horizontal quick-switch disabled by the Alpha product policy |
+| Navigation | Existing Android three-button navigation bar and security gates | Back, Home and Recents buttons by default; gestures remain an owner choice in Settings |
 | Keyboard | Complete AOSP LatinIME input engine, languages, suggestions and accessibility | Alpha light/dark colors; dark default when no theme preference has been saved |
 | First-run setup | Existing Provision enterprise branch, completion and disable logic; existing Alpha account/permission onboarding | An additive welcome step links to the full native Wi-Fi/security screens and then Alpha |
 
@@ -46,13 +46,12 @@ Never reset device provisioning or wipe the owner merely to preview the welcome 
 
 ## Home/Back and keyboard policy
 
-The owner requested Home plus Back, with no Recents or swipe-and-hold task switcher.
-`home-back-keyboard.patch` adds a default-off Launcher3 product resource and uses its
-existing overview-command admission path. Alpha enables it through the overlay.
-Completed upward pulls go Home; horizontal switching and pause-to-overview are disabled.
-Existing Home-disabled/security states and secondary-display rejection remain intact.
-The framework uses Android's normal gestural navigation dimensions and edge Back handler.
-The optional button fallback contains Back/Home and the keyboard switcher, not Recents.
+The owner asked for Android's three navigation buttons: Back, Home and Recents (2026-11-16).
+The framework overlay selects three-button mode and leaves Android's own navigation-mode
+dimensions and layout in place, so the owner can still switch to gestures in Settings.
+`home-back-keyboard.patch` keeps its default-off Launcher3 product resource
+(`config_alpha_home_back_only`); Alpha's overlay now leaves it off, so Recents and
+quick-switch work as in AOSP. The hidden gesture handle draw guard follows the same flag.
 
 LatinIME's default-theme resource applies only without a saved theme choice. Input engines,
 languages, predictions, correction, emoji, dictation affordances and permission behavior remain

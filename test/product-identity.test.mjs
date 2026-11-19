@@ -2,6 +2,7 @@
 // built-APK identity is checked by scripts/apk.ts and is separate evidence.
 import {ALPHA_PRODUCT_REGISTRATION as record} from '../apps/app/src/product/alpha-product-registration.ts';
 import test from 'node:test';
+import {androidIdentity} from '../scripts/android-identity.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,9 +68,10 @@ test('app.config.json carries the Alpha Compute package identity', () => {
   assert.equal(identity.appName, 'Alpha Phone');
 });
 
-test('the Android build derives namespace, applicationId and app_name from app.config.json', () => {
+test('the Android build derives namespace, applicationId and app_name from the selected declared identity', () => {
   // scripts/android-host.ts hands app.config.json to the generator; the descriptor carries no identity.
-  assert.deepEqual(hostIdentity('.'), {appId: identity.appId, appName: identity.appName, version: identity.version, versionCode: identity.versionCode});
+  const selected = androidIdentity('.');
+  assert.deepEqual(hostIdentity('.'), {appId: selected.appId, appName: selected.appName, version: selected.version, versionCode: selected.versionCode});
   const {profile} = readHostDescriptor('.');
   assert.doesNotMatch(JSON.stringify(profile), /applicationId|appName|"identity"/);
 });
@@ -93,11 +95,11 @@ test('the key scan would catch an unprefixed or foreign key', t => {
   assert.deepEqual(literalStorageKeys(dir).map(row => row.key).sort(), ['alpha.dev.', 'eliza:x', 'milady.theme']);
 });
 
-// Alpha is one registered product of the shared mobile shell (apps/app/src/product/alpha-product-registration.ts). The
+// Alpha is the registered product of its own mobile shell (apps/app/src/product/alpha-product-registration.ts). The
 // record is the product's identity, theme and installed-data compatibility input; the checks below
 // keep it equal to what the build and the renderer actually use.
 test('the product record validates and carries the same identity as app.config.json', async () => {
-  const {validateMobileProductRegistration} = await tsImport('../.eliza/client-features/packages/ui/src/mobile-shell/product-registration.ts', import.meta.url);
+  const {validateMobileProductRegistration} = await tsImport('../apps/app/src/ui/mobile-shell/product-registration.ts', import.meta.url);
   assert.deepEqual(validateMobileProductRegistration(record), []);
   assert.equal(record.identity.appId, identity.appId);
   assert.equal(record.identity.appName, identity.appName);

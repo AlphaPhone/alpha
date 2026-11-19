@@ -188,6 +188,8 @@ import templateHtml from "./template-source";
   const phoneRoot = phoneTpl.ownerDocument.importNode(tpl.querySelector('.os'), false);
   phoneRoot.classList.add('alpha-phone');
   phoneRoot.appendChild(phoneTpl.ownerDocument.importNode(tpl.querySelector('[data-screen]'), true));
+  // Phone chrome beside the screen rather than in it (the ongoing-call bar): the screen moves below it.
+  tpl.querySelectorAll('[data-alpha-screen-chrome]').forEach(function (chrome) { phoneRoot.appendChild(phoneTpl.ownerDocument.importNode(chrome, true)); });
   phoneTpl.appendChild(phoneRoot);
   export class DCLogic extends React.Component {
     constructor(p) { super(p); this.state = {}; }

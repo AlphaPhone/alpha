@@ -11,8 +11,7 @@ const modelPath = `specs/quint/services/${model}.qnt`;
 const sources = [
   modelPath, fileURLToPath(import.meta.url), 'test/fixtures/pilot-update.mjs',
   'scripts/pilot-update.ts', 'scripts/android-instrumentation.ts', 'scripts/provision-unit.ts',
-  'scripts/owner/pilot-rotation-journal.ts', 'scripts/owner/pilot-rotation.ts',
-  'scripts/owner/VerifyApkRotation.java', 'scripts/apk.ts', 'scripts/build-android.ts',
+  'scripts/owner/pilot-install-lock.ts', 'scripts/apk.ts', 'scripts/build-android.ts',
   'scripts/toolchain.ts', 'scripts/release-blockers.ts',
   'vendor/eliza/packages/os/scripts/android/apk-release-record.mjs',
 ];
@@ -22,8 +21,7 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
   const allSources = [...sources, ...extraSources];
   const driverHashes = captureInputs(allSources);
   const {planHome, updateUnit} = await import('../scripts/pilot-update.ts');
-  const {claimPilotInstall, beginPilotRotation, completePilotRotation, inspectPilotRotation} =
-    await import('../scripts/owner/pilot-rotation-journal.ts');
+  const {claimPilotInstall} = await import('../scripts/owner/pilot-install-lock.ts');
   const {ALPHA, STOCK, APK, BEFORE, DATA, NONCE, exported, fakeUnit, timing} =
     await import('./fixtures/pilot-update.mjs');
   const stockPackage = STOCK.split('/')[0];
@@ -33,17 +31,15 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
   const traces = [];
 
   function scenario(name, options = {}) {
-    const {rotation = false, fault = null, alphaHome = true, runningAt, agentLog,
+    const {fault = null, alphaHome = true, runningAt, agentLog,
       passed = true, verified = true, attempted = true, agent = 'running'} = options;
     const f = fakeUnit({alphaHome, runningAt, agentLog});
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-pilot-model-'));
-    const directory = path.join(root, 'journal');
+    const directory = path.join(root, 'locks');
     const device = 'a'.repeat(64);
     const lock = path.join(directory, `${device}.lock`);
-    const intent = {replacementApkSha256: APK.sha256};
-    const journalState = () => inspectPilotRotation(directory, device).state;
-    const trace = {name, init: action('initFor', homeOf(f.state) === 'alpha', rotation), expect: {
-      's.home': homeOf(f.state), 's.originalHome': homeOf(f.state), 's.locked': fs.existsSync(lock), 's.journal': journalState(),
+    const trace = {name, init: action('initFor', homeOf(f.state) === 'alpha'), expect: {
+      's.home': homeOf(f.state), 's.originalHome': homeOf(f.state), 's.locked': fs.existsSync(lock),
     }, steps: []};
     const record = (label, action, expect) => trace.steps.push({label, action, expect});
     const events = [];
@@ -52,10 +48,7 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
       const event = {args, line: args.join(' '), before: snapshot()};
       events.push(event);
       try {
-        if (args[0] === 'install') {
-          event.journal = journalState();
-          if (fault === 'lost-install') throw new Error('simulated installer response loss');
-        }
+        if (args[0] === 'install' && fault === 'lost-install') throw new Error('simulated installer response loss');
         if (fault === 'partial-handoff' && args.includes('set-home-activity') && args.at(-1) === STOCK) return '';
         if (fault === 'restore-home' && args.includes('add-role-holder') && args.at(-1) === ALPHA) return '';
         if (fault === 'process-list' && args.includes('ps')) return '';
@@ -81,17 +74,12 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
     let release;
     try {
       release = claimPilotInstall(directory, device, root);
-      record('device lock is acquired by the actual journal', action('claimDevice'), {'s.locked': fs.existsSync(lock)});
+      record('device lock is acquired by the actual lock', action('claimDevice'), {'s.locked': fs.existsSync(lock)});
       assert.throws(() => claimPilotInstall(directory, device, root), /lock is held/);
       record('competing claim is refused while the device lock exists', {...action('claimDevice'), reject: true}, {'s.locked': fs.existsSync(lock)});
       const home = planHome(adb);
       events.length = 0;
-      let intentHash;
-      const result = updateUnit({adb, apk: APK, before: BEFORE, home, nonce: NONCE, timing: {...timing, homeAttempts: 2},
-        prepareInstall: rotation ? domains => {
-          assert.ok(Object.keys(domains.files).length > 0);
-          return () => {intentHash = beginPilotRotation(directory, device, intent);};
-        } : undefined});
+      const result = updateUnit({adb, apk: APK, before: BEFORE, home, nonce: NONCE, timing: {...timing, homeAttempts: 2}});
       assert.equal(result.passed, passed, result.failures.join('\n'));
       assert.equal(result.installAttempted, attempted, result.failures.join('\n'));
       assert.equal(result.installVerified, verified, result.failures.join('\n'));
@@ -128,19 +116,13 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
         const dispatch = events[install];
         assert.ok(install > beforeRead && beforeRead >= 0);
         assert.equal(dispatch.before.pids, '');
-        if (rotation) {
-          assert.ok(intentHash);
-          record('real one-shot intent is already durable at dispatch', action('recordRotationIntent'), {'s.journal': dispatch.journal});
-        }
-        record('actual install command crosses the effect boundary', action('dispatch'), {'s.home': dispatch.before.home, 's.journal': dispatch.journal});
+        record('actual install command crosses the effect boundary', action('dispatch'), {'s.home': dispatch.before.home});
         record('installer reply returned or remains unknown', action('installerReturned', result.installed),
           {'s.installer': result.installed ? 'returned' : 'unknown'});
         if (result.installed)
           record('admitted bytes, identity and inventory result', action('verifyReadback', result.installVerified), {'s.installVerified': result.installVerified});
       } else {
-        assert.equal(intentHash, undefined);
-        record('source refuses to dispatch before cleanup', action('stopBeforeDispatch'),
-          {'s.installer': 'not-dispatched', 's.journal': journalState()});
+        record('source refuses to dispatch before cleanup', action('stopBeforeDispatch'), {'s.installer': 'not-dispatched'});
       }
       assert.ok(finalStop > install);
       const clean = Boolean(finalProcess) && !finalProcess.after.integrity && !finalProcess.after.pids && fault !== 'process-list';
@@ -157,18 +139,9 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
       record('startup result from actual log and service probes', result.agentRestart ? action('startAgent', status) : action('skipStart'),
         {'s.agent': status, 's.passed': result.passed});
       record('host receives the update result', action('finishRecord'), {'s.passed': result.passed, 's.installVerified': result.installVerified});
-      if (intentHash && result.installVerified) {
-        completePilotRotation(directory, device, intentHash, APK.sha256);
-        record('real journal confirms the verified install independently of startup', action('verifyRotationJournal'), {'s.journal': journalState()});
-      }
-      if (intentHash) {
-        assert.throws(() => beginPilotRotation(directory, device, intent), /do not dispatch again/);
-        record('the consumed rotation cannot reserve another intent', {...action('recordRotationIntent'), reject: true}, {'s.journal': journalState()});
-      }
       release();
       release = null;
-      record('actual device lock release preserves any journal outcome', action('releaseDevice'),
-        {'s.locked': fs.existsSync(lock), 's.journal': journalState()});
+      record('actual device lock release', action('releaseDevice'), {'s.locked': fs.existsSync(lock)});
       traces.push(trace);
     } finally {
       if (release) release();
@@ -189,25 +162,25 @@ async function runPilotApkUpdateRefinement(extraSources = []) {
   scenario('changed post-install data blocks verification and restart', {...unverified, fault: 'changed-inventory'});
   scenario('the final integrity process must stop before launch', {...cleanupFailed, fault: 'stuck-integrity'});
   scenario('unproven HOME restore prevents launch even after install verification', {...cleanupFailed, fault: 'restore-home'});
-  scenario('unknown installer response retains the durable rotation', {...unverified, rotation: true, fault: 'lost-install'});
-  scenario('the rotation remains applied even if the local agent refuses startup', {
-    rotation: true, passed: false, agent: 'refused', agentLog: 'E ElizaAgent: Private IPC recovery refused',
+  scenario('unknown installer response leaves the update unconfirmed and unstarted', {...unverified, fault: 'lost-install'});
+  scenario('a verified install still fails when the local agent refuses startup', {
+    passed: false, agent: 'refused', agentLog: 'E ElizaAgent: Private IPC recovery refused',
   });
 
   const receipt = await checkTraces({model, modelPath, sources: allSources, driverHashes, traces,
     batchSize: 3, scope: 'bounded-orchestration', assumptions: [
-      'One admitted replacement, one Android user, one selected stock launcher, and ordinary versus reviewed-rotation mode.',
-      'Actual planHome, updateUnit and shared APK comparison run against scripted adb. Actual device lock and rotation journal use an owner-only temporary filesystem.',
-      'Inventory contents, process names, HOME observations and startup logs are selected synthetic equality classes. Host return and journal certification are separate checkpoints.',
-      'The campaign composes the update core with the real journal API. The CLI admission, signing verifier and post-result unit record write are outside this source witness.',
+      'One admitted same-signer replacement, one Android user and one selected stock launcher.',
+      'Actual planHome, updateUnit and shared APK comparison run against scripted adb. The actual device lock uses an owner-only temporary filesystem.',
+      'Inventory contents, process names, HOME observations and startup logs are selected synthetic equality classes.',
+      'The campaign composes the update core with the real device lock. The CLI admission and post-result unit record write are outside this source witness.',
     ]});
   return {receipts: [receipt], obligations: [
     {model, obligation: 'Installed update, process visibility and HOME recovery', reason: 'Scripted adb cannot establish real Android package manager behavior, process visibility, storage integrity export or agent health.'},
-    {model, obligation: 'APK signing admission and full CLI orchestration', reason: 'Source replay starts after admission, drives a synthetic install port and uses the real journal. Signing proof verification, interrupted host durability and actual unit record writes remain separate.'},
+    {model, obligation: 'APK signing admission and full CLI orchestration', reason: 'Source replay starts after admission and drives a synthetic install port under the real device lock. Signer admission, interrupted host durability and actual unit record writes remain separate.'},
   ]};
 }
 
-test('scripted pilot update observations refine the bounded update and journal model', async () => {
+test('scripted pilot update observations refine the bounded update and device lock model', async () => {
   const {receipts, obligations} = await runPilotApkUpdateRefinement();
   assert.equal(receipts.length, 1);
   assert.equal(receipts[0].model, 'PilotApkUpdate');

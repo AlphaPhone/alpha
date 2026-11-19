@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {captureInputs, checkTraces, qmap, qset} from '../check-traces.mjs';
 import {app, directory, javaTraceCampaign, root} from './java.mjs';
 import {mmsPlatform} from './mms-dispatch-platform.mjs';
+import {actionJournalSources, historicalTelephonyHost} from './sms-dispatch-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
 import {prepareNativeFixture} from '../../../../test/fixtures/native-source.mjs';
 import {upstreamNativeSource} from '../../../../scripts/upstream-native-source.ts';
@@ -16,17 +17,23 @@ import {materializeHistoricalSources} from '../../legacy/core/formal-source-inve
 
 const model='NativeMmsDispatch';
 const shared='plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/';
-const extracted=['TelephonyPlugin','MmsStore','SmsProviderReader'];
+const extracted=['MmsStore','SmsProviderReader'];
 const compiled=['SmsTelephony','SmsTelephonyConfiguration','SmsSendJournal','MmsPdu'];
-const product=['AlphaTelephony','AlphaTelephonyPlugin','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
-const paths=[...extracted,...compiled].map(name=>shared+name+'.java');
+const historicalProduct=['AlphaTelephony','AlphaSmsSendReceiver'].map(name=>app+name+'.java');
+const appBase=app+'AlphaTelephonyBase.java';
+const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaApprovedSms.java',
+  app+'SmsNoticeOpenRequest.java','android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java'];
+const roleSource=shared+'SmsRoleConfiguration.java';
+const commonPaths=[...extracted,...compiled].map(name=>shared+name+'.java');
+const historicalPaths=[shared+'TelephonyPlugin.java',...commonPaths];
+const currentPaths=[...commonPaths,roleSource];
 const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
 const harness='MmsDispatchTraces.java';
 const historicalInventory='specs/quint/refinement/native/mms-historical-sources.json';
 const scenarios=[
-  'mms-attachment-conflict','sms-first-mms-receives-sms','mms-first-sms-rejected','exact-review',
-  'preflight-revalidates-reviewed-tuple','pruned-exact-review','pruned-conflicting-review','group-carrier-confirm',
-  'preview-invalid-size-and-cancel','carrier-changed-after-review','sim-changed-after-review','begin-refusal-cleans-pdu',
+  'agent-bridge-refuses-mms','mms-attachment-conflict','sms-first-mms-receives-sms','mms-first-sms-rejected','exact-compose',
+  'preflight-revalidates-composed-tuple','pruned-exact-compose','pruned-conflicting-compose','group-carrier-confirm',
+  'invalid-bytes-and-size','carrier-disabled-denies','begin-refusal-cleans-pdu',
   'part-refusal-cleans-outbox','radio-refusal-before-handoff','uncertain-radio-handoff','interrupted-durable-dispatch',
   'role-loss-before-callback','volatile-callback-evidence','committed-callback-refusal','boot-without-receipt',
 ];
@@ -34,40 +41,45 @@ const scenarios=[
 async function campaign(scenarios, extraSources, check, {historicalProbe=false} = {}) {
   const temporary=realpathSync(mkdtempSync(join(tmpdir(),'quint-mms-dispatch-')));
   try {
-    const staged=prepareNativeFixture(root,temporary);
-    const history=historicalProbe?materializeHistoricalSources(root,paths.map(path=>'vendor/eliza/'+path),historicalInventory):null;
+    const staged=historicalProbe?null:prepareNativeFixture(root,temporary);
+    const history=historicalProbe?materializeHistoricalSources(root,historicalPaths.map(path=>'vendor/eliza/'+path),historicalInventory):null;
     const resolveSource=path=>history?history.resolveSource('vendor/eliza/'+path):join(staged.root,path);
     const read=name=>readFileSync(resolveSource(shared+name+'.java'),'utf8');
-    const files=Object.entries(mmsPlatform(...extracted.map(read))).map(([path,contents])=>{
+    const plugin=historicalProbe?read('TelephonyPlugin'):readFileSync(join(root,appBase),'utf8');
+    const fixture={...mmsPlatform(plugin,read('MmsStore'),read('SmsProviderReader'),{historical:historicalProbe}),
+      ...(historicalProbe?historicalTelephonyHost:{})};
+    const files=Object.entries(fixture).map(([path,contents])=>{
       const target=join(temporary,'driver',path);
       mkdirSync(dirname(target),{recursive:true});writeFileSync(target,contents);return target;
     });
-    const receiptPath=join(staged.root,'.source.json');
-    const generatedSources=[...paths.map(path=>join(staged.root,path)),receiptPath,...files,...(history?paths.map(path=>resolveSource(path)):[])];
-    const sources=[...product,...paths.map(path=>'vendor/eliza/'+path),launcherManifest,'android/consumer-host.json',
-      'android/upstream-native-sources.json','upstream.lock.json',
-      'scripts/prepare-patched-native.ts','scripts/upstream-native-source.ts','test/fixtures/native-source.mjs','test/fixtures/jvm-tools.mjs',
+    const receiptPath=staged&&join(staged.root,'.source.json');
+    const generatedSources=staged?[...currentPaths.map(path=>join(staged.root,path)),receiptPath,...files]:files;
+    const productSources=historicalProbe?historicalProduct:product;
+    const sourceInputs=history?history.sources:[appBase,...currentPaths.map(path=>'vendor/eliza/'+path),launcherManifest,'android/consumer-host.json',
+      'android/upstream-native-sources.json','upstream.lock.json','scripts/prepare-patched-native.ts','scripts/upstream-native-source.ts','test/fixtures/native-source.mjs'];
+    const sources=[...sourceInputs,...productSources,...actionJournalSources,'test/fixtures/jvm-tools.mjs',
       app+'AlphaImageCapability.java',join(directory,harness),join(directory,'Trace.java'),join(directory,'java.mjs'),
       join(directory,'sms-dispatch-platform.mjs'),join(directory,'mms-dispatch-platform.mjs'),fileURLToPath(import.meta.url),
-      historicalInventory,'specs/quint/legacy/core/formal-source-inventory.mjs',
-      ...(jsonJar?[jsonJar]:[]),...generatedSources,...(history?.sources??[]),...extraSources];
+      ...(jsonJar?[jsonJar]:[]),...generatedSources,...extraSources];
     const driverHashes=captureInputs(sources);
-    verifyNativePatchReceipt(readFileSync(receiptPath,'utf8'),staged);
-    const pinned=upstreamNativeSource(root).read(shared);
-    for(const path of paths){
-      assert.equal(driverHashes[join(root,'vendor/eliza',path)],pinned.get(path).sha256);
-      assert.equal(driverHashes[join(staged.root,path)],staged.files[path]);
+    if(staged){
+      verifyNativePatchReceipt(readFileSync(receiptPath,'utf8'),staged);
+      const pinned=upstreamNativeSource(root).read(shared);
+      for(const path of currentPaths){
+        assert.equal(driverHashes[join(root,'vendor/eliza',path)],pinned.get(path).sha256);
+        assert.equal(driverHashes[join(staged.root,path)],staged.files[path]);
+        assert.equal(staged.files[path],pinned.get(path).sha256);
+      }
+      const host=JSON.parse(readFileSync(join(root,'android/consumer-host.json'),'utf8'));
+      assert.deepEqual(host.profile.modules.find(module=>module.name==='eliza-messages'),{
+        name:'eliza-messages',source:{root:'patchedNative',path:'plugins/plugin-native-messages/android'},relocateBuild:true,
+      });
+      assert.match(readFileSync(join(root,launcherManifest),'utf8'),/<receiver\s+android:name="\.AlphaSmsSendReceiver"\s+android:exported="false"/);
     }
-    // The reviewed upstream source now includes the former local MMS repair.
-    for(const path of paths)assert.equal(staged.files[path],pinned.get(path).sha256);
-    const host=JSON.parse(readFileSync(join(root,'android/consumer-host.json'),'utf8'));
-    assert.deepEqual(host.profile.modules.find(module=>module.name==='eliza-messages'),{
-      name:'eliza-messages',source:{root:'patchedNative',path:'plugins/plugin-native-messages/android'},relocateBuild:true,
-    });
-    assert.match(readFileSync(join(root,launcherManifest),'utf8'),/<receiver\s+android:name="\.AlphaSmsSendReceiver"\s+android:exported="false"/);
-    const complete=compiled.map(name=>resolveSource(shared+name+'.java'));
+    const complete=[...compiled.map(name=>resolveSource(shared+name+'.java')),...actionJournalSources.map(path=>join(root,path))];
+    if(!historicalProbe)complete.push(resolveSource(roleSource));
     let traces;
-    try {traces=javaTraceCampaign(harness,[...product,...complete,...files],scenarios.map(name=>historicalProbe?[name,'historical']:[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
+    try {traces=javaTraceCampaign(harness,[...productSources,...complete,...files],scenarios.map(name=>historicalProbe?[name,'historical']:[name]),'ai.eliza.plugins.messages.MmsDispatchTraces');}
     finally {assert.deepEqual(captureInputs(sources),driverHashes,'MMS inputs changed during replay');}
     for(const trace of traces)for(const {expect} of [trace,...trace.steps]){
       const events=expect['s.events'];
@@ -83,9 +95,9 @@ export function mmsSourceProbe(selected, options) {
 
 export function checkNativeMmsDispatch(extraSources=[]) {
   return campaign(scenarios,extraSources,async evidence=>{
-    const receipt=await checkTraces({...evidence,scope: 'bounded-orchestration',assumptions:[
-      'Actual product wrapper, staged SMS/MMS core, extracted native review and outbox members, and exact JVM PDU codec.',
-      'One installed ID shared by two reviews. Synthetic Android telephony, provider, preview, and credential storage ports. Temporary PDU custody uses real file operations.',
+    const receipt=await checkTraces({...evidence,definitionBatchSize:10,scope: 'bounded-orchestration',assumptions:[
+      'Actual product wrapper and Messages composer entry (AlphaTelephonyPlugin.sendComposed), staged SMS/MMS core, extracted native send and outbox members, and exact JVM PDU codec.',
+      'One installed ID shared by two composer sends; the agent bridge sendMms is refused. Synthetic Android telephony, provider, composer window and credential storage ports. Temporary PDU custody uses real file operations.',
       'Both live bridge registrations and exact per-bridge operation-ID notification counts are observed. Process reconstruction replaces all old registrations; the immediate Handler port does not qualify arbitrary held UI-queue retirement races.',
     ]});
     return {receipt,obligations:[

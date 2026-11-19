@@ -7,7 +7,7 @@ async function setup(page:Page,body=html){
  await page.route(url,r=>r.fulfill({contentType:'text/html',headers:{'access-control-allow-origin':'*'},body}));
  await page.goto('/?mode=dev');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();await returnToApps(page);await openLegacyNotes(page);await returnToApps(page);await page.getByRole('button',{name:'Browser',exact:true}).click();await page.getByRole('button',{name:'Search or type address',exact:true}).click();await page.getByRole('textbox',{name:'Address',exact:true}).fill(url);await page.getByRole('textbox',{name:'Address',exact:true}).press('Enter');await expect(page.frameLocator('iframe[title="Website"]').locator('article')).toBeVisible();
 }
-async function ask(page:Page){await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name:'Ask about page',exact:true}).click();return page.getByRole('dialog',{name:'Ask about selected content'});}
+async function ask(page:Page){await page.getByRole('button',{name:'Chat actions',exact:true}).click();await page.getByRole('button',{name:'Attach page',exact:true}).click();return page.getByRole('dialog',{name:'Ask about selected content'});}
 async function notes(page:Page){return page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records);}
 test('page excerpt becomes a reviewed summary note and reopens its durable web source',async({page},info)=>{
  await setup(page);const review=await ask(page);await expect(review.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(/Twelve raised beds/);

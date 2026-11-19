@@ -292,7 +292,9 @@ test('denied notification access stays pending after account restoration without
  await expect.poll(()=>calls(page,'DailyApps','requestPermissions')).toEqual([{permissions:['notifications']}]);
  await expect(panel.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
  // Walkthrough choices do not grant OS permission. A denied prompt is not requested again.
- await expect(panel.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);
+ // A known choice can be deferred with the explicit Skip; there is no other way past it.
+ await expect(panel.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
+ await expect(panel.getByRole('button',{name:/Not now|Back/})).toHaveCount(0);
  await page.keyboard.press('Escape');await expect(panel).toBeVisible();
  await page.reload();await restoreAccount();
  await expect(panel.getByRole('button',{name:'Settings',exact:true})).toBeVisible();

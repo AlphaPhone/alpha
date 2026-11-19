@@ -32,40 +32,48 @@ async function fixture(page:Page){
   };
  });
 }
-for(const action of ['edit','remove'] as const)test(`Own Voice ${action} survives status revision publication during the real reconnect`,async({page})=>{
+test('Voice key replacement survives status publication during reconnect',async({page})=>{
  await fixture(page);await residentHome(page);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.getByRole('button',{name:'Account',exact:true}).click();
  await page.getByRole('button',{name:/^AI (Cloud|Own keys)$/}).click();
  const panel=page.getByRole('dialog',{name:'AI connection',exact:true});await expect(panel).toBeVisible();
- await panel.getByRole('button',{name:'Keys',exact:true}).click();
- const voice=panel.getByRole('region',{name:'Voice key',exact:true});
+ await panel.getByRole('button',{name:'Direct',exact:true}).click();
+ const voice=panel.getByLabel('Voice key',{exact:true});
  await page.evaluate(()=>{(window as any).keyReconnect.hold=true;});
- if(action==='edit'){
-  await voice.getByRole('button',{name:'Edit',exact:true}).click();
-  await voice.getByLabel('Voice API key',{exact:true}).fill('synthetic-new-voice-key');
-  await voice.getByRole('button',{name:'Save',exact:true}).click();
- }else{
-  await voice.getByRole('button',{name:'Remove',exact:true}).click();
-  await voice.getByRole('button',{name:'Remove',exact:true}).click();
- }
+ await voice.fill('synthetic-new-voice-key');
+ await panel.getByRole('button',{name:'Save',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).keyReconnect.starting)).toBe(true);
- // connectResident has already read and published the new revision at this point.
- await expect(voice.locator('input')).toHaveCount(0);
+ await expect(voice).toHaveValue('');
  expect(await page.evaluate(()=>(window as any).keyReconnect.cancels)).toBe(0);
  await page.evaluate(()=>{const f=(window as any).keyReconnect;f.hold=false;f.release();});
- // Account settings remain open after the key change; the owner closes the sheet.
- await expect(voice.locator('input')).toHaveCount(0);
+ await expect(panel.getByRole('button',{name:'Save',exact:true})).toBeEnabled();
+ await expect(voice).toHaveValue('');
  await panel.getByRole('button',{name:'Close Account',exact:true}).click();
  await expect(panel).not.toBeVisible();
- await expect(page.getByRole('button',{name:'Talk',exact:true})).toBeEnabled();
+ expect(await page.evaluate(()=>(window as any).keyReconnect.edits)).toBe(1);
+ expect(await page.evaluate(()=>(window as any).keyReconnect.removes)).toBe(0);
+ expect(await page.evaluate(()=>(window as any).keyReconnect.cancels)).toBe(0);
+ await expect(page.locator('body')).not.toContainText('synthetic-new-voice-key');
+});
+test('A saved voice key can be removed after an explicit second step, and the panel opens on the provider in use',async({page})=>{
+ await fixture(page);await residentHome(page);
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.getByRole('button',{name:'Account',exact:true}).click();
  await page.getByRole('button',{name:/^AI (Cloud|Own keys)$/}).click();
- await panel.getByRole('button',{name:'Keys',exact:true}).click();
- await expect(panel.getByRole('button',{name:'Keys',exact:true})).toBeEnabled();
- await expect(voice).toContainText(action==='remove'?'Not added':'Added');
- await expect(panel.getByRole('alert')).toHaveCount(0);
- expect(await page.evaluate(()=>(window as any).keyReconnect.cancels)).toBe(0);
- expect(await page.evaluate(action=>(window as any).keyReconnect[action==='edit'?'edits':'removes'],action)).toBe(1);
- await expect(panel).not.toContainText('synthetic-new-voice-key');
+ const panel=page.getByRole('dialog',{name:'AI connection',exact:true});await expect(panel).toBeVisible();
+ // Direct is in use, so its tab is shown without the owner choosing it.
+ await expect(panel.getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(panel.getByRole('button',{name:'Switch to Cloud',exact:true})).toHaveCount(0);
+ await panel.getByRole('button',{name:'Remove saved voice key',exact:true}).click();
+ expect(await page.evaluate(()=>(window as any).keyReconnect.removes)).toBe(0);
+ const confirm=panel.getByRole('group',{name:'Remove voice key?',exact:true});
+ await confirm.getByRole('button',{name:'Cancel',exact:true}).click();
+ expect(await page.evaluate(()=>(window as any).keyReconnect.removes)).toBe(0);
+ await panel.getByRole('button',{name:'Remove saved voice key',exact:true}).click();
+ await confirm.getByRole('button',{name:'Remove voice key',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>(window as any).keyReconnect.removes)).toBe(1);
+ await expect(panel.getByRole('button',{name:'Remove saved voice key',exact:true})).toHaveCount(0);
+ await expect(panel.getByRole('button',{name:'Remove saved text key',exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).keyReconnect.edits)).toBe(0);
 });

@@ -1,5 +1,5 @@
 <sc-if value="{{isLock}}">
-<div data-alpha-development-lock-screen class="fadein" style="position: absolute; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; align-items: center">
+<div data-alpha-development-lock-screen data-alpha-lock-ink class="fadein" style="{{lockVars}}; position: absolute; inset: 0; z-index: 80; background: var(--alpha-black); color: var(--fg); display: flex; flex-direction: column; align-items: center">
   <svg class="i" viewBox="0 0 24 24" style="margin-top: 62px; width: 18px; height: 18px; color: var(--mut)"><path d="{{ic.lock}}"></path></svg>
   <div data-alpha-lock-clock class="serif" style="font-size: 132px; line-height: .9; margin-top: 44px; letter-spacing: -.035em">{{clock}}</div>
   <div style="margin-top: 16px; color: var(--mut); font-size: 15px">{{dateStr}}</div>

@@ -484,6 +484,9 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
           if(stillSelected())api.set({open:null});
           if(owner===deleteOwner&&deleteOwner.live){await deleteOwner.refreshReminders();api.toast('Reminder deleted');}
         }catch{
+          // A lost admission response may still have staged the deletion: re-read now so its
+          // Undo appears at once, not at the notice's next idle poll inside the 10 s window.
+          refreshDeletionViews();
           if(owner===deleteOwner&&deleteOwner.live){
             api.set({reminderDeleteUnknown:Object.keys(await pendingReminderDeletions()).length});
             api.toast('Unconfirmed');

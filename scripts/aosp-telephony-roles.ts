@@ -1,4 +1,7 @@
 import {parseXmlTree, type ManifestNode} from './apk.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import appConfig from '../app.config.json' with {type: 'json'};
 
 type RoleFilter = {
   action: string;
@@ -40,6 +43,9 @@ const roleComponents: readonly RoleComponent[] = [
   {name: 'ai.eliza.plugins.messages.MmsFileProvider', tag: 'provider', exported: false},
 ];
 
+/** The staged add-on's provisioning directory, as the shared provisioning overlay defines it. */
+const LAUNCHER_PROVISIONING_DIR = 'launcher_provisioning_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/provisioning';
+
 const isTrue = (value: string | undefined) => value === 'true' || value === '0xffffffff';
 const isFalse = (value: string | undefined) => value === 'false' || value === '0x0';
 
@@ -59,6 +65,9 @@ function matchesFilter(filter: ManifestNode, required: RoleFilter) {
 
 /** Read the privately staged release APK's manifest before making the roles eligible at boot. */
 export function aospTelephonyRoleComponents(xmltree: string, packageName: string) {
+  // OS images enable default handlers only for the canonical application identity.
+  if (packageName !== appConfig.appId)
+    throw Error(`Alpha telephony roles are staged only for ${appConfig.appId}`);
   const manifest = parseXmlTree(xmltree).children.find(node => node.name === 'manifest');
   const application = manifest?.children.find(node => node.name === 'application');
   if (manifest?.attrs.package !== packageName || !application ||
@@ -89,4 +98,37 @@ export function aospTelephonyRoleComponents(xmltree: string, packageName: string
     }
     return name;
   });
+}
+
+/**
+ * Image-owned component defaults are applied by PackageManager during package scans, before an
+ * Activity can enable its own handlers. They keep the admitted image eligible across APK updates;
+ * they neither assign a role nor replace an owner's chosen Phone or Messages app.
+ * Platform mechanism: ScanPackageUtils.configurePackageComponents (AOSP frameworks/base).
+ */
+export function writeAospTelephonyRoleOverrides(output: string, xmltree: string, packageName: string) {
+  const components = aospTelephonyRoleComponents(xmltree, packageName);
+  const name = 'alpha-telephony-components.xml';
+  const xml = '<?xml version="1.0" encoding="utf-8"?>\n<config>\n'
+    + `    <component-override package="${packageName}">\n`
+    + components.map(component => `        <component class="${component}" enabled="true" />\n`).join('')
+    + '    </component-override>\n</config>\n';
+  const productMakefile = path.join(output, 'product.mk');
+  if (!fs.existsSync(productMakefile)) throw Error('Alpha telephony role defaults require a staged product.mk');
+  // A product that already defines launcher_provisioning_dir (production and Sense images, through
+  // the provisioning overlay) keeps its makefile byte for byte. Only a definition that precedes every
+  // `include` resolves to this product's directory: an include (such as a staged listener's
+  // listener.mk) changes $(lastword $(MAKEFILE_LIST)). The production Pixel 10a stage with
+  // --listener-apk stages the listener before the provisioning overlay, so its definition follows
+  // the listener include; that existing ordering is tracked separately and is not changed here.
+  // An owner development image has no provisioning overlay, so the output-relative directory is
+  // defined here, as the first line of product.mk, ahead of any include.
+  const product = fs.readFileSync(productMakefile, 'utf8');
+  const definesDir = /^launcher_provisioning_dir\s*:=/m.test(product);
+  fs.mkdirSync(path.join(output, 'provisioning'), {recursive: true});
+  fs.writeFileSync(path.join(output, 'provisioning', name), xml, {flag: 'wx'});
+  if (!definesDir) fs.writeFileSync(productMakefile, `${LAUNCHER_PROVISIONING_DIR}\n${product}`);
+  fs.appendFileSync(productMakefile,
+    `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
+  return components;
 }

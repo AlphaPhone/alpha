@@ -632,8 +632,8 @@ export async function auditReadingOrder(page: Page): Promise<Violation[]> {
         for(const node of nodes){
           const el=node&&node.nodeType===1?node:node&&node.parentElement;
           if(!el||!el.isConnected){out.push(null);continue;}
-          // The phone screen and what is drawn over it in the top layer. A shell without the phone
-          // frame (the shared upstream shell) is judged whole, never skipped.
+          // The phone screen and what is drawn over it in the top layer. A page without the phone
+          // frame is judged whole, never skipped.
           const framed=!!document.querySelector('[data-screen]');
           const screen=!framed||el.closest('[data-screen]')||el.closest('dialog[open],:popover-open');
           // Names painted on the pannable map have a place, not an order; its pins are also listed in the results sheet.
@@ -790,6 +790,54 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
     for (const target of missed) out.push({ rule: 'focus-order-incomplete', target });
   }
   return out;
+}
+
+/**
+ * A sweep that audits one opened state more than once (at each text size) records where the open
+ * left it: which element had focus, every scroll offset that was not zero, and the controls and
+ * dialogs it exposes. Call it before the first audit; restoreOpenedState puts that back before each
+ * later one, or says that it cannot.
+ */
+export async function rememberOpenedState(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    const scrolled = Array.from(document.querySelectorAll('*')).filter(el => el.scrollTop || el.scrollLeft).map(el => [el, el.scrollTop, el.scrollLeft] as const);
+    const controls = (window as any).__alphaExposedControls = () => Array.from(document.querySelectorAll('button,a[href],input:not([type=hidden]),select,textarea,summary,[tabindex],dialog[open],[role=dialog],[role=alertdialog]'))
+      .filter(el => !el.closest('[inert],[aria-hidden="true"]') && el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible')
+      .map(el => `${el.tagName} ${el.getAttribute('role') || ''} ${el.getAttribute('aria-label') || (el.textContent || '').trim().slice(0, 40)}`).join('\n');
+    (window as any).__alphaOpenedState = { focus: active && active !== document.body && active !== document.documentElement ? active : null, scrolled, x: window.scrollX, y: window.scrollY, controls: controls() };
+  });
+}
+
+/**
+ * Undoes what an audit left behind, so the next audit of the same opened state covers exactly what
+ * a fresh open would: auditTabOrder's visited and candidate marks (a stop still marked as visited
+ * would not be reported when it became unreachable), the focus its walk moved, and the scroll
+ * offsets focusing each stop changed (they decide what is clipped, overlapped or under the dock).
+ * Run it at the text size the state was opened at, so the offsets mean what they meant then.
+ *
+ * Returns false when the page no longer shows what the open showed: the walk itself can change the
+ * app (focus that loads a list, Tab leaving and re-entering the page that brings up a dialog), and
+ * that cannot be undone here. The caller then opens the state afresh.
+ */
+export async function restoreOpenedState(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const opened = (window as any).__alphaOpenedState as { focus: HTMLElement | null; scrolled: Array<readonly [Element, number, number]>; x: number; y: number; controls: string } | undefined;
+    if (!opened) throw new Error('restoreOpenedState needs rememberOpenedState after the state opened');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    const offsets = new Map(opened.scrolled.map(([el, top, left]) => [el, [top, left]]));
+    for (const el of document.querySelectorAll('*')) {
+      delete (el as any).__alphaTabId; delete (el as any).__alphaTabCandidate;
+      const [top, left] = offsets.get(el) ?? [0, 0];
+      if (el.scrollTop !== top) el.scrollTop = top;
+      if (el.scrollLeft !== left) el.scrollLeft = left;
+    }
+    window.scrollTo(opened.x, opened.y);
+    if (opened.focus && !opened.focus.isConnected) return false;
+    opened.focus?.focus({ preventScroll: true });
+    // Scroll and focus handlers run before the page is compared or changed again.
+    return new Promise<boolean>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve((window as any).__alphaExposedControls() === opened.controls))));
+  });
 }
 
 // Deliberate single-line ellipsis and line clamps on previews of user content are allowed: the

@@ -13,7 +13,10 @@ for(const outcome of ['success','failure'] as const)test(`owned new voice note s
  if(outcome==='failure'){
   // An unconfirmed Notes write keeps the recording and says so in one line; nothing is discarded.
   await expect(recorder.getByRole('alert')).toHaveText('Not saved');await expect(recorder).toHaveAttribute('data-recorder-state','stopped');expect(await status()).toBe('stopped');
- }else{await expect(recorder).toHaveCount(0);await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();expect(await status()).toBe('idle');}
+ }else{
+  // The confirmed note closes the recorder, then the recorder discards its segments.
+  await expect(recorder).toHaveCount(0);await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();await expect.poll(status).toBe('idle');
+ }
  const notes=await page.evaluate(async()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())!).records);expect(notes.filter((n:any)=>n.kind==='voice'&&n.body==='')).toHaveLength(1);
  await page.evaluate(async()=>{for(const s of (window as any).voiceSave.sources){s.osc.stop();await s.context.close();}});
 });

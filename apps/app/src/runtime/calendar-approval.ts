@@ -1,3 +1,4 @@
+import {CALENDAR_APPROVAL_FALLBACK,calendarApprovalOutcomeText} from '../ui/calendar/calendar-approval-messages.ts';
 export const CALENDAR_APPROVAL_READ_PATH='/api/approvals?state=all&limit=500';
 /** Calendar markup identifies a candidate review; only the authenticated queue can authorize it. */
 const uuid='[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
@@ -42,21 +43,26 @@ export function calendarApprovalFromList(raw:unknown,id:string,ownerId:string):C
  return {id,ownerVerified:authority===row.subjectUserId,state:row.state,action:row.action,reason:row.reason,expiresAt:row.expiresAt,payload:row.payload,revision:JSON.stringify([row.id,row.subjectUserId,row.state,row.action,row.payload,row.reason,row.expiresAt,row.updatedAt])};
 }
 export function calendarApprovalPending(row:CalendarApproval|null,now=Date.now()){return !!row&&row.ownerVerified&&row.state==='pending'&&Date.parse(row.expiresAt)>now;}
+/** A request the owner may approve: one awaiting its first decision, or one an attempt left retryable
+ * without changing Calendar. The agent accepts a reviewed approval in either state; declining stays pending-only. */
+export function calendarApprovalActionable(row:CalendarApproval|null,now=Date.now()){return !!row&&row.ownerVerified&&(row.state==='pending'||row.state==='retryable')&&Date.parse(row.expiresAt)>now;}
 export function calendarApprovalStatus(row:CalendarApproval|null,now=Date.now()){
  if(!row)return 'Status unavailable';
- if(row.state==='expired'||row.state==='pending'&&Date.parse(row.expiresAt)<=now)return 'Review expired';
+ if(row.state==='expired'||(row.state==='pending'||row.state==='retryable')&&Date.parse(row.expiresAt)<=now)return 'Review expired';
  if(row.state==='pending')return row.ownerVerified?'Awaiting your approval':'Approval unavailable';
+ if(row.state==='retryable')return row.ownerVerified?'Nothing changed. Approve to try again':'Approval unavailable';
  if(row.state==='rejected')return 'Request declined';
  if(row.state==='done')return 'Review closed';
  return 'Change not confirmed';
 }
 /** Finite canonical receipt; a malformed or mismatched reply never becomes a success message. */
-export function parseCalendarApprovalResolution(raw:unknown,id:string,decision:CalendarApprovalDecision):CalendarApprovalResolution{
- if(!object(raw)||raw.requestId!==id||raw.decision!==decision||!['succeeded','rejected','invalidated','retryable','blocked'].includes(String(raw.kind))||decision==='reject'&&raw.kind!=='rejected'||decision==='approve'&&raw.kind==='rejected')throw Error('Calendar change is not confirmed. Check its saved status before trying again.');
+/** The shown text is Alpha's, keyed on the kind and failure code (../ui/calendar/calendar-approval-messages.ts);
+ * the agent's outcome sentence is read only for a completed change's title. `payload` is the reviewed request's. */
+export function parseCalendarApprovalResolution(raw:unknown,id:string,decision:CalendarApprovalDecision,payload?:Record<string,unknown>):CalendarApprovalResolution{
+ if(!object(raw)||raw.requestId!==id||raw.decision!==decision||!['succeeded','rejected','invalidated','retryable','blocked'].includes(String(raw.kind))||decision==='reject'&&raw.kind!=='rejected'||decision==='approve'&&raw.kind==='rejected')throw Error(CALENDAR_APPROVAL_FALLBACK.blocked);
  const kind=raw.kind as CalendarApprovalResolution['kind'];
- const fallback={succeeded:'Calendar change completed.',rejected:'Calendar change declined. Nothing was changed.',invalidated:'Calendar change was not made. Review the current event.',retryable:'Calendar change was not made. Review it again before trying.',blocked:'Calendar change is not confirmed. Check its saved status before trying again.'};
- const text=typeof raw.text==='string'&&raw.text.trim()&&raw.text.length<=8192?raw.text:fallback[kind];
- if(raw.failure!==undefined&&(!object(raw.failure)||typeof raw.failure.code!=='string'||typeof raw.failure.retryable!=='boolean'||!['not_accepted','unknown'].includes(String(raw.failure.acceptance))))throw Error(fallback.blocked);
- if((kind==='succeeded'||kind==='rejected')&&raw.failure!==undefined)throw Error(fallback.blocked);
+ if(raw.failure!==undefined&&(!object(raw.failure)||typeof raw.failure.code!=='string'||typeof raw.failure.retryable!=='boolean'||!['not_accepted','unknown'].includes(String(raw.failure.acceptance))))throw Error(CALENDAR_APPROVAL_FALLBACK.blocked);
+ if((kind==='succeeded'||kind==='rejected')&&raw.failure!==undefined)throw Error(CALENDAR_APPROVAL_FALLBACK.blocked);
+ const text=calendarApprovalOutcomeText(kind,raw.failure as {code?:unknown}|undefined,typeof raw.text==='string'&&raw.text.length<=8192?raw.text:undefined,payload);
  return {requestId:id,decision,kind,text,...(raw.failure?{failure:raw.failure as CalendarApprovalResolution['failure']}:{})};
 }

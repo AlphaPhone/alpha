@@ -12,12 +12,14 @@ import {observedSmsAdapter} from './fixtures/observed-sms-adapter.mjs';
 
 const MODEL = {path: 'specs/quint/services/SmsSend.qnt', module: 'SmsSend'};
 const SCENARIOS = ['retryAfterCancelledAndDeniedTest', 'repeatedIdNeverDispatchesTwiceTest', 'staleAnswerDroppedTest', 'editResetsOperationTest',
-  'deliveryEvidenceTest', 'readBackKeepsIdUntilSendAnswersTest', 'refusedBeforeJournalTest',
-  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest'];
+  'deliveryEvidenceTest', 'cancelledJournalReceiptReleasesIdTest', 'refusedBeforeJournalTest',
+  'acceptedDraftRetiredUntilOwnerEditsTest', 'retiredUncertainDraftResumesWithoutDispatchTest', 'retainedRefusalIsNotNewAttemptAuthorityTest',
+  'lateJournalReceiptRetiresDraftTest',
+  'staleCancelledAnswerReleasesIdOnOpenTest', 'staleDeniedAnswerReleasesIdOnOpenTest'];
 const WITNESSES = ['RetryAfterClosedRecordWitness', 'RepeatedIdAnsweredFromJournalWitness', 'StaleAnswerDroppedWitness', 'SentEvidenceWitness', 'RefusedBeforeJournalWitness'];
 const contracts = `${repositoryRoot}.eliza/client-features/packages/contracts/src`;
 const STUBS = {
-  'platform-plugins$': 'export const registerPlugin=()=>({});',
+  'platform-plugins$': 'export const registerPlugin=()=>({smsNoticePending:async()=>({})});',
   'runtime/aosp-image$': 'export const aospImage=true;',
   'native-adapter$': 'export const watchReturnToApp=()=>()=>{};',
   'runtime/aosp-telephony$': `export {reviewSms,reviewMms} from ${JSON.stringify(`${contracts}/native-telephony.ts`)};
@@ -26,10 +28,11 @@ const STUBS = {
     export const createAospTelephony=()=>new Proxy({},{get:(_,name)=>globalThis.__smsClient[name]});`,
 };
 const adapter = await observedSmsAdapter(STUBS);
-const BUSY = 'Another text is being reviewed.', UNKNOWN = 'May have sent';
+// A busy refusal is worded by Alpha by its code (ui/telephony/telephony-messages.ts).
+const BUSY = 'Another text is being reviewed.', BUSY_SHOWN = 'Another message is waiting for your review. Nothing was sent.', UNKNOWN = 'May have sent';
 const shownOf = notice => {
   if (notice === '') return 'none';
-  if (notice === BUSY) return 'refused';
+  if (notice === BUSY_SHOWN) return 'refused';
   if (notice === UNKNOWN) return 'outcome-unknown';
   const status = ['cancelled', 'denied', 'failed', 'unknown', 'submitted', 'sent', 'delivered'].find(item => adapter.receiptLabel(item) === notice);
   assert.ok(status, `unexpected notice: ${notice}`);
@@ -41,7 +44,8 @@ const project = s => ({busy: s.busy, operationId: s.operationId, minted: s.minte
 function create() {
   // Operation IDs in the order native first saw them: the model's 1, 2, 3.
   const ids = [], journal = new Map(), dispatches = new Map();
-  let sendAccess = true, call = null, sendUpdated = () => {}, probing = null, edits = 0;
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let sendAccess = true, journalReadable = true, call = null, sendUpdated = () => {}, probing = null, edits = 0;
   const ordinal = id => { if (!ids.includes(id)) ids.push(id); return ids.indexOf(id) + 1; };
   const status = {permissions: {sms: 'granted', sendSms: 'granted', phoneState: 'granted'}, subscriptions: [{id: 1, slot: 0, displayName: 'SIM', carrierName: 'Carrier'}],
     defaultSmsSubscriptionId: 1, sendMode: 'direct', mmsSend: false, roles: {sms: {available: true, held: false, eligible: true}}};
@@ -59,13 +63,14 @@ function create() {
     },
     async smsSendResult(_review, operationId) {
       if (probing) { probing.push(operationId); throw Error('no record'); }
-      if (!journal.has(operationId)) throw Error('no record');
+      if (!journalReadable || !journal.has(operationId)) throw Error('no readable record');
       return {operationId, status: journal.get(operationId)};
     },
   };
   globalThis.document = {hidden: false, addEventListener() {}, removeEventListener() {}};
+  globalThis.window = new EventTarget();
   const views = {messages: {}};
-  class Shell { view = 'home'; S() { return {view: this.view}; } setState() {} }
+  class Shell { view = 'home'; S() { return {screen: 'home', view: this.view}; } setState() {} }
   adapter.installSmsAdapter(Shell, views);
   const shell = new Shell();
   shell.componentDidMount();
@@ -73,13 +78,15 @@ function create() {
   const type = (field, value) => page()[field]({target: {value}});
   return {
     async open() {
+      const draftWasEmpty = !page().nativeBody;
       shell.view = 'messages'; shell.componentDidUpdate(); await settle();
       // The owner writes only an empty draft; an unfinished or uncertain draft survives re-entry.
-      if (!page().nativeBody) {type('nativeOnRecipients', '+1 555 555 0100'); type('nativeOnBody', 'hello');}
+      if (draftWasEmpty && !page().nativeBody) {type('nativeOnRecipients', '+1 555 555 0100'); type('nativeOnBody', 'hello');}
     },
     async leave() { shell.view = 'home'; shell.componentDidUpdate(); await settle(); },
     async edit() { type('nativeOnBody', `hello ${++edits}`); await settle(); },
     accessChanged() { sendAccess = !sendAccess; },
+    journalReadsAvailable(available) { journalReadable = available; },
     async send() { page().nativeSend(); await settle(); },
     nativeDecide(confirmed) {
       const existing = journal.get(call.operationId);
@@ -95,7 +102,7 @@ function create() {
       await settle();
     },
     journalAdvance(id, next) { journal.set(ids[id - 1], next); },
-    async reconcile(_context) { sendUpdated(ids[_context.before.operationId - 1]); await settle(); },
+    async reconcile({before}) { sendUpdated(ids[(before.operationId || before.lastSent) - 1]); await settle(); },
     async observe() {
       // A refresh can also reconcile the last sent receipt. It does not grant that receipt's ID
       // to the edited draft; read both actual closure identities and validate every native read.
@@ -109,10 +116,14 @@ function create() {
       const byId = (map, missing) => Object.fromEntries(IDS.map((key, index) => [key, map.get(ids[index]) ?? missing]));
       return {busy: model.nativeBusy, operationId: held.operationId ? ordinal(held.operationId) : 0, minted: ids.length,
         call: call ? ordinal(call.operationId) : 0, reply: call ? call.reply : 'none',
-        journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(model.nativeNotice) : 'none'};
+        journal: byId(journal, 'none'), dispatches: byId(dispatches, 0), shown: held.active ? shownOf(held.notice) : 'none'};
     },
     effects: () => ({ids: [...ids], call: call?.operationId ?? null, journal: [...journal], dispatches: [...dispatches]}),
-    close() { shell.componentWillUnmount(); delete globalThis.document; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe; },
+    close() {
+      shell.componentWillUnmount(); delete globalThis.document; delete globalThis.__smsClient; delete globalThis.__smsDraftProbe;
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else delete globalThis.window;
+    },
   };
 }
 
@@ -135,7 +146,7 @@ async function runSmsSendCase2(t, {canaries=true}={}) {
     const f = create();
     try {
       await f.open();await f.send();f.nativeDecide(true);
-      if (retired) {await f.callRejected(false);await f.leave();}
+      if (retired) {f.journalReadsAvailable(false);await f.callRejected(false);await f.leave();}
       else await f.deliver();
       const before = f.effects();await f.send();assert.deepEqual(f.effects(), before, 'no new native request or carrier effect');
       if (retired) {await f.open();assert.deepEqual(f.effects(), before);assert.ok(globalThis.__smsDraftProbe().operationId);}

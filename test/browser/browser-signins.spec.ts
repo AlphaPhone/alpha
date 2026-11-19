@@ -21,6 +21,14 @@ async function navigate(page:Page,path:string){
 }
 async function menu(page:Page,name:string){await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();}
 async function history(page:Page){await menu(page,'Bookmarks and history');await page.getByRole('button',{name:'History',exact:true}).click();}
+async function historyClearOptions(page:Page){
+ await history(page);
+ await page.getByRole('button',{name:'Clear history',exact:true}).click();
+ return page.getByRole('group',{name:'Clear history options'});
+}
+async function resetBrowserData(page:Page){
+ await (await historyClearOptions(page)).getByRole('button',{name:'Reset browser data',exact:true}).click();
+}
 const saved=(page:Page)=>page.evaluate(async()=>{const {browsingSessionDocument}=await import('/src/browser/preference-documents.ts');return browsingSessionDocument.read<any>(()=>({history:[],tabs:[],cur:''}));});
 
 test('normal tabs and history survive a cold start and the selected tab reloads its page',async({page})=>{
@@ -64,16 +72,19 @@ test('a private tab is labelled, created ephemeral and never enters saved tabs o
  await expect(page.getByRole('img',{name:'Private tab',exact:true})).toHaveCount(0);
 });
 
-test('Clear browsing data asks first, then clears history and saved tabs but keeps bookmarks and private tabs',async({page})=>{
+test('Reset browser data asks first, then clears history and saved tabs but keeps bookmarks and private tabs',async({page})=>{
  // Each case cold-starts the app again; under a parallel run that can exceed the default budget.
  test.slow();
  await openBrowser(page);await navigate(page,'kept-mark');await menu(page,'Bookmark');await navigate(page,'visited');
  await menu(page,'New private tab');await navigate(page,'private-open');
- await menu(page,'Clear all browsing data');
+ await page.getByRole('button',{name:'Menu',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Clear all browsing data',exact:true})).toHaveCount(0);
+ await page.keyboard.press('Escape');
+ await resetBrowserData(page);
  const dialog=page.getByRole('dialog',{name:'Clear browsing data?'});await expect(dialog).toBeVisible();await expect(dialog).toContainText('Clears history, cookies and tabs.');
  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(dialog).toHaveCount(0);
  await expect.poll(async()=>(await saved(page)).history.length).toBe(2);
- await menu(page,'Clear all browsing data');await page.getByRole('dialog',{name:'Clear browsing data?'}).getByRole('button',{name:'Clear data',exact:true}).click();
+ await page.getByRole('button',{name:'Reset browser data',exact:true}).click();await page.getByRole('dialog',{name:'Clear browsing data?'}).getByRole('button',{name:'Clear data',exact:true}).click();
  await expect(page.getByText('Cleared',{exact:true})).toBeVisible();
  // The private tab stays open; the normal tabs are closed.
  await expect(page.getByRole('button',{name:'Tabs',exact:true})).toHaveText('1');await expect(page.getByRole('img',{name:'Private tab',exact:true})).toBeVisible();
@@ -82,6 +93,93 @@ test('Clear browsing data asks first, then clears history and saved tabs but kee
  await page.getByRole('button',{name:'Bookmarks',exact:true}).click();await expect(page.getByRole('button',{name:'https://signins.example/kept-mark',exact:true})).toBeVisible();
  await page.reload();await openBrowser(page);await expect(page.getByRole('button',{name:'Tabs',exact:true})).toHaveText('1');
  await expect(page.locator('[data-browser-surface]')).toHaveCount(0);
+});
+
+test('History clears selected dates durably and keeps legacy visits, bookmarks and open tabs',async({page})=>{
+ test.slow();
+ const old = Date.parse('2026-11-17T18:00:00Z');
+ const recent = old + 30 * 60_000;
+ const legacy = 'https://signins.example/legacy';
+ const olderVisit = 'https://signins.example/older';
+ const recentVisit = 'https://signins.example/recent';
+ await page.evaluate(async legacy=>{
+  const {browsingSessionDocument}=await import('/src/browser/preference-documents.ts');
+  await browsingSessionDocument.edit(()=>({history:[],tabs:[],cur:''}),state=>{state.history=[legacy];});
+ },legacy);
+ await page.reload();
+ await page.clock.setFixedTime(old);
+ await openBrowser(page);
+ await navigate(page,'older');
+ await menu(page,'Bookmark');
+ await page.clock.setFixedTime(recent);
+ await navigate(page,'recent');
+ await expect.poll(async()=>(await saved(page)).visitTimes).toEqual({[olderVisit]:old,[recentVisit]:recent});
+ await page.reload();
+ await openBrowser(page);
+ await expect(heading(page,'recent')).toBeVisible();
+
+ const panel=await historyClearOptions(page);
+ const ranges=panel.getByRole('combobox',{name:'Time range'});
+ await expect(ranges.getByRole('option')).toHaveText(['Last 15 minutes','Last hour','Last day','Last week','Last year','All time']);
+ const dialog=page.getByRole('dialog',{name:'Clear history?'});
+ await panel.getByRole('button',{name:'Clear history',exact:true}).click();
+ await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+ expect((await saved(page)).history).toEqual([recentVisit,olderVisit,legacy]);
+ await panel.getByRole('button',{name:'Clear history',exact:true}).click();
+ await dialog.getByRole('button',{name:'Clear history',exact:true}).click();
+ await expect.poll(async()=>(await saved(page)).history).toEqual([olderVisit,legacy]);
+ await expect(page.getByRole('button',{name:recentVisit,exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:legacy,exact:true})).toBeVisible();
+ expect((await saved(page)).tabs[0].url).toBe(recentVisit);
+
+ await page.getByRole('button',{name:'Clear history',exact:true}).click();
+ await ranges.selectOption('all');
+ await panel.getByRole('button',{name:'Clear history',exact:true}).click();
+ await dialog.getByRole('button',{name:'Clear history',exact:true}).click();
+ await expect.poll(async()=>(await saved(page)).history).toEqual([]);
+ await page.getByRole('button',{name:'Bookmarks',exact:true}).click();
+ await expect(page.getByRole('button',{name:olderVisit,exact:true})).toBeVisible();
+ await page.reload();await openBrowser(page);
+ await expect(heading(page,'recent')).toBeVisible();
+ await history(page);
+ await expect(page.getByText('Empty',{exact:true})).toBeVisible();
+ expect((await saved(page)).history).toEqual([]);
+});
+
+test('leaving History cancels its pending clear review',async({page})=>{
+ await openBrowser(page);await navigate(page,'keep-on-leave');
+ await expect.poll(async()=>(await saved(page)).history).toEqual(['https://signins.example/keep-on-leave']);
+ await (await historyClearOptions(page)).getByRole('button',{name:'Clear history',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Clear history?'});
+ await expect(dialog).toBeVisible();
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('alpha:browser-open-view',{detail:'settings'})));
+ await expect(dialog).toHaveCount(0);
+ expect((await saved(page)).history).toEqual(['https://signins.example/keep-on-leave']);
+});
+
+test('a second window saves new visits without restoring cleared history',async({page,context})=>{
+ test.slow();
+ await openBrowser(page);await navigate(page,'saved-before-clear');
+ await expect.poll(async()=>(await saved(page)).history).toEqual(['https://signins.example/saved-before-clear']);
+ const peer=await context.newPage();
+ await peer.route('https://signins.example/**',route=>{
+  const title = new URL(route.request().url()).pathname.slice(1);
+  return route.fulfill({contentType:'text/html',body:`<title>${title}</title><h1>${title}</h1>`});
+ });
+ await peer.goto('/');
+ await openBrowser(peer);await expect(heading(peer,'saved-before-clear')).toBeVisible();
+ await navigate(peer,'saved-in-peer');
+ await expect.poll(async()=>(await saved(peer)).history).toEqual([
+  'https://signins.example/saved-in-peer','https://signins.example/saved-before-clear',
+ ]);
+ const panel=await historyClearOptions(page);
+ await panel.getByRole('combobox',{name:'Time range'}).selectOption('all');
+ await panel.getByRole('button',{name:'Clear history',exact:true}).click();
+ await page.getByRole('dialog',{name:'Clear history?'}).getByRole('button',{name:'Clear history',exact:true}).click();
+ await expect.poll(async()=>(await saved(page)).history).toEqual([]);
+
+ await navigate(peer,'saved-after-clear');
+ await expect.poll(async()=>(await saved(page)).history).toEqual(['https://signins.example/saved-after-clear']);
 });
 
 test('web site-data deletion is unavailable and direct calls cannot claim success',async({page})=>{
@@ -167,7 +265,7 @@ test('a save failure reports once and retries without following the geometry pol
  await expect.poll(async()=>(await saved(page)).tabs.map((tab:any)=>tab.url)).toEqual(['https://signins.example/retry-save']);
 });
 
-test('Clear browsing data cannot be overtaken by a held earlier save',async({page})=>{
+test('Reset browser data cannot be overtaken by a held earlier save',async({page})=>{
  await page.evaluate(async()=>{
   const {BrowserSurface}=await import('/src/browser/browser-surface.ts'),save=BrowserSurface.prototype.saveBrowsingState,clear=BrowserSurface.prototype.clearBrowsingData;
   const w=window as any;w.sessionSaveCalls=0;w.sessionClearCalls=0;
@@ -177,7 +275,7 @@ test('Clear browsing data cannot be overtaken by a held earlier save',async({pag
  await openBrowser(page);await navigate(page,'held-save');
  await expect.poll(()=>page.evaluate(()=>(window as any).sessionSaveCalls)).toBe(1);
  await navigate(page,'queued-save');
- await menu(page,'Clear all browsing data');await page.getByRole('dialog',{name:'Clear browsing data?'}).getByRole('button',{name:'Clear data',exact:true}).click();
+ await resetBrowserData(page);await page.getByRole('dialog',{name:'Clear browsing data?'}).getByRole('button',{name:'Clear data',exact:true}).click();
  expect(await page.evaluate(()=>(window as any).sessionClearCalls)).toBe(0);
  await page.evaluate(()=>(window as any).releaseSessionSave());
  await expect(page.getByText('Cleared',{exact:true})).toBeVisible();

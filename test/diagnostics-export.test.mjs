@@ -97,7 +97,7 @@ test('crash entries keep classes only, are bounded and expire after 30 days',()=
  const custom=new Error('x');custom.name='Account 12345 failed';
  assert.equal(errorClassOf(custom),'Error');
  assert.equal(errorClassOf('a string with content'),'string');
- assert.deepEqual(describeCrashEntry({at:now,source:'exit',reason:'anr',process:':isolated_pdf'}),{title:'App process stopped: anr',detail:'Reported by Android · :isolated_pdf process'});
+ assert.deepEqual(describeCrashEntry({at:now,source:'exit',reason:'anr',process:':isolated_pdf'}),{title:'Alpha stopped because it wasn’t responding',detail:'Reported by Android · :isolated_pdf process'});
  assert.deepEqual(describeCrashEntry({at:now,source:'uncaught',errorClass:'java.lang.IllegalStateException',rootClass:'java.io.IOException',thread:'main'}),{title:'App crashed',detail:'java.lang.IllegalStateException · caused by java.io.IOException · main thread'});
 });
 

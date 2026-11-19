@@ -1944,6 +1944,47 @@ public final class UpdateFlowTest {
    .put("apkUrl",offer.getString("apkUrl")).put("sha256",offer.getString("sha256"))
    .put("sizeBytes",offer.getData().optLong("sizeBytes")).put("versionCode",offer.getData().optLong("versionCode"));
  }
+ /** automaticUpdateStatus and selfUpdateAdmitted with and without the image's INSTALL_SELF_UPDATES grant. */
+ static org.json.JSONObject selfUpdateGrantStatuses(File cache)throws Exception{
+  org.json.JSONObject result=new org.json.JSONObject();
+  java.util.List<Context> contexts=new java.util.ArrayList<>();
+  try{
+  String[][] cases={{"granted30","1","0","30","35000"},{"granted","1","0","37","35000"},{"grantedEarlyBoot","1","0","37","30000"},
+   {"neither","0","0","37","35000"},{"consent","0","1","37","35000"}};
+  for(String[] c:cases){
+   Context context=installing(cache);contexts.add(context);context.selfUpdateGranted=c[1].equals("1");context.packages.installsAllowed=c[2].equals("1");
+   Build.VERSION.SDK_INT=Integer.parseInt(c[3]);android.os.SystemClock.uptime=Long.parseLong(c[4]);
+   result.put(c[0],new org.json.JSONObject().put("status",AlphaDevicePlugin.automaticUpdateStatus(context))
+    .put("admitted",AlphaDevicePlugin.selfUpdateAdmitted(context)));
+   Build.VERSION.SDK_INT=37;android.os.SystemClock.uptime=35_000L;
+  }
+  return result;
+  }finally{
+   // Each Context made its own data directory; leave none behind.
+   for(Context context:contexts)try(var files=java.nio.file.Files.walk(context.data.toPath())){
+    for(java.nio.file.Path child:files.sorted(java.util.Comparator.reverseOrder()).toArray(java.nio.file.Path[]::new))java.nio.file.Files.deleteIfExists(child);
+   }
+  }
+ }
+ /** Alpha ships only the launcher: an index feed carrying any other variant is malformed as a
+  * whole, so it offers nothing, not even its launcher row. Another signer's row is only skipped.
+  * Returns the versionCode selectUpdateOffer offers a launcher install for each mixed index (0: none). */
+ static org.json.JSONObject mixedIndexSelections()throws Exception{
+  java.lang.reflect.Method select=AlphaDevicePlugin.class.getDeclaredMethod("selectUpdateOffer",org.json.JSONObject.class,String.class,String.class);
+  select.setAccessible(true);
+  String signer=sha256(new byte[]{7});
+  org.json.JSONObject launcher=new org.json.JSONObject().put("schema","alpha-update/v1").put("variant","launcher")
+   .put("signerSha256",signer).put("apkUrl","https://updates.test/alpha-9.apk").put("sha256","ab".repeat(32)).put("sizeBytes",4).put("versionCode",9);
+  org.json.JSONObject result=new org.json.JSONObject();
+  for(String[] change:new String[][]{{"otherSigner","signerSha256","6d".repeat(32)},{"standalone","variant","standalone"}}){
+   org.json.JSONObject other=new org.json.JSONObject(launcher.toString()).put(change[1],change[2]);
+   org.json.JSONObject index=new org.json.JSONObject().put("schema","alpha-update/index-v1")
+    .put("releases",new org.json.JSONArray().put(other).put(new org.json.JSONObject(launcher.toString())));
+   org.json.JSONObject offered=(org.json.JSONObject)select.invoke(null,index,"launcher",signer);
+   result.put(change[0],offered==null?0:offered.getLong("versionCode"));
+  }
+  return result;
+ }
  private static byte[] manifestBytes(org.json.JSONObject offer){
   return (offer.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
  }
@@ -2012,6 +2053,16 @@ public final class UpdateFlowTest {
    check(proceed.resolved.get()==1&&owner.activity.started.equals(List.of(confirm)),"explicit Continue opens the existing confirmation exactly once");
    check(context.packages.installer.committed.equals(List.of(session))&&connections.isEmpty(),"Continue neither downloads nor commits again");
   }
+ }
+ private static void imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(File cache)throws Exception{
+  for(int sdk:new int[]{30,37}){
+   Context context=installing(cache);Build.VERSION.SDK_INT=sdk;context.packages.installsAllowed=false;context.selfUpdateGranted=true;android.os.SystemClock.uptime=35000;
+   String expected=sdk<31?"unsupported":"supported";
+   check(expected.equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"the image self-update grant replaces only the consent read: "+sdk);
+   Build.VERSION.SDK_INT=37;
+  }
+  Context denied=installing(cache);denied.packages.installsAllowed=false;android.os.SystemClock.uptime=35000;
+  check("permission-required".equals(AlphaDevicePlugin.automaticUpdateStatus(denied)),"without the image grant the owner's consent is still required");
  }
  private static void consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(File cache)throws Exception{
   Context context=installing(cache);context.packages.installsAllowed=false;
@@ -2235,7 +2286,7 @@ public final class UpdateFlowTest {
   Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
   byte[] original=manifestBytes(manifestOffer(tlsApk(8)));
   var replacement=manifestOffer(tlsApk(9));
-  var other=manifestOffer(tlsApk(9)).put("variant","standalone");
+  var other=manifestOffer(tlsApk(9)).put("signerSha256","6d".repeat(32));
   byte[] newer=manifestBytes(new org.json.JSONObject().put("schema","alpha-update/index-v1")
    .put("releases",new org.json.JSONArray().put(other).put(replacement)));
   try{
@@ -2451,6 +2502,7 @@ public final class UpdateFlowTest {
    automaticPendingActionWaitsForAnExplicitContinue(cache);
    aReceivedConfirmationSurvivesOnlyUntilFirstLaunch(cache);
    consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(cache);
+   imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(cache);
    automaticSuccessReconcilesTheExactInstalledSuccessor(cache);
    automaticDraftRefusalNeverStopsOrCommits(cache);
    automaticModeIsStrictAndExplicitFalseKeepsManualBehavior(cache);

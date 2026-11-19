@@ -50,8 +50,8 @@ async function openPage(page: Page) {
 }
 const answer = (page: Page, value: Answer) => page.evaluate(value => { (window as any).browserStub.answer = value; }, value);
 async function askAboutPage(page: Page) {
-  await button(page, 'Menu').click();
-  await button(page, 'Ask about page').click();
+  await button(page, 'Chat actions').click();
+  await button(page, 'Attach page').click();
   return page.getByRole('dialog', { name: 'Ask about selected content' });
 }
 const questions = (page: Page) => page.evaluate(() => (window as any).browserStub.questions as number);
@@ -95,8 +95,8 @@ test('a sensitive page or credential-like excerpt opens no review', async ({ pag
   await residentHome(page);
   await openPage(page);
   const cases: [Answer, string][] = [
-    [{ reject: { message: 'Reading unavailable on a sensitive or unverified page', code: 'sensitive-page' } }, 'Reading unavailable on a sensitive or unverified page'],
-    [{ reject: { message: 'Reading unavailable on a sensitive or ambiguous page', code: 'sensitive-page' } }, 'Reading unavailable on a sensitive or ambiguous page'],
+    [{ reject: { message: 'Reading unavailable on a sensitive or unverified page', code: 'sensitive-page' } }, 'Alpha doesn’t read pages that may be sensitive or that it can’t verify. Open a different page.'],
+    [{ reject: { message: 'Reading unavailable on a sensitive or ambiguous page', code: 'sensitive-page' } }, 'Alpha doesn’t read pages that may be sensitive or that it can’t verify. Open a different page.'],
     [{ text: 'Your verification code is 482913. Do not share it.' }, 'This page may contain credentials or verification codes. Open a different page.'],
   ];
   for (const [value, message] of cases) {

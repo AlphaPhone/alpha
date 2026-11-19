@@ -28,7 +28,7 @@ export async function settled(page: Page, timeout = 15_000) {
 }
 
 /**
- * Waits for `count` rendered frames. Screen focus (`@elizaos/ui/accessibility/screen-focus`) judges
+ * Waits for `count` rendered frames. Screen focus (`apps/app/src/ui/accessibility/screen-focus.ts`) judges
  * focus two frames after a change and then retries for up to 12 more, so 16 frames is the whole
  * window in which it may move focus, whatever the machine's frame rate. A fixed wait is not.
  */

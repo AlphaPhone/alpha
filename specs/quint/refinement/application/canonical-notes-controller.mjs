@@ -130,7 +130,7 @@ export async function checkCanonicalNotesController(extraSources = []) {
   }
   return checkTraces(boundInputs({model: 'CanonicalNotesController', sources: [...module.sources, driver, ...extraSources],
     traces, scope: 'bounded-component', assumptions: [
-      'Actual current CanonicalNotesController, shared NotesController, snapshot state and wire codec execute with controlled AppRecordPort completion order.',
+      'Actual current CanonicalNotesController, Alpha-owned NotesController, snapshot state and wire codec execute with controlled AppRecordPort completion order.',
       'All controller fields and retained pending transport identities are observed. Opaque note and promise identities use finite equality classes. Six requests and two note identities bound the model.',
       'The representative valid POST capability is get-notes. Domain mutation effects, NotesEditor, CanonicalNotesUi, record payload semantics, server durability and all possible interleavings require separate coverage.'] }));
 }

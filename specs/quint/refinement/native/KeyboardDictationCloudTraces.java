@@ -29,7 +29,7 @@ public final class KeyboardDictationCloudTraces {
    case "authority": AlphaLocalAgentPlugin.epoch++; authority=false; break;
    case "provider": AlphaCredentialStore.provider=new JSONObject(AlphaCredentialStore.provider).put("revision",2).toString(); provider=false; break;
    case "account": AlphaCredentialStore.credential=new JSONObject(AlphaCredentialStore.credential).put("credentialId","other-synthetic-account").toString(); account=false; break;
-   case "password": ai.eliza.plugins.passwords.PasswordSurfaces.showing=true; password=true; break;
+   case "password": PasswordSurfaces.showing=true; password=true; break;
    case "expiry": AlphaCredentialStore.credential=new JSONObject(AlphaCredentialStore.credential).put("expiresAt",1L).toString(); expired=true; break;
    case "cancel": operation.cancel(); cancelled=true; break;
    default: throw new AssertionError(kind);
@@ -40,7 +40,7 @@ public final class KeyboardDictationCloudTraces {
   route=direct?"direct":"cloud"; phase="ready"; mutation=during;
   authority=provider=account=true; password=expired=cancelled=disconnected=accepted=false;
   requests=sent=0; httpOk=status; validText=text; providerHeader=header;
-  ai.eliza.plugins.passwords.PasswordSurfaces.showing=false;
+  PasswordSurfaces.showing=false;
   ai.eliza.voice.RecordingPcm.last=null;
   AlphaLocalAgentPlugin.epoch++;
   AlphaCredentialStore.provider=new JSONObject().put("provider",direct?"cerebras":"elizacloud")

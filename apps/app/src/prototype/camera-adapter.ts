@@ -1,12 +1,15 @@
 import {validateCameraCaptureResult,type CameraCaptureResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
-// Shared camera host rules: explicit-denial classification and resume recovery that never re-prompts.
-import {cameraAccessDenied,restartAfterResume,type CameraAccessKind as AccessKind} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
+// Shared camera host rule: explicit-denial classification.
+import {cameraAccessDenied,type CameraAccessKind as AccessKind} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
+// Alpha's camera surface resume recovery, which never re-prompts.
+import {restartAfterResume} from '../ui/camera/host-ports';
 // The shared camera session owns the preview/capture/recording lifecycle; this adapter presents it.
 import {createCameraSession} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/session.ts';
 // A scanned page reaches Photos only through its explicit Keep, under one operation identity per capture.
-import {createScanCapture} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts';
+import {createScanCapture} from '../ui/camera/scan-document';
 import type {CameraKeepOutcome} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
 import {reviewFileEmail} from './file-email-review';
+import {decodedFile} from './chat-attachment-files';
 import {connectionController} from '../runtime/connection-ui';
 import type {MailAttachment} from '../runtime/inbox-attachment';
 import {readMediaCopyIntent,admitMediaCopyIntent,acknowledgeMediaCopyIntent,mediaCopyIntentDocument,type MediaCopyIntent} from '../runtime/media-copy-intent';
@@ -15,11 +18,14 @@ import {reviewContentQuestion} from '../browser/content-question';
 import {createCaptureRevisions,captureUnchanged} from './context-selection';
 import {createDeviceLibrary,setMainLibraryHost,LibraryAgentRefusal,type HostOperation} from './photo-library-adapter';
 import type {PhotosViewResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
-import {virtualGrid,newestFirst,mergeWindow,readWindow,keepThumbnails,changeBatches,runBatches,thumbnailPlan,groupSections,patchRows,insertRows,patchSelection,favoriteTarget,batches,daysLeft,pinchColumns,dragRange,filterMatches,filterLabel,viewerTitle,formatBytes,shotAt,albumOf,GRID_COLUMNS,type PhotosFilter} from '../../../../.eliza/client-features/packages/ui/src/mobile-shell/photos-view';
+import {virtualGrid,newestFirst,mergeWindow,readWindow,keepThumbnails,changeBatches,runBatches,thumbnailPlan,groupSections,patchRows,insertRows,patchSelection,favoriteTarget,batches,daysLeft,pinchColumns,dragRange,filterMatches,filterLabel,viewerTitle,formatBytes,shotAt,albumOf,GRID_COLUMNS,type PhotosFilter} from '../ui/mobile-shell/photos-view';
 import {LIBRARY_LIMITS,type LibraryAgentOperation,type LibraryAgentResult} from '../runtime/photo-library';
 import {openVideoEditReview} from './video-edit-review';
+import {DEFAULT_HOLD_MS} from '../ui/gestures/constants';
+import {photosErrorText,photosResultText} from '../ui/photos/photos-messages';
+import {cameraCaptureErrorText} from '../ui/camera/camera-capture-messages';
 import {openScanReview,ScanKeepError} from './scan-review';
-import {openScanDocument,pickNativeScanImage} from './scan-document';
+import {pickNativeScanImage} from './scan-document';
 import type {ScanPageCamera} from './scan-page-camera';
 import {systemPickerActive} from './scan-pdf';
 import {DailyApps} from '../daily';
@@ -31,12 +37,15 @@ import {BrowserReviews} from '../browser/review';
 import {testMocksEnabled} from '../build-flags';
 import {createPhotoViewport} from './photo-viewport';
 
-type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult};
-let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void)=>Promise<CameraCaptureAttempt>)|undefined;
-export async function captureAgentPhoto(operationId:string,signal:AbortSignal,current:()=>void):Promise<CameraCaptureAttempt>{
+type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult;cancelledBeforeCapture?:true};
+let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back')=>Promise<CameraCaptureAttempt>)|undefined;
+/** `lens` names the camera the photo must be taken with; without it the current camera is used. */
+export async function captureAgentPhoto(operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back'):Promise<CameraCaptureAttempt>{
   if(!requestedPhoto)return {status:'failed',summary:'Camera unavailable'};
-  return requestedPhoto(operationId,signal,current);
+  return requestedPhoto(operationId,signal,current,lens);
 }
+/** Native capture refusals that are raised before any photo is written. */
+const PHOTO_NOT_TAKEN=new Set(['CAPTURE_ERROR','CAMERA_INACTIVE','CAMERA_NOT_READY']);
 type Bag = Record<string, any>;
 type VideoReceipt = { path: string; duration: number; width: number; height: number; fileSize: number };
 /** `thumbnail` (a JPEG of at most 256 px) replaces `base64` when a gallery capture asks for `thumbnailOnly`. */
@@ -65,7 +74,7 @@ const nativeCamera = registerPlugin<{
 const cameraAccess = registerPlugin<{ checkPermissions(): Promise<{ camera?: string }> }>('ElizaCamera');
 export {restartAfterResume};
 type LibraryAccess = {scope:'full'|'partial'|'selected'|'denied';images:'full'|'selected'|'denied';videos:'full'|'selected'|'denied'};
-type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
+export type SavedPhoto = { name?:string;owned?:boolean;folder?:string;taken?:number;size?:number;kind?: 'image' | 'video'; duration?: number; path?: string; id: string; image: string; width: number; height: number; date: number; revision: string; mutationRevision?: string; contentRevision?: string; trashed?: boolean; expiresAt?: number; favorite?: boolean };
 const nativeLibrary = registerPlugin<{
   addListener(event:'libraryChanged',listener:()=>void):Promise<{remove():Promise<void>}>;
   libraryAccess():Promise<LibraryAccess>;
@@ -127,8 +136,8 @@ const browserMode=!Capacitor.isNativePlatform();
 const camera:typeof nativeCamera=browserMode?browserCamera:nativeCamera;
 // Check every implemented browser method against the native port contract.
 browserPhotoLibrary satisfies Pick<typeof nativeLibrary,Exclude<keyof typeof browserPhotoLibrary,'saveVideoCopy'|'forgetEdit'|'share'|'shareMany'>>;
-const library=browserMode?browserLibrary as unknown as typeof nativeLibrary:nativeLibrary;
-const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos');
+export const library=browserMode?browserLibrary as unknown as typeof nativeLibrary:nativeLibrary;
+export const libraryAvailable=()=>browserMode||Capacitor.isPluginAvailable('AlphaPhotos');
 /** canReplace: the native edit pipeline can overwrite this original (owned, or Android allows a write request). */
 type EditPreview={sessionId:string;operationId:string;image:string;width:number;height:number;reduced:boolean;maxEdge:number;filter:string;canReplace?:boolean};
 type EditReceipt={status:string;operationId:string;id?:string;replaced?:boolean;revision?:string;message?:string};
@@ -296,11 +305,11 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       }
       const value=await library.beginEdit({id:nativeId(row.id),revision:row.mutationRevision});if(!current()){void library.cancelEdit({sessionId:value.sessionId});return;}
       edit={...value,source:row.id,rotation:0,crop:false,busy:false};owner.set({nativeEditRevision:Date.now()});
-    }catch(error){if(videoSessionId){void nativeLibrary.cancelVideoEdit({sessionId:videoSessionId}).catch(()=>{});if(nativeVideoSession===videoSessionId)nativeVideoSession=undefined;}else if(nativeVideoOpening===token){nativeVideoOpening=undefined;void nativeLibrary.cancelVideoEdit({}).catch(()=>{});}if(current()){owner.set({nativeCopyRecovery:row.kind!=='video'||!copyIntentChecked});owner.toast(error instanceof Error?error.message:'Photo editor unavailable.');}}
+    }catch(error){if(videoSessionId){void nativeLibrary.cancelVideoEdit({sessionId:videoSessionId}).catch(()=>{});if(nativeVideoSession===videoSessionId)nativeVideoSession=undefined;}else if(nativeVideoOpening===token){nativeVideoOpening=undefined;void nativeLibrary.cancelVideoEdit({}).catch(()=>{});}if(current()){owner.set({nativeCopyRecovery:row.kind!=='video'||!copyIntentChecked});owner.toast(photosErrorText(error,'Photo editor unavailable.'));}}
   }
   async function transformEdit(owner:Bag,rotate:boolean,chosenFilter?:string){const current=edit;if(!current||current.busy||current.uncertain)return;current.busy=true;const rotation=rotate?(current.rotation+90)%360:current.rotation,crop=chosenFilter!==undefined?current.crop:rotate?current.crop:!current.crop,filter=chosenFilter??current.filter;owner.set({nativeEditRevision:Date.now()});
     try{const value=await library.previewEdit({sessionId:current.sessionId,rotation,crop,filter});if(edit===current)edit={...current,...value,rotation,crop,busy:false};}
-    catch(error){if(edit===current){current.busy=false;owner.toast(error instanceof Error?error.message:'No preview');}}
+    catch(error){if(edit===current){current.busy=false;owner.toast(photosErrorText(error,'No preview'));}}
     finally{if(owner.isActive())owner.set({nativeEditRevision:Date.now()});}
   }
   type EditCompletion={token:string;epoch:number;source:string|undefined;intent?:MediaCopyIntent;replace?:boolean};
@@ -454,14 +463,14 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // Keep the pointer on this tile so moving across others extends instead of ending the press.
       try{if(event&&event.currentTarget instanceof Element)event.currentTarget.setPointerCapture(event.pointerId);}catch{/* not capturable */}
       if(selection){drag={anchor:row.id,base:selection.filter(item=>item.id!==row.id),order,moved:false};if(!on)drag.base=[...selection];return;}
-      holdTimer=window.setTimeout(()=>{holdTimer=undefined;if(!owner.isActive()||disposed)return;startSelection(owner,[row]);swallowedTap=row.id;drag={anchor:row.id,base:[],order,moved:false};},450);},
+      holdTimer=window.setTimeout(()=>{holdTimer=undefined;if(!owner.isActive()||disposed)return;startSelection(owner,[row]);swallowedTap=row.id;drag={anchor:row.id,base:[],order,moved:false};},DEFAULT_HOLD_MS);},
     pm:(event:PointerEvent)=>{if(drag)dragTo(event,owner);},
     pu:()=>{endHold();drag=undefined;window.setTimeout(()=>{swallowedTap='';},0);},
   };}
   async function shareSelection(owner:Bag){
     if(!selection?.length||sharing||mutating)return;if(selection.length>SHARE_BATCH){owner.toast(`Max ${SHARE_BATCH}`);return;}const chosen=selection,token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&owner.isActive()&&selection===chosen&&chosen.every(sameCapture);sharing=true;owner.set({nativeMultiSelection:Date.now()});
-    try{const items=chosen.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''})),result:Awaited<ReturnType<typeof nativeLibrary.shareMany>>=browserMode?await browserPhotoLibrary.shareMany({items},current):await nativeLibrary.shareMany({items});if(owner.isActive()&&result.message)owner.toast(result.message);}
-    catch(error){if(owner.isActive()&&!(browserMode&&error instanceof DOMException&&error.name==='AbortError'))owner.toast(error instanceof Error?error.message:'Share failed');}
+    try{const items=chosen.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''})),result:Awaited<ReturnType<typeof nativeLibrary.shareMany>>=browserMode?await browserPhotoLibrary.shareMany({items},current):await nativeLibrary.shareMany({items});if(owner.isActive()&&result.message)owner.toast(browserMode?result.message:photosResultText(result.message,'Share failed'));}
+    catch(error){if(owner.isActive()&&!(browserMode&&error instanceof DOMException&&error.name==='AbortError'))owner.toast(photosErrorText(error,'Share failed'));}
     finally{sharing=false;if(!disposed)owner.set({nativeMultiSelection:Date.now()});}
   }
   /** Batch change of the selection (or of Undo's items). Large selections run in native-sized batches;
@@ -549,7 +558,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         else if(operation==='delete'||operation==='remove')owner.toast(operation==='delete'?'Album deleted':'Removed from album');
       }
       await loadCustomAlbums(owner);
-    }catch(error){if(!disposed){if(manager===current&&owner.isActive())owner.toast(error instanceof Error?error.message:'Not saved');void loadCustomAlbums(owner);}}
+    }catch(error){if(!disposed){if(manager===current&&owner.isActive())owner.toast(photosErrorText(error,'Not saved'));void loadCustomAlbums(owner);}}
     finally{mutating=false;if(!disposed)owner.set({nativePhotoMutation:Date.now()});}
   }
   async function loadCounts(owner: Bag) {
@@ -574,17 +583,18 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     finally { if (token === albumEpoch) albumBusy = false; }
   }
   async function favorite(row: SavedPhoto, owner: Bag) {
-    if (mutating || sharing || disposed || !row.mutationRevision) return;
+    if (mutating || sharing || disposed || !row.mutationRevision) return false;
     mutating = true; owner.set({nativePhotoMutation:Date.now()});
     try {
       const result = normalize(await library.setFavorite({id:nativeId(row.id),revision:row.mutationRevision,favorite:!row.favorite}));
-      if (disposed) return;
+      if (disposed) return false;
       const updated = {...row,...result}; captures = patchRows(captures,[updated],()=>true); albumRows = patchRows(albumRows,[updated],()=>true);
       const stillSelected = owner.isActive() && owner.get('photos').open === row.id;
       if (stillSelected) preview = updated;
       owner.set({...(stillSelected ? {nativePhotoSelection:captureSelection(updated)} : {}),nativeCaptureRevision:Date.now()});
       albumKey='';++albumEpoch;void loadCounts(owner);
-    } catch (error) { if (!disposed) owner.toast(error instanceof Error?error.message:'Couldn’t save'); }
+      return true;
+    } catch (error) { if (!disposed) owner.toast(photosErrorText(error,'Couldn’t save'));return false; }
     finally { mutating = false; if(!disposed)owner.set({nativePhotoMutation:Date.now()}); }
   }
   function cancelPermanent(owner: Bag) {
@@ -603,7 +613,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       if(result.count===0){void library.cancelDeleteTrash({confirmation:result.confirmation}).catch(()=>{});owner.toast('Empty');return;}
       if(prepared?.confirmation)void library.cancelDeleteTrash({confirmation:prepared.confirmation}).catch(()=>{});
       prepared=result;owner.set({sheet:'empty',nativeTrashMutationStatus:''});
-    } catch(error){if(!disposed)owner.toast(error instanceof Error?error.message:'Trash unavailable');}
+    } catch(error){if(!disposed)owner.toast(photosErrorText(error,'Trash unavailable'));}
     finally{mutating=false;if(!disposed)owner.set({nativePhotoMutation:Date.now()});}
   }
   async function deletePermanent(owner: Bag) {
@@ -626,7 +636,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       selection=selection?.filter(row=>!deleted.has(row.id));if(!selection?.length)selection=undefined;owner.set({sheet:null,open:null,nativePhotoSelection:null,nativeTrashMutationStatus:remaining?`${remaining} not deleted`:''});
       owner.toast(`${result.deletedIds.length} deleted`);
       void refresh();void loadTrash(owner);void loadCounts(owner);void loadCustomAlbums(owner);
-    }catch(error){if(!disposed){owner.set({sheet:null,nativeTrashMutationStatus:'Not deleted'});owner.toast(error instanceof Error?error.message:'Deletion failed.');void loadTrash(owner);}}
+    }catch(error){if(!disposed){owner.set({sheet:null,nativeTrashMutationStatus:'Not deleted'});owner.toast(photosErrorText(error,'Deletion failed.'));void loadTrash(owner);}}
     finally{if(prepared===snapshot)prepared=undefined;mutating=false;if(!disposed)owner.set({nativePhotoMutation:Date.now()});}
   }
   async function loadTrash(owner: Bag, more = false) {
@@ -661,7 +671,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       owner.toast(desired ? 'Deleted' : 'Restored', desired ? { undo: () => { void changeTrash({ ...row, ...result }, false, owner); } } : undefined);
       void refresh(); void loadTrash(owner); void loadCounts(owner); void loadCustomAlbums(owner); albumKey=''; ++albumEpoch;
     } catch (error) {
-      if (!disposed) { owner.toast(error instanceof Error ? error.message : 'Couldn’t change'); void refresh(); void loadTrash(owner); void loadCounts(owner); void loadCustomAlbums(owner); albumKey=''; ++albumEpoch; }
+      if (!disposed) { owner.toast(photosErrorText(error,'Couldn’t change')); void refresh(); void loadTrash(owner); void loadCounts(owner); void loadCustomAlbums(owner); albumKey=''; ++albumEpoch; }
     } finally { mutating = false; }
   }
   async function openSaved(id: string, currentApi: Bag) {
@@ -747,10 +757,47 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     if (maskCache.top !== top) { screen.style.setProperty('--alpha-camera-top', top); maskCache.top = top; }
     if (maskCache.bottom !== bottom) { screen.style.setProperty('--alpha-camera-bottom', bottom); maskCache.bottom = bottom; }
   }
+  type AgentCaptureRequest = { queued: boolean; refused: boolean; cancelReveal?: () => void };
+  let agentRequest: AgentCaptureRequest | undefined;
   let requestedCaptureHolds=0;
   let pendingShot:number|undefined;
   const cameraViewVisible = () => !disposed && !document.hidden && !!api?.isActive() && !!document.querySelector(finder);
-  const chatCovers = () => ['sheet', 'full'].includes(api?.S.chat);
+  /** Portrait Camera with the sheet open is laid out above the sheet (phone.css, Camera's chat-open layout),
+   * so only a full conversation, or a sheet without that layout (landscape), covers the viewfinder. */
+  const chatOpenLayout = () => api?.S.chat === 'sheet' && !document.documentElement.classList.contains('alpha-landscape') &&
+    document.querySelector('[data-screen]')?.getAttribute('data-alpha-chat-half') === 'true';
+  const chatCovers = () => api?.S.chat === 'full' || (api?.S.chat === 'sheet' && !chatOpenLayout());
+  const conversationPanel = () => document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]');
+  function conversationOverViewfinder(panel: HTMLElement | null): boolean {
+    const viewfinder = document.querySelector(finder);
+    if (!panel || !viewfinder || Number(getComputedStyle(panel).opacity) === 0) return false;
+    const chat = panel.getBoundingClientRect();
+    const preview = viewfinder.getBoundingClientRect();
+    return chat.height > 0 && chat.width > 0 &&
+      chat.top < preview.bottom && chat.bottom > preview.top &&
+      chat.left < preview.right && chat.right > preview.left;
+  }
+  /** Waits, a bounded number of times, for the conversation panel and Camera's layer to finish moving while
+   * the panel still overlaps the viewfinder. It never changes the conversation's detent. */
+  async function viewfinderSettled(signal: AbortSignal): Promise<void> {
+    for (let pass = 0; pass < 4; pass++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      signal.throwIfAborted();
+      const panel = conversationPanel();
+      if (!conversationOverViewfinder(panel)) return;
+      const layer = document.querySelector(finder)?.closest('[data-alpha-layer="app"]');
+      // Only finite motion is waited for, and never longer than a sheet transition.
+      const moving = [...(panel?.getAnimations?.() || []), ...(layer?.getAnimations?.() || [])]
+        .filter(animation => animation.effect?.getTiming().iterations !== Infinity);
+      if (!moving.length) return;
+      await new Promise<void>(resolve => {
+        const timer = window.setTimeout(() => done(), 1000);
+        const done = () => { window.clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+        signal.addEventListener('abort', done, { once: true });
+        void Promise.allSettled(moving.map(animation => animation.finished)).then(done);
+      });
+    }
+  }
   /** When the chat sheet started covering Camera; the session stays bound for CHAT_GRACE_MS after that. */
   let chatCoveredAt: number | undefined, chatTimer: number | undefined;
   /** Set by the grace timer itself, so a wall clock set back while the chat covers Camera cannot extend the grace. */
@@ -878,6 +925,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     });
   }
   async function stop() {
+    agentRequest?.cancelReveal?.();
     pendingShot=undefined;
     clearCameraInteraction();
     // A scan review that opened a system picker stays open while Android covers the WebView.
@@ -1037,50 +1085,101 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     const owner = api;
     await session.exclusive(async token=>{
       shutterFlash(owner);
-      const alpha=owner.get('camera').mode==='alpha';
-      try {
-        const photo=await writePhoto(owner,!alpha);
-        if(alpha&&photo.id&&session.current(token)&&owner.isActive()&&owner.get('camera').mode==='alpha'){
-          owner.open('photos',{tab:'lib',album:null,open:photo.id,nativePhotoSelection:captureSelection(photo),chrome:true});
-          owner.attachCameraPhoto(photo.id,photo.image);
-        }
-      }
+      try { await writePhoto(owner,true); }
       catch { if (session.current(token)) message('Not saved'); }
     });
   }
-  /** An agent capture asked for while Camera starts waits for the preview, unless a recording starts first. */
-  let agentRequest:{queued:boolean;refused:boolean}|undefined;
-  const takeRequestedPhoto=async(operationId:string,signal:AbortSignal,current:()=>void):Promise<CameraCaptureAttempt>=>{
+  /** An agent capture waits for the revealed viewfinder, unless a recording starts first. */
+  const takeRequestedPhoto=async(operationId:string,signal:AbortSignal,current:()=>void,wantedLens?:'front'|'back'):Promise<CameraCaptureAttempt>=>{
     const busy:CameraCaptureAttempt={status:'failed',summary:'Camera busy'};
-    let dispatched=false,request:{queued:boolean;refused:boolean}|undefined;
+    let dispatched=false;
+    let request: AgentCaptureRequest | undefined;
     try{
       signal.throwIfAborted();current();
       const owner=api;
       if(!cameraViewVisible()||!owner)return {status:'failed',summary:'Open Camera first'};
       if(agentRequest||session.busy)return busy;
-      // Close the chat so the owner sees the viewfinder and the capture.
-      if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
-      request=agentRequest={queued:false,refused:false};requestedCaptureHolds++;
+      const capture: AgentCaptureRequest = { queued: true, refused: false };
+      request=agentRequest=capture;requestedCaptureHolds++;
+      // The conversation keeps its detent where Camera is laid out above it (the open sheet in portrait).
+      // Only a conversation over the viewfinder (full, or a landscape sheet) closes so the owner sees what is
+      // taken. The committed state can also be settled while its moving panel still covers Camera.
+      const closeChat=chatCovers();
+      if(closeChat||conversationOverViewfinder(conversationPanel())){
+        const revealed=await new Promise<boolean>(resolve=>{
+          const finish=(committed:boolean)=>{
+            if(capture.cancelReveal!==cancel)return;
+            signal.removeEventListener('abort',cancel);
+            capture.cancelReveal=undefined;
+            resolve(committed);
+          };
+          const cancel=()=>finish(false);
+          const afterCommit=()=>{
+            if(capture.cancelReveal!==cancel)return;
+            const panel=conversationPanel();
+            // An interactive panel belongs to the owner. The shutter gate refuses its coverage.
+            const closing=panel?.hasAttribute('inert')&&conversationOverViewfinder(panel)
+              ? panel.getAnimations?.() : undefined;
+            if(closing?.length){
+              void Promise.allSettled(closing.map(animation=>animation.finished)).then(()=>finish(true));
+            }else finish(true);
+          };
+          capture.cancelReveal=cancel;
+          signal.addEventListener('abort',cancel,{once:true});
+          if(closeChat)owner.shell({chat:'hidden'},{afterCommit});
+          else afterCommit();
+        });
+        signal.throwIfAborted();current();
+        if(!revealed||!cameraViewVisible())return {status:'failed',summary:'Camera closed'};
+      }
       if(session.phase!=='ready'){
-        request.queued=true;
         if(session.phase!=='starting')void start(true);
         await untilSettled(signal);
-        request.queued=false;
       }
+      capture.queued=false;
       // The request is checked again right before the shutter: the conversation or screen may have changed.
       signal.throwIfAborted();current();
       if(request.refused)return {status:'failed',summary:'Recording — no photo'};
-      if(!active()||session.phase!=='ready')return {status:'failed',summary:session.phase==='off'?'Camera closed':'Camera unavailable'};
+      if(!active()||session.phase!=='ready')return {status:'failed',summary:session.phase==='off'?'Camera closed':session.denied==='camera'?'Camera access is off. Allow camera access, then ask again.':'Camera unavailable'};
+      if(wantedLens&&wantedLens!==direction){
+        // The request names its camera: nothing is taken with the other one.
+        await flipLens(owner);
+        signal.throwIfAborted();current();
+        if(direction!==wantedLens||!active()||session.phase!=='ready')return {status:'failed',summary:'Couldn’t switch camera, so no photo was taken.'};
+      }
+      // An open sheet keeps its detent, and Camera's layout above it moves with it (the reply opening the sheet,
+      // the sheet's own motion): a viewfinder that is still settling is waited for, never shot through.
+      if(!chatCovers())await viewfinderSettled(signal);
+      signal.throwIfAborted();current();
       const attempt=await session.exclusive(async():Promise<CameraCaptureAttempt>=>{
+        if(chatCovers()||conversationOverViewfinder(conversationPanel())){
+          return {status:'failed',summary:'Camera viewfinder is covered'};
+        }
         dispatched=true;shutterFlash(owner);
-        const item=await writePhoto(owner,false);
+        let item:SavedPhoto;
+        try{item=await writePhoto(owner,false);}
+        catch(error){
+          // A refusal the camera raises before writing is a plain failure; anything else leaves the save unknown.
+          if(!PHOTO_NOT_TAKEN.has(String((error as {code?:unknown}|null)?.code)))throw error;
+          return {status:'failed',summary:cameraCaptureErrorText(error,'The photo couldn’t be taken. Try again.')};
+        }
         if(!item.id)return {status:'unknown',summary:'Saved'};
         const cameraResult=validateCameraCaptureResult({version:1,kind:'camera_capture_photo',operationId,mediaId:nativeId(item.id),width:item.width,height:item.height,mime:'image/jpeg'},operationId);
         return {status:'succeeded',summary:'Saved',cameraResult};
       });
       return attempt.status==='busy'?busy:attempt.value;
-    }catch{return {status:dispatched?'unknown':'failed',summary:dispatched?'Save unconfirmed':'Request changed'};}
-    finally{if(request&&agentRequest===request)agentRequest=undefined;if(request){requestedCaptureHolds--;schedule();}}
+    }catch{
+      if(dispatched)return {status:'unknown',summary:'Save unconfirmed'};
+      if(signal.aborted)return {status:'failed',summary:'Cancelled. No photo was taken.',cancelledBeforeCapture:true};
+      return {status:'failed',summary:'The screen changed before the photo. Ask again.'};
+    }
+    finally{
+      if(request){
+        request.cancelReveal?.();
+        if(agentRequest===request)agentRequest=undefined;
+        requestedCaptureHolds--;schedule();
+      }
+    }
   };
   requestedPhoto=takeRequestedPhoto;
   /** The host Keep port of a scanned page: the browser's photo store, or the owned captures store with the capture's operation identity. */
@@ -1091,10 +1190,11 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       captures=[normalize(row),...captures.filter(item=>nativeId(item.id)!==row.id)];loaded=false;setLast(normalize(row));owner.setView('photos',{nativeCaptureRevision:row.id});
       return {status:'saved',id:row.id,message:'Kept in Photos.'};
     }
-    const result=await library.keepCapture({dataBase64:photo.base64,operationId});
+    // A refused Keep reaches scan review as Alpha's sentence, never the bridge's.
+    const result=await library.keepCapture({dataBase64:photo.base64,operationId}).catch((error:unknown)=>{throw new Error(photosErrorText(error,'Keep photo unconfirmed.'));});
     // An unknown native answer keeps the operation identity, so Try again resolves the same reservation.
-    if(result.status==='unknown')return {status:'unknown',message:result.message||'Keep photo unconfirmed.'};
-    if(result.status!=='saved'||!result.id)return {status:'failed',message:result.message||'Discarded'};
+    if(result.status==='unknown')return {status:'unknown',message:photosResultText(result.message,'Keep photo unconfirmed.')};
+    if(result.status!=='saved'||!result.id)return {status:'failed',message:photosResultText(result.message,'Discarded')};
     // Saved even if the review closed meanwhile: Photos shows the kept page.
     loaded=false;owner.setView('photos',{nativeCaptureRevision:'native-camera-'+result.id});return {status:'saved',id:result.id,message:'Kept in Photos.'};
   }
@@ -1113,7 +1213,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         const size=previewReceipt?.captureSize;
         if(!size||!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<=0||size.height<=0)throw Error('Camera capture size is unavailable. Close the document and start Camera again.');
         const scale=Math.min(1,2048/Math.max(size.width,size.height));
-        const photo=await camera.capturePhoto({format:'jpeg',quality:85,saveToGallery:false,width:Math.max(1,Math.round(size.width*scale)),height:Math.max(1,Math.round(size.height*scale))});
+        // A native refusal reaches the page dialog in Alpha's words, never the plugin's (or Android's exception text).
+        const photo=await camera.capturePhoto({format:'jpeg',quality:85,saveToGallery:false,width:Math.max(1,Math.round(size.width*scale)),height:Math.max(1,Math.round(size.height*scale))}).catch((error:unknown)=>{throw new Error(cameraCaptureErrorText(error,'Page could not be captured. Try again.'));});
         signal.throwIfAborted();if(!current()||!session.current(token))throw Error('Camera changed. The page was not added.');
         if(photo.format!=='jpeg'||!photo.base64||photo.width<=0||photo.height<=0||photo.width>2048||photo.height>2048)throw Error('Camera returned an incomplete document page. Try again.');
         return new Blob([Uint8Array.from(atob(photo.base64),char=>char.charCodeAt(0))],{type:'image/jpeg'});
@@ -1150,8 +1251,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   scanRequest=()=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    // Close the chat so the viewfinder and scan review are visible.
-    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
+    // The conversation stays where it is: scan review is a modal dialog above it.
     void scanFrame(owner);return true;
   };
   /** Android: the system picker returns one image straight into scan review
@@ -1184,10 +1284,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   }
   frameQuestion=question=>{
     const owner=api;if(disposed||!owner||!cameraViewVisible())return false;
-    if(!askCameraFrame(owner,question))return false;
-    // Close the chat so the frame review is visible.
-    if(owner.S.chat!=='hidden')owner.shell({chat:'hidden'});
-    return true;
+    // The conversation stays where it is: the frame review is a modal dialog above it.
+    return askCameraFrame(owner,question);
   };
   /** The reviewed item is still the listed one at the revision the review started with:
    * an edited, replaced or removed capture ends its review instead of continuing under the same id. */
@@ -1196,25 +1294,32 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     return !!live&&!live.trashed===!selected.trashed&&(selected.mutationRevision&&live.mutationRevision?live.mutationRevision===selected.mutationRevision:live.revision===selected.revision)&&(selected.contentRevision===undefined||live.contentRevision===selected.contentRevision);
   }
   function emailPhoto(selected:SavedPhoto,owner:Bag){
-    closeQuestion?.();const session=connectionController.getCloudClient()?.sessionId;
-    const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected)&&connectionController.getCloudClient()?.sessionId===session;
+    closeQuestion?.();
+    const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
     closeQuestion=reviewFileEmail({
       read:()=>photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!}),current,
       target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>current()&&views.inbox.attachReviewedFile(file,token),
-      inserted:()=>owner.open('inbox'),
+      inserted:()=>owner.open('inbox'),notify:message=>owner.toast(message),
     });
   }
   function askCapture(selected:SavedPhoto,owner:Bag):boolean{
     if(selected.kind==='video'||selected.trashed)return false;
     closeQuestion?.();
+    const chatSession=connectionController.getSnapshot().session;
+    const conversation=connectionController.getSelectedConversationId();
+    const sameConversation=()=>connectionController.getSnapshot().session===chatSession&&connectionController.getSelectedConversationId()===conversation;
     const current=()=>!disposed&&!document.hidden&&owner.isActive()&&owner.get('photos').open===selected.id&&sameCapture(selected);
     void library.read({id:nativeId(selected.id)}).then(row=>{
       if(!current()||!captureUnchanged(selected,row)||row.kind==='video'||row.trashed){
         if(owner.isActive())owner.toast('Photo changed');
         return;
       }
+      if(!sameConversation()){
+        owner.toast('Chat changed. Choose the photo again.');
+        return;
+      }
       owner.attachCameraPhoto(selected.id,row.image);
-    }).catch(()=>{if(current())owner.toast('Couldn’t open');});
+    }).catch(()=>{if(current()&&sameConversation())owner.toast('Couldn’t open');});
     return true;
   }
 
@@ -1235,11 +1340,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.bg = 'transparent'; data.vfBg = ready ? 'transparent' : '#000000'; data.vfOp = 1;
     data.zoomCss = ''; data.rec = session.recording; data.recTime = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, '0')}`;
     data.shutter = () => { void capture(); };
-    data.ask = () => {
-      if (!askCameraFrame(currentApi)) message(ready ? 'Capture in progress' : 'Camera off');
-    };
-    data.scanDocumentAvailable=!recordingBusy;
-    data.scanDocument=()=>{if(!currentApi.isActive()||recordingBusy)return;cancelScan();if(currentApi.S.chat!=='hidden')currentApi.shell({chat:'hidden'});closeScan=openScanDocument(undefined,documentCamera(currentApi));};
     data.flip = () => { void flipLens(currentApi); };
     data.flashAvailable = ready && !recordingBusy && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
     if (browserMode) data.flashLabel = browserCamera.lightingLabel(flash);
@@ -1266,12 +1366,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     };
     data.vfClick = (event: MouseEvent) => { if (event.detail === 0) focusAt(0.5, 0.5); };
     data.showModes = !recordingBusy;
-    data.modes = [...(data.modes || []),{label:'Ask',mode:'alpha',css:st.mode==='alpha'?'color:var(--alpha-white)':'color:rgba(255,255,255,.55)',dot:st.mode==='alpha'?1:0}].map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.mode || m.label.toLowerCase(); if (mode === 'photo' || mode === 'video' || mode === 'alpha') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
-    if(st.mode==='alpha'){
-      data.shutterLabel='Ask about this';
-      data.shutter=data.ask;
-      data.innerCss="width:62px;height:62px;border-radius:50%;background:var(--alpha-white) url('/logo-mark.svg') center/80% no-repeat";
-    }
+    // Camera has two modes, Video and Photo; asking about the frame goes through chat.
+    data.modes = (data.modes || []).map((m: Bag) => ({ ...m, pick: () => { if (recordingBusy || session.capturing) return; const mode = m.label.toLowerCase(); if (mode === 'photo' || mode === 'video') { if (currentApi.get('camera').mode !== mode) {pendingShot=undefined;bindMode(mode);} currentApi.set({ mode, rec: false }); } } }));
     const last = lastCapture;
     data.lastLabel = last?.kind === 'video' ? 'Open last video' : 'Open last photo';
     if (last) {
@@ -1396,7 +1492,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     trashed:(ids:string[])=>{const owner=photosApi;if(!owner||!ids.length)return;void (async()=>{await loadTrash(owner);await refresh();const rows=trash.filter(row=>ids.includes(nativeId(row.id)));if(owner.isActive())owner.toast('Deleted',rows.length?{undo:()=>{void changeSelection(owner,'restore',rows);}}:undefined);})();},
     async run(operation:HostOperation,signal:AbortSignal):Promise<LibraryAgentResult|PhotosViewResult>{
       const owner=photosApi;if(!owner?.isActive()||disposed)throw new LibraryAgentRefusal('Open Photos, then ask again.');
-      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy. Try again.');
+      if(edit||closeVideoEdit||mutating||sharing)throw new LibraryAgentRefusal('Photos is busy right now.');
       if(!loaded)await refresh();signal.throwIfAborted();
       if(operation.type==='photos_filter'){
         const {type:_type,...wanted}=operation;void _type;
@@ -1419,12 +1515,12 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       }
       const wanted=new Set(operation.ids),rows=captures.filter(row=>wanted.has(nativeId(row.id)));
       if(operation.type==='photo_library_select'){
-        if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos. The current selection was kept.');
+        if(!rows.length)throw new LibraryAgentRefusal('None of those items are in Photos.');
         selection=rows;selectionTab='lib';photosFilter=undefined;
         owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});
         return {kind:'photo_library_select',selected:rows.length,missing:operation.ids.length-rows.length};
       }
-      if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos. Nothing changed.');
+      if(!rows.length)throw new LibraryAgentRefusal('Those items are not in Photos.');
       if(albumReview||shareReview)throw new LibraryAgentRefusal('Finish the open review first.');
       if(operation.type==='photos_share'){
         // Reviewed: the owner confirms over the grid, then picks a target in Android's share sheet.
@@ -1445,7 +1541,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     try{
       const items=pending.items.map(row=>({id:nativeId(row.id),revision:row.mutationRevision||''})),token=photoReadEpoch;
       const result:{status:string;message?:string}=browserMode?await browserPhotoLibrary.shareMany({items},()=>!disposed&&!document.hidden&&photoReadEpoch===token&&owner.isActive()):await nativeLibrary.shareMany({items});
-      if(result.status!=='opened'&&owner.isActive())owner.toast(result.message||'Share failed');
+      if(result.status!=='opened'&&owner.isActive())owner.toast(browserMode?result.message||'Share failed':photosResultText(result.message,'Share failed'));
     }catch(error){if(owner.isActive()&&!(error instanceof DOMException&&error.name==='AbortError'))owner.toast('Item changed');}
     finally{if(shareReview===pending)shareReview=undefined;sharing=false;if(!disposed)owner.set({nativeAgentReview:Date.now()});}
   }
@@ -1477,7 +1573,6 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.importAvailable=browserMode||Capacitor.isPluginAvailable('DailyApps');
     data.importLabel=browserMode?'Choose image':'Scan image text';
     data.importImage=(event?:Event)=>{(event?.currentTarget as HTMLElement|undefined)?.closest('details')?.removeAttribute('open');chooseImage(currentApi);};
-    data.scanDocument=()=>{if(currentApi.isActive()){cancelScan();closeScan=openScanDocument();}};
     data.libraryAccessControl=!browserMode&&!!libraryAccess&&libraryAccess.scope!=='full'&&!st.open&&!st.album&&!selection&&!onAlbums;
     data.libraryAccessBusy=requestingLibraryAccess;
     data.libraryAccessChoose=async()=>{if(requestingLibraryAccess)return;requestingLibraryAccess=true;currentApi.set({nativeLibraryAccessRevision:Date.now()});const before=libraryAccess?.scope;try{libraryAccess=await nativeLibrary.requestLibraryAccess();if(libraryAccess.scope===before&&before==='denied')await nativeLibrary.openLibrarySettings();retirePhotoRead();captures=[];preview=undefined;next='';loaded=false;cancelEdit();closeVideo();currentApi.set({open:null,nativePhotoSelection:null});await refresh();}catch{currentApi.toast('Couldn’t open settings');}finally{requestingLibraryAccess=false;currentApi.set({nativeLibraryAccessRevision:Date.now()});}};
@@ -1504,10 +1599,20 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       // A queued callback belongs to the dialog and stage that rendered it.
       const current=()=>manager===shown&&shown.creating===creating&&shown.confirmDelete===confirmDelete
         &&!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').sheet==='owned-album';
+      const chosen=items??(media?[media]:[]),unfavorited=chosen.filter(row=>!row.favorite);
+      const close=()=>{if(current()){manager=undefined;currentApi.set({sheet:null});}};
       data.am={
         modalRef:albumModal.ref,title:confirmDelete?'Delete album?':creating?'New album':album?'Manage album':'Add to album',name:shown.name,
         onName:(event:Event)=>{if(current()&&naming){shown.name=(event.target as HTMLInputElement).value;currentApi.set({nativeAlbumDraft:Date.now()});}},
         managing:!!album,naming,info:false,description:'',choose:()=>{},choosing,confirming:!!confirmDelete,error:st.nativeAlbumsError||'',busy:mutating,
+        canFavorite:!!unfavorited.length,inFavorites:!!chosen.length&&!unfavorited.length,
+        inCamera:!!chosen.length&&chosen.every(row=>browserMode||albumOf(row,'camera')),
+        inVideos:!!chosen.length&&chosen.every(row=>albumOf(row,'videos')),
+        addFavorite:async()=>{
+          if(!current()||!choosing||mutating||sharing||!unfavorited.length)return;
+          if(items){close();await changeSelection(currentApi,'favorite',unfavorited);}
+          else if(media&&await favorite(media,currentApi))close();
+        },
         items:customAlbums.map(target=>{
           const member=!items&&target.memberIds.includes(nativeId(media?.id||''));
           return {id:'custom:'+target.id,name:target.name,label:(member?'Remove from ':'Add to ')+target.name,
@@ -1517,7 +1622,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         save:()=>{if(current()&&naming)void mutateAlbum(currentApi,creating?'create':'rename');},
         askDelete:()=>{if(current()&&naming&&album&&!mutating){shown.confirmDelete=true;currentApi.set({nativeAlbumDraft:Date.now()});}},
         delete:()=>{if(current()&&confirmDelete)void mutateAlbum(currentApi,'delete');},
-        close:()=>{if(current()){manager=undefined;currentApi.set({sheet:null});}},
+        close,
       };
     }
     data.selStart=()=>startSelection(currentApi);
@@ -1596,19 +1701,18 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       const go = (step: number) => { const target = sequence[index + step]; if (index < 0 || !target) return; void openSaved(target.id, currentApi); };
       const viewport=photoViewport.bind({key:`${selected.id}:${selected.revision}`,width:selected.width,height:selected.height,zoomable:selected.kind!=='video',
         current:()=>!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&!edit&&sameCapture(selected),
-        changed:()=>currentApi.set({nativeViewerRevision:++viewerRevision,chrome:true}),
+        changed:()=>currentApi.set({nativeViewerRevision:++viewerRevision}),
         toggle:()=>currentApi.set({chrome:currentApi.get('photos').chrome===false}),step:go});
       const when = viewerTitle(shotAt(selected)), chrome = st.chrome !== false;
       data.viewing = true; data.viewEmpty = false; data.editing = !!edit&&edit.source===selected.id;
       data.v = { bg: imageCss(selected).replace('cover', 'contain'), tf: selected.kind==='video'?'':viewport.transform, flt: '', slide: '', day: when.day, sub: when.time, chromeOp: chrome ? 1 : 0, chromePE: chrome ? 'auto' : 'none', favIcon: selected.favorite ? 'fill:currentColor' : 'fill:none', favLabel: selected.favorite ? 'Remove from favorites' : 'Favorite', vid: selected.kind === 'video', playing: !!video && !video.paused, playBtn: selected.kind === 'video' && (!video || video.paused), prog: `width:${video?.duration ? Math.min(100, video.currentTime / video.duration * 100) : 0}%`, play: () => { void playVideo(selected, currentApi); }, pause: () => { video?.pause(); currentApi.set({ nativePlaybackRevision: Date.now() }); }, notSecure: true,
-        tap:()=>viewport.tap(),down:(event:PointerEvent)=>viewport.down(event),move:(event:PointerEvent)=>viewport.move(event),up:(event:PointerEvent)=>viewport.up(event),cancel:()=>viewport.cancel(),
+        tap:(event:MouseEvent)=>viewport.tap(event),down:(event:PointerEvent)=>viewport.down(event),move:(event:PointerEvent)=>viewport.move(event),up:(event:PointerEvent)=>viewport.up(event),cancel:()=>viewport.cancel(),
         viewerRef:(element:HTMLElement|null)=>{if(element)element.ondblclick=selected.kind==='video'?null:event=>viewport.double(event);},key:(event:KeyboardEvent)=>viewport.key(event),frame:(element:HTMLElement|null)=>viewport.ref(element),
-        canZoom:selected.kind!=='video',zoomIn:()=>viewport.zoomIn(),zoomOut:()=>viewport.zoomOut(),fit:()=>viewport.fit(),zoomMax:viewport.scale>=4,zoomMin:viewport.scale<=1,zoomLabel:`${Math.round(viewport.scale*100)}%`,
         hasPrev: index > 0, hasNext: index >= 0 && index < sequence.length - 1, prev: () => go(-1), next: () => go(1),
         share: async () => {
         if(sharing || mutating)return;
         sharing=true;
-        try { const input={id:nativeId(selected.id),revision:selected.mutationRevision},token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected),result:Awaited<ReturnType<typeof nativeLibrary.share>>=browserMode?await browserPhotoLibrary.share(input,current):await nativeLibrary.share(input); if(result.status!=='opened')currentApi.toast(result.message||'Share failed'); }
+        try { const input={id:nativeId(selected.id),revision:selected.mutationRevision},token=photoReadEpoch,current=()=>!disposed&&!document.hidden&&photoReadEpoch===token&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected),result:Awaited<ReturnType<typeof nativeLibrary.share>>=browserMode?await browserPhotoLibrary.share(input,current):await nativeLibrary.share(input); if(result.status!=='opened')currentApi.toast(browserMode?result.message||'Share failed':photosResultText(result.message,'Share failed')); }
         catch(error) { if(!(browserMode&&error instanceof DOMException&&error.name==='AbortError'))currentApi.toast(browserMode&&error instanceof Error?error.message:'Unavailable'); }
         finally { sharing=false; }
       }, fav: () => { void favorite(selected,currentApi); }, edit: () => {void beginEdit(selected,currentApi);}, del: () => { void changeTrash(selected, true, currentApi, (sequence[index + 1] || sequence[index - 1])?.id); }, info: () => { currentApi.set({ sheet: 'photo-info', chrome: true }); }, ask: selected.kind==='video'||selected.trashed?undefined:() => { askCapture(selected,currentApi); } };
@@ -1629,8 +1733,14 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       data.v.hasPrevItem=at>0&&!edit;data.v.hasNextItem=at>=0&&at<shown.length-1&&!edit;data.v.prevItem=step(shown[at-1]);data.v.nextItem=step(shown[at+1]);
       data.v.viewerLabel=selected.kind==='video'?'Video. Tap to show or hide controls, swipe to browse':`Photo. Zoom ${Math.round(viewport.scale*100)} percent. Pinch or double tap to zoom; drag to pan. Use plus, minus, 0 and arrow keys.`;data.v.askLabel=`Ask Alpha about this ${selected.kind==='video'?'video':'photo'}`;
       data.v.editLabel=selected.kind==='video'?'Edit video':'Edit photo';data.v.shareLabel=selected.kind==='video'?'Share video':'Share photo';data.v.infoLabel=selected.kind==='video'?'Video info':'Photo info';data.v.deleteLabel=selected.kind==='video'?'Delete video':'Delete photo';
-      data.v.canEmail=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments')&&typeof views.inbox.fileEmailTarget==='function';
+      const canReadAttachment=!browserMode&&selected.kind!=='video'&&!selected.trashed&&nativeId(selected.id).startsWith('m:')&&!!selected.mutationRevision&&Capacitor.isPluginAvailable('AlphaMailAttachments');
+      data.v.canEmail=canReadAttachment&&typeof views.inbox.fileEmailTarget==='function';
       data.v.email=()=>emailPhoto(selected,currentApi);
+      data.v.canMessage=canReadAttachment&&typeof views.messages?.sharePicture==='function'&&/\.(jpe?g|png)$/i.test(selected.name||'');
+      data.v.message=()=>views.messages.sharePicture(
+        async()=>decodedFile(await photoAttachments.readPhotoSelected({id:nativeId(selected.id),revision:selected.mutationRevision!})),
+        ()=>!disposed&&!document.hidden&&currentApi.isActive()&&currentApi.get('photos').open===selected.id&&sameCapture(selected),
+      );
       // Info: date, file, size, dimensions, folder and albums.
       const albums=customAlbums.filter(album=>album.memberIds.includes(nativeId(selected.id))).map(album=>album.name);
       const facts=[['Date',`${new Date(shotAt(selected)).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})} ${when.time}`],['File',selected.name||''],['Size',formatBytes(selected.size)],['Dimensions',selected.width&&selected.height?`${selected.width} × ${selected.height}`:''],['Length',durationLabel(selected)],['Folder',(selected.folder||'').replace(/\/$/,'')],['Albums',albums.join(', ')]].filter(([,value])=>value).map(([label,value])=>({label,value}));

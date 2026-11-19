@@ -33,9 +33,10 @@ d.rememberRetainedDigests([missedRow],'Phone agent');out.onlyMissed=d.latestReta
 d.rememberRetainedDigests([row(3,'run-c','overlap','2026-10-08T06:00:00.000Z'),row(4,'run-d','unavailable','2026-10-09T06:00:00.000Z')]);out.neverRan=d.latestRetainedDigest();
 d.rememberRetainedDigests([ranRow,missedRow,row(5,'run-e','failed','2026-10-08T06:00:00.000Z')]);out.failed=d.latestRetainedDigest()?.status;
 console.log(JSON.stringify(out));`);
- assert.deepEqual(out.labels,['Missed — not run','Skipped — an earlier run was still active','Not run — source unavailable','finished','failed','completed']);
+ assert.deepEqual(out.labels,['Missed — not run','Skipped — an earlier run was still active','Not run — source unavailable','Finished','Failed','Completed']);
  assert.deepEqual(out.ran,[false,false,false,true,true,true,true]);
- assert.equal(out.missedText,'The scheduled time was missed. No backlog was executed.');
+ // The agent's recorded not-run text (DIGEST_MISSED_TEXT) reads in Alpha's words.
+ assert.equal(out.missedText,'This digest missed its scheduled time, so it didn’t run. Nothing runs late.');
  assert.deepEqual(out.home,{summary:'Brief run-a',ranAt:'2026-10-06T06:00:00.000Z',agent:'Phone agent',status:'finished'});
  assert.equal(out.onlyMissed,null);assert.equal(out.neverRan,null);assert.equal(out.failed,'failed');
 });

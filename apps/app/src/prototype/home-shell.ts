@@ -1,9 +1,12 @@
 import {createElement, type CSSProperties} from 'react';
-import type {FavoritesStore, InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
-import {appKey} from '@elizaos/capacitor-system/launcher';
-import {createMobileShellLauncher, mobileShellIconUrl, MobileHomeScreen, type MobileHomeEntry, type MobileHomeTile} from '@elizaos/ui/mobile-shell';
+import type {InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
+import {appKey, type FavoritesStore} from '../ui/mobile-shell/installed-launcher.ts';
+import {createMobileShellLauncher, type MobileHomeEntry} from '../ui/mobile-shell/mobile-launcher.ts';
+import {mobileShellIconUrl} from '../ui/mobile-shell/product-registration.ts';
+import {MobileHomeScreen, type MobileHomeTile} from '../ui/mobile-shell/MobileHomeScreen.tsx';
 import {ALPHA_PRODUCT, alphaViews} from '../product/alpha-product';
-import {InstalledAppsGridDrawer, HOLD_MS, SLOP, appsDrawerEntries} from '../../../../.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer';
+import {InstalledAppsGridDrawer, appsDrawerEntries} from '../ui/mobile-shell/InstalledAppsGridDrawer';
+import {DEFAULT_HOLD_MS, LAUNCHER_PRESS_SLOP} from '../ui/gestures/constants';
 import {createInlineModal} from '../runtime/inline-modal';
 type Bag = Record<string, any>;
 
@@ -25,7 +28,7 @@ const HOME_EDIT_CSS = `
 @media (prefers-reduced-motion: reduce){[data-alpha-home-editing="true"] [data-mobile-shell-tile-face]{animation:none}}
 `;
 
-/** Home and its app grid from the shared mobile shell, and Alpha's Apps drawer, themed by the Alpha
+/** Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer, themed by the Alpha
  * record (view refresh PLAN section 5). The template fills Home's notice and card slots; open state
  * and Back go through the shared navigation reducer (Component.shellNavigate), so Back and Home close
  * the drawer. The installed favorites are the record's (alpha.launcher.favorites.v1, product views as
@@ -203,7 +206,7 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
             press = null;
             if (!ownsHomeGesture(self, target)) return;
             swallow = key; self.setState({homeEdit: true, homeAdd: false});
-          }, HOLD_MS)};
+          }, DEFAULT_HOLD_MS)};
           press = started; return;
         }
         // A press on the remove control never starts a drag.
@@ -214,11 +217,11 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
       },
       onPointerMove: (event: PointerEvent) => {
         if (owner !== self) return;
-        if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > SLOP) endPress();
+        if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > LAUNCHER_PRESS_SLOP) endPress();
         if (drag?.pointer !== event.pointerId) return;
         if (!ownsHomeGesture(self, drag.tile)) { endDrag(); return; }
         const dx = (event.clientX - drag.x) / drag.scale, dy = (event.clientY - drag.y) / drag.scale;
-        if (!drag.moved && Math.hypot(dx, dy) <= SLOP) return;
+        if (!drag.moved && Math.hypot(dx, dy) <= LAUNCHER_PRESS_SLOP) return;
         if (!drag.moved) {
           drag.moved = true; drag.tile.setAttribute('data-alpha-home-dragging', '');
           // Captured only once it is a drag, so a tap still reaches the icon.

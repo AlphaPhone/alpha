@@ -2,6 +2,7 @@ package ai.eliza.plugins.messages;
 
 import ai.alphacompute.alphaphone.AlphaSmsSendReceiver;
 import ai.alphacompute.alphaphone.AlphaTelephonyPlugin;
+import ai.alphacompute.alphaphone.MainActivity;
 import ai.alphacompute.alphaphone.Trace;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -18,6 +19,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 import org.json.JSONArray;
@@ -25,7 +27,7 @@ import org.json.JSONArray;
 public final class MmsDispatchTraces {
  static boolean historicalListeners;
  static final String OP="synthetic-mms", SLOT="sms-send-ledger:v1:device", BODY="Synthetic message";
- static final long NOW=1_760_000_000_000L;
+ public static final long NOW=1_760_000_000_000L;
  static final int SUB=7;
  static final String[] RECIPIENTS={"+15555550100","+15555550101"};
  static final byte[][] IMAGES={ {}, {1,2,3}, {1,2,4} };
@@ -39,9 +41,8 @@ public final class MmsDispatchTraces {
  }
  static void check(boolean value,String reason){if(!value)throw new AssertionError(reason);}
  static void drain()throws Exception{
-  // A queued review can enqueue its durable decision after the first barrier.
-  SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
-  SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
+  // Admission, then dispatch, then a recovery decision can each enqueue the next worker step.
+  for(int barrier=0;barrier<4;barrier++)SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
  }
  static String digest(byte[] bytes)throws Exception{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}
  static boolean group(int binding){return binding==1||binding==2;}
@@ -49,16 +50,15 @@ public final class MmsDispatchTraces {
  static final class Fixture {
   final Context context=new Context();
   final AlphaSmsSendReceiver receiver=new AlphaSmsSendReceiver();
-  final TelephonyPlugin[] plugins=new TelephonyPlugin[3];
+  final AlphaTelephonyPlugin[] plugins=new AlphaTelephonyPlugin[3];
   final PluginCall[] reviewCalls=new PluginCall[3];
   final int[] reviews=new int[3];
-  final boolean[] reviewSims=new boolean[3];
   final SmsTelephonyConfiguration config;
   final Trace trace;
   final Map<String,Integer> bindings=new HashMap<>();
   final String[] to;
-  String reply="none",replyKind="none";
-  int replyBinding, positiveBinding;
+  String reply="none",replyKind="none",source="none";
+  int replyBinding, composedBinding;
   int process=1;
 
   Fixture(String name,boolean groupRecipients)throws Exception{
@@ -69,13 +69,18 @@ public final class MmsDispatchTraces {
      :SmsSendJournal.bindingText(to,BODY,SUB);
     bindings.put(SmsSendJournal.sha256(text),binding);
    }
-   load();config=plugins[1].telephonyConfiguration();
+   load();config=(SmsTelephonyConfiguration)Trace.read(plugins[1],"config");
    context.radio.beforeMms=this::beforeMms;
    trace=new Trace(name,observe());trace.value.put("init",Trace.action("initWith",groupRecipients));
   }
 
   void load()throws Exception{
-   for(int i=1;i<=2;i++){plugins[i]=new AlphaTelephonyPlugin();plugins[i].attach(context);plugins[i].load();drain();}
+   for(int i=1;i<=2;i++){
+    plugins[i]=new AlphaTelephonyPlugin();plugins[i].attach(context);
+    // The launcher's own activity, where the Messages composer has window focus.
+    plugins[i].activity=new MainActivity(context);
+    plugins[i].load();drain();
+   }
   }
 
   SmsSendJournal.Attachment attachment(int binding)throws Exception{
@@ -154,7 +159,7 @@ public final class MmsDispatchTraces {
   }
 
   void classify(PluginCall call){
-   replyBinding=0;replyKind="none";positiveBinding=0;
+   replyBinding=0;replyKind="none";composedBinding=0;
    if(!call.answered){reply="pending";return;}
    if(call.rejection!=null){reply=call.rejection;return;}
    if(!call.result.has("status")){reply="ok";return;}
@@ -180,33 +185,70 @@ public final class MmsDispatchTraces {
    return data;
   }
 
-  void request(int actor,int binding,String input)throws Exception{
+  /** The historical shared plugin's native review: only the raw-pin regression probes drive it. */
+  void review(int actor,int binding,String input)throws Exception{
+   check(historicalListeners,"Only the historical plugin shows a native review");
    int count=plugins[actor].activity.dialogs.size();
    PluginCall call=new PluginCall(message(binding,input));
    if(group(binding))plugins[actor].sendMms(call);else plugins[actor].sendSms(call);
    drain();
    if(plugins[actor].activity.dialogs.size()>count){
-    reviewCalls[actor]=call;reviews[actor]=binding;reviewSims[actor]=context.subscriptions.revision==1;
+    reviewCalls[actor]=call;reviews[actor]=binding;
     AlertDialog dialog=dialog(actor);
-    check(dialog.message.contains(BODY)&&dialog.message.contains(to[0])&&dialog.message.contains("Synthetic SIM")&&
+    check(dialog.message.contains(BODY)&&dialog.message.contains("To: "+String.join(", ",to)+"\n")&&dialog.message.contains("Synthetic SIM")&&
      (dialog.getWindow().flags&android.view.WindowManager.LayoutParams.FLAG_SECURE)!=0&&dialog.getButton(-1).filtered,
      "Reviewed message is private and obscured tap is filtered");
-    if(group(binding))check(dialog.message.contains("Attachment: synthetic.png")&&dialog.preview.images.size()==1&&
+    if(group(binding))check(dialog.message.contains(historicalListeners?"Attachment: synthetic.png":"Picture: synthetic.png")&&dialog.preview.images.size()==1&&
      Arrays.equals(dialog.preview.images.getFirst().image.bytes(),IMAGES[binding])&&
-     (to.length==1||dialog.message.contains("every recipient sees all the others")),"Exact attachment preview and group disclosure");
+     (to.length==1||dialog.message.contains(historicalListeners?"every recipient sees all the others":"everyone sees who else it went to")),"Exact attachment preview and group disclosure");
    }
    classify(call);point("request",actor,binding,input);
   }
 
   AlertDialog dialog(int actor){return plugins[actor].activity.dialogs.getLast();}
   void approve(int actor,String mode)throws Exception{
+   check(historicalListeners,"Only the historical plugin shows a native review");
+   Looper.runMain(()->dialog(actor).clickSend());
+   drain();classify(reviewCalls[actor]);point("approve",actor,mode);
+  }
+
+  /** The agent bridge's sendMms: no card can confirm an MMS, so it is refused. */
+  void request(int actor,int binding,String input)throws Exception{
+   PluginCall call=new PluginCall(message(binding,input));
+   plugins[actor].sendMms(call);drain();classify(call);
+   check(call.answered&&call.rejection!=null,"The agent bridge answers an MMS with a refusal only");
+   point("request",actor,binding,input);
+  }
+
+  /** The owner's Send in the Messages composer, through the launcher port's exact entry point. */
+  void composerSend(int actor,PluginCall call,int binding)throws Exception{
+   var method=AlphaTelephonyPlugin.class.getDeclaredMethod("sendComposed",PluginCall.class,boolean.class,java.util.function.Consumer.class);
+   method.setAccessible(true);
+   method.invoke(plugins[actor],call,group(binding),(java.util.function.Consumer<Runnable>)Runnable::run);
+  }
+
+  void compose(int actor,int binding,String input,String mode)throws Exception{
    context.radio.mode=mode;
    if(mode.equals("begin-before"))faults.add("before");
    if(mode.equals("end-before"))faults.addAll(List.of("pass","pass","before"));
-   Looper.runMain(()->dialog(actor).clickSend());
-   drain();context.radio.mode="complete";
+   PluginCall call=new PluginCall(message(binding,input));
+   composerSend(actor,call,binding);drain();context.radio.mode="complete";
    check(faults.isEmpty(),"Injected storage refusal reached intended boundary");
-   classify(reviewCalls[actor]);positiveBinding=reviews[actor];point("approve",actor,mode);
+   check(call.answered,"Every composer send answers within its macrostep");
+   classify(call);composedBinding=binding;point("compose",actor,binding,input,mode);
+  }
+
+  /** Two composer sends with one operation ID, both queued on the send worker before either is admitted. */
+  void composeTogether(int first,int second)throws Exception{
+   CountDownLatch gate=new CountDownLatch(1);
+   SmsTelephony.WORK.execute(()->{try{gate.await();}catch(InterruptedException stop){throw new AssertionError(stop);}});
+   PluginCall a=new PluginCall(message(first,"valid")),b=new PluginCall(message(second,"valid"));
+   composerSend(1,a,first);composerSend(2,b,second);
+   gate.countDown();drain();
+   check(a.answered&&b.answered,"Both composer sends answer");
+   classify(a);
+   check(replyBinding==first&&replyKind.equals(group(first)?"mms-send":"sms-send"),"The first send receives its own receipt");
+   classify(b);composedBinding=second;point("composeTogether",first,second);
   }
 
   void preflightConflict(int actor,String field)throws Exception{
@@ -218,10 +260,8 @@ public final class MmsDispatchTraces {
     default -> throw new AssertionError(field);
    }
    PluginCall call=new PluginCall(data);
-   int dialogs=plugins[actor].activity.dialogs.size();
-   plugins[actor].sendMms(call);drain();classify(call);
-   check(reply.equals("invalid")&&replyBinding==0&&plugins[actor].activity.dialogs.size()==dialogs,
-    "MMS preflight checks the exact reviewed "+field);
+   composerSend(actor,call,1);drain();classify(call);
+   check(reply.equals("invalid")&&replyBinding==0,"MMS preflight checks the exact composed "+field);
    point("preflightConflict",actor,field);
   }
 
@@ -237,15 +277,6 @@ public final class MmsDispatchTraces {
     journal.decide("synthetic-filler-"+i,to,BODY,SUB,"cancelled",NOW,context.boot);
    check(readMemory()==null&&readDisk()==null&&tombstoneBinding()==1,"Capacity retires the exact durable MMS binding");
    point("prune");
-  }
-
-  void cancel(int actor,boolean exact)throws Exception{
-   JSObject data=new JSObject();data.put("operationId",exact?OP:"other-operation");
-   PluginCall cancel=new PluginCall(data);
-   plugins[actor].cancelSmsReview(cancel);drain();
-   check(cancel.answered&&cancel.rejection==null,"Exact cancellation request resolved");
-   if(exact)classify(reviewCalls[actor]);
-   point("cancel",actor,exact);
   }
 
   void readback(int actor,boolean mms)throws Exception{
@@ -273,7 +304,6 @@ public final class MmsDispatchTraces {
     case "locked" -> context.lock.locked=value;
     case "carrier" -> context.radio.carrierEnabled=value;
     case "size" -> context.radio.carrierLimit=value?300*1024:1;
-    case "sim" -> context.subscriptions.revision=value?1:2;
     case "provider" -> context.provider.refuseMmsPart=!value;
     default -> throw new AssertionError(kind);
    }
@@ -289,7 +319,7 @@ public final class MmsDispatchTraces {
    if(historicalListeners)sharedField("listener").set(null,null);
    else ((Set<?>)sharedField("LISTENERS").get(null)).clear();
    context.dynamicReceivers.clear();if(reboot)context.boot++;
-   load();process++;reply="none";replyKind="none";replyBinding=0;positiveBinding=0;
+   load();process++;reply="none";replyKind="none";replyBinding=0;composedBinding=0;
    point("restart",reboot);
   }
 
@@ -298,8 +328,6 @@ public final class MmsDispatchTraces {
   }
 
   JSONObject observe()throws Exception{
-   int review1=Trace.read(plugins[1],"reviewCall")==null?0:reviews[1];
-   int review2=Trace.read(plugins[2],"reviewCall")==null?0:reviews[2];
    int mmsBox=context.provider.mms.isEmpty()?0:(int)context.provider.mms.values().iterator().next().get(Telephony.Mms.MESSAGE_BOX);
    JSONArray listeners=new JSONArray(),deliveries=new JSONArray();
    Set<?> registered=registeredListeners();
@@ -310,20 +338,22 @@ public final class MmsDispatchTraces {
    }
    check(registered.size()==listeners.length(),"Every native listener belongs to an observed current bridge");
    JSONObject events=new JSONObject().put("listeners",listeners).put("deliveries",deliveries);
-   return Trace.fields("groupRecipients",to.length==2,"reviewA",review(review1,1),"reviewB",review(review2,2),"reply",reply,
-    "replyKind",replyKind,"replyBinding",replyBinding,"positiveBinding",positiveBinding,
+   return Trace.fields("groupRecipients",to.length==2,"source",source,"reply",reply,
+    "replyKind",replyKind,"replyBinding",replyBinding,"composedBinding",composedBinding,
     "memory",record(readMemory()),"disk",record(readDisk()),"tombstoneBinding",tombstoneBinding(),
     "smsAttempts",context.radio.attempts,"mmsAttempts",context.radio.mmsAttempts,"mmsAccepted",context.radio.multimedia.size(),
     "files",files(),"mmsBox",mmsBox,"deletedMms",context.provider.deletedMms,"events",events,
     "role",context.role,"carrier",context.radio.carrierEnabled,"size",context.radio.carrierLimit>1,
-    "sim",context.subscriptions.revision==1,"provider",!context.provider.refuseMmsPart,"locked",context.lock.locked,
+    "provider",!context.provider.refuseMmsPart,"locked",context.lock.locked,
     "process",process,"boot",context.boot);
   }
-  JSONObject review(int binding,int actor){return new JSONObject().put("binding",binding).put("sim",binding!=0&&reviewSims[actor]);}
-  void point(String name,Object... args)throws Exception{trace.step(name,observe(),args);}
+  void point(String name,Object... args)throws Exception{
+   source=name.equals("request")?"agent":Set.of("compose","composeTogether","preflightConflict").contains(name)?"composer":"none";
+   trace.step(name,observe(),args);
+  }
 
   void close()throws Exception{
-   Looper.runMain(()->{for(int i=1;i<=2;i++)plugins[i].handleOnDestroy();});
+   Looper.runMain(()->{for(int i=1;i<=2;i++)plugins[i].fixtureDestroy();});
    SmsTelephony.WORK.shutdown();SmsTelephony.WORK.awaitTermination(5,TimeUnit.SECONDS);
    try(var entries=Files.walk(context.noBackup.toPath())){
     for(var entry:entries.sorted(Comparator.reverseOrder()).toList())Files.delete(entry);
@@ -336,98 +366,122 @@ public final class MmsDispatchTraces {
   String mode=args[0];
   Fixture f=new Fixture(mode,mode.equals("group-carrier-confirm"));
   try{
-   switch(mode){
-    case "mms-attachment-conflict":
-     f.request(1,1,"valid");f.request(2,2,"valid");f.approve(1,"complete");f.approve(2,"complete");
-     check(f.reply.equals("invalid")&&f.replyKind.equals("none")&&f.replyBinding==0&&
-      f.context.radio.mmsAttempts==1&&f.files()==1&&f.binding(f.readDisk())==1,
-      "Conflicting MMS approval must reject: "+f.reply+"/"+f.replyKind+"/"+f.replyBinding);
-     f.request(2,2,"valid");
-     break;
-    case "sms-first-mms-receives-sms":
-     f.request(1,3,"valid");f.request(2,1,"valid");f.approve(1,"complete");f.approve(2,"complete");
-     check(f.reply.equals("invalid")&&f.replyKind.equals("none")&&f.replyBinding==0&&
-      f.context.radio.attempts==1&&f.context.radio.mmsAttempts==0&&f.files()==0&&f.binding(f.readDisk())==3,
-      "Cross-kind MMS approval must reject: "+f.reply+"/"+f.replyKind+"/"+f.replyBinding);
-     f.request(2,1,"valid");f.readback(2,true);f.readback(1,false);
-     break;
-    case "mms-first-sms-rejected":
-     f.request(1,1,"valid");f.request(2,3,"valid");f.approve(1,"complete");f.approve(2,"complete");
-     check(f.reply.equals("invalid")&&f.replyBinding==0&&f.context.radio.attempts==0&&
-      f.context.radio.mmsAttempts==1,"Staged SMS positive recovery refuses the same-ID MMS receipt");
-     f.request(2,3,"valid");f.readback(2,false);f.readback(1,true);
-     break;
-    case "exact-review":
-     f.request(1,1,"valid");f.request(2,1,"valid");f.approve(1,"complete");f.approve(2,"complete");f.request(2,1,"valid");
-     break;
-    case "preflight-revalidates-reviewed-tuple":
-     f.request(1,1,"valid");f.approve(1,"complete");
-     f.preflightConflict(2,"body");f.preflightConflict(2,"recipients");f.preflightConflict(2,"sim");f.request(2,2,"valid");
-     check(f.context.radio.mmsAttempts==1&&f.files()==1&&f.binding(f.readDisk())==1,"Preflight preserves the original accepted MMS");
-     break;
-    case "pruned-exact-review":
-    case "pruned-conflicting-review":
-     int lateBinding=mode.equals("pruned-exact-review")?1:2;
-     String refusal=lateBinding==1?"expired":"invalid";
-     f.request(1,1,"valid");f.request(2,lateBinding,"valid");f.approve(1,"complete");f.callback("complete",true);
-     f.prune();f.approve(2,"complete");
-     check(f.reply.equals(refusal)&&f.replyBinding==0&&f.context.radio.mmsAttempts==1&&f.files()==0,
-      "A pruned late MMS approval reports the exact tombstone refusal and clears its PDU");
-     f.restart(false);f.request(2,lateBinding,"valid");f.readback(1,true);
-     break;
-    case "group-carrier-confirm":
-     f.request(1,1,"valid");f.approve(1,"complete");f.callback("bad-uri",true);f.callback("foreign-kind",true);
-     f.callback("failure-conf",true);f.readback(1,true);
-     break;
-    case "preview-invalid-size-and-cancel":
-     f.request(1,1,"bad-bytes");f.controls("size",false);f.request(1,1,"valid");f.controls("size",true);
-     f.request(1,1,"valid");f.request(1,2,"valid");f.cancel(1,false);f.cancel(1,true);
-     Looper.runMain(()->f.dialog(1).clickSend());drain();
-     f.trace.stutter("retired exact review ignores its captured positive callback",f.observe());
-     f.request(2,1,"valid");
-     break;
-    case "carrier-changed-after-review":
-     f.request(1,1,"valid");f.controls("carrier",false);f.approve(1,"complete");f.readback(2,true);
-     break;
-    case "sim-changed-after-review":
-     f.request(1,1,"valid");f.controls("sim",false);f.approve(1,"complete");f.readback(2,true);
-     break;
-    case "begin-refusal-cleans-pdu":
-     f.request(1,1,"valid");f.approve(1,"begin-before");f.request(2,1,"valid");
-     break;
-    case "part-refusal-cleans-outbox":
-     f.controls("provider",false);f.request(1,1,"valid");f.approve(1,"complete");f.callback("unreadable-conf",true);f.readback(1,true);
-     break;
-    case "radio-refusal-before-handoff":
-     f.request(1,1,"valid");f.approve(1,"throw-before");f.request(2,1,"valid");
-     break;
-    case "uncertain-radio-handoff":
-     f.request(1,1,"valid");f.approve(1,"throw-after");f.request(2,1,"valid");
-     f.callback("complete",false);f.readback(1,true);
-     break;
-    case "interrupted-durable-dispatch":
-     f.request(1,1,"valid");f.approve(1,"end-before");f.restart(false);f.readback(2,true);
-     f.callback("complete",true);f.request(1,1,"valid");
-     break;
-    case "role-loss-before-callback":
-     f.request(1,1,"valid");f.approve(1,"complete");f.controls("role",false);
-     f.controls("locked",true);f.callback("complete",true);f.readback(1,true);
-     f.controls("locked",false);f.readback(1,true);
-     break;
-    case "volatile-callback-evidence":
-     f.request(1,1,"valid");f.approve(1,"complete");f.callback("before",true);f.readback(1,true);
-     f.restart(false);f.readback(1,true);
-     break;
-    case "committed-callback-refusal":
-     f.request(1,1,"valid");f.approve(1,"complete");f.callback("after",false);
-     f.restart(false);f.readback(1,true);
-     break;
-    case "boot-without-receipt":
-     f.request(1,1,"valid");f.approve(1,"complete");f.restart(true);f.request(1,1,"valid");
-     break;
-    default: throw new AssertionError(mode);
-   }
+   if(historicalListeners)historical(f,mode);else current(f,mode);
    java.lang.System.out.print(f.trace.value);
   } finally {f.close();}
+ }
+
+ /** The raw-pin regressions of the shared plugin's native MMS review, before the staged repair. */
+ static void historical(Fixture f,String mode)throws Exception{
+  switch(mode){
+   case "mms-attachment-conflict":
+    f.review(1,1,"valid");f.review(2,2,"valid");f.approve(1,"complete");f.approve(2,"complete");
+    check(f.reply.equals("invalid")&&f.replyKind.equals("none")&&f.replyBinding==0&&
+     f.context.radio.mmsAttempts==1&&f.files()==1&&f.binding(f.readDisk())==1,
+     "Conflicting MMS approval must reject: "+f.reply+"/"+f.replyKind+"/"+f.replyBinding);
+    break;
+   case "sms-first-mms-receives-sms":
+    f.review(1,3,"valid");f.review(2,1,"valid");f.approve(1,"complete");f.approve(2,"complete");
+    check(f.reply.equals("invalid")&&f.replyKind.equals("none")&&f.replyBinding==0&&
+     f.context.radio.attempts==1&&f.context.radio.mmsAttempts==0&&f.files()==0&&f.binding(f.readDisk())==3,
+     "Cross-kind MMS approval must reject: "+f.reply+"/"+f.replyKind+"/"+f.replyBinding);
+    break;
+   default: throw new AssertionError("Unknown historical schedule "+mode);
+  }
+ }
+
+ static void current(Fixture f,String mode)throws Exception{
+  switch(mode){
+   case "agent-bridge-refuses-mms":
+    f.request(1,1,"valid");f.request(2,2,"bad-bytes");
+    check(f.context.radio.mmsAttempts==0&&f.readDisk()==null&&f.files()==0&&f.context.provider.mms.isEmpty(),
+     "The agent bridge reads, journals, stages and sends nothing for an MMS");
+    f.controls("locked",true);f.request(1,1,"valid");f.controls("locked",false);
+    break;
+   case "mms-attachment-conflict":
+    f.composeTogether(1,2);
+    check(f.reply.equals("invalid")&&f.replyKind.equals("none")&&f.replyBinding==0&&
+     f.context.radio.mmsAttempts==1&&f.files()==1&&f.binding(f.readDisk())==1,
+     "Conflicting MMS approval must reject: "+f.reply+"/"+f.replyKind+"/"+f.replyBinding);
+    f.compose(2,2,"valid","complete");
+    break;
+   case "sms-first-mms-receives-sms":
+    f.composeTogether(3,1);
+    check(f.reply.equals("invalid")&&f.replyKind.equals("none")&&f.replyBinding==0&&
+     f.context.radio.attempts==1&&f.context.radio.mmsAttempts==0&&f.files()==0&&f.binding(f.readDisk())==3,
+     "Cross-kind MMS approval must reject: "+f.reply+"/"+f.replyKind+"/"+f.replyBinding);
+    f.compose(2,1,"valid","complete");f.readback(2,true);f.readback(1,false);
+    break;
+   case "mms-first-sms-rejected":
+    f.composeTogether(1,3);
+    check(f.reply.equals("invalid")&&f.replyBinding==0&&f.context.radio.attempts==0&&
+     f.context.radio.mmsAttempts==1,"Composer SMS recovery refuses the same-ID MMS receipt");
+    f.compose(2,3,"valid","complete");f.readback(2,false);f.readback(1,true);
+    break;
+   case "exact-compose":
+    f.composeTogether(1,1);f.compose(2,1,"valid","complete");
+    break;
+   case "preflight-revalidates-composed-tuple":
+    f.compose(1,1,"valid","complete");
+    f.preflightConflict(2,"body");f.preflightConflict(2,"recipients");f.preflightConflict(2,"sim");f.compose(2,2,"valid","complete");
+    check(f.context.radio.mmsAttempts==1&&f.files()==1&&f.binding(f.readDisk())==1,"Preflight preserves the original accepted MMS");
+    break;
+   case "pruned-exact-compose":
+   case "pruned-conflicting-compose":
+    int lateBinding=mode.equals("pruned-exact-compose")?1:2;
+    String refusal=lateBinding==1?"expired":"invalid";
+    f.compose(1,1,"valid","complete");f.callback("complete",true);
+    f.prune();f.compose(2,lateBinding,"valid","complete");
+    check(f.reply.equals(refusal)&&f.replyBinding==0&&f.context.radio.mmsAttempts==1&&f.files()==0,
+     "A pruned operation reports the exact tombstone refusal to a later composer send and stages nothing");
+    f.restart(false);f.compose(2,lateBinding,"valid","complete");f.readback(1,true);
+    break;
+   case "group-carrier-confirm":
+    f.compose(1,1,"valid","complete");f.callback("bad-uri",true);f.callback("foreign-kind",true);
+    f.callback("failure-conf",true);f.readback(1,true);
+    break;
+   case "invalid-bytes-and-size":
+    f.compose(1,1,"bad-bytes","complete");f.controls("size",false);f.compose(1,1,"valid","complete");
+    check(f.readDisk()==null&&f.files()==0,"An oversized or mismatched message is neither journaled nor staged");
+    f.controls("size",true);f.compose(2,1,"valid","complete");
+    break;
+   case "carrier-disabled-denies":
+    f.controls("carrier",false);f.compose(1,1,"valid","complete");f.readback(2,true);
+    break;
+   case "begin-refusal-cleans-pdu":
+    f.compose(1,1,"valid","begin-before");f.compose(2,1,"valid","complete");
+    break;
+   case "part-refusal-cleans-outbox":
+    f.controls("provider",false);f.compose(1,1,"valid","complete");f.callback("unreadable-conf",true);f.readback(1,true);
+    break;
+   case "radio-refusal-before-handoff":
+    f.compose(1,1,"valid","throw-before");f.compose(2,1,"valid","complete");
+    break;
+   case "uncertain-radio-handoff":
+    f.compose(1,1,"valid","throw-after");f.compose(2,1,"valid","complete");
+    f.callback("complete",false);f.readback(1,true);
+    break;
+   case "interrupted-durable-dispatch":
+    f.compose(1,1,"valid","end-before");f.restart(false);f.readback(2,true);
+    f.callback("complete",true);f.compose(1,1,"valid","complete");
+    break;
+   case "role-loss-before-callback":
+    f.compose(1,1,"valid","complete");f.controls("role",false);
+    f.controls("locked",true);f.callback("complete",true);f.readback(1,true);
+    f.controls("locked",false);f.readback(1,true);
+    break;
+   case "volatile-callback-evidence":
+    f.compose(1,1,"valid","complete");f.callback("before",true);f.readback(1,true);
+    f.restart(false);f.readback(1,true);
+    break;
+   case "committed-callback-refusal":
+    f.compose(1,1,"valid","complete");f.callback("after",false);
+    f.restart(false);f.readback(1,true);
+    break;
+   case "boot-without-receipt":
+    f.compose(1,1,"valid","complete");f.restart(true);f.compose(1,1,"valid","complete");
+    break;
+   default: throw new AssertionError(mode);
+  }
  }
 }

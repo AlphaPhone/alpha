@@ -17,9 +17,18 @@ for(const theme of ['light','dark'])for(const viewport of [{width:360,height:640
  const recipient=page.getByRole('button',{name:'Remove '+address,exact:true});await recipient.scrollIntoViewIfNeeded();
  expect(await recipient.evaluate(el=>{const b=el.getBoundingClientRect(),p=el.parentElement!.getBoundingClientRect();return b.left>=p.left-1&&b.right<=p.right+1&&el.scrollWidth<=el.clientWidth+1;})).toBe(true);
  await body.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('editable-draft.png')});
- for(const name of ['Save draft','Discard draft','Send email']){const box=(await page.getByRole('button',{name,exact:true}).boundingBox())!;expect(box.y).toBeGreaterThanOrEqual(0);expect(box.y+box.height).toBeLessThanOrEqual(viewport.height);}
- await page.getByRole('button',{name:'Save draft',exact:true}).click();
- await expect(page.getByText('Saved locally',{exact:true})).toBeVisible();await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore local draft',exact:true}).click();
+ for(const name of ['Back from draft','Attach file','Send email']){const box=(await page.getByRole('button',{name,exact:true}).boundingBox())!;expect(box.y).toBeGreaterThanOrEqual(0);expect(box.y+box.height).toBeLessThanOrEqual(viewport.height);}
+ await expect(page.getByRole('button',{name:'Save draft',exact:true})).toHaveCount(0);
+ const composer=page.locator('[data-alpha-subview="inbox-composing"]');
+ await expect(composer.getByRole('button',{name:'Discard draft',exact:true})).toHaveCount(0);
+ const attach=composer.getByRole('button',{name:'Attach file',exact:true});
+ const send=composer.getByRole('button',{name:'Send email',exact:true});
+ expect(await attach.evaluate(el=>el.parentElement?.dataset.alphaAppHeader)).toBe('detail');
+ const attachmentBox=(await attach.boundingBox())!,sendBox=(await send.boundingBox())!;
+ expect(attachmentBox.x+attachmentBox.width).toBeLessThanOrEqual(sendBox.x);
+ await expect(page.getByText('Unsaved local draft',{exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ await expect(body).toHaveCount(0);await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore local draft',exact:true}).click();
  await expect(body).toHaveValue('A retained local draft.\nSecond paragraph.');await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Compact draft');
  await expect(page.getByRole('textbox',{name:'Cc',exact:true})).toHaveValue('copy@example.invalid');await expect(page.getByRole('textbox',{name:'Bcc',exact:true})).toHaveValue('blind@example.invalid');
  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.dev.app.inbox')!).sent.length)).toBe(0);

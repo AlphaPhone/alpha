@@ -1,14 +1,16 @@
 // Shared Inbox adapter harness: the real adapter, drafts and review controllers in a vm realm with a
 // closed provider fixture and a fixed clock. No network, real account or mail; nothing is dispatched.
 import React from 'react';
-import {MailFolderPicker} from '../.eliza/client-features/plugins/plugin-inbox/src/components/mailbox/MailFolderPicker.tsx';
+import {createAddressBookClient,isIncompleteAddressBookContact} from '../.eliza/client-features/packages/contracts/src/native-address-book.ts';
+import {literalMailAddress} from '../apps/app/src/ui/mailbox/drafts-controller.ts';
+import {MailFolderPicker} from '../apps/app/src/ui/mailbox/MailFolderPicker.tsx';
 import {mailSenderImage} from '../apps/app/src/runtime/mail-sender-image.ts';
 import {decodeMailPreview} from '../apps/app/src/runtime/mail-preview.ts';
 import {readGmailAccountChoice,saveGmailAccountChoice} from '../apps/app/src/runtime/gmail-account-selection.ts';
 import {GmailReadAhead} from '../apps/app/src/runtime/gmail-read-ahead.ts';
 import {formatMonthDay,formatTime,formatFullDateTime,weekdayName} from '../apps/app/src/prototype/locale-time.ts';
 // Existing shared formatter supplies fixture presentation; retention tests do not depend on its wording.
-import {formatBytes} from '../.eliza/client-features/packages/ui/src/mobile-shell/photos-view.ts';
+import {formatBytes} from '../apps/app/src/ui/mobile-shell/photos-view.ts';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {prototypeScript} from './fixtures/prototype-script.ts';
@@ -22,9 +24,10 @@ import { linkifyMailText, linkTextMismatch } from '../.eliza/client-features/plu
 import * as mailbox from '../apps/app/src/runtime/gmail-mailbox.ts';
 import * as googleAccounts from '../apps/app/src/runtime/google-accounts.ts';
 import * as grants from '../apps/app/src/runtime/gmail-grants.ts';
-import {createMailReviewController, type MailReviewView} from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/review-controller.ts';
-import {createMailDraftsController, type MailDraftsController, type SuggestionTarget} from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/drafts-controller.ts';
+import {createMailReviewController, type MailReviewView} from '../apps/app/src/ui/mailbox/review-controller.ts';
+import {createMailDraftsController, type MailDraftsController, type SuggestionTarget} from '../apps/app/src/ui/mailbox/drafts-controller.ts';
 import * as mailboxList from '../.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts';
+import * as mailboxListText from '../apps/app/src/ui/mailbox/mailbox-list.ts';
 
 import type {
  GmailAccount, GmailInboxCapabilities, GmailInboxOperationKind, GmailInboxReceipt, GmailDraftContent,
@@ -199,6 +202,7 @@ function scenario({caps={},accounts=null,nativePlatform=false}: {caps?: Partial<
  const serviceReadCache = async (): Promise<Cache | null> => null;
 
  const sandbox=inboxAdapterBindings({MailboxListCache:class extends mailboxList.MailboxListCache{get(key: string,now=clock){return super.get(key,now);}},MailBodyCache:class extends mailboxList.MailBodyCache<Read>{remember(key: string,body: Read,now=clock){return super.remember(key,body,now);}},serviceReadCache,alphaClient:{getState:()=>({context:{sensitive:false}})},reviewOwnNoticeQuestion:(options: ReviewNotice)=>{mailNotices.review=options;return ()=>{};},releaseGmailQuestion:async()=>{mailNotices.released++;mailNotices.tap=null;},configureGmailBackground:async()=>{},withdrawGmailBackground:async (grant?: string)=>{mailNotices.withdrawals++;mailNotices.withdrawn.push(grant??null);},pendingGmailNotice:async (): Promise<MailNoticeTap | null>=>mailNotices.tap,consumeGmailNotice:async (token: string)=>{mailNotices.consumed.push(token);mailNotices.tap=null;},onGmailNotice:async (fn: Action)=>{mailNotices.listener=fn;return {remove:async()=>{}};},readGmailAccountChoice:(owner: Parameters<typeof readGmailAccountChoice>[0])=>readGmailAccountChoice(owner,choices),saveGmailAccountChoice:(owner: Parameters<typeof saveGmailAccountChoice>[0], id: string | null)=>saveGmailAccountChoice(owner,id,choices),Date:FixedDate,inboxUnsaved,
+  createAddressBookClient,isIncompleteAddressBookContact,literalMailAddress,aospImage:false,setTimeout,clearTimeout,
   registerPlugin:()=>native,
   Capacitor:{isNativePlatform:()=>nativePlatform},
   secureConnectionStore:inboxMemoryStore(slots),
@@ -233,7 +237,7 @@ export class InboxFixtureShell {
 
 export function inboxAdapterBindings<T extends object>(overrides: T) {
  return {
-  ...mailboxList, formatMonthDay, formatTime, formatFullDateTime, weekdayName, formatBytes,
+  ...mailboxList, ...mailboxListText, formatMonthDay, formatTime, formatFullDateTime, weekdayName, formatBytes,
   createMailReviewController, createMailDraftsController, reviewMailAttachment,
   Capacitor:{isNativePlatform:()=>false},
   cloudServiceName, linkifyMailText, linkTextMismatch, React, MailFolderPicker, mailSenderImage, decodeMailPreview,

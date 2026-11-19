@@ -28,7 +28,7 @@ class EmbeddingInputsTest(unittest.TestCase):
             with self.subTest(changed=changed),self.assertRaises(ValueError):module.validate_metadata({**value,**changed},'11','a'*64)
 
     def test_repository_admission_follows_the_same_id_across_owner_transfer(self):
-        for name in ('eliza-research/alpha', 'alphacompute/alpha'):
+        for name in ('fixture-owner/alpha', 'alphacompute/alpha'):
             with self.subTest(name=name):
                 env = {'GITHUB_REPOSITORY': name, 'GITHUB_REPOSITORY_ID': str(module.REPOSITORY_ID)}
                 self.assertTrue(module.canonical_repository(env))

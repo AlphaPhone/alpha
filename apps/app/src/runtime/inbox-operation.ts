@@ -1,4 +1,5 @@
 import { reviewMailAttachment } from './inbox-attachment.ts';
+import { MailReviewNotice } from '../ui/mailbox/mail-operation-messages';
 import {
   InboxOperation as SharedInboxOperation,
   inboxOperationKey,
@@ -13,11 +14,11 @@ export {
   composerKind,
   inboxOperationKey,
   reviewBinding,
-  reviewBindingRefusal,
   type ComposerEmail,
   type InboxOperationRecord,
   type ReviewBinding,
 } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/operation-journal.ts';
+export { reviewBindingRefusal } from '../ui/mailbox/review-binding-refusal';
 export {
   attachmentBytes,
   checkOutgoingAttachments,
@@ -59,14 +60,16 @@ export function regressedReceipt(saved: SavedReceiptPhase | null | undefined, re
  * The receipt read the operation journal uses, for one owner's saved operations. Once an outcome
  * is recorded (`observed`), a `prepared` answer for the same request is refused before the journal
  * sees it: the saved receipt and phase stay, so the request can never be confirmed and dispatched
- * a second time, and a held cleanup stays held. Every other answer passes through unchanged.
+ * a second time, and a held cleanup stays held. Every other answer passes through unchanged. The
+ * refusal is Alpha's own sentence, thrown as a MailReviewNotice so the mail review shows it as
+ * written instead of its generic fallback.
  */
 export function receiptReadGuard(read: InboxOperationClient['gmailOperation'], store: Pick<InboxOperationStore, 'read'>, owner: string): InboxOperationClient['gmailOperation'] {
   return async (grant, request, signal) => {
     const receipt = await read(grant, request, signal);
     if (receipt?.state !== 'prepared') return receipt;
     const saved = await store.read<InboxOperationRecord>(await inboxOperationKey(owner, grant));
-    if (regressedReceipt(saved, request, receipt.state)) throw new Error(regressedReceiptRefusal);
+    if (regressedReceipt(saved, request, receipt.state)) throw new MailReviewNotice(regressedReceiptRefusal);
     return receipt;
   };
 }

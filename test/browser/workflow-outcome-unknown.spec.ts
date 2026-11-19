@@ -50,7 +50,7 @@ test('checking workflow editing support keeps Run visible and disabled without c
  await setup(page);await page.evaluate(()=>{(window as any).workflowReviewFlows.effect.metadata={};});await page.getByRole('region',{name:'Workflows',exact:true}).getByText('Save agenda note',{exact:true}).first().click();
  await expect(page.getByRole('button',{name:'Run now',exact:true})).toBeEnabled();
  await page.evaluate(async()=>{const {WorkflowProtocol}=await import('/src/runtime/workflow-protocol.ts');WorkflowProtocol.prototype.metadataSupported=()=>new Promise<boolean>(resolve=>(window as any).releaseWorkflowEditing=resolve);});
- await page.getByRole('button',{name:'Change',exact:true}).click();await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseWorkflowEditing)).toBe('function');
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseWorkflowEditing)).toBe('function');
  await expect(page.getByRole('button',{name:'Run now',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Run now',exact:true})).toBeDisabled();await expect(page.getByRole('status',{name:'Workflow running',exact:true})).toHaveCount(0);
  await page.evaluate(()=>(window as any).releaseWorkflowEditing(false));await expect(page.getByRole('button',{name:'Run now',exact:true})).toBeEnabled();expect(await posts(page,'/run')).toBe(0);
 });
@@ -67,10 +67,10 @@ test('side-effecting workflow: interrupted run is shown as outcome unknown, neve
  expect(await posts(page,'/run')).toBe(0);expect(await posts(page,'/cancel')).toBe(0);
  await page.getByRole('button',{name:'Back to Save agenda note',exact:true}).click();
  // Removal: upstream refuses while the run is unfinished, so the explicit acknowledgement is a confirmed cancellation.
- await page.getByRole('button',{name:'Remove workflow',exact:true}).click();await expect(page.getByText('1 interrupted. Completed actions stay.',{exact:true})).toBeVisible();expect(await posts(page,'/cancel')).toBe(0);
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();await expect(page.getByText('1 interrupted. Completed actions stay.',{exact:true})).toBeVisible();expect(await posts(page,'/cancel')).toBe(0);
  await page.getByRole('button',{name:'Cancel runs',exact:true}).click();await expect.poll(()=>posts(page,'/cancel')).toBe(1);await expect(page.getByText(/Interrupted runs cancelled; their earlier outcome remains unknown/).first()).toBeVisible();
- await expect(page.getByRole('button',{name:'cancelled · after an interrupted, unknown outcome execution',exact:true})).toBeVisible();expect(await posts(page,'/lifecycle')).toBe(0);
- await page.getByRole('button',{name:'Remove workflow',exact:true}).click();await expect(page.getByText('Keeps history; stops future runs.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeVisible();expect(await posts(page,'/lifecycle')).toBe(0);
+ await expect(page.getByRole('button',{name:'Cancelled · after an interrupted, unknown outcome execution',exact:true})).toBeVisible();expect(await posts(page,'/lifecycle')).toBe(0);
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();await expect(page.getByText('Keeps history; stops future runs.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeVisible();expect(await posts(page,'/lifecycle')).toBe(0);
  await page.getByRole('button',{name:'Remove',exact:true}).click();await expect.poll(()=>posts(page,'/lifecycle')).toBe(1);expect(await posts(page,'/run')).toBe(0);
 });
 
@@ -84,7 +84,7 @@ test('read-only digest: Run again is explicit, confirmed and creates a new run I
  await expect(page.getByText('Synthetic digest text',{exact:true})).toBeVisible();
  const sent=await page.evaluate(()=>(window as any).agentRequests.find((r:any)=>r.path.endsWith('/run')).body);expect(sent.expectedVersionId).toBe('digest-v1');expect(sent.submissionId).toMatch(/^[0-9a-f-]{36}$/);
  await page.getByRole('button',{name:'Back to Morning notes digest',exact:true}).click();
- await expect(page.getByRole('button',{name:'finished execution',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Interrupted execution',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Finished execution',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Interrupted execution',exact:true})).toBeVisible();
  expect(await posts(page,'/cancel')).toBe(0);expect(await posts(page,'/run')).toBe(1);
 });
 

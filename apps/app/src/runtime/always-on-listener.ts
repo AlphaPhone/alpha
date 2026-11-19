@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
-import {Sense,createSenseInvocationController,parseAssistantInvocation,parseInvocationUnlocked,parseListenerStatus,parseListenerStopReceipt,stopSenseListenerForChatOnly,type AssistantInvocation,type ListenerStatus} from '@elizaos/capacitor-system/sense';
+import {Sense,parseAssistantInvocation,parseInvocationUnlocked,parseListenerStatus,parseListenerStopReceipt,stopSenseListenerForChatOnly,type AssistantInvocation,type ListenerStatus} from '@elizaos/capacitor-system/sense';
 
+import {createSenseInvocationController} from '../ui/voice/sense-invocation';
 export type { AssistantInvocation, ListenerState, ListenerStatus } from '@elizaos/capacitor-system/sense';
 
 const listener = Sense;

@@ -1,22 +1,38 @@
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {returnToApps} from './app-navigation';
+import {preloadPageModules} from './helpers/page-modules';
 import {guardCalendarFixture as guardNoMedia} from './calendar-draft-readiness';
 import {test,expect,type Page} from '@playwright/test';
 test.beforeEach(async({context,page})=>{await guardNoMedia(context);await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());});
 // Gmail MVP flows against a controlled provider-boundary fixture: no real account, OAuth or mail.
-type Options={accounts?:string[];readState?:boolean;pages?:Record<string,number>;deferPaging?:boolean};
+type Options={accounts?:string[];readState?:boolean;pages?:Record<string,number>;deferPaging?:boolean;shiftedInboxPage?:boolean};
 async function setup(page:Page,options:Options={}){
  // Provider fixtures use local apps; they do not perform resident/Cloud onboarding.
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');
- await page.evaluate(async options=>{
-  const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
-  const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');
-  const {CloudProtocolError}=await import('/src/runtime/cloud-protocol.ts');
-  const w=window as any,slots:Record<string,unknown>={};w.gmSlots=slots;
+ await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/runtime/inbox-local-store.ts','/src/runtime/cloud-protocol.ts']);
+ await page.waitForFunction(()=>{
+  const state=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.getSnapshot();
+  return state.startupResolved&&!state.busy;
+ });
+ await page.evaluate(options=>{
+  const w=window as any,loaded=w.__alphaModules,slots:Record<string,unknown>={};w.gmSlots=slots;
+  const {connectionController:c}=loaded['/src/runtime/connection-ui.tsx'];
+  const {inboxLocalStore:s}=loaded['/src/runtime/inbox-local-store.ts'];
+  const {CloudProtocolError}=loaded['/src/runtime/cloud-protocol.ts'];
   s.read=async(key:string)=>structuredClone(slots[key]??null) as any;
-  s.compareExchange=async(key:string,prior:unknown,next:unknown)=>{if(JSON.stringify(slots[key]??null)!==JSON.stringify(prior))return {status:'conflict'};if(next===null)delete slots[key];else slots[key]=structuredClone(next);return {status:'saved'};};
+  s.compareExchange=async(key:string,prior:unknown,next:unknown)=>{
+   if(f.dispatchSaveGate&&(next as {phase?:string}|null)?.phase==='dispatching'){
+    f.dispatchSaveHeld=true;
+    await f.dispatchSaveGate;
+    f.dispatchSaveHeld=false;
+   }
+   if(JSON.stringify(slots[key]??null)!==JSON.stringify(prior))return {status:'conflict'};
+   if(next===null)delete slots[key];else slots[key]=structuredClone(next);
+   return {status:'saved'};
+  };
   const f=w.gm={searches:[] as any[],prepares:[] as any[],dispatches:[] as any[],disconnects:[] as string[],fail:null as any,failCursor:false,stale:false,gate:null as Promise<void>|null,dispatchState:'succeeded',accountReads:0,accountGate:null as Promise<void>|null,accountFailure:false,
+   dispatchSaveGate:null as Promise<void>|null,dispatchSaveHeld:false,hiddenIds:[] as string[],receiptReads:[] as string[],
    accounts:(options.accounts||['owner@example.test']).map((label,i)=>({connectionId:'grant-'+i,label,configured:true,connected:true,reason:'connected',grantedCapabilities:['google.gmail.triage','google.gmail.send','google.gmail.mailbox']}))};
   const mail=(id:string,extra:Record<string,unknown>={})=>({id,threadId:'thread-'+id,subject:'Subject '+id,from:'Sender '+id,fromEmail:'sender@example.test',to:['owner@example.test'],cc:[],replyTo:null,snippet:'Preview '+id,receivedAt:'2026-10-06T12:00:00Z',unread:false,...extra});
   const inbox=Array.from({length:options.pages?.inbox??1},(_,page)=>[mail('in-'+page+'-a',{unread:page===0}),mail('in-'+page+'-b')]);
@@ -34,7 +50,8 @@ async function setup(page:Page,options:Options={}){
     if(f.fail){const kind=f.fail;f.fail=null;if(kind==='offline')throw new TypeError('Failed to fetch');throw new CloudProtocolError('http',kind);}
     if(pageToken&&f.failCursor){f.failCursor=false;throw new CloudProtocolError('http',400,{error:'Invalid Gmail page token.'});}
     const pages=store[query]||[[]],index=pageToken?Number(pageToken.split(':')[1]):0;
-    return {messages:pages[index]||[],syncedAt:'sync',nextPageToken:index+1<pages.length?'cursor:'+(index+1):null};
+    const mailboxHistoryId=options.shiftedInboxPage&&query==='in:inbox'?String(index+1):undefined;
+    return {messages:(pages[index]||[]).filter(message=>!f.hiddenIds.includes(message.id)),syncedAt:'sync',mailboxHistoryId,nextPageToken:index+1<pages.length?'cursor:'+(index+1):null};
    },
    gmailRead:async(_grant:string,id:string)=>({message:all().find(m=>m.id===id),bodyText:'Body of '+id,historyId:'h-'+id,attachments:[]}),
    gmailThread:async(_grant:string,threadId:string)=>{const message=all().find(m=>m.threadId===threadId);return {messages:[{message,bodyText:'Body of '+message.id,historyId:'h-'+message.id,attachments:[]}],total:1,offset:0,historyId:'thread-history',nextOffset:null};},
@@ -52,7 +69,7 @@ async function setup(page:Page,options:Options={}){
     const receipt={...receipts[requestId],state:'succeeded',providerResult:{messageId:proposal.messageId,labelIds:[],historyId:'h2-'+proposal.messageId,...(proposal.kind.startsWith('mark-')?{unread:proposal.kind==='mark-unread'}:{})},reviewDigest};
     receipts[requestId]=receipt;return receipt;
    },
-   gmailOperation:async(_grant:string,requestId:string)=>receipts[requestId],
+   gmailOperation:async(_grant:string,requestId:string)=>{f.receiptReads.push(requestId);return receipts[requestId];},
    disconnectGmail:async(id:string)=>{f.disconnects.push(id);f.accounts=f.accounts.map((a:any)=>a.connectionId===id?{...a,connected:false,reason:'disconnected',grantedCapabilities:[]}:a);},
    initiateGmail:async()=>{throw Error('No live OAuth in fixture');},
   };
@@ -61,7 +78,7 @@ async function setup(page:Page,options:Options={}){
  },options);
 }
 const gm=(page:Page)=>page.evaluate(()=>(window as any).gm);
-// The Home app grid is the shared mobile shell's (prototype/home-shell.ts); its tile marks unread with this badge.
+// The Home app grid is Alpha's mobile shell (ui/mobile-shell, installed by prototype/home-shell.ts); its tile marks unread with this badge.
 const inboxBadge=(page:Page)=>page.getByRole('button',{name:'Inbox',exact:true}).locator('[data-mobile-shell-tile-badge]');
 
 for(const scenario of ['connected','empty','error','restored'] as const)test(`Shared email waits for Gmail account readiness: ${scenario}`,async({page})=>{
@@ -234,7 +251,6 @@ test('Share by email from Notes opens a prefilled local draft without sending',a
  await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Shared plan');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Shared plan\n\nFirst line\nSecond line');
- await expect(page.getByRole('status').filter({hasText:'nothing has been sent'})).toBeVisible();
  expect((await gm(page)).prepares).toEqual([]);
 });
 
@@ -252,7 +268,6 @@ test('compose From picker moves a new email directly to a chosen connected accou
  await expect(from).toHaveValue('grant-2');
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Moving subject');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Moving body');
- await expect(page.getByRole('status').filter({hasText:'Draft in third@example.test'})).toBeVisible();
  expect((await gm(page)).prepares).toEqual([]);
 });
 
@@ -330,14 +345,26 @@ test('From switcher returns the email to its account when the other account alre
  expect((await page.evaluate(()=>(window as any).gmSlots['inbox-drafts:v1:'+JSON.stringify(['production','fixture-owner','fixture-org','grant-1'])])).subject).toBe('Second saved');
 });
 
-for(const saved of [false,true])test(`Share to email opens a new populated draft and preserves ${saved?'saved':'unsaved'} earlier email`,async({page})=>{
- await setup(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();
+async function seedLegacyOwnerDraft(page: Page, subject: string, body: string) {
+ await page.evaluate(({subject,body})=>{
+  const owner=JSON.stringify(['production','fixture-owner','fixture-org','grant-0']);
+  (window as any).gmSlots['inbox-drafts:v1:'+owner]={version:1,id:'earlier-email',revision:'earlier-revision',owner,to:[],subject,body};
+ },{subject,body});
+}
+
+for(const legacy of [false,true])test(`Share to email opens a new populated draft and preserves ${legacy?'a legacy saved copy':'an earlier draft saved on Back'}`,async({page})=>{
+ await setup(page);
+ if(legacy)await seedLegacyOwnerDraft(page,'Earlier email','Earlier exact body');
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Compose',exact:true}).click();
- await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Earlier email');
- await page.getByRole('textbox',{name:'Message',exact:true}).fill('Earlier exact body');
- if(saved){await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByText('Saved locally on this device',{exact:true}).first()).toBeVisible();}
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);
+ if(!legacy){
+  await page.getByRole('button',{name:'Compose',exact:true}).click();
+  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Earlier email');
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Earlier exact body');
+  await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
+ }
+ await returnToApps(page);
  await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Shared selected note');
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('First line\nSecond line');
@@ -354,10 +381,9 @@ for(const saved of [false,true])test(`Share to email opens a new populated draft
 });
 
 for(const destination of ['another account','Home'] as const)test(`Shared email is retired when leaving for ${destination} during local preservation`,async({page})=>{
- await setup(page,{accounts:['owner@example.test','second@example.test']});await page.getByRole('button',{name:'Inbox',exact:true}).click();
- await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Compose',exact:true}).click();
- await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Keep earlier email');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Keep earlier body');
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);
+ await setup(page,{accounts:['owner@example.test','second@example.test']});
+ // Back now shelves new drafts. A legacy saved draft still moves during Share.
+ await seedLegacyOwnerDraft(page,'Keep earlier email','Keep earlier body');
  await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Retired share');await page.getByRole('textbox',{name:'Note',exact:true}).fill('Must not insert later');
  await page.evaluate(async()=>{
@@ -384,9 +410,9 @@ for(const destination of ['another account','Home'] as const)test(`Shared email 
 });
 
 test('Share to email preserves earlier edits when local preservation conflicts',async({page})=>{
- await setup(page);await page.getByRole('button',{name:'Inbox',exact:true}).click();await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Conflict protected email');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Protected exact body');
- await page.getByRole('button',{name:'Back from draft',exact:true}).click();await returnToApps(page);await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
+ await setup(page);
+ await seedLegacyOwnerDraft(page,'Conflict protected email','Protected exact body');
+ await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Refused share');await page.getByRole('textbox',{name:'Note',exact:true}).fill('Never replaces earlier email');
  await page.evaluate(async()=>{const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');const cas=s.compareExchange.bind(s);s.compareExchange=async(key,prior,next)=>key.startsWith('inbox-drafts:v1:shelf:')?{status:'conflict'}:cas(key,prior,next);});
  await page.getByRole('button',{name:'More',exact:true}).click();
@@ -394,4 +420,181 @@ test('Share to email preserves earlier edits when local preservation conflicts',
  await expect(page.getByText('Drafts changed in another window. Reload before continuing.',{exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Other mail folders',exact:true}).click();await page.getByRole('menuitemradio',{name:'Drafts',exact:true}).click();await page.getByRole('button',{name:'Local draft, Conflict protected email',exact:true}).click();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Conflict protected email');await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Protected exact body');
  expect((await gm(page)).prepares).toEqual([]);expect((await gm(page)).dispatches).toEqual([]);
+});
+
+async function mailOption(page: Page, name: string) {
+ await page.getByLabel('Mail options',{exact:true}).click();
+ await page.getByRole('menuitem',{name,exact:true}).click();
+}
+
+test('Inbox selection changes only the confirmed visible emails once',async({page})=>{
+ await setup(page,{pages:{inbox:2}});
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
+ await mailOption(page,'Select emails');
+ await mailOption(page,'Select all shown');
+ await expect(page.getByRole('heading',{name:'2 selected',exact:true})).toBeVisible();
+ await mailOption(page,'Move to Trash');
+ const review=page.getByRole('dialog',{name:'Move to Trash 2 emails?',exact:true});
+ await review.getByRole('button',{name:'No',exact:true}).click();
+ expect((await gm(page)).prepares).toEqual([]);
+ expect((await gm(page)).dispatches).toEqual([]);
+ await mailOption(page,'Move to Trash');
+ await review.getByRole('button',{name:'Yes',exact:true}).click();
+ const exact=['in-0-a','in-0-b'].map(messageId=>({kind:'trash',messageId,expectedHistoryId:'h-'+messageId}));
+ await expect.poll(async()=>(await gm(page)).dispatches).toEqual(exact);
+ expect((await gm(page)).prepares).toEqual(exact);
+ await expect(page.getByRole('status').filter({hasText:'Emails updated.'})).toBeVisible();
+});
+
+test('Inbox does not retain a selection across a refreshed first page',async({page})=>{
+ await setup(page,{pages:{inbox:2},shiftedInboxPage:true});
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ await page.getByRole('button',{name:'Load more',exact:true}).click();
+ const reload=page.getByRole('button',{name:'Load newer mail',exact:true});
+ await expect(reload).toBeVisible();
+ await mailOption(page,'Select emails');
+ await mailOption(page,'Select all shown');
+ await expect(page.getByRole('heading',{name:'4 selected',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeDisabled();
+
+ await page.evaluate(()=>{(window as any).gm.hiddenIds=['in-0-b'];});
+ await reload.click();
+ await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
+ await expect(page.getByText('Subject in-0-b',{exact:true})).toHaveCount(0);
+ await expect(page.getByRole('heading',{name:'Inbox',exact:true})).toBeVisible();
+ await mailOption(page,'Select emails');
+ await mailOption(page,'Select all shown');
+ await mailOption(page,'Archive');
+ await page.getByRole('dialog',{name:'Archive 1 email?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ await expect.poll(async()=>(await gm(page)).dispatches).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
+ expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
+});
+
+for(const retirement of ['leaves Inbox','withdraws Gmail changes'] as const)test(
+ `Inbox recovers a held Archive without dispatch when the owner ${retirement}`,async({page})=>{
+ await setup(page);
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
+ await page.evaluate(()=>{
+  const f=(window as any).gm;
+  f.dispatchSaveGate=new Promise<void>(resolve=>f.releaseDispatchSave=resolve);
+ });
+ await mailOption(page,'Select emails');
+ await mailOption(page,'Select all shown');
+ await mailOption(page,'Archive');
+ await page.getByRole('dialog',{name:'Archive 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ await expect.poll(async()=>(await gm(page)).dispatchSaveHeld).toBe(true);
+ const journal=await page.evaluate(()=>{
+  const slots=(window as any).gmSlots;
+  const key=Object.keys(slots).find(k=>k.startsWith('inbox-operation:v1:'))!;
+  return {key,requestId:slots[key].requestId,phase:slots[key].phase};
+ });
+ expect(journal.phase).toBe('review');
+
+ const homeInbox=page.getByRole('region',{name:'Home',exact:true}).getByRole('button',{name:'Inbox',exact:true});
+ if(retirement==='leaves Inbox'){
+  await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
+  await expect(homeInbox).toBeVisible();
+ }else{
+  const reads=(await gm(page)).accountReads;
+  await page.evaluate(()=>{
+   const f=(window as any).gm;
+   f.accounts[0].grantedCapabilities=['google.gmail.triage'];
+   window.dispatchEvent(new Event('alpha:google-accounts-changed'));
+  });
+  await expect.poll(async()=>(await gm(page)).accountReads).toBeGreaterThan(reads);
+ }
+ await page.evaluate(()=>(window as any).gm.releaseDispatchSave());
+ const saved=()=>page.evaluate(key=>(window as any).gmSlots[key]??null,journal.key);
+ await expect.poll(saved).toMatchObject({phase:'dispatching',requestId:journal.requestId,receipt:{state:'prepared'}});
+ if(retirement==='leaves Inbox')await homeInbox.click();
+ await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeEnabled();
+ const review=page.getByRole('dialog',{name:'Review mail operation',exact:true});
+ if(!await review.isVisible())await page.getByRole('button',{name:'Mail review / receipt',exact:true}).click();
+ await expect(review).toContainText(journal.requestId);
+ await review.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ await expect(review.getByRole('status')).toContainText('Gmail reports that this change was not made.');
+ await review.getByRole('button',{name:'Discard this operation',exact:true}).click();
+ await expect.poll(saved).toBeNull();
+ expect((await gm(page)).receiptReads).toEqual([journal.requestId,journal.requestId]);
+ expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
+ expect((await gm(page)).dispatches).toEqual([]);
+});
+
+test('Inbox selection stops after an uncertain result and keeps its receipt',async({page})=>{
+ await setup(page);
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).gm.dispatchState='outcome-unknown');
+ await mailOption(page,'Select emails');
+ await mailOption(page,'Select all shown');
+ await mailOption(page,'Archive');
+ await page.getByRole('dialog',{name:'Archive 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ const receipt=page.getByRole('dialog',{name:'Review mail operation',exact:true});
+ await expect(receipt).toContainText(/outcome of this change is unknown/i);
+ await expect(receipt.getByRole('button',{name:'Retry',exact:true})).toHaveCount(0);
+ await receipt.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
+ expect((await gm(page)).dispatches).toHaveLength(1);
+});
+
+test('Inbox selection retires after switching accounts during the first dispatch',async({page})=>{
+ await setup(page,{accounts:['first@example.test','second@example.test']});
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Unread, Sender in-0-a, Subject in-0-a',exact:true})).toBeVisible();
+ await page.evaluate(()=>{
+  const f=(window as any).gm;
+  f.gate=new Promise<void>(resolve=>f.releaseDispatch=resolve);
+ });
+ await mailOption(page,'Select emails');
+ await mailOption(page,'Select all shown');
+ await mailOption(page,'Move to Trash');
+ await page.getByRole('dialog',{name:'Move to Trash 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ await expect.poll(async()=>(await gm(page)).dispatches.length).toBe(1);
+ await page.getByRole('button',{name:'second@example.test',exact:true}).click();
+ await expect.poll(async()=>(await gm(page)).searches.at(-1)?.grant).toBe('grant-1');
+ await page.evaluate(()=>(window as any).gm.releaseDispatch());
+ await expect(page.getByRole('heading',{name:'Inbox',exact:true})).toBeVisible();
+ await expect(page.getByRole('status').filter({hasText:'Updating emails…'})).toHaveCount(0);
+ expect((await gm(page)).dispatches).toEqual([{kind:'trash',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
+});
+
+for (const conflict of [false,true])test(
+ conflict?'Draft selection refuses a concurrently changed revision':'Draft selection deletes only the confirmed local copy',
+ async({page})=>{
+ await setup(page);
+ await seedLegacyOwnerDraft(page,'Keep this draft','Keep this body');
+ await page.getByRole('button',{name:'Inbox',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Compose',exact:true}).click();
+ await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Delete this draft');
+ await page.getByRole('textbox',{name:'Message',exact:true}).fill('Delete this local copy');
+ await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Other mail folders',exact:true}).click();
+ await page.getByRole('menuitemradio',{name:'Drafts',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Local draft, Keep this draft',exact:true})).toBeVisible();
+ await mailOption(page,'Select drafts');
+ await page.getByRole('checkbox',{name:'Local draft, Delete this draft',exact:true}).click();
+ await mailOption(page,'Delete drafts');
+ if(conflict)await page.evaluate(()=>{
+  const shelf=Object.entries((window as any).gmSlots).find(([key])=>key.startsWith('inbox-drafts:v1:shelf:'))?.[1] as {items:Array<{draft:{subject:string;body:string;revision:string}}>};
+  const chosen=shelf.items.find(row=>row.draft.subject==='Delete this draft')!;
+  chosen.draft.body='Edited in the other window';
+  chosen.draft.revision='other-window-revision';
+ });
+ await page.getByRole('dialog',{name:'Delete 1 draft?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ if(conflict){
+  await expect(page.getByRole('status').filter({hasText:'These drafts changed.'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Local draft, Keep this draft',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Local draft, Delete this draft',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Edited in the other window');
+ }else{
+  await expect(page.getByRole('button',{name:'Local draft, Delete this draft',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Local draft, Keep this draft',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Keep this body');
+ }
+ expect((await gm(page)).prepares).toEqual([]);
+ expect((await gm(page)).dispatches).toEqual([]);
 });

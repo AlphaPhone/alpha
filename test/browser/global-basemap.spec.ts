@@ -10,26 +10,32 @@ async function setup(page:any,fail=false){
   if(url==='https://tiles.openfreemap.org/closed-world.geojson')return route.fulfill({contentType:'application/json',body:JSON.stringify({type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[[[-170,-60],[170,-60],[170,75],[-170,75],[-170,-60]]]}}]})});
   return route.abort();
  });
- await page.goto('/?connections=advanced');await page.getByRole('button',{name:'Maps',exact:true}).click();
+ await page.goto('/?connections=advanced');
+ await page.evaluate(async()=>{
+  const {MapPlane}=await import('/src/maps/map-plane.ts');const update=MapPlane.prototype.update;
+  MapPlane.prototype.update=function(selected,route,overlay){
+   (window as any).lastGlobalSelection=selected?{latitude:selected.latitude,longitude:selected.longitude}:null;
+   return update.call(this,selected,route,overlay);
+  };
+ });
+ await page.getByRole('button',{name:'Maps',exact:true}).click();
 }
 async function expectSelectionClearance(page:any,viewport:{width:number;height:number}){
  const pin=page.locator('.maplibregl-marker'),credits=page.locator('.alpha-map-credits');
- await expect(page.getByLabel('Map information and credits',{exact:true}).locator('[data-alpha-icon]')).toBeVisible();await expect(pin).toHaveCount(1);await expect(pin).toBeInViewport();await expect(credits).toBeInViewport();
+ await expect(pin).toHaveCount(1);await expect(pin).toBeInViewport();await expect(credits).toBeInViewport();
  await expect.poll(async()=>{
   const p=(await pin.boundingBox())!,sheet=(await page.locator('[data-alpha-maps-sheet="place"]').boundingBox())!,c=(await credits.boundingBox())!,header=(await page.locator('[data-alpha-app-header=main]').boundingBox())!;
   return p.y>header.y+header.height&&p.y+p.height<c.y-8&&(viewport.width>viewport.height?p.x+p.width<sheet.x-8:p.y+p.height<sheet.y-8);
  }).toBe(true);
- await page.getByLabel('Map information and credits',{exact:true}).click();
- await expect(page.getByText('Map tiles: OpenFreeMap',{exact:true})).toBeInViewport();
- await page.getByLabel('Map information and credits',{exact:true}).click();
+ await expect(credits.getByRole('link',{name:'OpenFreeMap',exact:true})).toBeInViewport();
 }
 for(const viewport of [{width:412,height:915},{width:360,height:600},{width:915,height:412}])test(`global basemap renders without configuring search/routes or automatically reading location: ${viewport.width}x${viewport.height}`,async({page},info)=>{
- await page.setViewportSize(viewport);await setup(page);const map=page.locator('[data-alpha-map-plane]');await expect(map).toHaveAttribute('aria-label','World map');await expect(map).toHaveAttribute('data-map-ready','true');await page.getByLabel('Map information and credits',{exact:true}).click();await expect(page.getByRole('link',{name:'OpenFreeMap',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'© OpenMapTiles',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'© OpenStreetMap',exact:true})).toBeVisible();await expect(page.getByText('Map tiles: OpenFreeMap',{exact:true})).toBeVisible();await page.getByLabel('Map information and credits',{exact:true}).click();expect(await page.evaluate(()=>(window as any).locationRequests)).toBe(0);
- const query=page.getByRole('searchbox',{name:'Search places',exact:true});await query.fill('37.77, -122.42');await query.press('Enter');await expect(page.getByText('37.77000, -122.42000',{exact:true})).toBeVisible();await expect(page.locator('.maplibregl-marker')).toBeInViewport();await expect(map).toHaveAttribute('data-map-zoom','14');await expect(page.locator('[data-alpha-maps-status]')).toHaveCount(0);await expectSelectionClearance(page,viewport);if(viewport.width===412){await page.setViewportSize({width:915,height:412});await expectSelectionClearance(page,{width:915,height:412});await page.setViewportSize(viewport);await expectSelectionClearance(page,viewport);}await expect(page.getByRole('button',{name:'Directions',exact:true})).toHaveCount(0);expect(await page.evaluate(async()=>{const {mapsConnection}=await import('/src/maps/runtime.ts');return mapsConnection().config.status;})).toBe('unconfigured');await page.screenshot({path:info.outputPath('closed-world-manual-pin.png')});
+ await page.setViewportSize(viewport);await setup(page);const map=page.locator('[data-alpha-map-plane]');await expect(map).toHaveAttribute('aria-label','World map');await expect(map).toHaveAttribute('data-map-ready','true');await expect(page.getByLabel('Map information and credits',{exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Enter coordinates',exact:true})).toHaveCount(0);await expect(page.getByRole('link',{name:'OpenFreeMap',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'© OpenMapTiles',exact:true})).toBeVisible();await expect(page.getByRole('link',{name:'© OpenStreetMap',exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).locationRequests)).toBe(0);
+ const query=page.getByRole('searchbox',{name:'Search places',exact:true});await query.fill('37.77, -122.42');await query.press('Enter');await expect(page.getByText('Selected location',{exact:true}).first()).toBeVisible();await expect(page.getByText('37.77000, -122.42000',{exact:true})).toHaveCount(0);await expect.poll(()=>page.evaluate(()=>(window as any).lastGlobalSelection)).toEqual({latitude:37.77,longitude:-122.42});await expect(page.locator('.maplibregl-marker')).toBeInViewport();await expect(map).toHaveAttribute('data-map-zoom','14');await expect(page.locator('[data-alpha-maps-status]')).toHaveCount(0);await expectSelectionClearance(page,viewport);if(viewport.width===412){await page.setViewportSize({width:915,height:412});await expectSelectionClearance(page,{width:915,height:412});await page.setViewportSize(viewport);await expectSelectionClearance(page,viewport);}await expect(page.getByRole('button',{name:'Directions',exact:true})).toHaveCount(0);expect(await page.evaluate(async()=>{const {mapsConnection}=await import('/src/maps/runtime.ts');return mapsConnection().config.status;})).toBe('unconfigured');await page.screenshot({path:info.outputPath('closed-world-manual-pin.png')});
  await returnToApps(page);expect(await page.locator('.maplibregl-canvas').count()).toBe(0);expect(await page.evaluate(()=>(window as any).locationRequests)).toBe(0);
 });
-test('global basemap failure stays honest and retains manual coordinate tools',async({page})=>{
- await setup(page,true);await expect(page.getByText('Map rendering is unavailable. Retry the map, or use coordinates and saved places.',{exact:true}).first()).toBeVisible();await expect(page.getByRole('button',{name:'Retry map',exact:true})).toBeVisible();const query=page.getByRole('searchbox',{name:'Search places',exact:true});await query.fill('35.68, 139.76');await query.press('Enter');await expect(page.getByText('35.68000, 139.76000',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Directions',exact:true})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).locationRequests)).toBe(0);
+test('global basemap failure keeps saved places and accepts a typed pin',async({page})=>{
+ await setup(page,true);await expect(page.getByText('Map rendering is unavailable. Retry the map or open a saved place.',{exact:true}).first()).toBeVisible();await expect(page.getByRole('button',{name:'Retry map',exact:true})).toBeVisible();const query=page.getByRole('searchbox',{name:'Search places',exact:true});await query.fill('35.68, 139.76');await query.press('Enter');await expect(page.getByText('Selected location',{exact:true}).first()).toBeVisible();await expect(page.getByText('35.68000, 139.76000',{exact:true})).toHaveCount(0);await expect.poll(()=>page.evaluate(()=>(window as any).lastGlobalSelection)).toEqual({latitude:35.68,longitude:139.76});await expect(page.getByRole('button',{name:'Directions',exact:true})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).locationRequests)).toBe(0);
 });
 
 test('a global manual pin composes with the actual configured route provider without a Monaco identity',async({page})=>{

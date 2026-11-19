@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const shared = await import('../.eliza/client-features/plugins/plugin-native-system/src/client/shade.ts');
+const shared = await import('../apps/app/src/ui/shell/notification-shade.ts');
 const copy = shared.defaultShadeFallbackCopy('Alpha');
 const m = { ...shared, shadeFallback: outcome => shared.shadeFallback(outcome, copy) };
 

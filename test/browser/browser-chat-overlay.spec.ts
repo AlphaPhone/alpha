@@ -8,11 +8,13 @@ import {settled as settleScreen} from './helpers/settled';
 test.use({viewport:{width:390,height:844}});
 
 const SITE='https://overlay.example/long';
+type ViewportSize = {width: number; height: number};
+type OverlayProbeWindow = Window & {overlayResizes: ViewportSize[]};
 const BODY='<!doctype html><meta name="viewport" content="width=device-width"><title>Overlay probe</title>'+
  '<style>body{margin:0;font:16px system-ui}section{height:220px;border-bottom:1px solid #ccc}</style><h1>Overlay probe</h1>'+
  Array.from({length:20},(_,i)=>`<section>Section ${i}</section>`).join('')+
  '<button id="tap" style="position:fixed;top:8px;right:8px" onclick="this.textContent=\'Tapped\'">Tap</button>'+
- '<script>window.resizes=0;addEventListener("resize",()=>resizes++);</script>';
+ '<script>window.overlayResizes=[];addEventListener("resize",()=>window.overlayResizes.push({width:innerWidth,height:innerHeight}));</script>';
 
 async function openSite(page:Page){
  let loads=0;
@@ -25,13 +27,40 @@ async function openSite(page:Page){
  await address.fill(SITE);await address.press('Enter');
  await expect(page.frameLocator('iframe[title="Website"]').getByRole('heading',{name:'Overlay probe'})).toBeVisible();
  const site=page.frames().find(frame=>frame.url()===SITE)!;
- await site.evaluate(()=>scrollTo(0,600));
- const geometry=async()=>({
-  frame:await page.locator('[data-browser-surface]').evaluate(element=>{const box=element.getBoundingClientRect();return {display:getComputedStyle(element).display,x:Math.round(box.x),y:Math.round(box.y),width:Math.round(box.width),height:Math.round(box.height)};}),
-  page:await site.evaluate(()=>({width:innerWidth,height:innerHeight,scrollY:Math.round(scrollY),resizes:(window as any).resizes})),
- });
+ await site.waitForLoadState('load');
+ await expect(page.getByRole('progressbar',{name:'Loading website'})).toHaveCount(0);
  await settleScreen(page);
+ const surface=page.locator('[data-browser-surface]');
+ // Browser publishes the website bounds on its own update after the loading bar disappears.
+ await expect.poll(() => surface.evaluate(element => {
+  const viewport=document.querySelector('[data-native-browser-viewport]');
+  return viewport ? Math.abs(element.getBoundingClientRect().top-viewport.getBoundingClientRect().top) : Infinity;
+ })).toBeLessThanOrEqual(1);
+ const viewportSize=await surface.locator('iframe').evaluate(iframe=>({width:iframe.clientWidth,height:iframe.clientHeight}));
+ await site.evaluate(async()=>{
+  await document.fonts.ready;
+  scrollTo(0,600);
+ });
+ // Wait for the child viewport to reach the presented size and drain its initial resize delivery.
+ await expect.poll(() => site.evaluate(size => new Promise<boolean>(resolve => {
+  const probe=window as OverlayProbeWindow;
+  const resizeCount=probe.overlayResizes.length;
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve(
+   innerWidth===size.width && innerHeight===size.height && scrollY===600 && probe.overlayResizes.length===resizeCount
+  )));
+ }),viewportSize)).toBe(true);
+ const resizeStart=await site.evaluate(()=>(window as OverlayProbeWindow).overlayResizes.length);
+ const geometry=async()=>({
+  frame:await surface.evaluate(element=>{const box=element.getBoundingClientRect();return {display:getComputedStyle(element).display,x:Math.round(box.x),y:Math.round(box.y),width:Math.round(box.width),height:Math.round(box.height)};}),
+  page:await site.evaluate(({resizeStart,viewportSize})=>({
+   width:innerWidth,height:innerHeight,scrollY:Math.round(scrollY),
+   // A same-size notification is harmless. Record even a transient size change that later reverts.
+   viewportChanges:(window as OverlayProbeWindow).overlayResizes.slice(resizeStart)
+    .filter(size=>size.width!==viewportSize.width||size.height!==viewportSize.height),
+  }),{resizeStart,viewportSize}),
+ });
  const settled=await geometry();
+ expect(settled.page).toEqual({...viewportSize,scrollY:600,viewportChanges:[]});
  return {site,geometry,settled,loads:()=>loads};
 }
 const nextFrame=(page:Page)=>page.evaluate(()=>new Promise(requestAnimationFrame));
@@ -95,5 +124,27 @@ test('a website is not reloaded or scrolled when Browser is left and opened agai
  await page.getByRole('button',{name:'Browser',exact:true}).click();
  await expect.poll(async()=>(await geometry()).frame).toEqual(settled.frame);
  expect(await site.evaluate(()=>scrollY)).toBe(600);
+ expect(loads()).toBe(1);
+});
+
+test('Browser menu keeps the page visible and restores input on dismissal', async ({ page }) => {
+ const { geometry, settled, loads } = await openSite(page);
+ const opener = page.getByRole('button', { name: 'Menu', exact: true });
+ const menu = page.getByRole('dialog', { name: 'Browser menu' });
+ const surfaces = page.locator('[data-alpha-browser-surfaces]');
+
+ await opener.click();
+ await expect(menu).toBeVisible();
+ await expect(menu.getByRole('button', { name: 'Read aloud', exact: true })).toHaveCount(0);
+ await expect(menu.getByRole('button', { name: 'Ask about page', exact: true })).toHaveCount(0);
+ await expect(menu.getByRole('button', { name: 'Downloads', exact: true })).toHaveCount(0);
+ await expect(surfaces).toHaveAttribute('inert', '');
+ await expect.poll(geometry).toEqual(settled);
+
+ await page.keyboard.press('Escape');
+ await expect(menu).toBeHidden();
+ await expect(opener).toBeFocused();
+ await expect(surfaces).not.toHaveAttribute('inert', '');
+ await expect.poll(geometry).toEqual(settled);
  expect(loads()).toBe(1);
 });

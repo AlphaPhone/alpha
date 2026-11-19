@@ -31,3 +31,9 @@ export async function newWorkflow(page:Page){
  await choices.getByRole('button',{name:/^Steps/}).click();
  await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toBeEditable();
 }
+
+export async function openWorkflowActions(page:Page){
+ const menu=page.getByLabel('Workflow actions',{exact:true});
+ await expect(menu).toBeVisible();
+ if(!await menu.evaluate(element=>element.closest('details')?.open))await menu.click();
+}

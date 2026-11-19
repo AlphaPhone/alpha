@@ -193,20 +193,48 @@ test('dirty edits require a discard decision and cancelled replacement preserves
  await expect(page.getByRole('button',{name:'Edit photo',exact:true})).toBeVisible();
 });
 
-test('viewer zoom, bounded pan, pinch and keyboard controls belong to the current photo',async({page})=>{
+test('photo zoom keeps controls hidden and the actions menu has labeled actions without zoom controls',async({page},info)=>{
  await seed(page);await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();
  const viewport=page.locator('[data-alpha-photo-viewport]'),image=page.locator('[data-alpha-photo-image]');
+ await page.evaluate(()=>document.documentElement.style.setProperty('--native-bottom-inset','24px'));
+ await expect.poll(()=>viewport.evaluate(element=>{
+  const backing=getComputedStyle(element.closest('.alpha-phone')!,'::after');
+  return {color:backing.backgroundColor,visible:parseFloat(backing.height)>0};
+ })).toEqual({color:'rgb(0, 0, 0)',visible:true});
+ const actions=page.getByLabel('Photo actions',{exact:true}), menu=page.locator('.photo-viewer-menu');
+ await actions.click();
+ await expect(menu.getByRole('button',{name:'Add to album',exact:true})).toHaveText('Add to album');
+ await expect(menu.getByRole('button',{name:/Zoom|Fit photo/})).toHaveCount(0);
+ await expect(menu.getByRole('status')).toHaveCount(0);
+ await page.screenshot({path:info.outputPath('clean-photo-menu.png'),animations:'disabled'});
+ await actions.click();
+ const chrome=page.locator('[data-alpha-photo-actions]');
+ await viewport.click({position:{x:200,y:350}});
+ await expect(chrome).toHaveCSS('opacity','0');
  await viewport.focus();await viewport.press('+');await expect(viewport).toHaveAttribute('aria-label',/Zoom 150 percent/);
  await viewport.press('+');await viewport.press('ArrowRight');await expect(image).toHaveCSS('transform','matrix(2, 0, 0, 2, -48, 0)');
  await viewport.press('0');await expect(image).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');
  await viewport.dblclick({position:{x:200,y:350}});await expect(viewport).toHaveAttribute('aria-label',/Zoom 250 percent/);await viewport.press('0');
- await viewport.dispatchEvent('pointerdown',{pointerId:11,pointerType:'touch',clientX:100,clientY:300,button:0});
- await viewport.dispatchEvent('pointerdown',{pointerId:12,pointerType:'touch',clientX:200,clientY:300,button:0});
- await viewport.dispatchEvent('pointermove',{pointerId:12,pointerType:'touch',clientX:300,clientY:300,button:0});
+ const touch=await page.context().newCDPSession(page);
+ await touch.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
+ await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:150,y:350},{id:2,x:250,y:350}]});
+ await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:100,y:350},{id:2,x:300,y:350}]});
+ await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  await expect(viewport).toHaveAttribute('aria-label',/Zoom 200 percent/);
- await viewport.dispatchEvent('pointerup',{pointerId:11,pointerType:'touch',clientX:100,clientY:300,button:0});
- await viewport.dispatchEvent('pointerup',{pointerId:12,pointerType:'touch',clientX:300,clientY:300,button:0});
- await page.getByLabel('Photo actions',{exact:true}).click();await page.getByRole('button',{name:'Fit photo',exact:true}).click();await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
+ await page.clock.install();
+ for(let tap=0;tap<2;tap++){
+  await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:200,y:350}]});
+  await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ }
+ await page.clock.runFor(400);
+ await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
+ await expect(chrome).toHaveCSS('opacity','0');
+ await expect(menu).not.toHaveAttribute('open','');
+ await expect(page.getByRole('dialog',{name:'Add to album',exact:true})).toHaveCount(0);
+ await touch.detach();
+ await viewport.click({position:{x:200,y:350}});
+ await page.clock.runFor(400);
+ await expect(chrome).toHaveCSS('opacity','1');
  await page.getByRole('button',{name:'Back from photo',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
 });
 
@@ -214,6 +242,6 @@ test('unmatched agent photo selection keeps the visible selection and partial se
  await seed(page);await page.getByRole('button',{name:'Photos',exact:true}).click();await expect(page.getByRole('button',{name:/^Photo, /})).toBeVisible();
  const select=(ids:string[])=>page.evaluate(async ids=>{const {deviceLibraryAgent}=await import('/src/prototype/photo-library-adapter.ts');try{return await deviceLibraryAgent()!.runView({type:'photo_library_select',ids} as never,new AbortController().signal);}catch(error){return {refused:(error as Error).message};}},ids);
  expect(await select(['1000'])).toEqual({kind:'photo_library_select',selected:1,missing:0});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
- expect(await select(['9999'])).toEqual({refused:'None of those items are in Photos. The current selection was kept.'});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
+ expect(await select(['9999'])).toEqual({refused:'None of those items are in Photos.'});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
  expect(await select(['1000','9999'])).toEqual({kind:'photo_library_select',selected:1,missing:1});
 });

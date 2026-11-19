@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
@@ -14,7 +15,7 @@ test('uploaded artifact metadata retries transient visibility and transport fail
   let calls = 0, waits = 0;
   const result = await uploadedCandidateMetadata('4242', 'controlled-token', {
     request: async (url, options) => {
-      assert.equal(url, 'https://api.github.com/repos/eliza-research/alpha/actions/artifacts/4242');
+      assert.equal(url, 'https://api.github.com/repos/alphacompute/alpha/actions/artifacts/4242');
       assert.equal(options.redirect, 'error');
       assert.equal(options.headers.Authorization, 'Bearer controlled-token');
       assert.ok(options.signal instanceof AbortSignal);
@@ -88,8 +89,8 @@ test('retired-channel inventory sets a version floor while the receipt binds onl
   };
   f.state.legacyMissing = false;
   f.state.legacyPages = [[{name: 'alpha-phone-703.apk'}]];
-  for (const repository of ['eliza-research/alpha', 'eliza-research/alphaphone', 'alphacompute/alpha', 'alphacompute/alphaphone']) {
-    f.state.legacyPointer = pointer(legacyManifestUrl.replace('eliza-research/alpha', repository), 704);
+  for (const repository of ['alphacompute/alpha', 'alphacompute/alphaphone']) {
+    f.state.legacyPointer = pointer(legacyManifestUrl.replace('alphacompute/alpha', repository), 704);
     const initial = await candidateVersion(f);
     assert.equal(initial.observedFloor, 704, repository);
     assert.equal(initial.manifestSha256, null);
@@ -101,6 +102,8 @@ test('retired-channel inventory sets a version floor while the receipt binds onl
   f.state.legacyPages = [[{name: 'alpha-update-stable.json'}]];
   f.state.legacyPointer = null;
   await assert.rejects(candidateVersion(f), /not anonymously readable/);
+  f.state.legacyPointer = pointer(legacyManifestUrl.replace('alphacompute/alpha', 'other-owner/alpha'), 704);
+  await assert.rejects(candidateVersion(f), /Malformed stable pointer/);
 });
 
 test('missing or malformed inventories, hidden pointers and wrong source/workflow epochs fail before writing a candidate', async t => {
@@ -137,7 +140,7 @@ test('missing or malformed inventories, hidden pointers and wrong source/workflo
   f.commit(f.sdk); await assert.rejects(candidateVersion(f), /SDK changed/);
 });
 
-test('candidate receipt binds actual archive bytes and source freeze while keeping unsigned evidence separate from distribution', async t => {
+fixtureTest('candidate receipt binds actual archive bytes and source freeze while keeping unsigned evidence separate from distribution', async t => {
   const f = fixture(t), versionFile = 'test-results/version.json';
   const admission = await main(['version', versionFile], f), archive = f.archive(admission);
   const result = await main(['receipt', versionFile, archive.relative], f);
@@ -153,7 +156,7 @@ test('candidate receipt binds actual archive bytes and source freeze while keepi
   assert.deepEqual(fs.readFileSync(receipt), before, 'A retry cannot overwrite prior evidence');
 });
 
-test('native build receipt must match frozen and staged bytes', async t => {
+fixtureTest('native build receipt must match frozen and staged bytes', async t => {
   const f = fixture(t), admission = await candidateVersion(f), archive = f.archive(admission);
   const file = path.join(archive.output, 'native-input-admission.json'), original = read(file);
   json(file, {...original, producer: {...original.producer, sdkCommit: 'invalid'}});
@@ -167,7 +170,7 @@ test('native build receipt must match frozen and staged bytes', async t => {
   assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /native-input-admission.json/);
 });
 
-test('frozen native receipt requires current recipe, valid outputs and honest qualification', async t => {
+fixtureTest('frozen native receipt requires current recipe, valid outputs and honest qualification', async t => {
   const f = fixture(t), admission = await candidateVersion(f);
   for (const change of [value => value.producer.sdkCommit = 'invalid', value => value.producer.ndk = 'old',
     value => value.recipe.identity = 'other.app', value => value.recipeSha256 = '0'.repeat(64),
@@ -187,7 +190,7 @@ test('frozen native receipt requires current recipe, valid outputs and honest qu
   assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /Native output changed/);
 });
 
-test('archive measurement binds the actual artifact metadata and expanded upload file sizes', async t => {
+fixtureTest('archive measurement binds the actual artifact metadata and expanded upload file sizes', async t => {
   const f = fixture(t), versionFile = 'test-results/version.json';
   const admission = await main(['version', versionFile], f), archive = f.archive(admission);
   const candidate = await main(['receipt', versionFile, archive.relative], f);
@@ -197,7 +200,7 @@ test('archive measurement binds the actual artifact metadata and expanded upload
       repository_id: 1396333361, head_repository_id: 1396333361}};
   const options = {...f, archive: archive.relative, env: {...f.env, ALPHA_CANDIDATE_ARTIFACT_ID: '4242',
     ALPHA_CANDIDATE_ARTIFACT_SHA256: 'a'.repeat(64)}, api: args => {
-      assert.deepEqual(args, ['repos/eliza-research/alpha/actions/artifacts/4242']); return uploaded;
+      assert.deepEqual(args, ['repos/alphacompute/alpha/actions/artifacts/4242']); return uploaded;
     }};
   const files = fs.readdirSync(archive.output);
   const expandedBytes = files.reduce((sum, file) => sum + fs.statSync(path.join(archive.output, file)).size, 0);
@@ -225,7 +228,7 @@ test('archive measurement binds the actual artifact metadata and expanded upload
   assert.throws(() => candidateArchiveSize(options), /native input receipt changed/);
 });
 
-test('changed APKs, mocks, another profile or channel, code/package drift, signed output and changed inputs cannot become native candidates', async t => {
+fixtureTest('changed APKs, mocks, another profile or channel, code/package drift, signed output and changed inputs cannot become native candidates', async t => {
   const f = fixture(t), admission = await candidateVersion(f), archive = f.archive(admission);
   const file = path.join(archive.output, 'apk-verification.json'), original = read(file);
   for (const change of [v => v.testMocks = true, v => v.runtimeProfile = 'cloud', v => v.allowUnpackagedRuntime = true,

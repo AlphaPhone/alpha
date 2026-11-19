@@ -1,5 +1,5 @@
 from pathlib import Path
-import importlib.util, hashlib, json, os, subprocess, sys, tempfile, unittest, xml.etree.ElementTree as ET
+import importlib.util, hashlib, json, os, subprocess, sys, tempfile, unittest, zipfile, xml.etree.ElementTree as ET
 from unittest.mock import patch
 
 REPO=Path(__file__).resolve().parents[1]
@@ -45,12 +45,13 @@ public class FreshTest {
    subprocess.run([java_binary('javac'),'--release','11','-d',d,str(BRAND/'provision/AlphaFreshSetupPolicy.java'),str(p)],check=True,capture_output=True)
    self.assertIn('PASS fresh preset policy',subprocess.check_output([java_binary('java'),'-cp',d,'com.android.provision.FreshTest'],text=True))
 
- def fixture(self,root):
+ def fixture(self,root,vendor=True):
   project='packages/apps/Provision'
   for name in ['src/com/android/provision/DefaultActivity.java','AndroidManifest.xml']:
    source=INPUT/project/name;target=root/project/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(source.read_bytes())
   for row in json.loads((CORE/'SOURCE-INPUTS.json').read_text())['files']:
    target=root/'frameworks/base'/row['path'];target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(core_baseline(row['path']))
+  if not vendor:return None
   product=root/'vendor/alphaphone/product.mk';product.parent.mkdir(parents=True);product.write_text('# Existing accepted app product, retained\n')
   return stage.digest(product.read_bytes())
 
@@ -58,11 +59,110 @@ public class FreshTest {
   before=self.fixture(root)
   return stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,product_mk_hash=before,core_baseline=core_baseline)
 
+ def test_image_identity_rechecks_canonical_signed_apk_and_all_admission_bindings(self):
+  bun=os.environ.get('ALPHA_BUN','bun')
+  selected='ai.alphacompute.alphaphone'
+  # A real nine-handler canonical launcher manifest runs through the production TS qualifiers.
+  tree=lambda *flags:subprocess.check_output([bun,'test/fixtures/telephony-launcher-tree.mjs',selected,*flags],text=True,cwd=REPO)
+  manifest={'tree':tree()}
+  with tempfile.TemporaryDirectory(prefix='alpha-image-identity-') as d:
+   root=Path(d);apk=root/'Launcher.apk';apk.write_bytes(b'isolated signed-tool boundary fixture, not an APK')
+   config=json.loads((REPO/'app.config.json').read_text());product=json.loads((REPO/'android/aosp/pixel10a-product.json').read_text())
+   signer=json.loads((REPO/product['signer']['apkDescriptor']).read_text())['signerSha256']
+   descriptor={'packageName':selected,'moduleName':config['moduleName'],'apkSha256':stage.digest(apk.read_bytes()),'certificateSha256':signer,'development':False}
+   descriptor_file=root/'launcher.json';descriptor_file.write_text(json.dumps(descriptor))
+   admission={'schema':1,'packageName':selected,'apkSha256':descriptor['apkSha256'],
+    'launcherDescriptorSha256':stage.digest(descriptor_file.read_bytes()),'sourceLockSha256':product['sourceLock']['sha256'],
+    'platformCertificateSha256':product['signer']['platformCertificateSha256']}
+   output=root/'provisioning/alpha-telephony-components.xml';output.parent.mkdir(parents=True,exist_ok=True)
+   output.write_text('isolated normal-stage file binding fixture');admission['handlerDefaultsSha256']=stage.digest(output.read_bytes())
+   file=root/'image-policy-admission.json';file.write_text(json.dumps(admission))
+   generated=b'# Generated Pixel launcher stage product\n';(root/'product.mk').write_bytes(generated)
+   aosp=root/'aosp';aosp.mkdir();self.fixture(aosp,vendor=False)
+   run=subprocess.check_output
+   def tools(args,**kwargs):
+    if args[0]=='apksigner-fixture':return 'Signer #1 certificate SHA-256 digest: '+signer+'\n'
+    if args[0]==bun:return run(args,**kwargs)
+    if args[0]=='git':
+     # Pinned Provision objects from the source checkout; only `git show REV:path` is expected.
+     self.assertEqual(args[1],'-C');self.assertEqual(args[3],'show')
+     project=Path(args[2]).resolve().relative_to(aosp.resolve())
+     self.assertIn(str(project),['packages/apps/Provision','packages/modules/Permission'])
+     return (INPUT/project/args[4].split(':',1)[1]).read_bytes()
+    self.assertEqual(args[0],'aapt-fixture')
+    if args[2]=='xmltree':return manifest['tree']
+    return "package: name='"+selected+"' versionCode='80'\n"
+   with patch.object(stage.subprocess,'check_output',side_effect=tools):
+    self.assertEqual(stage.image_identity(root,'aapt-fixture','apksigner-fixture'),admission)
+    for broken in [tree('--without-setup-receiver'),manifest['tree'].replace('BIND_INCALL_SERVICE','UNRELATED'),
+                   manifest['tree'].replace(selected,'other.package')]:
+     with self.subTest(manifest=broken[-80:]):
+      manifest['tree']=broken
+      with self.assertRaises(subprocess.CalledProcessError):stage.image_identity(root,'aapt-fixture','apksigner-fixture')
+    manifest['tree']=tree()
+    policy_plan=stage.core_policy_plan
+    def policy(root,read_baseline=None):
+     return policy_plan(root,core_baseline)
+    # The exact production invocation: stage-aosp pins and brands the stage product.mk itself.
+    command=json.loads(run([bun,'-e','const [output, source, assets, reportSha256] = process.argv.slice(-4);'
+      'console.log(JSON.stringify((await import("./scripts/stage-aosp.ts")).brandingPacketCommand('
+      '{output, source, assets, reportSha256, aapt: "aapt-fixture", apksigner: "apksigner-fixture"})));',
+      str(root),str(aosp),str(ASSETS),stage.digest((ASSETS/'branding-assets.json').read_bytes())],text=True,cwd=REPO))
+    self.assertEqual(command[0],'scripts/stage-alpha-os-branding.py')
+    self.assertNotIn('--source-inputs',command)
+    self.assertEqual((root/'product.mk').read_bytes(),
+                     generated+b'\n# Alpha OS visual identity.\n$(call inherit-product, vendor/alphaphone/branding/branding.mk)\n')
+    with patch.object(stage,'check_revision'), patch.object(stage,'core_policy_plan',side_effect=policy), patch.object(sys,'argv',command):
+     stage.main()
+    packet=json.loads((root/'source-packet.json').read_text())
+    self.assertFalse(packet['applied']);self.assertEqual(packet['imageIdentityAdmission'],admission)
+    self.assertEqual(packet['packetSha256'],stage.digest((root/'source-packet.zip').read_bytes()))
+    self.assertNotIn('vendor/alphaphone/product.mk',[row['path'] for row in packet['files']],'the image stage already carries the include')
+    with zipfile.ZipFile(root/'source-packet.zip') as archive:
+     for row in packet['files']:self.assertEqual(stage.digest(archive.read(row['path'])),row['sha256'])
+    self.assertFalse((aosp/'vendor').exists(),'packet must not apply source')
+    # A stage product.mk that differs from its pinned generated preimage is refused.
+    (root/'product.mk').write_bytes(b'# other\n'+(root/'product.mk').read_bytes())
+    with patch.object(stage,'check_revision'), patch.object(stage,'core_policy_plan',side_effect=policy), patch.object(sys,'argv',command):
+     with self.assertRaisesRegex(AssertionError,'pinned preimage'):stage.main()
+    # Only the canonical identity is admitted; the former installed identity is not an image identity.
+    for key,value in [('packageName','ai.elizaresearch.alphaphone'),('packageName','unknown.package'),('apkSha256','0'*64),
+                      ('launcherDescriptorSha256','0'*64),('sourceLockSha256','0'*64),('platformCertificateSha256','0'*64),
+                      ('handlerDefaultsSha256','0'*64)]:
+     with self.subTest(key=key,value=value):
+      file.write_text(json.dumps({**admission,key:value}))
+      with self.assertRaises(AssertionError):stage.image_identity(root,'aapt-fixture','apksigner-fixture')
+    file.write_text(json.dumps(admission))
+    descriptor_file.write_text(json.dumps({**descriptor,'certificateSha256':'0'*64}))
+    file.write_text(json.dumps({**admission,'launcherDescriptorSha256':stage.digest(descriptor_file.read_bytes())}))
+    with self.assertRaisesRegex(AssertionError,'signer admission'):stage.image_identity(root,'aapt-fixture','apksigner-fixture')
+   descriptor_file.write_text(json.dumps(descriptor));file.write_text(json.dumps(admission))
+   with patch.object(stage.subprocess,'check_output',return_value='Signer #1 certificate SHA-256 digest: '+'0'*64+'\n'):
+    with self.assertRaisesRegex(AssertionError,'Staged APK signer'):stage.image_identity(root,'aapt-fixture','apksigner-fixture')
+
+ def test_staged_boot_animations_reuse_the_admitted_archive(self):
+  with tempfile.TemporaryDirectory(prefix='alpha-brand-boot-') as d, patch.object(stage,'check_revision'):
+   root=Path(d)/'aosp';root.mkdir();plan,rows=self.plan(root)
+   stage.apply_plan(root,plan,rows,Path(d)/'backup')
+   makefile=root/'check-boot.mk'
+   makefile.write_text('''TARGET_COPY_OUT_PRODUCT := product
+include vendor/alphaphone/branding/branding.mk
+boot-animation-copies:
+	@printf '%s\\n' $(PRODUCT_COPY_FILES)
+''')
+   copies=subprocess.check_output(['make','-s','-f',str(makefile),'boot-animation-copies'],cwd=root,text=True)
+   admitted_hash=json.loads((ASSETS/'branding-assets.json').read_text())['bootAnimationSha256']
+   for name in ('bootanimation.zip','bootanimation-dark.zip'):
+    destination='product/media/'+name
+    sources=[source for source,target in (row.split(':',1) for row in copies.splitlines()) if target==destination]
+    self.assertEqual(sources,['vendor/alphaphone/branding/generated/bootanimation.zip'])
+    self.assertEqual(stage.digest((root/sources[0]).read_bytes()),admitted_hash)
+
  def test_guarded_staging_roundtrip_preserves_enterprise_and_completed_paths(self):
   with tempfile.TemporaryDirectory(prefix='alpha-brand-stage-')as d,patch.object(stage,'check_revision')as revision:
    root=Path(d)/'aosp';root.mkdir();plan,rows=self.plan(root)
-   self.assertEqual(revision.call_count,2)
-   self.assertTrue(all(name.startswith(('vendor/alphaphone/','packages/apps/Provision/','frameworks/base/'))for name in plan))
+   self.assertEqual(revision.call_count,3)
+   self.assertTrue(all(name.startswith(('vendor/alphaphone/','packages/apps/Provision/','packages/modules/Permission/','frameworks/base/'))for name in plan))
    core=json.loads((CORE/'manifest.json').read_text())
    for row in core['files']:self.assertEqual(stage.digest(plan['frameworks/base/'+row['path']]),row['afterSha256'])
    before=(INPUT/'packages/apps/Provision/src/com/android/provision/DefaultActivity.java').read_text()

@@ -3,7 +3,7 @@
 module ConnectionController {
   type State = {
     // The step holding the slot: none, step (any owner or background step), key-manager (a
-    // provider key reveal, edit or removal), return (a native sign-in return) or rebind.
+    // provider key save), return (a native sign-in return) or rebind.
     operation: str, startupResolved: bool,
     rebindWanted: bool, rebinds: int,
     queuedReturn: bool, returnsArrived: int, returnsHandled: int, returnsReplaced: int,

@@ -10,15 +10,19 @@ const checkTraces = options => check(boundInputs({...options, sources: [...optio
 export async function shellNavigation() {
   const path = 'apps/app/src/prototype/model.js', source = read(path);
   const methods = source.slice(source.indexOf('  goHome(chat) {'), source.indexOf('  /* ---- Android', source.indexOf('  goHome(chat) {')));
-  const {navigateMobileShell} = await sourceModule('.eliza/client-features/packages/ui/src/mobile-shell/core.ts');
+  // AP-16: shellDetent consults the real comms-view predicate (a view with a bar keeps the input rest).
+  const commsStart = source.indexOf('  isCommsView(k) {'), commsMember = source.slice(commsStart, source.indexOf('\n', commsStart) + 1);
+  assert.ok(commsStart >= 0 && commsMember.trim().endsWith('}'), 'model.js isCommsView member');
+  const {navigateMobileShell} = await sourceModule('apps/app/src/ui/mobile-shell/core.ts');
   const traces = [];
   for (const view of ['notes', 'calendar', 'files', 'browser', 'settings']) {
     const context = vm.createContext({navigateMobileShell, VIEWS: {[view]: {}}, isMvpView: value => value === view});
     vm.runInContext(`class Shell {
       constructor(){this.state={view:null,chat:'input',shade:false,drawer:false,voice:'off'};this.props={};}
       S(){return this.state;} setState(patch){Object.assign(this.state,patch);} clear(){} leave(){}
-      mod(){return {};} vget(){return {};} vset(){} vreset(){} homeHint(){} toast(){}
+      mod(){return {};} api(){return {};} vget(){return {};} vset(){} vreset(){} homeHint(){} toast(){}
       defaultChat(){return 'hidden';} rest(){return this.state.view?'hidden':'input';}
+      ${commsMember}
       ${methods}
     };globalThis.shell=new Shell();`, context);
     const shell = context.shell;
@@ -29,7 +33,7 @@ export async function shellNavigation() {
     shell.back(); checkpoint(t, 'actual shell returns home', call('back'), observe()); traces.push(t);
   }
   return checkTraces({model: 'ShellNavigation', sources: [path], traces, scope: 'bounded-component', assumptions: [
-    'Actual goHome/openView/back method bodies execute with synchronous React state commits and empty view-specific handlers.',
+    'Actual goHome/openView/back method bodies and the isCommsView predicate execute with synchronous React state commits and empty view-specific handlers.',
     'Collapsed input on Home and hidden chat inside app views remain distinct. Modal interception, focus, drawer gestures and asynchronous navigation claims remain untested here.']});
 }
 
@@ -61,9 +65,9 @@ export async function developmentDevice() {
   for (const late of [false, true]) {
     const state = {callWho: null, liveAt: null, mute: false, spk: false, recents: [], tab: 'recents'};
     let timer;
-    const context = vm.createContext({Date, PN_SCRIPT: {_:{lines: [], sum: ''}}, PEOPLE: [], person: () => null});
+    const context = vm.createContext({Date, testMocksEnabled:true, setCallPartyResolver(){}, deviceEmergencyLive:()=>false, PN_SCRIPT: {_:{lines: [], sum: ''}}, PEOPLE: [], person: () => null});
     vm.runInContext(phone + ';globalThis.operations={pnStart,pnEnd};', context);
-    const api = {get: () => state, set: patch => Object.assign(state, patch), stop() {}, stopBg() {}, laterBg(fn) {timer = fn;}, everyBg() {}, toast() {}, isActive: () => false};
+    const api = {get: () => state, set: patch => Object.assign(state, patch), stop() {}, stopBg() {}, stopRing() {}, laterBg(fn) {timer = fn;}, everyBg() {}, toast() {}, isActive: () => false};
     const observe = () => ({'s.call': state.callWho ? state.liveAt ? 'active' : 'dialing' : 'idle',
       's.microphoneMuted': state.mute, 's.speaker': state.spk});
     const t = trace(`call-timer-${late ? 'late' : 'current'}`, observe());

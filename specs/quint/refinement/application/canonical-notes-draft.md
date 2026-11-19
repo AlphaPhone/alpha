@@ -1,6 +1,6 @@
 # Canonical Notes draft and save protocol
 
-`CanonicalNotesDraft` covers the shared `NotesEditor` methods used for one open
+`CanonicalNotesDraft` covers Alpha's `NotesEditor` methods used for one open
 draft and its save. The source adapter executes the actual editor against
 Alpha's current canonical controller and wire codec. Controller requests are
 held at the transport boundary and completed in selected orders.

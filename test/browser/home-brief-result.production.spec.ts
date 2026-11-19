@@ -93,7 +93,7 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   const failedAt = now - 120_000;
   await deliver(page, [result(6, 'run-failed', failedAt, { status: 'failed', output: null, error: 'Synthetic source expired' })]);
   await expect(card).toHaveAttribute('data-alpha-home-brief-failed', 'true', { timeout: 20_000 });
-  await expect(card.locator('.home-brief-title')).toHaveText('Synthetic source expired');
+  await expect(card.locator('.home-brief-title')).toHaveText('This digest stopped with an error on your agent. Open execution details to see what ran.');
   await expect(card.locator('.home-brief-status')).toHaveText(`${AGENT_NAME} · Failed ${await when(page, failedAt)}`);
 
   // The harness counters start again when the page reloads, so what the first session asked of the
@@ -109,7 +109,7 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   // 5. The retained result survives a restart of the renderer and is shown again for the same agent.
   await page.reload();
   await expect(brief(page)).toHaveAttribute('data-alpha-home-brief-failed', 'true', { timeout: 30_000 });
-  await expect(brief(page).locator('.home-brief-title')).toHaveText('Synthetic source expired');
+  await expect(brief(page).locator('.home-brief-title')).toHaveText('This digest stopped with an error on your agent. Open execution details to see what ran.');
   expect(await page.evaluate(() => document.body.innerText.includes('SYNTHETIC_RAW_SOURCE_456'))).toBe(false);
   await expect(home(page)).not.toContainText('"nodeId"');
 

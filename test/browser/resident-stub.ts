@@ -19,6 +19,8 @@ export type StubStream =
   | 'reject'
   /** The runtime refuses admission with HTTP 429; nothing is recorded. */
   | 'busy'
+  /** As 'busy', but the 429 is held until `release()`, so the owner can type while the send is pending. */
+  | 'busyHeld'
   /** The runtime answers 401: the resident's owner session is no longer accepted. */
   | 'expired'
   /** HTTP 200 and the user turn is recorded, then the stream fails before a terminal frame. */
@@ -88,9 +90,11 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       // Per page load: conversation reads (the recent window, not older pages), list reads and turn
       // aborts. holdReads holds both reads until heldRead() / heldList().
       reads: 0, lists: 0, aborts: 0, holdReads: false, heldRead: null as null | (() => void), heldList: null as null | (() => void),
+      chatSearchQueries: [] as string[], chatSearchWindows: [] as Array<{conversationId:string;messageId:string}>,
       // Cloud's answer to the next code redemption: 'ok' grants Plus; 'invalid' is Cloud's one answer
       // for unknown, expired, disabled and used-up codes (400 invalid_subscription_code).
       redeem: 'ok' as 'ok' | 'invalid', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
+      holdRedeem: false, releaseRedeem: null as null | (() => void),
       maps: { requests: [] as Array<{ route: string; body: any; requestId: string }>, cancelled: [] as string[], hold: false, limit: null as null | string },
     };
     const persist = () => sessionStorage.setItem('resident-stub', JSON.stringify({ order: s.order, cloud: s.cloud, bodies: s.bodies, opened: s.opened, accounts: s.accounts, login: s.login, nextToken: s.nextToken, polls: s.polls, start: s.start, held: s.held }));
@@ -105,6 +109,13 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     let agent: { conversations: { id: string; title: string }[]; history: Record<string, any[]> } = { conversations: [], history: {} };
     try { agent = JSON.parse(sessionStorage.getItem('resident-stub-agent') || 'null') ?? agent; } catch { /* first load */ }
     const record = (conversation: string, row: any) => { agent.history[conversation].push(row); sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); };
+    s.seedConversation = (id:string,text:string) => {
+      const messageId=crypto.randomUUID();
+      agent.conversations.push({id,title:'Earlier chat'});
+      agent.history[id]=[];
+      record(id,{id:messageId,role:'assistant',text,timestamp:Date.now()-60_000});
+      return messageId;
+    };
     const room = 'c0ffee00-1111-4222-8333-444455556666';
     const conversations = async (method: string, path: string, body: any): Promise<{ status: number; data: unknown } | null> => {
       if (path === '/api/conversations' && method === 'POST') { const row = { id: 'resident-chat-' + (agent.conversations.length + 1), title: String(body.title || 'Alpha Phone') }; agent.conversations.push(row); agent.history[row.id] = []; sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); return { status: 200, data: { conversation: row } }; }
@@ -112,9 +123,29 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
         s.lists++; if (s.holdReads) await new Promise<void>(resolve => { s.heldList = resolve; });
         return { status: 200, data: { conversations: options.abortRoute ? agent.conversations.map(row => ({ ...row, roomId: room })) : agent.conversations } };
       }
-      const read = /^\/api\/conversations\/([^/]+)\/messages$/.exec(path.split('?')[0]);
+      const [route, query] = path.split('?',2);
+      const params=new URLSearchParams(query);
+      if(route==='/api/conversations/messages/search'&&method==='GET'){
+        const needle=(params.get('q')||'').toLowerCase();
+        s.chatSearchQueries.push(needle);
+        const results=agent.conversations.flatMap(({id})=>
+          (agent.history[id]||[]).filter(row=>row.text.toLowerCase().includes(needle)).map(row=>({
+            messageId:row.id,conversationId:id,roomId:id,role:row.role,text:row.text,snippet:row.text,createdAt:row.timestamp,
+          })),
+        );
+        const offset=Number(params.get('offset')||0);
+        return {status:200,data:{results:results.slice(offset,offset+50)}};
+      }
+      const read = /^\/api\/conversations\/([^/]+)\/messages$/.exec(route);
       if (read && method === 'GET') {
-        if (!new URLSearchParams(path.split('?')[1] ?? '').has('before')) { s.reads++; if (s.holdReads) await new Promise<void>(resolve => { s.heldRead = resolve; }); }
+        const messageId=params.get('around');
+        if(messageId){
+          const conversationId=read[1],messages=agent.history[conversationId]||[];
+          s.chatSearchWindows.push({conversationId,messageId});
+          return messages.some(row=>row.id===messageId)
+            ? {status:200,data:{messages}} : {status:404,data:{}};
+        }
+        if (!params.has('before')) { s.reads++; if (s.holdReads) await new Promise<void>(resolve => { s.heldRead = resolve; }); }
         return { status: 200, data: { messages: (agent.history[read[1]] || []).slice(-200) } };
       }
       if (/^\/api\/turns\/[^/]+\/abort$/.test(path)) { s.aborts++; return options.abortRoute && path.includes(room) ? { status: 200, data: { aborted: false, roomId: room } } : { status: 404, data: {} }; }
@@ -212,6 +243,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           f.unexpected.push('maps ' + route); return { status: 404, data: {} };
         }
         if (path === '/api/v1/api-keys/current' && input.method === 'DELETE') { s.order.push('revoke ' + auth); persist(); return { status: 200, data: { success: true, status: 'revoked', credentialId: null, revokedAt: new Date().toISOString() } }; }
+          if (path === '/api/v1/subscriptions/plans') return {status:200,data:{success:true,data:{plans:[{key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25'}},{key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90'}}]}}};
         if (s.accounts.length) {
           const owner = account(auth);
           if (!owner) return { status: 401, data: {} };
@@ -220,12 +252,14 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           // harness), and carries the organization credit balance (the retired /api/v1/credits/balance is never read).
           if (path === '/api/v1/subscription/redeem' && input.method === 'POST') {
             const body = JSON.parse(input.body); s.redeemed.push({ code: body.code, idempotencyKey: body.idempotencyKey }); s.order.push('redeem ' + owner.email); persist();
+            if (s.holdRedeem) await new Promise<void>(resolve => { s.releaseRedeem = resolve; });
             if (s.redeem === 'invalid') return { status: 400, data: { success: false, error: 'This subscription code cannot be redeemed.', code: 'invalid_subscription_code' } };
             owner.plan = undefined; persist();
             return { status: 200, data: { success: true, replayed: false, grant: { id: 'synthetic-grant', planKey: 'plus_monthly', startsAt: '2026-10-30T00:00:00.000Z', endsAt: '2027-04-30T00:00:00.000Z', revoked: false, paidPlanTakesPrecedence: false }, entitlement: { plan: { id: 'plus_monthly', name: 'Plus', status: 'active' }, source: 'grant', effectiveUntil: '2027-04-30T00:00:00.000Z' } } };
           }
+          if (path === '/api/v1/referrals') return {status:200,data:{code:'SYNTHETIC',total_referrals:0,is_active:true}};
           if (path === '/api/v1/billing/limits') { s.order.push('plan ' + owner.email); persist(); return { status: 200, data: { success: true, data: { schemaVersion: 2, v2: {
-            subscription: owner.plan === 'credits' ? { status: 'not_applicable', reason: 'no_organization_subscription' } : { status: 'available', value: { planKey: 'plus_monthly', state: owner.plan === 'none' ? 'canceled' : 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } },
+            subscription: owner.plan === 'credits' ? { status: 'not_applicable', reason: 'no_organization_subscription' } : { status: 'available', value: { subscriptionId:'sub_synthetic',lifecycleRevision:'1',planKey: 'plus_monthly', state: owner.plan === 'none' ? 'canceled' : 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } },
             balance: { status: 'available', source: 'organizations', observedAt: new Date().toISOString(), value: { balance: { value: String(owner.balance), unit: 'usd', currency: 'USD' }, revision: '1' } } } } } }; }
           if (path === '/api/v1/eliza/google/accounts') return { status: 200, data: owner.inbox ? [{ configured: true, connected: true, reason: 'connected', connectionId: 'grant-' + owner.userId.slice(0, 8), grantedCapabilities: ['google.gmail.triage'], identity: { email: owner.inbox } }] : [] };
         }
@@ -248,6 +282,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           setTimeout(() => { emit(streamId, { type: 'response', status: 200, headers: { 'content-type': 'text/event-stream' } }); if (mode === 'hold') s.release = finish; else if (holdChunk) s.heldChunk = finish; else finish(); }, 0);
           return { streamId };
         }
+        if (mode === 'busyHeld') { s.release = () => { s.release = null; emit(streamId, { type: 'response', status: 429, headers: { 'content-type': 'application/json' } }); emit(streamId, { type: 'complete' }); }; return { streamId }; }
         if (mode === 'busy' || mode === 'expired') { setTimeout(() => { emit(streamId, { type: 'response', status: mode === 'busy' ? 429 : 401, headers: { 'content-type': 'application/json' } }); emit(streamId, { type: 'complete' }); }, 0); return { streamId }; }
         f.posts.push(String(body.text));
         const userMessageId = crypto.randomUUID();

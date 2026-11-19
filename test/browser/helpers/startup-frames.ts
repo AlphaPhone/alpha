@@ -6,12 +6,16 @@ type Frame={t:number;home:boolean;prompt:boolean};
 export async function recordStartupFrames(page:Page){await page.addInitScript(()=>{
  const frames:Frame[]=(window as any).startupFrames=[],start=performance.now();
  const painted=(element:Element|null)=>!!element&&!element.closest('[inert],[hidden],[aria-hidden="true"]')&&element.getClientRects().length>0&&getComputedStyle(element).visibility!=='hidden';
- const sample=()=>{const home=painted(document.querySelector('[data-alpha-layer="home"]')),prompt=painted(document.querySelector('.alpha-connection,dialog.alpha-startup-permissions[open]')),last=frames.at(-1);if(!last||last.home!==home||last.prompt!==prompt)frames.push({t:Math.round(performance.now()-start),home,prompt});requestAnimationFrame(sample);};
+ const sample=()=>{const home=painted(document.querySelector('[data-alpha-layer="home"]')),prompt=painted(document.querySelector('.alpha-auth-page,.alpha-connection,dialog.alpha-startup-permissions[open]')),last=frames.at(-1);if(!last||last.home!==home||last.prompt!==prompt)frames.push({t:Math.round(performance.now()-start),home,prompt});requestAnimationFrame(sample);};
  requestAnimationFrame(sample);
 });}
-/** A startup prompt was painted, and no frame before it showed Home. */
+/** A startup prompt was painted, and no frame before it showed Home. The sampler records a prompt
+ * on the first animation frame after it is shown, which can come after the prompt is in the DOM
+ * and focused when the host is loaded, so wait for that frame before reading the record. */
 export async function expectNoHomeBeforePrompt(page:Page){
- const frames=await page.evaluate(()=>(window as any).startupFrames as Frame[]),first=frames.findIndex(frame=>frame.prompt);
+ const recorded=()=>page.evaluate(()=>(window as any).startupFrames as Frame[]);
+ await expect.poll(recorded,{message:'a startup prompt was painted'}).toContainEqual(expect.objectContaining({prompt:true}));
+ const frames=await recorded(),first=frames.findIndex(frame=>frame.prompt);
  expect(first).toBeGreaterThanOrEqual(0);expect(frames.slice(0,first)).not.toContainEqual(expect.objectContaining({home:true}));
 }
 export const startupLoading=(page:Page)=>page.getByRole('status',{name:'Loading Alpha',exact:true});

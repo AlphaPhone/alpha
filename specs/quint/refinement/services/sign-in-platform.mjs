@@ -9,7 +9,7 @@ export function signInPlatform() {
     'android/os/CancellationSignal.java': 'package android.os;public class CancellationSignal {private boolean stopped;public void cancel(){stopped=true;}public boolean isCanceled(){return stopped;}}',
     'ai/eliza/auth/cloud/NativeGoogleCredential.java': `package ai.eliza.auth.cloud;
 public class NativeGoogleCredential {
- public interface Callback {void token(String token);void failure(String code);}
+ public interface Callback {void token(String idToken,String account);void failure(String code);}
  public static void request(android.app.Activity activity,String client,String nonce,android.os.CancellationSignal cancellation,Callback callback){throw new AssertionError("Native account picker outside browser fixture");}
  public static void clear(android.app.Activity activity,Runnable completed){completed.run();}
 }`,
@@ -88,14 +88,6 @@ public class AlphaCredentialStore {
   }
   public AlphaCredentialStore(Context context, Runnable check) {
     owner = check;
-  }
-  public boolean legacyCloudRecoveryEligible(){throw new AssertionError("Unused legacy recovery");}
-  static final class RecoveryRefused extends Exception {
-    final String code;
-    RecoveryRefused(String code) { super("Saved sign-in refused"); this.code = code; }
-  }
-  public boolean restoreLegacyCloudCredential() throws RecoveryRefused {
-    throw new AssertionError("Unused legacy recovery");
   }
   public String readCredentialSlot(String key) {
     owner.run();

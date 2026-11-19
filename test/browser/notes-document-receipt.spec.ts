@@ -4,6 +4,8 @@ import { openLegacyNotes } from './helpers/legacy-notes';
 // Android returns a document picker's result before the app is shown again. A receipt lasts
 // under two seconds, so one issued while the document is hidden could end unseen.
 test('A document receipt that arrives while the page is hidden is shown once the page is visible', async ({ page }) => {
+  // The page's fake clock runs in real time; the test moves it past a receipt's lifetime at once.
+  await page.clock.install();
   await page.goto('/');
   await openLegacyNotes(page);
   const chooser = page.waitForEvent('filechooser');
@@ -26,7 +28,7 @@ test('A document receipt that arrives while the page is hidden is shown once the
   const download = page.waitForEvent('download');
   await exportButton.click();
   await download;
-  await page.waitForTimeout(2300); // Longer than a receipt stays up.
+  await page.clock.runFor(2300); // Longer than a receipt stays up.
   await expect(receipt).toHaveCount(0);
   // The operation itself finished: the control is usable again while the receipt waits.
   await expect(page.getByRole('dialog',{name:'Share',exact:true})).toHaveCount(0);
@@ -48,6 +50,7 @@ test('A visible page shows a document receipt at once', async ({ page }) => {
 
 // A failure is a document outcome too, and the one a person most needs to see.
 test('A document failure that arrives while the page is hidden is shown once the page is visible', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/');
   await openLegacyNotes(page);
   const chooser = page.waitForEvent('filechooser');
@@ -69,7 +72,7 @@ test('A document failure that arrives while the page is hidden is shown once the
   await exportButton.click();
   await page.waitForFunction(() => (window as unknown as { __exportAttempts: number }).__exportAttempts === 1);
   await expect(page.getByRole('dialog',{name:'Share',exact:true})).toHaveCount(0);
-  await page.waitForTimeout(2300); // Longer than a notice stays up.
+  await page.clock.runFor(2300); // Longer than a notice stays up.
   await expect(failure).toHaveCount(0);
   await page.evaluate(() => {
     (window as unknown as { __receiptHidden: boolean }).__receiptHidden = false;

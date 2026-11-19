@@ -28,7 +28,12 @@ import { secureConnectionStore } from "./native-connection";
 import { actionScope } from "./device-actions";
 import {
 	HostedSourceRejected,
+ digestLoopEditRefused,
  digestSummaryText,
+ digestCalendarErrorText,
+ DIGEST_CALENDAR_PERMISSION_DENIED,
+ DIGEST_CALENDARS_UNAVAILABLE,
+ HOSTED_SOURCE_REJECTED_TEXT,
  digestRenewals,
  digestLoopState,
  digestStatusLabel,
@@ -485,7 +490,21 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
             await b.storage.write(b.pendingSlot, dispatched);
             if(binding.current!==b)return;
             setPending(dispatched);
-            const saved=await b.client.mutate(value.path, body, b.controller.signal);
+            let saved;
+            try {
+              saved=await b.client.mutate(value.path, body, b.controller.signal);
+            } catch (error) {
+              const sourceRejected=value.path==='sources'&&error instanceof HostedSourceRejected;
+              if(!sourceRejected&&(value.path!=='loops'||!digestLoopEditRefused(body,error)))throw error;
+              if(binding.current!==b)return;
+              try{await b.storage.remove(b.pendingSlot);}
+              catch{if(binding.current===b)setMessage(sourceRejected?'Source not saved. Retry to clear it.':'Schedule not saved. Couldn’t clear this request.');return;}
+              if(binding.current!==b)return;
+              setPending(null);setReview(null);
+              await refresh(true);
+              if(binding.current===b)setMessage(sourceRejected?HOSTED_SOURCE_REJECTED_TEXT:'Schedule changed before saving. Review it again.');
+              return;
+            }
             if(binding.current!==b)return;
             if(value.rebind?.length){
               // One confirmed renewal: the reviewed source above, then each loop moves to its exact new revision.
@@ -506,11 +525,6 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 			setText("");
 			await refresh(true);
 		} catch (error) {
-      if(error instanceof HostedSourceRejected && binding.current===b){
-        try { await b.storage.remove(b.pendingSlot); } catch {if(binding.current===b)setMessage("Source not saved. Retry to clear it.");return;}
-        if(binding.current!==b)return;
-        setPending(null);setReview(null);await refresh(true);if(binding.current===b)setMessage(error.message);return;
-      }
 			if (binding.current === b)
 				setMessage("Save not confirmed. Retry.");
 		} finally {
@@ -526,7 +540,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 		try{await b.storage.remove(b.pendingSlot);if(binding.current!==b)return;setPending(null);setReview(null);setMessage('Discarded');}
 		catch{if(binding.current===b)setMessage('Couldn’t discard');}
 	}
- async function loadNativeCalendars(){const b=binding.current;if(!b||busy)return;setBusy(true);try{const permission=await nativeCalendars.requestWorkflowReadAccess();if(permission.status!=='granted')throw Error('Calendar permission was not granted.');const result=await nativeCalendars.workflowCalendars();if(binding.current!==b)return;if(result.status!=='ready')throw Error('Calendar sources unavailable.');setCalendarChoices(result.calendars);if(digestMissingCalendars(selectedCalendars,result.calendars).length){setSelectedCalendars(ids=>ids.filter(id=>result.calendars.some(c=>c.id===id)));setMessage('Some selected calendars are no longer available. Choose again.');}}catch(error){if(binding.current===b)setMessage((error as Error).message);}finally{setBusy(false);}}
+ async function loadNativeCalendars(){const b=binding.current;if(!b||busy)return;setBusy(true);try{const permission=await nativeCalendars.requestWorkflowReadAccess();if(permission.status!=='granted')throw Error(DIGEST_CALENDAR_PERMISSION_DENIED);const result=await nativeCalendars.workflowCalendars();if(binding.current!==b)return;if(result.status!=='ready')throw Error(DIGEST_CALENDARS_UNAVAILABLE);setCalendarChoices(result.calendars);if(digestMissingCalendars(selectedCalendars,result.calendars).length){setSelectedCalendars(ids=>ids.filter(id=>result.calendars.some(c=>c.id===id)));setMessage('Some selected calendars are no longer available. Choose again.');}}catch(error){if(binding.current===b)setMessage(digestCalendarErrorText(error));}finally{setBusy(false);}}
  async function reviewNativeSource(){try{await prepareNativeSource();}catch{if(mounted.current)setMessage('Couldn’t review');}}
  async function prepareNativeSource(){
   const b=binding.current;if(!b||busy)return;

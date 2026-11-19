@@ -2,15 +2,56 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "head": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "recordedAt": "2026-11-14",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "status": "identical",
-  "aheadBy": 0,
+  "baseCommit": "2161a22091e4afb5f0407d38e7d634be91218427",
+  "head": "f85602752e293d40157df22e73e0049a8293deb1",
+  "recordedAt": "2026-11-19",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...f85602752e293d40157df22e73e0049a8293deb1",
+  "status": "ahead",
+  "aheadBy": 17,
   "behindBy": 0,
-  "mergeBase": "f86b5038f897094df686da9d5a8d901f60b1e20e",
-  "pinOnlyCommits": [],
+  "mergeBase": "2161a22091e4afb5f0407d38e7d634be91218427",
+  "pinOnlyCommits": [
+    {
+      "sha": "cb4bda9e85f0987a84777523c4af169742e210db",
+      "subject": "Ground Browser opens in spoken hostnames"
+    },
+    {
+      "sha": "6895508ec0d4dee95a70eba52d175c09c8b565a6",
+      "subject": "Keep mixed hostnames and spoken corrections intact"
+    },
+    {
+      "sha": "9e453f11a0d54b793507b9dac206f9d81d702a73",
+      "subject": "Bind SMS reply drafts to the actual latest sender read"
+    },
+    {
+      "sha": "cd10f18e6ac775ab163778d040fd6ada9da072e2",
+      "subject": "Require a persisted sender reply before resolving its address"
+    },
+    {
+      "sha": "dae4495e860c3d5bd68fdea3cf99b2c6aa0fae5a",
+      "subject": "Read spoken hostname spans after the request words"
+    },
+    {
+      "sha": "3b644d2680e5f64e408dcdc15134aff61bd80621",
+      "subject": "Use the existing native Messages thread identity throughout"
+    },
+    {
+      "sha": "93c5035131033ec792be522e8ee252bd00be6c5a",
+      "subject": "Offer owner-bound Gmail composition to a negotiated device editor"
+    },
+    {
+      "sha": "94c7e31bc7d74eb801fd76ecf13918a1b0bb0d8f",
+      "subject": "Ground SMS draft recipients and sender disclosure in the owner request"
+    },
+    {
+      "sha": "72b0ccdd837ffccc45ac03f5c017b7f3d026570f",
+      "subject": "Ask before reading when the requested sender scope is unsupported"
+    },
+    {
+      "sha": "e83eea56ed100c2d361567b484a6516eaf0a1770",
+      "subject": "Route retries of phone Gmail drafts back to the composer"
+    }
+  ],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
@@ -41,6 +82,32 @@
     "https://github.com/elizaOS/eliza/pull/39620",
     "https://github.com/elizaOS/eliza/pull/39619",
     "https://github.com/elizaOS/eliza/pull/39625",
-    "https://github.com/elizaOS/eliza/pull/39623"
+    "https://github.com/elizaOS/eliza/pull/39623",
+    "https://github.com/elizaOS/eliza/pull/39658",
+    "https://github.com/elizaOS/eliza/pull/39660",
+    "https://github.com/elizaOS/eliza/pull/39661",
+    "https://github.com/elizaOS/eliza/pull/39666",
+    "https://github.com/elizaOS/eliza/pull/39686",
+    "https://github.com/elizaOS/eliza/pull/39690",
+    "https://github.com/elizaOS/eliza/pull/39683",
+    "https://github.com/elizaOS/eliza/pull/39743",
+    "https://github.com/elizaOS/eliza/pull/39794",
+    "https://github.com/elizaOS/eliza/pull/39796",
+    "https://github.com/elizaOS/eliza/pull/39803",
+    "https://github.com/elizaOS/eliza/pull/39804",
+    "https://github.com/elizaOS/eliza/pull/39805",
+    "https://github.com/elizaOS/eliza/pull/39806",
+    "https://github.com/elizaOS/eliza/pull/39808",
+    "https://github.com/elizaOS/eliza/pull/39810",
+    "https://github.com/elizaOS/eliza/pull/39813",
+    "https://github.com/elizaOS/eliza/pull/39883",
+    "https://github.com/elizaOS/eliza/pull/39887",
+    "https://github.com/elizaOS/eliza/pull/39898",
+    "https://github.com/elizaOS/eliza/pull/39901",
+    "https://github.com/elizaOS/eliza/pull/39906",
+    "https://github.com/elizaOS/eliza/pull/39903",
+    "https://github.com/elizaOS/eliza/pull/39919",
+    "https://github.com/elizaOS/eliza/pull/39920",
+    "https://github.com/elizaOS/eliza/pull/39921"
   ]
 }

@@ -15,7 +15,7 @@ import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {modelTraces, replayTraces, repositoryRoot, settle} from './browser-model-traces.mjs';
 
 const model = {path: 'specs/quint/application/BrowserSurfacePresentation.qnt', module: 'BrowserSurfacePresentation'};
-const scenarios = ['staleAnswerIgnoredTest', 'overlayWithdrawsTest', 'failureReportedOnceTest', 'hiddenAppKeepsPageTest', 'idleOffBrowserTest', 'sameGeometryNotResentTest'];
+const scenarios = ['staleAnswerIgnoredTest', 'overlayWithdrawsTest', 'failedWithdrawalRetriesQuietlyTest', 'failureReportedOnceTest', 'hiddenAppKeepsPageTest', 'idleOffBrowserTest', 'sameGeometryNotResentTest'];
 const witnesses = ['StaleAnswerPendingWitness', 'RetryAfterFailureWitness', 'KeptWhileAppHiddenWitness'];
 const widths = {1: 320, 2: 400};
 

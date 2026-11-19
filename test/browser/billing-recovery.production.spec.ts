@@ -9,6 +9,7 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, seedCompletedAccessSetup } from './flag-off-android';
 import { residentStub, stub, setStub, type StubAccount } from './resident-stub';
+import { openCloudPlanFromSettings } from './helpers/cloud-plan-settings';
 
 const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5';
 // Synthetic, never a real grant code: 16 Crockford characters once normalized.
@@ -43,6 +44,93 @@ async function zeroAccount(page: Page) {
   return foreign;
 }
 const configured = (page: Page) => stub(page, s => s.order.filter((entry: string) => entry.startsWith('configureCloudProvider')).length);
+const pressHome = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
+
+test('launcher Home dismisses Account and Google without clearing the account or conversation', async ({ page }) => {
+  test.setTimeout(120_000);
+  const foreign = await boot(page, { balance: 0.02, plan: undefined });
+  await residentHome(page);
+  await send(page, 'Keep this conversation');
+  await expect(conversation(page).getByText(/^Resident reply \d+$/)).toHaveCount(1);
+  await button(page, 'Minimize chat').click();
+  const openAccount = async () => {
+    await button(page, 'Settings').click();
+    return openCloudPlanFromSettings(page);
+  };
+  let account = await openAccount();
+  await expect(account.getByText('owner@example.invalid', { exact: true })).toBeVisible();
+  const before = await stub(page, s => s.order.filter((entry: string) => entry.startsWith('Agent.') || entry.startsWith('revoke ') || entry === 'remove cloud key'));
+  await pressHome(page);
+  await expect(account).toHaveCount(0);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+
+  account = await openAccount();
+  const google = page.getByRole('dialog', { name: 'Google accounts', exact: true });
+  await account.getByRole('button', { name: 'Google & email', exact: true }).click();
+  await expect(google).toBeVisible();
+  await google.getByRole('button', { name: 'Close Google accounts', exact: true }).click();
+  await expect(account.getByRole('button', { name: 'Google & email', exact: true })).toBeFocused();
+  await account.getByRole('button', { name: 'Google & email', exact: true }).click();
+  await expect(google).toBeVisible();
+  await pressHome(page);
+  await expect(google).toHaveCount(0);
+  await expect(account).toHaveCount(0);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+  expect(await stub(page, s => s.order.filter((entry: string) => entry.startsWith('Agent.') || entry.startsWith('revoke ') || entry === 'remove cloud key'))).toEqual(before);
+
+  account = await openAccount();
+  await expect(account.getByText('owner@example.invalid', { exact: true })).toBeVisible();
+  await pressHome(page);
+  await expect(account).toHaveCount(0);
+  await button(page, 'Open conversation').click();
+  await expect(bubble(page, 'Keep this conversation')).toHaveCount(1);
+  await expect(conversation(page).getByText(/^Resident reply \d+$/)).toHaveCount(1);
+  expect(await harness(page, f => f.posts)).toEqual(['Keep this conversation']);
+  expect(foreign).toEqual([]);
+});
+
+for (const failRestart of [false, true]) {
+  test(`launcher Home stays visible when a submitted redemption ${failRestart ? 'is followed by a failed restart' : 'completes'}`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const foreign = await zeroAccount(page);
+    await setStub(page, { holdRedeem: true });
+    const startsBefore = await stub(page, s => s.order.filter((entry: string) => entry === 'Agent.start').length);
+    await controls(page).getByRole('button', { name: 'Use code', exact: true }).click();
+    await controls(page).getByRole('textbox', { name: 'Membership code' }).fill(CODE);
+    await controls(page).getByRole('button', { name: 'Redeem', exact: true }).click();
+    await expect.poll(() => stub(page, s => typeof s.releaseRedeem)).toBe('function');
+    await pressHome(page);
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+    await page.evaluate(fail => {
+      const fixture = (window as any).residentStub;
+      if (fail) fixture.start = 'reject-once';
+      fixture.releaseRedeem();
+    }, failRestart);
+    await expect.poll(() => stub(page, s => s.order.filter((entry: string) => entry === 'Agent.start').length)).toBeGreaterThan(startsBefore);
+    if (failRestart) {
+      // The one-shot failure was consumed. Automatic recovery stays on Home.
+      await expect.poll(() => stub(page, s => s.start)).toBe('ok');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(button(page, 'Notes')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Restart Alpha', exact: true })).toHaveCount(0);
+    } else {
+      await button(page, 'Open conversation').click();
+      await expect(conversation(page)).toBeVisible();
+      await expect(page.getByRole('textbox', { name: 'Message Alpha', exact: true })).toBeVisible();
+      await button(page, 'Minimize chat').click();
+    }
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+    await button(page, 'Settings').click();
+    const account = await openCloudPlanFromSettings(page);
+    await expect(account.getByRole('button', { name: 'Done', exact: true })).toBeEnabled();
+    await expect(account.getByText('owner@example.invalid', { exact: true })).toBeVisible();
+    expect(await stub(page, s => s.redeemed.map((row: { code: string }) => row.code))).toEqual([NORMALIZED]);
+    expect(await harness(page, f => f.posts)).toEqual([]);
+    expect(foreign).toEqual([]);
+  });
+}
 
 test('an account without a subscription is told why nothing was sent and gets the one Subscription popup back', async ({ page }, info) => {
   test.setTimeout(120_000);
@@ -121,10 +209,11 @@ test('a plan activated in Cloud billing closes the subscription popup on return 
   test.setTimeout(150_000);
   const foreign = await zeroAccount(page);
   await page.evaluate(() => { (window as any).sameDocument = true; });
-  // Plan selection opens Cloud's billing page only after the account check; nothing is bought here.
+  // Plan selection opens the in-app plans on the current Cloud (no browser page); nothing is bought until Stripe.
   await controls(page).getByRole('button', { name: 'Choose a plan', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Review billing account', exact: true })).toHaveCount(0);
-  await expect.poll(() => stub(page, s => s.opened)).toEqual(['https://cloud.eliza.app/cloud/billing']);
+  await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plus',{exact:true})).toBeVisible();
+  expect(await stub(page,s=>s.opened)).toEqual([]);
   // The synthetic Cloud answer now reports an active plan, with the cash balance still zero.
   await stub(page, s => { s.accounts[0].plan = undefined; s.persist(); });
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));

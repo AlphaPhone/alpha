@@ -8,9 +8,6 @@
 // - Web pages come from an in-process HTTP server on 127.0.0.1 started by this spec.
 // - The search engine is an external boundary: https://www.google.com/search is fulfilled by
 //   Playwright with a test-owned results page; no real request is sent.
-// - The device speech engine is replaced by a recording fixture (same prototype hook that
-//   reading-sensitive.spec.ts uses), so no audio is played; the reviewed text handed to speech
-//  is what is asserted.
 // - Password values are only the development vault's built-in synthetic records and the
 //   development provider's disposable sample sign-in. Nothing is typed into a credential field.
 //
@@ -65,7 +62,7 @@ async function enter(page: Page, value: string) {
 async function menu(page: Page, name: string) { await button(page, 'Menu').click(); await button(page, name).click(); }
 const providerDocument = (page: Page) => page.evaluate(async () => (await import('/src/browser/preference-documents.ts')).passwordProviderDocument.readRaw());
 
-test('browser navigation, tabs, private tab, reviewed reading and password manager complete as one journey', async ({page}) => {
+test('browser navigation, page attachment eligibility, private tabs and passwords complete as one journey', async ({page}) => {
   test.setTimeout(240_000);
   const searches: string[] = [];
   await page.route('https://www.google.com/search**', route => {
@@ -73,12 +70,6 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     return route.fulfill({contentType: 'text/html', body: '<h1>Results fixture</h1>'});
   });
   await page.goto('/?mode=dev');
-  await page.evaluate(async () => {
-    const {BrowserVoice} = await import('/src/browser/voice.ts');
-    (window as any).speechCalls = [];
-    BrowserVoice.prototype.synthesizeLocal = async function (input: {text: string}) { (window as any).speechCalls.push(input.text); throw Error('Fixture terminal'); };
-  });
-
   await test.step('navigate, search, Back and Forward', async () => {
     await button(page, 'Browser').click();
     await expect(page.getByRole('heading', {name: 'New tab', exact: true})).toBeVisible();
@@ -115,83 +106,32 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await expect(heading(page, 'Harbour notes')).toBeVisible();
   });
 
-  await test.step('reviewed page reading hands only reviewed text to local speech', async () => {
-    await menu(page, 'Read aloud');
-    const review = page.getByRole('dialog', {name: 'Read page excerpt'});
-    await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('');
-    const excerpt = review.getByRole('textbox', {name: 'Excerpt to read'});
-    await expect(excerpt).toHaveValue('Harbour notes\n\nThe ferry leaves at nine.');
-    expect(await page.evaluate(() => (window as any).injected)).toBeUndefined();
-    expect(await page.evaluate(() => (window as any).speechCalls)).toEqual([]);
-    await excerpt.fill('The ferry leaves at nine.');
-    await review.getByRole('button', {name: 'Read locally', exact: true}).click();
-    await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('Fixture terminal');
-    expect(await page.evaluate(() => (window as any).speechCalls)).toEqual(['The ferry leaves at nine.']);
-    await review.getByRole('button', {name: 'Close', exact: true}).click();
-    await expect(review).toHaveCount(0);
-  });
-
-  // Journey hardening: navigation during approval.
-  await test.step('a page that navigates while its excerpt is under review retires that review; nothing of the old page is read', async () => {
-    await enter(page, `${origin}/departures`);
-    await expect(heading(page, 'Departures')).toBeVisible();
-    await menu(page, 'Read aloud');
-    const review = page.getByRole('dialog', {name: 'Read page excerpt'});
-    await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('');
-    await expect(review.getByRole('textbox', {name: 'Excerpt to read'})).toHaveValue('Departures\n\nOld page text.');
-    await expect(review.getByRole('button', {name: 'Read locally', exact: true})).toBeEnabled();
-    // The page starts leaving on its own; the old document is still shown while the request is held.
-    await expect.poll(() => held.length).toBe(1);
-    await expect(heading(page, 'Departures')).toBeVisible();
-    await expect(review).toBeVisible();
-    // The navigation commits while the review is open: the review of the old target is withdrawn.
-    releaseArrivals();
-    await expect(heading(page, 'Arrivals')).toBeVisible();
-    await expect(review).toHaveCount(0);
-    await expect(page.getByRole('button', {name: 'Read locally', exact: true})).toHaveCount(0);
-    expect(await page.evaluate(() => (window as any).speechCalls)).toEqual(['The ferry leaves at nine.']);
-    // The host cannot see where a sandboxed page took itself, so it says so and offers no reading
-    // of that unknown document: the menu offers neither Read aloud nor a page question, so no review
-    // opens and nothing is spoken.
-    await expect(page.getByRole('status').filter({hasText: 'Page blocked'})).toBeVisible();
+  await test.step('page questions stay out of the Browser menu and non-HTTPS pages cannot be attached', async () => {
     await button(page, 'Menu').click();
-    await expect(button(page, 'Reload page')).toBeVisible();
-    await expect(button(page, 'Read aloud')).toHaveCount(0);
-    await expect(button(page, 'Ask about page')).toHaveCount(0);
+    const overflow = page.getByRole('dialog', {name: 'Browser menu', exact: true});
+    await expect(overflow.getByRole('button', {name: 'Read aloud', exact: true})).toHaveCount(0);
+    await expect(overflow.getByRole('button', {name: 'Ask about page', exact: true})).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog',{name:'Browser menu',exact:true})).toHaveCount(0);
-    await expect(review).toHaveCount(0);
-    expect(await page.evaluate(() => (window as any).speechCalls)).toEqual(['The ferry leaves at nine.']);
-    // Going to the new address explicitly restores a reviewable page: the review is of that page.
-    await enter(page, `${origin}/arrivals`);
-    await expect(heading(page, 'Arrivals')).toBeVisible();
-    await menu(page, 'Read aloud');
-    await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('');
-    await expect(review.getByRole('textbox', {name: 'Excerpt to read'})).toHaveValue('Arrivals\n\nNew page text.');
-    await review.getByRole('button', {name: 'Read locally', exact: true}).click();
-    await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('Fixture terminal');
-    expect(await page.evaluate(() => (window as any).speechCalls)).toEqual(['The ferry leaves at nine.', 'Arrivals\n\nNew page text.']);
-    await review.getByRole('button', {name: 'Close', exact: true}).click();
-    await expect(review).toHaveCount(0);
-  });
-
-  await test.step('a page with a credential field is refused for reading and for questions', async () => {
     await enter(page, `${origin}/members`);
     await expect(heading(page, 'Members')).toBeVisible();
-    await menu(page, 'Read aloud');
-    const review = page.getByRole('dialog', {name: 'Read page excerpt'});
-    await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('Contains secrets');
-    await expect(review.getByRole('textbox', {name: 'Excerpt to read'})).toHaveValue('');
-    await expect(review.getByRole('textbox', {name: 'Excerpt to read'})).toBeDisabled();
-    await expect(review.getByRole('button', {name: 'Read locally', exact: true})).toBeDisabled();
-    await review.getByRole('button', {name: 'Close', exact: true}).click();
-    expect(await page.evaluate(() => (window as any).speechCalls)).toHaveLength(2);
-    // A plain-HTTP local page is not an acceptable question source: honest refusal, no editor,
-    // and the menu must not stay open over the refusal.
-    await menu(page, 'Ask about page');
-    await expect(page.getByText('Load a public HTTPS page before asking about it.', {exact: true})).toBeVisible();
-    await expect(page.getByRole('dialog', {name: 'Ask about selected content'})).toHaveCount(0);
-    await expect(button(page, 'Close menu')).toHaveCount(0);
+    await button(page, 'Chat actions').click();
+    const actions = page.getByRole('dialog', {name: 'Chat actions', exact: true});
+    await expect(actions).toBeVisible();
+    await expect(actions.getByRole('button', {name: 'Attach page', exact: true})).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  });
+
+  await test.step('an iframe navigation remains visible but cannot acquire the host page address', async () => {
+    await enter(page, `${origin}/departures`);
+    await expect(heading(page, 'Departures')).toBeVisible();
+    await expect.poll(() => held.length).toBe(1);
+    await expect(heading(page, 'Departures')).toBeVisible();
+    releaseArrivals();
+    await expect(heading(page, 'Arrivals')).toBeVisible();
+    await expect(page.getByRole('status').filter({hasText: 'Page blocked'})).toBeVisible();
+    await button(page, 'Chat actions').click();
+    await expect(page.getByRole('button', {name: 'Attach page', exact: true})).toHaveCount(0);
+    await page.keyboard.press('Escape');
   });
 
   await test.step('private tab is marked, kept out of history and gone after reload', async () => {
@@ -218,7 +158,7 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await button(page, 'Tabs').click();
     await expect(page.getByRole('heading', {name: '2 tabs', exact: true})).toBeVisible();
     await expect(button(page, `Switch to ${origin}/one`)).toBeVisible();
-    await expect(button(page, `Switch to ${origin}/members`)).toBeVisible();
+    await expect(button(page, `Switch to ${origin}/departures`)).toBeVisible();
     await expect(page.getByRole('button', {name: /private/i})).toHaveCount(1); // only the "New private tab" control
     await button(page, 'Back to page').click();
   });

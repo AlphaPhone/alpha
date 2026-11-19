@@ -19,7 +19,7 @@ function fixture(){
   if(input.kind==='cancel')return {status:'cancelled'};
   throw Error('Unexpected native operation');
  }};
- const context=vm.createContext({crypto:webcrypto,TextEncoder,document:{hidden:false},Event,CustomEvent,DOMException,Date,AbortController,setTimeout,clearTimeout,window:{dispatchEvent(event){dispatched.push(event);}},Capacitor:{isNativePlatform:()=>true},registerPlugin:()=>bridge});
+ const context=vm.createContext({crypto:webcrypto,TextEncoder,document:{hidden:false},Event,CustomEvent,DOMException,Date,AbortController,setTimeout,clearTimeout,window:{dispatchEvent(event){dispatched.push(event);}},Capacitor:{isNativePlatform:()=>true},registerPlugin:()=>bridge,CalendarSyncNotice:class CalendarSyncNotice extends Error{name='CalendarSyncNotice';}});
  const fields=stripTypeScriptTypes(fs.readFileSync('apps/app/src/browser/calendar-sync-fields.ts','utf8'),{mode:'strip'}).replace(/^export /gm,'');vm.runInContext(fields,context);
  const source=stripTypeScriptTypes(fs.readFileSync('apps/app/src/runtime/native-calendar-sync.ts','utf8'),{mode:'strip'}).replace(/^import[^\n]+\n/gm,'').replace('export const nativeCalendarSync =','globalThis.nativeCalendarSync =');vm.runInContext(source,context);
  const api=context.nativeCalendarSync,current=()=>state.current,prepare=()=>api.prepare({environment:'production',connectionId:binding.connectionId,calendarId:'primary'},current,abort.signal);

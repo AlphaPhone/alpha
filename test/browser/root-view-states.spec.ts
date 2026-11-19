@@ -10,7 +10,7 @@ type View = typeof ROOT[number] | 'Reminders' | 'Notifications';
 const VIEWS: View[] = [...ROOT, 'Reminders', 'Notifications'];
 const EMPTY: Record<View, RegExp> = {
   Inbox: /Connect Eliza Cloud/,
-  Calendar: /Connect/,
+  Calendar: /Not connected/,
   Browser: /No open pages|New tab/,
   Camera: /^Can’t start camera$/,
   Photos: /^No photos$/,
@@ -21,7 +21,7 @@ const EMPTY: Record<View, RegExp> = {
   Files: /Internal storage|Storage Unavailable/,
   Workflows: /Connect your remote agent in Settings\./,
   Settings: /^General$/,
-  Reminders: /Connect/,
+  Reminders: /Not connected/,
   Notifications: /No notifications/,
 };
 // Fixture identities from the reference prototype must never appear in a live profile.

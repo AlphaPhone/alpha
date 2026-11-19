@@ -11,10 +11,14 @@ route, installed provider and capability attempt. It checks selected shared
 projections for capability success and failure, explicit search recovery,
 result selection, Directions after explicit origin entry, Start, End,
 conversation minimization and arrival. A fresh off-route fix keeps guidance
-and prompts for an explicit reroute. A real touch on the rendered button
-checks the exact route request endpoints. The same mounted replay checks
-guidance controls, Map information, attribution links and status text at
-412×915, 360×640, 915×412 and 640×360 with 100% and 150% browser text.
+and its status points at End; the sheet has no Reroute control, and the
+replay checks that it is absent. An explicit reroute is driven through the
+registered agent navigation port, which checks the exact route request
+endpoints; it is not a touch on a rendered control. The same mounted replay
+checks that End navigation, Map information, attribution links and status
+text own their touch points at 412×915, 360×640, 915×412 and 640×360 with
+100% and 150% browser text, and that Reroute, Ask Alpha and the voice
+guidance controls are absent.
 The landscape checks also open and close Map information by touch, sample
 the first disclosure action and check the controls on the right-docked
 assistant. These are derived renderer checks over the shell's measured

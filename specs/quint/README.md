@@ -61,7 +61,7 @@ retained; this historical comparison does not establish current runtime behavior
 NativeCrashJournal keeps its seven original initial states, raw timestamp values,
 actions and safety obligations. Its completion helper factors the installed disk
 and reply independently, and the row predicate checks the same ordered rows.
-The [six-step qualification](https://github.com/eliza-research/alpha/actions/runs/43537851333)
+The [six-step qualification](https://github.com/alphacompute/alpha/actions/runs/43537851333)
 completed all seven verification conditions at states zero through six with
 `NoError`. It used the pinned Z3 backend, a 4 GiB heap, `after` invariant scheduling
 and a three-hour phase deadline. The default model depth remains four. Its
@@ -75,7 +75,7 @@ proves both original progress properties, alongside unchanged review retirement.
 The individual historical properties remain available. Branch-local choices and
 history-relation evaluation preserve the original state transitions and domains.
 
-The [full qualification](https://github.com/eliza-research/alpha/actions/runs/43508291814)
+The [full qualification](https://github.com/alphacompute/alpha/actions/runs/43508291814)
 completed 8,398,068 states at depth 23 with an empty queue, two liveness branches,
 and the history assertions as an implied invariant. It retained the 1800-second,
 two-worker, 2 GiB limits and all original scenarios and sampling bounds. Separate
@@ -111,11 +111,30 @@ bun scripts/check-quint.ts compare --backend=tlc --models=ChatInput
 ```
 
 `--models` selects comma-separated module names. `--out` selects the JSON
-evidence file. `--jobs` or `ALPHA_QUINT_JOBS` allows independent scenario,
-simulation and typecheck workers. The default is one worker. Each model keeps
-its ordered phases, and the receipt lists results in registry order. Use
-`ALPHA_QUINT_JOBS=3 bun run quint:check` to apply this to the standard gate. Model
-checking remains serial within one server endpoint.
+evidence file. `--jobs` or `ALPHA_QUINT_JOBS` sets the number of independent scenario,
+simulation and typecheck workers. The default is half the available cores, at most four;
+`--jobs=1` runs serially. Each model keeps its ordered phases, and the receipt lists
+results in registry order. Model checking remains serial within one server endpoint.
+
+Every Quint run is remembered in `.cache/quint/` (`ALPHA_QUINT_CACHE_DIR` moves it) under
+exactly what decides its answer: the installed Quint package and every package it loads,
+the Bun or Node that runs it, the arguments, and the bytes of the model, every model it
+imports transitively and any configuration file its arguments name (`tlc.json`, an
+Apalache configuration). TLC translations also key the checker code and pinned Apalache
+distribution that produce them. Each run executes in a fresh directory holding only those
+files, so a file left out of the key is one Quint cannot find: a missed import fails
+instead of being reused. Only a run the checker accepted is stored, and remembered output is
+judged again by the current checker before reuse. A change to one model therefore reruns
+that model and the models that import it, and nothing else. A reused phase says
+`(cached)`, and its receipt row records `cache.hit` and when the original run finished
+(`cache.recordedAt`). `--cache=off` or `ALPHA_QUINT_CACHE=off` runs everything. Entries
+unused for 30 days, or beyond 512 MiB, are removed. Registry loading likewise remembers
+each model's parser-backed metadata validation, which otherwise costs about 16 seconds
+per load; its marker must name the exact key and model-text hash it vouches for.
+Entries carry no provenance, so the checker refuses a cache directory in which git tracks
+any file. Promotion CI runs every check with `ALPHA_QUINT_CACHE=off` and neither restores
+nor saves `.cache/quint`: anything a pull request runs can write the Actions cache its
+promotion runs read, under a key it can predict. The cache speeds up local runs only.
 `--timeout` sets the per-check timeout in seconds. Defaults are 1800 for model
 checking and 120 for the default gate; the qualified six-step NativeCrashJournal
 Apalache phase receives 10800 seconds. An explicit `--timeout` overrides that

@@ -24,9 +24,9 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 async function prepared(extraSources,mutant){
  const sources=[driver,'specs/quint/refinement/services/support.mjs','upstream.lock.json','.eliza/client-features/.source.json',
-  'apps/app/src/maps/screen.ts','apps/app/src/maps/device-navigation.ts',shared+'maps-screen.ts',shared+'state.ts',shared+'saved-places.ts',...extraSources];
+  'apps/app/src/maps/screen.ts','apps/app/src/maps/device-navigation.ts','apps/app/src/ui/maps/maps-screen.ts','apps/app/src/ui/maps/state.ts',shared+'saved-places.ts',...extraSources];
  let hashes=captureInputs(sources);
- const compile=()=>build({stdin:{contents:`export {MapsScreenController} from './apps/app/src/maps/screen.ts';export {DeviceMapsNavigation} from './apps/app/src/maps/device-navigation.ts';export {MapsController} from './${shared}state.ts';export {SavedPlaces} from './${shared}saved-places.ts';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,format:'esm',platform:'node',logLevel:'silent',plugins:[{name:'source-canary-only',setup(b){
+ const compile=()=>build({stdin:{contents:`export {MapsScreenController} from './apps/app/src/maps/screen.ts';export {DeviceMapsNavigation} from './apps/app/src/maps/device-navigation.ts';export {MapsController} from './apps/app/src/ui/maps/state.ts';export {SavedPlaces} from './${shared}saved-places.ts';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,format:'esm',platform:'node',logLevel:'silent',plugins:[{name:'source-canary-only',setup(b){
   if(!mutant)return;
   b.onLoad({filter:/\/maps-screen\.ts$/},args=>{
    let text=readFileSync(args.path,'utf8');
@@ -102,15 +102,15 @@ async function checkMapsScreenModes(extraSources=[],options={}){
   for(const mode of ['layers','typed-route','origin-search']){
    const f=fixture(p.module);try{
     const t={name:'actual Maps screen '+mode,expect:screenProjection(f),steps:[]};const point=(label,actions)=>t.steps.push({label,action:actions,expect:screenProjection(f)});
-    f.screen.focusQuery();point('real focus draws results',action('focusSearch'));
-    f.screen.setQuery('Destination');point('real typed query',action('typeQuery'));
+    f.screen.focusQuery();point('real focus draws results',action('controllerFocusSearch'));
+    f.screen.setQuery('Destination');point('real typed query',action('controllerTypeQuery'));
     f.screen.submit();await until(()=>f.controller().snapshot().search.phase==='ready','actual search');point('real provider search submits',action('submitSearch'));assert.equal(f.routes.length,0,'Search must not route');
     f.screen.choose('place:'+providerId+':destination');await tick();point('actual result selection',action('pickResult'));
     if(mode==='layers'){
      f.screen.back();point('Back clears actual selected place',action('back'));assert.equal(f.screen.view().mode,'base','Back must retire selected-place layer');
      f.screen.back();point('Back clears retained query',action('back'));
     }else{
-     f.screen.openDirections();point('Directions never request location or routing by themselves',action('openDirections'));assert.equal(f.routes.length,0);assert.equal(f.agent.starts,0);assert.equal(f.location.starts,0);
+     f.screen.openDirections();point('Directions never request location or routing by themselves',action('controllerOpenDirections'));assert.equal(f.routes.length,0);assert.equal(f.agent.starts,0);assert.equal(f.location.starts,0);
      f.screen.setOriginText(mode==='origin-search'?'Start':'1, 1');point('real typed origin invalidates route',action('editOrigin',mode!=='origin-search'));
      if(mode==='origin-search'){
       f.screen.planOrigin();await until(()=>f.controller().snapshot().originSearch.phase==='ready','actual origin search');point('origin search opens only origin layer',action('searchOrigin'));
@@ -129,7 +129,7 @@ async function checkMapsScreenModes(extraSources=[],options={}){
   const receipt=await checkTraces({model:'MapsScreenModes',sources:p.sources,driverHashes:p.hashes,generatedSources:[p.input],traces,scope:'bounded-orchestration',assumptions:[
    'Actual MapsScreenController and MapsController execute search, selected place, directions, origin search, manual-coordinate planning, Start, End and layered Back. Private TypeScript fields are read without rewriting behavior; public view modes and independent provider/GPS call counts cross-check their state.',
    'Closed deterministic provider, storage, location, voice and background-session ports are not installed integrations. Three explicit schedules project searching, query, selection, directions, origin mode, navigation, locating, origin and route readiness.',
-   'hidden, watch, originText, lastChoice and the shell handoff/counter fields are not projected. The starting point is typed before the location permission read settles, so opening directions requests no fix. Cross-app consumption, permission/watch races, native background lifecycle, saved places, agent commands, leaving the view and arbitrary interleavings are replayed from model traces by maps-screen-modes.mjs.',
+   'hidden, watch, originText, lastChoice and the shell handoff/counter fields are not projected. Controller-prefixed model actions describe the shared immediate-input API. Alpha host debounce and automatic location are checked by the mounted adapter replay. The starting point is typed before the permission read settles, so the direct controller requests no fix. Cross-app consumption, permission/watch races, native background lifecycle, saved places, agent commands, leaving the view and arbitrary interleavings are replayed from model traces by maps-screen-modes.mjs.',
   ]});
   return{receipt,obligations:[{model:'MapsScreenModes',obligation:'Unobserved shell, location, lifecycle and agent schedules',reason:receipt.assumptions?.at(-1)??'Only three explicit screen-layer schedules are observed.'}]};
  }finally{p.close();}

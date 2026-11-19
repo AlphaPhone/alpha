@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {readFileSync} from 'node:fs';
+import {dirname, resolve} from 'node:path';
 import {bootEmailReview, reviewInputs} from './fixtures/use-in-email-review.mjs';
 import {captureInputs, checkTraces} from '../specs/quint/refinement/check-traces.mjs';
 import {call, checkpoint, root, trace} from '../specs/quint/refinement/application/support.mjs';
 
 const model = 'EmailSuggestionReview';
-const shared = 'vendor/eliza/plugins/plugin-inbox/src/mailbox/use-in-email.ts';
-const inputs = [...reviewInputs, shared, fileURLToPath(import.meta.url),
+const inputs = [...reviewInputs, fileURLToPath(import.meta.url),
   fileURLToPath(new URL('./fixtures/use-in-email-review.mjs', import.meta.url)),
   fileURLToPath(new URL('../specs/quint/refinement/application/support.mjs', import.meta.url))];
 
@@ -61,8 +61,10 @@ function observe(t, rendered) {
 async function checkEmailSuggestionReview(extraSources = []) {
   const sources = [...new Set([...inputs, ...extraSources])];
   const driverHashes = captureInputs(sources);
-  assert.deepEqual(readFileSync(root + reviewInputs[1]), readFileSync(root + shared),
-    'Use-in-email rules must be the pinned shared source');
+  // The executed rules are the very module the renderer review imports.
+  const review = root + reviewInputs[0];
+  const imported = [...readFileSync(review, 'utf8').matchAll(/^import .* from '(\.[^']+)';$/gm)].map(match => resolve(dirname(review), match[1]) + '.ts');
+  assert.ok(imported.includes(resolve(root, reviewInputs[1])), 'Use-in-email rules must be the module the renderer review imports');
   const traces = [];
   async function scenario(name, run) {
     const t = await bootEmailReview();
@@ -151,7 +153,7 @@ async function checkEmailSuggestionReview(extraSources = []) {
   });
   return checkTraces({model, sources, driverHashes, traces, scope: 'bounded-component',
     assumptions: [
-      'Executes the actual renderer review and byte-identical shared fit and presentation helpers with a closed synthetic Inbox adapter. Its only mutation records local text insertions.',
+      'Executes the actual renderer review and the fit and presentation helpers it imports with a closed synthetic Inbox adapter. Its only mutation records local text insertions.',
       'One agent reply, up to four review snapshots, three retained render-control slots and representative visibility, account, token and capacity classes.',
       'The Inbox composer internals, actual DOM focus, arbitrary renderer schedules and provider execution are separate obligations.',
     ]});

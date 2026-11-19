@@ -8,6 +8,7 @@ import {filesWithin, repositoryRoot as root} from '../../../../scripts/quint-lib
 import {sha256} from '../../../../scripts/sha256.ts';
 import {fenceNetwork} from '../../../../test/browser/flag-off-android.ts';
 import {entitlements, startNativeCloudSignInFixture, USER} from '../../../../test/browser/helpers/native-cloud-signin.ts';
+import {scopedViteCacheDir} from '../../../../test/browser/helpers/vite-cache.ts';
 import {captureInputs, checkTraces, qset} from '../../refinement/check-traces.mjs';
 
 const expect = baseExpect.configure({timeout: 30000});
@@ -25,12 +26,13 @@ const state = page => page.evaluate(() => {
 
 async function chooser(page, google) {
   await expect(panel(page).getByRole('heading', {name: 'Alpha', exact: true})).toBeVisible();
-  await expect(panel(page).getByRole('textbox', {name: 'Email or phone', exact: true})).toBeVisible();
-  await expect(panel(page).getByRole('form',{name:'Sign in with email or phone',exact:true})).toBeVisible();
-  if (google) await expect(button(page, 'Continue with Google')).toBeVisible();
-  else await expect(button(page, 'Continue with Google')).toHaveCount(0);
+  await expect(panel(page).getByRole('textbox', {name: 'Email', exact: true})).toBeVisible();
+  await expect(panel(page).getByRole('form',{name:'Sign in with email',exact:true})).toBeVisible();
+  await expect(button(page, 'Continue with phone number')).toBeEnabled();
+  await expect(button(page, 'Continue with Google')).toBeVisible();
+  if (!google) await expect(button(page, 'Continue with Google')).toBeDisabled();
   const enabled = ['email', 'phone'];
-  if (await button(page, 'Continue with Google').count()) {
+  if (google) {
     await expect(button(page, 'Continue with Google')).toBeEnabled();
     enabled.push('google');
   }
@@ -39,7 +41,7 @@ async function chooser(page, google) {
 }
 
 async function emailCode(page, record) {
-  await panel(page).getByRole('textbox', {name: 'Email or phone', exact: true}).fill(address);
+  await panel(page).getByRole('textbox', {name: 'Email', exact: true}).fill(address);
   await button(page, 'Send code').click();
   await expect(panel(page).getByRole('form', {name: 'Enter your email code'})).toBeVisible();
   const offered = await state(page);
@@ -69,7 +71,8 @@ async function emailCode(page, record) {
 }
 
 async function phoneBack(page, record) {
-  await panel(page).getByRole('textbox',{name:'Email or phone',exact:true}).fill('+12025550101');
+  await button(page, 'Continue with phone number').click();
+  await panel(page).getByRole('textbox',{name:'Phone number',exact:true}).fill('+12025550101');
   await button(page, 'Send code').click();
   await expect(panel(page).getByRole('form', {name: 'Enter your phone code'})).toBeVisible();
   const offered = await state(page);
@@ -106,8 +109,10 @@ async function googleBack(page, record) {
 async function mounted(extraSources) {
   checkClientFeatures();
   const cacheDir = resolve(root, 'test-results/quint-refinement/legacy-sign-in-vite-cache');
+  const optimizedDependencies = scopedViteCacheDir(cacheDir);
   const watched = new Set(['apps/app/src/runtime/connection-ui.tsx', 'apps/app/src/runtime/cloud-sign-in.ts',
-    'apps/app/src/runtime/cloud-sign-in-ui.tsx', '.eliza/client-features/packages/auth/src/auth/native-cloud-sign-in.ts']
+    'apps/app/src/runtime/cloud-sign-in-ui.tsx', 'apps/app/src/ui/auth/native-cloud-sign-in-copy.ts',
+    '.eliza/client-features/packages/auth/src/auth/native-cloud-sign-in.ts']
     .map(path => resolve(root, path)));
   const sources = [...new Set([
     ...filesWithin(resolve(root, 'apps/app/src')), ...filesWithin(resolve(root, '.eliza/client-features')),
@@ -116,12 +121,12 @@ async function mounted(extraSources) {
     'vendor/eliza/packages/core/src/utils/uuid.ts', 'vite.config.ts', 'package.json', 'bun.lock', 'upstream.lock.json',
     'scripts/prepare-client-features.ts', 'scripts/quint-lib.ts', fileURLToPath(import.meta.url),
     'test/browser/flag-off-android.ts', 'test/browser/helpers/native-navigation-protocol.ts',
-    'test/browser/helpers/native-cloud-signin.ts', ...extraSources,
+    'test/browser/helpers/native-cloud-signin.ts', 'test/browser/helpers/vite-cache.ts', ...extraSources,
   ])];
   const driverHashes = captureInputs(sources), loaded = new Set();
   const fixture = await startNativeCloudSignInFixture(cacheDir, [{name: 'quint-sign-in-inputs', enforce: 'pre', transform(code, id) {
     const path = id.split('?')[0];
-    if (path.startsWith(root+'/') && !path.startsWith(cacheDir+'/') && !path.includes('/node_modules/') && existsSync(path)) {
+    if (path.startsWith(root+'/') && !path.startsWith(optimizedDependencies+'/') && !path.includes('/node_modules/') && existsSync(path)) {
       assert.ok(driverHashes[path], 'Mounted source captured before execution: '+path);
       if (watched.has(path)) {
         assert.equal(sha256(Buffer.from(code)), driverHashes[path]);

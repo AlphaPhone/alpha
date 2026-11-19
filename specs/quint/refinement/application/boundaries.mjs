@@ -14,41 +14,42 @@ const checkTraces = options => check(boundInputs({...options, sources: [...optio
 export async function filesAndSharing() {
   const source = 'apps/app/src/prototype/file-email-review.ts';
   const attachment = await bundledSource('apps/app/src/runtime/inbox-attachment.ts');
-  const modal = await bundledSource('apps/app/src/runtime/modal-inert.ts');
+  const drafts = await bundledSource('apps/app/src/ui/mailbox/drafts-controller.ts', {'import.meta.env': '{}'});
   const traces = [];
   for (const changed of [false, true]) {
-    const page = new JSDOM('<div class="os"></div>', {pretendToBeVisual: true});
-    page.window.HTMLDialogElement.prototype.showModal = function () {this.open = true;};
-    let inserted = null, readCount = 0, lastReview = Promise.resolve();
-    const document = page.window.document;
+    const page = new JSDOM('<div></div>', {pretendToBeVisual: true});
+    let inserted = null, readCount = 0, opened = 0, carryNotice = '';
+    const {document} = page.window, held = deferred();
     const file = {name: 'Owned.txt', mimeType: 'text/plain', dataBase64: Buffer.from('first').toString('base64')};
     const reviewed = await attachment.exports.reviewMailAttachment(file);
-    const second = {name: 'Owned.txt', mimeType: 'text/plain', dataBase64: Buffer.from('changed').toString('base64')};
+    const second = {...file, dataBase64: Buffer.from('changed').toString('base64')};
     const changedReview = await attachment.exports.reviewMailAttachment(second);
     const module = sourceContext([source], ['reviewFileEmail'], {window: page.window, document,
-      getComputedStyle: page.window.getComputedStyle.bind(page.window),
-      reviewMailAttachment: value => (lastReview = attachment.exports.reviewMailAttachment(value)), holdPhoneInert: modal.exports.holdPhoneInert,
-      describeEmailTarget: () => ({account: 'Owner', destination: 'Draft'})});
-    const t = trace(`attachment-${changed ? 'changed' : 'exact'}`, {'s.inserted': !!inserted});
+      AbortController: page.window.AbortController, reviewMailAttachment: attachment.exports.reviewMailAttachment,
+      rethrowAttachmentRefusal: drafts.exports.rethrowAttachmentRefusal});
+    const t = trace(`attachment-${changed ? 'changed' : 'exact'}`, {'s.inserted': false});
     const close = module.reviewFileEmail({read: async () => {
-      readCount++;
-      return readCount > 1 && changed ? {...second, ...changedReview} : {...file, ...reviewed};
+      if (++readCount === 1) return {...file, ...reviewed};
+      await held.promise;
+      return changed ? {...second, ...changedReview} : {...file, ...reviewed};
     }, current: () => true, target: () => ({ready: true, token: 'draft-one'}),
-    insert(value, token) {assert.equal(token, 'draft-one'); inserted = value; return true;}, inserted() {}});
-    await tick(); await lastReview; await tick();
-    const input = document.querySelector('input'); assert.equal(input.disabled, false);
-    checkpoint(t, 'source performs initial attachment validation', call('read'), {'s.inserted': !!inserted, 's.checked': input.checked});
-    input.checked = true; input.dispatchEvent(new page.window.Event('change'));
-    checkpoint(t, 'explicit checkbox', call('check'), {'s.checked': input.checked});
-    if (changed) checkpoint(t, 'source bytes changed before second read', call('changeSource'), {'s.inserted': !!inserted});
-    [...document.querySelectorAll('button')].find(button => button.textContent === 'Attach').click();
-    await tick(); await lastReview; await tick();
-    checkpoint(t, 'source rereads bytes before insertion', changed ? {...call('insert'), reject: true} : call('insert'), {'s.inserted': !!inserted});
+    insert(value, token) {assert.equal(token, 'draft-one'); inserted = value; return true;},
+    inserted() {opened++;}, notify(message) {carryNotice=message;}});
+    for(let attempt=0;readCount<2&&attempt<12;attempt++) await tick();
+    assert.equal(readCount,2);
+    checkpoint(t, 'Email click binds the local draft and validates the first read', call('read'), {'s.inserted': false});
+    if (changed) checkpoint(t, 'selected bytes change before the second read', call('changeSource'), {'s.inserted': false});
+    held.resolve(); await tick();
+    assert.equal(document.querySelector('dialog'), null);
+    assert.equal(opened, changed ? 0 : 1);
+    if (changed) assert.match(carryNotice,/selected file changed/);
+    else assert.deepEqual(inserted,{...file,...reviewed});
+    checkpoint(t, 'only matching bytes open the draft', call(changed ? 'insertFailed' : 'insert'), {'s.inserted': !!inserted});
     close(); page.window.close(); traces.push(t);
   }
-  return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...modal.sources], traces, scope: 'bounded-component', assumptions: [
-    'Real review dialog and upstream byte validation execute for exact and changed-byte copies. Destination description is a text-only stub.',
-    'Owner/draft token changes, focus/page retirement, revoked native grants and restart need further schedules.']});
+  return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...drafts.sources], traces, scope: 'bounded-component', assumptions: [
+    'The actual Email action, shared validator, and exact-byte reread execute with a controlled draft port.',
+    'Native grant changes and cross-tab persistence are separate check boundaries.']});
 }
 
 export async function notificationCollection() {

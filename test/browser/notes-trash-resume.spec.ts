@@ -41,7 +41,7 @@ test('a resume on Home erases expired text and voice Trash entries without openi
  const last=Math.max(...entries.map((e:any)=>e.deletedAt));
  await home(page);
 
- // One minute short of three days, a resume keeps both entries restorable.
+ // One minute short of the 30-day retention, a resume keeps both entries restorable.
  await page.clock.setSystemTime(last+30*DAY-60_000);
  await page.evaluate(()=>{document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
  await page.waitForTimeout(300);

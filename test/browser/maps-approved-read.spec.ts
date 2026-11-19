@@ -129,10 +129,10 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
     if(mode==='stale-after-read'){
       await expect.poll(()=>page.evaluate(()=>typeof (window as any).releaseMapsFinish)).toBe('function');
       await page.evaluate(async()=>{const {clearMapsSelection}=await import('/src/maps/agent-context.ts');clearMapsSelection();(window as any).releaseMapsFinish();});
-      await expect(page.getByText(/Not synced yet; open action history to retry\./).last()).toBeVisible();
+      await expect(page.getByText(/, but it isn't synced yet\./).last()).toBeVisible();
       expect(await page.evaluate(()=>(window as any).mapsRetained.result.mapsResult.fields.label)).toBe('Private fixture destination');
     } else if(mode.endsWith('replay')) {
-      await expect(page.getByText(/Not synced yet; open action history to retry\./).last()).toBeVisible();
+      await expect(page.getByText(/, but it isn't synced yet\./).last()).toBeVisible();
       const retained=await page.evaluate(()=>(window as any).mapsRetained.result.mapsResult);
       await page.evaluate(async stale=>{
         if(stale){const {clearMapsSelection}=await import('/src/maps/agent-context.ts');clearMapsSelection();}
@@ -146,7 +146,7 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
       await expect(page.getByRole('button',{name:/^Review unavailable/})).toBeDisabled();
       expect(await page.evaluate(()=>(window as any).recoveryFixture.claims)).toBe(0);
     } else {
-      await expect(page.getByText('Shared the exact selected Maps snapshot with approval. Navigation was not started.',{exact:true}).last()).toBeVisible();
+      await expect(page.getByText('Shared the selected Maps place.',{exact:true}).last()).toBeVisible();
       const result=await page.evaluate(()=>(window as any).mapsUploaded);
       expect(result.target).toEqual(sent.metadata.alphaPhone.context.selectedObject);
       expect(result.fields.kind).toBe(mode==='route'?'map-route':'map-place');

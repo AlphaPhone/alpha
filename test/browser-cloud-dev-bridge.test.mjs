@@ -23,8 +23,10 @@ test('Cloud browser login admits only one session and the optional fixed Alpha h
    await connection.openExternal({url,requestId:randomUUID()});
    assert.equal(opened.at(-1).url,url);assert.equal(opened.at(-1).target,'_blank');assert.equal(opened.at(-1).popup.opener,null);
   }
+  for(const url of ['https://checkout.stripe.com/c/pay/cs_test_fixture#fid=provider-fragment','https://invoice.stripe.com/i/fixture'])await connection.openExternal({url,requestId:randomUUID()});
   const count=opened.length,base=`https://eliza.app/auth/cli-login?session=${session}`;
   for(const url of [
+   'https://checkout.stripe.com.attacker.invalid/c/pay/x','http://checkout.stripe.com/c/pay/x',
    base+'&app=other',base+'&app=Alpha',base+'&app=',base+'&app=alpha&app=alpha',base+'&app=alpha&app=other',
    base+'&session='+session,base+'&app=alpha&session='+session,base+'&app=alpha&returnTo=https://attacker.invalid',
    'https://eliza.app/auth/cli-login?app=alpha',base.replace(session,'invalid')+'&app=alpha',
@@ -47,7 +49,7 @@ async function fixture(resident,environment){
   if(path==='/steward/auth/providers')return Response.json({google:false,oauth:[]});
   if(path==='/api/auth/cli-session')return Response.json({sessionId:session,expiresAt:new Date(Date.now()+60000).toISOString()});
   if(path==='/api/auth/cli-session/'+session)return pollResponse();
-  if(path==='/api/v1/subscription/entitlement-keys')return response(url,input);
+  if(path==='/api/v1/subscription/entitlement-keys'||path==='/api/v1/subscriptions/plans')return response(url,input);
   assert.equal(new Headers(input.headers).get('Authorization'),'Bearer '+secret);
   if(path==='/api/v1/user')return Response.json({success:true,data:{id:owner,organization_id:org,email:'owned@example.invalid'}});
   if(path==='/api/v1/billing/limits')return Response.json({success:true,data:{v2:{subscription:{status:'available',value:{planKey:'plus_monthly',state:'active'}}}}});
@@ -64,10 +66,34 @@ test('existing Mac credential becomes a real canonical identity/credit reference
  const f=await fixture();try{
   const stored=await f.rpc({operation:'secureRead',slot:'cloud:production'});assert.equal(stored.status,200);assert.equal(stored.data.value.includes(secret),false);const credential=JSON.parse(stored.data.value);assert.equal(credential.credentialReference,reference);assert.equal(credential.credentialId,credentialId);assert.equal(credential.token,undefined);
   const result=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/user',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(result.data.status,200);assert.equal(result.data.data.data.id,owner);assert.equal(result.data.data.data.organization_id,org);
+  const catalogue=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscriptions/plans',method:'GET',headers:{Accept:'application/json'}}});assert.equal(catalogue.status,200);
+  const referral=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/referrals',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(referral.status,200);
   const limits=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/billing/limits',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(limits.data.data.data.v2.subscription.value.state,'active');
   const redeemed=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscription/redeem',method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({code:'SYNTHETIC0000CODE',idempotencyKey:randomUUID()}),credentialReference:reference}});assert.equal(redeemed.data.data.success,true);
   for(const body of [{code:'SYNTHETIC0000CODE'},{code:'SYNTHETIC0000CODE',idempotencyKey:'short'},{code:'SYNTHETIC0000CODE',idempotencyKey:randomUUID(),extra:1}]){const refused=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscription/redeem',method:'POST',headers:{Accept:'application/json'},body:JSON.stringify(body),credentialReference:reference}});assert.ok([400,409].includes(refused.status),JSON.stringify(body));}
   assert.equal(f.calls.filter(call=>new URL(call.url).pathname==='/api/v1/subscription/redeem').length,1);assert.equal((await stat(f.profile)).mode&0o077,0);
+ }finally{await f.close();}
+});
+test('signed-in checkout reaches Cloud once and keeps foreign routes and body fields refused',async()=>{
+ const f=await fixture();try{
+  f.setResponse(async()=>Response.json({success:true,data:{status:'open',commandId:'cmd_fixture',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_fixture',sessionId:'cs_test_fixture',expiresAt:new Date(Date.now()+60000).toISOString()}}));
+  const input={url:'https://api.eliza.app/api/v1/subscriptions/checkout',method:'POST',headers:{'Content-Type':'application/json'},credentialReference:reference,body:JSON.stringify({planKey:'plus_monthly',idempotencyKey:randomUUID(),presentation:'mobile'})};
+  const call=change=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{...input,...change}});
+  assert.equal((await call({})).data.status,200);
+  const count=f.calls.length;
+  for(const change of [{url:input.url+'?x=1'},{url:'https://attacker.invalid/api/v1/subscriptions/checkout'},{body:JSON.stringify({planKey:'plus_monthly',returnUrl:'https://attacker.invalid'})},{credentialReference:'browser-cloud-reference:'+randomUUID()}])assert.notEqual((await call(change)).status,200);
+  assert.equal(f.calls.length,count);
+ }finally{await f.close();}
+});
+test('balance checkout forwards its exact idempotency header and fixed return only',async()=>{
+ const f=await fixture();try{
+  const key=randomUUID(),target='https://eliza.app/alphaphone/billing/return';
+  f.setResponse(async(_url,input)=>{assert.equal(new Headers(input.headers).get('Idempotency-Key'),key);return Response.json({url:'https://checkout.stripe.com/c/pay/fixture',sessionId:'cs_fixture'});});
+  const input={url:'https://api.eliza.app/api/v1/credits/checkout',method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},credentialReference:reference,body:JSON.stringify({amountUsd:10,success_url:target,cancel_url:target+'?cancelled=1'})};
+  const call=change=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{...input,...change}});
+  const answer=await call({});assert.equal(answer.data.status,200,JSON.stringify(answer));const count=f.calls.length;
+  for(const change of [{headers:{}},{url:input.url+'?x=1'},{body:JSON.stringify({amountUsd:10,success_url:'https://attacker.invalid',cancel_url:target})}])assert.notEqual((await call(change)).status,200);
+  assert.equal(f.calls.length,count);
  }finally{await f.close();}
 });
 test('negative origins, methods, authorities, routes, private bearer headers and wrong reference never dispatch',async()=>{
@@ -759,6 +785,76 @@ test('full browser resident Calendar writes require exact owner intent and prese
   assert.notEqual((await privateCall(third,freshWrite)).status,200);assert.equal(f.calls.length,count,'Clear retires the independently current intent');
 
  }finally{await google?.close();await second?.close();await third?.close();await f.close();}
+});
+
+test('resident Gmail requires the current owner switch and a matching review before one dispatch',async()=>{
+ const f=await fixture({clear:async()=>({})},'production');
+ const token='6'.repeat(64),saved=new Map(),gmailGrant=randomUUID();
+ let host,hasSendGrant=true;
+ let dispatches=0;
+ f.setResponse(async(url,input)=>{
+  const pathname=new URL(url).pathname;
+  if(pathname.endsWith('/accounts'))return Response.json([{
+   configured:true,connected:true,reason:'connected',connectionId:gmailGrant,identity:{email:'owned@example.invalid'},
+   grantedCapabilities:['google.gmail.triage',...(hasSendGrant?['google.gmail.send']:[])],
+  }]);
+  if(pathname.endsWith('/operations')&&input.method==='POST'){
+   const {requestId,proposal}=JSON.parse(input.body);
+   const review={from:'owned@example.invalid',...proposal};
+   const reviewDigest=createHash('sha256').update(JSON.stringify(review)).digest('hex');
+   const receipt={requestId,kind:'send',state:'prepared',reviewDigest,providerResult:null,rejectionCode:null};
+   saved.set(requestId,{receipt,proposal});
+   return Response.json({version:1,providerExactlyOnce:false,receipt,review});
+  }
+  if(pathname.includes('/inbox-v1/operations/')){
+   const entry=saved.get(pathname.split('/').at(input.method==='POST'?-2:-1));
+   if(!entry)return Response.json({error:'Unknown operation'},{status:404});
+   if(input.method==='POST'){
+    const {proposal,reviewDigest}=JSON.parse(input.body);
+    assert.deepEqual(proposal,entry.proposal);
+    assert.equal(reviewDigest,entry.receipt.reviewDigest);
+    dispatches++;
+    entry.receipt={...entry.receipt,state:'succeeded',providerResult:{messageId:'fixture-message'}};
+   }
+   return Response.json({version:1,providerExactlyOnce:false,receipt:entry.receipt});
+  }
+  throw Error('Unexpected synthetic Cloud operation '+pathname);
+ });
+ const call=async send=>{
+  const r=await fetch('http://127.0.0.1:'+host.port+'/__alpha-owner-gmail',{
+   method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({send}),
+  });
+  return {status:r.status,data:await r.json()};
+ };
+ const intent=(gmailChanges,id=credentialId)=>f.rpc({operation:'residentGoogleGmailAccess',environment:'production',credentialId:id,gmailChanges});
+ try{
+  host=await f.host().startGoogleHost(token,{credentialId,reference});
+  const content={to:['self@example.invalid'],subject:'Synthetic review',bodyText:'Fixture only'};
+  const prepare={...content,operation:'prepare',requestId:randomUUID()};
+  assert.notEqual((await call(prepare)).status,200);
+  assert.notEqual((await intent(true,gmailGrant)).status,200);
+  assert.deepEqual((await intent(true)).data,{gmailChanges:true});
+  hasSendGrant=false;assert.notEqual((await call(prepare)).status,200);assert.equal(saved.size,0);
+  hasSendGrant=true;
+  const prepared=await call(prepare);assert.equal(prepared.status,200,JSON.stringify(prepared.data));
+  const {id,reviewDigest}=prepared.data.send;
+  assert.equal(dispatches,0,'prepare is review only');
+  const send={...content,operation:'dispatch',id,reviewDigest};
+  assert.notEqual((await call({...send,bodyText:'Changed'})).status,200);
+  assert.equal(dispatches,0);
+  assert.equal((await intent(false)).status,200);
+  assert.notEqual((await call(send)).status,200);
+  assert.equal(dispatches,0);
+  const receipt=await call({operation:'receipt',id});
+  assert.equal(receipt.status,200,'Off keeps send receipts readable: '+JSON.stringify(receipt.data));
+  assert.equal(receipt.data.send.state,'prepared');
+  assert.equal((await intent(true)).status,200);
+  assert.equal((await call(send)).data.send.providerResult.messageId,'fixture-message');
+  assert.equal((await call(send)).data.send.state,'succeeded');
+  assert.equal(dispatches,1);
+  assert.equal((await f.rpc({operation:'residentClear',environment:'production'})).status,200);
+  assert.notEqual((await call({...prepare,requestId:randomUUID()})).status,200);
+ }finally{await host?.close();await f.close();}
 });
 
 const googleProof = {state:'a'.repeat(43),challenge:'b'.repeat(43)};

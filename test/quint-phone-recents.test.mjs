@@ -21,7 +21,8 @@ const bundled = await build({entryPoints: [resolve('apps/app/src/prototype/phone
   }}]});
 const {installPhoneAdapter} = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 
-const HANDOFF = 'Your phone app is open with the number.', INVALID = 'Invalid number';
+// TelephonyPlugin.dial's sentence and Alpha's wording of it (ui/telephony/telephony-messages.ts).
+const HANDOFF = 'Your phone app is open with the number. Place the call there; this app does not know whether it connects.', HANDOFF_SHOWN = 'Your phone app is open with the number. Place the call there; Alpha can’t tell whether it connects.', INVALID = 'Invalid number';
 const VALID = '+15555550100', call = {id: '4', number: VALID, cachedName: 'Ada', date: 1700000000000, durationSeconds: 75, type: 'missed', isNew: true};
 const permissions = access => ({permissions: access === 'unsupported' ? {} : {callLog: access}});
 
@@ -76,7 +77,7 @@ function fixture(initial) {
       assert.ok(accessRequests <= requestReads, 'access is asked for only inside a read the owner requested');
     },
     observe() {
-      const shown = page(), notice = shown.nativeNotice === HANDOFF ? 'handoff' : shown.nativeNotice === INVALID ? 'invalid' : shown.nativeNotice;
+      const shown = page(), notice = shown.nativeNotice === HANDOFF_SHOWN ? 'handoff' : shown.nativeNotice === INVALID ? 'invalid' : shown.nativeNotice;
       return {busy: shown.nativeBusy, rows: shown.nativeRows.length > 0, needsAccess: shown.nativeAccess,
         notice, number: Object.keys(TYPED).find(name => TYPED[name] === shown.nativeNumber), reads: reads.length, dials: dials.length, handoffs};
     },

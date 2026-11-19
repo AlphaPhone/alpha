@@ -10,7 +10,9 @@ test.describe('Calendar detail accessibility', () => {
    await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
    await page.goto('/?mode=dev&theme='+theme);
    await page.evaluate(async({kind,title,body})=>{const {registerPlugin}=await import('/src/platform-plugins.ts');if(kind==='event')await registerPlugin<any>('AlphaCalendar').save({creationId:crypto.randomUUID(),separateCreation:true,calendarId:'local',title,body,location:'Building-'+ 'abcdef'.repeat(15),begin:Date.parse('2027-03-13T14:00Z'),end:Date.parse('2027-03-13T15:00Z')});else await registerPlugin<any>('DailyApps').scheduleReminder({id:'large-detail',title,body,at:Date.parse('2027-03-13T14:00Z')});const {BrowserDevice}=await import('/src/browser/device.ts');await BrowserDevice.prototype.setTextScale({percent:150});},{kind,title,body});
-   await page.reload();await openBrowserCalendar(page);await page.getByRole('button',{name:'Day 13',exact:true}).click();await page.getByRole('button',{name:new RegExp('^Reference-')}).click();
+   // The text scale applies live, and the device calendar first reads its storage when the
+   // browser source opens below, so the seeded row needs no extra boot of the app.
+   await openBrowserCalendar(page);await page.getByRole('button',{name:'Day 13',exact:true}).click();await page.getByRole('button',{name:new RegExp('^Reference-')}).click();
    const heading=page.getByRole('heading',{name:title,exact:true});await expect(heading).toBeVisible();const detail=heading.locator('..');
    expect(await detail.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
    const notes=page.getByText(kind==='reminder'?body+'\nScheduled. Alerts may arrive a few minutes late.':body,{exact:true});await notes.scrollIntoViewIfNeeded();await expect(notes).toHaveCSS('white-space','pre-wrap');expect(await notes.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
@@ -25,7 +27,8 @@ test.describe('Calendar draft accessibility', () => {
    await page.setViewportSize({width:360,height:430});
    await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
    await page.goto('/?mode=dev&theme='+theme);
-   await page.evaluate(async()=>{const {BrowserDevice}=await import('/src/browser/device.ts');await BrowserDevice.prototype.setTextScale({percent:150});});await page.reload();
+   // setTextScale applies the scale before it resolves (as the editor test below relies on).
+   await page.evaluate(async()=>{const {BrowserDevice}=await import('/src/browser/device.ts');await BrowserDevice.prototype.setTextScale({percent:150});});
    await openBrowserCalendar(page);await page.getByRole('button',{name:'New event',exact:true}).click();
    const save=page.getByRole('button',{name:'Save event',exact:true});expect((await save.boundingBox())!.height).toBeGreaterThanOrEqual(44);
    const fields=page.getByRole('region',{name:'Event details',exact:true});await expect(fields).toBeVisible();await fields.focus();await page.keyboard.press('End');

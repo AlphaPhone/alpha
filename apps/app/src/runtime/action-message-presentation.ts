@@ -1,6 +1,7 @@
-import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../../../../.eliza/client-features/packages/ui/src/components/chat/message-maps-parser.ts';
+import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
+import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
 type Message = Record<string, any>;
 /** Only the service-authored check-in suffix is presentation markup. */
@@ -15,10 +16,41 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   return prose.trimEnd();
 }
 const REVIEW_TEXT = 'Review on phone';
+const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';
+const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
+// Presentation only: preserve the journal while explaining uncertainty safely.
+export function actionResultText(text: string): string {
+  return text === 'The action could not reach a confirmed result.'
+    || text === 'Action did not reach a confirmed result. Check action history before requesting it again.'
+    ? 'I couldn’t confirm the result.' : text;
+}
 export function browserNavigationSummary(url: string): string {
   const destination = new URL(url);
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
-  return `Opened ${destination.host}.`;
+  return `Created a browser tab for ${destination.host}.`;
+}
+/** The one-sentence completion of a reviewed Browser control: the owner reads it and the agent receives it. */
+export function browserControlSummary(operation: BrowserControlOperation): string {
+  switch (operation.type) {
+    case 'browser_search': return `Searching the web for “${operation.query}”.`;
+    case 'browser_tab_new': return operation.private ? 'Opened a private tab.' : 'Opened a new tab.';
+    case 'browser_tab_switch': return 'Switched tabs in Browser.';
+    case 'browser_tab_close': return 'Closed the tab.';
+    case 'browser_find': return `Finding “${operation.text}” in the page.`;
+    case 'browser_history': return {back: 'Went back a page.', forward: 'Went forward a page.', reload: 'Reloading the page.', stop: 'Stopped loading the page.'}[operation.action];
+  }
+}
+function legacyBrowserNavigationSummary(url: string): string {
+  return `Opened ${new URL(url).host}.`;
+}
+/** Update the description of an older tab creation while keeping any receipt status. */
+function browserReceiptDisplayText(url: string, summary: string): string {
+  const legacy = legacyBrowserNavigationSummary(url);
+  if (summary === LEGACY_BROWSER_RECEIPT) return browserNavigationSummary(url);
+  if (summary === legacy || summary.startsWith(legacy + ' ')) {
+    return browserNavigationSummary(url) + summary.slice(legacy.length);
+  }
+  return summary;
 }
 function browserCardUrl(description: unknown): string | undefined {
   const prefix = 'Open browser destination ';
@@ -30,7 +62,8 @@ function browserCardUrl(description: unknown): string | undefined {
  * (no pending server receipt or other note), else undefined. */
 export function succeededBrowserDestination(card: {description: string} | null | undefined, receipt: {status: string; summary: string}): string | undefined {
   const url = browserCardUrl(card?.description);
-  if (url && receipt.status === 'succeeded' && receipt.summary === browserNavigationSummary(url)) return url;
+  if (url && receipt.status === 'succeeded' &&
+      (receipt.summary === browserNavigationSummary(url) || receipt.summary === legacyBrowserNavigationSummary(url))) return url;
 }
 function cardDestination(message: Message): string | undefined {
   if (message.from === 'agent' && message.card?.proposalId) return browserCardUrl(message.text);
@@ -52,12 +85,19 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
   }
   let turn: Message[] = [];
   const finish = () => {
-    const actions = turn.filter(message => message.from === 'agent' && (message.card?.proposalId || message.deviceReceipt));
-    if (!actions.length) return;
-    for (const message of turn) if (message.from === 'agent' && message.text === REVIEW_TEXT) hidden.add(message.id);
+    const visibleActions = turn.filter(message => renderedIds.has(message.id) && message.from === 'agent'
+      && (message.card?.proposalId || message.deviceReceipt || message.card?.deviceActionNotice === true));
+    if (!visibleActions.length) return;
+    // A pending proposal still needs its review instruction. A visible outcome supersedes it.
+    const outcomeShown = visibleActions.some(message => message.deviceReceipt
+      || message.card?.deviceActionNotice === true || message.card?.done === true);
+    for (const message of turn) {
+      if (message.from === 'agent' && (message.text === REVIEW_TEXT
+        || (outcomeShown && message.text === REVIEW_INSTRUCTION))) hidden.add(message.id);
+    }
     // A shown agent reply already answers a requested Browser open. Only a succeeded browser receipt
     // carries browserDestination; failures and other device receipts stay visible.
-    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && typeof message.text === 'string' && message.text.trim())) return;
+    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && message.text !== REVIEW_INSTRUCTION && typeof message.text === 'string' && message.text.trim())) return;
     for (const message of turn) if (message.from === 'agent' && message.deviceReceipt === true && !message.card && message.browserDestination) hidden.add(message.id);
   };
   for (const message of source) { if (message.from === 'user') { finish(); turn = []; } turn.push(message); } finish();
@@ -66,16 +106,21 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
     if (!stored || stored.from !== 'agent') return message;
     const destination = cardDestination(stored);
     if (stored.card?.proposalId && stored.card.done) {
-      const displayText = destination && stored.card.title === 'Completed' ? browserNavigationSummary(destination) : stored.card.sub;
-      if (typeof displayText !== 'string' || !displayText.trim()) return message;
+      const rawSummary = stored.card.sub;
+      if (typeof rawSummary !== 'string' || !rawSummary.trim()) return message;
+      // AC-26: a comms proposal card shows its own result ("Done · Completed · summary"); it is the
+      // one completion, so its row shows no receipt line beside it.
+      if (stored.card.type === 'proposal') return {...message, hasCalendarText:false};
+      const summary = actionResultText(rawSummary);
+      const displayText = destination && stored.card.title === 'Completed' ? browserReceiptDisplayText(destination, summary) : summary;
       return {...message, cGeneric:false, cDigest:false, displayText, hasCalendarText:true, deviceReceipt:true};
     }
     // A result reported by the phone itself is marked (`deviceReceipt`) so the chat can show it
     // apart from the assistant's own words.
-    if (stored.deviceReceipt && stored.browserDestination) {
-      try { return {...message, displayText:browserNavigationSummary(stored.browserDestination), hasCalendarText:true, deviceReceipt:true}; } catch { return {...message, deviceReceipt:true}; }
+    if (stored.deviceReceipt && stored.browserDestination && typeof stored.text === 'string') {
+      try { return {...message, displayText:browserReceiptDisplayText(stored.browserDestination, stored.text), hasCalendarText:true, deviceReceipt:true}; } catch { return {...message, deviceReceipt:true}; }
     }
-    if (stored.deviceReceipt === true && !stored.card) return {...message, deviceReceipt:true};
+    if (stored.deviceReceipt === true && !stored.card) return {...message, displayText:actionResultText(stored.text), deviceReceipt:true};
     if (destination && message.cDigest && message.rows?.length) {
       return {...message,hasCalendarText:false,rows:message.rows.map((row:Message,index:number)=>index===0?{...row,who:new URL(destination).host,text:'Open'}:row)};
     }
@@ -172,7 +217,19 @@ export function collapseSystemNotices<T extends ChatRow>(messages: T[]): T[] {
 
 
 /** Display-only projection of an agent Maps card. Links are shown as text, never opened. */
-export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];attribution:string;mapQuery?:string};
+export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];attribution:string;mapQuery?:string;
+ /** Maps reads the phone's position itself, after the user's tap, and searches around it. Chat never receives it. */
+ nearMe?:boolean;
+ /** Maps plans directions from the phone's own position, after the user's tap: to `place`, to the closest
+  * match of a `nearMe` search, or (an older agent's card, which names no place) to the first match of `mapQuery`. */
+ directionsFromHere?:boolean;
+ /** The exact place the agent resolved. Maps selects it by its provider id and coordinates, under its own name. */
+ place?:MapsCardPlace;
+ /** How to travel on a `directionsFromHere` card, when the request named it. */
+ travelMode?:MapsCardRoute['travelMode'];
+ /** A planned route for Maps to draw: both ends as `latitude, longitude`, and how to travel. */
+ route?:{origin:string;destination:string;name:string;travelMode:MapsCardRoute['travelMode']}};
+type MapsCardRoute=Extract<MapsCardSpec,{kind:'route'}>;
 /** The plugin-maps share gate: exactly two bounded answers that are sent back verbatim. */
 export type MapsShareChoice={id:string;options:{label:string;value:string}[]};
 
@@ -180,14 +237,33 @@ const MODES:Record<string,string>={drive:'Driving',walk:'Walking',bicycle:'Cycli
 const placeLine=(place:MapsCardPlace)=>place.formattedAddress?`${place.name}, ${place.formattedAddress}`:place.name;
 // Alpha's agent context carries no device position, so the locate card cannot be answered here.
 const LOCATE_LINE='Name a start · Location not shared';
+// Maps can serve a location request on the phone. plugin-maps names the search or the destination in the card's
+// own fields; an older agent names it only in the prompt, which these read.
+const NEAR_PROMPT=/^I need your precise location to search near you for “([^”]{1,300})”\.$/;
+const ROUTE_PROMPT=/^I need your precise location to start the route to (.{1,300})\.$/;
+const point=(place:MapsCardPlace)=>`${place.latitude}, ${place.longitude}`;
 
 function present(card:MapsCardSpec):MapsChatCard{
  switch(card.kind){
-  case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',mapQuery:`${card.place.latitude}, ${card.place.longitude}`};
+  case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',place:card.place};
   case 'places':return {kind:card.kind,title:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query};
-  case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:`${card.destination.latitude}, ${card.destination.longitude}`};
-  case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',mapQuery:`${card.place.latitude}, ${card.place.longitude}`};
-  case 'locate':return {kind:card.kind,title:'Location needed',lines:[card.intent==='place-near'?'Pick an area in Maps · Location not shared':LOCATE_LINE],attribution:''};
+  case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:point(card.destination),
+   route:{origin:point(card.origin),destination:point(card.destination),name:card.destination.name,travelMode:card.travelMode}};
+  case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',place:card.place};
+  case 'locate':{
+   const mode=card.travelMode?{travelMode:card.travelMode}:{};
+   if(card.intent==='place-near'){
+    const near=card.query??NEAR_PROMPT.exec(card.prompt)?.[1];
+    if(near)return {kind:card.kind,title:`“${near}” near you`,lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:near,nearMe:true};
+   }else if(card.destination)return {kind:card.kind,title:`Directions to ${card.destination.name}`,lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',place:card.destination,directionsFromHere:true,...mode};
+   // A kind of place, not one place: Maps finds the closest around the phone, then plans the route to it.
+   else if(card.query)return {kind:card.kind,title:`Directions to ${card.query}`,lines:['Map finds the closest around this phone · Location not shared with chat'],attribution:'',mapQuery:card.query,nearMe:true,directionsFromHere:true,...mode};
+   else{
+    const to=ROUTE_PROMPT.exec(card.prompt)?.[1];
+    if(to)return {kind:card.kind,title:`Directions to ${to}`,lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',mapQuery:to,directionsFromHere:true};
+   }
+   return {kind:card.kind,title:'Location needed',lines:[card.intent==='place-near'?'Pick an area in Maps · Location not shared':LOCATE_LINE],attribution:''};
+  }
  }
 }
 
@@ -245,5 +321,53 @@ export function workflowReplyText(text:string){
   return lead;
  });
  // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
- return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():text,runs};
+ return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered,runs};
+}
+
+// The owner can ask for technical details, a literal address, or the wording of an email.
+const literalSpeech = /\b(?:verbatim|word for word|as written|read it (?:back|aloud)|spell it out|repeat (?:it|that) exactly)\b/i;
+const asksForField = /\b(?:read(?: back)?|spell(?: out)?|quote|repeat|recite|give me|tell me|what(?:[’']s| is| are))\s+(?:(?:me|out|aloud|the|this|that|my|its|full|exact|whole|entire|last|four)\s+){0,7}(?:(?:event|request|operation|workflow|run|order|thread|record|confirmation|reference)\s+(?:ID|identifier|number)|receipt|identifier|ID|address|number|digits|code|subject|headers?|body|draft|e-?mail|message|text)\b/i;
+// Managed Gmail can prefix the recipient with its connector or account. Model-written
+// email copy typically has just the To and Subject lines, sometimes with bold labels.
+const mailHeaders = /^(?:[ \t]*(?:\*\*)?From:(?:\*\*)?[^\n]*\r?\n)?[ \t]*(?:\[gmail(?: account [^\]\n]+)?\][ \t]*)?(?:\*\*)?To:(?:\*\*)?[^\n]*\r?\n(?:[ \t]*(?:Cc|Bcc):[^\n]*\r?\n)*[ \t]*(?:\*\*)?Subject:(?:\*\*)?[^\n]*/im;
+const introToDraft = /^(?:(?:Got it|Sure|Okay)[.!,:]?\s*)?(?:(?:Here(?:’s|'s| is) (?:the|your|a) (?:email|draft|suggested wording)(?: draft)?|Drafted gmail message to [^\n]+)[.:!]?\s*)?$/i;
+const receiptKey = String.raw`(?:(?:request|proposal|receipt|operation|message|event|draft|run|workflow|record|conversation|thread|external|resource)\s+(?:id|identifier)|uuid|id)`;
+const opaqueValue = "[`\"']?[a-z0-9_-](?:[a-z0-9_.:-]*[a-z0-9_-])?[`\"']?";
+const receiptField = new RegExp(String.raw`(^|\n|[.!?][ \t]+)[ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}(?:[.;](?=\s|$)|(?=[ \t]*\r?$))[ \t]*`, 'gim');
+const receiptAside = new RegExp(String.raw`[ \t]*\([ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}[ \t]*\)`, 'gi');
+
+/** Presentation for conversation speech. Never mutate the written reply or the action results. */
+export function spokenActionReply(request: string, reply: {
+  text: string; actionResults?: readonly unknown[]; completedActions?: readonly unknown[];
+}, emailCardReady = false): string {
+  const text = reply.text;
+  if (literalSpeech.test(request) || asksForField.test(request)) return text;
+  const results = reply.actionResults ?? [];
+  const asksForMail = /\b(?:draft|compose|write|send|reply)\b/i.test(request) && /\b(?:e-?mail|gmail|inbox)\b/i.test(request);
+  const envelope = mailHeaders.exec(text);
+  if (emailCardReady || (envelope && asksForMail)) {
+    const lead = envelope ? text.slice(0,envelope.index).trim() : '';
+    const rest = envelope ? text.slice(envelope.index+envelope[0].length).trim() : text;
+    const hasMoreWork = /\b(?:and|then|also)\s+(?:check|look up|find|open|create|schedule|book|summarize|tell me|show me)\b/i.test(request);
+    const hasLimitation = /\b(?:(?:failed|unable|couldn[’']t|can[’']t|cannot|could not) (?:to )?(?:send|save|prepare|create|deliver|schedule|open|verify|confirm)|not (?:sent|saved|created|scheduled))\b/i.test(rest);
+    if (rest && !hasMoreWork && introToDraft.test(lead) && !hasLimitation &&
+        results.length <= 1 && !reply.completedActions?.length) {
+      const result = results[0] as {success?: unknown; actionName?: unknown; error?: unknown} | null;
+      if (result?.success === false || result?.error) {
+        if (typeof result.actionName === 'string' && /^MESSAGE(?:_|$)/.test(result.actionName)) {
+          return 'The email action failed. The suggested wording is in the chat.';
+        }
+        return envelope ? (lead+'\n\n'+rest).trim() : text;
+      }
+      // Only the owner's validated local card can confirm that an editable draft is ready.
+      return emailCardReady ? 'Your email draft is ready to review.' : 'The suggested email is in the chat.';
+    }
+    // A compound reply or a refusal can carry additional information after the preview.
+    if (envelope) return (lead+'\n\n'+rest).trim();
+  }
+  if (!results.length && !reply.completedActions?.length) return text;
+  // Only delimited ID fields from action turns. Dates, times, counts, amounts and
+  // numbers in the actual answer remain available to the synthesizer.
+  const spoken = text.replace(receiptAside,'').replace(receiptField,'$1');
+  return spoken === text ? text : spoken.replace(/\n{3,}/g,'\n\n').trim() || 'The details are in the chat.';
 }

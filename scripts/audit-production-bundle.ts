@@ -128,15 +128,20 @@ export function avatarInitials(text: string) {
   return [...text.matchAll(AVATAR_INITIALS)].map(match => match[1]);
 }
 
-/** Reads {"testMocks": boolean}. A missing or malformed record is treated as a production bundle. */
+/** Reads {"testMocks": boolean}. A missing or malformed record is treated as a production bundle.
+ * `fastIteration` is written only into the synced Android payload by `bun run android:build:fast`. */
 export function readBuildFlags(dir: string) {
   const file = path.join(dir, 'build-flags.json');
-  if (!existsSync(file)) return {present: false, testMocks: false, candidateCloud: false};
+  if (!existsSync(file)) return {present: false, testMocks: false, candidateCloud: false, fastIteration: false};
   try {
     const value = JSON.parse(readFileSync(file, 'utf8'));
-    return {present: true, testMocks: value?.testMocks === true, candidateCloud: value?.candidateCloud === true, valid: typeof value?.testMocks === 'boolean' && (value.candidateCloud === undefined || typeof value.candidateCloud === 'boolean')};
-  } catch { return {present: true, testMocks: false, candidateCloud: false, valid: false}; }
+    const optionalBoolean = (name: string) => value[name] === undefined || typeof value[name] === 'boolean';
+    return {present: true, testMocks: value?.testMocks === true, candidateCloud: value?.candidateCloud === true, fastIteration: value?.fastIteration === true,
+      valid: typeof value?.testMocks === 'boolean' && optionalBoolean('candidateCloud') && optionalBoolean('fastIteration')};
+  } catch { return {present: true, testMocks: false, candidateCloud: false, fastIteration: false, valid: false}; }
 }
+
+export const FAST_ITERATION_ERROR = 'build-flags.json records fastIteration:true: this payload comes from bun run android:build:fast, a developer build that skipped lint, tests and APK verification. It is never a production bundle; build with bun run android:build:local.';
 
 interface BundleAuditOptions {
   testMocks?: boolean;
@@ -153,6 +158,7 @@ export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
   if (!flags.present) errors.push('build-flags.json is missing; the bundle cannot prove how it was built.');
   else if (flags.valid === false) errors.push('build-flags.json is malformed.');
   if (flags.present && flags.testMocks !== expected) errors.push(`build-flags.json records testMocks:${flags.testMocks}, expected ${expected}.`);
+  if (flags.fastIteration) errors.push(FAST_ITERATION_ERROR);
   if (!existsSync(path.join(dir, 'index.html'))) errors.push('index.html is missing.');
   // A candidate Cloud (ALPHA_CLOUD_DEPLOYMENT_FILE) is for development and rehearsal; distributed builds use the shipped policy.
   if (!expected && (flags.candidateCloud || CLOUD_DEPLOYMENT_IS_CANDIDATE)) errors.push('This build addresses a candidate Cloud deployment (ALPHA_CLOUD_DEPLOYMENT_FILE); a production bundle must use the shipped Cloud deployment policy.');

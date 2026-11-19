@@ -212,6 +212,7 @@
     "invariant": "safety",
     "sources": [
       "apps/app/src/runtime/always-on-listener.ts",
+      "apps/app/src/ui/voice/sense-invocation.ts",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListeningService.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ConsentActivity.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java",
@@ -253,6 +254,7 @@
     "invariant": "safety",
     "sources": [
       "apps/app/src/runtime/always-on-listener.ts",
+      "apps/app/src/ui/voice/sense-invocation.ts",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListeningService.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ConsentActivity.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java",
@@ -389,7 +391,8 @@
       "apps/app/src/runtime/note-audio-deletions.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/NativeOwnerReminderHost.java",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/deletion/DeferredDeletionCoordinator.java"
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/deletion/DeferredDeletionCoordinator.java",
+      "apps/app/src/ui/deletions/deletion-notice.ts"
     ],
     "tests": [
       "undoBeforeExpiryTest",
@@ -443,7 +446,8 @@
       "android/app/src/main/java/ai/alphacompute/alphaphone/NativeReadEpoch.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/SelectedDocumentAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaPhotoLibraryPlugin.java",
-      "apps/app/src/browser/files.ts"
+      "apps/app/src/browser/files.ts",
+      "apps/app/src/ui/photos/library-presentation.ts"
     ],
     "tests": [
       "reviewedPublicationTest",
@@ -492,7 +496,8 @@
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapabilities.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaReminders.java",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java"
+      "android/app/src/main/java/ai/alphacompute/alphaphone/ResidentScheduleRearm.java",
+      "apps/app/src/ui/reminders/reminder-refusal-message.ts"
     ],
     "tests": [
       "smsDeliveryEvidenceTest",
@@ -540,6 +545,7 @@
       "apps/app/src/runtime/voice-assistant.ts",
       "apps/app/src/runtime/local-agent.ts",
       "apps/app/src/runtime/calendar-sync-host.ts",
+      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/inbox-operation.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDataReset.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/LocalAgentProviderAdmission.java"
@@ -631,7 +637,9 @@
       "apps/app/src/maps/agent-navigation.ts",
       "apps/app/src/maps/screen.ts",
       "apps/app/src/maps/state.ts",
-      "vendor/eliza/plugins/plugin-maps/src/client/maps-screen.ts",
+      "apps/app/src/ui/maps/maps-screen.ts",
+      "apps/app/src/ui/maps/state.ts",
+      "apps/app/src/ui/maps/guidance.ts",
       "upstream.lock.json"
     ],
     "stateMapping": {
@@ -689,8 +697,6 @@
       "plugins/plugin-maps/src/client/route-distance.ts",
       "plugins/plugin-maps/src/client/device-navigation.ts",
       "plugins/plugin-maps/src/client/agent-navigation.ts",
-      "plugins/plugin-maps/src/client/maps-screen.ts",
-      "plugins/plugin-maps/src/client/state.ts",
       "plugins/plugin-maps/src/client/saved-places.ts"
     ]
   },
@@ -1366,6 +1372,7 @@
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/cloud-protocol.ts",
       "apps/app/src/runtime/calendar-sync-host.ts",
+      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/native-calendar-sync.ts",
       "apps/app/src/runtime/calendar-linked-storage.ts",
       "apps/app/src/runtime/google-calendar-selection.ts",
@@ -1948,7 +1955,7 @@
     "step": "step",
     "invariant": "safety",
     "sources": [
-      "vendor/eliza/packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudSignInPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInClient.java",
       "vendor/eliza/packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudSignInFlow.java",
       "vendor/eliza/packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudCredentialSlots.java",
       "vendor/eliza/packages/auth/android/build.gradle",
@@ -2534,15 +2541,19 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "conflictingReviewCannotClaimAnotherReceiptTest",
-      "lateReviewUsesTombstoneBindingTest",
-      "exactSecondReviewUsesFirstReceiptWithoutRadioTest",
+      "conflictingCardCannotClaimAnotherReceiptTest",
+      "exactReplayUsesFirstReceiptWithoutClaimTest",
+      "unapprovedOrMismatchedTextSendsNothingTest",
+      "expiredApprovalSendsNothingTest",
+      "claimIsSingleUseWhenNothingWasJournaledTest",
+      "queuedCancellationClosesTheClaimTest",
+      "lateCardUsesTombstoneBindingTest",
       "simChangeAfterFirstRecipientIsUnknownTest",
       "callbackMemoryDoesNotImplyDurableEvidenceTest",
       "dispatchMarkerRefusalRecoversUnknownTest",
       "providerReadbackRequiresReportAndUniqueRowTest",
       "multipartReportDoesNotProveDeliveryTest",
-      "emptyDivisionCannotReviveReviewedIdTest",
+      "emptyDivisionCannotReviveClaimedIdTest",
       "bothBridgesReceiveTheSameCallbackTest",
       "pausedAndDestroyedBridgesRetireOnlyTheirDeliveryTest",
       "eightCallbackPublicationsReachBothBridgesTest"
@@ -2554,37 +2565,47 @@
       "DeliveryNeedsSentAndReport",
       "ProviderRowsHaveOnePhase",
       "LiveBridgeListeners",
-      "PerBridgeNoticeCapacity"
+      "PerBridgeNoticeCapacity",
+      "RadioNeedsClaimedApproval",
+      "OneClaimPerOperation"
     ],
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephony.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaApprovedSms.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/SmsNoticeOpenRequest.java",
+      "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
       "android/app/src/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephonyConfiguration.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsSendJournal.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournal.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournalConfiguration.java"
     ],
     "stateMapping": {
-      "reviews/foreground/closed/listeners/events": "Exact review calls, saved SIM/tuple, Activity lifecycle, registered bridge identities and each bridge's actual opaque notification count",
-      "recipients/parts/attempts/accepted": "Synthetic exact reviewed radio handoff prefix and per-part PendingIntent identity",
+      "cards": "Each approval card's action-journal entry: the approved text, open or claimed by AlphaApprovedSms, and expired against its expiresAt",
+      "foreground/closed/listeners/events": "Activity lifecycle, registered bridge identities and each bridge's actual opaque notification count",
+      "recipients/parts/attempts/accepted": "Synthetic exact approved radio handoff prefix and per-part PendingIntent identity",
       "memory/disk/tombstoneBinding/boot/process": "Real live and durable SmsSendJournal records, pruned binding tombstone and reconstruction after process or boot boundaries",
       "role/outbox/sentRows/failedRows/candidate/providerStatus": "Actual outgoing provider inserts/updates and controlled unique provider readback",
       "image/send/phone/read/locked/sim/refuseOutbox/old": "Controlled platform admission, permission, SIM and time classes",
       "reply/replyBinding": "Actual native send/read/decision response and retained tuple equality class"
     },
     "abstractions": [
-      "One operation ID, two reviewed payloads and bridge actors, one or two recipients with one or two parts each. The existing journal model covers wider ID retirement and capacity.",
+      "One operation ID, two approved payloads held by cards in two chat scopes, two bridge actors, one or two recipients with one or two parts each. Foreign requests stand for any other recipients or SIM. The existing journal model covers wider ID retirement and capacity.",
       "Successful pruning of the fixed ID retains its binding. Wider tombstone compaction, pruning write faults and capacity are separate from this retained-receipt boundary.",
-      "Controlled AOSP admission, radio, provider, storage and Activity ports. Installed carrier or permission behavior, legacy journal file migration, MMS and larger interleavings remain separate.",
+      "Controlled AOSP admission, radio, provider, storage, approval-journal storage and Activity ports. Cards are sms_send entries written as the chat writes them; sms_compose targets, sensitive-screen records, the chat settling a card, the Messages composer path, installed carrier or permission behavior, legacy journal file migration, MMS and larger interleavings remain separate.",
       "Eight callback publications per bridge retain the original callback depth with at most sixteen deliveries across two recipients. Only a candidate transition that would overflow a recipient's count is refused; stopped bridges do not consume another bridge's capacity.",
-      "Handler.post executes immediately within each controlled JVM macrostep. Registration, foreground/lock filtering and exact destruction are observed; arbitrary held UI-queue retirement races remain outside this schedule."
+      "Handler.post executes immediately within each controlled JVM macrostep. A queued cancellation or pause holds the send worker until the cancel lands. Registration, foreground/lock filtering and exact destruction are observed; arbitrary held UI-queue retirement races remain outside this schedule."
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -2599,13 +2620,14 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
+      "agentBridgeRefusesMmsTest",
       "conflictingAttachmentCannotClaimAnotherReceiptTest",
       "mmsCannotClaimSmsWireReceiptTest",
       "retiredMmsRetainsExactBindingTest",
       "retainedIdRejectsDifferentBodyRecipientsAndSimTest",
       "stagedSmsRejectsMmsReceiptTest",
-      "exactMmsReviewRetriesOnceTest",
-      "invalidAttachmentDoesNotOpenReviewTest",
+      "exactComposerRetryUsesFirstReceiptTest",
+      "invalidAttachmentIsNeverJournaledTest",
       "carrierFailureOverridesAndroidSuccessTest",
       "providerChildRefusalKeepsRadioAndDeletesPartialRowTest",
       "failedCallbackWriteDeletesPduButLosesEvidenceOnRestartTest",
@@ -2620,38 +2642,45 @@
       "MmsNeverClaimsDelivery",
       "OutboxOnlyForMms",
       "TombstoneRetiresRecord",
-      "ApprovedReceiptMatchesReview",
+      "ComposedReceiptMatchesSend",
+      "AgentBridgeRefusesMms",
       "LiveBridgeListeners",
       "PerBridgeNoticeCapacity"
     ],
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephony.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaApprovedSms.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/SmsNoticeOpenRequest.java",
+      "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
       "android/app/src/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephonyConfiguration.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsSendJournal.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournal.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournalConfiguration.java"
     ],
     "stateMapping": {
-      "reviewA/reviewB/groupRecipients": "Two exact native review calls, captured SIM class and reviewed recipient count",
-      "reply/replyKind/replyBinding/positiveBinding": "Wire status, typed SMS/MMS result and exact retained and approved binding classes",
+      "groupRecipients/source": "Composed recipient count and whether the last step was the agent bridge sendMms or the Messages composer send",
+      "reply/replyKind/replyBinding/composedBinding": "Wire status, typed SMS/MMS result and exact retained and composed binding classes",
       "memory/disk/tombstoneBinding/boot/process": "Actual shared live/durable journal, capacity tombstone and process or boot reconstruction",
       "smsAttempts/mmsAttempts/mmsAccepted/files": "Controlled radio boundary and actual temporary PDU retention",
       "mmsBox/deletedMms/events": "Outgoing MMS provider state, partial-row rollback, registered bridge identities and exact per-bridge opaque notification counts",
-      "role/carrier/size/sim/provider/locked": "Controlled device admission and failure classes"
+      "role/carrier/size/provider/locked": "Controlled device admission and failure classes"
     },
     "abstractions": [
-      "One ID shared across SMS and MMS, two bridge instances and two exact MMS attachment variants. The SMS competitor is a one-part message.",
+      "One ID shared across SMS and MMS, two bridge instances and two exact MMS attachment variants. The agent bridge sendMms is refused before anything is read; every send goes through the Messages composer (AlphaTelephonyPlugin.sendComposed) with its window guard. Two composer sends with one ID are interleaved by holding the send worker. The SMS competitor is a one-part composer text.",
       "Successful capacity pruning is observed for a settled MMS. Tombstone compaction and pruning write faults are outside this retained-receipt boundary.",
-      "PDU encoding, staged file and journal execute real code with synthetic Android radio, provider and preview ports. Installed URI grants, provider semantics, platform scheduling, and carrier behavior remain separate.",
+      "PDU encoding, staged file and journal execute real code with synthetic Android radio, provider and composer-window ports. Installed URI grants, provider semantics, platform scheduling, composer focus loss and carrier behavior remain separate.",
       "Four callback publications per bridge retain the original depth with at most eight deliveries across the two live bridges. Process restart clears every old listener and loads both current bridge identities with zero counters.",
       "Handler.post executes immediately within each controlled JVM macrostep. Arbitrary held UI-queue retirement races and additional bridge lifecycle interleavings remain separate."
     ],
@@ -3075,6 +3104,7 @@
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/GmailBackground.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/GmailDeliveryWorker.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/GmailNoticePoster.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaGmailPlugin.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/PluginWorkers.java",
@@ -3353,7 +3383,10 @@
       "busyRecorderMessageTest",
       "waitingSuccessorRejectedTest",
       "waitingAppSuccessorStopsOnceTest",
-      "restartOpensChainsTest"
+      "restartOpensChainsTest",
+      "confirmedReadingStartsItsSuccessorTest",
+      "confirmedVoiceCleanupAllowsEntryTest",
+      "dismissedVoiceFailureRequiresRestartTest"
     ],
     "invariants": [
       "StagesKnown",
@@ -3450,9 +3483,10 @@
       "epoch": "The app process"
     },
     "abstractions": [
-      "Four independent chains, each idle, playing, retiring, recovering or closed; at most six requests and one restart.",
+      "Four modeled chains, each idle, playing, retiring, recovering or closed, with at most six requests and one restart. The installed replays exercise each chain on its own and leave cross-chain handoff separate.",
       "A request made while speech plays on its chain retires that speech and waits; who cancels the predecessor is not distinguished.",
       "The voice surface and read aloud stay closed until the app process restarts. App speech and Cloud app speech ask native to stop playback once per request on a closed chain: a confirmed stop admits the request, a refused one keeps the chain closed with the restart message.",
+      "The whole voice and note-read replay executes the actual reply and playback controllers with held native stop replies. The app and Cloud app playback members retain their separate partial-source regression.",
       "Native cancel and stop are one confirmed-or-unconfirmed settle step (see RendererSpeechChunk). Starting a voice conversation on a closed voice chain is refused the same way as Transcribe."
     ]
   },
@@ -3612,99 +3646,6 @@
       "Frame validation, the 2 MB limit and content-type checks are one valid/invalid class. The turn limit, the idle limit and the caller signal are one abort action.",
       "Assumption: native rejects requestStream only before it sent anything to the runtime.",
       "Parsing of the event stream body (readLocalAgentStream) is outside this model."
-    ]
-  },
-  {
-    "path": "specs/quint/native/SavedSignInRecovery.qnt",
-    "module": "SavedSignInRecovery",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "restoreTest",
-      "newerSignInWinsTest",
-      "cancelSupersedesUnreadRestoreTest",
-      "singleFlightTest",
-      "destroyedActivityRestoresNothingTest",
-      "expiredSavedSignInTest",
-      "expiresDuringRestoreTest",
-      "refusedKeyIsMarkedTest"
-    ],
-    "invariants": [
-      "TypeOK",
-      "NewerSignInWins",
-      "SingleFlight",
-      "OwnerNeverAhead",
-      "SavedDataKept",
-      "RestoredConsumesSaved",
-      "RejectedIsMarked"
-    ],
-    "witnesses": [
-      "RestoredWitness",
-      "SupersededKeepsSavedWitness",
-      "BusyRefusalWitness",
-      "RejectedWitness",
-      "ExpiredDuringRestoreWitness"
-    ],
-    "sources": [
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java"
-    ],
-    "symbols": [
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "restoreSavedSignIn"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "savedSignInRecoveryStatus"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "supersedeRecovery"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "recoveryEpoch"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "recoveringLegacy"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "endRecovery"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java",
-        "name": "reserveCredentialCommit"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java",
-        "name": "restoreLegacyCloudCredential"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java",
-        "name": "legacyCloudRecoveryEligible"
-      },
-      {
-        "path": "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCredentialStore.java",
-        "name": "RecoveryRefused"
-      }
-    ],
-    "stateMapping": {
-      "epoch/owner/recovering/closed": "recoveryEpoch, the restore owner epoch, recoveringLegacy and the destroyed plugin",
-      "stage": "accepted, snapshot taken, and the Cloud identity read outside every lock",
-      "intentCurrent": "the credential intent reserved by AlphaLocalAgentPlugin.reserveCredentialIntent",
-      "legacy/legacyAtRequest": "the retained legacy production credential and its state when the restore was accepted",
-      "slot/commitsSinceRequest": "the Cloud credential slot writer and shared sign-in commits since the request",
-      "answer/refusals": "the plugin call result and login-active refusals"
-    },
-    "abstractions": [
-      "Six epochs and one saved credential. The legacy journal, exact-byte recheck and encrypted storage are AlphaCredentialStore primitives covered by existing tests.",
-      "The shared sign-in client is a controlled port: only its entry points, cancel, matching return and commit reservation are represented. The client reserves the credential intent when a Google attempt is accepted or a code is sent and stores the key later under that guard; the model joins the two into signInCommits.",
-      "An already expired saved credential is not offered and answers that nothing was restored; the expired refusal is only the expiry passing between the snapshot and the token check.",
-      "The replay in specs/quint/refinement/native/saved-sign-in-recovery.mjs runs the real AlphaCloudSignInPlugin with the credential store and the shared client as ports, so legacy, slot and stage are port state there. Scenario and simulation evidence otherwise; no Keystore, installed-upgrade or Cloud claim."
     ]
   },
   {
@@ -4135,6 +4076,8 @@
       "credentialChangeCommitsAfterConfirmedStopTest",
       "unconfirmedShutdownNeedsRetryTest",
       "cancelDuringShutdownRetryPreventsStartTest",
+      "staleStartProbeCannotOvertakeMutationTest",
+      "stoppedResidentNeedsExactMutationAcknowledgementTest",
       "rearmWaitsForExplicitStartAfterStopTest",
       "startBeforeStatusRechecksShutdownTest"
     ],
@@ -4233,13 +4176,15 @@
       "mutationEpoch/retryEpoch/shutdown": "credentialMutationEpoch, credentialShutdownRetryEpoch and credentialShutdownRequest with the service acknowledgement of that exact request",
       "startRequest/startRequestEpoch/startOwnsLaunch": "startRequestId, startRequestEpoch and startOwnsLaunch (true only when the start found the service stopped)",
       "cancelledStarts/attachedStarts": "request ids cancelled before their start arrived, and starts that attached to an admitted running resident",
-      "native/launchedBy/launches/commits": "ElizaAgentService process state, the request whose start launched it, and committed credential mutations"
+      "native/launchedBy/launches/commits": "ElizaAgentService process state, the request whose start launched it, and committed credential mutations",
+      "heldStart": "A start request blocked at its boot-state read after capturing the old lifecycle epoch"
     },
     "abstractions": [
       "Two start requests, six lifecycle generations and three launches. Attach admission (root token, provider generation, owner) is one boolean.",
       "A start request while a stop is latched or a credential stop is unacknowledged is the strict recheck (shutdownRetryRequired): it reissues the stop under a new request and is modeled as reissuing in the same step it is admitted, although the plugin does that on its worker.",
       "Enrollment, pending bridge calls and the 128-entry cancellation bound are not modeled. The 15 s acknowledgement wait ends in one step; an uncertain commit is treated as an unconfirmed shutdown.",
-      "The replay in specs/quint/refinement/native/resident-start-cancel.mjs covers lifecycleStep, the machine without a credential mutation, on the whole plugin over service and Android ports; beginMutation and finishMutation are exercised only by the NativeCredentialMutation adapters."
+      "The sampled whole-plugin replay drives lifecycleStep. Named traces invoke AlphaLocalAgentPlugin.mutateCredentials and hold boot-state observations to interleave a stale start, a credential mutation and an exact stop acknowledgement.",
+      "The named replay observes actual refusal, synthetic commit and exact release or abandonment of the stop. Service boot/stop acknowledgements, clock, credential commit and Android focus are controlled ports. It does not operate a credential store, resident process or Android activity."
     ]
   },
   {
@@ -4452,7 +4397,8 @@
     "invariant": "safety",
     "sources": [
       "apps/app/src/runtime/telephony-executor.ts",
-      "apps/app/src/prototype/contacts-adapter.ts"
+      "apps/app/src/prototype/contacts-adapter.ts",
+      "apps/app/src/ui/telephony/telephony-receipt-text.ts"
     ],
     "tests": [
       "ownerEditSavesTest",
@@ -4492,7 +4438,8 @@
     "sources": [
       "apps/app/src/runtime/message-draft.ts",
       "apps/app/src/prototype/sms-adapter.ts",
-      "apps/app/src/runtime/image-sms.ts"
+      "apps/app/src/runtime/image-sms.ts",
+      "apps/app/src/ui/messages/sms-session.ts"
     ],
     "tests": [
       "suggestionSentAfterTapTest",
@@ -4505,7 +4452,9 @@
       "unknownSendIsNotRetriedTest",
       "lockDismissesReviewTest",
       "inboundDuringAgentReviewClosesItTest",
-      "askedDraftNeverReplacesOwnerTextTest",
+      "askedDraftReplacesOwnerTextTest",
+      "askedDraftNeedsReadinessTest",
+      "askedDraftKeepsUnknownSendTest",
       "askedDraftSentOnlyAfterTapTest",
       "askedDraftReplacesSuggestionTest",
       "dismissedSuggestionIsNotOfferedAgainTest"
@@ -4523,7 +4472,8 @@
     ],
     "abstractions": [
       "One thread, up to three inbound messages and two draft texts. The reviewed radio dispatch is NativeSmsDispatch; here a confirmed review yields sent, failed or unknown.",
-      "ready collapses image admission, SMS role, permission, unlock and foreground."
+      "ready collapses image admission, SMS role, permission, unlock and foreground.",
+      "An asked draft replaces the slot, owner text included (AC-14); the one Undo that restores the displaced text is not modelled."
     ]
   },
   {
@@ -4535,7 +4485,8 @@
     "sources": [
       "apps/app/src/runtime/telephony-executor.ts",
       "apps/app/src/prototype/phone-adapter.ts",
-      "apps/app/src/runtime/aosp-telephony.ts"
+      "apps/app/src/runtime/aosp-telephony.ts",
+      "apps/app/src/ui/telephony/telephony-receipt-text.ts"
     ],
     "tests": [
       "callByNumberTest",
@@ -4669,7 +4620,8 @@
       "SkippedRequestKeepsWarningWitness"
     ],
     "sources": [
-      "apps/app/src/runtime/always-on-listener.ts"
+      "apps/app/src/runtime/always-on-listener.ts",
+      "apps/app/src/ui/voice/sense-invocation.ts"
     ],
     "sharedSources": [
       "plugins/plugin-native-system/src/sense.ts"
@@ -4746,7 +4698,8 @@
       "QuietAfterDismissWitness"
     ],
     "sources": [
-      "apps/app/src/runtime/deletions.ts"
+      "apps/app/src/runtime/deletions.ts",
+      "apps/app/src/ui/deletions/deletion-notice.ts"
     ],
     "sharedSources": [
       "packages/contracts/src/deletion-window.ts"

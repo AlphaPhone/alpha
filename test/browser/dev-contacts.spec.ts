@@ -18,3 +18,20 @@ test('an opened contact is never an agent selection',async({page})=>{
  const context=await page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context);
  expect(context.view).toBe('contacts');expect(context.selectedObject??null).toBeNull();
 });
+
+
+test('contact search leaves one Back in the detail and keeps the search when returning',async({page})=>{
+ await page.getByRole('button',{name:'Search contacts',exact:true}).click();
+ const search=page.getByRole('searchbox',{name:'Search contacts',exact:true});
+ await search.fill('Maya');
+ await page.getByText('Maya Chen',{exact:true}).last().click();
+ const back=page.getByRole('button',{name:/^Back(?: to (?:apps|contacts))?$/});
+ await expect(back).toHaveCount(1);
+ await page.getByRole('button',{name:'Edit contact',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeVisible();
+ await expect(back).toHaveCount(0);
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ await expect(back).toHaveCount(1);
+ await back.click();
+ await expect(search).toHaveValue('Maya');
+});

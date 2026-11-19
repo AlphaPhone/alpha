@@ -36,14 +36,15 @@ const installed = {versionCode: 7, launcher: true, signerSha256: signer};
 const offered = {schema: 'alpha-update/v1', variant: 'launcher', signerSha256: signer, versionCode: 8,
   versionName: 'Synthetic update', apkUrl: 'https://updates.test/alpha-8.apk', sha256: sha(Buffer.of(1, 2, 3, 4)), sizeBytes: 4};
 const replacement = {...offered, versionCode: 9, apkUrl: 'https://updates.test/alpha-9.apk'};
-const secondFeed = {schema: 'alpha-update/index-v1', releases: [{...offered, variant: 'standalone'}, replacement]};
+const secondFeed = {schema: 'alpha-update/index-v1', releases: [{...offered, signerSha256: sha(Buffer.of(8))}, replacement]};
 const offerJson = JSON.stringify(offered);
 const nativeInputs = {
   offer1: [200, offerJson],
   offer2: [200, JSON.stringify(secondFeed)],
   withdrawn: [404, ''],
   malformed: [200, '{bad json'],
-  invalid: [200, JSON.stringify({...offered, variant: 'standalone'})],
+  // Well formed, but offered to another signer: never this install's update.
+  invalid: [200, JSON.stringify({...offered, signerSha256: sha(Buffer.of(8))})],
   transport: [503, ''],
   exactLimit: [200, offerJson.padEnd(65536)],
   oversized: [200, offerJson.padEnd(65537)],
@@ -178,7 +179,7 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     assert.deepEqual(Object.fromEntries(['apkUrl','sha256','sizeBytes','versionCode'].map(key => [key,receipt[key]])),
       Object.fromEntries(['apkUrl','sha256','sizeBytes','versionCode'].map(key => [key,offered[key]])));
     const args = [...native.map(([, [code, body]]) => ['manifest',String(code),body]),
-      ['deadline'], ...modes.map(mode => [mode,JSON.stringify(receipt)])];
+      ['deadline'], ['index'], ['selfUpdateGrant'], ...modes.map(mode => [mode,JSON.stringify(receipt)])];
     const results = javaTraceCampaign(harness,[members,...compiled],args);
     const responses = Object.fromEntries(native.map(([key],index) => [key,results[index]]));
     assert.deepEqual(responses.offer1,{resolved:true,manifest:offerJson,manifestSha256:sha(offerJson)});
@@ -188,6 +189,21 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     assert.deepEqual(responses.oversized,{resolved:false,manifest:null,manifestSha256:null});
     const deadline = results[native.length];
     assert.deepEqual(deadline,{lateBody:{verified:false,bytes:2},lateEof:{verified:true,bytes:4}});
+    // Alpha ships only the launcher. Both parsers skip another signer's row, but an index carrying a
+    // non-launcher row is malformed as a whole: it offers nothing, not even its launcher row.
+    assert.deepEqual(results[native.length + 1],{otherSigner:9,standalone:0});
+    // The image's INSTALL_SELF_UPDATES grant stands in for the owner's install consent only: never below
+    // Android 12, never past the early-boot throttle, and without it the owner's consent is still required.
+    assert.deepEqual(results[native.length + 2],{
+      granted30:{status:'unsupported',admitted:true}, granted:{status:'supported',admitted:true},
+      grantedEarlyBoot:{status:'starting',admitted:true}, neither:{status:'permission-required',admitted:false},
+      consent:{status:'supported',admitted:true}});
+    const parser = vm.createContext({Date, URL, Capacitor:{isNativePlatform:() => true},
+      localStorage:{getItem:() => null, setItem() {}}, device:{checkForUpdate() {throw Error('not called');}}});
+    program.runInContext(parser);
+    const mixed = row => ({schema:'alpha-update/index-v1',releases:[{...replacement,...row},replacement]});
+    assert.equal(parser.review(mixed({signerSha256:sha(Buffer.of(8))}),installed)?.versionCode,9);
+    assert.equal(parser.review(mixed({variant:'standalone'}),installed),null);
 
     const cache = renderer(program,'cached-offer-cadence-withdrawal-and-replacement',responses);
     cache.request();cache.duplicate();await cache.answer('offer1');
@@ -207,7 +223,7 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     restored.request(true);await restored.answer('invalid');
     traces.push(restored.trace);
 
-    for (const [index,result] of results.slice(native.length+1).entries()) {
+    for (const [index,result] of results.slice(native.length+3).entries()) {
       if (result.skip) {
         assert.equal(modes[index],'cache-delete-refused');
         skipped.push({mode:modes[index],reason:result.skip});

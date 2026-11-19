@@ -13,14 +13,21 @@ type Popup=[key:string,open:(out:Bag)=>boolean,close:(out:Bag)=>void];
 const POPUPS:Record<string,Popup[]>={
  browser:[['menuModal',out=>!!out.menu,out=>out.closeMenu?.()],['shareModal',out=>!!out.share,out=>out.closeShare?.()]],
  photos:[['infoModal',out=>!!out.infoOpen,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareOpen,out=>out.closeSheet?.()]],
- notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()]],
+ notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()],['previousNotesModal',out=>!!out.previousNotesMenu,out=>out.closePreviousNotesMenu?.()]],
  files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()],['moveModal',out=>!!out.moveSheet,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()]],
  workflows:[['stepModal',out=>!!out.b?.sheetOn,out=>out.b?.closeSheet?.()]],
  settings:[['sheetModal',out=>!!out.hasSheet,out=>out.sheet?.close?.()]],
 };
 function popupFocus(name:string,current:()=>Bag){
  const popups=(POPUPS[name]||[]).map(([key,open,close])=>({key,open,modal:reviewFocus(()=>close(current()))}));
- return (out:Bag)=>{const refs:Bag={};for(const popup of popups){popup.modal.render(popup.open(out));refs[popup.key]=popup.modal.ref;}return refs;};
+ return (out:Bag)=>{
+  const refs:Bag={};
+  // A menu row disappears when it opens a sibling sheet. Carry its surviving opener forward.
+  const replaced=popups.find(popup=>!popup.open(out)&&popup.modal.openedFrom());
+  const opener=replaced?.modal.openedFrom();
+  for(const popup of popups){popup.modal.render(popup.open(out),opener);refs[popup.key]=popup.modal.ref;}
+  return refs;
+ };
 }
 /** Full-screen subviews replace their covered content in accessibility navigation. */
 export function installSubviewAccessibility(views:Bag){
@@ -29,7 +36,7 @@ export function installSubviewAccessibility(views:Bag){
   let output:Bag={};
   const attachmentModal=reviewFocus(()=>output.attachment?.close());
   const providerModal=reviewFocus(()=>output.provider?.close());
-  const discardModal=reviewFocus(()=>output.c?.cancelDiscard?.());
+  const mailSelectionModal=reviewFocus(()=>output.mailReview?.close());
   const focus=focusHistory();
   const detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read),runFocus=subviewFocus(focus.read),builderFocus=subviewFocus(focus.read);
   const popups=popupFocus(name,()=>output);
@@ -37,9 +44,9 @@ export function installSubviewAccessibility(views:Bag){
    const out=output=render(state,api);
    if(name==='inbox'){
     attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
-    discardModal.render(!!(out.composing&&out.c?.confirm));
-    const review=!!(out.attachmentOpen||out.providerReview||out.composing&&out.c?.confirm);
-    return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,discardModal:discardModal.ref,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
+    mailSelectionModal.render(!!out.mailReview);
+    const review=!!(out.attachmentOpen||out.providerReview||out.mailReview);
+    return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,mailSelectionModal:mailSelectionModal.ref,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
    }
    return {...out,...popups(out),captureSubviewFocus:focus.capture,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!(out.detail||out.automation?.detail||out.runOpen||out.builder),detailCovered:!!(out.runOpen||out.builder),runCovered:!!out.builder};
   };
@@ -115,8 +122,8 @@ function subviewFocus(read:()=>FocusTarget){
 function reviewFocus(close:()=>void){
  let open=false,opener:HTMLElement|null=null;
  const modal=createInlineModal(close,()=>opener);
- return {...modal,render(next:boolean){
-  if(next&&!open)opener=document.activeElement instanceof HTMLElement?document.activeElement:null;
+ return {...modal,openedFrom:()=>open?opener:null,render(next:boolean,inheritedOpener?:HTMLElement|null){
+  if(next&&!open)opener=inheritedOpener??(document.activeElement instanceof HTMLElement?document.activeElement:null);
   open=next;
  }};
 }
@@ -214,6 +221,7 @@ export function installReplyAnnouncer(Component: any) {
     if (!settled && !arrived) { if (!state.typing && !state.turnStatus) this.replyAnnounced = false; return; }
     const text = String(last.text || last.card?.title || '').trim();
     this.replyAnnouncedId = last.id; this.replyAnnounced = false;
-    if (text) say(bounded(text),this);
+    // A quiet local note ("Sent to Maya", AP-16) is logged in the chat, not read out as a reply.
+    if (text && !last.quiet) say(bounded(text),this);
   };
 }

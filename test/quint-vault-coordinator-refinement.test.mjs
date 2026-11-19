@@ -6,7 +6,10 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {buildSync} from 'esbuild';
 import {sourceContext, tick, deferred} from '../specs/quint/refinement/application/support.mjs';
-import {captureInputs, checkTraces} from '../specs/quint/refinement/check-traces.mjs';
+import {captureInputs, checkTraces, verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
+
+import {checkVaultReadback} from '../specs/quint/refinement/native/vault-readback.mjs';
+import {jvmSkip} from './fixtures/jvm-tools.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const driver = fileURLToPath(import.meta.url);
@@ -24,7 +27,7 @@ function sharedModule(path) {
 async function fixture(extraSources) {
   const shared = sharedModule('vendor/eliza/plugins/plugin-native-passwords/src/client.ts');
   const bindings = sharedModule('vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts');
-  const sources = [...shared.sources,...bindings.sources,'apps/app/src/passwords/password-manager.ts',
+  const sources = [...shared.sources,...bindings.sources,'apps/app/src/ui/passwords/passwords-presentation.ts','apps/app/src/passwords/password-manager.ts',
     'specs/quint/refinement/application/support.mjs','test/support/strip-types.mjs',driver,...extraSources];
   const driverHashes = captureInputs(sources);
   const sharedExports=shared.instantiate(), bindingExports=bindings.instantiate();
@@ -49,7 +52,7 @@ async function fixture(extraSources) {
   };
   const document = new EventTarget(); document.hidden=false;
   const window = new EventTarget();
-  const api = sourceContext(['apps/app/src/passwords/password-manager.ts'], [
+  const api = sourceContext(['apps/app/src/ui/passwords/passwords-presentation.ts','apps/app/src/passwords/password-manager.ts'], [
     'passwordManagerGroups','passwordEntryPage','leavePasswordManager','refreshPasswordManager','passwordManagerLifecycle',
     'observe: () => ({active,generation,locked:status?.locked ?? true,entries:entries!==null,damaged,resetReviewed:confirmReset!==null,secret:!!draft?.password,draft:!!draft,busy,noticePresent:!!notice})',
   ], {
@@ -189,4 +192,16 @@ test('actual vault coordinator clears drafts and retires reset review on leave',
   assert.equal(receipt.passed,true);
   assert.equal(receipt.inputsUnchanged,true);
   assert.equal(receipt.driverInputsBound,true);
+});
+
+test('whole native vault reads metadata and fences damaged-vault recovery', {
+  skip: jvmSkip('json', 'javac'), timeout: scaledTimeout(120000),
+}, async () => {
+  const receipt = await checkVaultReadback(driver);
+  assert.equal(receipt.traces, 4);
+  assert.equal(receipt.checkpoints, 27);
+  assert.deepEqual(receipt.observedFields, ['s.resets', 's.vaultOpen']);
+  assert.equal(receipt.passed, true);
+  assert.equal(receipt.driverInputsBound, true);
+  assert.equal(verifyRefinementReceiptInputs(receipt), true);
 });

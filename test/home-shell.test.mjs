@@ -1,13 +1,14 @@
-// Alpha's Home and app grid render from the shared mobile shell (@elizaos/ui/mobile-shell), its Apps
-// drawer from the shared installed-app grid, with the product record in apps/app/src/product/alpha-product-registration.ts. Shared controller and search cases live in
-// the upstream mobile-shell and native-system suites.
+// Alpha's Home and app grid render from Alpha's mobile shell (apps/app/src/ui/mobile-shell), its Apps
+// drawer from Alpha's installed-app grid (apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx), with the product record in apps/app/src/product/alpha-product-registration.ts. Search ranking and
+// same-label disambiguation are in test/installed-launcher-search.test.mjs; launcher controller cases live in the Quint
+// launcher and drawer refinement suites (test/quint-launcher-*.test.mjs, test/quint-drawer-interaction.test.mjs).
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {tsImport} from './support/ts-import.mjs';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {cloneElement,createElement} from 'react';
 const {installHomeShell}=await tsImport('../apps/app/src/prototype/home-shell.ts',import.meta.url);
-const {navigateMobileShell}=await tsImport('../.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts',import.meta.url);
+const {navigateMobileShell}=await tsImport('../apps/app/src/ui/mobile-shell/navigation.ts',import.meta.url);
 const icon='data:image/png;base64,iVBORw0KGgo=';
 const apps=[
  {packageName:'com.android.settings',label:'Settings',icon},
@@ -289,7 +290,7 @@ test('with the drawer closed, Home toasts a failed launch and a failed app read 
   globalThis.document=Object.assign(new EventTarget(),{hidden:false});
   let saved=[...PRODUCT,'com.android.settings'],listing='ok';const toasts=[];
   const Shell=shellClass([],toasts);
-  const shell=installHomeShell(Shell,{},{list:async()=>{if(listing==='fail')throw new Error('offline');return {apps};},launch:async()=>{throw new Error('Work apps are paused.');}},
+  const shell=installHomeShell(Shell,{},{list:async()=>{if(listing==='fail')throw new Error('offline');return {apps};},launch:async()=>{throw new Error('Work apps are paused or locked. Turn on work apps in Android, then try again.');}},
     {appInventory:'simulated',favorites:{read:()=>saved,write:keys=>{saved=[...keys];}}});
   const home=new Shell();home.renderVals();home.componentDidMount();
   try {
@@ -301,7 +302,7 @@ test('with the drawer closed, Home toasts a failed launch and a failed app read 
     assert.deepEqual(toasts,[]);
     home.setState(home.shellNavigate({type:'drawer',open:false}));
     await shell.launcher.launch(shell.launcher.snapshot().apps.find(app=>app.packageName==='com.android.settings'));
-    assert.deepEqual(toasts,['Settings could not be opened. Work apps are paused.']);
+    assert.deepEqual(toasts,['Settings could not be opened. Work apps are paused or locked. Turn them on in Android, then try again.']);
     // A failed read drops the pinned app from Home; repeated failed refreshes report it once.
     listing='fail';
     await shell.launcher.refresh();await shell.launcher.refresh();
@@ -311,7 +312,7 @@ test('with the drawer closed, Home toasts a failed launch and a failed app read 
     listing='ok';await shell.launcher.refresh();toasts.length=0;listing='fail';
     await shell.launcher.launch(shell.launcher.snapshot().apps.find(app=>app.packageName==='com.android.settings'));
     assert.equal(shell.launcher.snapshot().status,'failed');
-    assert.deepEqual(toasts,['Settings could not be opened. Work apps are paused.']);
+    assert.deepEqual(toasts,['Settings could not be opened. Work apps are paused or locked. Turn them on in Android, then try again.']);
     // A background read that fails while another app is open does not toast over it.
     listing='ok';await shell.launcher.refresh();toasts.length=0;home.setState({view:'inbox'});listing='fail';
     await shell.launcher.refresh();

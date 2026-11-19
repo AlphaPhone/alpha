@@ -36,7 +36,12 @@ const ready=(page:Page)=>expect(page.getByRole('button',{name:'Settings',exact:t
 /** Ask Alpha to scan the poster, correct the recognized text and open the event suggestions. */
 async function scanPoster(page:Page){
  const dialog=page.getByRole('dialog',{name:'Review scanned text'}),text=dialog.getByRole('textbox',{name:'Scanned text'});
- await page.getByRole('button',{name:'Type',exact:true}).click();{const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();await input.fill('Scan this');await input.press('Enter');}
+ const typeButton=page.getByRole('button',{name:'Type',exact:true});
+ const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
+ await expect.poll(async()=>await input.isVisible()||await typeButton.isVisible()).toBe(true);
+ if (!await input.isVisible()) await typeButton.click();
+ await input.fill('Scan this');
+ await input.press('Enter');
  await expect(text).toBeEnabled({timeout:120_000});
  // The real local OCR result must already contain the poster's date and time.
  await expect(text).toHaveValue(/Open studio/);await expect(text).toHaveValue(/October 10, 2026/);await expect(text).toHaveValue(/6:30 PM/);

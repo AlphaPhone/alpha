@@ -113,6 +113,10 @@ test('realtime transcribing streams revised words into one pending bubble until 
  await expect(page.getByRole('button',{name:'Mute microphone',exact:true})).toBeEnabled();
  await page.evaluate(()=>(window as any).voicePresentationFixture.partial('hello from Alpha'));
  await expect(pending).toHaveCount(1);await expect(pending).toHaveText('hello from Alpha');
+ // Repeated listening snapshots can arrive between partials; they must not erase live words.
+ await page.evaluate(()=>{const f=(window as any).voicePresentationFixture;f.phase('listening');f.partial('still speaking');f.phase('listening');});
+ await expect(pending).toHaveText('still speaking');
+ await page.evaluate(()=>(window as any).voicePresentationFixture.partial('hello from Alpha'));
  await page.evaluate(()=>(window as any).voicePresentationFixture.phase('thinking'));
  await expect(pending).toHaveText('hello from Alpha');
  await page.evaluate(()=>{const f=(window as any).voicePresentationFixture;f.shell.setState({msgs:[{id:'committed-voice',from:'user',text:'hello from Alpha'}]});});

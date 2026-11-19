@@ -132,6 +132,7 @@ public class ApplicationInfo {
  public boolean getBoolean(int id){if(id!=206)throw new AssertionError(id);return android.content.Context.provisioned;}`);
     put('ai/alphacompute/alphaphone/BuildConfig.java',`package ai.alphacompute.alphaphone;
 public class BuildConfig {
+ public static final int VERSION_CODE=1;
  public static final String APPLICATION_ID="fixture.alpha";
  public static boolean DEBUG=false;
 }`);
@@ -225,7 +226,9 @@ public final class AlphaLocalAgentPlugin extends Plugin {
  static long powerAuthorizationMutationEpoch,credentialMutationEpoch=-1,credentialShutdownRequest=-1;
  static boolean stopping;
 ${exact(agent,' static final class PowerLaunchPin', ' private final java.util.Set<String> cancelledStarts')}
-${exact(agent,' @PluginMethod public void launchSurface(', ' /** Read-only: may this surface')}
+${exact(agent,' @PluginMethod public void launchSurface(', '\n /** How this assistant surface was opened')}
+${exact(agent,' @PluginMethod public void takeInvocation(', '\n }')}
+ }
 }
 final class AlphaCredentialStore {
  AlphaCredentialStore(Context context){}

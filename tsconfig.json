@@ -27,9 +27,6 @@
       "@elizaos/capacitor-system/settings": ["./.eliza/client-features/plugins/plugin-native-system/src/settings.ts"],
       "@elizaos/contracts/device-action-execution": ["./.eliza/client-features/packages/contracts/src/device-action-execution.ts"],
       "@elizaos/contracts/client-turn-observation": ["./.eliza/client-features/packages/contracts/src/client-turn-observation.ts"],
-      "@elizaos/capacitor-system/shade": [
-        "./.eliza/client-features/plugins/plugin-native-system/src/client/shade.ts"
-      ],
       "@elizaos/capacitor-system/launcher": [
         "./.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts"
       ],
@@ -38,12 +35,6 @@
       ],
       "@elizaos/contracts/sms-send": [
         "./.eliza/client-features/packages/contracts/src/sms-send.ts"
-      ],
-      "@elizaos/ui/mobile-shell": [
-        "./.eliza/client-features/packages/ui/src/mobile-shell/index.ts"
-      ],
-      "@elizaos/ui/mobile-shell/core": [
-        "./.eliza/client-features/packages/ui/src/mobile-shell/core.ts"
       ],
       "@elizaos/contracts/native-notes-query": [
         "./.eliza/client-features/packages/contracts/src/native-notes-query.ts"
@@ -56,18 +47,6 @@
       ],
       "@elizaos/core/speech": [
         "./.eliza/client-features/packages/core/src/speech.ts"
-      ],
-      "@elizaos/ui/voice/batch-conversation": [
-        "./.eliza/client-features/packages/ui/src/voice/batch-conversation.ts"
-      ],
-      "@elizaos/ui/accessibility/screen-focus": [
-        "./.eliza/client-features/packages/ui/src/accessibility/screen-focus.ts"
-      ],
-      "@elizaos/ui/voice/voice-chat-playback": [
-        "./.eliza/client-features/packages/ui/src/voice/voice-chat-playback.ts"
-      ],
-      "@elizaos/ui/voice/voice-session-client": [
-        "./.eliza/client-features/packages/ui/src/voice/voice-session-client-core.ts"
       ],
       "@elizaos/host/voice/ui-context": [
         "./.eliza/client-features/packages/host/src/voice/ui-context.ts"
@@ -84,11 +63,64 @@
       "@elizaos/core/schema-types": [
         "./.eliza/client-features/packages/core/src/schema-types.ts"
       ],
+      "@elizaos/plugin-maps/client/cloud-provider": ["./.eliza/client-features/plugins/plugin-maps/src/client/cloud-provider.ts"],
+      "@elizaos/plugin-maps/client/contracts": ["./.eliza/client-features/plugins/plugin-maps/src/client/contracts.ts"],
+      "@elizaos/plugin-maps/client/device-navigation": ["./.eliza/client-features/plugins/plugin-maps/src/client/device-navigation.ts"],
+      "@elizaos/plugin-maps/client/guidance": ["./.eliza/client-features/plugins/plugin-maps/src/client/guidance.ts"],
+      "@elizaos/plugin-maps/client/location": ["./.eliza/client-features/plugins/plugin-maps/src/client/location.ts"],
+      "@elizaos/plugin-maps/client/navigation-fix": ["./.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts"],
+      "@elizaos/plugin-maps/client/route-distance": ["./.eliza/client-features/plugins/plugin-maps/src/client/route-distance.ts"],
+      "@elizaos/plugin-maps/client/saved-places": ["./.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts"],
+      "@elizaos/plugin-files/browser/storage-model": ["./.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts"],
+      "@elizaos/plugin-files/browser/files-agent-contract": ["./.eliza/client-features/plugins/plugin-files/src/browser/files-agent-contract.ts"],
+      "@elizaos/plugin-notes/types": ["./.eliza/client-features/plugins/plugin-notes/src/types.ts"],
+      "@elizaos/plugin-notes/note-authored": ["./.eliza/client-features/plugins/plugin-notes/src/note-authored.ts"],
+      "@elizaos/plugin-notes/note-format": ["./.eliza/client-features/plugins/plugin-notes/src/note-format.ts"],
+      "@elizaos/plugin-notes/client/notes-api": ["./.eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts"],
+      "@elizaos/plugin-notes/client/note-origin": ["./.eliza/client-features/plugins/plugin-notes/src/client/note-origin.ts"],
+      "@elizaos/plugin-notes/client/note-schedule-draft": ["./.eliza/client-features/plugins/plugin-notes/src/client/note-schedule-draft.ts"],
+      "@elizaos/plugin-calendar/client/availability-review": ["./.eliza/client-features/plugins/plugin-calendar/src/client/availability-review.ts"],
+      "@elizaos/plugin-calendar/linked-sync": ["./.eliza/client-features/plugins/plugin-calendar/src/linked-sync/index.ts"],
+      "@elizaos/plugin-inbox/mailbox/attachments": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/attachments.ts"],
+      "@elizaos/plugin-inbox/mailbox/background-notices": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/background-notices.ts"],
+      "@elizaos/plugin-inbox/mailbox/digest": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/digest.ts"],
+      "@elizaos/plugin-inbox/mailbox/failures": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/failures.ts"],
+      "@elizaos/plugin-inbox/mailbox/grants": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/grants.ts"],
+      "@elizaos/plugin-inbox/mailbox/mailbox-list": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts"],
+      "@elizaos/plugin-inbox/mailbox/operation-journal": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/operation-journal.ts"],
+      "@elizaos/plugin-inbox/mailbox/read-state": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/read-state.ts"],
+      "@elizaos/plugin-inbox/mailbox/retained-draft": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/retained-draft.ts"],
+      "@elizaos/plugin-inbox/mailbox/types": ["./.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts"],
+      "@elizaos/plugin-workflow/client/hosted-digests": ["./.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts"],
+      "@elizaos/plugin-workflow/services/hosted-digest-policy": ["./.eliza/client-features/plugins/plugin-workflow/src/services/hosted-digest-policy.ts"],
+      "@elizaos/capacitor-camera/host-ports": ["./.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts"],
+      "@elizaos/capacitor-camera/scan-document": ["./.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts"],
+      "@elizaos/core/events": ["./.eliza/client-features/packages/core/src/events.ts"],
+      "@elizaos/contracts/native-telephony": ["./.eliza/client-features/packages/contracts/src/native-telephony.ts"],
+      "@elizaos/contracts/phone-workflow": ["./.eliza/client-features/packages/contracts/src/phone-workflow.ts"],
+      "@elizaos/contracts/workflow-client": ["./.eliza/client-features/packages/contracts/src/workflow-client.ts"],
+      "@elizaos/contracts/workflow-scope": ["./.eliza/client-features/packages/contracts/src/workflow-scope.ts"],
+      "@elizaos/plugin-assistant/device-actions/browser-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/camera-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/client-coordinator": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"],
+      "@elizaos/plugin-assistant/device-actions/clock-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/files-browser-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/maps-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/maps-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/notes-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/notes-organize-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/notes-query-result": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-query-result.ts"],
+      "@elizaos/plugin-assistant/device-actions/photo-library-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photo-library-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/photos-view-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/reminder-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/reminder-create-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-create-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/reminder-journal": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts"],
+      "@elizaos/plugin-assistant/device-actions/telephony-actions-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts"],
+      "@elizaos/plugin-assistant/device-actions/workflow-contract": ["./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/workflow-contract.ts"],
       "@elizaos/contracts": [
         "./.eliza/client-features/client-contracts.ts"
       ],
       "@elizaos/ui/api/transport": [
-        "./.eliza/client-features/packages/ui/src/api/transport.ts"
+        "./apps/app/src/ui/api/transport.ts"
       ],
       "@elizaos/plugin-assistant/device-calendar-contract": [
         "./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts"
@@ -99,13 +131,9 @@
       "@elizaos/plugin-assistant/device-foreground-review": [
         "./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/foreground-review-contract.ts"
       ],
-      "@elizaos/ui/view-primitives": [
-        "./.eliza/client-features/packages/ui/src/view-primitives.ts"
-      ],
       "@elizaos/cloud-sdk/subscription-entitlement": [
         "./.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts"
       ],
-      "@elizaos/contracts/stated-clock-time": ["./.eliza/client-features/packages/contracts/src/stated-clock-time.ts"],
       "@elizaos/contracts/browser-request-grounding": [
         "./.eliza/client-features/packages/contracts/src/browser-request-grounding.ts"
       ],
@@ -119,7 +147,6 @@
   },
   "include": [
     "apps/app/src",
-    ".eliza/client-features/packages/ui/src/mobile-shell",
     "vite.config.ts",
     "capacitor.config.ts"
   ]

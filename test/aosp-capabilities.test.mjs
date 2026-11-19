@@ -23,12 +23,20 @@ public class CapabilityTest {
  static void check(boolean ok){if(!ok)throw new AssertionError();}
  public static void main(String[] args){
   android.content.Context c=new android.content.Context();
-  if(args.length>0){c.resources.value=true;c.info.flags=1;c.packages.features.add("ai.alphacompute.alphaphone.aosp_image");check(!AlphaImageCapabilities.aospImage(c));check(!AlphaImageCapability.verified(c));check(!AlphaImageCapabilities.defaultAppEnabled(c,"dial"));System.out.println("PASS refused "+args[0]);return;}
+  if(args.length>0){
+   String scenario=args[0];
+   if(!scenario.equals("sideload"))c.info.flags=1;
+   if(!scenario.equals("no-marker"))c.packages.features.add("ai.alphacompute.alphaphone.aosp_image");
+   c.resources.value=scenario.equals("debug-overlay");
+   check(AlphaImageCapabilities.startupPermissionDefaults(c)==scenario.startsWith("debug-"));
+   check(!AlphaImageCapabilities.aospImage(c));check(!AlphaImageCapability.verified(c));check(!AlphaImageCapabilities.defaultAppEnabled(c,"dial"));
+   System.out.println("PASS startup defaults for "+scenario);return;
+  }
   check(!AlphaImageCapabilities.aospImage(c));c.resources.value=true;check(!AlphaImageCapabilities.aospImage(c));c.info.flags=1;check(AlphaImageCapabilities.aospImage(c));
   check(AlphaImageCapabilities.defaultAppEnabled(c,"dial"));check(!AlphaImageCapabilities.defaultAppEnabled(c,"sms"));check(!AlphaImageCapabilities.defaultAppEnabled(c,null));
   check(AlphaImageCapability.featureName("ai.alphacompute.alphaphone").equals("ai.alphacompute.alphaphone.aosp_image"));
   c.resources.missing=true;check(!AlphaImageCapabilities.aospImage(c));check(!AlphaImageCapabilities.defaultAppEnabled(c,"dial"));check(!AlphaImageCapability.verified(c));c.resources.missing=false;
-  c.packages.features.add("ai.alphacompute.alphaphone.aosp_image");check(AlphaImageCapability.verified(c));
+  c.packages.features.add("ai.alphacompute.alphaphone.aosp_image");check(AlphaImageCapability.verified(c));check(AlphaImageCapabilities.startupPermissionDefaults(c));
   for(String role:new String[]{"dialer","sms","contacts","unknown",null})check(!AlphaImageCapabilities.roleEnabled(role));check(AlphaImageCapabilities.roleEnabled("home"));check(AlphaImageCapabilities.roleEnabled("assistant"));
   System.out.println("PASS image admission and unimplemented role denial");
  }
@@ -39,10 +47,13 @@ public class CapabilityTest {
  const alpha='android/app/src/main/java/ai/alphacompute/alphaphone', shared='vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages';
  const sources=[`${alpha}/AlphaImageCapabilities.java`,`${alpha}/AlphaImageCapability.java`,`${shared}/ImageCapability.java`,`${shared}/SmsTelephonyConfiguration.java`];
  execFileSync(javaBinary('javac'),['--release','11','-d',dir,...sources,...Object.keys(files).map(name=>path.join(dir,name))],{timeout:scaledTimeout(30000),stdio:'pipe'});
- const run=(...args)=>execFileSync(javaBinary('java'),[...args,'-cp',dir,'ai.alphacompute.alphaphone.CapabilityTest',...(args.length?[args[0]]:[])],{encoding:'utf8',timeout:scaledTimeout(30000)});
+ const run=(scenario,debug=false)=>execFileSync(javaBinary('java'),[...(debug?['-Dt.debug=true']:[]),'-cp',dir,'ai.alphacompute.alphaphone.CapabilityTest',...(scenario?[scenario]:[])],{encoding:'utf8',timeout:scaledTimeout(30000)});
  assert.match(run(),/PASS image admission/);
- // A debug build is refused even with every image fact present.
- assert.match(run('-Dt.debug=true'),/PASS refused/);
+ // The development image can skip the walkthrough while image-only product access stays off.
+ assert.match(run('debug-image',true),/PASS startup defaults for debug-image/);
+ assert.match(run('debug-overlay',true),/PASS startup defaults for debug-overlay/);
+ assert.match(run('sideload'),/PASS startup defaults for sideload/);
+ assert.match(run('no-marker'),/PASS startup defaults for no-marker/);
 });
 test('production RRO targets the prebuilt app overlayable and cannot be a development default',t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-image-overlay-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));fs.writeFileSync(path.join(dir,'product.mk'),'');

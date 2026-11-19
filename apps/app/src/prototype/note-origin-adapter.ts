@@ -67,7 +67,7 @@ export function installNoteOriginAdapter(Component:Bag,views:Bag){
   const openId=state.open;
   if(origin.version===2)return canonicalOrigin(out,origin,api,openId);
   // The title is the note's current one. A link whose note is gone names no note at all.
-  const known=olderNotesOpen(),live=known?resolveNoteOrigin(origin as NoteOrigin,olderNotes(api)):undefined,name=live?.status==='found'?noteOriginTitle(live.note):'';
+  const known=olderNotesOpen(),live=known?resolveNoteOrigin(origin as NoteOrigin,olderNotes(api)):undefined,name=live?.status==='found'?noteOriginTitle(live.note,'Voice note'):'';
   out.ev.hasOrigin=true;out.ev.originLabel=!known?'Voice note':name?`From note: ${name}`:'Deleted note';out.ev.originOpenLabel=name?`Open note ${name}`:'Open note';
   out.ev.openOrigin=async()=>{
    if(opening)return;opening=true;
