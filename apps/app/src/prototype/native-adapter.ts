@@ -59,6 +59,117 @@ export function egressPrivacy(connection: EgressConnection, native = Capacitor.i
   return { big: 'Offline', sub: 'AI off' };
 }
 const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'wallet', 'workflows']);
+/** PROD-09: the handlers each reference view may keep unchanged in a product build. A handler key
+ * that no rule in replacement() covers and that is not listed here is treated as unavailable: its
+ * control is not shown. A new control in template.html fails test/reviewed-handlers.test.mjs until
+ * it is listed here (local navigation or state) or replaced in replacement(). Seeded from the
+ * template's bindings on 19 Nov 2026, so it keeps the controls shown then. */
+const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
+  phone: [
+    'accept add alphaAnswer askDelete call callMatch cancelDelete clearFilter closeReply',
+    'confirmDelete decline del delKey dialCall endCall endLive endScreen erase info message',
+    'msg nativeDial nativeOnNumber nativeRefresh nativeRequest openReply pick play press',
+    'replyModal restore retry seek send toggle toggleNotes writeReply',
+  ],
+  messages: [
+    'allow askDelete attachFile call camera clear clearSearch click close closeNew',
+    'closeSearch compose context copy discard down edit focus go goNum key loadMore menuKey',
+    'move nativeAttach nativeBack nativeHandoff nativeLoadMore nativeRead nativeRefresh',
+    'nativeSendAccess nativeSimAccess newMsg onKey onQ onRecipientInput onSearch onText open',
+    'openFile openPhoto openSearch pick remove rm send submitSearch toggleContacts toggleTray',
+    'undo up who',
+  ],
+  inbox: [
+    'addAcct addRaw allowContacts archive ask askQ attach attachmentModal captureSubviewFocus',
+    'check clear clearSearch close closeMenu closeSearch compose composeFocus confirm del',
+    'deleteDraft detailFocus down editDraft formattedMailRef forward hideSenderImage',
+    'htmlLoaded loadMore loadMoreContacts mailMenuKey mailSelectionModal menuKey nextThread',
+    'onBcc onBody onCc onFrom onQ onSubj onTo open openContacts openSearch openSendSettings',
+    'pick previousThread providerModal recoverEdits refresh reload replaceEdits reply',
+    'replyAll restoreEdits retry retryEdits rm save send showImages submitSearch toKey',
+    'toggleRead toggleRecipientDetails undo up useLatest who',
+  ],
+  browser: [
+    'allow askPage bookNow cancelEdit captureSubviewFocus cfNo cfOk clearAddress clearData',
+    'clearHist clearSite close closeLib closeMenu closeShare closeTabs copyLink deny focusRef',
+    'go goBack goFwd libHist libMarks libraryFocus menuModal newTab next onAddr onAddrKey',
+    'onInput onKey onLibQuery onName onPhone openBook openDownloads openEnc',
+    'openExternalBrowser openFind openLib openNews openPasswordProvider openPrivate openShare',
+    'openTabs partyDown partyUp pick prev readAloud rebook reload remove rootRef shareModal',
+    'startEdit stopAg stopLoading tabsFocus toggleMark toggleMenu',
+  ],
+  camera: [
+    'clearSaid cycleTimer flip openLast pick shutter toggleFlash vfCancel vfClick vfDown',
+    'vfMove vfUp',
+  ],
+  photos: [
+    'addFavorite addToAlbum albumFocus albumsRecover ask askDelete cancel captureSubviewFocus',
+    'choose clearFilter close closeActions closeSheet confirm create crop del delete',
+    'deleteAlbum deleteForever down edit editFocus email emptyFocus emptyModal emptyNow',
+    'emptyTrash fav frame go gridRef importImage info infoModal key libraryAccessChoose',
+    'libraryRetry loadMore manage modalRef move mute newAlbum onName open openCopyRecovery',
+    'openPlace openTrash pause pd pick play pm pu recover replace rotate save seek selAlbum',
+    'selAll selCancel selDel selDeleteForever selFav selRecover selShare selStart select send',
+    'share shareModal tap up viewerFocus viewerRef',
+  ],
+  maps: [
+    'backToEvent call clearQ close copyPhone dirs end focusQ go mapRef nativeApplyName',
+    'nativeEdit nativeLocation nativeLocationSettings nativeManualLocation nativeRename',
+    'onOrigin onQ openInMapsApp originFocus originKey originLocation qKey recenter',
+    'retryNativeMap rootRef save searchLead share shareEta start web',
+  ],
+  calendar: [
+    'accept addEmail cancel captureSubviewFocus checkCreations checkReminderCreations',
+    'checkReminderDeletions checkReminderTap checkUncertain chooseMonth chooseYear close',
+    'closeMonth closePick decline del deleteSeries detailFocus discardEditDraft',
+    'discardFormDraft dismissReminderTap eMinus ePlus edit editSeries formFocus go goToday',
+    'goWhere insertHandoff join mNext mPrev monthModalRef nativeStatusRetry newEvent onDate',
+    'onEndDate onEndTime onNotes onPq onStartTime onTitle onWhere open openBrowserRecovery',
+    'openCalendarSettings openOrigin openPick openProvider openReminderActionRecovery',
+    'openReminderCreationRecovery openReminderRecovery pick pqKey recoverEditDraft',
+    'recoverFormDraft reminderDone reminderReopen reminderSnooze remove replaceEditDraft',
+    'replaceFormDraft response restoreEditDraft restoreFormDraft resumeEditDraft',
+    'resumeFormDraft retryEditDraft retryFormDraft sMinus sPlus save separateCreation tlDown',
+    'tlUp toggleAllDay toggleMonth toggleVideo',
+  ],
+  contacts: [
+    'addEmail addNew addPhone ask cancel cancelDelete cancelEdit change clear clearSearch',
+    'close closeSearch confirmDelete del edit go nativeLoadMore nativeRequest onChange',
+    'onFamilyName onGivenName onNotes onSearch open openSearch remove save submitSearch',
+    'toggleFav',
+  ],
+  files: [
+    'allFiles ask cancel captureSubviewFocus clear close closeMenu confirm context del',
+    'deleteNow down email empty_ exitSel folderFocus forget go grant mediaError mediaRef',
+    'menuModal modalRef move newFolder onFocus onKey onRn onValue openElsewhere openMenu',
+    'openTrash pdfNext pdfPrevious previewFocus reselect restore restoreAll retry rnKey',
+    'saveRn selAll selCopy selDel selMove selRename selShare share sort startRename tap',
+    'toggleView up',
+  ],
+  settings: [
+    'action back change close color go ok onKey onName onPw openAccount pick rootRef set',
+    'sheetModal toggle togglePreview',
+  ],
+  wallet: [
+    'addCal auth back cancel close dirs done go lock manual next onCode onCvv onExp onName',
+    'onNum open pay reload remove scan setDef startAdd startPay swDown swUp verify',
+  ],
+  workflows: [
+    'add again allowAnother approve ask builderFocus cancel cancelGeneration cancelReview',
+    'cancelRun captureSubviewFocus change changeDays changeScheduleHour',
+    'changeScheduleInstructions changeScheduleMinute close closeSheet confirm',
+    'connectCalendars createDeviceReminder createDigest createPrompt createReminder',
+    'createWorkflow del deny describe detailFocus digestLink discard down edit generateDraft',
+    'history lifecycleCancel lifecycleConfirm localHistory modalRef newFlow onDescription',
+    'onGenerationPrompt onLabel onMatch onName onSnooze onText onTime open openClock',
+    'openFilters openNotificationSettings phoneReview phoneStopSpeech phoneSync pick prepare',
+    'refresh resend run runFocus save saveScheduleEdit stepModal tMinus tPlus tap toggle',
+    'toggleCase toggleNewMore togglePower togglePromptMore up useGenerated',
+  ],
+};
+const reviewedHandlers = new Map(Object.entries(REVIEWED_HANDLERS).map(([module, lines]) => [module, new Set(lines.join(' ').split(' '))]));
+/** For test/reviewed-handlers.test.mjs. */
+export const reviewedHandlerKeys = (module: string): ReadonlySet<string> => reviewedHandlers.get(module) ?? new Set();
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
 /** Only directly observed native facts. A missing key means unknown: no on/off is shown. */
@@ -287,13 +398,19 @@ export function installPrototypeNativeAdapters(
     }
     return undefined;
   }
+  /** PROD-09: in a product build no control is bound to a handler nobody reviewed, since it could
+   * be a simulated effect: the handler is marked, so dc-lite.js does not show its control. Code that
+   * reads it (a list filter's apply/current, say) still reaches the original. */
+  const reviewed = (module: string, key: string, handler: Callback): Callback =>
+    browserDevProfile || reviewedHandlers.get(module)?.has(key) ? handler : Object.assign((...args: unknown[]) => handler(...args), { [UNAVAILABLE_CONTROL]: true });
   function walk(value: any, module: string, st: Bag, api: Bag, path = ''): any {
-    if (!value || typeof value !== 'object') return value;
+    // A React element is rendered as given; its props are not this view's handlers.
+    if (!value || typeof value !== 'object' || '$$typeof' in value) return value;
     if (Array.isArray(value)) return value.map((v, i) => walk(v, module, st, api, path + i + '.'));
     const result: Bag = {};
     for (const [key, child] of Object.entries(value)) {
       result[key] = typeof child === 'function'
-        ? replacement(module, key, path + key, value, st, api, child as Callback) || child
+        ? replacement(module, key, path + key, value, st, api, child as Callback) || reviewed(module, key, child as Callback)
         : walk(child, module, st, api, path + key + '.');
     }
     // A typed Photos or Files search names no content to analyze; product builds offer no Ask chip for it.

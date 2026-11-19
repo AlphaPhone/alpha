@@ -45,7 +45,7 @@ test('the walker marks controls that could only say they are unavailable', () =>
   const noop = () => {};
   const trees = {
     camera: {ask: noop, shutter: noop},
-    browser: {readAloud: noop, openNews: noop, bookNow: noop, menu: noop},
+    browser: {readAloud: noop, openNews: noop, bookNow: noop, toggleMenu: noop},
     photos: {send: noop, selShare: noop, fav: noop},
     maps: {web: noop, shareEta: noop},
     // Files' fixture Share sheet is gone; the selection's Share still only names the Files app.
@@ -63,8 +63,8 @@ test('the walker marks controls that could only say they are unavailable', () =>
     out.maps.web, out.maps.shareEta, out.files.selShare, out.messages.t.ask, out.inbox.d.ask, out.calendar.open.join];
   for (const handler of marked) assert.equal(handler[MARK], true);
   // Real effects and local navigation stay as they are.
-  for (const handler of [out.camera.shutter, out.browser.menu, out.photos.fav, out.files.sort, out.messages.t.who, out.inbox.d.forward]) assert.equal(handler[MARK], undefined);
-  assert.equal(out.browser.menu, noop);
+  for (const handler of [out.camera.shutter, out.browser.toggleMenu, out.photos.fav, out.files.sort, out.messages.t.who, out.inbox.d.forward]) assert.equal(handler[MARK], undefined);
+  assert.equal(out.browser.toggleMenu, noop);
   // Should a later adapter still call one, it keeps saying so instead of doing nothing.
   out.maps.web();
   assert.deepEqual(toasts, ['Use Maps app']);
