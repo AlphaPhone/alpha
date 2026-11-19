@@ -106,7 +106,7 @@ public class DailyAppsInstrumentedTest {
    assertNotNull("Real native record created from Calendar form",reminderId);
    // Saving returns to Calendar; select the record's civil day before opening it.
    long due=ReminderTestAccess.read(context,reminderId).getLong("dueAt");
-   evaluate(scenario,"document.querySelector('button[aria-label=\"Month view\"]').click()");
+   evaluate(scenario,"document.querySelector('button[aria-label=\"Choose date\"]').click()");
    evaluate(scenario,"(()=>{const d=new Date("+due+");const now=new Date();if(d.getMonth()!==now.getMonth()||d.getFullYear()!==now.getFullYear())document.querySelector('button[aria-label=\"Next month\"]').click();})()");
    String day="(()=>{const d=new Date("+due+");const label=d.toLocaleDateString('en-US',{weekday:'long'})+' '+d.toLocaleDateString('en-US',{month:'long'})+' '+d.getDate();return [...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')===label);})()";
    uiWait(scenario,day);evaluate(scenario,"("+day+").click()");

@@ -3,7 +3,7 @@ type Bag=Record<string,any>;
 /** Month selection owns focus without allowing covered day controls to act. */
 export function installCalendarMonthFocus(Component:any,views:Bag){
  const render=views.calendar.render;let close=()=>{},container:HTMLElement|null=null;
- const modal=createInlineModal(()=>close(),()=>document.querySelector<HTMLElement>('button[aria-label="Month view"]'));
+ const modal=createInlineModal(()=>close(),()=>document.querySelector<HTMLElement>('button[aria-label="Choose date"]'));
  views.calendar.render=(state:Bag,api:Bag)=>{const out=render(state,api);close=out.closeMonth;
   if(out.monthOpen){
    const selected=new Date(api.now);selected.setDate(selected.getDate()+Number(state.day||0));selected.setDate(1);

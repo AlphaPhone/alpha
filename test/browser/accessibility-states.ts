@@ -131,7 +131,7 @@ export const LIVE_STATES: State[] = [
   live('Calendar', ['Calendar']),
   // An admitted read-only source exposes the real form; no calendar event write runs.
   {name:'live Calendar new event',shows:'calendar-form',open:async(page,theme)=>{await openCanonicalCalendarForm(page,theme);await settle(page);await showing(page,'calendar-form');}},
-  live('Calendar month', ['Calendar', 'Month view']),
+  live('Calendar month', ['Calendar', 'Choose date']),
   live('Browser', ['Browser']),
   live('Browser tabs', ['Browser', 'Tabs']),
   live('Camera (unavailable)', ['Camera']),
@@ -457,7 +457,7 @@ export const LAUNCHER_STATES: State[] = [
   // Every retained app view in the launcher presentation (its headers and system bars differ).
   launcher('Inbox', ['Inbox']),
   launcher('Calendar', ['Calendar']),
-  launcher('Calendar month', ['Calendar', 'Month view']),
+  launcher('Calendar month', ['Calendar', 'Choose date']),
   launcher('Browser', ['Browser']),
   launcher('Camera', ['Camera']),
   launcher('Photos', ['Photos']),
