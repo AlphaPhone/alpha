@@ -1004,7 +1004,8 @@ export class MapsScreenController {
     if (this.disposed || this.locating || !this.host.active()) return;
     if (!this.quietLocate) this.host.discardHandoff?.();
     this.quietFailure = undefined;
-    this.message = "";
+    // The quiet request on open leaves whatever the screen is already saying.
+    if (!this.quietLocate) this.message = "";
     this.locating = true;
     if (!this.directions && !this.recenterOnly && !this.quietLocate)
       this.selected = undefined;
@@ -1051,6 +1052,8 @@ export class MapsScreenController {
   manualLocation(): void {
     if (this.disposed || !this.host.active()) return;
     this.release();
+    // Same visit: the coordinate prompt is not replaced by a fresh look for the position.
+    this.openedLocate = true;
     this.query = "";
     this.searching = false;
     this.message = "Type a latitude and longitude in Search, then press Enter.";
@@ -1859,7 +1862,12 @@ export class MapsScreenController {
       this.recenterOnly = false;
       this.quietLocate = false;
       if (quiet) {
-        if (!this.selected && !this.directions && !this.searching) {
+        if (
+          !this.selected &&
+          !this.directions &&
+          !this.searching &&
+          !this.query.trim()
+        ) {
           this.recenterSelection = undefined;
           this.recenterPosition = position.coordinate;
           if (position.precision === "approximate")

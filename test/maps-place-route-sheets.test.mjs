@@ -205,3 +205,29 @@ test('a failed position on open shows no message', async () => {
     assert.notEqual(m.harness.screen.view().status.text, view.status.text);
   } finally { m.restore(); }
 });
+
+test('Enter coordinates keeps its prompt; the visit does not look for the position again', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    assert.equal(m.harness.locationStarts, 1);
+    m.harness.screen.manualLocation();
+    m.render(); await settle();
+    m.render(); await settle();
+    assert.equal(m.harness.screen.view().status.text, 'Type a latitude and longitude in Search, then press Enter.');
+    assert.equal(m.harness.locationStarts, 1);
+  } finally { m.restore(); }
+});
+
+test('a fix that arrives while the owner types a search leaves the map where it is', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    m.render().onQ({target: {value: 'caf'}});
+    m.harness.flushInputTimers(); await settle();
+    assert.equal(m.render().results.length, 1, 'the typed search has its results listed');
+    request.run?.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.equal(m.harness.screen.view().map.selected, undefined);
+  } finally { m.restore(); }
+});

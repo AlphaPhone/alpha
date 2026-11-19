@@ -368,12 +368,50 @@ class MapLibrePlane {
     this.map.on("movestart", (event) => {
       if (event.originalEvent) options.onInteraction?.();
     });
-    // The WebView reports a touch long press as a context menu event.
+    // A one-finger press held still for half a second drops a pin. The map's own touch
+    // handling can keep the WebView from reporting a long press as a context menu, so the
+    // press is timed here; a secondary click (contextmenu) does the same with a mouse.
+    let press: ReturnType<typeof setTimeout> | undefined;
+    let pressStart: { x: number; y: number } | undefined;
+    let pressedAt = 0;
+    const endPress = () => {
+      clearTimeout(press);
+      press = undefined;
+      pressStart = undefined;
+    };
+    const longPress = (point: { lat: number; lng: number }) => {
+      if (this.destroyed || !options.onLongPress) return;
+      options.onLongPress({ latitude: point.lat, longitude: point.lng });
+    };
+    this.map.on("touchstart", (event) => {
+      endPress();
+      if (!options.onLongPress || event.originalEvent.touches.length !== 1)
+        return;
+      const at = event.lngLat.wrap();
+      pressStart = { x: event.point.x, y: event.point.y };
+      press = setTimeout(() => {
+        press = undefined;
+        pressStart = undefined;
+        pressedAt = Date.now();
+        longPress(at);
+      }, 500);
+    });
+    this.map.on("touchmove", (event) => {
+      if (
+        pressStart &&
+        Math.hypot(event.point.x - pressStart.x, event.point.y - pressStart.y) >
+          10
+      )
+        endPress();
+    });
+    this.map.on("touchend", endPress);
+    this.map.on("touchcancel", endPress);
     this.map.on("contextmenu", (event) => {
       if (this.destroyed || !options.onLongPress) return;
       event.preventDefault();
-      const point = event.lngLat.wrap();
-      options.onLongPress({ latitude: point.lat, longitude: point.lng });
+      // The same touch press already dropped its pin.
+      if (Date.now() - pressedAt < 1000) return;
+      longPress(event.lngLat.wrap());
     });
     this.map.on("idle", () => {
       if (this.destroyed) return;
