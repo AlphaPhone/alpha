@@ -76,8 +76,10 @@ test('turning the map shows a compass that puts north back up',async({page})=>{
  await page.mouse.up();await page.keyboard.up('Control');
  await expect(compass).toBeVisible();
  expect((await compass.boundingBox())!.height).toBeGreaterThanOrEqual(48);
- await compass.click();
+ await compass.focus();await page.keyboard.press('Enter');
  await expect(compass).toHaveCount(0);
+ // Focus moves to the map the compass turned, not to the page.
+ await expect(page.locator('[data-alpha-map-plane] canvas')).toBeFocused();
 });
 
 test('a planned route swaps its starting point and destination',async({page})=>{
@@ -89,8 +91,11 @@ test('a planned route swaps its starting point and destination',async({page})=>{
  const swap=sheet.getByRole('button',{name:'Swap starting point and destination',exact:true});
  await expect(swap).toBeVisible();
  await expect(sheet).toContainText('Harbour Cafe');
- await swap.click();
+ await swap.focus();await page.keyboard.press('Enter');
  await expect(sheet).toContainText('Dropped pin');
+ // The control stays while the swapped route is planned, so focus is not lost.
+ await expect(swap).toBeFocused();
+ await expect(swap).toHaveAttribute('aria-disabled','false');
  await expect(start).toHaveValue('Harbour Cafe');
  await expect.poll(()=>page.evaluate(()=>(window as any).mapsControls.routes.length)).toBe(2);
  expect(await page.evaluate(()=>(window as any).mapsControls.routes[1].from)).toEqual({latitude:43.7384,longitude:7.4246});
@@ -109,8 +114,11 @@ test('recent searches are offered with the saved places and can be cleared',asyn
  await row.click();
  await expect(search(page)).toHaveValue('harbour');
  await page.getByRole('button',{name:'Clear search',exact:true}).click();
- await recent.getByRole('button',{name:'Clear recent searches',exact:true}).click();
+ const clear=recent.getByRole('button',{name:'Clear recent searches',exact:true});
+ await clear.focus();await page.keyboard.press('Enter');
  await expect(recent).toHaveCount(0);
+ // Focus moves on to the sheet's first control rather than falling to the page.
+ await expect(page.locator('[data-alpha-maps-sheet="results"] button').first()).toBeFocused();
  // Nothing about the search was written to this browser's storage.
  expect(await page.evaluate(()=>JSON.stringify(localStorage))).not.toContain('harbour');
 });

@@ -500,11 +500,17 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       // Recent searches, offered with the saved places while the search field is empty.
       hasRecent: savedListVisible && recentSearches.length > 0 && queryDraft===undefined,
       recentRows: savedListVisible ? recentSearches.map(text => ({ id: 'recent:' + text, text, d: CLOCK, go: () => {if(!active())return;retireSearch();rememberSearch(text);screen.searchFor(text);} })) : [],
-      clearRecent: () => {recentSearches=[];currentApi.set({nativeMapsRevision:++renders});},
+      // Clear removes the Recent list it sits in; focus moves on to the sheet's first control.
+      clearRecent: () => {
+        const focused=!!(document.activeElement as HTMLElement|null)?.closest?.('[data-alpha-maps-recent]');
+        recentSearches=[];currentApi.set({nativeMapsRevision:++renders});
+        if(focused)requestAnimationFrame(()=>{if(active())document.querySelector<HTMLElement>('[data-alpha-maps-sheet="results"] button')?.focus();});
+      },
       // North up: shown while the map is turned or tilted, except while guidance turns it with the heading.
       compass: mapRotated && !(isNav && view.map.overlay.follow), compassD: NORTH,
       compassRef: (element: HTMLElement) => {compassElement=element||undefined;turnCompass();},
-      northUp: () => {if(active())plane?.resetNorth();},
+      // The compass leaves once the map is north up; focus moves to the map it turned.
+      northUp: () => {if(!active())return;if(compassElement&&document.activeElement===compassElement)planeElement?.querySelector<HTMLElement>('canvas')?.focus({preventScroll:true});plane?.resetNorth();},
       compassBottom: isNav ? 198 : recBottom + 60,
       hasResults: queryDraft===undefined&&originDraft===undefined&&results.length > 0, noResults: queryDraft===undefined&&originDraft===undefined&&(view.noResults || view.hasResults && results.length === 0), emptyQ: view.emptyQuery,
       recenter: () => {retireSearch();screen.recenter();}, recBottom, recCss: '',
@@ -551,7 +557,8 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
        hasRoutes:directions.routes.length>0,
        routes:directions.routes.map(choice=>({label:`${choice.label}, ${choice.duration}, ${choice.meta}`,t:choice.label,sub:`${choice.duration} · ${choice.meta}`,on:choice.selected,css:choice.selected?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>{retireSearch();screen.chooseRoute(choice.id);}})),
        hasSteps:directions.steps.length>0,steps:directions.steps.map(step=>({text:step.instruction,distance:step.distance})),
-       canSwap:directions.canSwap,swapD:SWAP,swap:()=>{if(!active())return;retireSearch();screen.swapEnds();},
+       // Shown on the route sheet and unavailable while a route is planned, so focus stays on it.
+       swapShown:!view.navigation,swapOff:!directions.canSwap,swapOpacity:directions.canSwap?1:.4,canSwap:directions.canSwap,swapD:SWAP,swap:()=>{if(!active())return;retireSearch();screen.swapEnds();},
        start:()=>{retireSearch();screen.start();},
        nav:{going:!nav?.arrived,arrived:!!nav?.arrived,dist:nav?.distance||'Locating…',street:nav?.instruction||'Waiting for location',icon:nav?.maneuverIcon||PIN,hasThen:!!nav?.following,thenD:nav?.following?.icon||'',thenText:nav?.following?.text||'',
         left:nav?.remainingTime||'Guidance',meta:nav?.remaining&&nav.remaining===nav.meta?'':nav?.meta||'',remaining:nav?.remaining||'',

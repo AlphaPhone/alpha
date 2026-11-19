@@ -2375,7 +2375,7 @@
           <sc-if value="{{maps.native}}"><div style="display:flex;align-items:center;gap:6px"><input aria-label="Starting point" placeholder="{{maps.originPlaceholder}}" value="{{maps.originText}}" onFocus="{{maps.originFocus}}" onChange="{{maps.onOrigin}}" onKeyDown="{{maps.originKey}}" style="height:44px;border:0;background:transparent;color:var(--fg);font-size:16px;flex:1;min-width:0"><button class="ib" aria-label="Use my location" onClick="{{maps.originLocation}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mapsLoc}}"></path></svg></button></div></sc-if>
           <div style="display: flex; align-items: center; gap: 12px; height: 32px; font-size: 15px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="width: 18px; height: 18px; color: var(--acct)"><path d="{{ic.pin}}"></path></svg>{{maps.dr.name}}</div>
         </div>
-        <sc-if value="{{maps.dr.canSwap}}"><button class="ib" data-alpha-maps-swap aria-label="Swap starting point and destination" onClick="{{maps.dr.swap}}" style="width: 48px; height: 48px"><svg class="i" viewBox="0 0 24 24"><path d="{{maps.dr.swapD}}"></path></svg></button></sc-if>
+        <sc-if value="{{maps.dr.swapShown}}"><button class="ib" data-alpha-maps-swap aria-label="Swap starting point and destination" aria-disabled="{{maps.dr.swapOff}}" onClick="{{maps.dr.swap}}" style="width: 48px; height: 48px; flex-shrink: 0; opacity: {{maps.dr.swapOpacity}}"><svg class="i" viewBox="0 0 24 24"><path d="{{maps.dr.swapD}}"></path></svg></button></sc-if>
       </div>
       <div style="display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0 8px">
         <sc-for list="{{maps.dr.modes}}" as="md">
