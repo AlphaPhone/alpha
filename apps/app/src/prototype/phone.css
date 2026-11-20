@@ -1266,3 +1266,19 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .chat-email-draft button { padding:0 14px; min-height:44px; border-radius:22px; background:var(--s2); }
 .chat-email-draft button:last-child { background:var(--fg); color:var(--bg); }
 .chat-email-draft button:disabled { opacity:.45; }
+
+.sms-recipient-picker { display:grid; gap:12px; min-width:0; padding:14px; border:1px solid var(--line); border-radius:22px; background:var(--bg); }
+.sms-recipient-picker p { margin:0; font-size:15px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.sms-recipient-picker fieldset { min-width:0; margin:0; padding:0; border:0; }
+.sms-recipient-picker legend { margin-bottom:8px; padding:0; font-size:15px; font-weight:600; }
+.sms-recipient-picker label { display:flex; align-items:center; gap:12px; min-height:52px; padding:8px 12px; border-radius:14px; cursor:pointer; }
+.sms-recipient-picker label:has(input:checked) { background:var(--s2); }
+.sms-recipient-picker input[type="radio"] { appearance:auto; width:20px; height:20px; margin:0; flex:none; accent-color:var(--acc); cursor:inherit; }
+.sms-recipient-picker label > span { display:grid; gap:2px; min-width:0; overflow-wrap:anywhere; }
+.sms-recipient-picker label strong { font-size:15px; font-weight:600; }
+.sms-recipient-picker label span span { color:var(--mut); font-size:14px; font-variant-numeric:tabular-nums; }
+.sms-recipient-actions { display:flex; justify-content:flex-end; gap:8px; }
+.sms-recipient-actions button { min-height:44px; padding:0 16px; border-radius:22px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; }
+.sms-recipient-actions button:last-child { background:var(--acc); color:var(--alpha-white); }
+.sms-recipient-actions button:disabled { background:var(--s2); color:var(--mut); cursor:default; }
+.sms-recipient-picker :is(input,button):focus-visible { outline:2px solid var(--acct); outline-offset:2px; }

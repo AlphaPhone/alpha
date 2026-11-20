@@ -209,10 +209,25 @@ for(const contactMode of ['one','two','none'] as const) test(voiceCases[contactM
     expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0});
     if(contactMode==='two'){
       await card.click();
-      await expect(page.getByRole('button',{name:/Carson.*0199/})).toBeVisible();
-      await expect(page.getByRole('button',{name:/Carson.*0198/})).toBeVisible();
+      const picker = page.getByRole('group',{name:'Choose a recipient'});
+      const first = picker.getByRole('radio',{name:/Carson.*0199/});
+      const second = picker.getByRole('radio',{name:/Carson.*0198/});
+      const done = page.getByRole('button',{name:'Done',exact:true});
+      await expect(done).toBeDisabled();
+      await expect(page.getByRole('button',{name:'Not now',exact:true})).toBeEnabled();
+      await first.check();
+      await expect(done).toBeEnabled();
+      await first.press('ArrowDown');
+      await expect(second).toBeChecked();
+      await expect(first).not.toBeChecked();
+      await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
       expect((await state(page)).sendSms).toBe(0);
       await info.attach('Two matching contacts', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
+      await done.click();
+      await expect(picker).toHaveCount(0);
+      const draft = page.getByRole('group',{name:/Message draft to Carson.*0198/});
+      await expect(draft.getByRole('textbox',{name:'Message draft',exact:true})).toHaveValue(BODY);
+      expect((await state(page)).sendSms).toBe(0);
     }
   }
 });

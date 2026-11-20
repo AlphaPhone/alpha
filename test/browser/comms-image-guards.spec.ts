@@ -73,7 +73,15 @@ async function reviewed(page: Page, operation: Record<string, unknown>, pick: st
   const review = page.locator('[data-alpha-proposal-review]').first();
   await expect(review).toBeVisible();
   await seen(review);
-  await review.locator('button').filter({hasText: pick}).first().click();
+  const option = review.getByRole('radio', {name: pick});
+  if (await option.count()) {
+    const before = await bridgeEffects(page);
+    await option.check();
+    expect(await bridgeEffects(page)).toEqual(before);
+    await review.getByRole('button', {name: 'Send', exact: true}).click();
+  } else {
+    await review.locator('button').filter({hasText: pick}).first().click();
+  }
   return page.evaluate(() => (window as any).__reviewed);
 }
 const textCarmen = {type: 'sms_compose', query: 'Carmen', body: 'On my way'};
@@ -100,12 +108,15 @@ test.describe('Alpha image: the installed executor refuses side effects during a
     // Dismissed: the owner saw who matched and nothing reached the bridge.
     const dismissed = await reviewed(page, textCarmen, 'Not now', async review => {
       await expect(review.locator('[data-alpha-telephony-review-body]')).toHaveText('On my way');
-      await expect(review.getByRole('button', {name: /^Message Carmen .*555.*0103/})).toHaveCount(1);
+      await expect(review.getByRole('radio', {name: /^Carmen .*555.*0103/})).toHaveCount(1);
+      await expect(review.getByRole('button', {name: 'Send', exact: true})).toBeDisabled();
+      await review.getByRole('radio', {name: /^Carmen .*555.*0103/}).check();
+      await expect(review.getByRole('button', {name: 'Send', exact: true})).toBeEnabled();
       expect(await bridgeEffects(page)).toEqual([]);
     });
     expect(dismissed).toBe('Message cancelled.');
     expect(await bridgeEffects(page)).toEqual([]);
-    // Chosen: the same number is sent at once, under the approved card, with no dialog after it.
+    // Send confirms the selected number under the approved card, with no dialog after it.
     await reviewed(page, textCarmen, 'Carmen');
     expect(await bridgeEffects(page)).toEqual(['sendSms']);
     expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).find(([method]) => method === 'sendSms')![1].recipients)).toEqual(['+15550100103']);

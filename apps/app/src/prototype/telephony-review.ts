@@ -2,8 +2,8 @@
  * The on-phone confirmation of an agent-proposed call, text or contact change (telephony-executor.ts).
  * It shows exactly what will happen: the contact's name and the number that will be called or
  * texted, a contact's fields before and after, or the contact already in Contacts that a new one
- * would repeat. One tap on a row chooses it; "Not now", leaving
- * the app or a cancelled request chooses nothing. The rows render inside the chat card whose
+ * would repeat. A text recipient is selected before Done confirms the choice.
+ * "Not now", leaving the app or a cancelled request chooses nothing. The review renders inside the chat card whose
  * approval is running (AP-16 D8: the proposal card is the one approval surface, never a modal).
  */
 import type {ContactDraft, ContactRecord, TelephonyReview} from '../runtime/telephony-executor';
@@ -12,11 +12,11 @@ import type {BrowserTabChoice} from './browser-adapter';
 
 /** The open tabs a chat request's words match, when there are several (browser-adapter.ts browserControl). */
 type TabReview = {kind: 'tab'} & BrowserTabChoice;
-type Pending = {review: TelephonyReview | TabReview; settle: (choice: number | null) => void};
+type Pending = {review: TelephonyReview | TabReview; settle: (choice: number | null) => void; selected?: number};
 let pending: Pending | null = null, repaint: () => void = () => {};
 const ICON = {
   call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z',
-  message: 'M12 19V5M6 11l6-6 6 6', tab: 'M4 6h16v12H4zM4 10h16', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', add: 'M12 5v14M5 12h14',
+  tab: 'M4 6h16v12H4zM4 10h16', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', add: 'M12 5v14M5 12h14',
 };
 /** Shows the review and resolves with the chosen option's index, or null when nothing was chosen. */
 export function askTelephonyReview(review: TelephonyReview | TabReview, signal: AbortSignal): Promise<number | null> {
@@ -39,6 +39,23 @@ export function contactChangeLines(before: ContactRecord, after: ContactDraft): 
 export function presentTelephonyReview(entry: Pending | null) {
   if (!entry) return {open: false, rows: [] as never[], dismiss: () => {}};
   const {review, settle} = entry;
+  if (review.kind === 'message') {
+    return {open: true, rows: [] as never[], dismiss: () => settle(null), recipientPicker: {
+      body: review.body,
+      options: review.options.map((match, index) => ({
+        name: match.name, number: displayNumber(match.number), selected: entry.selected === index,
+        select: () => {
+          if (pending !== entry) return;
+          entry.selected = index;
+          repaint();
+        },
+      })),
+      doneDisabled: entry.selected === undefined,
+      doneLabel: review.draftOnly ? 'Done' : 'Send',
+      done: () => { if (entry.selected !== undefined) settle(entry.selected); },
+      dismiss: () => settle(null),
+    }};
+  }
   const style = (lines: {text: string; struck: boolean; added: boolean}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400}));
   const plain = (text: string) => [{text, struck: false, added: false}];
   const rows = review.options.map((option, index) => {
@@ -46,9 +63,9 @@ export function presentTelephonyReview(entry: Pending | null) {
     if (review.kind === 'tab') { const tab = review.options[index], closing = review.verb === 'Close';
       return {ini: initials(tab.title), name: tab.title, lines: style([...(tab.priv ? ['Private tab'] : []), ...(tab.host ? [tab.host] : [])].flatMap(plain)), choose, icon: closing ? ICON.dismiss : ICON.tab,
         bg: closing ? 'var(--alpha-call-red)' : 'var(--acc)', label: `${review.verb} ${tab.priv ? 'private ' : ''}tab ${tab.title}${tab.host ? ' ' + tab.host : ''}`}; }
-    if (review.kind === 'call' || review.kind === 'message') { const match = option as {name: string; number: string};
-      return {ini: initials(match.name), name: match.name, lines: style(plain(displayNumber(match.number))), choose, icon: ICON[review.kind],
-        bg: review.kind === 'call' ? 'var(--alpha-call-green)' : 'var(--acc)', label: `${review.kind === 'call' ? 'Call' : 'Message'} ${match.name} ${displayNumber(match.number)}`}; }
+    if (review.kind === 'call') { const match = option as {name: string; number: string};
+      return {ini: initials(match.name), name: match.name, lines: style(plain(displayNumber(match.number))), choose, icon: ICON.call,
+        bg: 'var(--alpha-call-green)', label: `Call ${match.name} ${displayNumber(match.number)}`}; }
     if (review.kind === 'contact-create') { const twin = option as {name: string; numbers: string[]};
       return {ini: initials(twin.name), name: 'Add anyway', lines: style([`${twin.name} is already in Contacts`, ...twin.numbers.slice(0, 2).map(displayNumber)].flatMap(plain)), choose, icon: ICON.add, bg: 'var(--acc)',
         label: `Add anyway: ${twin.name} is already in Contacts`}; }
@@ -62,7 +79,7 @@ export function presentTelephonyReview(entry: Pending | null) {
     return {ini: initials(contact.displayName), name: contact.displayName, lines: style([...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)].slice(0, 2).flatMap(plain)),
       choose, icon: ICON.delete, bg: 'var(--alpha-call-red)', label: `Delete ${contact.displayName}`};
   });
-  return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', dismiss: () => settle(null)};
+  return {open: true, rows, dismiss: () => settle(null)};
 }
 type Review = ReturnType<typeof presentTelephonyReview>;
 type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; cProposal?: boolean; cDigest?: boolean; [key: string]: unknown};
@@ -79,6 +96,7 @@ export function placeTelephonyReview(msgs: Row[], review: Review, approving: unk
   if (at < 0) return null;
   return msgs.map((m, index) => {
     if (index !== at) return m;
+    if (review.recipientPicker) return {...m, cDigest: false, cProposal: false, recipientPicker: review.recipientPicker};
     if (m.cProposal) return {...m, c: {...m.c, reviewing: review}, proposalAsk: false};
     return {...m, rows: [...review.rows.map(row => ({ini: row.ini, who: row.name, text: row.lines.map(line => line.text).join(' · '), icon: row.icon, open: row.choose, label: row.label})),
       {ini: '', who: 'Not now', text: 'Nothing is called, sent or changed.', icon: ICON.dismiss, open: review.dismiss}]};

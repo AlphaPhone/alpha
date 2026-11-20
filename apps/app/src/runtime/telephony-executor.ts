@@ -23,7 +23,7 @@ export type ContactDraft = Omit<ContactRecord, 'id' | 'version'>;
 /** What the owner is shown on the phone before a telephony action takes effect. */
 export type TelephonyReview =
   | {kind: 'call'; options: ContactMatch[]}
-  | {kind: 'message'; options: ContactMatch[]; body: string}
+  | {kind: 'message'; options: ContactMatch[]; body: string; draftOnly: boolean}
   /** A new contact whose name or number is already in Contacts: the one option adds it anyway. */
   | {kind: 'contact-create'; options: {name: string; numbers: string[]}[]}
   /** `keeps`: one whole-field request shown twice for one contact, adding to its numbers and addresses or replacing them. */
@@ -179,7 +179,7 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
       const only = draftOnly && options.length === 1 ? inOpenThread(match.number) : undefined;
       if (only === 'drafted') return result('drafted');
       // The card did not show an exact number; the owner's choice is required here.
-      const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
+      const choice = await ports.ask({kind: 'message', options, body: operation.body, draftOnly}, signal);
       if (choice === null || !options[choice]) return result('cancelled');
       ports.current();
       number = options[choice].number; placed = only;

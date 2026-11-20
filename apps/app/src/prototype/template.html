@@ -4580,6 +4580,25 @@
               </div>
             </sc-if>
 
+            <sc-if value="{{m.recipientPicker}}">
+              <div class="sms-recipient-picker" data-alpha-proposal-review>
+                <p data-alpha-telephony-review-body>{{m.recipientPicker.body}}</p>
+                <fieldset>
+                  <legend>Choose a recipient</legend>
+                  <sc-for list="{{m.recipientPicker.options}}" as="r">
+                    <label>
+                      <input type="radio" name="alpha-sms-recipient" checked="{{r.selected}}" onChange="{{r.select}}">
+                      <span><strong>{{r.name}}</strong><span>{{r.number}}</span></span>
+                    </label>
+                  </sc-for>
+                </fieldset>
+                <div class="sms-recipient-actions">
+                  <button type="button" onClick="{{m.recipientPicker.dismiss}}">Not now</button>
+                  <button type="button" disabled="{{m.recipientPicker.doneDisabled}}" onClick="{{m.recipientPicker.done}}">{{m.recipientPicker.doneLabel}}</button>
+                </div>
+              </div>
+            </sc-if>
+
             <sc-if value="{{m.cNote}}">
               <button onClick="{{m.act}}" style="display: flex; align-items: flex-start; gap: 14px; padding: 16px; border-radius: 22px; background: var(--s2); text-align: left">
                 <svg class="i" viewBox="0 0 24 24" style="color: var(--acct)"><path d="{{ic.notes}}"></path></svg>
@@ -4632,7 +4651,6 @@
                 <sc-if value="{{m.voiceSendId}}"><small>Say “Send this text”</small></sc-if>
                 <sc-if value="{{m.c.reviewing.open}}">
                   <div data-alpha-proposal-review style="display: flex; flex-direction: column; gap: 2px">
-                    <sc-if value="{{m.c.reviewing.hasBody}}"><p data-alpha-telephony-review-body style="margin: 0 0 4px; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere">{{m.c.reviewing.body}}</p></sc-if>
                     <sc-for list="{{m.c.reviewing.rows}}" as="r">
                       <button aria-label="{{r.label}}" onClick="{{r.choose}}" style="display: flex; align-items: center; gap: 12px; padding: 6px; border-radius: 18px; background: var(--s2); text-align: left; min-height: 56px; width: 100%; box-sizing: border-box">
                         <span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 20px; background: var(--s3); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0">{{r.ini}}</span>
