@@ -12,7 +12,9 @@
  * It sends about 40 synthetic requests, roughly 115K tokens in all, with the key in the
  * owner-only file ~/.config/alphaphone/cerebras-key, and takes about three minutes because
  * the admission and refill measurements each start from a refilled limit. Run it while
- * nothing else uses the key: another caller's tokens are read as this probe's. Nothing from a phone is
+ * nothing else uses the key. The account is shared with every device on it: a call
+ * another device has running shows as a lower allowance, and the refill reading in
+ * particular is wrong while one is. Nothing from a phone is
  * sent, and each run marks its requests so an earlier run cannot answer for it.
  */
 import { randomUUID } from 'node:crypto';
@@ -154,23 +156,6 @@ if (import.meta.main) {
   sized.push(same);
 
   console.log('Held at admission: one fresh request per output cap, each after the limit has refilled');
-  const admit = async (cap: number | null): Promise<Admission> => {
-    await new Promise(resolve => setTimeout(resolve, 20_000));
-    const body: Body = { ...sizedRequest(model, randomUUID(), 40), stream: true, stream_options: { include_usage: true } };
-    if (cap === null) delete body.max_tokens;
-    else body.max_tokens = cap;
-    const response = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    if (!response.ok) throw new Error(`Provider answered ${response.status}`);
-    const limit = Number(response.headers.get('x-ratelimit-limit-tokens-minute'));
-    const remaining = Number(response.headers.get('x-ratelimit-remaining-tokens-minute'));
-    const prompt = Number(/"prompt_tokens":\s*(\d+)/.exec(await response.text())?.[1] ?? 0);
-    console.log(`  cap ${String(cap ?? 'none').padStart(5)}  prompt ${String(prompt).padStart(6)}  held ${String(limit - remaining).padStart(6)}`);
-    return { cap, prompt, held: limit - remaining };
-  };
-  const admission = admissionOf([await admit(16), await admit(4096), await admit(null)]);
-
-  console.log('Refill: the allowance after one request of about 36,000 tokens, read every two seconds with requests of a few tokens');
-  await new Promise(resolve => setTimeout(resolve, 20_000));
   let limit = 0;
   const reading = async (): Promise<Reading> => {
     const response = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ok' }], reasoning_effort: 'none', max_tokens: 1, stream: false }) });
@@ -179,6 +164,24 @@ if (import.meta.main) {
     limit = Number(response.headers.get('x-ratelimit-limit-tokens-minute'));
     return { at: Date.now(), left: Number(response.headers.get('x-ratelimit-remaining-tokens-minute')) };
   };
+  const admit = async (cap: number | null): Promise<Admission> => {
+    await new Promise(resolve => setTimeout(resolve, 20_000));
+    // Read just before, so what another device on the account holds at that moment is not counted as this request's.
+    const before = (await reading()).left;
+    const body: Body = { ...sizedRequest(model, randomUUID(), 40), stream: true, stream_options: { include_usage: true } };
+    if (cap === null) delete body.max_tokens;
+    else body.max_tokens = cap;
+    const response = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(`Provider answered ${response.status}`);
+    const remaining = Number(response.headers.get('x-ratelimit-remaining-tokens-minute'));
+    const prompt = Number(/"prompt_tokens":\s*(\d+)/.exec(await response.text())?.[1] ?? 0);
+    console.log(`  cap ${String(cap ?? 'none').padStart(5)}  prompt ${String(prompt).padStart(6)}  held ${String(before - remaining).padStart(6)}`);
+    return { cap, prompt, held: before - remaining };
+  };
+  const admission = admissionOf([await admit(16), await admit(4096), await admit(null)]);
+
+  console.log('Refill: the allowance after one request of about 36,000 tokens, read every two seconds with requests of a few tokens');
+  await new Promise(resolve => setTimeout(resolve, 20_000));
   await send(sizedRequest(model, randomUUID(), 1700));
   const readings: Reading[] = [];
   for (let index = 0; index < 7; index++) {
@@ -195,7 +198,8 @@ if (import.meta.main) {
   console.log(`Held with no cap: ${admission?.uncappedHold ?? 'not shown'} output tokens; the audit assumes ${CEREBRAS_QWEN.uncappedOutputHold}`);
   console.log(`Input held per prompt token: ${admission ? admission.inputFactor.toFixed(2) : 'not shown'}; the audit assumes ${CEREBRAS_QWEN.admissionInputFactor}`);
   console.log(`Allowance regained: ${refill === null ? 'not shown' : `${Math.round(refill)} tokens a second`}; the audit assumes a sixtieth of the limit, ${Math.round(limit / 60)}`);
-  const admissionMatches = admission !== null && admission.uncappedHold === CEREBRAS_QWEN.uncappedOutputHold && Math.abs(admission.inputFactor - CEREBRAS_QWEN.admissionInputFactor) <= 0.1;
+  // The reading before a sample costs a few tokens, so the hold is matched to within 64.
+  const admissionMatches = admission !== null && Math.abs(admission.uncappedHold - CEREBRAS_QWEN.uncappedOutputHold) <= 64 && Math.abs(admission.inputFactor - CEREBRAS_QWEN.admissionInputFactor) <= 0.1;
   const refillMatches = refill !== null && Math.abs(refill - limit / 60) <= 0.25 * (limit / 60);
   if (unit !== CEREBRAS_QWEN.cacheBlockTokens || order?.join() !== 'tools,system,messages' || !admissionMatches || !refillMatches) {
     console.log('The provider no longer matches what scripts/agent-context-audit.ts assumes. Update CEREBRAS_QWEN and simulateProvider.');
