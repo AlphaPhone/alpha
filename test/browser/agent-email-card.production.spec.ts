@@ -33,6 +33,18 @@ for (const outgoing of ['clear','different body','saved draft'] as const) {
     }else{
       await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Email sent\.$/})).toBeVisible({timeout:15000});
       expect(await harness(page,f=>f.mail.dispatches.length)).toBe(1);
+      if(outgoing==='saved draft'){
+        expect(await harness(page,f=>f.posts)).toEqual(['Draft an email to crew@example.invalid about the shoot.']);
+        await composer.fill('Send this email.');
+        await composer.press('Enter');
+        await expect(page.locator('[data-alpha-message-text]').filter({hasText:/Which email draft should I send/})).toBeVisible();
+        expect(await harness(page,f=>({posts:f.posts.length,sends:f.mail.dispatches.length}))).toEqual({posts:1,sends:1});
+        await page.reload();
+        await residentHome(page);
+        await button(page,'Open conversation').click();
+        await expect(page.locator('[data-alpha-message-text]').filter({hasText:/Sent\.\s+To: crew@example.invalid\s+Subject: Shoot plan/})).toBeVisible();
+        expect(await harness(page,f=>f.mail.dispatches.length)).toBe(0);
+      }
     }
     await expect(page.getByRole('region',{name:'Email draft',exact:true})).toHaveCount(0);
     expect(foreign).toEqual([]);

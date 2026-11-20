@@ -2,7 +2,7 @@ import type { AgentReply } from '../runtime/alpha-client';
 import { connectionController } from '../runtime/connection-ui';
 import { inboxLocalStore } from '../runtime/inbox-local-store';
 import { cachedDevicePreferences, readDevicePreferences } from '../browser/device-preferences';
-import { emailOwnerRequest, ownerCommand } from '../ui/device-actions/owner-request';
+import { emailOwnerRequest, ownerCommand, sendsSavedEmail } from '../ui/device-actions/owner-request';
 import {
   agentEmailDraft,
   draftMailRecipients,
@@ -94,6 +94,12 @@ const statusText = {
   uncertain: 'Delivery is unconfirmed. Check the receipt in Inbox.',
 } satisfies Record<Card['state'], string>;
 
+function plainEmailDraftText(card:Card,to:string) {
+  const status=card.state==='draft'?'Email draft saved.':statusText[card.state];
+  const details=`${status}\nTo: ${to}\nSubject: ${card.subject}`;
+  return card.state==='draft'?`${details}\n\n${card.body}\n\nSay “Send this email” when it’s ready.`:details;
+}
+
 /** Restore local chat drafts by their original reply. The Inbox journal owns provider effects. */
 export function installAgentEmailCards(
   Component: Bag,
@@ -167,10 +173,37 @@ export function installAgentEmailCards(
     }
   }
 
+  p.sendSavedAgentEmail = async function (authoredText:string,turnCurrent:()=>boolean) {
+    if(!sendsSavedEmail(authoredText))return;
+    const shelf=shelfFor(this);
+    const current=()=>turnCurrent()&&this.live&&!document.hidden&&
+      (shelf?draftScope()===shelf.scope:!draftScope());
+    const reviewOn=async()=>(await readDevicePreferences().catch(()=>({askBeforeAgentActions:true}))).askBeforeAgentActions;
+    if(!current()||await reviewOn()||!current())return;
+    const choose='Which email draft should I send? Give me its recipient, subject and message.';
+    if(!shelf)return choose;
+    try{
+      await shelf.ready;
+      if(!current())return;
+      await views.inbox.readyAgentEmailAccount?.();
+      if(!current()||await reviewOn()||!current())return;
+      const account:EmailAccount|null=views.inbox.agentEmailAccount?.();
+      const unsent=[...shelf.cards.values()].filter(row=>row.state==='draft'&&row.plainDraft&&(!row.grant||row.grant===account?.grant));
+      if(unsent.length!==1)return choose;
+      if(!account)return 'Which Gmail account should I send from? Open Inbox to check the account.';
+      const card=unsent[0];
+      const recipients=draftMailRecipients(resolvedEmailRecipients(card.to,account.from));
+      if(!recipients||recipients.length!==1)return 'What email address should I send this to?';
+      return await sendCard(this,shelf,card,account,recipients,()=>
+        current()&&cachedDevicePreferences()?.askBeforeAgentActions===false&&views.inbox.agentEmailAccount?.()?.token===account.token)
+        ?? 'Check Inbox for delivery status.';
+    }catch{return 'I couldn’t open the email draft. Check Inbox before trying again.';}
+  };
+
   p.stageAgentEmailDraft = async function (reply: AgentReply, authoredText='', turnCurrent:()=>boolean=()=>true) {
+    if(sendsSavedEmail(authoredText))return false;
     const draft = agentEmailDraft(reply.actionResults, reply.userMessageId);
-    const sendSaved=/^send (?:this|the|that) email[.!]?$/i.test(ownerCommand(authoredText));
-    const shelf = (draft || sendSaved) && shelfFor(this);
+    const shelf = draft && shelfFor(this);
     if (
       !shelf || !reply.messageId || !reply.messageBinding ||
       reply.messageBinding.conversationId !== connectionController.getSelectedConversationId() ||
@@ -185,11 +218,11 @@ export function installAgentEmailCards(
       const explicit=direct?emailOwnerRequest(authoredText):undefined;
       const draftRequested=/^(?:draft|compose|write)\s+(?:an?\s+)?(?:email|mail)\b/i.test(ownerCommand(authoredText));
       const report=(text:string)=>{if(current())this.agentSay(text);return text;};
-      if(direct&&(explicit||sendSaved))await views.inbox.readyAgentEmailAccount?.();
+      if(explicit)await views.inbox.readyAgentEmailAccount?.();
       if(!current())return false;
       const account:EmailAccount|null=views.inbox.agentEmailAccount?.();
       let card:Card|undefined;
-      if(draft&&!sendSaved){
+      if(draft){
         card = {
         ...draft, to: draft.to.join(', '), messageId: reply.messageId,
         from: account?.from ?? '', grant: account?.grant ?? '', state: 'draft',
@@ -199,26 +232,23 @@ export function installAgentEmailCards(
         shelf.cards.set(card.messageId, card);
       }
       if(direct){
-        if(sendSaved){
-          const unsent=[...shelf.cards.values()].filter(row=>row.state==='draft'&&row.plainDraft&&(!row.grant||row.grant===account?.grant));
-          if(unsent.length!==1)return report('Which email draft should I send? Give me its recipient, subject and message.');
-          card=unsent[0];
-        }
-        if(card&&(explicit||sendSaved)){
+        if(card&&explicit){
           if(!account||card.grant&&card.grant!==account.grant)return report('Which Gmail account should I send from? Open Inbox to check the account.');
           const recipients=draftMailRecipients(resolvedEmailRecipients(card.to,account.from));
           if(!recipients||recipients.length!==1)return report('What email address should I send this to?');
-          if(explicit&&((resolvedEmailRecipients(explicit.recipient,account.from).toLowerCase()!==recipients[0].toLowerCase())||
-              explicit.subject!==card.subject||explicit.body!==card.body))
+          if(resolvedEmailRecipients(explicit.recipient,account.from).toLowerCase()!==recipients[0].toLowerCase()||
+              explicit.subject!==card.subject||explicit.body!==card.body)
             return report('Tell me the exact email address, subject and message before I send.');
           if((await readDevicePreferences().catch(()=>({askBeforeAgentActions:true}))).askBeforeAgentActions)return true;
           const status=await sendCard(this,shelf,card,account,recipients,()=>
             current()&&views.inbox.agentEmailAccount?.()?.token===account.token);
           return status?report(status):false;
         }
-        if(card)return report(draftRequested
-          ?`Email draft saved.\nTo: ${account?resolvedEmailRecipients(card.to,account.from):card.to}\nSubject: ${card.subject}\n\n${card.body}\n\nSay “Send this email” when it’s ready.`
-          :'What email address, subject and message should I send?');
+        if(card&&draftRequested){
+          if(current())this.setState({});
+          return plainEmailDraftText(card,account?resolvedEmailRecipients(card.to,account.from):card.to);
+        }
+        if(card)return report('What email address, subject and message should I send?');
         return false;
       }
       if(!card)return false;
@@ -239,7 +269,8 @@ export function installAgentEmailCards(
 
   p.renderVals = function () {
     const out = render.call(this), shelf = shelfFor(this);
-    if (!shelf?.cards.size || cachedDevicePreferences()?.askBeforeAgentActions===false) return out;
+    if (!shelf?.cards.size) return out;
+    const reviewOff=cachedDevicePreferences()?.askBeforeAgentActions===false;
     const selectedAccount = views.inbox.agentEmailAccount?.();
     out.msgs = (out.msgs || []).map((message: Bag) => {
       const card = shelf.cards.get(message.id);
@@ -248,6 +279,12 @@ export function installAgentEmailCards(
         ? selectedAccount : null;
       const resolveAddress = (text: string) => account ? resolvedEmailRecipients(text,account.from) : text;
       const to = resolveAddress(card.to);
+      if(reviewOff){
+        if(!card.plainDraft)return message;
+        const displayText=plainEmailDraftText(card,to);
+        return {...message,displayText,hasCalendarText:true,canUseInEmail:false,
+          messageActionsLabel:message.messageActionsLabel?'Message actions: '+displayText:message.messageActionsLabel};
+      }
       const current = () =>
         this.live && !document.hidden && draftScope() === shelf.scope &&
         shelf.cards.get(card.messageId)?.id === card.id;

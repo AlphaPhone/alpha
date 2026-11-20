@@ -50,6 +50,7 @@ import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
 import {cachedDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
+import {sendsSavedEmail} from '../ui/device-actions/owner-request';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
@@ -2086,6 +2087,19 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!receipt)this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
       return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
     }
+    if(sendsSavedEmail(text)){
+      this.draftSendPending=true;
+      let savedEmailReply:string|undefined;
+      try{savedEmailReply=await this.sendSavedAgentEmail?.(text,belongs);}
+      finally{this.draftSendPending=false;}
+      current();
+      if(savedEmailReply){
+        const replyId=`voice-email:${turnId}`;
+        this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+        this.agentSay(savedEmailReply,undefined,{id:replyId},belongs);
+        return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:savedEmailReply,complete:true,localVoiceReply:true as const};
+      }
+    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     const continuation=input.navigation;
@@ -2251,6 +2265,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const answer=await sendPlainSmsDraft(plain);
       if(this.live&&connectionController.getSelectedConversationId()===plain.binding.conversationId)this.agentSay(answer);
       return;
+    }
+    if(sendsSavedEmail(text)&&fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment){
+      const bound=sendBinding();
+      const current=()=>this.live&&!document.hidden&&!connectionController.getSnapshot().open&&
+        sendBinding()===bound&&this.S().view===view&&String(this.S().draft||'')===text;
+      this.draftSendPending=true;
+      let savedEmailReply:string|undefined;
+      try{savedEmailReply=await this.sendSavedAgentEmail?.(text,current);}
+      finally{this.draftSendPending=false;}
+      if(!current())return;
+      if(savedEmailReply){
+        this.setState((previous:Shell)=>({draft:'',msgs:[...previous.msgs,{id:crypto.randomUUID(),from:'user',text}]}));
+        this.agentSay(savedEmailReply);
+        return;
+      }
     }
     // No draft identity exists until the resident has an owner session. Report readiness
     // before asking its durable draft controller to reserve an unbound send.

@@ -32,6 +32,10 @@ export function emailOwnerRequest(text: string) {
   if (send) return {recipient: word(send[1]), subject: unquote(send[2]), body: unquote(send[3])};
 }
 
+export function sendsSavedEmail(text:string) {
+  return /^send (?:this|the|that) email[.!]?$/i.test(ownerCommand(text));
+}
+
 function reviewedWindow(command: string, fields: {title:string;description:string;location:string;start:string;end:string;timeZone:string}, zone?:string) {
   if (fields.description || fields.location) return false;
   const event = /^(?:create|add|schedule|update|reschedule)\s+(?:an?\s+|the\s+)?(?:calendar\s+)?event\s+(?:called\s+|titled\s+)?(.+?)\s+from\s+(\S+)\s+to\s+(\S+)\.?$/i.exec(command);
