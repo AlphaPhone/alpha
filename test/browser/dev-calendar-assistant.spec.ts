@@ -11,6 +11,7 @@ for (const mode of ['confirm', 'cancel', 'read', 'update', 'delete'] as const) {
   test(`browser assistant Calendar action: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
       const w = window as any, store = new Map();
+      localStorage.setItem('alpha.browser.device.v1', JSON.stringify({ askBeforeAgentActions: true }));
       if(mode!=='confirm'&&mode!=='cancel'&&!localStorage.getItem('alpha.browser.calendar.v1')){const start=new Date();start.setHours(12,0,0,0);(localStorage.getItem('alpha.browser.calendar.v1')===null&&localStorage.setItem('alpha.browser.calendar.v1',JSON.stringify({sourceRevision:'b'.repeat(64),events:[{id:'selected-event',calendarId:'local',title:'Selected private event',body:'Private description',location:'Private location',begin:start.getTime(),end:start.getTime()+3600000,revision:'c'.repeat(64)}]})));}
       const agentId = '12345678-1234-4234-8234-123456789abc';
       const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, journal: [] as string[], proposal: null as any };
