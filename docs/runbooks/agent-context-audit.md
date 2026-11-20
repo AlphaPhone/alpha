@@ -117,6 +117,29 @@ Four causes:
 - **No output cap on the first step of a turn or on its check.** Each held 16,384
   tokens for an answer of about 150.
 
+### The same Pixel two days later, and the same turns through the branch
+
+The Pixel's log was read again on November 20 (launcher build 617, the same runtime
+behaviour). The conversation had grown from 283 to 580 messages, and with no history
+limit its requests had doubled. The right-hand column is a host replay, not a phone
+result: the same turns of November 19 and 20 sent through the upstream branch's Stage 1
+and planner code as in the replay section below, with the reworked device tool and the
+phone's output caps. It covers Stage 1 and the first planner call of each turn.
+
+| November 19 and 20 | Pixel as recorded, tools counted | Same turns through the branch |
+| --- | --- | --- |
+| Stage 1 input per call | 52K tokens median, 66K maximum | 15K, 19K |
+| Planner input per call | 59K median, 74K maximum | 20K, 24K |
+| Input per turn | 107K median, 139K p90, 214K maximum | 35K, 40K, 42K |
+| Tokens the cache rules give as reused | 1% | 78% |
+| Uncached tokens charged in any 60 seconds | 106K median, 156K p90, 214K maximum | 3K, 21K, 44K |
+| Allowance left once a call holds its share | 53K median, 75K short at the lowest | 124K median, 102K at the lowest |
+| Turns in which this phone alone runs out of allowance | 41 of 145 | 0 of 158 |
+
+One first step of 61K tokens with no output cap holds about 96K of the account's 150K
+while it runs. The phone's log shows it sending such calls in the minutes when the
+probe on the same account read another device's calls (section 2).
+
 ### What the provider counted, before and after
 
 A synthetic conversation of 72 messages was replayed through the upstream Stage 1 and
@@ -358,9 +381,9 @@ Read with these in mind:
   five seconds and all 36 turns were answered, two of them in under a second with no
   proposal, as a turn is when its first step is refused. 26 of 36 cases passed.
 - **The account is shared.** While the probe ran on an otherwise idle key, another
-  device's call appeared twice in four minutes as 56K of allowance held, the size of a
-  first step from a phone on the old build. Every count of refusals here includes
-  whatever else was using the account.
+  device's calls appeared as allowance held and then drained to 5K. The Pixel's own log
+  shows it sending first steps of 61K tokens in those minutes. Every count of refusals
+  here includes whatever else was using the account.
 - **The audit's allowance agrees with the refusals.** At the last call each refused
   run completed, the audit puts the allowance at 2,823 and 1,304 tokens short and at
   7,182 left, of 150,000.

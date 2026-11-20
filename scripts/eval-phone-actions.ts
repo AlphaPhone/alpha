@@ -12,8 +12,10 @@
  *
  *   bun scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
  *     --token-file <paired-machine-token> --output test-results/phone-actions.json \
- *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--database <resident .elizadb>]
+ *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--only <case id>[,...]]
+ *     [--database <resident .elizadb>]
  *
+ * With --only the run sends just the named cases, to repeat the few a change is about.
  * With --one-conversation every case of a run is sent in the same conversation, in order,
  * the way an owner uses a phone for a while: each request then carries the turns before
  * it, which is where history, caching and the per-minute limit show.
@@ -196,10 +198,16 @@ if (import.meta.main) {
   const origin = flag('--origin'), tokenFile = flag('--token-file'), output = flag('--output');
   const runs = Number(flag('--runs') ?? 1), pauseMs = Number(flag('--pause-ms') ?? 0);
   if (!origin || !tokenFile || !output || !Number.isInteger(runs) || runs < 1 || !(pauseMs >= 0)) {
-    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--database <resident .elizadb>]');
+    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--only <case id>[,...]] [--database <resident .elizadb>]');
     process.exit(2);
   }
-  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation') });
+  const only = flag('--only')?.split(',').filter(Boolean);
+  const unknown = only?.filter(id => !CASES.some(item => item.id === id)) ?? [];
+  if (unknown.length || only?.length === 0) {
+    console.error(`Unknown case: ${unknown.join(', ') || '(none named)'}`);
+    process.exit(2);
+  }
+  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)) } : {}) });
   const database = flag('--database');
   // The run's own model calls, read from the resident's records after the last turn.
   const usage = database ? audit((await loadCalls(database)).filter(call => call.at >= Date.parse(result.recordedAt))) : null;
