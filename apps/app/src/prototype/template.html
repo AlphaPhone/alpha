@@ -2543,11 +2543,14 @@
     <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">{{notes.notesTitle}}</h1>
     <sc-if value="{{notes.canRecord}}"><button class="ib" data-agent-id="notes-record" aria-label="Record voice note" onClick="{{notes.record}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.mic}}"></path></svg></button></sc-if>
       <sc-if value="{{notes.canCreate}}"><button class="ib" data-agent-id="notes-new" aria-label="New note" disabled="{{notes.createDisabled}}" onClick="{{notes.newNote}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg></button></sc-if>
-    <sc-if value="{{notes.previousNotesAction}}"><button class="ib" aria-label="Notes options" aria-haspopup="dialog" aria-expanded="{{notes.previousNotesMenu}}" onClick="{{notes.openPreviousNotesMenu}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
+    <sc-if value="{{notes.openPreviousNotesMenu}}"><button class="ib" aria-label="Notes options" aria-haspopup="dialog" aria-expanded="{{notes.previousNotesMenu}}" onClick="{{notes.openPreviousNotesMenu}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
   </div>
   <sc-if value="{{notes.previousNotesMenu}}"><div ref="{{notes.previousNotesModal}}" data-alpha-popup style="display:contents">
     <button aria-hidden="true" tabindex="-1" onClick="{{notes.closePreviousNotesMenu}}" style="position:absolute;inset:0;z-index:11;background:transparent"></button>
-    <div class="notes-menu" role="dialog" aria-label="Notes options"><button onClick="{{notes.previousNotesAction}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg>On this phone</button></div>
+    <div class="notes-menu" role="dialog" aria-label="Notes options">
+      <sc-if value="{{notes.notesMenuTrash}}"><button disabled="{{notes.notesMenuTrashDisabled}}" onClick="{{notes.notesMenuTrash}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></sc-if>
+      <sc-if value="{{notes.previousNotesAction}}"><button onClick="{{notes.previousNotesAction}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg>On this phone</button></sc-if>
+    </div>
   </div></sc-if>
   <sc-if value="{{notes.hasDeleted}}"><div style="padding:0 16px 10px"><button class="tap notes-chip" data-agent-id="notes-trash" onClick="{{notes.openTrash}}"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></div></sc-if>
   <sc-if value="{{notes.filterOn}}">
@@ -2591,6 +2594,7 @@
         <div style="flex-grow: 1"></div>
         <button class="ib" data-agent-id="notes-format" aria-label="{{notes.ed.listLabel}}" onClick="{{notes.ed.toggleList}}" style="{{notes.ed.listCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.notesList}}"></path></svg></button>
         <button class="ib" data-agent-id="notes-more" aria-label="More" aria-haspopup="dialog" aria-expanded="{{notes.ed.menuShown}}" onClick="{{notes.ed.more}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button>
+        <button class="tap" data-agent-id="notes-done" onClick="{{notes.ed.close}}" style="min-height:44px;padding:0 12px;color:var(--fg);font-weight:600">Done</button>
       </div>
       <sc-if value="{{notes.ed.saveStatus}}"><div role="status" aria-live="polite" style="padding:0 24px 4px;color:var(--mut);font-size:12px">{{notes.ed.saveStatus}}</div></sc-if>
       <div class="note-title-column" style="padding: 4px 24px 0; flex-shrink: 0">
@@ -4518,6 +4522,25 @@
             <sc-if value="{{m.hasMapsChoice}}"><div class="maps-chat-choice" role="group" aria-label="Share location"><sc-for list="{{m.mapsChoices}}" as="option"><button class="tap" onClick="{{option.choose}}">{{option.label}}</button></sc-for></div></sc-if>
 
 
+            <sc-if value="{{m.emailDraft}}">
+              <section aria-label="Email draft" class="chat-email-draft">
+                <sc-if value="{{m.emailDraft.editing}}">
+                  <sc-if value="{{m.emailDraft.from}}"><small>From {{m.emailDraft.from}}</small></sc-if>
+                  <label>To<input type="text" aria-label="Email recipients" value="{{m.emailDraft.to}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeTo}}"></label>
+                  <label>Subject<input type="text" aria-label="Email subject" maxlength="998" value="{{m.emailDraft.subject}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeSubject}}"></label>
+                  <textarea aria-label="Email body" rows="4" maxlength="64000" value="{{m.emailDraft.body}}" disabled="{{m.emailDraft.locked}}" onChange="{{m.emailDraft.changeBody}}"></textarea>
+                  <sc-if value="{{m.emailDraft.missingAccount}}"><button onClick="{{m.emailDraft.openInbox}}">Open Inbox</button></sc-if>
+                  <div><button disabled="{{m.emailDraft.busy}}" onClick="{{m.emailDraft.discard}}">Don’t send</button><button aria-label="Send email" disabled="{{m.emailDraft.sendDisabled}}" onClick="{{m.emailDraft.send}}">Send</button></div>
+                </sc-if>
+                <sc-if value="{{m.emailDraft.settled}}">
+                  <sc-if value="{{m.emailDraft.from}}"><small>From {{m.emailDraft.from}}</small></sc-if>
+                  <sc-if value="{{m.emailDraft.to}}"><small>To {{m.emailDraft.to}}</small></sc-if>
+                  <strong>{{m.emailDraft.subject}}</strong>
+                  <p class="chat-email-draft-body">{{m.emailDraft.body}}</p>
+                </sc-if>
+                <sc-if value="{{m.emailDraft.status}}"><span role="status">{{m.emailDraft.status}}</span></sc-if>
+              </section>
+            </sc-if>
             <sc-if value="{{m.cAgenda}}">
               <button onClick="{{m.act}}" style="border-radius: 22px; background: var(--s2); overflow: hidden; text-align: left">
                 <sc-for list="{{m.rows}}" as="r">

@@ -11,14 +11,14 @@ import {setupTelephony} from './telephony-fixture';
 const bridgeEffects = (page: Page) => page.evaluate(() => ((window as any).telephonyInputs as [string, any][])
   .map(([method]) => method).filter(method => ['dial', 'placeCall', 'sendSms', 'contacts.save', 'contacts.remove'].includes(method)));
 
-async function installedExecutor(page: Page) {
+async function installedExecutor(page: Page, options?:Parameters<typeof setupTelephony>[1]) {
   await page.route(/\/src\/runtime\/connection-ui\.tsx/, async route => {
     const response = await route.fetch();
     const body = (await response.text()).replace(/setDeviceExecutor\(executor\)\s*\{\s*deviceExecutor = executor;/, match => `${match} globalThis.__installedDeviceExecutor = executor;`);
     if (!body.includes('__installedDeviceExecutor')) throw Error('setDeviceExecutor not found in connection-ui');
     await route.fulfill({response, body});
   });
-  await setupTelephony(page);
+  await setupTelephony(page,options);
   await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
   await expect.poll(() => page.evaluate(() => typeof (window as any).__installedDeviceExecutor)).toBe('function');
   // The review fence compares the agent session and screen context; hold both steady as a live review would.
@@ -198,6 +198,31 @@ test.describe('Alpha image: a text to a number, a draft, and Contacts from chat 
     expect(await bridgeEffects(page)).toEqual([]);
   });
 
+  test('a latest-sender draft has an exact recipient, inline editing, local discard and one Send',async({page})=>{
+    await installedExecutor(page,{preview:true,smsRoleHeld:true});
+    await shell(page,'goHome');
+    const read=await execute(page,{type:'sms_latest_sender',includeAddress:true},'home');
+    expect(read.result).toEqual({kind:'sms-latest-sender',status:'found',address:'+15550100101',threadId:'thread:101'});
+    const draft={type:'sms_compose',draft:true,target:{kind:'number',number:read.result.address},replyThreadId:read.result.threadId,body:'Bring the tripod tomorrow.'};
+    const mismatch=await execute(page,{...draft,replyThreadId:'thread:103'},'home');
+    expect(mismatch.result).toEqual({kind:'sms-compose',status:'unavailable'});
+    const open=await execute(page,draft,'home');expect(open.presents).toBe(true);
+    await present(page);
+    const card=page.getByRole('group',{name:/Message draft to Ada Okafor/});
+    await expect(card).toContainText('+15550100101');
+    await expect(card.getByRole('textbox',{name:'Message draft'})).toHaveValue(draft.body);
+    await card.getByRole('button',{name:'Don’t send',exact:true}).click();
+    await expect(card).toHaveCount(0);
+    const attempts=()=>page.evaluate(()=>(window as any).telephonyInputs.filter((r:any[])=>r[0]==='sendComposedSms').map((r:any[])=>r[1]));
+    expect(await attempts()).toEqual([]);
+    await execute(page,draft,'messages');
+    await card.getByRole('textbox',{name:'Message draft'}).fill('Bring the tripod and plate.');
+    await card.getByRole('button',{name:'Send',exact:true}).click();
+    await expect.poll(async()=>(await attempts()).length).toBe(1);
+    expect((await attempts())[0]).toMatchObject({recipients:['+15550100101'],body:'Bring the tripod and plate.'});
+    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    await expect(page.getByText('Bring the tripod and plate.',{exact:true}).first()).toBeVisible();
+  });
   test('adding one number to a contact shows the contact before and after and saves every value it had', async ({page}) => {
     await installedExecutor(page);
     await reviewed(page, {type: 'contact_update', query: 'Ada', add: {phoneNumbers: ['+15550100150']}}, 'Ada Okafor', async review => {

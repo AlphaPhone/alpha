@@ -1,7 +1,7 @@
 import {localDraftRow,savedInboxAttachments} from './inbox-draft-navigation';
 import {test,expect,type Page} from '@playwright/test';
 const dialog=(page:Page)=>page.getByRole('dialog',{name:'Attach to email',exact:true});
-async function setup(page:Page,reviewFile=true,openInbox=true){
+async function setup(page:Page,openFile=true,openInbox=true,holdRead=false){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');
  await page.evaluate(async()=>{
@@ -23,28 +23,32 @@ async function setup(page:Page,reviewFile=true,openInbox=true){
  if(!openInbox)return;
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
- if(!reviewFile)return;
+ if(!openFile)return;
  await expect.poll(()=>page.evaluate(async()=>{const {VIEWS}=await import('/src/prototype/model.js');return VIEWS.inbox.fileEmailTarget().ready;})).toBe(true);
  await page.evaluate(()=>(window as any).fileEmail.shell.openView('files',{}));
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
+ if(holdRead) await page.evaluate(async()=>{
+  const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
+  const original=BrowserMailAttachments.prototype.readSelected, fixture=(window as any).fileEmail;
+  BrowserMailAttachments.prototype.readSelected=async function(input){
+   const result=await original.call(this,input);
+   if(!fixture.releaseAttachment)await new Promise<void>(resolve=>fixture.releaseAttachment=resolve);
+   return result;
+  };
+ });
+ await chooseEmail(page);
+ if(holdRead)await expect.poll(()=>page.evaluate(()=>typeof(window as any).fileEmail.releaseAttachment)).toBe('function');
+}
+async function chooseEmail(page:Page){
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Use in email',exact:true}).click();
- await expect(dialog(page)).toContainText('selected.txt · text/plain · 17 bytes');
 }
-test('selected Files require explicit attachment review, retain exact bytes and never send',async({page})=>{
- await setup(page);const review=dialog(page),insert=review.getByRole('button',{name:'Attach',exact:true});
- await expect(insert).toBeDisabled();await expect(review).toContainText('owner@example.invalid');
- await page.screenshot({path:test.info().outputPath('file-email-review.png')});
- await review.getByRole('checkbox',{name:'Attach this file'}).check();await expect(insert).toBeEnabled();
- await review.getByRole('checkbox').uncheck();await expect(insert).toBeDisabled();
- await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect(review).toHaveCount(0);
- // The review opened from a File actions row; Cancel returns focus to the menu's opener, not the page.
- await expect(page.getByRole('button',{name:'File actions',exact:true})).toBeFocused();
- await page.getByRole('button',{name:'File actions',exact:true}).click();
- await expect(page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Use in email',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Use in email',exact:true}).click();await review.getByRole('checkbox').check();await insert.click();
- await expect(review).toHaveCount(0);await expect(page.getByRole('textbox',{name:'Message',exact:true})).toBeVisible();
+test('choosing Email in Files stages the exact attachment directly in the local draft',async({page},info)=>{
+ await setup(page);
+ await expect(dialog(page)).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
+ await page.screenshot({path:info.outputPath('file-email-draft.png')});
  await page.getByRole('button',{name:'Back from draft',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
@@ -55,8 +59,8 @@ test('selected Files require explicit attachment review, retain exact bytes and 
  expect((await saved())[0].dataBase64).toBe(Buffer.from('Café\nExact bytes').toString('base64'));
  await page.getByRole('button',{name:'Remove selected.txt',exact:true}).click();await expect(page.getByRole('list',{name:'Attachments',exact:true})).toHaveCount(0);
 });
-for(const change of ['account','bytes','revoke'])test(`file attachment review refuses changed ${change}`,async({page})=>{
- await setup(page);await dialog(page).getByRole('checkbox').check();
+for(const change of ['account','bytes','revoke'])test(`direct file attachment refuses changed ${change}`,async({page})=>{
+ await setup(page,true,true,true);
  await page.evaluate(async change=>{
   if(change==='account'){const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');const old=c.getCloudClient()!;c.getCloudClient=()=>({...old,sessionId:'another-owner'});return;}
   const {registerPlugin}=await import('/src/platform-plugins.ts'),files=registerPlugin<any>('AlphaFiles');
@@ -66,19 +70,18 @@ for(const change of ['account','bytes','revoke'])test(`file attachment review re
    const tx=db.transaction('entries','readwrite'),store=tx.objectStore('entries'),request=store.get(row.id);request.onsuccess=()=>{const changed=new TextEncoder().encode('changed');store.put({...request.result,bytes:changed.buffer,size:changed.length});};await new Promise<void>((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});db.close();
   }else await files.delete({id:row.id,expectedRevision:row.revision,confirmPermanent:true});
  },change);
- await dialog(page).getByRole('button',{name:'Attach',exact:true}).click();
- await expect(dialog(page).getByRole('status')).toContainText(/changed|no longer available/);
+ await page.evaluate(()=>(window as any).fileEmail.releaseAttachment());
+ await expect(page.getByText(/changed|no longer available/).first()).toBeVisible();
+ await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 test('the same selected bytes cannot be attached twice',async({page})=>{
- await setup(page);await dialog(page).getByRole('checkbox').check();await dialog(page).getByRole('button',{name:'Attach',exact:true}).click();
+ await setup(page);
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
  await page.evaluate(()=>(window as any).fileEmail.shell.openView('files',{}));
  await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
- await page.getByRole('button',{name:'File actions',exact:true}).click();
- await page.getByRole('button',{name:'Use in email',exact:true}).click();await dialog(page).getByRole('checkbox').check();
- await dialog(page).getByRole('button',{name:'Attach',exact:true}).click();
- await expect(dialog(page).getByRole('status')).toContainText('already attached');
+ await chooseEmail(page);
+ await expect(page.getByText(/already attached/).first()).toBeVisible();
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 test('Files before Inbox asks to open Inbox once when a Gmail account was chosen',async({page})=>{
@@ -93,12 +96,12 @@ test('Files before Inbox asks to open Inbox once when a Gmail account was chosen
  await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Use in email',exact:true}).click();
- await expect(dialog(page).getByRole('status')).toHaveText('Open Inbox first');
- await expect(dialog(page).getByRole('checkbox')).toBeDisabled();
+ await expect(page.getByText('Open Inbox first',{exact:true})).toBeVisible();
+ await expect(dialog(page)).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 
-test('finishing the selected-file text read preserves its open attachment review',async({page})=>{
+test('a concurrent text preview read does not disturb the stashed attachment',async({page})=>{
  await setup(page,false);
  await expect.poll(()=>page.evaluate(async()=>{const {VIEWS}=await import('/src/prototype/model.js');return VIEWS.inbox.fileEmailTarget().ready;})).toBe(true);
  await page.evaluate(async()=>{
@@ -117,11 +120,9 @@ test('finishing the selected-file text read preserves its open attachment review
  await expect.poll(()=>page.evaluate(()=>typeof(window as any).fileEmail.releaseRead)).toBe('function');
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Use in email',exact:true}).click();
- await expect(dialog(page)).toContainText('selected.txt · text/plain · 17 bytes');
+ await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
  await page.evaluate(()=>(window as any).fileEmail.releaseRead());
  await expect.poll(()=>page.evaluate(()=>(window as any).fileEmail.readFinished)).toBe(true);
- await dialog(page).getByRole('checkbox',{name:'Attach this file'}).check();
- await dialog(page).getByRole('button',{name:'Attach',exact:true}).click();
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });

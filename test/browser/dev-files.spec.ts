@@ -70,6 +70,7 @@ for(const [label,name,content,excerpt] of [['a UTF-8 BOM text file','bom.txt','\
  test(`Ask Alpha links the source of ${label}`,async({page})=>{
   await observeFileQuestionEffects(page);await importAndOpen(page,name,content);await page.getByRole('button',{name:'File actions',exact:true}).click();
   await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
+  expect(await fileQuestionEffects(page)).toEqual({reads:1,retains:0,sends:0});
   await page.getByRole('button',{name:/^Edit excerpt from /}).click();
   const question=page.getByRole('dialog',{name:'Ask about selected content'});if(excerpt)await question.getByRole('textbox',{name:'Content excerpt'}).fill(excerpt);
   await expect(question.getByRole('checkbox')).toBeChecked();await question.getByRole('button',{name:'Use in conversation'}).click();
@@ -82,7 +83,7 @@ for(const [label,name,content,excerpt] of [['a UTF-8 BOM text file','bom.txt','\
   expect(retained.source).toEqual({version:1,name,mimeType:'text/plain',size:Buffer.byteLength(content),sha256:createHash('sha256').update(content).digest('hex'),reference:expect.stringMatching(/^b1:[a-f0-9-]{36}$/)});
   expect(JSON.stringify(retained.source).length).toBeLessThan(512);expect(retained.source).not.toHaveProperty('dataBase64');expect(retained.source).not.toHaveProperty('text');
   expect(retained.draft.length).toBeLessThan(512);if(excerpt)expect(retained.draft).toContain(excerpt);
-  expect(await fileQuestionEffects(page)).toEqual({reads:2,retains:1,sends:0});
+  expect(await fileQuestionEffects(page)).toEqual({reads:3,retains:1,sends:0});
  });
 // Observe the actual source boundary, without replacing its result or the send behavior.
 async function observeFileQuestionEffects(page:import('@playwright/test').Page){

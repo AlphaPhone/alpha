@@ -1144,12 +1144,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           ...imageContactPorts(book,current),
           sendSms:imageSmsPort(texts,expectedContext,current),
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
-          latestIncomingSender:()=>client.latestIncomingSender(),
+          latestIncomingSender:includeAddress=>client.latestIncomingSender(includeAddress),
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
-          draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
+          draftInOpenThread:(body,number,threadId)=>placeAskedSmsDraft(body,number,threadId),
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
           // changes the view, so it runs after the receipt and only while this review is still current.
-          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>{current();step();});},
+          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&(()=>{current();step();});},
           showContacts:async query=>{
             const step=showContactsStep(query),access=step?await book.status():null;
             if(!step||access?.available!==true||access.readable!==true)return null;
@@ -1692,7 +1692,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
     return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
   };
-  const selectedFiles=new WeakMap<ChatFile,{source:Source; selection:SelectedChatFile; thumbnail?:string}>();
+  const selectedFiles=new WeakMap<ChatFile,{selection:SelectedChatFile; thumbnail?:string}>();
   async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile){
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
@@ -1724,7 +1724,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     try{
       const selected=selection ? await selection.read(current) : undefined;
       if (!current() || (selection && !selected)) return;
-      const files:File[]=selected ? [selected.file] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
+      const files:File[]=selected ? [selected] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
       if(!current()||!files.length)return;
       const encoded=await encodeChatAttachments(files);
       if(!current())return;
@@ -1734,7 +1734,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (selection && selected) {
         const file=additions[0];
         const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
-        selectedFiles.set(file, {source:selected.source,selection,thumbnail});
+        selectedFiles.set(file, {selection,thumbnail});
       }
       shell.fileAttachments=[...existing,...additions];
       if (selected) {
@@ -2059,7 +2059,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!reply.messageId||!reply.userMessageId||!identity||identity.conversationId!==binding.conversationId||JSON.stringify(identity.session)!==JSON.stringify(binding.session)||!reply.text.trim())throw Error('The voice reply could not be matched to this conversation. Check history before speaking again.');
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
       keepWorkflowChanges(this,reply,belongs);
-      const emailCardReady=this.stageAgentEmailDraft?.(reply)===true;
+      const emailCardReady=await this.stageAgentEmailDraft?.(reply)===true;
       let delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
       let nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
       current();
@@ -2093,7 +2093,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
       const completedActions=reply.completedActions;
       if(completedActions?.length)this.setState({},()=>{if(this.live&&connectionController.voiceConversationCurrent(binding,false))for(const receipt of completedActions)publishCommittedDeviceChanges(receipt,alphaClient,binding.session);});
-      const review=!!reply.proposals?.length||pendingNotice;
+      const review=!!reply.proposals?.length||pendingNotice||emailCardReady;
       const speechText=spokenActionReply(text,reply,emailCardReady);
       return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
@@ -2155,7 +2155,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       finally{this.draftSendPending=false;}
     }
     let sourceDraft=fromComposer&&this.reviewedSourceDraft?.draft===text?sourceOf(this.reviewedSourceDraft.source):undefined;
-    if (filesAtStart?.length===1 && !sourceDraft) sourceDraft=selectedFiles.get(filesAtStart[0])?.source;
     context(this);
     const transcript=fromComposer?this.transcriptAttachment:null;
     const mail=fromComposer?(this.mailAttachment??null):null;
@@ -2288,6 +2287,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(streamed)this.setState((previous:Shell)=>settlementCurrent()?{msgs:reply.messageId&&previous.msgs.some((m:Shell)=>m.id===reply.messageId)?previous.msgs.filter((m:Shell)=>m.id!==streamedId).map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planCard,identity):m):previous.msgs.map((m:Shell)=>m.id===streamedId?{...m,id:reply.messageId||m.id,messageBinding:reply.messageId?identity:undefined,text:reply.text,streaming:false,...(planCard?{card:planCard}:{})}:m)}:null);else this.agentSay(reply.text,planCard,reply.messageId&&identity?{id:reply.messageId,messageBinding:identity}:undefined,settlementCurrent);
       if(reply.userMessageId&&identity)await new Promise<void>(resolve=>this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m)}:null,resolve));
       keepWorkflowChanges(this,reply,settlementCurrent);
+      await this.stageAgentEmailDraft?.(reply);
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
       let cameraOpened=false,cameraReceipts=0;
       if(sourceDraft&&sourceSession&&JSON.stringify(sourceSession)===JSON.stringify(connectionController.getSnapshot().session))this.agentSay('Review this answer before saving it with its source.',{type:'generic',icon:'note',title:'Review summary note',sub:sourceDraft.name,sourceSummary:{source:sourceDraft,text:reply.text,session:sourceSession}});

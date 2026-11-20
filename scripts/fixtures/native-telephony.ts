@@ -177,7 +177,7 @@ export function installTelephonyFixture(options: TelephonyFixture = {}) {
         if (method === 'markVoicemailHeard') return {status: 'marked'};
         if (method === 'deleteVoicemail') { w.voicemails = w.voicemails.filter((row: any) => row.id !== input.id); return {status: 'deleted'}; }
         if (method === 'listThreads') return {threads: w.access.sms ? threads() : [], next: null};
-        if (method === 'latestIncomingSender') return {status: 'found', numberEnding: '0101'};
+        if (method === 'latestIncomingSender') return input?.includeAddress===true ? {status:'found',address:'+15550100101',threadId:'thread:101'} : {status: 'found', numberEnding: '0101'};
         if (method === 'listMessages') return {messages: [...(w.messages[input.threadId] || [])].reverse().slice(0, input.limit), next: null};
         if (method === 'deleteMessage') {
           const rows=w.messages[input.threadId]||[],row=rows.find((value:any)=>value.id===input.id);

@@ -553,10 +553,10 @@ public abstract class AlphaTelephonyBase extends Plugin {
   fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.messages(getContext(), thread, limit, before, cursor, cancel));
  }
 
- /** Reads the masked sender of one incoming SMS through the normal foreground fence. */
+ /** Reads the latest SMS sender through the foreground fence, masked by default. */
  @PluginMethod public void latestIncomingSender(PluginCall call) {
   if (refused(call)) return;
-  fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.latestIncomingSender(getContext(), cancel));
+  fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.latestIncomingSender(getContext(), cancel, call.getBoolean("includeAddress", false)));
  }
 
  /**
