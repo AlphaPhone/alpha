@@ -23,7 +23,6 @@ const stubs = {
     export const Capacitor={isNativePlatform:()=>host().native,getPlatform:()=>host().native?'android':'web',isPluginAvailable:()=>true};`,
   '../daily': 'export const DailyApps={addListener:()=>Promise.resolve({remove(){}})};',
   '../runtime/native-reading-voice': 'export const createNativeReadingVoice=()=>globalThis.__alphaBrowserHost.voice();',
-  '../browser/content-question': 'export const reviewContentQuestion=input=>globalThis.__alphaBrowserHost.question(input);',
   [pageSource]: 'export const readPublicPageSource=(url,signal)=>globalThis.__alphaBrowserHost.pageSource(url,signal);',
   './agent-calendar-adapter': 'export const browserCalendarScope=()=>false;',
   '../runtime/connection-ui': `const host=()=>globalThis.__alphaBrowserHost;
@@ -57,7 +56,7 @@ export async function browserAdapterHost({native = true, instant = ['bookmarks',
     };
   }});
   const host = globalThis.__alphaBrowserHost = {Browser, native, connection: {open: false, session: true}, connectionListeners: new Set(),
-    voice: () => undefined, question: () => { throw new Error('No question review port'); }, pageSource: async () => ({text: ''}), readingReview: async () => {}};
+    voice: () => undefined, pageSource: async () => ({text: ''}), readingReview: async () => {}};
   const views = {browser: {state: {editing: false, addr: '', tabsOpen: false, menu: false, lib: null, share: false, ag: null, confirm: null}, render: () => ({})}};
   const shellState = {screen: 'home', view: 'browser', shade: false, chat: 'closed'};
   const viewOpens = [];

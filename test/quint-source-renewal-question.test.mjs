@@ -18,10 +18,10 @@ async function attach(run, id) {
 }
 async function review(run, id) {
   await run('showRenewal', id);
-  assert.equal((await run('observe')).renewalDialog, true);
+  assert.equal((await run('observe')).renewalQueued, true);
   await run('acceptRenewal');
   const state = await run('observe');
-  assert.equal(state.renewalDialog, false);
+  assert.equal(state.renewalQueued, false);
   assert.ok(pending(state, 'renewal-read', id));
 }
 

@@ -50,10 +50,10 @@ export function shadeRowCustodyFixture() {
     const keys = copy(kind === 'clear' ? input.items : [input]);
     operations.push({kind, keys, pending: true, resolve, reject});
   });
-  const unusedReview = () => {throw Error('Question dialog is outside the row action fixture');};
+  const unusedQuestion = () => {throw Error('Question attachment is outside the row action fixture');};
   vm.runInNewContext(stripTypeScriptTypes(code.replace(/^export /gm, '')) + '\ninstallNotificationsAdapter(Shell);',
     {Shell, window, document, clearInterval, native, Capacitor: {isNativePlatform: () => false},
-      createOwnNoticeRevisions,noticeKind, noticeReviewable: () => false, reviewContentQuestion: unusedReview, formatTime: () => 'time'});
+      createOwnNoticeRevisions,noticeKind, noticeReviewable: () => false, noticeQuestionFile: unusedQuestion, stageNoticeQuestion: unusedQuestion, formatTime: () => 'time'});
   const shell = new Shell();
   shell.renderVals();
   shell.componentDidMount();

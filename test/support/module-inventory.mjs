@@ -271,7 +271,6 @@ export const moduleInventory = {
     "apps/app/src/browser/camera-frame.ts",
     "apps/app/src/browser/clock.ts",
     "apps/app/src/browser/cloud-connection.ts",
-    "apps/app/src/browser/content-question.ts",
     "apps/app/src/browser/daily.ts",
     "apps/app/src/browser/deleted-note-origins.ts",
     "apps/app/src/browser/deletion-recovery.ts",

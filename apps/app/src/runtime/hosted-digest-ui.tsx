@@ -1,5 +1,6 @@
 import {reviewSourceRenewalQuestion,renewalMatches,type SourceRenewalTap} from './source-renewal-question';
 import {hostedTapResolver,reviewHostedNoticeQuestion} from './hosted-notice-question';
+import type {SelectedChatFile} from '../prototype/chat-attachment-files';
 import {iconStyle} from '../icon-style';
 // Presentation only: status dots sit beside a word, chips name a source, switches map onto the existing handlers.
 const srOnly={position:'absolute',width:1,height:1,overflow:'hidden',clip:'rect(0 0 0 0)',whiteSpace:'nowrap'} as const;
@@ -77,7 +78,7 @@ const same=(a:unknown,b:unknown)=>a===b||JSON.stringify(a)===JSON.stringify(b);
 const nativeSources=registerPlugin<{nativeSourceConsent(input:Record<string,unknown>):Promise<Record<string,unknown>>;nativeSourceIdentity(input:{sessionId:string}):Promise<Record<string,unknown>>;scheduleSourceRenewal(input:{selection:SourceRenewalTap['selection'];expiresAt:number}):Promise<void>;clearSourceRenewal(input:{selection:SourceRenewalTap['selection']}):Promise<void>;pendingSourceRenewal():Promise<Partial<SourceRenewalTap>>;settleSourceRenewal(input:{token:string;discard:boolean}):Promise<void>;addListener(event:'renewSource',listener:()=>void):Promise<{remove():Promise<void>}>}>('AlphaHostedResults');
 const nativeCalendars=registerPlugin<{requestWorkflowReadAccess():Promise<{status:string}>;workflowCalendars():Promise<{status:string;calendars:Array<{id:string;name:string;account:string;sourceRevision:string}>}>}>('AlphaCalendar');
 function canSyncResults(){return !document.hidden&&(isAndroid||(document.documentElement.dataset.devBackground!=='true'&&!browserScreenLocked()));}
-export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQuestion?:(draft:string,sessionId:string)=>boolean;canComposeQuestion?:(sessionId:string)=>boolean}={}) {
+export function HostedDigestPanel({attachQuestion,canComposeQuestion}:{attachQuestion?:(selection:SelectedChatFile,sessionId:string)=>Promise<boolean>;canComposeQuestion?:(sessionId:string)=>boolean}={}) {
  const questionClose=useRef<undefined|(()=>void)>(undefined);
  const questionBusy=useRef(false);
  const resolveTap=useRef(hostedTapResolver());
@@ -155,10 +156,15 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
             let unreviewable=false;
             if(result.kind==='ready' && b&&result.question){
                 const current=()=>mounted.current&&binding.current===b&&b.notices.current()&&canSyncResults()&&!connectionController.getSnapshot().open;
-                // Failures after the dialog closes stay visible beside the saved result instead of in a closed panel.
+                // A failed attachment stays visible beside the saved result.
                 const report=(value:string)=>{if(!mounted.current||binding.current!==b)return;setOpen(true);setFocusedRun(result.result.runId);setMessage(value);};
                 questionBusy.current=true;
-                questionClose.current=reviewHostedNoticeQuestion({signal:b.controller.signal,result,current,recheck:()=>resolveHostedResultTap(hostedResultNative,b.notices,b.controller.signal),canCompose:()=>canComposeQuestion?.(b.sessionId)??false,consume:()=>hostedResultNative.consumeResult({token:result.token}),discard:async()=>{if(!hostedResultNative.releaseResultQuestion)throw Error('Question release unavailable');await hostedResultNative.releaseResultQuestion({token:result.token});},compose:draft=>{if(!composeQuestion?.(draft,b.sessionId))throw Error('Conversation unavailable');setOpen(false);},report,unreviewable:()=>{unreviewable=true;},closed:()=>{questionBusy.current=false;questionClose.current=undefined;}});
+                questionClose.current=reviewHostedNoticeQuestion({
+                    signal:b.controller.signal,result,current,recheck:()=>resolveHostedResultTap(hostedResultNative,b.notices,b.controller.signal),
+                    canCompose:()=>canComposeQuestion?.(b.sessionId)??false,consume:()=>hostedResultNative.consumeResult({token:result.token}),
+                    attach:selection=>attachQuestion?.(selection,b.sessionId)??Promise.resolve(false),report,
+                    unreviewable:()=>{unreviewable=true;},closed:attached=>{questionBusy.current=false;questionClose.current=undefined;if(attached)setOpen(false);},
+                });
                 if(!questionClose.current)questionBusy.current=false;
                 // An unreviewable Ask opens like an ordinary tap, which consumes it instead of re-reporting on every poll.
                 if(!unreviewable)return;
@@ -416,11 +422,11 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
         questionClose.current=reviewSourceRenewalQuestion({
          tap:tap as SourceRenewalTap,signal:b.controller.signal,current,
          recheck:()=>nativeSources.pendingSourceRenewal(),
-         settle:discard=>nativeSources.settleSourceRenewal({token:tap.token!,discard}),
+         consume:()=>nativeSources.settleSourceRenewal({token:tap.token!,discard:false}),
          canCompose:()=>canComposeQuestion?.(b.sessionId)===true,
-         compose:draft=>composeQuestion?.(draft,b.sessionId)===true,
+         attach:selection=>attachQuestion?.(selection,b.sessionId)??Promise.resolve(false),
          report:value=>{if(mounted.current&&binding.current===b&&b.notices.current())setMessage(value);},
-         closed:()=>{questionBusy.current=false;questionClose.current=undefined;},
+         closed:attached=>{questionBusy.current=false;questionClose.current=undefined;if(attached)setOpen(false);},
         });
         if(!questionClose.current)questionBusy.current=false;
         return;

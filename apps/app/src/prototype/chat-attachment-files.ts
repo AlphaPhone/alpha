@@ -2,7 +2,6 @@ import {
   CHAT_IMAGE_MIME_TYPE_SET, CHAT_UPLOAD_MIME_TYPES, MAX_CHAT_ATTACHMENT_NAME_LENGTH,
   MAX_CHAT_IMAGE_INTAKE_BYTES, MAX_CHAT_MEDIA_RAW_BYTES, MAX_CHAT_UPLOAD_ATTACHMENTS,
 } from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits.ts';
-import type {SummarySource} from './summary-source';
 
 export type AttachmentBytes = { name: string; mimeType: string; dataBase64: string };
 const uploadTypes = new Set<string>(CHAT_UPLOAD_MIME_TYPES.filter(type => !/^(audio|video)\//.test(type)));
@@ -22,7 +21,8 @@ export function decodedFile(value: AttachmentBytes): File {
 export type SelectedChatFile = {
   current(): boolean;
   read(current: () => boolean): Promise<File | undefined>;
-  edit(compose: (draft: string, source?: SummarySource) => void, current: () => boolean, question?: string): void;
+  prompt?: string;
+  commit?(current: () => boolean): Promise<boolean>;
 };
 
 export type ChatFile = {id:string;data:string;mimeType:string;name:string};

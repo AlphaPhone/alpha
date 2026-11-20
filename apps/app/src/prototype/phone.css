@@ -796,10 +796,8 @@ button[aria-label$=" on or off"][aria-pressed]::before { content:""; position:ab
 .mail-folder-check{margin-inline-start:auto;width:18px;height:18px;mask-image:url('/icons/lucide/check.svg');-webkit-mask-image:url('/icons/lucide/check.svg')}
 @media(hover:hover){.mail-folder-option:not(:disabled):hover{background:var(--s2)}}
 
-.note-source-dialog .content-question-help{font-size:.875em;color:var(--mut);margin:0 0 16px;line-height:1.5}
 .note-source-dialog textarea{display:block;border:1px solid var(--line);border-radius:12px;background:var(--s1);color:inherit;resize:vertical;min-height:72px}
 .note-source-dialog textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-.note-source-dialog button.content-question-primary{background:var(--acc);color:var(--alpha-white)}
 .note-source-dialog footer{flex-direction:row-reverse}
 .note-source-dialog footer button{flex:1 1 120px}
 .note-source-dialog [role=status]:empty{display:none}
@@ -900,15 +898,6 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 
 .mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
-.content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
-.content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}
-.content-question-source{font-size:13px;line-height:1.4;color:var(--source-mut,var(--alpha-gray-66));margin:0 0 12px;overflow-wrap:anywhere}
-.content-question-dialog .content-question-help{font-size:13px;line-height:1.4;margin:0 0 12px;color:var(--source-mut,var(--alpha-gray-66))}
-.content-question-dialog label{font-size:14px;font-weight:500}
-.content-question-dialog textarea{font-size:16px!important;line-height:1.4!important;resize:none;background:var(--source-s2,var(--alpha-gray-f3));border:0;border-radius:12px;min-height:72px}
-.content-question-dialog footer{gap:8px;padding-top:4px}
-.content-question-dialog footer button{font-size:15px;font-weight:600;min-height:48px}
-.content-question-dialog button.content-question-primary{background:var(--source-acc,var(--alpha-blue));color:var(--alpha-white)}
 
 .mail-addresses{min-width:0;flex:1;overflow-wrap:anywhere}
 .mail-addresses summary{display:block;list-style:none;cursor:pointer;min-height:44px}
@@ -1216,6 +1205,7 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .chat-pending-files{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px}
 .chat-pending-files button{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:42px;padding:4px 10px;border:1px solid var(--line);border-radius:18px;background:var(--s2);color:var(--fg);overflow-wrap:anywhere;text-align:left}
 .chat-file-chip{display:inline-flex;align-items:center;max-width:100%;background:var(--s2);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.chat-file-label{display:flex;align-items:center;gap:6px;min-width:0;padding:4px 0 4px 10px;overflow-wrap:anywhere}
 .chat-file-chip img{width:26px;height:26px;object-fit:cover;border-radius:6px}
 .chat-file-chip button{border:0;background:transparent;border-radius:0}.chat-file-chip button:last-child{min-width:44px;justify-content:center}
 .chat-pending-files .i{flex:none;width:16px;height:16px}

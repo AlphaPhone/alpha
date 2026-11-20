@@ -1,11 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync, mkdtempSync, writeFileSync, rmSync} from 'node:fs';
-import {createRequire} from 'node:module';
-import {tmpdir} from 'node:os';
-import {join, resolve} from 'node:path';
-import {pathToFileURL} from 'node:url';
-import {build} from 'esbuild';
+import {readFileSync} from 'node:fs';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 
 // The extracted saver remains independently checked; production retains the stronger
@@ -86,43 +81,6 @@ test('the poll is idle only off the Browser view with the page already hidden', 
   assert.equal(surfacePollIdle('browser', 'hidden', 'hidden'), false);
   assert.equal(surfacePollIdle('home', '', 'hidden'), false, 'geometry must be resent first');
   assert.equal(surfacePollIdle('home', '{"id":"b1"}', 'hidden'), false);
-});
-
-test('a question dialog that cannot open removes itself and its listeners', async () => {
-  const {JSDOM} = createRequire(import.meta.url)('jsdom');
-  const dom = new JSDOM('<div class="os"><button id="opener"></button></div>');
-  const names = ['window', 'document', 'HTMLElement', 'getComputedStyle'], previous = names.map(name => Object.getOwnPropertyDescriptor(globalThis, name));
-  const directory = mkdtempSync(join(tmpdir(), 'content-question-'));
-  try {
-    for (const name of names) Object.defineProperty(globalThis, name, {configurable: true, writable: true, value: name === 'window' ? dom.window : dom.window[name]});
-    globalThis.getComputedStyle = element => dom.window.getComputedStyle(element);
-    const bundle = await build({entryPoints: [resolve('apps/app/src/browser/content-question.ts')], bundle: true, format: 'esm', platform: 'node', write: false,
-      plugins: [{name: 'ports', setup(b) { b.onResolve({filter: /local-ocr$/}, args => ({path: args.path, namespace: 'fixture'})); b.onLoad({filter: /.*/, namespace: 'fixture'}, () => ({contents: 'export const recognizeLocalText=async()=>({text:""});'})); }}]});
-    const file = join(directory, 'content-question.mjs');
-    writeFileSync(file, bundle.outputFiles[0].text);
-    const {reviewContentQuestion} = await import(pathToFileURL(file));
-    dom.window.HTMLDialogElement.prototype.showModal = function () { throw new dom.window.DOMException('cannot open', 'InvalidStateError'); };
-    const closed = [];
-    const open = () => reviewContentQuestion({name: 'Example', text: 'page text', current: () => true, compose() {}, closed: dismissed => closed.push(dismissed)});
-    assert.throws(open, /cannot open/);
-    assert.deepEqual(closed, [false], 'the caller is told once that the review is gone');
-    assert.equal(dom.window.document.querySelector('dialog'), null);
-    const back = new dom.window.Event('alpha-back', {cancelable: true});
-    dom.window.dispatchEvent(back);
-    assert.equal(back.defaultPrevented, false, 'no Back handler is left behind');
-    // A dialog that opens still stays open and owns Back until dismissed.
-    dom.window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
-    const close = open();
-    assert.ok(dom.window.document.querySelector('.os dialog'));
-    const owned = new dom.window.Event('alpha-back', {cancelable: true});
-    dom.window.dispatchEvent(owned);
-    assert.equal(owned.defaultPrevented, true);
-    close();
-    assert.deepEqual(closed, [false, true]);
-  } finally {
-    names.forEach((name, index) => { if (previous[index]) Object.defineProperty(globalThis, name, previous[index]); else delete globalThis[name]; });
-    rmSync(directory, {recursive: true, force: true});
-  }
 });
 
 test('approved opens reuse an untouched New tab or the agent tab and never a user page', () => {

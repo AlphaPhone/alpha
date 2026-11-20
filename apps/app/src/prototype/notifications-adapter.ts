@@ -2,9 +2,8 @@ import {alphaClient} from '../runtime/alpha-client';
 import {connectionController} from '../runtime/connection-ui';
 import { registerPlugin } from '../platform-plugins';
 import { Capacitor } from '@capacitor/core';
-import { reviewContentQuestion } from '../browser/content-question';
-import { sensitiveReadingText } from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { createOwnNoticeRevisions, noticeKind, noticeCurrent, noticeExcerpt, noticeReviewable } from './context-selection';
+import { noticeQuestionFile, stageNoticeQuestion } from './own-notice-question';
 import { isMvpView } from './mvp-features';
 import { formatTime } from './locale-time';
 const opaque=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -169,35 +168,32 @@ export function installNotificationsAdapter(Component: any) {
     else this.toast('Ongoing');
    },{axis:'x'});
    const select=()=>{this.alphaNoticeSelection=ownNotificationSelection(n)?{id:n.id,revision:n.revision,source:n.source,...(n.kind===undefined?{}:{kind:n.kind})}:undefined;};
-   /** Review scope: this one Alpha Phone notification's shown title and text, editable before
-    * anything reaches the conversation draft. Other apps' and hosted rows offer no question.
-    * The list is read again when the owner continues, so a dismissed, replaced or updated
-    * notification (or one hidden by a lock) adds nothing and never becomes its neighbor. */
+   /** Stage the chosen Alpha Phone notification after rechecking its exact row and visibility. */
    const ask=()=>{
-    if(this.swallowed()||!current()||!noticeReviewable(n))return;
+    if(this.swallowed()||!current()||!noticeReviewable(n)||alphaClient.getState().context.sensitive)return;
+    const excerpt=noticeExcerpt(n),file=noticeQuestionFile('Alpha Phone notification.txt',excerpt);
+    if(!file){self.toast('Unavailable');return;}
     retireQuestion(self);select();self.publishAlphaNoticeSelection();
     const lease=self.alphaNoticeQuestionLease={};
-    const reviewed={id:n.id,revision:n.revision,source:n.source},excerpt=noticeExcerpt(n);
+    const reviewed=key(n);
     const owned=()=>self.alphaNoticeQuestionLease===lease;
-    const live=()=>owned()&&self.alphaNoticesLive&&!document.hidden&&shadeActive(self)&&noticeCurrent(reviewed,self.alphaNotices);
-    const refused=()=>{self.toast('Gone');void self.refreshAlphaNotices();};
-    self.alphaNoticeQuestion=reviewContentQuestion({name:(n.appLabel||'Alpha Phone')+' notification',text:excerpt,question:'Help me with this notification.',current:live,validate:text=>!sensitiveReadingText(text),closed:dismissed=>{
-     if(!owned())return;
-     self.alphaNoticeQuestion=undefined;
-     // The dialog closes before Continue starts the final list read.
-     if(dismissed)retireQuestion(self);
-    },compose:draft=>{void (async()=>{
-     if(!owned())return;
-     try{
-      if(!live()){refused();return;}
-      const epoch=self.alphaNoticeEpoch;
-      const fresh=(await native.list()).items,same=fresh.find((row:Notice)=>row.id===reviewed.id&&row.source===reviewed.source);
-      if(!owned())return;
-      if(epoch!==self.alphaNoticeEpoch||!live()||!noticeCurrent(reviewed,fresh)||!same||!noticeReviewable(same)||noticeKind(same)!==noticeKind(n)||noticeExcerpt(same)!==excerpt){refused();return;}
-      self.api(self.S().view).composeContentQuestion(draft);
-     }catch{if(owned()&&self.alphaNoticesLive)self.toast('Couldn’t check');}
-     finally{if(owned())retireQuestion(self);}
-    })();}});
+    let failure='Gone';
+    self.alphaNoticeQuestion=stageNoticeQuestion({
+     file,prompt:'Help me with this notification.',
+     current:()=>owned()&&currentVisit()&&!alphaClient.getState().context.sensitive&&noticeCurrent(reviewed,self.alphaNotices),
+     attach:selection=>self.api(self.S().view).attachSelectedFile(selection),
+     prepare:async admitted=>{
+      try{
+       const epoch=self.alphaNoticeEpoch;
+       const fresh=(await native.list()).items;
+       const same=fresh.find(row=>row.id===reviewed.id&&row.source===reviewed.source);
+       return epoch===self.alphaNoticeEpoch&&admitted()&&noticeCurrent(reviewed,fresh)&&!!same&&
+        noticeReviewable(same)&&noticeKind(same)===noticeKind(n)&&noticeExcerpt(same)===excerpt;
+      }catch{failure='Couldn’t check';return false;}
+     },
+     failed:()=>{if(owned()&&self.alphaNoticesLive){self.toast(failure);if(failure==='Gone')void self.refreshAlphaNotices();}},
+     closed:()=>{if(owned())retireQuestion(self);},
+    });
    };
    return {canAsk:noticeReviewable(n),ask,askLabel:'Ask Alpha about this '+(n.appLabel||'Alpha Phone')+' notification',id:n.id,d:out.ic.bell,who:n.source==='external'?n.appLabel:n.title||'Alpha Phone',text:n.source==='external'&&n.title!==n.appLabel?[n.title,n.text].filter(Boolean).join(' · '):n.text,time:formatTime(new Date(n.at)),tx:0,op:1,down:(event:unknown)=>{if(!current())return;select();return swipe.down(event);},up:(event:unknown)=>{if(currentVisit())window.setTimeout(()=>{if(currentVisit())self.publishAlphaNoticeSelection();},0);return swipe.up(event);},open:()=>{
     const row=current();

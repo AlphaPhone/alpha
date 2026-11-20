@@ -852,20 +852,21 @@
   {
     "sources": [
       "apps/app/src/browser/reading-review.ts",
-      "apps/app/src/browser/content-question.ts"
+      "apps/app/src/prototype/browser-adapter.ts",
+      "apps/app/src/browser/page-question.ts"
     ],
     "stateMapping": {
       "phase/isolated/ready/sensitive": "isolated-world readiness handshake, native extraction and per-page sensitive refusal",
       "token/approved/reviewedExcerpt/consumed": "expiring, single-use review bound to exact extracted bytes",
       "owner/epoch/navigation/capturedEpoch/capturedNavigation": "current account and page lifetime at consumption",
-      "draft/userText": "question review inserts a draft; with an empty excerpt only user-supplied text that passes the sensitive check can be approved"
+      "draft": "explicit page question may stage a bounded public excerpt for the current request"
     },
     "abstractions": [
       "One excerpt represented by identity, two navigation changes and owner changes, and two abstract expiration ticks. Native reading/token and local playback have different wall-clock durations.",
       "Sensitivity heuristics and extraction traversal/byte limits are external predicates with source tests. Sensitivity is decided per page.",
-      "Ask about page has an empty-excerpt fallback when the page cannot be read in isolation; Read aloud has none. A sensitive page opens no review on either path.",
+      "A public page question can use an isolated public fetch without native reading support. An unavailable or sensitive page yields a no-source notice, which is not an excerpt draft.",
       "The web build's reading review has no token or expiry and is modeled in WebReadingReview; the token fields describe the native path.",
-      "Question approval releases reviewed text into the local composer. Sending and agent-response lifecycle remain in AssistantConversation."
+      "An explicit page question authorizes staged public text for that request. Sending and agent-response lifecycle remain in AssistantConversation."
     ],
     "path": "specs/quint/services/BrowserReadingState.qnt",
     "module": "BrowserReadingState",
@@ -880,7 +881,7 @@
       "pageNavigationCancelsTest",
       "questionDraftTest",
       "sensitiveThenNextPageTest",
-      "fallbackNeedsUserTextTest"
+      "unsupportedNativeAllowsPublicQuestionTest"
     ],
     "invariants": [
       "TypeOK",
@@ -888,8 +889,7 @@
       "CurrentReading",
       "SingleUseToken",
       "SensitiveRefused",
-      "DraftHasReviewedContent",
-      "FallbackNeverSpeaks"
+      "DraftHasReviewedContent"
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -903,9 +903,7 @@
       "plugins/plugin-native-browser-surface/android/src/main/java/ai/eliza/plugins/browsersurface/BrowserPageReading.java"
     ],
     "witnesses": [
-      "FallbackDraftWitness",
-      "ReadableAfterSensitivePageWitness",
-      "SensitivePasteHeldWitness"
+      "ReadableAfterSensitivePageWitness"
     ]
   },
   {
@@ -4056,6 +4054,7 @@
       "apps/app/src/prototype/workflow-adapter.ts",
       "apps/app/src/runtime/workflow-device-contract.ts",
       "apps/app/src/prototype/workflow-notice-question.ts",
+      "apps/app/src/prototype/own-notice-question.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowNoticeTaps.java",
       "apps/app/src/ui/workflows/workflow-messages.ts"
     ],
@@ -4109,8 +4108,8 @@
         "name": "reviewWorkflowNoticeQuestion"
       },
       {
-        "path": "apps/app/src/prototype/workflow-notice-question.ts",
-        "name": "discard"
+        "path": "apps/app/src/prototype/workflow-adapter.ts",
+        "name": "dismissTap"
       },
       {
         "path": "android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowNoticeTaps.java",
@@ -4125,7 +4124,7 @@
       "ledger/question": "the tap row of the shared notice route ledger (new, pending, consumed) and its Ask flag",
       "tapBusy/tapRequested/tapDeferred/recheck": "the read in progress and the three ways another check is owed",
       "operation/generation/epoch/staleDrop": "the workflow operation, the view generation, the generation a read began under, and a read that ended under another one",
-      "noticeQuestion/asked/composed": "the open question review and its outcome",
+      "noticeQuestion/asked/composed": "the notification attachment staging operation and its outcome",
       "openedTap/runOpen/opens": "the token of a run opened before its consume, the open run, and how often it was opened"
     },
     "abstractions": [
@@ -4133,7 +4132,7 @@
       "Taps for another account, unavailable executions and a failed native lookup leave the tap pending without a new check; they are not modeled.",
       "The authenticated receipt and workflow reads are one step. Their failure reports the tap as retained.",
       "A view reset drops the running operation without its completion step, so a deferred check then waits for the next operation or event. The model keeps that behavior.",
-      "The native ledger is the shared notice route contract; here it is one row that a tap makes pending, a canceled question returns to new, and a consume ends."
+      "The native ledger is the shared notice route contract; here it is one row that a tap makes pending, an explicit dismissal returns to new, and a consume ends."
     ],
     "sharedSources": [
       "plugins/plugin-native-notifications/android/src/main/java/ai/eliza/plugins/notifications/NoticeRoutes.java",

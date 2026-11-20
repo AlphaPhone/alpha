@@ -1796,7 +1796,7 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
       out.pv.meta = [
         out.pv.meta,
         [
-          volumeLabel(volume),
+          ...(volume ? [volumeLabel(volume)] : []),
           ...parentOf(path).split("/").filter(Boolean),
         ].join(" › "),
       ]

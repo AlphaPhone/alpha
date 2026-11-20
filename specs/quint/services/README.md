@@ -18,7 +18,7 @@ listed in `manifest.json`. All transitions are local specification execution.
 | [NoticesAndCaches](NoticesAndCaches.qnt) | epoch/phase/retry, notice/claim/posted/consumed/acknowledgements, cacheOwner/cacheEpoch/cacheAge/cacheWritePending | `CacheOwnerIsolation`, `PostedOwnerIsolation`, `OneAcknowledgement`, `ClaimExclusive`, `NoPostAfterConsume` |
 
 | [BrowserSiteState](BrowserSiteState.qnt) | privateTab/thirdParty/passkeys/phase, decisions/prompt/permissionChoice/androidAllowed, authAttempts/passwordPresent/passwordSubmitted, autofillExposed/authSave | `PrivateCookiePolicy`, `PrivatePermissionPolicy`, `CurrentPermission`, `PasskeysDisabled`, `StandardHttpAuthManual`, `PasswordLifetime` |
-| [BrowserReadingState](BrowserReadingState.qnt) | phase/isolated/ready/sensitive, token/approved/reviewedExcerpt/consumed, owner/epoch/navigation/capturedEpoch/capturedNavigation, draft/sent | `ReviewedSpeech`, `CurrentReading`, `SingleUseToken`, `SensitiveRefused`, `QuestionDoesNotSend` |
+| [BrowserReadingState](BrowserReadingState.qnt) | phase/isolated/ready/sensitive, token/approved/reviewedExcerpt/consumed, owner/epoch/navigation/capturedEpoch/capturedNavigation, draft | `ReviewedSpeech`, `CurrentReading`, `SingleUseToken`, `SensitiveRefused`, `DraftHasReviewedContent` |
 | [BrowserDownloads](BrowserDownloads.qnt) | phase/kind/reviewed/reviewedNavigation, cookieSent/targetOrigin/sourceOrigin/redirects, captureToken/nextChunk/chunks/pendingFile, published/completed/entry/persisted | `CookieOrigin`, `PrivateListNeverPersisted`, `ReviewedPublication`, `CompletedFromEvidence`, `CapturedBytesOrdered`, `CancelledCaptureCleaned` |
 | [ScanDocument](ScanDocument.qnt) | ordered pages/text layers, serialized CAS saves, visibility, export retry lock | `TextStaysWithPage`, `WriterSerialized`, `ImmutableExport`, `UnknownExportLocked`, `ClosedNoWriter` |
 
@@ -107,8 +107,8 @@ WebView default WebAuthn NONE; this model does not establish a platform readback
 sensor kind represent the per-origin permission record.
 
 `BrowserReadingState` models isolated extraction, sensitive-page refusal, an
-expiring one-use token, owner/navigation fences and cancellation. Question review
-releases a local draft and keeps Send separate. Browser DOM heuristic correctness
+expiring one-use token, owner/navigation fences and cancellation. An explicit page question can stage one bounded public excerpt for the current
+request. An unavailable or sensitive page yields only a no-source notice. Browser DOM heuristic correctness
 and extraction limits retain their source tests.
 
 `BrowserDownloads` separates OS public transfers, signed in-app fetches, and local

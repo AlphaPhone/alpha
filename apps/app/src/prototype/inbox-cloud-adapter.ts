@@ -11,7 +11,7 @@ import {mailSenderImage} from '../runtime/mail-sender-image';
 import {decodeMailPreview} from '../runtime/mail-preview';
 import {alphaClient} from '../runtime/alpha-client';
 import {reviewOwnNoticeQuestion} from './own-notice-question';
-import {configureGmailBackground,withdrawGmailBackground,releaseGmailQuestion,pendingGmailNotice,consumeGmailNotice,onGmailNotice} from '../runtime/gmail-background';
+import {configureGmailBackground,withdrawGmailBackground,pendingGmailNotice,consumeGmailNotice,onGmailNotice} from '../runtime/gmail-background';
 import {cachedDevicePreferences,initializeDevicePreferences} from '../browser/device-preferences';
 import {prepareMailHtml,fitMailFrame} from '../runtime/mail-html';
 import {readGmailAccountChoice,saveGmailAccountChoice} from '../runtime/gmail-account-selection';
@@ -96,7 +96,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
         if(!agent&&current()&&noAgentNoticeToken!==tap.token){noAgentNoticeToken=tap.token;noticeShell.toast('Agent not ready');}
         if(!agent||!tap.messageId||!tap.threadId||!live())return;
         // Explicit Ask reads the exact current message; background delivery never fetches its body.
-        // Only the subject/snippet selected here enters review, never body or attachments.
+        // The staged excerpt only contains the subject and snippet.
         let read:Awaited<ReturnType<typeof binding.client.gmailRead>>;
         try{read=await binding.client.gmailRead(tap.grantId,tap.messageId,new AbortController().signal);}
         catch{if(live()){accounts=rows;accountsChecked=true;accountsFromDisk=false;accountsSession=binding.sessionId;folder='inbox';spamTrashSearch=false;publish({q:null,open:null});selectAccount(account,true);noticeShell.openView?.('inbox',{open:null,q:null});noticeShell.toast('Unavailable');}return;}
@@ -107,7 +107,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
           const again=await pendingGmailNotice();if(!live()||again?.token!==tap.token||!again.question||again.generation!==tap.generation)return false;
           const fresh=await binding.client.gmailRead(tap.grantId,tap.messageId!,new AbortController().signal);
           return live()&&fresh.historyId===revision&&fresh.message.id===tap.messageId&&fresh.message.threadId===tap.threadId&&fresh.message.subject===excerpt.title&&fresh.message.snippet===excerpt.text;
-        },consume:()=>consumeGmailNotice(tap.token),release:()=>releaseGmailQuestion(tap.token),compose:draft=>noticeShell.api(noticeShell.S().view).composeContentQuestion(draft),report:message=>noticeShell.toast(message),closed:()=>{closeMailQuestion=undefined;}});
+        },consume:()=>consumeGmailNotice(tap.token),attach:selection=>noticeShell.api(noticeShell.S().view).attachSelectedFile(selection),report:message=>noticeShell.toast(message),closed:()=>{closeMailQuestion=undefined;}});
         return;
       }
       // Consumption rechecks the native generation. A tap opens only the Inbox list, never marks a message read.

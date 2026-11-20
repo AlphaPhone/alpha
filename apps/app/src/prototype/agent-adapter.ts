@@ -875,7 +875,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.dialogBackObserver = new MutationObserver(() => updateBackAvailability(this));
     this.dialogBackObserver.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['open','inert']});
     // A refused send puts its text back with no line under the composer (owner, 2026-11-03).
-    this.composerDraft=new AssistantDraftController(assistantDraftStore,()=>String(this.S().draft||''),(text,expected,current)=>new Promise<void>(resolve=>{if(!this.live||current&&!current()){resolve();return;}this.setState((previous:Shell)=>{if(current&&!current()||expected!==undefined&&String(previous.draft||'')!==expected)return null;if(this.startupDraft!==null)this.startupDraft=undefined;this.reviewedSourceDraft=null;return {draft:text};},resolve);}),()=>{if(this.live)this.setState({});},{notSent:''});
+    this.composerDraft=new AssistantDraftController(assistantDraftStore,()=>String(this.S().draft||''),(text,expected,current)=>new Promise<void>(resolve=>{if(!this.live||current&&!current()){resolve();return;}this.setState((previous:Shell)=>{if(current&&!current()||expected!==undefined&&String(previous.draft||'')!==expected)return null;if(this.startupDraft!==null)this.startupDraft=undefined;return {draft:text};},resolve);}),()=>{if(this.live)this.setState({});},{notSent:''});
     this.refreshDraftBinding=()=>{this.draftBindingAbort?.abort();if(residentAlwaysPresent&&!connectionController.getSnapshot().session){this.draftBindingTask=Promise.resolve();return;}const controller=this.draftBindingAbort=new AbortController();this.draftBindingTask=connectionController.assistantDraftBinding(controller.signal).then(async key=>{if(!this.live||controller.signal.aborted)return;const review=await firstSendReview(this,key,controller.signal);if(!this.live||controller.signal.aborted)return;await this.composerDraft.open(review.open??key);if(review.moved&&this.composerDraft.binding===key)settleFirstSendSlot(this,review.moved,key,String(this.S().draft||''),()=>this.live&&this.composerDraft.binding===key);}).catch(()=>{if(this.live&&!controller.signal.aborted)this.composerDraft.unavailable();});};
     this.refreshDraftBinding();
     const initialConnection = connectionController.getSnapshot();
@@ -905,7 +905,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.startupDraft=null;
         cancelMessageContext(this);
         this.cancelVoiceScrollFollow();
-        this.closeSummaryReview?.();this.chatImagePreview=null;this.cameraAttachment=null;this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.mailAttachment=null;this.fileAttachments=[];
+        this.closeSummaryReview?.();this.chatImagePreview=null;this.cameraAttachment=null;this.transcriptAttachment=null;this.mailAttachment=null;this.fileAttachments=[];
         clearMapsSelection();
         this.connectionSession = session;
         alphaClient.disconnect();
@@ -916,7 +916,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const history = connectionController.getSnapshot().history;
       if (history && history.sessionId === session && this.restoredHistory !== history) {
-        if(!history.automatic){this.ownerConversationChoices=(this.ownerConversationChoices||0)+1;this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.reviewedSourceDraft=null;this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
+        if(!history.automatic){this.ownerConversationChoices=(this.ownerConversationChoices||0)+1;this.draftRecoveryAbort?.abort();this.draftBindingAbort?.abort();this.composerDraft.retire(false);draftBindingAfterPaint=true;cancelMessageContext(this);this.transcriptAttachment=null;this.cameraAttachment=null;this.mailAttachment=null;this.fileAttachments=[];}
         this.restoredHistory = history;
         const attachmentSession=connectionController.getSnapshot().session;
         if(attachmentSession)void restoreAttachments(history.messages,attachmentSession,history.conversationId).then(messages=>{
@@ -1646,8 +1646,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
     api.attachSelectedFile=(selection: SelectedChatFile)=>pickChatAttachments(this, selection);
-    api.composeContentQuestion=(draft:string,source?:Source)=>{
-      this.reviewedSourceDraft={draft,source:sourceOf(source)};
+    api.composeContentQuestion=(draft:string)=>{
       context(this);this.setState({chat:'sheet',shade:false,draft});
     };
     api.assist = (notice: string) => {
@@ -1692,18 +1691,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
     return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
   };
-  const selectedFiles=new WeakMap<ChatFile,{selection:SelectedChatFile; thumbnail?:string}>();
-  async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile){
+  async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile):Promise<boolean>{
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
     const camera=shell.cameraAttachment;
-    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding)return;
-    if (selection && shell.fileAttachmentScope===binding && existing.some(file=>selectedFiles.get(file)?.selection.current())) {
-      shell.setState({chat:'sheet',shade:false});
-      return;
-    }
+    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding)return false;
     const maximum=MAX_CHAT_UPLOAD_ATTACHMENTS-existing.length-(camera?1:0);
-    if(maximum<1){shell.toast('Remove an attachment before adding another.');return;}
+    if(maximum<1){shell.toast('Remove an attachment before adding another.');return false;}
     const abort=shell.chatAttachmentAbort=new AbortController();
     const current=()=>!abort.signal.aborted&&(!selection||selection.current())&&shell.live&&!document.hidden&&shell.S().view===view&&
       attachmentBinding()===binding&&shell.fileAttachments===existing&&shell.cameraAttachment===camera&&
@@ -1712,26 +1706,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     for(const event of ['pagehide','launcher-home','alpha:device-state'])window.addEventListener(event,retire,{signal:abort.signal});
     const unsubscribe=connectionController.subscribe(()=>{if(!current())abort.abort();});
     try{
+      if(!current())return false;
       const selected=selection ? await selection.read(current) : undefined;
-      if (!current() || (selection && !selected)) return;
+      if (!current() || (selection && !selected)) return false;
       const files:File[]=selected ? [selected] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
-      if(!current()||!files.length)return;
+      if(!current()||!files.length)return false;
       const encoded=await encodeChatAttachments(files);
-      if(!current())return;
-      if(!attachmentBatchFits([...existing,...encoded],camera?.image)){shell.toast('Choose fewer or smaller files.');return;}
+      if(!current())return false;
+      const additions = (selection ? encoded.filter(file=>!existing.some(item=>
+        file.name===item.name&&file.mimeType===item.mimeType&&file.data===item.data)) : encoded)
+        .map(file=>({...file,id:crypto.randomUUID()}));
+      if(!attachmentBatchFits([...existing,...additions],camera?.image)){shell.toast('Choose fewer or smaller files.');return false;}
+      if(selection?.commit&&(!await selection.commit(current)||!current()))return false;
       shell.fileAttachmentScope=binding;
-      const additions = encoded.map(file=>({...file,id:crypto.randomUUID()}));
-      if (selection && selected) {
-        const file=additions[0];
-        const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
-        selectedFiles.set(file, {selection,thumbnail});
-      }
       shell.fileAttachments=[...existing,...additions];
       if (selected) {
-        shell.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Explain this file'}));
+        shell.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:selection?.prompt??'Explain this file'}));
       } else if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
+      return true;
     }catch(error){
       if(current())shell.toast(errorNotice(error,'The attachment could not open.'),ERROR_TOAST);
+      return false;
     }finally{
       abort.abort();unsubscribe();
       if(shell.chatAttachmentAbort===abort){shell.chatAttachmentAbort=undefined;if(shell.live)shell.setState({});}
@@ -1835,22 +1830,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.attachFilesDisabled=!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding||this.messageEditTarget);
     out.hasPendingFiles=!!this.fileAttachments?.length;
     out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>{
-      const item=selectedFiles.get(file);
+      const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
       return {
-      id:file.id,name:file.name,reviewable:!!item,plain:!item,thumbnail:item?.thumbnail,document:!item?.thumbnail,
-      editLabel:'Edit excerpt from '+file.name,edit:()=>{
-        const binding=attachmentBinding(), draft=this.S().draft;
-        const current=()=>this.live && !document.hidden && this.fileAttachmentScope===binding &&
-          attachmentBinding()===binding && this.fileAttachments?.includes(file) && this.S().draft===draft &&
-          !this.S().typing && !this.draftSendPending && !this.composerDraft?.holding;
-        if(!item || !current())return;
-        if(!item.selection.current()){this.toast('Reopen the file to edit its excerpt.');return;}
-        item.selection.edit((text,source)=>{
-          if(!current())return;
-          this.fileAttachments=this.fileAttachments.filter((entry:ChatFile)=>entry!==file);
-          this.api(this.S().view).composeContentQuestion(text,source);
-        },current,draft==='Explain this file'?undefined:draft);
-      },
+      id:file.id,name:file.name,previewable:!!thumbnail,thumbnail,document:!thumbnail,
+      previewLabel:'Preview attached '+file.name,
+      preview:()=>{if(thumbnail&&this.fileAttachments?.includes(file)){this.chatImagePreview=thumbnail;this.setState({});}},
       removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
         if(this.S().typing||this.draftSendPending||this.composerDraft?.holding)return;
         this.fileAttachments=(this.fileAttachments??[]).filter((item:ChatFile)=>item!==file);
@@ -2132,7 +2116,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(residentAlwaysPresent&&!readiness.session){this.toast(agentPendingText(readiness),ERROR_TOAST);return;}
     // Scanning is not a Camera mode: asking to scan in Camera opens scan review on one frame, on this phone.
     if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraScanRequested(text)&&requestCameraScan()){if(fromComposer)this.setState({draft:''});return;}
-    if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim())){if(fromComposer)this.setState({draft:''});return;}
+    if(!hasBinaryAttachment&&!this.messageEditTarget&&s.view==='camera'&&cameraFrameQuestionRequested(text)&&askAboutCameraFrame(text.trim()))return;
     const editTarget:ConversationMessageTarget|undefined=this.messageEditTarget,replyTarget:ConversationMessageTarget|undefined=fromComposer?this.messageReplyTarget:undefined,editView=s.view;
     if(editTarget){
       // An app action must not replace or abandon the user's open edit.
@@ -2153,7 +2137,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.toast(errorNotice(error,'Couldn’t open the edited conversation. Nothing was sent.'),ERROR_TOAST);return;}
       finally{this.draftSendPending=false;}
     }
-    let sourceDraft=fromComposer&&this.reviewedSourceDraft?.draft===text?sourceOf(this.reviewedSourceDraft.source):undefined;
+    let sourceDraft:Source|undefined;
     context(this);
     const transcript=fromComposer?this.transcriptAttachment:null;
     const mail=fromComposer?(this.mailAttachment??null):null;
@@ -2192,7 +2176,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       finally{this.draftSendPending=false;}
     }
-    const reviewedSource=fromComposer?this.reviewedSourceDraft:null;if(fromComposer)this.reviewedSourceDraft=null;
     // Everything this send later shows belongs to the agent connection it was sent on.
     const sameChat=()=>connectionController.getSnapshot().session?.sessionId===sessionId;
     const userId=crypto.randomUUID(),streamedId=crypto.randomUUID();let streamed=false;
@@ -2339,7 +2322,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // Nothing reached the agent: put the text back and drop the unsent bubble. Never resend.
         // The text back in the composer says it was not sent; only a refusal with its own reason is
         // shown, and the private local preview keeps a held composer send's refusal out of toasts as before.
-        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{sameChat:sendChat,stayed:ownerStayed}):'kept';if(reviewedSource&&!this.reviewedSourceDraft)this.reviewedSourceDraft=reviewedSource;if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
+        if(this.live){const previewHeld=fromComposer&&privateLocalPreviewEnabled&&this.composerDraft?.holding===true;this.setState((previous:Shell)=>({msgs:previous.msgs.filter((item:Shell)=>item.id!==userId)}));const released=fromComposer?releaseComposerSend(this,heldKey,heldText,undurableText,{sameChat:sendChat,stayed:ownerStayed}):'kept';if(!previewHeld){if(released==='lost')this.toast(UNSENT_NOT_RESTORED,ERROR_TOAST);else if(e instanceof NotDispatched)this.toast(message);else if(e instanceof AlphaClientError&&(['unconfigured','sensitive','busy'].includes(e.code)||(e as {refusedBeforeTurn?:unknown}).refusedBeforeTurn===true))this.toast('Not sent. '+message);else if(released==='restored')this.toast('Not sent. Your message is back in the composer.');else if(!fromComposer)this.toast('Not sent.');}}
         else if(fromComposer)this.composerDraft?.release();
       }else{
         const sessionRetired=attempt.residentSessionRetired===true;

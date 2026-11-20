@@ -579,7 +579,7 @@ test('loop J01 in the web build: a scanned event remains in review without an au
   expect(foreign).toEqual([]);
 });
 
-test('loop J03 in the web build: a chosen document can be reviewed for a question, and with no agent nothing is sent or saved', async ({ page }) => {
+test('loop J03 in the web build: a chosen document stages locally, and with no agent nothing is sent or saved', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page);
   await page.addInitScript(offline);
@@ -595,14 +595,13 @@ test('loop J03 in the web build: a chosen document can be reviewed for a questio
   await button(page, 'Open garden-report.txt').click();
   await button(page, 'File actions').click();
   await button(page, 'Ask Alpha').click();
-  await page.getByRole('button', { name: /^Edit excerpt from / }).click();
-  const question = page.getByRole('dialog', { name: 'Ask about selected content' });
-  await expect(question.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue('Public fact: twelve raised beds.');
-  await question.getByRole('button', { name: 'Use in conversation', exact: true }).click();
+  const remove=button(page, 'Remove garden-report.txt');
+  await expect(remove).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Ask about selected content' })).toHaveCount(0);
   await button(page, 'Send').click();
   await expect(page.locator('.alpha-connection').getByText('Android only', { exact: true })).toBeVisible();
   // The refused send gets its text back with no line under the composer (owner, 2026-11-03).
-  await expect.poll(() => page.locator('textarea[data-alpha-composer]').evaluateAll(fields => fields.some(field => (field as HTMLTextAreaElement).value.includes('Public fact: twelve raised beds.')))).toBe(true);
+  await expect.poll(() => page.locator('textarea[data-alpha-composer]').evaluateAll(fields => fields.some(field => (field as HTMLTextAreaElement).value==='Explain this file'))).toBe(true);
   await expect(page.getByRole('status', { name: 'Assistant draft status' })).toHaveCount(0);
   await expect(page.getByText('Your message is back in the composer')).toHaveCount(0);
   await expect(page.getByText('Review summary note', { exact: true })).toHaveCount(0);

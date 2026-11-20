@@ -1,39 +1,7 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openLegacyNotes} from './helpers/legacy-notes';
-/*
- * Journey J03: Inbox attachment -> Files -> reviewed document question -> reviewed summary note
- * with a verified source reference, driven start to finish through rendered controls in the
- * browser build with the development agent profile.
- *
- * Loop covered in one test:
- *  1. A development incoming email with a text attachment arrives ("Device controls" ->
- *     "Incoming email"). Inbox -> message -> attachment review -> "Save to Files".
- *  2. Files -> Internal storage -> open the saved document -> "Ask Alpha" -> review/trim the excerpt ->
- *     "Use in conversation" -> Send.
- *  3. "Review summary note": Cancel saves nothing; then edit and "Save reviewed note".
- *  4. Reload: the note persists once with its source reference; tapping the attachment opens the
- *     exact source document.
- *  5. The source bytes change: the reference fails closed and opens nothing.
- *  6. The source file is deleted in Files: the reference fails closed and the note is unchanged.
- *
- * Synthetic fixtures (external boundaries only):
- *  - Mail: the development incoming-email simulator. No mailbox, provider or network is used.
- *    Provider (Gmail) attachment review and its Save to Files are covered separately by
- *    inbox-save-attachment.spec.ts with a closed provider fixture.
- *  - Agent: the development agent profile with a scripted reply.
- *  - Source change (step 5): the browser build has no rendered control that edits a stored
- *    file's bytes in place, so the stored bytes are changed directly in the Files database, the
- *    same external-change simulation source-reference-integrity.spec.ts uses. Everything that
- *    reacts to the change is the real UI.
- *
- * Native-only / not provable here:
- *  - A real mailbox attachment, Android document-provider grants (expired URI, revoked account),
- *    and a provider file changing underneath a persisted URI grant.
- *  - A real agent's answer quality.
- *
- * A pass is source/test evidence only. It is not APK, emulator, AOSP image, device or
- * real-integration evidence.
- */
+// J03 covers Inbox → Save to Files → Ask Alpha → explicit Send in the development renderer.
+// A separately seeded retained note verifies that an older saved source still opens matching bytes.
 import {test,expect,type Page} from '@playwright/test';
 import {createHash} from 'node:crypto';
 import {returnToApps} from './app-navigation';
@@ -62,7 +30,7 @@ async function openLinkedSource(page:Page){
  await attachment.click();
 }
 
-test('J03: an Inbox attachment is saved to Files, analysed, and kept as a reviewed note whose source link opens the source and fails closed when it changes or is deleted',async({page})=>{
+test('J03: a saved Inbox attachment reaches Alpha only on Send and a retained source link still opens exact bytes',async({page})=>{
  await page.goto('/?mode=dev&tools=1');await ready(page);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await openConnectionDiagnostics(page);
@@ -108,48 +76,31 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  await expect(page.getByText('PRIVATE OMIT: do not send this line.',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
- await page.getByRole('button',{name:/^Edit excerpt from /}).click();
- const question=page.getByRole('dialog',{name:'Ask about selected content'});
- await expect(question.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(contents);
- await expect(question.getByRole('checkbox',{name:'Link source'})).toBeChecked();
- await question.getByRole('textbox',{name:'Content excerpt'}).fill(excerpt);
- await question.getByRole('button',{name:'Use in conversation',exact:true}).click();
- await expect(question).toHaveCount(0);
- // Composed only: nothing reaches the agent before Send.
+ await expect(page.getByRole('button',{name:'Remove garden-report.txt',exact:true})).toBeVisible();
+ await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
  expect(await agentMessages(page)).toEqual([]);
  await page.getByRole('button',{name:'Send',exact:true}).click();
- await expect(page.getByText('Review summary note',{exact:true})).toBeVisible();
+ await expect(page.getByText(reply,{exact:true})).toBeVisible();
  const sent=await agentMessages(page);
  expect(sent.map(m=>m.role)).toEqual(['user','assistant']);
- expect(sent[0].text).toContain(excerpt);
- expect(JSON.stringify(sent)).not.toContain('PRIVATE OMIT');
+ expect(sent[0].text).toContain('Explain this file');
  expect(sent[1].text).toBe(reply);
+ await expect(page.getByText('Review summary note',{exact:true})).toHaveCount(0);
+ expect(await notes(page)).toEqual([]);
 
- // ---- 3. Reviewed, editable summary note with a source reference ----
- expect(await notes(page)).toEqual([]);
- await page.getByText('Review summary note',{exact:true}).click();
- const review=page.getByRole('dialog',{name:'Save summary'});
- await expect(review.getByRole('textbox',{name:'Summary note text'})).toHaveValue(reply);
- await expect(review).toContainText('garden-report.txt');
- await review.getByRole('button',{name:'Cancel',exact:true}).click();
- expect(await notes(page)).toEqual([]);
- await page.getByText('Review summary note',{exact:true}).click();
- await review.getByRole('textbox',{name:'Summary note title'}).fill('Garden summary');
- await review.getByRole('textbox',{name:'Summary note text'}).fill('There are twelve raised beds.');
- await review.getByRole('button',{name:'Save reviewed note',exact:true}).click();
- await expect(review).toHaveCount(0);
- await expect(page.getByText('Summary note saved',{exact:true})).toBeVisible();
- // The saved card stays saved: it does not revert to a review, and choosing it is not a second Save.
- await expect(page.getByText('Review summary note',{exact:true})).toHaveCount(0);
- await page.getByText('Summary note saved',{exact:true}).click();
- await expect(review).toHaveCount(0);
- await expect(page.getByText('Summary note saved',{exact:true})).toHaveCount(1);
- await expect(page.getByText('Review summary note',{exact:true})).toHaveCount(0);
+ // ---- 3. Seed a source link written by a previous version ----
+ const sha256=createHash('sha256').update(contents).digest('hex');
+ const reference=await page.evaluate(async sha256=>{
+  const {registerPlugin}=await import('/src/platform-plugins.ts');
+  const files=registerPlugin<any>('AlphaFiles'),attachments=registerPlugin<any>('AlphaMailAttachments');
+  const selected=await files.storageSelect({path:'garden-report.txt'});
+  return (await attachments.retainSourceReference({selectionId:selected.selectionId,sha256})).reference;
+ },sha256);
+ expect(reference).toMatch(/^b1:[a-f0-9-]{36}$/);
+ const linked={id:'j03-retained-summary',kind:'text' as const,title:'Garden summary',body:'There are twelve raised beds.',documentSource:{version:1 as const,name:'garden-report.txt',mimeType:'text/plain',size:Buffer.byteLength(contents),sha256,reference}};
+ await returnToApps(page);await openLegacyNotes(page,[linked]);
  const retained=await notes(page);
- expect(retained).toHaveLength(1);
- expect(retained[0]).toMatchObject({title:'Garden summary',body:'There are twelve raised beds.'});
- expect(retained[0].documentSource).toEqual({version:1,name:'garden-report.txt',mimeType:'text/plain',size:Buffer.byteLength(contents),sha256:createHash('sha256').update(contents).digest('hex'),reference:expect.stringMatching(/^b1:[a-f0-9-]{36}$/)});
- expect(JSON.stringify(retained)).not.toContain('PRIVATE OMIT');
+ expect(retained).toHaveLength(1);expect(retained[0]).toMatchObject(linked);
 
  // ---- 4. Reload: note persists once; its verified source reference opens the source ----
  await page.reload();await ready(page);
