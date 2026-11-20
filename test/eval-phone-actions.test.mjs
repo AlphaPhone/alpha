@@ -27,6 +27,7 @@ test('the case set covers each device family, off-surface requests and requests 
 test('every proposal a run causes is rejected, late ones are never credited to the next case, and the phone is revoked', async () => {
   const token = 'synthetic-eval-token', proposals = [];
   let revokes = 0, late = false;
+  const opened = [], sentTo = [];
   const propose = type => proposals.push({id: `p${proposals.length}`, digest: 'd', state: 'pending', payload: {operation: {type}}});
   const server = http.createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -40,7 +41,7 @@ test('every proposal a run causes is rejected, late ones are never credited to t
       if (late) { late = false; propose('sms_compose'); }
       return;
     }
-    if (url === '/api/conversations') return send({conversation: {id: `c${Math.random().toString(16).slice(2)}`}});
+    if (url === '/api/conversations') { opened.push(`c${opened.length}`); return send({conversation: {id: opened.at(-1)}}); }
     if (url.endsWith('/decision')) {
       const proposal = proposals.find(item => url.includes(`/${item.id}/`));
       assert.equal(body.decision, 'reject');
@@ -48,6 +49,7 @@ test('every proposal a run causes is rejected, late ones are never credited to t
       return send({proposal});
     }
     if (url.endsWith('/messages')) {
+      sentTo.push(url.split('/')[3]);
       assert.match(req.headers['x-eliza-device-capabilities'], /phone\.call\.v1/);
       assert.equal(body.metadata.clientDevice.context.view, body.text.startsWith('Ring') ? 'maps' : 'home');
       if (/^Call/.test(body.text)) propose('phone_call');
@@ -72,6 +74,15 @@ test('every proposal a run causes is rejected, late ones are never credited to t
     assert.equal(revokes, 1);
     assert.match(result.source.caseSet, /^[a-f0-9]{64}$/);
     assert.ok(!('model' in result), 'the runtime model is not claimed as observed');
+    assert.equal(result.conversations, 'one-per-case');
+    assert.deepEqual(sentTo, opened, 'each case has its own conversation');
+    // As an owner uses a phone for a while: a run's cases follow each other in one conversation.
+    opened.length = 0; sentTo.length = 0;
+    const session = await evaluate({origin, token, cases, runs: 2, oneConversation: true});
+    assert.equal(session.conversations, 'one-per-run');
+    assert.deepEqual(sentTo, ['c0', 'c0', 'c0', 'c0', 'c1', 'c1', 'c1', 'c1']);
+    assert.deepEqual(session.rows.map(row => row.outcome), result.rows.map(row => row.outcome));
+    assert.equal(revokes, 2);
     await assert.rejects(evaluate({origin: 'https://agent.example.com', token}), /loopback/);
   } finally { server.closeAllConnections(); await stopLoopback(server); }
   assert.deepEqual(summarize([{id: 'a', family: 'f', run: 1, outcome: 'pass', proposed: [], ms: 5}, {id: 'a', family: 'f', run: 2, outcome: 'missing', proposed: [], ms: 9}]).unstableCases, ['a']);

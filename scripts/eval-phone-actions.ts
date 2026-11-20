@@ -12,7 +12,11 @@
  *
  *   bun scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
  *     --token-file <paired-machine-token> --output test-results/phone-actions.json \
- *     [--runs 3] [--pause-ms 4000] [--database <resident .elizadb>]
+ *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--database <resident .elizadb>]
+ *
+ * With --one-conversation every case of a run is sent in the same conversation, in order,
+ * the way an owner uses a phone for a while: each request then carries the turns before
+ * it, which is where history, caching and the per-minute limit show.
  *
  * A pass means the proposals matched the case's expectation. It says nothing about reply
  * wording, about actions that are not device proposals (Maps, Notes, Calendar records),
@@ -125,8 +129,8 @@ function loopback(origin: string) {
 interface Proposal { id: string; digest: string; state: string; payload?: { operation?: { type?: string } } }
 
 /** Sends every case `runs` times; every proposal a turn caused is rejected before the next turn. */
-export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs = 0, now = () => new Date() }: {
-  origin: string; token: string; cases?: readonly PhoneCase[]; runs?: number; pauseMs?: number; now?: () => Date;
+export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs = 0, oneConversation = false, now = () => new Date() }: {
+  origin: string; token: string; cases?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; now?: () => Date;
 }) {
   const base = loopback(origin), installationId = randomUUID();
   const device: Record<string, string> = { 'X-Eliza-Device-Id': installationId, 'X-Eliza-Device-Key': randomBytes(32).toString('hex'), 'X-Eliza-Device-Capabilities': selectDeviceCapabilities([], DEVICE_PROFILE).join(',') };
@@ -157,27 +161,31 @@ export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs
     };
     const rows: CaseRun[] = [];
     let strayProposals = 0;
-    for (let run = 1; run <= runs; run++) for (const item of cases) {
-      const row: CaseRun = { id: item.id, family: item.family, run, outcome: 'error', proposed: [], ms: 0 };
-      const began = Date.now();
-      try {
-        strayProposals += (await rejectUnseen()).length;
-        const { conversation } = await call<{ conversation: { id: string } }>('/api/conversations', { title: `Phone-action eval ${item.id}` });
-        const context = { view: item.view, revision: 1, sensitive: false, timeZone: 'America/New_York' };
-        const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation.id)}/messages`, { text: item.text, channelType: 'DM', metadata: { uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
-        row.proposed = (await rejectUnseen()).map(proposal => proposal.payload?.operation?.type ?? 'unknown');
-        row.outcome = judge(item.expect, row.proposed);
-        row.replyChars = String(reply.text ?? '').length;
-      } catch (error) {
-        row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200);
+    const open = async (title: string) => (await call<{ conversation: { id: string } }>('/api/conversations', { title })).conversation.id;
+    for (let run = 1; run <= runs; run++) {
+      const shared = oneConversation ? await open(`Phone-action eval run ${run}`) : null;
+      for (const item of cases) {
+        const row: CaseRun = { id: item.id, family: item.family, run, outcome: 'error', proposed: [], ms: 0 };
+        const began = Date.now();
+        try {
+          strayProposals += (await rejectUnseen()).length;
+          const conversation = shared ?? await open(`Phone-action eval ${item.id}`);
+          const context = { view: item.view, revision: 1, sensitive: false, timeZone: 'America/New_York' };
+          const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, { text: item.text, channelType: 'DM', metadata: { uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
+          row.proposed = (await rejectUnseen()).map(proposal => proposal.payload?.operation?.type ?? 'unknown');
+          row.outcome = judge(item.expect, row.proposed);
+          row.replyChars = String(reply.text ?? '').length;
+        } catch (error) {
+          row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200);
+        }
+        row.ms = Date.now() - began;
+        rows.push(row);
+        if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs));
       }
-      row.ms = Date.now() - began;
-      rows.push(row);
-      if (pauseMs > 0) await new Promise(resolve => setTimeout(resolve, pauseMs));
     }
     strayProposals += (await rejectUnseen()).length;
     await call('/api/client-devices/revoke', {}); revoked = true;
-    return { version: 1, kind: 'phone-actions', recordedAt: startedAt.toISOString(), expectedModel: AGENT_MODEL, deviceProfile: DEVICE_PROFILE, negotiatedCapabilities: negotiated, source: sourceBinding(), summary: { ...summarize(rows), strayProposals }, rows };
+    return { version: 1, kind: 'phone-actions', conversations: oneConversation ? 'one-per-run' : 'one-per-case', recordedAt: startedAt.toISOString(), expectedModel: AGENT_MODEL, deviceProfile: DEVICE_PROFILE, negotiatedCapabilities: negotiated, source: sourceBinding(), summary: { ...summarize(rows), strayProposals }, rows };
   } finally {
     if (!revoked) await call('/api/client-devices/revoke', {}).catch(() => {});
   }
@@ -188,10 +196,10 @@ if (import.meta.main) {
   const origin = flag('--origin'), tokenFile = flag('--token-file'), output = flag('--output');
   const runs = Number(flag('--runs') ?? 1), pauseMs = Number(flag('--pause-ms') ?? 0);
   if (!origin || !tokenFile || !output || !Number.isInteger(runs) || runs < 1 || !(pauseMs >= 0)) {
-    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--database <resident .elizadb>]');
+    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--database <resident .elizadb>]');
     process.exit(2);
   }
-  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs });
+  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation') });
   const database = flag('--database');
   // The run's own model calls, read from the resident's records after the last turn.
   const usage = database ? audit((await loadCalls(database)).filter(call => call.at >= Date.parse(result.recordedAt))) : null;
