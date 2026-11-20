@@ -162,6 +162,7 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
   // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.
   for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[]),BROWSER_OPEN_NEW_TAB_CAPABILITY])if(agent.includes(capability))capabilities.push(capability);
+  if(agent.includes('gmail.local-compose.v1'))capabilities.push('gmail.local-compose.v1');
   // Free/busy is negotiated only when the agent offers it.
   if(agent.includes(CALENDAR_AVAILABILITY_CAPABILITY))capabilities.push(CALENDAR_AVAILABILITY_CAPABILITY);
   // The device photo library is offered only where the native Photos plugin exists and the agent offers it.
@@ -185,7 +186,10 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // A form that extends an action (a text to a number or a draft; single contact values) is never offered without that action.
   for(const [action,form] of [[SMS_COMPOSE_CAPABILITY,SMS_COMPOSE_TARGET_CAPABILITY],[CONTACT_WRITE_CAPABILITY,CONTACT_UPDATE_VALUES_CAPABILITY]])if(telephony.includes(action)&&agent.includes(form))telephony.push(form);
   // Sender lookup uses the approved telephony executor, independent of Calendar's foreground review.
-  if (profile.aospImage && agent.includes('sms.latest-sender.v1')) capabilities.push('sms.latest-sender.v1');
+  if (profile.aospImage && agent.includes('sms.latest-sender.v1')) {
+    capabilities.push('sms.latest-sender.v1');
+    if(agent.includes('sms.latest-sender.v2')) capabilities.push('sms.latest-sender.v2');
+  }
   capabilities.push(...telephony);
   return capabilities;
 }

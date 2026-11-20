@@ -203,9 +203,6 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .note-source-dialog footer button { flex:1 1 180px; min-width:0; overflow-wrap:normal; }
 .note-source-content:focus-visible { outline:2px solid currentColor; outline-offset:-2px; }
 /* Document actions scroll with their details; Done remains outside the scroll area. */
-.note-source-document-dialog .note-source-content { min-height:44px; }
-.note-source-options { display:flex; flex-wrap:wrap; gap:8px; }
-.note-source-options button { flex:1 1 180px; min-width:min-content; max-width:100%; overflow-wrap:normal; word-break:normal; }
 /* Keep review actions outside the scrolling details at every text size. The body can shrink
  * within the viewport while retaining its own keyboard-scrollable focus region. */
 .alpha-large-text .note-source-dialog footer button { overflow-wrap:anywhere; }
@@ -1252,3 +1249,15 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
   padding:8px 14px; border-radius:16px; font-size:15px; text-align:start;
 }
 .file-preview-action :is(.i,.alpha-compute-mark) { width:20px; height:20px; flex:none; }
+
+.chat-email-draft { display:grid; gap:8px; width:100%; box-sizing:border-box; padding:14px; border:1px solid var(--line); border-radius:18px; background:var(--bg); }
+.chat-email-draft small,.chat-email-draft label { color:var(--mut); }
+.chat-email-draft strong,.chat-email-draft small,.chat-email-draft-body { overflow-wrap:anywhere; }
+.chat-email-draft-body { margin:0; white-space:pre-wrap; }
+.chat-email-draft label { display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line); }
+.chat-email-draft input,.chat-email-draft textarea { min-width:0; width:100%; border:0; background:transparent; color:var(--fg); font:inherit; }
+.chat-email-draft input { min-height:44px; }
+.chat-email-draft > div { display:flex; justify-content:flex-end; gap:8px; }
+.chat-email-draft button { padding:0 14px; min-height:44px; border-radius:22px; background:var(--s2); }
+.chat-email-draft button:last-child { background:var(--fg); color:var(--bg); }
+.chat-email-draft button:disabled { opacity:.45; }

@@ -47,14 +47,14 @@ export type TelephonyPorts = {
    * `number`, when given), replacing any unsent text, which is kept for one Undo. `occupied`: a
    * message is being sent or has pictures attached there. Nothing is sent: Send stays the owner's tap.
    */
-  draftInOpenThread(body: string, number?: string): 'drafted' | 'none-selected' | 'occupied' | 'unavailable';
+  draftInOpenThread(body: string, number?: string, replyThreadId?:string): 'drafted' | 'none-selected' | 'occupied' | 'unavailable';
   /**
    * The step that opens the conversation with exactly `number` in Messages (a new message when
    * there is none) and puts `body` in its text field; null when Messages cannot take a draft now.
    * Nothing is sent. Opening another view ends the review an action runs under, so the executor
    * hands the step back as `present` and the coordinator runs it once the receipt is recorded.
    */
-  draftFor(number: string, body: string): Promise<(() => void) | null>;
+  draftFor(number: string, body: string, replyThreadId?:string): Promise<(() => void) | null>;
   /**
    * Looks `query` up as the Contacts list will: the step that brings Contacts in front filtered by
    * it (handed back like `draftFor`'s), 'not-found' when the list would be empty, null when
@@ -73,7 +73,7 @@ export type TelephonyPorts = {
   /** The agent negotiated `contacts.write.v2`: it names each value to add or remove, so a `set` it sends replaces the field. */
   contactValues: boolean;
   openThread(): {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean} | null;
-  latestIncomingSender?(): Promise<SmsLatestSenderMetadata>;
+  latestIncomingSender?(includeAddress?:boolean): Promise<SmsLatestSenderMetadata>;
   openVoicemail(): {caller: string | null; date: number; durationSeconds: number; transcriptState: 'ready' | 'pending' | 'unavailable' | 'failed'; engine: 'device' | 'cloud' | 'carrier' | null; transcript: string | null} | null;
   deleteOpenVoicemail(current: () => void, signal: AbortSignal): Promise<'deleted' | 'none-selected' | 'cancelled' | 'failed'>;
 };
@@ -157,7 +157,8 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
   const target = smsComposeTarget(operation), draftOnly = 'draft' in operation && operation.draft === true;
   // When that person's conversation is already open, the draft goes into its text field, where the
   // owner can edit it; the separate review is for a conversation that is not on screen.
-  const inOpenThread = (number: string) => ports.draftInOpenThread(operation.body, number);
+  const replyThreadId = "replyThreadId" in operation ? operation.replyThreadId : undefined;
+  const inOpenThread = (number: string) => ports.draftInOpenThread(operation.body, number, replyThreadId);
   let number: string, placed: ReturnType<typeof inOpenThread>;
   if (target.kind === 'number') {
     // The approval card showed this exact number (`sms.compose.v2`), so nothing is asked again here.
@@ -182,7 +183,7 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
     // in its field; one that is open but busy (a send in flight, pictures attached) is left alone.
     if (placed !== 'none-selected') return result('unavailable');
     let step: (() => void) | null;
-    try { step = await ports.draftFor(number, operation.body); } catch { return result('unavailable'); }
+    try { step = await ports.draftFor(number, operation.body, replyThreadId); } catch { return result('unavailable'); }
     ports.current();
     if (!step) return result('unavailable');
     present(step);
@@ -341,7 +342,7 @@ async function observed(operation: TelephonyActionOperation, operationId: string
       return thread ? {kind: 'messages-read', status: 'read', ...thread} : {kind: 'messages-read', status: 'none-selected'};
     }
     case 'sms_latest_sender': {
-      const sender = await ports.latestIncomingSender?.().catch(() => null);
+      const sender = await ports.latestIncomingSender?.(operation.includeAddress).catch(() => null);
       signal.throwIfAborted();
       ports.current();
       return {kind: 'sms-latest-sender', ...(sender ?? {status:'unavailable'})};

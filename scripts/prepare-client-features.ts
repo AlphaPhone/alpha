@@ -196,6 +196,7 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/contracts/src/mms-send.ts',
   'packages/contracts/src/native-telephony.ts',
   'packages/contracts/src/telephony-actions.ts',
+  'packages/contracts/src/spoken-phone-number.ts',
   'plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts',
   'packages/contracts/src/native-address-book.ts',
   'plugins/plugin-assistant/src/services/device-actions/clock-contract.ts',
