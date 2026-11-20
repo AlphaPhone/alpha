@@ -21,7 +21,7 @@ module ReminderTapTokens {
   // The check still belongs to what the owner is looking at.
   val Current = not(s.blocked) and s.interaction == s.interactionAt
   // A check that ends runs a queued explicit request at once. The request is dropped when the
-  // page is blocked or a question review is open; nothing starts it again later.
+  // page is blocked or a question attachment is staging; nothing starts it again later.
   pure def finish(state: State): State = {
     pure val idle = { ...state, busy: false, stage: "idle", captured: 0, capturedQuestion: false,
       requested: false }
@@ -69,9 +69,9 @@ module ReminderTapTokens {
       else finish({ ...s, nativeToken: 0, lastConsumed: s.captured, banner: false,
         consumedUnseen: s.consumedUnseen or s.detail != s.captured })
   }
-  // The reviewed question either consumes its own token or releases it for a later tap. It
-  // consumes only after reading the token and the reminder again: the page is shown, the detail
-  // is still open, and the tap is still for that unchanged, listed reminder.
+  // Declined or interrupted attachment preparation leaves the pending token in place.
+  // Admitted attachment bytes require a fresh read of the same pending token and reminder
+  // while that exact detail is still visible, before native consumption.
   action closeQuestion(consume: bool): bool = all {
     s.questionOpen != 0,
     s' = if (consume and not(s.blocked) and s.nativeToken == s.questionOpen and s.retained
@@ -137,11 +137,15 @@ module ReminderTapTokens {
   run changedTargetKeepsLinkTest = init.then(tap(false)).then(targetChanged).then(check(true))
     .then(readPending).expect(ChangedTargetKeptWitness and s.detail == 0 and not(s.busy) and safety)
   run blockedCheckDoesNothingTest = init.then(tap(false)).then(setBlocked(true)).then(check(true).fail())
-  run questionReleasedTest = init.then(tap(true)).then(check(true)).then(readPending).then(listed)
+  run questionBlocksCheckWhileStagingTest = init.then(tap(true)).then(check(true)).then(readPending).then(listed)
     .then(confirm).then(afterOpen).expect(QuestionOpenWitness and s.nativeToken == 1)
     .then(check(true).fail())
-  // A second tap arrives while the first one's question review opens: its queued check is
-  // dropped, the link stays pending and the banner shows it once the review closes.
+  run declinedAttachmentKeepsQuestionTokenTest = init.then(tap(true)).then(check(true)).then(readPending)
+    .then(listed).then(confirm).then(afterOpen).then(closeQuestion(false))
+    .expect(s.nativeToken == 1 and s.question and s.banner and
+      s.questionOpen == 0 and s.lastConsumed == 0 and safety)
+  // A second tap arrives while the first question is staging: its queued check is dropped,
+  // the link stays pending and the banner shows it when staging finishes.
   run queuedCheckDroppedByQuestionTest = init.then(tap(true)).then(check(true)).then(readPending)
     .then(listed).then(confirm).then(tap(false)).then(check(true)).expect(s.requested)
     .then(afterOpen).expect(NewerTapWaitsForOwnerWitness and safety)
