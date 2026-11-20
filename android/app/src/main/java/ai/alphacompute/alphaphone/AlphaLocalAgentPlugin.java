@@ -713,11 +713,16 @@ private static final class ResidentAttachDiagnostic {
   env.put("ELIZA_PLANNER_MAX_TOKENS","4096");
   env.put("ELIZA_STAGE1_MAX_TOKENS","4096");
   env.put("ELIZA_EVALUATOR_MAX_TOKENS","4096");
+  // The other text calls of a turn sent no cap either: the reply written after a failed delivery
+  // and its check, Calendar field extraction, scheduled-task messages. The longest recorded on a
+  // phone wrote about 450 tokens.
+  env.put("TEXT_SMALL_MAX_TOKENS","4096");
+  env.put("TEXT_LARGE_MAX_TOKENS","4096");
   // The hosted model answers a per-minute refusal with Retry-After 59 and admits the same request
   // seconds later: its allowance refills 2,500 tokens a second (measured). On an owner's own key
-  // the runtime held the model for the stated minute and failed every turn in it. Five seconds is
-  // what the runtime waits before it re-sends a refused step once.
-  env.put("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","5");
+  // the runtime held the model for the stated minute and failed every turn in it. The runtime
+  // re-sends a refused step once after five seconds, so the hold must end before that.
+  env.put("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","4");
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");

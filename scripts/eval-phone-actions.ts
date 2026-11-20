@@ -37,7 +37,7 @@ import { selectDeviceCapabilities } from '../apps/app/src/runtime/phone-context.
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** An Alpha-image phone: every reviewed surface the launcher can run. */
 export const DEVICE_PROFILE = Object.freeze({ android: true, native: true, camera: true, foregroundReview: true, canonicalNotes: true, photoLibrary: true, files: true, clockRepeatDays: true, aospImage: true });
-const CASESET_REVISION = 2;
+const CASESET_REVISION = 3;
 
 /**
  * `expect` lists what the turn must propose: each entry is a set of acceptable operation
@@ -88,6 +88,8 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
   { id: 'directions', family: 'other-actions', view: 'home', text: 'Directions to the Ferry Building in San Francisco.', expect: [] },
   { id: 'note', family: 'other-actions', view: 'home', text: 'Create a note called Groceries with milk and eggs.', expect: [] },
   { id: 'calendar-read', family: 'other-actions', view: 'calendar', text: "What's on my calendar tomorrow?", expect: [] },
+  // A reminder is not an alarm: guidance that sends "wake me" to Clock must not take this too.
+  { id: 'reminder-plain', family: 'other-actions', view: 'home', text: 'Remind me to call mom at 5pm.', expect: [], allow: REMINDER },
   { id: 'question', family: 'chat', view: 'home', text: 'What is the capital of France?', expect: [] },
   { id: 'thanks', family: 'chat', view: 'home', text: 'Thanks!', expect: [] },
   { id: 'phone-question', family: 'chat', view: 'home', text: 'How do phone alarms differ from timers?', expect: [] },
