@@ -99,7 +99,7 @@ export async function checkNativeSmsDispatch(extraSources = []) {
     for(const path of currentPaths)assert.equal(prepared.files[path],pinned.get(path).sha256);
     const traces=runScenarios([
       'cross-card-binding','exact-card-replay','pruned-exact-card','pruned-conflicting-card',
-      'approval-mismatch-and-missing','expired-card','journal-refused-claim-is-single-use',
+      'approval-mismatch-and-missing','expired-card','journal-refused-claim-is-single-use','uncertain-device-claim',
       'queued-cancellation','queued-background-cancellation','screen-off-and-lock','empty-parts-retains-denied','initial-permission-denied',
       'carrier-replaced-after-card','per-recipient-sim-change','partial-radio-throw','radio-refused-before-acceptance',
       'begin-save-before-refusal','begin-commit-then-failed-report','end-write-failure-and-process-recovery',

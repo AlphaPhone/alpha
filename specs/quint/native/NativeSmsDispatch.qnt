@@ -8,7 +8,7 @@ module NativeSmsDispatch {
   // phase: none, open (approved and applying, unclaimed) or claimed (admitted one send).
   type Card = {binding: int, phase: str, expired: bool}
   type State = {
-    recipients: int, parts: int, reply: str, replyBinding: int, memory: Record, disk: Record, tombstoneBinding: int,
+    recipients: int, parts: int, reply: str, replyBinding: int, memory: Record, disk: Record, tombstoneBinding: int, claimOwner: int,
     attempts: int, accepted: int, cards: int -> Card, foreground: Set[int], closed: Set[int], listeners: Set[int], events: int -> int,
     image: bool, send: bool, phone: bool, read: bool, locked: bool, role: bool, sim: int,
     process: int, boot: int, old: bool, candidate: str, providerStatus: str, refuseOutbox: bool,
@@ -23,7 +23,7 @@ module NativeSmsDispatch {
 
   action initWith(recipients: int, parts: int, role: bool): bool = all {
     recipients.in(1.to(2)), parts.in(1.to(2)),
-    s' = {recipients:recipients,parts:parts,reply:"none",replyBinding:0,memory:noRecord,disk:noRecord,tombstoneBinding:0,attempts:0,accepted:0,
+    s' = {recipients:recipients,parts:parts,reply:"none",replyBinding:0,memory:noRecord,disk:noRecord,tombstoneBinding:0,claimOwner:0,attempts:0,accepted:0,
       cards:cardSlots.mapBy(_=>noCard),foreground:actors,closed:Set(),listeners:actors,events:actors.mapBy(_=>0),
       image:true,send:true,phone:true,read:true,locked:false,role:role,sim:1,process:1,boot:1,old:false,
       candidate:"none",providerStatus:"none",refuseOutbox:false,outbox:Set(),sentRows:Set(),failedRows:Set()}
@@ -116,7 +116,7 @@ module NativeSmsDispatch {
   // journal before the card is read. Otherwise only an open, unexpired card for exactly this text
   // admits it, and the admission claims the card once, before any dispatch check.
   val requests = Set("complete","long-number","divide-refused","empty-parts","other-sim","other-recipient")
-  val sendModes = Set("complete","guard-change","throw-before","throw-after","begin-before","journal-refused",
+  val sendModes = Set("complete","claim-before","claim-after","guard-change","throw-before","throw-after","begin-before","journal-refused",
     "begin-after-and-deny-before","end-before","end-after","cancel-queued","pause-queued")
   action send(actor: int, card: int, binding: int, request: str, mode: str): bool = all {
     actors.contains(actor), card.in(0.to(2)), binding.in(1.to(2)), requests.contains(request), sendModes.contains(mode),
@@ -125,8 +125,10 @@ module NativeSmsDispatch {
     if (not(current(s,actor))) s' = response(s,"unavailable",0)
     else if (request=="long-number") s' = response(s,"invalid",0)
     else if (hasRetainedId(s)) s' = retained(s,if (foreign) 0 else binding)
-    else if (foreign or not(admits(approval,binding))) s' = response(s,"not-approved",0)
-    else s' = dispatched({ ...s,cards:s.cards.set(card,{ ...approval,phase:"claimed" }) },actor,binding,request,mode)
+    else if (foreign or s.claimOwner!=0 or not(admits(approval,binding))) s' = response(s,"not-approved",0)
+    else if (mode=="claim-before") s' = response(s,"not-approved",0)
+    else if (mode=="claim-after") s' = response({ ...s,claimOwner:card },"not-approved",0)
+    else s' = dispatched({ ...s,claimOwner:card,cards:s.cards.set(card,{ ...approval,phase:"claimed" }) },actor,binding,request,mode)
   }
 
   // A cancellation with nothing queued answers and changes nothing.
@@ -332,6 +334,8 @@ module NativeSmsDispatch {
     .expect(s.reply=="unavailable" and s.disk.binding==0 and s.cards.get(1).phase=="claimed")
     .then(restart(false)).then(send(2,1,1,"complete","complete"))
     .expect(s.reply=="not-approved" and s.attempts==0)
+    .then(approveCard(2,2)).then(send(2,2,2,"complete","complete"))
+    .expect(s.reply=="not-approved" and s.claimOwner==1 and s.attempts==0)
 
   run queuedCancellationClosesTheClaimTest = approved.then(send(1,1,1,"complete","cancel-queued"))
     .expect(s.reply=="cancelled" and s.attempts==0 and s.cards.get(1).phase=="claimed")
