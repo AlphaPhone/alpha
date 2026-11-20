@@ -575,7 +575,10 @@ export function createMailReviewController(
           pending.proposal.kind !== "send" ||
           binding(pending) !== "bound" ||
           pending.composer?.draftId !== source.draftId ||
-          composerContent(pending.proposal) !== composerContent(proposal)
+          composerContent(pending.proposal) !== composerContent(proposal) ||
+          // A chat draft's request ID names its content; an unsent review
+          // under another ID (an earlier Alpha's) is prepared again.
+          (inlineSend && pending.requestId !== source.requestId)
         ) {
           if (pending) await operation.clear();
           check();

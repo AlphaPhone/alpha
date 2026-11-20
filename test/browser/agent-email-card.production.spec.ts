@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   button,
   fenceNetwork,
@@ -171,3 +171,103 @@ for (const decision of [
       expect(foreign).toEqual([]);
     },
   );
+
+const crew = [
+  'lighting.crew@example.invalid',
+  'camera.operator@example.invalid',
+  'location.manager@example.invalid',
+];
+// What the owner leaves on screen after the edits below, and so what Send must store and dispatch.
+const shown = {
+  to: [...crew, 'owner@example.invalid'],
+  subject: 'Tomorrow’s shoot',
+  bodyText: 'Bring the tripod. And the blue notebook.',
+};
+/** The chat draft cards as written to their encrypted slot. */
+const storedCards = (page: Page) =>
+  harness(page, (f) =>
+    Object.entries(f.slots as Record<string, string>)
+      .filter(([slot]) => slot.startsWith('inbox-drafts:v1:chat:'))
+      .flatMap(([, raw]) => JSON.parse(raw) as Record<string, unknown>[]),
+  );
+
+/** Opens the agent's three-recipient draft, then types one more recipient and a body line. */
+async function editCrewDraft(page: Page) {
+  await flagOffAndroid(page, {
+    accounts: [
+      {
+        connectionId: 'owned-grant',
+        email: 'owner@example.invalid',
+        connected: true,
+        messages: [],
+      },
+    ],
+    emailDraft: { to: crew, subject: 'Tomorrow’s shoot', body: 'Bring the tripod.' },
+  });
+  await residentHome(page);
+  await openRetainedNativeNotes(page);
+  await button(page, 'Open conversation').click();
+  const composer = page.getByRole('textbox', { name: 'Message Alpha', exact: true });
+  await composer.fill('Draft an email to the crew with the shoot plan.');
+  await composer.press('Enter');
+  const draft = page.getByRole('region', { name: 'Email draft', exact: true });
+  const to = draft.getByRole('textbox', { name: 'Email recipients' });
+  await expect(to).toHaveValue(crew.join(', '), { timeout: 15000 });
+  await expect(to).toBeEnabled();
+  // The single-line field shows only the start of this list at phone width; the inline Send has
+  // no review sheet, so each address is listed in full under the field.
+  const listed = draft.getByRole('list', { name: 'Email recipient list' });
+  await expect(draft.getByText('3 recipients', { exact: true })).toBeVisible();
+  await expect(listed.getByRole('listitem')).toHaveText(crew);
+  await listed.scrollIntoViewIfNeeded();
+  for (const row of await listed.getByRole('listitem').all()) {
+    await expect(row).toBeInViewport({ ratio: 1 });
+    expect(await row.evaluate((item) => item.scrollWidth <= item.clientWidth)).toBe(true);
+  }
+  // Each keystroke shows at once and is kept: nothing is dropped while the edit is saved.
+  await to.press('End');
+  await to.pressSequentially(', owner@example.invalid');
+  await expect(to).toHaveValue(shown.to.join(', '));
+  await expect(listed.getByRole('listitem')).toHaveText(shown.to);
+  await expect(draft.getByText('4 recipients', { exact: true })).toBeVisible();
+  const body = draft.getByRole('textbox', { name: 'Email body' });
+  await body.press('ControlOrMeta+End');
+  await body.pressSequentially(' And the blue notebook.');
+  await expect(body).toHaveValue(shown.bodyText);
+  return draft;
+}
+
+test('every recipient of a chat draft is on screen before Send, and edits keep each typed character', async ({ page }) => {
+  const foreign = await fenceNetwork(page);
+  const draft = await editCrewDraft(page);
+  // The edits are written as shown, and nothing reaches Gmail before Send.
+  await expect.poll(() => storedCards(page)).toEqual([
+    expect.objectContaining({ to: shown.to.join(', '), subject: shown.subject, body: shown.bodyText, state: 'draft' }),
+  ]);
+  await expect(draft.getByRole('status')).toHaveCount(0);
+  expect(await harness(page, (f) => [f.mail.prepares.length, f.mail.dispatches.length])).toEqual([0, 0]);
+  expect(foreign).toEqual([]);
+});
+
+// The inline Send dispatches only because the pinned Inbox journal keeps the request ID the draft
+// names (review-controller.ts refuses it otherwise with "Update Alpha before sending this email.").
+// A journal that named its own ID would fail this case on that refusal; it is never an outcome.
+test('Send of an edited chat draft stores and dispatches exactly the email on screen, once', async ({ page }) => {
+  const foreign = await fenceNetwork(page);
+  const draft = await editCrewDraft(page);
+  await draft.getByRole('button', { name: 'Send email' }).click();
+  await expect(draft.getByRole('status')).toHaveText('Sent.', { timeout: 15000 });
+  await expect(draft.getByRole('button', { name: 'Send email' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Review mail operation' })).toHaveCount(0);
+  // Read after the card settled, so a late or repeated dispatch would be counted.
+  const proof = await harness(page, (f) => ({ prepares: f.mail.prepares, dispatches: f.mail.dispatches, sent: f.mail.sent }));
+  expect(proof.prepares).toHaveLength(1);
+  expect(proof.dispatches).toHaveLength(1);
+  expect(proof.prepares[0]).toMatchObject(shown);
+  expect(proof.dispatches[0]).toMatchObject({ ...shown, requestId: proof.prepares[0].requestId, digest: proof.prepares[0].digest });
+  expect(proof.sent).toEqual([shown.subject + ' | ' + shown.bodyText]);
+  expect(await storedCards(page)).toEqual([
+    expect.objectContaining({ to: shown.to.join(', '), subject: shown.subject, body: shown.bodyText, state: 'sent' }),
+  ]);
+  expect(foreign).toEqual([]);
+});
