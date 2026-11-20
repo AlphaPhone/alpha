@@ -6,6 +6,8 @@ import {join} from 'node:path';
 import {createServer,request as httpRequest} from 'node:http';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {once} from 'node:events';
+import {setTimeout as delay} from 'node:timers/promises';
 const {createLocalAgentDevHandler,localAgentPathAllowed,LOCAL_VOICE_WS_PATH}=await import('../scripts/local-agent-dev-bridge.ts');
 const owner=randomUUID(),agent=randomUUID(),conversation=randomUUID(),nonce='a'.repeat(43),voiceToken='b'.repeat(43),root='1'.repeat(64),paired='synthetic-owner-bearer';
 const BASE='/api/v1/voice/session';
@@ -298,5 +300,29 @@ test('Cloud lease renewal remains bound to canonical stop and rotation proof',as
   const response=await f.call(mint());assert.equal(response.status,200);assert.equal(JSON.parse(response.data.body).leaseRenewal,true);
   for(const leaseRenewal of [false,'true',1]){f.mintMetadata(id=>({stopIntentVersion:1,stopIntentGeneration:id,rotationPreparation:'retire-before-open-v1',leaseRenewal}));assert.equal((await f.call(mint())).status,503);}
   f.mintMetadata(()=>({leaseRenewal:true}));assert.equal((await f.call(mint())).status,503);
+ }finally{await f.close();}
+});
+
+test('a renewable Talk tunnel keeps its upstream socket past admission expiry and closes on owner credential change',async()=>{
+ const f=await fixture(false,true,{speechRoute:'cloud',speechProvider:'cartesia',providerAdmission:'at-session-start'});
+ try{
+  f.mintMetadata(id=>({expiresAt:Date.now()+750,stopIntentVersion:1,stopIntentGeneration:id,rotationPreparation:'retire-before-open-v1',leaseRenewal:true}));
+  const ticket=JSON.parse((await f.call(mint())).data.body);
+  const unclaimed=JSON.parse((await f.call(mint())).data.body);
+  const {status,socket}=await upgrade(ticket.wsUrl,f.origin);
+  assert.equal(status,101);
+  const closed=once(socket,'close');
+  await delay(Math.max(ticket.expiresAt,unclaimed.expiresAt)-Date.now()+25);
+  assert.equal((await upgrade(unclaimed.wsUrl,f.origin)).status,403);
+  assert.equal((await upgrade(ticket.wsUrl,f.origin)).status,403);
+  const health={path:BASE+'/health?conversationId='+conversation,method:'GET'};
+  assert.equal((await f.call(health)).data.status,200);
+  assert.equal(socket.destroyed,false);
+  const echo=once(socket,'data',{signal:AbortSignal.timeout(1000)});
+  socket.write('renewed audio');
+  assert.equal((await echo)[0].toString(),'renewed audio');
+  await writeFile(f.tokenFile,'2'.repeat(64),{mode:0o600});
+  await f.call(health);
+  await Promise.race([closed,delay(1000).then(()=>{throw Error('Changed owner credential left Talk open');})]);
  }finally{await f.close();}
 });
