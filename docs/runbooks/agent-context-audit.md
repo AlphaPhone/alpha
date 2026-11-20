@@ -332,54 +332,84 @@ is still a desktop process with a desktop's plugins. It is not an APK or a devic
 
 ### Results, November 20, 2026
 
-Direct Cerebras key, references swapped as on the phone, one run of 36 turns per arm.
-"Base" is the product pin `de690c72f9b`. "Branch" is upstream `a5a361580a3` with the
-settings the phone launches with: stable references and output caps of 4,096. The last
-column is upstream `274e719ac37`: the same with the device-tool rework and the device
-tool offered to requests routed as files tasks.
-The base runtime does not record tool definitions or the provider's counts.
+Direct Cerebras key, references swapped as on the phone, one run of the case set per
+arm. "Base" is the product pin `de690c72f9b`. "Branch" is upstream `a5a361580a3` with
+the settings the phone launches with: stable references and output caps of 4,096.
+"Rework" is upstream `274e719ac37`: the same with the device-tool rework and the device
+tool offered to requests routed as files tasks. "Tip" is upstream `5b885c53d06` with the
+phone's full settings: a re-send for a refused first step, caps on the side calls, a
+four-second model hold and the Clock route sentence. The base runtime does not record
+tool definitions or the provider's counts.
+
+Scores use case set revision 3, in which three expectations were corrected: a phone has
+no timer, free/busy from Home belongs to the Calendar service, and opening a view may be
+a device proposal. Earlier runs are re-scored from the proposals they recorded; the tip
+runs have one more case, a plain reminder.
 
 Desktop mode:
 
 | | Base | Branch |
 | --- | --- | --- |
 | Turns 1.5 s apart: answered before the provider refused | 9 of 36 | 26 of 36 |
-| Turns 15 s apart: cases passing | 27 of 36 | 30 of 36 |
-| Turns 15 s apart: device requests routed correctly | 20 of 27 | 21 of 27 |
+| Turns 15 s apart: cases passing | 30 of 36 | 32 of 36 |
+| Turns 15 s apart: device requests routed correctly | 20 of 25 | 21 of 25 |
 | Provider's cached share, 15 s apart | not recorded | 66% |
 
 Android mode:
 
-| | Base | Branch | With the device-tool rework |
-| --- | --- | --- | --- |
-| Turns 1.5 s apart: answered before the provider refused | 8 of 36 | 36 of 36 | 36 of 36 |
-| Turns 1.5 s apart: input, cached share, lowest allowance | not recorded | 845K, 55%, 32K | 685K, 55%, 84K |
-| One conversation, 5 s apart: turns answered | 24 of 36, refused at turn 19 | 36 of 36 | 36 of 36 |
-| One conversation, 5 s apart: cases passing | 21 of the 24 answered | 29 of 36 | 31 of 36 |
-| One conversation: input per turn | 25K median, 30K p90 over its 24 turns (estimated) | 33K median, 57K p90 over 36 | 30K median, 42K p90 over 36 |
-| One conversation: cached share, lowest allowance | 2% by the rules, 7K | 58%, 82K | 54%, 90K |
-| Turns 10 s apart: cases passing, of those the model was asked | 28 of 36 | 25 of 31 | 31 of 36 |
-| Turns 10 s apart: device requests routed correctly, of those asked | 21 of 27 | 17 of 22 | 23 of 27 |
+| | Base | Branch | Rework | Tip |
+| --- | --- | --- | --- | --- |
+| Turns 1.5 s apart: answered before the provider refused | 8 of 36 | 36 of 36 | 36 of 36 | 37 of 37 |
+| Turns 1.5 s apart: cases passing, of those asked | 7 of 8 | 31 of 36 | 30 of 36 | 32 of 37 |
+| Turns 1.5 s apart: input, cached share, lowest allowance | not recorded | 845K, 55%, 32K | 685K, 55%, 84K | 1,059K, 68%, 63K |
+| One conversation, 5 s apart: turns answered | 24 of 36, refused at turn 19 | 36 of 36 | 36 of 36 | 37 of 37 |
+| One conversation: cases passing, of those asked | 21 of 24 | 31 of 36 | 34 of 36 | 35 of 37 |
+| One conversation: input per turn | 25K median, 30K p90 over its 24 turns (estimated) | 33K, 57K | 30K, 42K | 33K, 52K |
+| One conversation: cached share, lowest allowance | 2% by the rules, 7K | 58%, 82K | 54%, 90K | 55%, 42K |
+| Turns 10 s apart: cases passing, of those asked | 32 of 36 | 27 of 31 | 34 of 36 | 33 of 37 |
+| Turns 10 s apart: device requests routed correctly, of those asked | 21 of 25 | 17 of 21 | 23 of 25 | 22 of 25 |
+
+In the tip's 1.5-second arm one request ("Show my contacts") went through tool search
+for 14 model calls and 305K tokens, which is why that arm's input is the largest. The
+same request took one to three planner rounds in other arms.
+
+### The Clock route sentence
+
+The alarm, timer, reminder and free/busy cases, five runs each in Android mode, at
+upstream `217b4a92be9` (before the sentence) and at the tip, same settings:
+
+| Request | Before | After |
+| --- | --- | --- |
+| "Set an alarm for 7am." proposes an alarm | 4 of 5 | 5 of 5 |
+| "Wake me at 6:30 tomorrow." proposes an alarm | 1 of 5 | 5 of 5 |
+| "Set a timer for 10 minutes." proposes no alarm | 5 of 5 | 4 of 5 |
+| "Remind me to call mom at 5pm." proposes no alarm | 5 of 5 | 5 of 5 |
+| Free/busy from Home proposes no device read | 5 of 5 | 5 of 5 |
+| A text and an alarm in one request proposes both | 0 of 5 | 0 of 5 |
+
+### What a refusal costs, before and after
+
+The same thirty turns ran twice while other jobs were using the same account. At
+upstream `274e719ac37`, with the provider's whole hold and no re-send of a first step,
+the provider refused one call, the runtime held the model for 59 seconds, and 17 of the
+30 turns were answered in a sixth of a second without asking the model. At the tip, with
+a four-second hold and one re-send at every step, the provider refused eleven calls and
+all 30 turns were answered by the model; six of them took five seconds longer.
 
 Read with these in mind:
 
 - **One run per arm.** Two or three cases move between runs of the same arm. The same
-  cases fail at the base and on the branch: a vague text ("Ping my brother"), a vague
-  alarm, a timer, free/busy, and a text with an alarm in one request. "Show my PDFs in
-  Files" failed in all seven arms before the last column and passes in its three.
+  cases fail at the base and on the branch: a vague text ("Ping my brother") and a text
+  with an alarm in one request. "Show my PDFs in Files" failed in every arm before the
+  rework and passes in every arm since.
 - **A refusal stops more than one turn.** On this route the runtime held a refused
   model for the provider's `Retry-After`, 59 seconds, and answered every turn in that
   time without asking the model. "Answered before the provider refused" is therefore
   the turn at which the account's allowance ran out. In the branch's 10-second arm a
   side call was refused while the run itself had used a tenth of the allowance:
   something else on the account had used the rest, and five turns were lost to the
-  hold. Upstream `217b4a92be9` lets a host cap the hold, and the phone sets five
-  seconds. The arms in the tables ran without it.
-- **With the hold capped, a refusal costs a step, not a minute.** One conversation at
-  upstream `217b4a92be9` with the phone's settings, 5 seconds between turns, ran while
-  another device was using the account. The provider refused four calls. Each hold was
-  five seconds and all 36 turns were answered, two of them in under a second with no
-  proposal, as a turn is when its first step is refused. 26 of 36 cases passed.
+  hold. Upstream `217b4a92be9` lets a host cap the hold. The base, branch and rework
+  arms ran without it; the tip arms ran with the phone's four seconds.
 - **The account is shared.** While the probe ran on an otherwise idle key, another
   device's calls appeared as allowance held and then drained to 5K. The Pixel's own log
   shows it sending first steps of 61K tokens in those minutes. Every count of refusals
@@ -392,8 +422,10 @@ Read with these in mind:
   starts, at about 40 messages. What changes is that most of each request is a cache
   hit, which is not charged, and that each call holds 4,096 for its output and not
   16,384.
-- **The evaluator ran in these turns.** 5 to 11 calls per Android-mode arm on the
+- **The evaluator ran in these turns.** 5 to 12 calls per Android-mode arm on the
   branch, capped, about half cached, every turn answered.
+- **The side calls are capped at the tip.** Its logs record 4,096 on the large text
+  calls that recorded none before.
 
 ## 3. What a change must show
 
@@ -412,27 +444,19 @@ Read with these in mind:
 
 - **No phone has run the branch.** Everything above is a host measurement. Real
   numbers need the upstream changes merged, the pin advanced and a build on a phone.
-- **A request routed away from the device tool cannot reach the phone.** The planner
-  is offered `PROPOSE_DEVICE_ACTION` only in the contexts the tool names. "Show my PDFs
-  in Files" was routed as a files task and got attachment and knowledge tools; the
-  branch adds that context. "Wake me at 6:30 tomorrow" is routed as a tasks request and
-  gets reminder tools, not Clock, and free/busy asked from Home gets the Calendar
-  service's own tool. Those two fail at the base and on the branch alike.
-- **Side calls send no output cap.** The reply written after a failed delivery and its
-  grounding check, Calendar field extraction and scheduled-task messages: 22 of the
-  Pixel's 323 calls, each holding 16,384 while it runs. A `DEFAULT_MAX_TOKENS` in the
-  agent's environment does not reach the runtime's settings.
+- **A text and an alarm in one request proposes only the text.** The planner's first
+  reply usually holds both calls; the turn stops at the first approval pause with the
+  second still queued.
 - **Tools chosen per request sit before the system prompt** in the provider's read
   order: Calendar (18K characters), reminders (20K), messaging (13K). A turn whose tool
   set differs from the last one's re-reads the system prompt and the history. In the
   one-conversation run the planner reused 51% for that reason.
-- **Only the planner and the evaluator re-send after a refusal,** once, after at most
-  five seconds. Stage 1 does not, and a turn whose first step is refused ends there.
 - **The account's limit is close even after the change.** In one conversation that
   changes subject every turn, a phone on the branch is charged about 14K uncached tokens
   a turn, and the account regains 2,500 a second. One phone sending a turn every nine
-  seconds uses about two thirds of that; the base used more than all of it. A conversation that
-  stays on a subject reuses more (70% to 76% in the replay of the Pixel's own).
+  seconds uses about two thirds of that; the base used more than all of it. A
+  conversation that stays on a subject reuses more (70% to 78% in the replays of the
+  Pixel's own).
 - **Recall is lexical** and standing instructions older than the window survive only
   by an English keyword floor (section 1).
 - **The device tool still differs by view,** and by two wordings: asking for an
