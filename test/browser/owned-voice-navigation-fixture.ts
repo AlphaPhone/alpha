@@ -8,6 +8,7 @@ import {preloadPageModules} from './helpers/page-modules';
 // `development` opens the development phone, which has Phone, Messages and Contacts.
 export const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
 export async function setup(page:Page,detent='sheet',development=false,canonicalNotes=false){
+ await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1',JSON.stringify({askBeforeAgentActions:true})));
  await cloudNotesVoiceFixture(page,true,development);if(!canonicalNotes){await openLegacyNotes(page);await returnToApps(page);}
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/runtime/alpha-client.ts','/src/runtime/view-navigation.ts','/src/browser/voice.ts','/src/prototype/model.js']);
  await page.evaluate(canonicalNotes=>{

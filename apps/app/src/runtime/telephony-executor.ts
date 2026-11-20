@@ -44,6 +44,8 @@ export type TelephonyPorts = {
   sendSms(number: string, body: string, operationId: string, signal: AbortSignal): Promise<SmsComposeResult['status']>;
   /** Exact on-device match already displayed with the body on the approved SMS card. */
   reviewedSmsRecipient?: ContactMatch;
+  /** The current authored request already named this exact contact for deletion. */
+  directContactDelete?: true;
   /**
    * Puts a draft in the draft slot of the conversation the owner has open (only the one with exactly
    * `number`, when given), replacing any unsent text, which is kept for one Undo. `occupied`: a
@@ -143,9 +145,16 @@ async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal
     ports.current();
     if (!options.length) return {kind: 'phone-call', status: 'not-found', contact: false};
     // A name is never called unseen: the owner confirms or chooses the exact number, even for one match.
-    const choice = await ports.ask({kind: 'call', options}, signal);
-    if (choice === null || !options[choice]) return {kind: 'phone-call', status: 'cancelled', contact: false};
-    number = options[choice].number;
+    const bound = ports.reviewedSmsRecipient;
+    if (bound) {
+      if (options.length !== 1 || options[0].id !== bound.id || options[0].number !== bound.number)
+        return {kind: 'phone-call', status: 'unavailable', contact: false};
+      number = bound.number;
+    } else {
+      const choice = await ports.ask({kind: 'call', options}, signal);
+      if (choice === null || !options[choice]) return {kind: 'phone-call', status: 'cancelled', contact: false};
+      number = options[choice].number;
+    }
   }
   ports.current();
   // A lost native reply may follow an accepted call; the coordinator keeps that outcome unknown.
@@ -286,7 +295,8 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
       dispatched=true;
       return result((await ports.saveContact(options[choice].after, {id: options[choice].before.id, version: options[choice].before.version})).status);
     }
-    const choice = await ports.ask({kind: 'contact-delete', options: found}, signal);
+    const exact=found.length===1&&found[0].displayName.trim().toLowerCase()===operation.query.trim().toLowerCase();
+    const choice = ports.directContactDelete ? (exact ? 0 : null) : await ports.ask({kind: 'contact-delete', options: found}, signal);
     if (choice === null || !found[choice]) return result('cancelled');
     ports.current();
     dispatched=true;

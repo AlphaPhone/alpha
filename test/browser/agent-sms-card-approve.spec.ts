@@ -12,9 +12,9 @@ import {preloadPageModules} from './helpers/page-modules';
 
 const NUMBER = '+15550100199', BODY = 'On my way';
 
-async function setup(page: Page, contactMode?: 'one' | 'two' | 'none') {
+async function setup(page: Page, contactMode?: 'one' | 'two' | 'none', reviewFirst=true) {
   await page.addInitScript(installTelephonyFixture, {});
-  await page.addInitScript(({number, body, contactMode}) => {
+  await page.addInitScript(({number, body, contactMode, reviewFirst}) => {
     const w = window as any, fixture = w.smsCardFixture = {
       proposal: null as any, decisions: [] as string[], receipts: [] as any[], sends: [] as any[], refused: [] as string[],
       journal: new Map<string, any>(),
@@ -27,6 +27,7 @@ async function setup(page: Page, contactMode?: 'one' | 'two' | 'none') {
     // installTelephonyFixture chose the offline profile; this check pairs with a local agent instead.
     localStorage.removeItem('alpha.connection.selection.v1');
     const agentId = '12345678-1234-4234-8234-123456789abc', store = new Map<string, string>();
+    localStorage.setItem('alpha.browser.device.v1',JSON.stringify({askBeforeAgentActions:reviewFirst}));
     for (const header of w.Capacitor.PluginHeaders) {
       const extra = header.name === 'AlphaConnection' ? ['request', 'cancel'] : header.name === 'AlphaActionJournal' ? ['reserve', 'markApplying', 'finish'] : [];
       for (const name of extra) if (!header.methods.some((method: any) => method.name === name)) header.methods.push({name, rtype: 'promise'});
@@ -78,7 +79,7 @@ async function setup(page: Page, contactMode?: 'one' | 'two' | 'none') {
       if (pathname === '/api/conversations/fixture-chat/messages' && input.method === 'POST') {
         if (!String(input.headers['X-Eliza-Device-Capabilities'] ?? '').split(',').includes('sms.compose.v2')) throw Error('sms.compose.v2 was not negotiated');
         fixture.proposal = {id: 'fixture-proposal', digest: 'a'.repeat(64), state: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(), subjectUserId: 'fixture-owner', requestedBy: agentId, action: 'device_action',
-          payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', operation: {type: 'sms_compose', target: contactMode ? {kind:'contact', query:contactMode==='none'?'Qassem':'Carson'} : {kind: 'number', number}, body, ...(contactMode ? {draft:true} : {})}}};
+          payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', ...(contactMode?{requestMessageId:'22222222-2222-4222-8222-222222222222'}:{}), operation: {type: 'sms_compose', target: contactMode ? {kind:'contact', query:contactMode==='none'?'Qassem':'Carson'} : {kind: 'number', number}, body, ...(contactMode ? {draft:true} : {})}}};
         return ok({text: 'Review the text below.', agentName: 'SMS card fixture', ...(contactMode ? {
           messageId:'11111111-1111-4111-8111-111111111111',userMessageId:'22222222-2222-4222-8222-222222222222',
         } : {})});
@@ -93,7 +94,7 @@ async function setup(page: Page, contactMode?: 'one' | 'two' | 'none') {
       }
       throw Error('Unexpected fixture route ' + pathname);
     };
-  }, {number: NUMBER, body: BODY, contactMode});
+  }, {number: NUMBER, body: BODY, contactMode, reviewFirst});
   await page.route('https://**/*', route => route.abort());
   await page.goto('/?mode=dev');
   await page.getByText('Local development agent', {exact: true}).click();
@@ -257,4 +258,35 @@ test('an addressed SMS draft sends on one explicit tap in chat',async({page})=>{
   await expect(page.getByText('Message sent.',{exact:true})).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
   expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,sendSms:1});
+});
+
+test('with review off an explicit send to one exact contact sends once without a card',async({page})=>{
+  const card=await setup(page,'one',false);
+  const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
+  expect(reply.text).toBe('Message sent.');
+  await expect(card).toHaveCount(0);
+  const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({recipients:[NUMBER],body:BODY});
+});
+
+test('with review off an ambiguous recipient gets a follow-up and no picker or send',async({page})=>{
+  const card=await setup(page,'two',false);
+  const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
+  expect(reply.text).toContain('Which recipient did you mean?');
+  await expect(card).toHaveCount(0);
+  expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0,journalEntries:0});
+});
+
+test('with review off an explicit draft remains unsent without a card',async({page})=>{
+  const card=await setup(page,'one',false);
+  const draft=await page.evaluate(()=>(window as any).smsCardFixture.voice('Draft a text to Carson saying On my way'));
+  expect(draft.text).toContain('Text draft saved.');
+  expect(draft.text).toContain(BODY);
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+  expect((await state(page)).sendSms).toBe(0);
+  const sent=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
+  expect(sent.text).toBe('Message sent.');
+  expect((await state(page)).sendSms).toBe(1);
 });

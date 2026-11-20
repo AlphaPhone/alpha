@@ -122,6 +122,11 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await receipts(3);await showing('news.example/today');
 
  // Switch, several matches: never run unseen. The card lists the two shop tabs; the owner picks one.
+ const review=async(on:boolean)=>page.evaluate(async enabled=>{
+  const {editDevicePreferences}=await import('/src/browser/device-preferences.ts');
+  await editDevicePreferences(state=>{state.askBeforeAgentActions=enabled;});
+ },on);
+ await review(true);
  await ask('Switch to the shop tab');
  const switchCard=page.getByRole('button',{name:/^Switch tab\b.*Approve$/s});
  await expect(switchCard).toHaveCount(1);expect((await fixture()).receipts).toHaveLength(3);await showing('news.example/today');
@@ -132,7 +137,7 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await page.getByRole('button',{name:/Switch to tab https:\/\/shop\.example\/hats$/}).click();
  await receipts(4);await showing('shop.example/hats');
 
- // Close: always reviewed, even with "Ask before Alpha acts" off. Approving closes the news tab only.
+ // With reviews enabled, approving closes the news tab only.
  await ask('Close the news tab');
  const closeCard=page.getByRole('button',{name:/^Close tab\b.*Approve$/s});
  await expect(closeCard).toHaveCount(1);await expect(tabs).toHaveText('4');
@@ -144,6 +149,7 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await page.getByRole('button',{name:/^Switch to .*shop\.example\/hats/}).click();
 
  // Back and reload act on the showing tab.
+ await review(false);
  await type('https://shop.example/scarves');await showing('shop.example/scarves');
  await ask('Go back');
  await receipts(6);await showing('shop.example/hats');

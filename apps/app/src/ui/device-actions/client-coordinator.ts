@@ -202,6 +202,7 @@ import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT, type ContactMatch } from "../telephony/telephony-messages.ts";
 import { SMS_CARRIER_CHARGES, smsSendFacts } from "../telephony/sms-card-facts.ts";
+import { callOwnerRecipient, directOwnerAction, samePhoneRecipient, smsOwnerRequest } from "./owner-request.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -693,6 +694,7 @@ export class DeviceActionCoordinator<
       requestKey?: string;
       currentRequest?: RequestedAction;
       smsRecipient?: ContactMatch;
+      directContactDelete?: true;
     }
   >();
   private readReplies = new Map<
@@ -1502,11 +1504,19 @@ export class DeviceActionCoordinator<
       throw sharedValidatorRefusal(failures[0]);
     return proposals;
   }
+  /** An explicitly requested, addressed draft can stay in chat as plain text. */
+  isOwnerSmsDraft(proposalId:string,messageId:string,text:string):boolean {
+    const entry=this.proposals.get(proposalId),request=smsOwnerRequest(text);
+    if(!entry||entry.proposal.requestMessageId!==messageId||!request||request.send)return false;
+    const operation=entry.proposal.operation;
+    if(!isSmsCompose(operation)||!("draft" in operation))return false;
+    const target=smsComposeTarget(operation);
+    return (target.kind==="number"||!!entry.smsRecipient)&&
+      samePhoneRecipient(request.recipient,target.kind==="number"?target.number:target.query,target.kind==="number")&&
+      (request.body===undefined||request.body===operation.body);
+  }
   /** Only proposals bound by the host to this exact freshly sent user message may run.
-   * Only reversible local actions bypass the optional review. Sends, deletes, private
-   * reads and Calendar/reminder writes retain their recorded separate review policy.
-   * A reply draft is such a local action: it lands in the open conversation's text
-   * field, visible and editable, and only the owner's own Send tap sends it.
+   * An explicit send or other data-changing request must also match the proposed effect.
    * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
   async performRequested(
     messageId: string,
@@ -1532,18 +1542,59 @@ export class DeviceActionCoordinator<
     ];
     const results: DeviceOperationReceipt[] = [];
     for (const [proposalId, entry] of [...this.proposals]) {
+      const operation=entry.proposal.operation;
+      const owner=proof?.messageId===messageId?proof:undefined;
+      let directSendDraft=false;
+      let directSms=false;
+      let callRecipient:ContactMatch|undefined;
+      let directCall=false;
       if (
-        results.length >= 4 ||
-        (!directTypes.includes(entry.proposal.operation.type) &&
-          !(proof?.messageId === messageId && directSmsRequest(entry.proposal.operation, proof.text))) ||
-        entry.proposal.workflow ||
-        entry.proposal.requestMessageId !== messageId ||
-        (operationType !== undefined &&
-          entry.proposal.operation.type !== operationType)
+        results.length>=4 || entry.proposal.workflow || entry.proposal.requestMessageId!==messageId ||
+        (operationType!==undefined && operation.type!==operationType)
+      ) continue;
+      if (owner && (isSmsCompose(operation) || isSmsSend(operation))) {
+        const request=smsOwnerRequest(owner.text);
+        if (request) {
+          if (isSmsCompose(operation)) {
+            const target=smsComposeTarget(operation);
+            const exact=samePhoneRecipient(request.recipient,target.kind==="number"?target.number:target.query,target.kind==="number") &&
+              (target.kind==="number" || !!entry.smsRecipient);
+            if (exact && request.send && request.body===operation.body) {
+              directSms=true;
+              directSendDraft="draft" in operation;
+            } else if (exact && !request.send && "draft" in operation &&
+                (request.body===undefined || request.body===operation.body)) {
+              directSms=true;
+            }
+          } else if (request.send && operation.recipients.length===1 &&
+              samePhoneRecipient(request.recipient,operation.recipients[0],true) && request.body===operation.body) {
+            directSms=true;
+          }
+        }
+      }
+      if (owner && operation.type==="phone_call") {
+        const recipient=callOwnerRecipient(owner.text);
+        const target=operation.target;
+        if (recipient && target.kind==="number") directCall=samePhoneRecipient(recipient,target.number,true);
+        else if (recipient && target.kind==="contact" && samePhoneRecipient(recipient,target.query,false)) {
+          callRecipient=(await this.options.smsRecipient?.(target.query,signal).catch(()=>null))??undefined;
+          owner.current();
+          directCall=!!callRecipient;
+        }
+      }
+      let directOther=!!owner && directOwnerAction(operation,owner.text,context);
+      if(directOther&&operation.type==="contact_delete"){
+        const matches=await this.options.contactMatches?.(operation.query,signal).catch(()=>null);
+        owner?.current();
+        directOther=matches?.length===1&&samePhoneRecipient(operation.query.trim().toLowerCase(),matches[0],false);
+      }
+      if (
+        !directTypes.includes(operation.type) && !directSms && !directCall && !directOther &&
+        !(owner && directSmsRequest(operation,owner.text))
       )
         continue;
       // Talk presents a draft for its owner to confirm without leaving the current view.
-      if (proof?.retainSmsDraft && isSmsCompose(entry.proposal.operation) && "draft" in entry.proposal.operation) continue;
+      if (proof?.retainSmsDraft && !directSendDraft && isSmsCompose(operation) && "draft" in operation) continue;
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
       // Words that match several tabs need the owner's pick, and only the
@@ -1583,6 +1634,13 @@ export class DeviceActionCoordinator<
         continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
+      if (directSms || directCall || directOther) {
+        owner?.current();
+        if (this.proposals.get(proposalId)!==entry) continue;
+        entry.currentRequest=owner;
+        if (callRecipient) entry.smsRecipient=callRecipient;
+        if (operation.type==="contact_delete") entry.directContactDelete=true;
+      }
       if (entry.proposal.operation.type === "sms_latest_sender" || entry.proposal.operation.type === "sms_compose") proof?.current();
       if (browser) {
         if (
@@ -1601,9 +1659,10 @@ export class DeviceActionCoordinator<
         proof.current();
         entry.currentRequest = proof;
       }
-      const result = await this.approve(proposalId, context, signal);
+      const result = await this.approve(proposalId, context, signal, directSendDraft?"send-draft":undefined);
       results.push(result);
-      if (result.status !== "succeeded" || signal.aborted ||
+      // One clear outbound or destructive command authorizes one matching effect.
+      if (directSms || directCall || directOther || result.status !== "succeeded" || signal.aborted ||
           (entry.proposal.operation.type === "open_view" && typeof proof?.projectView === "function")) break;
     }
     return results;
@@ -2067,7 +2126,7 @@ export class DeviceActionCoordinator<
         if (p.expiresAt <= Date.now())
           throw new DeviceActionNotStarted("This action expired.");
         execution.markDispatched(reserved.entry);
-        const journalIdentity = { scope: this.scope, proposalId: p.id, ...(reviewed.smsRecipient ? { smsRecipient: reviewed.smsRecipient } : {}) };
+        const journalIdentity = { scope: this.scope, proposalId: p.id, ...(reviewed.smsRecipient ? { smsRecipient: reviewed.smsRecipient } : {}), ...(reviewed.directContactDelete?{directContactDelete:true as const}:{}) };
         if (p.operation.type === "open_view" && typeof reviewed.currentRequest?.projectView === "function") {
           assertCurrent();
           const opened = await reviewed.currentRequest.projectView(p.operation.view, signal);

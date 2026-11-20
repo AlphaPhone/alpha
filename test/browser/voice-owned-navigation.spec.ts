@@ -178,7 +178,7 @@ test('the next spoken Send this text confirms one visible addressed SMS without 
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
  await utterance(page);
- await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts};})).toEqual({requests:1,approvals:['send-reviewed-text']});
 });
 
@@ -203,7 +203,7 @@ test('an addressed draft sends once by voice without leaving Talk or opening Mes
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
  await utterance(page);
- await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts};})).toEqual({requests:1,approvals:['draft-review']});
 });
 
@@ -218,7 +218,7 @@ test('a changed background SMS review cannot inherit the live voice confirmation
  await expect(page.locator('[data-alpha-voice-send-review="draft-review"]')).toHaveCount(0);
  await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
  await utterance(page);
- await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts??[])).toEqual([]);
 });
 
@@ -232,7 +232,7 @@ test('speaking Send this text with an unresolved draft stages no send and forwar
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
  await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
  await utterance(page);
- await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts??[]};})).toEqual({requests:1,approvals:[]});
 });
 
@@ -248,6 +248,6 @@ test('speaking Send this text cannot approve an addressed card hidden from the o
  await card.evaluate(row=>row.setAttribute('hidden',''));
  await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
  await utterance(page);
- await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts??[])).toEqual([]);
 });

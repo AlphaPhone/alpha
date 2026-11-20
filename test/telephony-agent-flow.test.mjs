@@ -108,6 +108,36 @@ test('an unresolved contact draft makes no changes without a confirmed recipient
   assert.deepEqual(f.posts,[]);
 });
 
+test('direct call mode accepts an exact current request and rejects a mismatched target',async()=>{
+  const operation={type:'phone_call',target:{kind:'number',number:'+14155550132'}};
+  for(const [text,count] of [['Call +14155550132',1],['Call +14155550199',0],['Do not call +14155550132',0]]){
+    const f=fixture({operation,requestMessageId:messageId,result:{kind:'phone-call',status:'placed',contact:false}});
+    const owner={...proof,text};
+    await f.client.pendingReview(context,signal(),owner);
+    const receipts=await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,owner);
+    assert.equal(receipts.length,count);
+    assert.equal(f.effects,count);
+  }
+});
+
+test('a named direct call needs one exact phone contact',async()=>{
+  const operation={type:'phone_call',target:{kind:'contact',query:'Priya Nair'}};
+  const owner={...proof,text:'Call Priya Nair'};
+  const recipient={id:'1',name:'Priya Nair',number:'+14155550132'};
+  try{
+    for(const match of [recipient,null]){
+      setSmsReviewRecipient(async()=>match);
+      let chosen;
+      const f=fixture({operation,requestMessageId:messageId,onExecute:identity=>{chosen=identity.smsRecipient;}});
+      await f.client.pendingReview(context,signal(),owner);
+      const receipts=await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,owner);
+      assert.equal(receipts.length,match?1:0);
+      assert.equal(f.effects,match?1:0);
+      assert.deepEqual(chosen,match??undefined);
+    }
+  }finally{setSmsReviewRecipient(async()=>null);}
+});
+
 test('only the current requested navigation can transfer to the voice projection', async () => {
   const operation={type:'open_view',view:'notes'};
   const f=fixture({operation,requestMessageId:messageId,result:null});
