@@ -6,8 +6,8 @@ import {checkNativeSmsDispatch, historicalSmsSourceTraces} from '../specs/quint/
 test('partial source contract: card-approved SMS admission, radio dispatch and callback readback refine authenticated staged source', async () => {
   const {receipt} = await checkNativeSmsDispatch();
   assert.equal(receipt.passed, true);
-  assert.equal(receipt.traces, 30);
-  assert.equal(receipt.observedFields.length, 30);
+  assert.equal(receipt.traces, 31);
+  assert.equal(receipt.observedFields.length, 31);
   assert.equal(verifyRefinementReceiptInputs(receipt), true);
 });
 

@@ -2232,6 +2232,7 @@
   {
     "path": "specs/quint/services/CoreConnectorCustody.qnt",
     "module": "CoreConnectorCustody",
+    "verifyBackend": "tlc-bounded",
     "init": "init",
     "step": "step",
     "invariant": "safety",
