@@ -1,5 +1,6 @@
 import {test, expect, type Page} from '@playwright/test';
 import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
+import {preloadPageModules} from './helpers/page-modules';
 
 // The owner's Send on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
 // and no dialog follows. Real renderer, pairing, connection controller, proposal parser, coordinator
@@ -11,13 +12,18 @@ import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
 
 const NUMBER = '+15550100199', BODY = 'On my way';
 
-async function setup(page: Page) {
+async function setup(page: Page, contactMode?: 'one' | 'two' | 'none') {
   await page.addInitScript(installTelephonyFixture, {});
-  await page.addInitScript(({number, body}) => {
+  await page.addInitScript(({number, body, contactMode}) => {
     const w = window as any, fixture = w.smsCardFixture = {
       proposal: null as any, decisions: [] as string[], receipts: [] as any[], sends: [] as any[], refused: [] as string[],
       journal: new Map<string, any>(),
     };
+    if (contactMode) {
+      const contacts = contactMode === 'none' ? [] : [{id: '41', name: 'Carson', phones: [number], emails: []}];
+      if (contactMode === 'two') contacts.push({id: '42', name: 'Carson', phones: ['+15550100198'], emails: []});
+      w.people.splice(0, w.people.length, ...contacts);
+    }
     // installTelephonyFixture chose the offline profile; this check pairs with a local agent instead.
     localStorage.removeItem('alpha.connection.selection.v1');
     const agentId = '12345678-1234-4234-8234-123456789abc', store = new Map<string, string>();
@@ -72,8 +78,10 @@ async function setup(page: Page) {
       if (pathname === '/api/conversations/fixture-chat/messages' && input.method === 'POST') {
         if (!String(input.headers['X-Eliza-Device-Capabilities'] ?? '').split(',').includes('sms.compose.v2')) throw Error('sms.compose.v2 was not negotiated');
         fixture.proposal = {id: 'fixture-proposal', digest: 'a'.repeat(64), state: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(), subjectUserId: 'fixture-owner', requestedBy: agentId, action: 'device_action',
-          payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', operation: {type: 'sms_compose', target: {kind: 'number', number}, body}}};
-        return ok({text: 'Review the text below.', agentName: 'SMS card fixture'});
+          payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', operation: {type: 'sms_compose', target: contactMode ? {kind:'contact', query:contactMode==='none'?'Qassem':'Carson'} : {kind: 'number', number}, body, ...(contactMode ? {draft:true} : {})}}};
+        return ok({text: 'Review the text below.', agentName: 'SMS card fixture', ...(contactMode ? {
+          messageId:'11111111-1111-4111-8111-111111111111',userMessageId:'22222222-2222-4222-8222-222222222222',
+        } : {})});
       }
       if (pathname === '/api/client-devices/proposals') return ok({proposals: fixture.proposal ? [fixture.proposal] : []});
       const sent = input.body ? JSON.parse(input.body) : {};
@@ -85,7 +93,7 @@ async function setup(page: Page) {
       }
       throw Error('Unexpected fixture route ' + pathname);
     };
-  }, {number: NUMBER, body: BODY});
+  }, {number: NUMBER, body: BODY, contactMode});
   await page.route('https://**/*', route => route.abort());
   await page.goto('/?mode=dev');
   await page.getByText('Local development agent', {exact: true}).click();
@@ -94,6 +102,28 @@ async function setup(page: Page) {
   await local.getByLabel('Pairing code', {exact: true}).fill('synthetic-code');
   await local.getByRole('button', {name: 'Connect local agent', exact: true}).click();
   await page.locator('.alpha-connection-scrim').waitFor({state: 'detached'});
+  if (contactMode) {
+    await preloadPageModules(page, ['/src/prototype/model.js']);
+    await page.evaluate(() => {
+      const w = window as any;
+      const {Component} = w.__alphaModules['/src/prototype/model.js'];
+      const render = Component.prototype.renderVals;
+      Component.prototype.renderVals = function () { w.smsCardFixture.shell = this; return render.call(this); };
+    });
+    await page.getByRole('button', {name: 'Open conversation', exact: true}).click();
+    await page.evaluate(async () => {
+      const f = (window as any).smsCardFixture;
+      f.shell.voiceConversationActive = () => true;
+      const signal = new AbortController().signal;
+      f.voice = async (text: string) => {
+        const prepared = await f.shell.prepareVoiceConversation(signal);
+        return f.shell.sendVoiceTurn({...prepared, text, signal, approvalSignal: signal, talkGeneration: 1,
+          turnId: crypto.randomUUID(), assertCurrent: () => signal.throwIfAborted(),
+          voiceTurnSignal: {nextSpeaker: 'agent', agentShouldSpeak: true, source: 'fixture'}});
+      };
+    });
+    return page.getByRole('button', {name: /^Draft SMS/});
+  }
   const input = page.getByRole('textbox', {name: 'Ask Alpha', exact: true});
   await input.fill(`Text ${NUMBER}: ${BODY}`);
   await input.press('Enter');
@@ -140,4 +170,49 @@ test('Decline on the Review SMS card sends nothing', async ({page}) => {
   await expect.poll(async () => (await state(page)).decisions).toEqual(['reject']);
   expect(await state(page)).toMatchObject({sends: 0, sendSms: 0, receipts: []});
   await expect(card).toHaveCount(0);
+});
+
+const voiceCases={
+  one:'Draft to Carson with one matching contact',
+  two:'Draft to Carson with two matching contacts',
+  none:'Draft with no contact matching the recognized name',
+};
+for(const contactMode of ['one','two','none'] as const) test(voiceCases[contactMode], async ({page}, info) => {
+  const card = await setup(page, contactMode);
+  const spoken = await page.evaluate(async (name) => {
+    const {voice} = (window as any).smsCardFixture;
+    const reply = await voice('Draft a text to '+name+' saying On my way.');
+    return reply.speechText ?? reply.text;
+  }, contactMode==='none'?'Qassem':'Carson');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText(BODY);
+  expect((await state(page)).sendSms).toBe(0);
+  if(contactMode==='one'){
+    await expect(card).toContainText(`Carson (${NUMBER})`);
+    await expect(card).toContainText('Say “Send this text”');
+    expect(spoken).toContain('confirm by voice');
+    await info.attach('Addressed draft', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
+    await page.evaluate(() => (window as any).smsCardFixture.voice('Send this text.'));
+    // The host draft is retired. The distinct, explicitly confirmed device send is journaled once.
+    expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,refused:0,sendSms:1});
+    const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends[0]);
+    expect(sent).toMatchObject({recipients:[NUMBER],body:BODY});
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await info.attach('One simulated send', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
+  }else{
+    await expect(card).toContainText(contactMode==='none'?'To contact: Qassem':'To contact: Carson');
+    await expect(card).toContainText('Choose recipient');
+    await expect(card).not.toContainText('Say “Send this text”');
+    expect(spoken).toBe('Who should get this text? Say their full name or choose a recipient on your phone.');
+    await info.attach('Draft asks for a recipient', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
+    await page.evaluate(() => (window as any).smsCardFixture.voice('Send this text.'));
+    expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0});
+    if(contactMode==='two'){
+      await card.click();
+      await expect(page.getByRole('button',{name:/Carson.*0199/})).toBeVisible();
+      await expect(page.getByRole('button',{name:/Carson.*0198/})).toBeVisible();
+      expect((await state(page)).sendSms).toBe(0);
+      await info.attach('Two matching contacts', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
+    }
+  }
 });

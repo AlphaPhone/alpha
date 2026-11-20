@@ -148,13 +148,13 @@ for(const when of ['during the ACK','after opening'])test(`Talk survives the fir
   .toEqual({kind:'canonical-note-source',id:'notes',revision:'1'});
 });
 
-test('a text draft offers Open draft and returns to listening without sending',async({page})=>{
+test('an unresolved text draft asks who should receive it and returns to listening',async({page})=>{
  await setup(page);
  await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
  await utterance(page);
- await expect(page.getByRole('button',{name:/Draft SMS.*Open draft/})).toBeVisible();
+ await expect(page.getByRole('button',{name:/Draft SMS.*Choose recipient/})).toBeVisible();
  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
- expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken)).toEqual(['Your draft is ready. Tap Open draft to see it in Messages.']);
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken)).toEqual(['Who should get this text? Say their full name or choose a recipient on your phone.']);
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
@@ -226,7 +226,7 @@ test('speaking Send this text with an unresolved draft stages no send and forwar
  await setup(page,'full');
  await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.prompt='Draft a text to Carson.';});
  await utterance(page);
- await expect(page.getByRole('button',{name:/Draft SMS.*Open draft/})).toBeVisible();
+ await expect(page.getByRole('button',{name:/Draft SMS.*Choose recipient/})).toBeVisible();
  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');

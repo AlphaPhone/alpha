@@ -3494,7 +3494,7 @@ function describeTelephonyAction(
             title: "Draft SMS",
             description: `${to}\n\n${operation.body}\n\n${target.kind === "number" || smsRecipient
               ? `From: the SIM chosen in Messages, or your default texting SIM\n${smsSendFacts(1, operation.body)}`
-              : "Opens that conversation in Messages with this in its text field. Nothing is sent until you tap Send there."}`,
+              : "Choose a recipient to open this draft in Messages."}`,
           }
         : {
             title: "Review SMS",

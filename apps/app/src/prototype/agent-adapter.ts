@@ -477,7 +477,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
-    const approvalLabel=(proposal.smsReview==='draft'||proposal.smsReview==='addressed-draft')?'Open draft':proposal.smsReview==='send'?'Send':proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
+    const approvalLabel=proposal.smsReview==='addressed-draft'?'Open draft':proposal.smsReview==='send'?'Send':
+      proposal.smsReview==='draft'||proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
     return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
   function visibleSmsReview(proposalId:string):boolean {
@@ -2164,7 +2165,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const proposal=reply.proposals![0];
         this.pendingVoiceSmsReview={id:proposal.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:proposal.contextRevision,expiresAt:proposal.expiresAt,details:proposal.description};
       }
-      const speechText=smsReview==='draft'?'Your draft is ready. Tap Open draft to see it in Messages.'
+      const speechText=smsReview==='draft'?'Who should get this text? Say their full name or choose a recipient on your phone.'
         :smsReview==='addressed-draft'?'Your draft is ready. Review it on your phone. You can confirm by voice.'
         :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
         :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
