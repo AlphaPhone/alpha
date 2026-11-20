@@ -431,6 +431,7 @@ import android.telephony.*;
 import java.io.File;
 import java.util.*;
 public final class Context {
+ public String claimFault="";
  public boolean admitted=true,send=true,phone=true,read=true,role;
  public int boot=1;
  public final Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
@@ -541,7 +542,13 @@ final class AlphaCredentialStore {
  AlphaCredentialStore(Context context){this.context=context;}
  String readCredentialSlot(String slot){return context.slots.get(slot);}
  boolean compareExchangeCredentialSlot(String slot,String expected,String value)throws Exception{
-  return ai.eliza.plugins.messages.SmsDispatchTraces.reserveClaim(context,slot,expected,value);
+  if(expected!=null)throw new AssertionError("Device operation claims must be write-once");
+  synchronized(context.slots){
+   if(context.claimFault.equals("claim-before"))throw new java.io.IOException("Synthetic claim refusal");
+   if(context.slots.putIfAbsent(slot,value)!=null)return false;
+   if(context.claimFault.equals("claim-after"))throw new java.io.IOException("Synthetic lost claim acknowledgement");
+   return true;
+  }
  }
  void writeCredentialSlot(String slot,String value)throws Exception{ai.eliza.plugins.messages.SmsDispatchTraces.write(context,slot,value);}
 }`,

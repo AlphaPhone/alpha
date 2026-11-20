@@ -36,18 +36,6 @@ public final class SmsDispatchTraces {
  public static long now=1_760_000_000_000L;
  static final ArrayDeque<String> faults=new ArrayDeque<>();
  static boolean historicalListeners;
- public static String claimFault="";
-
- public static boolean reserveClaim(Context context,String slot,String expected,String value)throws Exception{
-  check(slot.equals("alpha-sms-operation:claim:v1:"+SmsSendJournal.sha256(OP))&&expected==null,"Write-once device operation identity");
-  synchronized(context.slots){
-   if(claimFault.equals("claim-before"))throw new IOException("Synthetic claim refusal");
-   if(context.slots.putIfAbsent(slot,value)!=null)return false;
-   if(claimFault.equals("claim-after"))throw new IOException("Synthetic lost claim acknowledgement");
-   return true;
-  }
- }
-
 
  public static void write(Context context,String slot,String value)throws Exception{
   if(!slot.equals(SLOT))throw new AssertionError("Exact Alpha installed journal slot");
@@ -264,7 +252,7 @@ public final class SmsDispatchTraces {
     default -> throw new AssertionError(request);
    }
    context.radio.mode=mode;
-   claimFault=mode;
+   context.claimFault=mode;
    switch(mode){
     case "begin-before" -> faults.add("before");
     case "journal-refused" -> {faults.add("before");faults.add("before");}
