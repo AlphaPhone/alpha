@@ -2,162 +2,66 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
-  "head": "bc1cc39afc3aa96e459357936ccd97de9bed42fc",
+  "baseCommit": "a3df983bff6ed878d996971e9092c531dcc76426",
+  "head": "76bdaf03a44f22dde488ddcd275f28038f0ae5a6",
   "recordedAt": "2026-11-20",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...bc1cc39afc3aa96e459357936ccd97de9bed42fc",
-  "status": "ahead",
-  "aheadBy": 47,
-  "behindBy": 0,
-  "mergeBase": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...76bdaf03a44f22dde488ddcd275f28038f0ae5a6",
+  "status": "diverged",
+  "aheadBy": 13,
+  "behindBy": 32,
+  "mergeBase": "e66a28c3ea1b09fefaccb85d72486dada8f00758",
   "pinOnlyCommits": [
     {
-      "sha": "9e453f11a0d54b793507b9dac206f9d81d702a73",
-      "subject": "Bind SMS reply drafts to the actual latest sender read"
+      "sha": "38e8f829a2a2d36b44f622a6f34e0f3b27e7ef96",
+      "subject": "Keep validated speech cues on directly routed work"
     },
     {
-      "sha": "cd10f18e6ac775ab163778d040fd6ada9da072e2",
-      "subject": "Require a persisted sender reply before resolving its address"
+      "sha": "90d69b2397455b899648811f98597fde2bca9875",
+      "subject": "Run verified built-in Calendar slot reads without replanning"
     },
     {
-      "sha": "3b644d2680e5f64e408dcdc15134aff61bd80621",
-      "subject": "Use the existing native Messages thread identity throughout"
+      "sha": "ffdce4656201ab42003ce2e5aeafd19e989ad4b6",
+      "subject": "Carry delivered voice cues into the final reply prompt"
     },
     {
-      "sha": "93c5035131033ec792be522e8ee252bd00be6c5a",
-      "subject": "Offer owner-bound Gmail composition to a negotiated device editor"
+      "sha": "4df8a8c7ca593b3f897e9eb106129d44647dde90",
+      "subject": "Read Calendar openings as conversational time ranges"
     },
     {
-      "sha": "94c7e31bc7d74eb801fd76ecf13918a1b0bb0d8f",
-      "subject": "Ground SMS draft recipients and sender disclosure in the owner request"
+      "sha": "0647a8c3f8351c6da69be325000a46e623811170",
+      "subject": "Keep progress cues short when a turn covers several tasks"
     },
     {
-      "sha": "72b0ccdd837ffccc45ac03f5c017b7f3d026570f",
-      "subject": "Ask before reading when the requested sender scope is unsupported"
+      "sha": "f7fa32209495a61170b6726caeef86f58d33ed81",
+      "subject": "Honor explicit Calendar windows alongside the simple routing marker"
     },
     {
-      "sha": "e83eea56ed100c2d361567b484a6516eaf0a1770",
-      "subject": "Route retries of phone Gmail drafts back to the composer"
+      "sha": "b882f555b84eb661b90657ea0ae61858e262d376",
+      "subject": "Bind the sole Calendar slot when a provider uses index zero"
     },
     {
-      "sha": "b4afc7881bf061765963613da0d7f8d28b8ec529",
-      "subject": "Preserve visit times in native browser history"
+      "sha": "c9b0176a2f7f4db8dc2dbbef8534d7c49a8ea32d",
+      "subject": "Identify new Notes checklists and require their matching title"
     },
     {
-      "sha": "d6df73a2c405ca90ab62d61fd7ec928945db55ca",
-      "subject": "Update exhaustive Gmail enrollment fixture"
+      "sha": "a338c3117346638be457c7c9161e585ead214e70",
+      "subject": "Keep explicit Calendar slot requests on the fast path"
     },
     {
-      "sha": "9755962ab552f810c0f00881d92ea257e1c1602c",
-      "subject": "Require a room listing connector for channel discovery"
+      "sha": "cf60bb2a81559ebf68d5e742b905e99216078477",
+      "subject": "Preserve hosted intent lists and confirmed Calendar times"
     },
     {
-      "sha": "e9115abb12579b0e571c53b7ca320b4498e2cca8",
-      "subject": "Keep required view navigation pending until its receipt"
+      "sha": "ceec0ad902599eb34633ff13b2a5694bbbea8da7",
+      "subject": "Honor the original explicit Calendar range before saving"
     },
     {
-      "sha": "98abd3d37bf2e14c0699190aae7bd927a671f4e5",
-      "subject": "Keep self-addressed Gmail drafts pending without sending"
+      "sha": "0b9a3629b69cb9cb22ad4d76ab85e284551351c2",
+      "subject": "Keep confirmed Calendar saves after argument repair"
     },
     {
-      "sha": "0172f613a12bdc05e5b58cf13056bf324bc9312d",
-      "subject": "Keep explicit compound view navigation in planning"
-    },
-    {
-      "sha": "448aa9d9212c31fb3552cc8935ba077a6e44dcec",
-      "subject": "Route explicit local email drafts to the composer"
-    },
-    {
-      "sha": "e1b6f97c920e2d32bb49cc16fe1505093c72ad12",
-      "subject": "Preserve a settled read when view navigation is prepared"
-    },
-    {
-      "sha": "7da8e4147e88e0fe801cd4300d264cd508140c54",
-      "subject": "Keep SMS drafts in the conversation the owner has open"
-    },
-    {
-      "sha": "cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
-      "subject": "Sort Assistant draft and navigation imports"
-    },
-    {
-      "sha": "57fde30369fdfaf8012c406e28931bb3e4dfe946",
-      "subject": "Reuse Calendar source discovery during event creation"
-    },
-    {
-      "sha": "83cc63fc1fc3b9fdd4763e7156675ef88413f7be",
-      "subject": "Overlap speech relay warm-up with consent persistence"
-    },
-    {
-      "sha": "aa2ac5aa7d4377e139e561c531c5f26e260f1d0a",
-      "subject": "Preserve built-in Calendar scope for next-event reads"
-    },
-    {
-      "sha": "4c29476aa633c8db80771ea0af465291530064e7",
-      "subject": "Type-check the Calendar scope regression fixture"
-    },
-    {
-      "sha": "8b615fb77ede08263f23de0df5f500905e2eb2e8",
-      "subject": "Use the bound built-in Calendar ID without model retries"
-    },
-    {
-      "sha": "4c4ab9b4e3f9cfb0c0f85b67147bbd6201f3e718",
-      "subject": "Assert Calendar source identity independently of sync time"
-    },
-    {
-      "sha": "cf9c154c8467535dc6ed837ec49319bcbf9a7150",
-      "subject": "Exercise Cloud speech audio after the original lease deadline"
-    },
-    {
-      "sha": "944a36f97491674a68a96cad4cdfac7be97fe341",
-      "subject": "Bind exact Calendar read intent references and source scopes"
-    },
-    {
-      "sha": "f39b42a28eaddfef3fd550917f1929f28583cc4b",
-      "subject": "Use a complete response fixture for Calendar intent binding"
-    },
-    {
-      "sha": "42bb92e529e5d9cb39ca50d09e566596b1cd991b",
-      "subject": "Keep a verified next-event answer when the model omits its citation"
-    },
-    {
-      "sha": "8ede343f6366ce111401d4f688618cf144238a2b",
-      "subject": "Preserve the verified Calendar date in next-event replies"
-    },
-    {
-      "sha": "52dfd3d1a2846e4431d6d88fb162425b46b01bea",
-      "subject": "Keep renewed speech sessions alive across stale expiry alarms"
-    },
-    {
-      "sha": "0e6732ed98b647b09a0f9a148ea24d3af9f14d7a",
-      "subject": "Route a single owned named note read without another planner call"
-    },
-    {
-      "sha": "1876f64e88d3ff2cbfbe67d5be10c96b7deeed93",
-      "subject": "Route a plain built-in next-event read through its canonical tool"
-    },
-    {
-      "sha": "9068629237424f465405ee1bd0fa9c43d7c0b462",
-      "subject": "Decode serialized Calendar read bindings before validation"
-    },
-    {
-      "sha": "13039435126795bb567cd0a9753f1202e05e2f39",
-      "subject": "Normalize abbreviated Calendar intent references"
-    },
-    {
-      "sha": "dd5559deac227f76430709bd3ea0cb852dbe908f",
-      "subject": "Route a verified Calendar title and day without replanning"
-    },
-    {
-      "sha": "c831e1d281b17b38cfe2acf55cdcfd38008e546a",
-      "subject": "Ask for the literal Calendar search day in the read binding"
-    },
-    {
-      "sha": "af8669aff16d4b066f4722e46b5f250ed3e12303",
-      "subject": "Answer a verified Calendar slot preview from its actual local times"
-    },
-    {
-      "sha": "bc1cc39afc3aa96e459357936ccd97de9bed42fc",
-      "subject": "Keep a verified dated title lookup on the Calendar search route"
+      "sha": "76bdaf03a44f22dde488ddcd275f28038f0ae5a6",
+      "subject": "Speak the final reply without planning acknowledgments"
     }
   ],
   "pullRequests": [
