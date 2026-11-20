@@ -1,10 +1,12 @@
-import {localDraftRow,savedInboxAttachments} from './inbox-draft-navigation';
+import {localDraftRow,savedInboxAttachments,savedInboxDrafts} from './inbox-draft-navigation';
 import {test,expect,type Page} from '@playwright/test';
 const dialog=(page:Page)=>page.getByRole('dialog',{name:'Attach to email',exact:true});
-async function setup(page:Page,openFile=true,openInbox=true,holdRead=false){
+const owner:[string,string,string,string]=['production','file-owner','','file-grant'];
+/** `mail` lists one synthetic message the owner can reply to. */
+async function setup(page:Page,openFile=true,openInbox=true,holdRead=false,mail=false){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');
- await page.evaluate(async()=>{
+ await page.evaluate(async mail=>{
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
   const {Component}=await import('/src/prototype/model.js');
   // Synthetic restartable native-slot stand-in; browser production intentionally has no Inbox secret slots.
@@ -14,20 +16,19 @@ async function setup(page:Page,openFile=true,openInbox=true,holdRead=false){
   const {registerPlugin}=await import('/src/platform-plugins.ts');
   const f=(window as any).fileEmail={writes:0,shell:null as any};
   const write=async()=>{f.writes++;throw Error('No provider writes allowed');};
-  const client={gmailAccounts:async()=>[{connectionId:'file-grant',label:'owner@example.invalid',connected:true,grantedCapabilities:['google.gmail.triage']}],gmailInboxCapabilities:async()=>({send:false,providerDrafts:false,mailboxMutations:false}),gmailSearch:async()=>({messages:[],syncedAt:'1'}),gmailPrepareOperation:write,gmailDispatchOperation:write};
+  const message={id:'m1',threadId:'t-m1',from:'Alice Example',fromEmail:'alice@example.invalid',to:['owner@example.invalid'],subject:'Lunch plans',snippet:'Synthetic',receivedAt:'2026-10-01T12:00:00Z',unread:false};
+  const client={gmailAccounts:async()=>[{connectionId:'file-grant',label:'owner@example.invalid',connected:true,grantedCapabilities:['google.gmail.triage']}],gmailInboxCapabilities:async()=>({send:false,providerDrafts:false,mailboxMutations:false}),gmailSearch:async()=>({messages:mail?[message]:[],syncedAt:'1'}),gmailRead:async()=>({message,bodyText:'Synthetic body',historyId:'mail-r1',links:[]}),gmailPrepareOperation:write,gmailDispatchOperation:write};
   c.getCloudClient=()=>({client,sessionId:'file-session'} as any);
   const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'file-owner',sessionId:'file-session',credentialId:'fixture'}} as any;c.getSnapshot=()=>snapshot;
   const original=Component.prototype.renderVals;Component.prototype.renderVals=function(){f.shell=this;return original.call(this);};
   const files=registerPlugin<any>('AlphaFiles');if(!(await files.list({})).entries.length)await files.importFile(new File(['Café\nExact bytes'],'selected.txt',{type:'text/plain'}));
- });
+ },mail);
  if(!openInbox)return;
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
  if(!openFile)return;
  await expect.poll(()=>page.evaluate(async()=>{const {VIEWS}=await import('/src/prototype/model.js');return VIEWS.inbox.fileEmailTarget().ready;})).toBe(true);
- await page.evaluate(()=>(window as any).fileEmail.shell.openView('files',{}));
- await page.getByRole('button',{name:'Internal storage',exact:true}).click();
- await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
+ await openSelectedFile(page);
  if(holdRead) await page.evaluate(async()=>{
   const {BrowserMailAttachments}=await import('/src/browser/mail-attachments.ts');
   const original=BrowserMailAttachments.prototype.readSelected, fixture=(window as any).fileEmail;
@@ -40,11 +41,17 @@ async function setup(page:Page,openFile=true,openInbox=true,holdRead=false){
  await chooseEmail(page);
  if(holdRead)await expect.poll(()=>page.evaluate(()=>typeof(window as any).fileEmail.releaseAttachment)).toBe('function');
 }
+/** Leaves Inbox for Files, first visit, and opens the selected file there. */
+async function openSelectedFile(page:Page){
+ await page.evaluate(()=>(window as any).fileEmail.shell.openView('files',{}));
+ await page.getByRole('button',{name:'Internal storage',exact:true}).click();
+ await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
+}
 async function chooseEmail(page:Page){
  await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Use in email',exact:true}).click();
 }
-test('choosing Email in Files stages the exact attachment directly in the local draft',async({page},info)=>{
+test('choosing Email in Files stages the exact attachment directly in a new local draft',async({page},info)=>{
  await setup(page);
  await expect(dialog(page)).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
@@ -52,7 +59,7 @@ test('choosing Email in Files stages the exact attachment directly in the local 
  await page.getByRole('button',{name:'Back from draft',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
- const saved=()=>savedInboxAttachments(page,['production','file-owner','','file-grant']);
+ const saved=()=>savedInboxAttachments(page,owner);
  expect(await saved()).toEqual([{name:'selected.txt',mimeType:'text/plain',dataBase64:Buffer.from('Café\nExact bytes').toString('base64')}]);
  await setup(page,false);await (await localDraftRow(page)).click();
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
@@ -75,13 +82,44 @@ for(const change of ['account','bytes','revoke'])test(`direct file attachment re
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
-test('the same selected bytes cannot be attached twice',async({page})=>{
+test('sharing the same file again while its email is unfinished adds nothing',async({page})=>{
  await setup(page);
  await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
+ // Files reopens in the folder it was showing; leaving Inbox keeps the shared email unfinished.
  await page.evaluate(()=>(window as any).fileEmail.shell.openView('files',{}));
  await page.getByRole('button',{name:'Open selected.txt',exact:true}).click();
  await chooseEmail(page);
- await expect(page.getByText(/already attached/).first()).toBeVisible();
+ await expect(page.getByText('This file is already attached to your unfinished email in Inbox. Nothing was added.',{exact:true}).first()).toBeVisible();
+ // The duplicate refusal sets nothing aside and starts no second email: the one email holds the file once.
+ expect(await savedInboxDrafts(page,owner)).toEqual([]);
+ await page.evaluate(()=>(window as any).fileEmail.shell.openView('inbox',{}));
+ await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
+ // Drafts lists the unfinished email (Continue draft) and nothing set aside.
+ await (await localDraftRow(page)).click();
+ await expect(page.getByRole('list',{name:'Attachments',exact:true}).getByRole('listitem')).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toHaveCount(1);
+ expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
+});
+test('a shared file never lands in an unfinished reply: a new composer opens with only that file',async({page},info)=>{
+ await setup(page,false,true,false,true);
+ await page.getByText('Lunch plans',{exact:true}).click();
+ await page.getByLabel('Message actions',{exact:true}).click();
+ await page.getByRole('button',{name:'Reply',exact:true}).click();
+ await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Re: Lunch plans');
+ await page.getByRole('textbox',{name:'Message',exact:true}).fill('Reply the owner typed');
+ // Leaving Inbox closes the composer and keeps the unfinished reply.
+ await openSelectedFile(page);
+ await chooseEmail(page);
+ await expect(page.getByRole('button',{name:'Remove selected.txt',exact:true})).toBeVisible();
+ await expect(page.getByRole('list',{name:'Attachments',exact:true}).getByRole('listitem')).toHaveCount(1);
+ await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('');
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('');
+ await page.screenshot({path:info.outputPath('file-email-new-draft-beside-reply.png')});
+ const shape=(drafts:Awaited<ReturnType<typeof savedInboxDrafts>>)=>drafts.map(draft=>[draft.mode,draft.subject,draft.body,(draft.attachments??[]).map(file=>file.name)]);
+ // The reply was set aside as it was: its text, no attachment.
+ expect(shape(await savedInboxDrafts(page,owner))).toEqual([['reply','Re: Lunch plans','Reply the owner typed',[]]]);
+ await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ expect(shape(await savedInboxDrafts(page,owner))).toEqual([['reply','Re: Lunch plans','Reply the owner typed',[]],['compose','','',['selected.txt']]]);
  expect(await page.evaluate(()=>(window as any).fileEmail.writes)).toBe(0);
 });
 test('Files before Inbox asks to open Inbox once when a Gmail account was chosen',async({page})=>{
