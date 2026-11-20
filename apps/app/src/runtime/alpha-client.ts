@@ -62,7 +62,7 @@ export interface ActionProposal {
   /** Validated exact target for navigation only. Opening it never approves the operation. */
   reviewNoteTarget?:import('./notes-contract').NotesTarget;
   /** Presentation of a validated SMS operation. Approval remains bound to the original proposal. */
-  smsReview?: 'draft' | 'send' | 'recipient';
+  smsReview?: 'draft' | 'addressed-draft' | 'send' | 'recipient';
   title: string;
   /** Human-readable exact target/action review. Must contain no secret values. */
   description: string;
@@ -140,6 +140,7 @@ export interface VerifiedSessionTransport {
   execute(input: {
     requestId: string;
     proposal: ActionProposal;
+    approval?: "send-draft";
     context: ContextEnvelope;
     signal: AbortSignal;
   }): Promise<OperationReceipt>;
@@ -544,10 +545,11 @@ export class AlphaClient {
     },options?.signal);
   }
   /** Call only after the user reviews and explicitly approves this exact proposal. */
-  async approve(proposalId: string, approvalSignal?: AbortSignal): Promise<OperationReceipt> {
+  async approve(proposalId: string, approvalSignal?: AbortSignal, approval?: "send-draft"): Promise<OperationReceipt> {
     const proposal = this.proposals.get(proposalId);
     if (
       !proposal ||
+      (approval === "send-draft" && proposal.smsReview !== "addressed-draft") ||
       proposal.expiresAt <= Date.now() ||
       proposal.contextRevision !== this.context.revision ||
       this.consumed.has(proposalId)
@@ -564,6 +566,7 @@ export class AlphaClient {
       const receipt = await transport.execute({
         requestId: crypto.randomUUID(),
         proposal: { ...proposal },
+        ...(approval ? { approval } : {}),
         context,
         signal,
       });

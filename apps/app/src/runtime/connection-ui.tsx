@@ -2357,7 +2357,7 @@ export const connectionController = {
   setDeviceExecutor(executor: DeviceExecutor) { deviceExecutor = executor; },
   setForegroundExecutor(executor: ForegroundReviewExecutor) { foregroundExecutor = executor; },
   setDeviceReadReview(review:(proposal:ActionProposal,context:ContextEnvelope,signal:AbortSignal)=>Promise<void>){deviceReadReview=review;},
-  async execute(proposal: ActionProposal, context: ContextEnvelope, signal: AbortSignal): Promise<OperationReceipt> {
+  async execute(proposal: ActionProposal, context: ContextEnvelope, signal: AbortSignal, approval?: "send-draft"): Promise<OperationReceipt> {
     const selected = active;
     if (!selected || !selected.actions) return { proposalId: proposal.id, status: 'denied', summary: 'Not supported' };
     const session=state.session!,sessionId=session.sessionId,generation=epoch,account=JSON.stringify(service?.identity??null),conversation=conversationMemory.get(conversationKey(session)),review=deviceReadReview;
@@ -2369,7 +2369,7 @@ export const connectionController = {
         await review(proposal,context,signal);signal.throwIfAborted();
         if(selected!==active||generation!==epoch||state.session!==session||conversationMemory.get(conversationKey(session))!==conversation||JSON.stringify(service?.identity??null)!==account||document.hidden||state.open)throw Error('The Notes review changed. Nothing was shared.');
       }
-      return selected.actions!.approve(proposal.id, context, signal);
+      return selected.actions!.approve(proposal.id, context, signal, approval);
     })();
     actionReceipts.set(proposal.id, { sessionId, result });
     // A refusal (before the journal reserved anything) can be approved again; a settled receipt stays.
@@ -3624,7 +3624,7 @@ export const connectionController = {
         try { const projectView=channelType==='VOICE_DM'&&projectRequestedView
           ? (findViewActionHandoff(reply.actionResults)?'canonical' as const:projectRequestedView)
           : undefined;
-          const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,projectView}:undefined;
+          const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,projectView,...(channelType==="VOICE_DM"?{retainSmsDraft:true as const}:{})}:undefined;
           let items = await selected.actions.pendingReview(context, requestSignal,authoredRequest);
           if(!failed&&directRequestedActions&&typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)){
             const performed=await selected.actions.performRequested(reply.userMessageId,context,requestSignal,async()=>!(await readDevicePreferences(requestSignal)).askBeforeAgentActions,undefined,authoredRequest);

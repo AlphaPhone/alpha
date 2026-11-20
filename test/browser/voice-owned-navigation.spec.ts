@@ -158,7 +158,31 @@ test('the next spoken Send this text confirms one visible addressed SMS without 
  expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts};})).toEqual({requests:1,approvals:['send-reviewed-text']});
 });
 
-test('speaking Send this text with only a draft stages no send and forwards no command',async({page})=>{
+test('an addressed draft sends once by voice without leaving Talk or opening Messages',async({page})=>{
+ await setup(page,'full');
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.addressedDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
+ await utterance(page);
+ const card=page.locator('[data-alpha-voice-send-review="draft-review"]');
+ await expect(card).toContainText('Carson (+15550100200)');
+ await expect(card).toContainText('Can you bring ice?');
+ await expect(card).toContainText('Say “Send this text”');
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts??[])).toEqual([]);
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
+ await utterance(page);
+ await expect(page.getByText('Text submitted.',{exact:true})).toBeVisible();
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts};})).toEqual({requests:1,approvals:['draft-review']});
+});
+
+test('speaking Send this text with an unresolved draft stages no send and forwards no command',async({page})=>{
  await setup(page,'full');
  await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.prompt='Draft a text to Carson.';});
  await utterance(page);

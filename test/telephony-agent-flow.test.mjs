@@ -27,7 +27,7 @@ const messageId = '77bc5ac9-0000-4000-8000-a61a04b11111';
 const proof = {messageId, text: 'Help with this conversation', current() {}};
 const ALL = ['phone.call.v1', 'contacts.write.v1', 'contacts.write.v2', 'contacts.show.v1', 'contacts.read.v1', 'sms.compose.v1', 'sms.compose.v2', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
 const callPriya = {type: 'phone_call', target: {kind: 'contact', query: 'Priya'}};
-function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId, present, onExecute} = {}) {
+function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId, present, onExecute, executedOperation = operation} = {}) {
   let state = 'pending', attemptId, effects = 0, entry;
   const posts = [];
   const proposal = () => ({id, digest, state, subjectUserId: 'owner', requestedBy: 'agent', action: 'device_action', expiresAt: new Date(Date.now() + 600000).toISOString(),
@@ -35,7 +35,7 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
   const request = async (path, body) => {
     if (body === undefined) return {proposals: [proposal()]};
     posts.push({path, body});
-    if (path.endsWith('/decision')) state = 'approved';
+    if (path.endsWith('/decision')) state = body.decision === 'reject' ? 'rejected' : 'approved';
     if (path.endsWith('/claim')) { state = 'executing'; attemptId = 'attempt'; }
     if (path.endsWith('/receipt')) { if (receiptOutage) throw Error('offline'); state = body.receipt.outcome === 'applied' ? 'done' : 'reconciliation_required'; }
     return {proposal: proposal(), digest};
@@ -45,7 +45,7 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
     get: async () => ({entry}), list: async () => ({entries: entry ? [entry] : []})};
   const seen = [];
   const client = new DeviceActions(session, {installationId: 'device', enrollmentId: 'enrollment', key: 'a'.repeat(64), capabilities}, 'c'.repeat(64), request, journal,
-    async (op, operationId, _context, _signal, _binding, _workflow, review) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); onExecute?.(review); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {}), ...(present ? {present: () => present(posts.map(post => post.path.split('/').pop()))} : {})}; });
+    async (op, operationId, _context, _signal, _binding, _workflow, review) => { effects++; seen.push(operationId); assert.deepEqual(op, executedOperation); onExecute?.(review); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {}), ...(present ? {present: () => present(posts.map(post => post.path.split('/').pop()))} : {})}; });
   return {client, posts, seen, get entry() { return entry; }, get effects() { return effects; }, online() { receiptOutage = false; }};
 }
 const signal = () => new AbortController().signal;
@@ -70,6 +70,40 @@ test('the single reviewed SMS recipient stays bound to the first address shown',
   } finally {
     setSmsReviewRecipient(async()=>null);
   }
+});
+
+test('a confirmed Talk draft retires the editor handoff and journals exactly one addressed send', async () => {
+  const number = '+14155550132';
+  const target = {kind:'number',number};
+  const send = {type:'sms_compose',target,body:'On my way'};
+  const origin = {...proof,text:'Draft a text to '+number,retainSmsDraft:true};
+  const f = fixture({
+    operation:{...send,draft:true}, executedOperation:send, requestMessageId:messageId,
+    result:{kind:'sms-compose',status:'submitted'},
+  });
+  const [review] = await f.client.pendingReview(context,signal(),origin);
+  assert.equal(review.proposal.smsReview,'addressed-draft');
+  assert.match(review.proposal.description,/To: \+14155550132\n\nOn my way/);
+  assert.deepEqual(await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,origin),[]);
+  assert.equal(f.effects,0);
+  const receipt = await f.client.approve(id,context,signal(),'send-draft');
+  assert.equal(receipt.status,'succeeded');
+  assert.deepEqual(f.entry.record.operation,send);
+  assert.equal(f.entry.operationId,id);
+  assert.equal(f.entry.phase,'terminal');
+  assert.deepEqual(f.entry.result.telephonyResult,{kind:'sms-compose',status:'submitted'});
+  assert.deepEqual(f.posts.map(post=>[post.path.split('/').at(-1),post.body.decision]),[['decision','reject']]);
+  await assert.rejects(f.client.approve(id,context,signal(),'send-draft'),/review this action again/i);
+  assert.equal(f.effects,1);
+});
+
+test('an unresolved contact draft cannot be approved as a send', async () => {
+  const f = fixture({operation:{type:'sms_compose',target:{kind:'contact',query:'Priya'},body:'On my way',draft:true}});
+  const [review] = await f.client.pending(context,signal());
+  assert.equal(review.smsReview,'draft');
+  await assert.rejects(f.client.approve(id,context,signal(),'send-draft'),/choose a recipient/i);
+  assert.equal(f.effects,0);
+  assert.deepEqual(f.posts,[]);
 });
 
 test('only the current requested navigation can transfer to the voice projection', async () => {

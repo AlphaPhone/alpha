@@ -477,7 +477,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
-    const approvalLabel=proposal.smsReview==='draft'?'Open draft':proposal.smsReview==='send'?'Send':proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
+    const approvalLabel=(proposal.smsReview==='draft'||proposal.smsReview==='addressed-draft')?'Open draft':proposal.smsReview==='send'?'Send':proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
     return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
   function visibleSmsReview(proposalId:string):boolean {
@@ -1033,7 +1033,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,projectRequestedView }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,projectRequestedView)),
           // Remote text is not authority to execute device actions. This path
           // accepts chat only until the server supports verified proposals.
-          execute: ({ proposal, context, signal }) => connectionController.execute(proposal, context, signal),
+          execute: ({ proposal, context, signal, approval }) => connectionController.execute(proposal, context, signal, approval),
         }, connection.kind === 'local' ? { developmentOrigin: connection.session.origin } : {});
         return;
       }
@@ -1880,7 +1880,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // title repeated as the detail and no second copy printed above it.
       if(c.systemNotice&&m.cGeneric)return {...m,cGeneric:false,cNotice:true,noticeSub:c.sub&&c.sub!==c.title?c.sub:'',hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub&&m.displayText!==c.title};
       const waitingForReply=!!c.recovered&&this.S().typing;
-      const voiceSendId=c.smsReview==='send'&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
+      const voiceSendId=(c.smsReview==='send'||c.smsReview==='addressed-draft')&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
       if(m.cProposal)return {...m,voiceSendId,...(waitingForReply?{proposalDisabled:true}:{})};
       if(!c.proposalId||c.done||c.reviewUnavailable||!m.cGeneric)return m;
       const message=live.find(item=>item.card===c);if(!message)return m;
@@ -2022,16 +2022,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.pendingVoiceSmsReview=undefined;
     // The immediate next accepted microphone turn can confirm exactly one displayed Send card.
     // Never send the confirmation to the model or reopen a consumed approval.
-    if(/^(?:yes[,]?\s+)?send this (?:text|message)[.!]?$/i.test(text.trim())){
+    if(/^(?:yes[,]?\s+)?send this (?:text|message|draft)[.!]?$/i.test(text.trim())){
       const message=reviewed&&input.approvalSignal&&reviewed.generation===input.talkGeneration&&
         reviewed.conversationId===binding.conversationId&&reviewed.revision===input.context.revision&&
         reviewed.expiresAt>Date.now()&&this.emergencyLive?.()!==true&&visibleSmsReview(reviewed.id)
-        ?this.S().msgs.find((m:Shell)=>m.card?.proposalId===reviewed.id&&m.card.smsReview==='send'&&
+        ?this.S().msgs.find((m:Shell)=>m.card?.proposalId===reviewed.id&&(m.card.smsReview==='send'||m.card.smsReview==='addressed-draft')&&
           m.card.sub===reviewed.details&&!m.card.done&&!m.card.recovered&&!m.card.reviewUnavailable&&
           (m.card.type!=='proposal'||m.card.state==='open')):undefined;
       input.approvalSignal?.throwIfAborted();
       this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
-      const receipt=message?await this.cardAct(message,input.approvalSignal):undefined;
+      const receipt=message?await this.cardAct(message,input.approvalSignal,message.card.smsReview==='addressed-draft'?'send-draft':undefined):undefined;
       current();
       const answer=receipt?.summary??(message?'I couldn’t confirm the send. Check Messages before trying again.':'There’s no visible text review ready to send.');
       const replyId=receipt?`device-receipt:${receipt.proposalId}`:`voice-review:${turnId}`;
@@ -2152,11 +2152,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // Receipt of the card itself never authorizes the SMS.
       const smsReview=!pendingNotice&&!emailCardReady&&reply.proposals?.length===1?reply.proposals[0].smsReview:undefined;
       const review=!smsReview&&(!!reply.proposals?.length||pendingNotice||emailCardReady);
-      if(smsReview==='send'&&input.talkGeneration!==undefined&&input.approvalSignal){
+      if((smsReview==='send'||smsReview==='addressed-draft')&&input.talkGeneration!==undefined&&input.approvalSignal){
         const proposal=reply.proposals![0];
         this.pendingVoiceSmsReview={id:proposal.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:proposal.contextRevision,expiresAt:proposal.expiresAt,details:proposal.description};
       }
       const speechText=smsReview==='draft'?'Your draft is ready. Tap Open draft to see it in Messages.'
+        :smsReview==='addressed-draft'?'Your draft is ready. Review it on your phone. You can confirm by voice.'
         :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
         :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
         :spokenActionReply(text,reply,emailCardReady);
@@ -2499,7 +2500,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.setState({ msgs: this.S().msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, declined: true, title: 'Declined', sub: result.message }) } : m) });
   };
   const originalCardAct=p.cardAct;
-  p.cardAct = async function (message: Shell, voiceSignal?:AbortSignal) {
+  p.cardAct = async function (message: Shell, voiceSignal?:AbortSignal, approveAs?: "send-draft") {
     const card = message.card || {};
     // AC-26: a replaced or finished proposal never acts. A view's own proposal (a fixture call or
     // "Screen it") is dispatched by the shell to that view's action; live ones are approved below.
@@ -2602,7 +2603,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const beforeView = this.S().view;
         let receipt;
         const readLease=this.readReplyLeases?.get(card.proposalId);
-        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId,approval.signal); }
+        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId,approval.signal,approveAs); }
         catch (error) {
           // Navigation may cancel the context-bound chat wait after the effect.
           // Await only that already-started journaled action; never execute again.
