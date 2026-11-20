@@ -97,7 +97,7 @@ for(const scenario of ['connected','empty','error','restored'] as const)test(`Sh
  await openLegacyNotes(page);await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Waiting shared note');await page.getByRole('textbox',{name:'Note',exact:true}).fill('Exact retained shared body');
  await page.getByRole('button',{name:'More',exact:true}).click();
-  await page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect.poll(async()=>{const f=await gm(page);return scenario==='restored'?f.restoreReads:f.accountReads;}).toBeGreaterThan(0);
  await expect(page.getByText('Checking…',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Connect Gmail',exact:true})).toHaveCount(0);
@@ -247,7 +247,7 @@ test('Share by email from Notes opens a prefilled local draft without sending',a
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Shared plan');
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('First line\nSecond line');
  await page.getByRole('button',{name:'More',exact:true}).click();
-  await page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();
  await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Shared plan');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Shared plan\n\nFirst line\nSecond line');
@@ -369,7 +369,7 @@ for(const legacy of [false,true])test(`Share to email opens a new populated draf
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Shared selected note');
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('First line\nSecond line');
  await page.getByRole('button',{name:'More',exact:true}).click();
-  await page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Shared selected note');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Shared selected note\n\nFirst line\nSecond line');
  expect((await gm(page)).prepares).toEqual([]);expect((await gm(page)).dispatches).toEqual([]);
@@ -391,7 +391,7 @@ for(const destination of ['another account','Home'] as const)test(`Shared email 
   s.compareExchange=async(key,prior,next)=>{if(key.startsWith('inbox-drafts:v1:shelf:')){w.shareShelfHeld=true;await new Promise<void>(resolve=>w.releaseShareShelf=resolve);}return cas(key,prior,next);};
  });
  await page.getByRole('button',{name:'More',exact:true}).click();
-  await page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).shareShelfHeld===true)).toBe(true);
  if(destination==='another account'){
   await page.getByRole('button',{name:'second@example.test',exact:true}).click();
@@ -416,7 +416,7 @@ test('Share to email preserves earlier edits when local preservation conflicts',
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Refused share');await page.getByRole('textbox',{name:'Note',exact:true}).fill('Never replaces earlier email');
  await page.evaluate(async()=>{const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');const cas=s.compareExchange.bind(s);s.compareExchange=async(key,prior,next)=>key.startsWith('inbox-drafts:v1:shelf:')?{status:'conflict'}:cas(key,prior,next);});
  await page.getByRole('button',{name:'More',exact:true}).click();
-  await page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();await page.getByRole('button',{name:'Email',exact:true}).click();
  await expect(page.getByText('Drafts changed in another window. Reload before continuing.',{exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Other mail folders',exact:true}).click();await page.getByRole('menuitemradio',{name:'Drafts',exact:true}).click();await page.getByRole('button',{name:'Local draft, Conflict protected email',exact:true}).click();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Conflict protected email');await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Protected exact body');
  expect((await gm(page)).prepares).toEqual([]);expect((await gm(page)).dispatches).toEqual([]);
@@ -513,7 +513,7 @@ for(const retirement of ['leaves Inbox','withdraws Gmail changes'] as const)test
  const review=page.getByRole('dialog',{name:'Review mail operation',exact:true});
  if(!await review.isVisible())await page.getByRole('button',{name:'Mail review / receipt',exact:true}).click();
  await expect(review).toContainText(journal.requestId);
- await review.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ await review.getByRole('button',{name:'Check if this change went through',exact:true}).click();
  await expect(review.getByRole('status')).toContainText('Gmail reports that this change was not made.');
  await review.getByRole('button',{name:'Discard this operation',exact:true}).click();
  await expect.poll(saved).toBeNull();
@@ -534,7 +534,7 @@ test('Inbox selection stops after an uncertain result and keeps its receipt',asy
  const receipt=page.getByRole('dialog',{name:'Review mail operation',exact:true});
  await expect(receipt).toContainText(/outcome of this change is unknown/i);
  await expect(receipt.getByRole('button',{name:'Retry',exact:true})).toHaveCount(0);
- await receipt.getByRole('button',{name:'Check saved receipt',exact:true}).click();
+ await receipt.getByRole('button',{name:'Check if this change went through',exact:true}).click();
  expect((await gm(page)).prepares).toEqual([{kind:'archive',messageId:'in-0-a',expectedHistoryId:'h-in-0-a'}]);
  expect((await gm(page)).dispatches).toHaveLength(1);
 });

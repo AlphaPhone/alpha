@@ -34,7 +34,7 @@ for (const failure of ['quota', 'concurrent edit'] as const) {
     await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
     await page.getByRole('button', { name: 'Open Recovery note', exact: true }).click();
     await expect(body).toHaveValue('Latest text typed after the failure');
-    const recovery=page.getByRole('button', { name: 'Recover browser Notes', exact: true });
+    const recovery=page.getByRole('button', { name: 'Recover Notes', exact: true });
     expect((await recovery.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await recovery.click();
     const dialog=page.getByRole('dialog', { name: 'Browser Notes recovery' });

@@ -23,8 +23,8 @@ async function until(predicate) {
 async function runCanonicalNotesRefinement(extraSources = []) {
   const loaded = await loadNotesSource([fileURLToPath(import.meta.url), fileURLToPath(new URL('../specs/quint/refinement/services/notes-store/fixture.mjs', import.meta.url)), ...extraSources]);
   const traces = [];
-  async function scenario(name, body, {legacy, clock = Array(100).fill(0)} = {}) {
-    const f = await notesFixture(loaded, {mode: 'encrypted', clock});
+  async function scenario(name, body, {legacy, clock = Array(100).fill(0), threeDayTrash = false} = {}) {
+    const f = await notesFixture(loaded, {mode: 'encrypted', clock, threeDayTrash});
     let last = null, failure = null;
     if (legacy) f.backend.replace(JSON.stringify({schemaVersion: 3, revision: 2,
       persistedAt: '2023-11-14T22:13:20.000Z', notes: [2, 1].map(id => ({
@@ -158,6 +158,42 @@ async function runCanonicalNotesRefinement(extraSources = []) {
     await invoke('clear-notes', {expectedRevision: 1, confirm: true});
     await record('repeat empty clear preserves document revision', action('clear', 1));
   });
+
+  // Three-day Trash: the owner erases one reviewed entry or empties Trash, an expired entry is swept
+  // when Notes is read, and an erased note cannot be restored.
+  const trashEntry = async (f, id) => (await f.raw()).trash.find(entry => entry.note.id === 'note-fixture-' + id);
+  await scenario('owner erases one reviewed Trash entry and it cannot be restored', async ({f, record, invoke, create}) => {
+    await create(1, 'Alpha'); await create(2, 'Beta');
+    await invoke('delete-note', {id: 'note-fixture-1'}); await record('delete moves the note to Trash', commit(action('remove', 1)));
+    const {deletedAt} = await trashEntry(f, 1);
+    await assert.rejects(f.selected.eraseTrash({scope: 'entry', id: 'note-fixture-1', deletedAt, expectedRevision: 2}), {code: 'NOTES_EDIT_CONFLICT'});
+    await record('an erase at a stale revision changes nothing', null, false);
+    const erased = await f.selected.eraseTrash({scope: 'entry', id: 'note-fixture-1', deletedAt, expectedRevision: 3});
+    assert.equal(erased.value.erased, 1); assert.deepEqual(erased.value.recordingCleanup, []);
+    await record('erase removes the entry from Trash', commit(action('erase', 1, 3)), false);
+    const refused = await invoke('restore-note', {id: 'note-fixture-1', expectedRevision: 4}); assert.equal(refused.success, false);
+    await record('the erased note cannot be restored', action('restoreErased', 1));
+  }, {threeDayTrash: true});
+  await scenario('owner empties Trash, then an empty Trash keeps its revision', async ({f, record, invoke, create}) => {
+    await create(1, 'Alpha'); await create(2, 'Beta');
+    await invoke('clear-notes', {expectedRevision: 2, confirm: true}); await record('clear moves both notes to Trash', commit(action('clear', 2)));
+    const emptied = await f.selected.eraseTrash({scope: 'all', expectedRevision: 3}); assert.equal(emptied.value.erased, 2);
+    await record('empty Trash erases every entry', commit(action('eraseAll', 3)), false);
+    const again = await f.selected.eraseTrash({scope: 'all', expectedRevision: 4}); assert.equal(again.value.erased, 0);
+    await record('emptying an empty Trash changes nothing', action('eraseAll', 4), false);
+  }, {threeDayTrash: true});
+  await scenario('an expired Trash entry is swept when Notes is read', async ({f, record, invoke, create, clock}) => {
+    await create(1, 'Alpha'); await create(2, 'Beta');
+    await invoke('delete-note', {id: 'note-fixture-1'}); await record('delete moves the note to Trash', commit(action('remove', 1)));
+    clock.fill(3 * 24 * 60 * 60 - 1);
+    assert.equal((await f.selected.readSnapshot()).trash.length, 1);
+    await record('one second before three days the entry stays', null, false);
+    clock.fill(3 * 24 * 60 * 60);
+    const read = await f.selected.readSnapshot(); assert.equal(read.trash.length, 0); assert.equal(read.notes.length, 1);
+    await record('at three days the read sweeps the entry and keeps active notes', commit(action('expire', qset([1]))), false);
+    const refused = await invoke('restore-note', {id: 'note-fixture-1', expectedRevision: 4}); assert.equal(refused.success, false);
+    await record('the expired note cannot be restored', action('restoreErased', 1));
+  }, {threeDayTrash: true});
 
   const receipt = await checkTraces({model: 'CanonicalNotesStore', modelPath: 'specs/quint/services/CanonicalNotesStore.qnt',
     sources: loaded.sources, driverHashes: loaded.driverHashes, traces, scope: 'bounded-component',

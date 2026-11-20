@@ -24,7 +24,15 @@ const native = registerPlugin<{
   claimCanonicalNoteSave(input: { recordingId: string }): Promise<{ claimed: boolean }>;
   saveNoteRecording(input: { recordingId: string; noteId: string; transcript: string }): Promise<SavedNoteAudio>;
   addListener(event: 'noteRecordingChanged', callback: (status: NoteRecordingStatus) => void): Promise<{ remove(): Promise<void> }>;
+  consumeNoteRecordingOpen(): Promise<{ open: boolean }>;
+  clearNoteRecordingOpen(): Promise<unknown>;
 }>('AlphaVoiceCloud');
+
+/** A tap on Android's recording notification, held natively until the renderer can open Notes. */
+export const noteRecordingNotificationOpen = {
+  consume: () => native.consumeNoteRecordingOpen(),
+  clear: () => native.clearNoteRecordingOpen(),
+};
 
 export function createNoteRecorderDriver(): NoteRecorderDriver {
   return {

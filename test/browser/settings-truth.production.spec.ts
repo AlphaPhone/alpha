@@ -211,6 +211,11 @@ test('every Settings row is a control backed by real state, with no fixture valu
   await expect(current(page).getByRole('button',{name:'Developer',exact:true})).toHaveCount(0);
  }
  await openSettings(page,'Privacy');
+ // The product build names where speech goes (SET-17).
+ // The row's description sits inside its label, so the label reads as the two together.
+ const voiceRoute=current(page).locator('.settings-info-description',{hasText:'Recordings, replies →'});
+ await expect(voiceRoute).toBeVisible();await expect(voiceRoute).toHaveText('Recordings, replies → Eliza Cloud');
+ await expect(voiceRoute.locator('..')).toHaveText('VoiceRecordings, replies → Eliza Cloud');
  const review=()=>current(page).getByRole('switch',{name:'Ask before Alpha acts',exact:true});
  await expect(review()).toHaveAttribute('aria-checked','false');
  await review().click();await expect(review()).toHaveAttribute('aria-checked','true');
@@ -252,7 +257,7 @@ test('notification state is read back from Android, and local history stays avai
  await expect(state).not.toContainText('Some off');await resume(page);
  await expect(state).toContainText('Some off');
  await set(page,{status:{appEnabled:false}});await resume(page);await expect(state).toContainText('Off');
- await current(page).getByRole('button',{name:'View local metadata history',exact:true}).click();
+ await current(page).getByRole('button',{name:'View history',exact:true}).click();
  await expect(current(page)).toContainText(/Stub Mail\s*Arrived/);
  await page.evaluate(()=>{const truth=(window as any).truth,original=(window as any).Capacitor.nativePromise;(window as any).Capacitor.nativePromise=async(plugin:string,method:string,input:unknown)=>{if(plugin==='AlphaNotifications'&&method==='status'){truth.calls.push({plugin,method,input});throw Error('Notification delivery status unavailable');}return original(plugin,method,input);};});
  await resume(page);await expect(state).toContainText('Unavailable');

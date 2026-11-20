@@ -52,10 +52,12 @@ public final class AlphaInCallService extends InCallService {
     /** Calls that are not ringing: dialing, connected and held calls, without sound or heads-up. */
     static final String ONGOING_CHANNEL_ID = "alpha-phone-calls-ongoing";
     static final String CHANNEL_NAME = "Phone calls", ONGOING_CHANNEL_NAME = "Calls in progress";
+    static final String CHANNEL_DESCRIPTION = "Incoming calls. Your ringtone plays from the phone, not from this notice.",
+            ONGOING_CHANNEL_DESCRIPTION = "Calls you are dialing, on, or have on hold. Shown without sound.";
     /** Distinguishes notice actions per call; the call screen reads only the extras. */
     static final String CALL_SCHEME = "alphaphone-call";
-    /** Status-bar icon of call notices: the platform call glyph. */
-    static final int NOTIFICATION_ICON = android.R.drawable.sym_action_call;
+    /** Status-bar icon of call notices: Alpha's monochrome handset, tinted by Android. */
+    static final int NOTIFICATION_ICON = R.drawable.ic_call;
     static final String ANSWER = "Answer", DECLINE = "Decline", END_CALL = "End call";
     /** The proximity lock's tag in power diagnostics. */
     static final String PROXIMITY_TAG = "alphaphone:call-proximity";
@@ -87,12 +89,14 @@ public final class AlphaInCallService extends InCallService {
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
         // Telecom provides the ringtone; duplicate channel audio would ring twice.
         channel.setSound(null, null);
+        channel.setDescription(CHANNEL_DESCRIPTION);
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
         // Dialing and connected calls are already on the call screen: their ongoing notice stays in
         // the shade and status bar without a heads-up banner over the screen the owner is using.
         NotificationChannel ongoing = new NotificationChannel(ONGOING_CHANNEL_ID, ONGOING_CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
         ongoing.setSound(null, null);
         ongoing.enableVibration(false);
+        ongoing.setDescription(ONGOING_CHANNEL_DESCRIPTION);
         getSystemService(NotificationManager.class).createNotificationChannel(ongoing);
     }
 

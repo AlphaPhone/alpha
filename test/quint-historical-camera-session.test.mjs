@@ -70,7 +70,8 @@ async function checkHistoricalCameraSession(extraSources = []) {
         assert.ok(actual.zoom === 1 || actual.zoom === 2);
         if (actual.phase === 'ready') assert.equal(actual.preview, true, 'Ready Camera displays the actual synthetic stream');
         return {'s.view': actual.view, 's.phase': actual.phase, 's.capture': actual.capture, 's.lens': actual.lens,
-          's.flash': actual.flash, 's.zoom': actual.zoom === 1 ? 'one' : 'half',
+          // The adapter holds Off, Auto or On; the historical model has the browser torch, off or on.
+          's.flash': actual.flash !== 'off', 's.zoom': actual.zoom === 1 ? 'one' : 'half',
           's.chat': actual.view === 'camera' && actual.chat ? 'open' : 'closed',
           Ready: actual.view === 'camera' && actual.phase === 'ready' && actual.preview};
       }

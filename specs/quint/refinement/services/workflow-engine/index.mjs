@@ -146,11 +146,17 @@ export async function collectWorkflowEngineTraces() {
     await start(f); await running(f);
     await point('explicit reviewed manual request remains allowed', [action('admitManual', 1, 1, 1), action('enterWorker')]);
   }, {active: false});
+  await scenario('chat start runs the current paused definition without an owner submission', async (f, point) => {
+    await f.service.startWorkflow('workflow-A', {mode: 'chat', input: {}}); await running(f);
+    await point('chat run admitted without receipt or reviewed version', [action('admitChat'), action('enterWorker')]);
+  }, {active: false});
   await scenario('removed definition denies new manual and scheduled admission', async (f, point) => {
     await assert.rejects(start(f), error => error.statusCode === 409);
     await point('removed manual denied', reject('admitManual', 1, 1, 1));
     await assert.rejects(f.service.startWorkflow('workflow-A', {mode: 'trigger'}), error => error.statusCode === 409);
     await point('removed schedule denied', reject('admitScheduled', 'ready'));
+    await assert.rejects(f.service.startWorkflow('workflow-A', {mode: 'chat', input: {}}), error => error.statusCode === 409);
+    await point('removed chat start denied', reject('admitChat'));
   }, {removed: true});
   await scenario('transaction rollback leaves neither run nor receipt then retries normally', async (f, point) => {
     f.faultNextTransaction('before-commit');

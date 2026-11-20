@@ -2,6 +2,7 @@ import {confirmCalendarAction} from './calendar-confirmation';
 import {calendarDefaultEventStart} from './calendar-form-inputs';
 import {presentCalendarIntervals} from './calendar-interval-presentation';
 import {refreshDeletionViews} from '../runtime/deletions';
+import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 import {openReminderRecovery,openReminderCreationRecovery,openReminderActionRecovery} from '../browser/reminder-recovery';
 import {openCalendarRecovery} from '../browser/calendar-recovery';
 import { registerPlugin } from '../platform-plugins';
@@ -268,7 +269,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
       // One tap to Android Calendar, prefilled; its editor owns the save.
       out.f.insertHandoff=async()=>{
         const current=api.get('calendar').form;if(!current?.title?.trim()||!Capacitor.isNativePlatform())return;
-        let event;try{event=calendarOptionEvent({...current,repeat:current.repeat||'none'},deviceZone);}catch(error){api.toast((error as Error).message);return;}
+        let event;try{event=calendarOptionEvent({...current,repeat:current.repeat||'none'},deviceZone);}catch(error){api.toast(errorNotice(error,'Choose another date and time. Nothing was saved.'),ERROR_TOAST);return;}
         const guests=(current.who||[]).filter((who:unknown)=>typeof who==='string'&&/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(who));
         try{
           const result=await calendar.insertHandoff({event:{...event,attendees:guests,alerts:current.alert!=null?[Number(current.alert)]:[]}});
@@ -282,7 +283,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
       };
       // 0041 direct save: all-day, chosen zone or repeat, with provider readback of each field.
       const saveOptions=async(current:Bag,currentOwner:Bag)=>{
-        let event;try{event=calendarOptionEvent(current,deviceZone);}catch(error){api.toast((error as Error).message);return;}
+        let event;try{event=calendarOptionEvent(current,deviceZone);}catch(error){api.toast(errorNotice(error,'Choose another date and time. Nothing was saved.'),ERROR_TOAST);return;}
         const epoch=creationDraftEpoch;let submittedForm=current;
         const ownsForm=()=>owner===currentOwner&&!document.hidden&&api.isActive()&&creationDraftEpoch===epoch&&api.get('calendar').form===submittedForm;
         currentOwner.calendarSaving=true;

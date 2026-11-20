@@ -124,7 +124,7 @@ async function remove(page, title) {
   await button(page, 'Open '+title).click();
   await expect(editor(page)).toBeVisible();
   await button(page, 'More').click();
-  await page.getByRole('dialog', {name: 'Note actions'}).getByRole('button', {name: 'Delete', exact: true}).click();
+  await page.getByRole('menu', {name: 'Note actions'}).getByRole('menuitem', {name: 'Delete', exact: true}).click();
   await expect(editor(page)).toHaveCount(0);
   await expect(button(page, 'Open '+title)).toHaveCount(0);
   await expect(button(page, 'Recently deleted')).toBeVisible();

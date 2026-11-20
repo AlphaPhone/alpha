@@ -142,12 +142,12 @@ public class AlphaCallPresentationTest {
         return Robolectric.buildService(AlphaInCallService.class).create().get();
     }
 
-    @Test public void callNotificationKeepsThePlatformCallGlyphAndOpensAlphasCallScreen() throws Exception {
+    @Test public void callNotificationShowsAlphasCallIconAndOpensAlphasCallScreen() throws Exception {
         AlphaInCallService owner = owner();
         try {
             owner.onCallAdded(activeCall());
             Notification notice = owner.getSystemService(NotificationManager.class).getActiveNotifications()[0].getNotification();
-            assertEquals(android.R.drawable.sym_action_call, notice.getSmallIcon().getResId());
+            assertEquals(R.drawable.ic_call, notice.getSmallIcon().getResId());
             // A call with no handle names nobody.
             assertEquals("Unknown caller", notice.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
             assertEquals("In call", notice.extras.getCharSequence(Notification.EXTRA_TEXT).toString());
@@ -173,6 +173,7 @@ public class AlphaCallPresentationTest {
             Notification ringing = manager.getActiveNotifications()[0].getNotification();
             assertEquals("alpha-phone-calls", ringing.getChannelId());
             assertEquals("Phone calls", manager.getNotificationChannel(ringing.getChannelId()).getName().toString());
+            assertEquals(AlphaInCallService.CHANNEL_DESCRIPTION, manager.getNotificationChannel(ringing.getChannelId()).getDescription());
             org.junit.Assert.assertNotNull("a ringing call opens the call screen over the lock screen", ringing.fullScreenIntent);
             assertEquals(NotificationManager.IMPORTANCE_HIGH,
                 manager.getNotificationChannel(ringing.getChannelId()).getImportance());
@@ -184,6 +185,7 @@ public class AlphaCallPresentationTest {
             assertEquals("alpha-phone-calls-ongoing", connected.getChannelId());
             android.app.NotificationChannel quiet = manager.getNotificationChannel(connected.getChannelId());
             assertEquals(NotificationManager.IMPORTANCE_LOW, quiet.getImportance());
+            assertEquals(AlphaInCallService.ONGOING_CHANNEL_DESCRIPTION, quiet.getDescription());
             org.junit.Assert.assertNull(quiet.getSound());
             org.junit.Assert.assertFalse(quiet.shouldVibrate());
         } finally {

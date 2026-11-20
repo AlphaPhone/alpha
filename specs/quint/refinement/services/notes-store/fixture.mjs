@@ -37,7 +37,7 @@ export function encryptedBackend() {
 }
 
 /** Actual Notes owners, with only filesystem root, clock, event delivery and host CAS supplied. */
-export async function notesFixture(loaded,{mode='file',backend=encryptedBackend(),clock=[0,1,2,3,4,5,6,7,8,9]}={}) {
+export async function notesFixture(loaded,{mode='file',backend=encryptedBackend(),clock=[0,1,2,3,4,5,6,7,8,9],threeDayTrash=false}={}) {
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'quint-notes-store-'));
   const runtime=new loaded.AgentRuntime({character:{name:'Quint Notes',id:'00000000-0000-4000-8000-000000000031'},enableAutonomy:false});
   const services=[],events=[],errors=[],broadcastWaiters=[];
@@ -56,7 +56,7 @@ export async function notesFixture(loaded,{mode='file',backend=encryptedBackend(
     const store=new loaded.NotesStore(mode==='encrypted'
       ?{agentId:'notes-fixture',encryptedPort:freshPort?backend.port():sharedPort,now}
       :{agentId:'notes-fixture',stateDir:directory,now});
-    const service=new loaded.NotesService(runtime,{store,now,createId:()=>`note-fixture-${++id}`});
+    const service=new loaded.NotesService(runtime,{store,now,threeDayTrash,createId:()=>`note-fixture-${++id}`});
     services.push(service);f.selected=service;if(initialize)await service.initialize();return service;
   };
   f.interact=async(capability,params,service=f.selected)=>{

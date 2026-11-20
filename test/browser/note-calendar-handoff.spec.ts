@@ -66,7 +66,7 @@ async function openCalendarItem(page:Page,name:string){
   const date=new Date(value);
   return `${date.toLocaleDateString('en-US',{month:'long'})} ${date.getDate()}`;
  },timestamp);
- await button(page,'Month view').click();
+ await button(page,'Choose date').click();
  await page.getByRole('dialog',{name:'Choose calendar date'}).getByRole('button',{name:new RegExp(` ${dateLabel}$`)}).click();
  await item.click();
 }
@@ -225,7 +225,7 @@ test('Notes scheduling contract: the open-note action fails closed when the note
  // Deleted (moved to Trash): nothing opens, the event is unchanged, the other note is never opened instead.
  await openRecording(page,'Venue meeting');
  await page.clock.pauseAt(new Date(await page.evaluate(()=>Date.now()+1000)));
- await button(page,'More').click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await button(page,'More').click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect.poll(async()=>(await notes(page)).map(n=>n.title)).toEqual(['Garden meeting']);
  await openEvent();
  // A note in Trash is not shown as live: its title is not displayed and is stored nowhere with the link.

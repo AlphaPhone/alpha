@@ -1,0 +1,32 @@
+import {test,expect} from '@playwright/test';
+import {openCanonicalCalendar} from './helpers/canonical-calendar';
+// Calendar Schedule mode and event search (CAL-17) over the closed Agent Calendar fixture. Read-only.
+test.use({timezoneId:'America/New_York',contextOptions:{reducedMotion:'reduce'}});
+const calendarState=(page:any)=>page.evaluate(()=>{const screen=document.querySelector('[data-screen]') as any;let fiber=screen[Object.keys(screen).find(key=>key.startsWith('__reactFiber$'))!];while(fiber&&!(fiber.stateNode&&typeof fiber.stateNode.vget==='function'))fiber=fiber.return;return fiber.stateNode.vget('calendar');});
+test('Schedule lists upcoming events from today and search finds events in the read dates',async({page})=>{
+ await page.clock.setFixedTime(new Date('2027-06-10T12:00Z'));
+ await openCanonicalCalendar(page,{eventTitle:'Planning review',location:'Room 4',begin:Date.parse('2027-06-11T13:00Z'),end:Date.parse('2027-06-11T14:00Z')});
+ await page.getByRole('button',{name:'Choose date',exact:true}).click();
+ const views=page.getByRole('group',{name:'Calendar view',exact:true});
+ await expect(views.getByRole('button',{name:'Day',exact:true})).toHaveAttribute('aria-pressed','true');
+ await views.getByRole('button',{name:'Schedule',exact:true}).click();
+ const schedule=page.getByRole('region',{name:'Schedule',exact:true});
+ await expect(schedule).toBeVisible();await expect(page.getByRole('region',{name:'Calendar timeline'})).toBeHidden();
+ await expect(schedule.getByRole('heading',{name:/^Tomorrow · /})).toBeVisible();await expect(schedule).toContainText(/^Through /);
+ const row=schedule.getByRole('button',{name:/^Planning review, /});await expect(row).toContainText('Room 4');
+ await row.click();await expect(page.getByRole('heading',{name:'Planning review',level:1})).toBeVisible();
+ await page.getByRole('button',{name:'Back to calendar',exact:true}).click();
+ await expect(schedule).toBeVisible();expect((await calendarState(page)).day).toBe(0);expect((await calendarState(page)).calendarMode).toBe('schedule');
+ await page.getByRole('button',{name:'Search events',exact:true}).click();
+ const results=page.getByRole('region',{name:'Search results',exact:true});
+ await expect(page.getByRole('searchbox',{name:'Search events',exact:true})).toBeFocused();await expect(results).toContainText(/^Searching /);await expect(results.getByRole('button',{name:/^Planning review, /})).toBeVisible();
+ await page.getByRole('searchbox',{name:'Search events',exact:true}).fill('room 4');
+ await expect(results.getByRole('button',{name:/^Planning review, /})).toBeVisible();
+ await page.getByRole('searchbox',{name:'Search events',exact:true}).fill('dentist');
+ await expect(results).toContainText('No matching events');
+ await page.getByRole('button',{name:'Close search',exact:true}).click();
+ await expect(schedule).toBeVisible();await expect(page.getByRole('button',{name:'Search events',exact:true})).toBeFocused();
+ await page.getByRole('button',{name:'Choose date',exact:true}).click();await views.getByRole('button',{name:'Day',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Calendar timeline'})).toBeVisible();await expect(schedule).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'))).toEqual([]);
+});

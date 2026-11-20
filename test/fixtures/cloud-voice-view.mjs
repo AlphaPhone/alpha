@@ -23,7 +23,7 @@ const moduleFiles = ['runtime/voice-selection.ts',
  '../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts',
  'prototype/local-speech-playback.ts','runtime/voice-states.ts','runtime/local-agent-stream.ts',
  'prototype/note-recorder.ts','runtime/note-recorder-driver.ts','runtime/note-default-title.ts',
- 'runtime/voice-call-pause.ts','prototype/voice-adapter.ts'];
+ 'runtime/voice-call-pause.ts','runtime/maps-notification-open.ts','prototype/voice-adapter.ts'];
 const modules = new Map(await Promise.all(moduleFiles.map(async file => {
  const entry=path.resolve('apps/app/src',file);
  const built=await build({entryPoints:[entry],bundle:true,write:false,format:'iife',globalName:'__alphaVoiceModule',platform:'browser',target:'es2022',logLevel:'silent',plugins:[{
@@ -77,6 +77,9 @@ export function cloudVoiceViewFixture(options={}){
  // Exercise Notes only when the scenario supplies an owned in-memory recording port.
  load('prototype/note-recorder.ts',box);
  box.createNoteRecorderDriver=()=>({status:async()=>({state:'idle'}),listen:async()=>({remove(){}}),start:async()=>{throw Error('No Notes recording in this fixture');}});
+ // No recording-notification tap is ever held natively in this fixture; the real hold-and-take rule is loaded.
+ box.noteRecordingNotificationOpen={consume:async()=>({open:false}),clear:async()=>{}};
+ load('runtime/maps-notification-open.ts',box);
  box.noteSegmentTranscriber=async()=>null;box.setNotesRecorderControl=()=>{};box.openNativeLiveStream=async()=>{throw Error('No live stream in this fixture');};
  if(options.noteRecording){
   Object.assign(driver,options.noteRecording(driver));

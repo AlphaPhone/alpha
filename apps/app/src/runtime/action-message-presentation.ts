@@ -1,5 +1,6 @@
 import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
+import {formatTime} from '../prototype/locale-time';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
@@ -14,6 +15,16 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   // Quoted examples and ambiguous repeated blocks remain authored text.
   if(!prose.trim()||/^[ \t]*(?:```|~~~)|\[\/?CHOICE\b/gim.test(prose))return;
   return prose.trimEnd();
+}
+/** A pending action states when it stops being available; a clock time needs no ticking re-render.
+ * The time follows the device locale and 12/24-hour setting, as every other visible time does. */
+export function approvalExpiryText(expiresAt: unknown, now = Date.now()): string {
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= now) return '';
+  return `Expires at ${formatTime(new Date(expiresAt))}`;
+}
+/** An empty conversation with no agent says so before the owner types, instead of only when Send fails. */
+export function emptyChatNotice(shownMessages: number, hasSession: boolean, pendingText: string): string {
+  return shownMessages === 0 && !hasSession ? pendingText : '';
 }
 const REVIEW_TEXT = 'Review on phone';
 const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';

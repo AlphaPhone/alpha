@@ -7,7 +7,7 @@ import {bundledSource, captureSources, boundInputs, trace, checkpoint, call, def
 const driver = 'test/quint-device-action-review.test.mjs';
 captureSources([driver]);
 const contextKey = value => JSON.stringify([value.view, value.sensitive === true, value.revision, value.timeZone ?? null, value.selectedObject ?? null]);
-const benign = {authority:'none', expired:false, current:true, sensitive:false, asks:false, bound:true};
+const benign = {authority:'none', expired:false, current:true, sensitive:false, asks:false, bound:true, route:'none', sameSession:true};
 const message = 'message-one';
 /** Declared proposal classes; the real coordinator decides what parses, lists and runs. */
 const kinds = {
@@ -26,7 +26,7 @@ const typedAddress = 'open https://example.com/', otherText = 'what is on my cal
 function fixture(DeviceActions, options = {}) {
   const f = {now: 1900000000000, context: {view:'home', revision:1, sensitive:false},
     reviewFirst:'off', pass:0, passOpen:true, passEffects:0, browserUsed:false, browserAuto:0,
-    controller:new AbortController(), execution:deferred()};
+    controller:new AbortController(), execution:deferred(), route:'none'};
   const session = {ownerId:'owner', agentId:'agent', sessionId:'session', origin:'https://agent.invalid'};
   const credential = {installationId:'device', enrollmentId:'enrollment', key:'a'.repeat(64), capabilities:[]};
   const scope = 'c'.repeat(64), expires = f.now + 60000;
@@ -53,7 +53,9 @@ function fixture(DeviceActions, options = {}) {
     's.browserUsed':f.browserUsed, 's.pass':f.pass, 's.passOpen':f.passOpen, 's.passEffects':f.passEffects, 's.browserAuto':f.browserAuto,
     's.authority':slot.authority, 's.decisions':slot.decisions, 's.claims':slot.claims, 's.dispatches':slot.dispatches,
     's.receipts':slot.receipts, 's.status':slot.entry?.status ?? 'none', 's.returned':slot.returned, 's.synced':slot.synced,
-    's.admitted':slot.admitted, 's.at':slot.at};};
+    's.admitted':slot.admitted, 's.at':slot.at,
+    // The card's route is the driver's declaration; one agent session, so a recovered card always matches it.
+    's.route':f.route, 's.session':0, 's.cardSession':0};};
   const record = (label, action) => checkpoint(f.trace, label, action, observe());
   const request = async (path, body, signal) => {
     if (body === undefined) return {proposals:plan.map(wire)};
@@ -78,7 +80,7 @@ function fixture(DeviceActions, options = {}) {
       if (f.client.busy) {
         const slot = f.focus;
         assert.equal(identity.proposalId, slot.id, 'the coordinator approved a proposal the driver did not focus');
-        slot.begun=true;slot.settled=false;slot.authority=f.direct ? 'request' : 'review';
+        slot.begun=true;slot.settled=false;slot.duplicate=false;slot.authority=f.direct ? 'request' : 'review';
         if (f.direct && slot.op === 'browser_navigate') f.browserUsed=true;
         record('card consumed and busy taken before asynchronous journal lookup',call('begin',!!f.direct));
         if (f.holdLookup) await f.holdLookup.promise;
@@ -88,7 +90,7 @@ function fixture(DeviceActions, options = {}) {
     async reserve(input) {
       const slot = f.focus;assert.equal(input.proposalId, slot.id);
       if (options.failure === 'reserve') throw Error('Controlled reservation failure');
-      if (slot.entry) {record('existing durable effect is never admitted twice',call('existing'));return {created:false,entry:slot.entry};}
+      if (slot.entry) {slot.duplicate=true;record('existing durable effect is never admitted twice',call('existing'));return {created:false,entry:slot.entry};}
       slot.reservedId=input.operationId;slot.entry={...input,phase:'reserved'};
       if (options.failure === 'identity') slot.entry.operationId='foreign-operation';
       record('actual durable reservation',call('reserve',options.failure !== 'identity'));
@@ -112,12 +114,14 @@ function fixture(DeviceActions, options = {}) {
     assert.deepEqual(actualContext,f.reviewContext);assert.equal(signal.aborted,false);
     slot.dispatches++;
     slot.at={authority:slot.authority, expired:f.now >= expires, current:contextKey(f.context) === contextKey(f.reviewContext),
-      sensitive:f.context.sensitive === true, asks:f.reviewFirst !== 'off', bound:slot.bound};
+      sensitive:f.context.sensitive === true, asks:f.reviewFirst !== 'off', bound:slot.bound, route:f.route, sameSession:true};
     if (f.direct) {f.passEffects++;if (slot.op === 'browser_navigate') f.browserAuto++;}
     slot.admitted=!signal.aborted && f.now < expires && contextKey(f.context) === contextKey(f.reviewContext);
     record('real coordinator calls its executor exactly once',call('dispatch'));
     if (options.abort === 'after') {f.controller.abort();record('post-dispatch cancellation preserves the effect outcome',call('abort'));}
     if (options.failure === 'executor') throw Error('Controlled executor uncertainty');
+    // A product executor's pre-effect guard (agent-adapter screen checks) refuses with its reason.
+    if (options.failure === 'not-started') throw new options.NotStarted('The screen changed');
     return {status:slot.outcome,summary:'Controlled executor outcome'};
   };
   f.recreate=()=>{f.client=new DeviceActions(session,credential,scope,request,journal,execute);};f.recreate();
@@ -126,14 +130,18 @@ function fixture(DeviceActions, options = {}) {
   const proposeArgs = slot => call('propose',slot.op,slot.workflow,slot.bound,slot.grounded,f.client.proposals.has(slot.id));
   f.proof=options.proof === undefined ? undefined : {messageId:message, text:options.proof, current() {}};
   f.prefer=value=>{f.reviewFirst=value;record('owner preference for reviewing phone actions first',call('prefer',value));};
-  f.propose=slot=>{f.focus=slot;f.focused=true;record('focus another proposal of this message; the listing already decided its card',proposeArgs(slot));};
-  f.review=async()=>{await f.client.pendingReview(f.context,f.controller.signal,f.proof);record('actual parsed current-screen review',call('review',f.client.proposals.has(f.focus.id)));};
+  f.propose=slot=>{f.focus=slot;f.focused=true;f.route=f.client.proposals.has(slot.id) ? 'live' : 'none';record('focus another proposal of this message; the listing already decided its card',proposeArgs(slot));};
+  f.review=async()=>{await f.client.pendingReview(f.context,f.controller.signal,f.proof);f.route='live';record('actual parsed current-screen review',call('review',f.client.proposals.has(f.focus.id)));};
+  /** QUINT-02: `approvePendingAction` re-lists the pending proposals under the current screen and
+   * approves the recovered card through the same coordinator. */
+  f.recover=async()=>{await f.client.pendingReview(f.context,f.controller.signal,f.proof);f.route='recovered';
+    record('recovered card rebuilt from a fresh pending listing',call('recover'));};
   /** The public call returned (or the pass moved on): busy is released and the result is known. */
   const leave = (slot, status) => {
     slot.returned=status;slot.settled=true;
     const durable=slot.entry?.phase === 'terminal' && status === slot.entry.status;
     if (slot.authority === 'request') {f.pass++;f.passOpen=f.passOpen && status === 'succeeded' && !f.controller.signal.aborted;}
-    record('public call settles after releasing its busy guard',durable ? call('finish',slot.synced) : call('abandon'));
+    record('public call settles after releasing its busy guard',durable ? call('finish',slot.synced) : slot.duplicate ? call('duplicate') : call('abandon'));
   };
   f.approve=async()=>{
     f.direct=false;const slot=f.focus;slot.returned='none';slot.synced=false;
@@ -196,7 +204,7 @@ async function checkDeviceActionReview(extraSources = []) {
         {op:'browser_navigate',grounded:true,expect:'skip'},{...note,bound:false,expect:'skip'}],effects:2},
       {name:'browser-without-typed-address',direct:true,proof:otherText,plan:[{op:'browser_navigate',expect:'skip'}],cards:[false]},
       {name:'browser-without-request-proof',direct:true,plan:[{op:'browser_navigate',expect:'skip'}],cards:[true]},
-      {name:'direct-pre-dispatch-failure-answers-unknown',direct:true,failure:'decision',plan:[note,{...note,expect:'skip'}],effects:0},
+      {name:'direct-pre-dispatch-failure-answers-failed',direct:true,failure:'decision',plan:[note,{...note,expect:'skip'}],effects:0},
       {name:'foreign-owner',foreign:true},
     ]) {
       const f=fixture(loaded.exports.DeviceActions,options);Date.now=()=>f.now;
@@ -248,6 +256,14 @@ async function checkDeviceActionReview(extraSources = []) {
       f.record('overlapping explicit approval cannot enter twice',call('refused'));f.holdLookup.resolve();await pending;traces.push(f.trace);
     }
     {
+      // AGENT-06 / CHAT-02: an executor that refuses with DeviceActionNotStarted closes as failed, not unknown.
+      const f=fixture(loaded.exports.DeviceActions,{name:'executor-not-started',failure:'not-started',NotStarted:loaded.exports.DeviceActionNotStarted});
+      Date.now=()=>f.now;await f.review();const result=await f.run();
+      assert.equal(result.status,'failed');assert.equal(result.summary,'Not started: The screen changed.');
+      assert.equal(f.focus.entry.status,'failed');assert.equal(f.focus.entry.result.dispatch,'not_started');
+      assert.equal(f.focus.returned,'failed');traces.push(f.trace);
+    }
+    {
       const f=fixture(loaded.exports.DeviceActions,{name:'terminal-journal-never-replayed'});Date.now=()=>f.now;
       await f.review();await f.run();f.focus.state='pending';await f.review();await f.run();
       assert.equal(f.focus.dispatches,1);assert.equal(f.focus.returned,'unknown');traces.push(f.trace);
@@ -258,21 +274,51 @@ async function checkDeviceActionReview(extraSources = []) {
       f.focus.state='pending';await f.review();await f.run();
       assert.equal(f.focus.dispatches,1);assert.equal(f.focus.returned,'unknown');traces.push(f.trace);
     }
+    {
+      // QUINT-02: the conversation reopens; the recovered card is listed again and approved once.
+      const f=fixture(loaded.exports.DeviceActions,{name:'recovered-approval'});Date.now=()=>f.now;
+      await f.review();f.recreate();f.record('the conversation reopens with a new coordinator',call('restart'));
+      await f.recover();assert.equal(f.client.proposals.has(f.id),true);
+      const result=await f.approve();assert.equal(result.status,'succeeded');
+      assert.equal(f.focus.dispatches,1);assert.equal(f.focus.at.route,'recovered');traces.push(f.trace);
+    }
+    {
+      // QUINT-02: a proposal applied through the live card is answered from the journal, not repeated.
+      const f=fixture(loaded.exports.DeviceActions,{name:'recovered-after-live-effect'});Date.now=()=>f.now;
+      await f.review();await f.run();f.recreate();f.record('the conversation reopens with a new coordinator',call('restart'));
+      f.focus.state='pending';await f.recover();await f.approve();
+      assert.equal(f.focus.dispatches,1);assert.equal(f.focus.at.route,'live');assert.equal(f.focus.returned,'unknown');traces.push(f.trace);
+    }
+    {
+      // QUINT-02: an expired proposal is not listed again, so no recovered card is built.
+      const f=fixture(loaded.exports.DeviceActions,{name:'expired-not-recovered'});Date.now=()=>f.now;
+      await f.review();f.recreate();f.record('the conversation reopens with a new coordinator',call('restart'));
+      f.now+=60001;f.record('the pending proposal expires',call('expire'));
+      await f.client.pendingReview(f.context,f.controller.signal,f.proof);
+      assert.equal(f.client.proposals.has(f.id),false);
+      f.record('an expired proposal is not listed again and builds no card',call('refused'));
+      assert.equal(f.focus.dispatches,0);traces.push(f.trace);
+    }
   } finally {Date.now=now;}
   return check(boundInputs({model:'DeviceActionReview',sources:[source,...loaded.sources,driver,...extraSources],traces,
     scope:'bounded-orchestration',assumptions:[
       'Actual Alpha DeviceActions and shared coordinator, parsing, listing, context checks, direct-pass admission, execution fence and hashing execute; transport, journal persistence, the Review-first preference read and device effects are controlled recording ports.',
       'Up to five proposals of one listing. Operation classes are driver declarations (open_view, open_view to Settings, create_note, browser_navigate, reminder write, workflow-bound note, an operation outside the contract); the coordinator alone decides which parse, list and run. Each port call and each `allowed` call is an observation boundary. No provider, Android or real user effect runs.',
       'pass, passOpen and browserUsed are inferred from the results and port calls of the real pass and asserted against its returned receipts. Host owner retirement supplies AbortSignal; current-context equality is checked on approve entry.',
-      'KNOWN DIVERGENCE (AGENT-06): reserve-failure, decision-outage, changed-decision-digest, missing-execution-claim, changed-journal-identity and direct-pre-dispatch-failure-answers-unknown end with returned `unknown` and no dispatch. The model reproduces this; UnknownOnlyAfterDispatch is registered as an expected violation, not as safety.',
-      'Camera, Files, Photos, Notes-organise and SMS-reply direct types, workflow-run review, navigation-only review destinations, domain-specific result validation, Files identities, native journal durability and recovery are separate contracts.']}));
+      'AGENT-06: reserve-failure, decision-outage, changed-decision-digest, missing-execution-claim, changed-journal-identity and direct-pre-dispatch-failure-answers-failed end with returned `failed` and no dispatch; a proposal whose journal already holds an attempt answers `unknown` without repeating it. UnknownOnlyAfterDispatch is part of safety.',
+      'Camera, Files, Photos, Notes-organise and SMS-reply direct types, workflow-run review, navigation-only review destinations, domain-specific result validation, Files identities, native journal durability and its recovery are separate contracts.',
+      'QUINT-02: recovered-approval, recovered-after-live-effect and expired-not-recovered rebuild the card from a fresh listing on a recreated coordinator and approve it through the same `approve`; the route is the driver\'s declaration and the agent session does not change, so the session binding in agent-adapter and connection-ui is model-only.']}));
 }
 
 test('real device-action coordinator binds review, reservation, claim and one effect', {timeout:scaledTimeout(120000)}, async()=>{
   const receipt=await checkDeviceActionReview(['test/quint-device-action-review.test.mjs']);
   assert.ok(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound);
-  assert.equal(receipt.traces,36);
+  assert.equal(receipt.traces,40);
   const last=Object.fromEntries(receipt.traceInputs.map(t=>[t.name,t.steps.at(-1).expect]));
+  assert.equal(last['recovered-approval']['s.at'].route,'recovered');
+  assert.equal(last['recovered-approval']['s.returned'],'succeeded');
+  assert.equal(last['recovered-after-live-effect']['s.dispatches'],1);
+  assert.equal(last['expired-not-recovered']['s.card'],false);
   assert.equal(last['abort-before-effect']['s.dispatches'],0);
   assert.equal(last['abort-after-effect']['s.status'],'succeeded');
   assert.equal(last['receipt-outage']['s.synced'],false);
@@ -295,9 +341,12 @@ test('real device-action coordinator binds review, reservation, claim and one ef
   assert.equal(last['settings-is-navigation-only']['s.card'],false);
   assert.equal(last['expired-after-claim']['s.dispatches'],0);
   assert.equal(last['expired-after-claim']['s.status'],'failed');
-  // Known divergence (AGENT-06): no dispatch, yet the public call answers "unknown".
-  for (const name of ['reserve-failure','decision-outage','missing-execution-claim','direct-pre-dispatch-failure-answers-unknown']) {
+  assert.equal(last['executor-not-started']['s.status'],'failed');
+  assert.equal(last['executor-not-started']['s.returned'],'failed');
+  // AGENT-06: a failure before dispatch answers "failed", never "unknown".
+  for (const name of ['reserve-failure','changed-journal-identity','decision-outage','changed-decision-digest','missing-execution-claim','direct-pre-dispatch-failure-answers-failed']) {
     const steps=receipt.traceInputs.find(t=>t.name===name).steps;
-    assert.ok(steps.some(step=>step.expect['s.returned']==='unknown'&&step.expect['s.dispatches']===0),name);
+    assert.ok(steps.some(step=>step.expect['s.returned']==='failed'&&step.expect['s.dispatches']===0),name);
+    assert.ok(!steps.some(step=>step.expect['s.returned']==='unknown'),name);
   }
 });

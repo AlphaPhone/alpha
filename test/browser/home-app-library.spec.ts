@@ -32,7 +32,7 @@ async function nativeStub(page: Page, apps: App[], refusals: Record<string, Refu
       DailyApps: ['surfaceInfo', 'requestPermissions', 'closeAssistant'],
       AlphaNotifications: ['status', 'list'],
       AlphaVoiceCloud: ['checkPermissions', 'requestPermissions'],
-      AlphaDevice: ['openSettings'],
+      AlphaDevice: ['openSettings', 'haptic'],
     };
     const answer = (plugin: string, method: string, options: any) => {
       if (plugin === 'ElizaSystem') {
@@ -319,6 +319,8 @@ test('Home edit mode removes and rearranges icons, "+" restores hidden views, an
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
   const done = page.getByRole('button', { name: 'Done', exact: true });
   await expect(done).toBeVisible();
+  // The hold that starts editing gives one long-press touch feedback (NOTIF-12).
+  expect(await page.evaluate(() => (window as any).nativeCalls.filter((c: any) => c.plugin === 'AlphaDevice' && c.method === 'haptic').map((c: any) => c.options))).toEqual([{kind: 'long-press'}]);
   const add = page.getByRole('button', { name: 'Add to Home', exact: true });
   await expect(add).toBeDisabled();
   // Apps is not offered while editing; each icon is named for its removal.

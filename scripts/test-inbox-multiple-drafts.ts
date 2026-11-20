@@ -17,6 +17,8 @@ try {
    'inbox-unsaved':`export function inboxUnsaved(owner,publish,restore){const s=globalThis.multipleDraftsFixture;return {ready:Promise.resolve(),get available(){return s.retained.has(owner)},peek(){return structuredClone(s.retained.get(owner)||null)},edit(v){s.retained.set(owner,structuredClone(v));},clear:async()=>{s.retained.delete(owner)},resume(){const v=s.retained.get(owner);if(v)restore(structuredClone(v));},retire(){},error:false,conflict:false,status:''};}`,
    'platform-plugins':`export const registerPlugin=()=>({});`,
    'daily':`export const DailyApps={perform(){throw Error('Unexpected external operation')}};`,
+   // The titled in-app review (NOTIF-01) answers as the owner would; this fixture always confirms.
+   'review':`export class BrowserReviews{async confirm(id,title,details){return globalThis.window.confirm(details);}}`,
    'inbox-attachment':`export const reviewMailAttachment=()=>{throw Error('Unexpected attachment read')};`,
    'inbox-operation':`export const outgoingAttachmentLimits={maximumFiles:20,maximumTotalBytes:8*1024*1024};export const checkOutgoingAttachments=()=>{};export const attachmentBytes=()=>0;`,
    'inbox-local-store':`export const inboxLocalStore={read:async key=>structuredClone(globalThis.multipleDraftsFixture.rows.get(key)||null),compareExchange:async(key,before,next)=>{const s=globalThis.multipleDraftsFixture;if(s.waitShelf&&key.includes(':shelf:'))await s.waitShelf;if(s.failShelf&&key.includes(':shelf:'))throw Error('Synthetic storage failure');if(JSON.stringify(s.rows.get(key)||null)!==JSON.stringify(before))return {status:'conflict'};s.rows.set(key,structuredClone(next));return {status:'saved'};}};`,

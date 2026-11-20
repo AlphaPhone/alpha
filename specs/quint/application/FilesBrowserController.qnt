@@ -1,9 +1,12 @@
 // Current installed Files folder-read coordinator. Storage effects remain ports.
+// `loading` is the listing read in flight; `mutations` counts opens and changes in flight.
+// A reload never settles a mutation, and a listing read never blocks an open tap.
 module FilesBrowserController {
   type Request = {generation: int, place: int, agent: bool}
   type State = {bound: bool, active: bool, place: int, generation: int, stateGeneration: int,
-    access: str, volumes: List[int], entries: List[int], loaded: bool, busy: bool, error: bool,
-    states: Set[int], lists: Set[int], requests: int -> Request, shares: int}
+    access: str, volumes: List[int], entries: List[int], loaded: bool, loading: bool, error: bool,
+    states: Set[int], lists: Set[int], requests: int -> Request, shares: int,
+    mutations: int, selecting: bool}
   var s: State
   pure val Ids = 1.to(6)
   pure val EmptyRequest: Request = {generation: 0, place: 0, agent: false}
@@ -11,13 +14,14 @@ module FilesBrowserController {
     val id = value.stateGeneration + 1
     val generation = value.generation + 1
     {...value, bound: true, active: true, place: place, generation: generation, stateGeneration: id,
-      busy: true, entries: if (navigate) List() else value.entries,
+      loading: true, entries: if (navigate) List() else value.entries,
       loaded: if (navigate) false else value.loaded, error: if (navigate) false else value.error,
       states: value.states.union(Set(id)), requests: value.requests.set(id, {generation: generation, place: place, agent: false})}
   }
   action init = s' = {bound: false, active: false, place: 1, generation: 0, stateGeneration: 0, access: "unknown",
-    volumes: List(), entries: List(), loaded: false, busy: false, error: false,
-    states: Set(), lists: Set(), requests: Ids.mapBy(_ => EmptyRequest), shares: 0}
+    volumes: List(), entries: List(), loaded: false, loading: false, error: false,
+    states: Set(), lists: Set(), requests: Ids.mapBy(_ => EmptyRequest), shares: 0,
+    mutations: 0, selecting: false}
   action enter = all {not(s.active), s.stateGeneration < 6, s' = start(s, s.place, false)}
   action refresh = all {s.active, s.stateGeneration < 6, s' = start(s, s.place, false)}
   action navigate(place: int): bool = all {s.active, place.in(1.to(2)), s.stateGeneration < 6,
@@ -38,7 +42,7 @@ module FilesBrowserController {
         access: if (current) access else s.access, volumes: if (current) volumes.select(v => v == 1).concat(volumes.select(v => v != 1)) else s.volumes,
         entries: if (current and not(request.agent) and not(admitted)) List() else s.entries,
         loaded: if (current and not(request.agent) and not(admitted)) true else s.loaded,
-        busy: if (ownReload and not(admitted)) false else s.busy,
+        loading: if (ownReload and not(admitted)) false else s.loading,
         lists: if (admitted and not(request.agent)) s.lists.union(Set(id)) else s.lists,
         shares: if (admitted and request.agent) s.shares + 1 else s.shares}
     }}
@@ -50,9 +54,15 @@ module FilesBrowserController {
         entries: if (current) (if (success) entries else List()) else s.entries,
         loaded: if (current and success) true else s.loaded,
         error: if (current) not(success) else s.error,
-        busy: if (own) false else s.busy}}}
+        loading: if (own) false else s.loading}}}
+  // A tap on a listed file starts its open while no other mutation runs, even while a listing loads.
+  action openTap(entry: int): bool = all {s.active, s.mutations == 0, s.entries.indices().exists(i => s.entries.nth(i) == entry),
+    entry != 2, s' = {...s, mutations: s.mutations + 1, selecting: true}}
+  // The storage answers the open (here: the owner cancels); only the open's own end settles it.
+  action openReply = all {s.selecting, s' = {...s, mutations: s.mutations - 1, selecting: false}}
   action leave = s' = {...s, active: false}
-  action step = any {enter, refresh, agentRead, leave,
+  action step = any {enter, refresh, agentRead, leave, openReply,
+    {nondet entry = 1.to(3).oneOf(); openTap(entry)},
     {nondet place = 1.to(2).oneOf(); navigate(place)},
     {nondet id = Ids.oneOf(); nondet access = Set("granted", "denied", "unavailable").oneOf();
       nondet volumes = Set(List(), List(1), List(1, 2)).oneOf(); stateReply(id, access, volumes)},
@@ -62,7 +72,9 @@ module FilesBrowserController {
     and s.states.subseteq(Ids) and s.lists.subseteq(Ids) and s.entries.length() <= 3
     and s.volumes.length() <= 2 and s.requests.keys() == Ids
   val PendingKindsDisjoint = s.states.intersect(s.lists) == Set()
-  val safety = TypeOK and PendingKindsDisjoint
+  // Every open in flight is still counted: no reload or reply of another kind clears it.
+  val MutationsCounted = s.mutations == (if (s.selecting) 1 else 0)
+  val safety = TypeOK and PendingKindsDisjoint and MutationsCounted
   run staleDenialKeepsCurrentListingTest = init.then(enter).then(stateReply(1, "granted", List(1))).then(listReply(1, List(1, 2), true))
     .then(refresh).then(navigate(2)).then(stateReply(3, "granted", List(1))).then(listReply(3, List(3), true))
     .then(stateReply(2, "denied", List())).expect(s.access == "granted" and s.entries == List(3) and safety)
@@ -75,4 +87,10 @@ module FilesBrowserController {
     .expect(s.shares == 1 and safety)
   run retiredAgentReadDoesNotShareTest = init.then(enter).then(agentRead).then(leave)
     .then(stateReply(2, "granted", List(1))).expect(s.shares == 0 and safety)
+  run openTapAdmittedWhileLoadingTest = init.then(enter).then(stateReply(1, "granted", List(1))).then(listReply(1, List(1, 2), true))
+    .then(refresh).then(openTap(1)).expect(s.loading and s.mutations == 1 and safety)
+  run reloadKeepsOpenMutationTest = init.then(enter).then(stateReply(1, "granted", List(1))).then(listReply(1, List(1, 2), true))
+    .then(openTap(1)).then(refresh).then(stateReply(2, "granted", List(1))).then(listReply(2, List(1, 2), true))
+    .expect(not(s.loading) and s.mutations == 1 and safety)
+    .then(openReply).expect(s.mutations == 0 and safety)
 }

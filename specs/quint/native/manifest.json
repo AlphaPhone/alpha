@@ -3048,16 +3048,21 @@
       "hostFingerStaysHostTest",
       "pageGestureStaysPageTest",
       "hiddenGestureIsConsumedTest",
-      "resumeRequiresNewGeometryTest"
+      "resumeRequiresNewGeometryTest",
+      "newFindBarBlocksPageUntilMeasuredTest",
+      "closedFindBarReturnsItsAreaAfterMeasureTest",
+      "unpublishedControlWouldReachPageTest"
     ],
     "invariants": [
       "TypeOK",
       "NoHostGestureBecomesPage",
+      "NoHostControlTouchReachesPage",
       "NoPageStartWithoutHostRects",
       "DisposedPageCannotBeShown"
     ],
     "abstractions": [
       "Coordinates, rounded hit tests, shadows and event dispatch stay native-library/Pixel evidence.",
+      "Host controls are two names: toolbar (chat, pill, toast and Home) and find (the find-in-page bar). The router's page decision reads only the published host rects. A control the renderer's selector names retires page input when it is mounted or removed (blockPageInput) until the next frame measures it; that this block reaches the router before the new control is painted is assumed, not modelled. The JVM trace replays the production router with the toolbar published; mount, unmount and publish are not replayed there.",
       "Pause represents Android cancellation; exact activity lifecycle sequencing requires signed-device qualification.",
       "Session, profile and sensitive-overlay authority remain BrowserSession/BrowserSiteState."
     ]

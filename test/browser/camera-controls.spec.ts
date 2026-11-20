@@ -230,3 +230,53 @@ test('two-finger preview pinch changes the real zoom crop without firing tap foc
  await expect(page.getByRole('button',{name:'Zoom 2x',exact:true})).toHaveCSS('width','40px');
  await cdp.detach();
 });
+test('the self-timer counts down before a photo and a second shutter press cancels it',async({page})=>{
+ const timer=page.getByRole('button',{name:'Timer off',exact:true});
+ await timer.click();await expect(page.getByRole('button',{name:'Timer 3 seconds',exact:true})).toHaveAttribute('aria-pressed','true');
+ const photos=()=>page.evaluate(async()=>{const {browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');return (await p.list()).items.length;});
+ const before=await photos();
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await expect(page.getByRole('timer',{name:'Photo in 3 seconds',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Cancel timer',exact:true}).click();
+ await expect(page.locator('[data-alpha-camera="countdown"]')).toHaveCount(0);
+ await page.waitForTimeout(3500);expect(await photos()).toBe(before);
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await expect(page.getByRole('timer',{name:'Photo in 1 second',exact:true})).toBeVisible({timeout:4000});
+ await expect.poll(photos,{timeout:6000}).toBe(before+1);
+ await page.getByRole('button',{name:'Timer 3 seconds',exact:true}).click();await expect(page.getByRole('button',{name:'Timer 10 seconds',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();await expect(page.locator('[data-alpha-camera="timer"]')).toHaveCount(0);
+});
+test('switching to Photo closes the microphone notice, so its buttons cannot record from Photo',async({page})=>{
+ await page.evaluate(()=>{const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async constraints=>{if(constraints?.audio)throw new DOMException('Synthetic microphone denial','NotAllowedError');return original(constraints);};});
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();
+ await page.getByRole('button',{name:'Start recording',exact:true}).click();
+ const notice=page.getByRole('alert',{name:'Mic off',exact:true});await expect(notice).toBeVisible();
+ await page.getByRole('button',{name:'Photo mode',exact:true}).click();
+ await expect(notice).toHaveCount(0);await expect(page.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ await expect(page.getByRole('timer',{name:'Recording',exact:true})).toHaveCount(0);
+});
+test('the framing grid is drawn over the preview only while it is on',async({page})=>{
+ const toggle=page.getByRole('button',{name:'Framing grid',exact:true}),grid=page.locator('[data-alpha-camera="grid"]');
+ await expect(toggle).toHaveAttribute('aria-pressed','false');await expect(grid).toHaveCount(0);
+ await toggle.click();await expect(toggle).toHaveAttribute('aria-pressed','true');
+ // Two lines each way at thirds of the 3:4 frame, and taps still reach the viewfinder through it.
+ const lines=await grid.evaluate(element=>{const style=getComputedStyle(element),frame=element.parentElement!.getBoundingClientRect(),box=element.getBoundingClientRect();return {pointer:style.pointerEvents,image:style.backgroundImage,same:Math.abs(frame.width-box.width)<1&&Math.abs(frame.height-box.height)<1};});
+ expect(lines.pointer).toBe('none');expect(lines.same).toBe(true);expect(lines.image.match(/linear-gradient/g)).toHaveLength(2);
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();await expect(grid).toBeVisible();
+ await toggle.click();await expect(grid).toHaveCount(0);
+});
+test('a volume key press from Android is one shutter press, and is ignored behind a dialog',async({page})=>{
+ const photos=()=>page.evaluate(async()=>{const {browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');return (await p.list()).items.length;});
+ const before=await photos();
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:volume-shutter')));
+ await expect.poll(photos).toBe(before+1);
+ await expect(page.getByRole('button',{name:'Open last photo',exact:true})).toBeVisible();
+ await page.evaluate(()=>{const dialog=document.createElement('dialog');dialog.dataset.volumeTest='';document.body.append(dialog);dialog.showModal();window.dispatchEvent(new Event('alpha:volume-shutter'));dialog.close();dialog.remove();});
+ await page.waitForTimeout(500);expect(await photos()).toBe(before+1);
+ // With the self-timer on, the key press starts the countdown just as the shutter does.
+ await page.getByRole('button',{name:'Timer off',exact:true}).click();
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:volume-shutter')));
+ await expect(page.getByRole('timer',{name:'Photo in 3 seconds',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:volume-shutter')));
+ await expect(page.locator('[data-alpha-camera="countdown"]')).toHaveCount(0);
+});

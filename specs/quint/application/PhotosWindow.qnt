@@ -50,6 +50,8 @@ module PhotosWindow {
       else s' = finish({...read, captures: if (s.more) merged(s.captures, allRows) else sorted(allRows),
         next: cursor, loaded: true, error: false})
     }}
+  // Native only: a hidden page drops the catalog (camera-adapter `visibility`, `!browserMode`). The
+  // browser build keeps its rows while hidden; browser media follows a separate lifecycle.
   action hide = all {s.epoch < 6,
     s' = if (s.disposed) {...s, hidden: true}
       else {...s, hidden: true, epoch: s.epoch + 1, captures: List(), next: 0, loaded: false}}

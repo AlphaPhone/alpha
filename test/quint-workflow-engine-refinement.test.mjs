@@ -24,8 +24,9 @@ test('workflow engine SQL admission and source coordinator refine bounded Quint 
     assert.equal(receipt.passed, true);
     assert.equal(receipt.inputsUnchanged, true);
     assert.equal(receipt.driverInputsBound, true);
-    assert.equal(receipt.traces, 24);
-    assert.equal(receipt.checkpoints, 118);
+    assert.equal(receipt.traces, 25);
+    assert.equal(receipt.checkpoints, 121);
+    assert.ok(receipt.actions.admitChat);
     assert.ok(receipt.actions.cancelReceipt);
     assert.ok(receipt.actions.decisionUnconfirmed);
     assert.ok(receipt.actions.replayScheduled);

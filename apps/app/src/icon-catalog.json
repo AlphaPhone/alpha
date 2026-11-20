@@ -13,6 +13,8 @@
     "plus": "plus",
     "minus": "minus",
     "back": "chevron-left",
+    "arrowLeft": "arrow-left",
+    "arrowRight": "arrow-right",
     "phone": "phone",
     "camera": "camera",
     "bell": "bell",

@@ -8,7 +8,7 @@ const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promi
 import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
-import { selectedPreviewText } from '../ui/files/storage-presentation.ts';
+import { formatSize, selectedPreviewText, shortDate, typeLabel } from '../ui/files/storage-presentation.ts';
 import { selectedDocumentText } from '../ui/files/selected-document-messages.ts';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
@@ -25,6 +25,16 @@ function previewMedia(result:NativeResult) {
   const kind=mime.split('/')[0];
   if(!['image','video','audio'].includes(kind)||mime==='image/svg+xml')return undefined;
   return {kind,url:native?Capacitor.convertFileSrc(uri):uri};
+}
+
+/** The preview's subtitle: type, then size and date when the provider reported them. The parts
+ * stay separate so the Files browser can add the place the file is in. */
+function previewMeta(result:NativeResult,mime:string) {
+  const metaType=typeLabel(mime);
+  const metaSize=typeof result.size==='number'?formatSize(result.size):'';
+  const metaDate=typeof result.modified==='number'?shortDate(result.modified):'';
+  return {meta:[metaType,metaSize,metaDate].filter(Boolean).join(' · '),metaType,metaSize,metaDate,mimeType:mime,
+    ...(typeof result.size==='number'?{size:result.size}:{}),...(typeof result.modified==='number'?{modified:result.modified}:{})};
 }
 
 /** Install after installPrototypeNativeAdapters so real previews override fixture
@@ -238,26 +248,19 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       };
       if (module === 'files') {
         const media=selected.mediaFailed?undefined:previewMedia(selected.result);
-        const rows = selected.text?.split('\n').map((v, i) => ({ k: String(i + 1), v })) || [];
-        // Fixed prototype page geometry: chunk rows into successive pages so long
-        // text is scrollable rather than silently clipped to the first page.
-        const pages = [];
-        for (let i = 0; i < rows.length; i += 8) pages.push({ first: true, rest: false, heading: i ? name + ' (continued)' : name, rows: rows.slice(i, i + 8), lines: [], num: '' });
         data.isPreview = true;
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
           canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg'),
           message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
-          name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: mime + ' · selected on this device', d: '',
-          isPages: !!selected.pdf||rows.length>0, pages: selected.pdf ? [] : pages, isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
+          name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, ...previewMeta(selected.result,mime), d: '',
+          textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
           mediaError:()=>{if(!sameSelection()||!current)return;current={...current,mediaFailed:true,status:'Preview unavailable for this file.'};refresh();},
           previewStatus:!media&&!selected.pdf&&selected.text===undefined?selected.status:'',
           canOpenElsewhere:selected.result.status==='selected'&&!!selected.result.selectionId,
           openElsewhereLabel:Capacitor.isNativePlatform()?'Open in Android':'Download file',openElsewhere:()=>void open(api,selected,!Capacitor.isNativePlatform()),
-          photoBg: image ? `url(${JSON.stringify(image)}) center / contain no-repeat` : '', photoSun: 'none',
-          isReceipt: false, isAudio: false, isArchive: false, receipt: null, contents: [],
           renaming: !!st.renaming, notRenaming: !st.renaming, rn: typeof st.rn === 'string' ? st.rn : name, onRn: (event: Event) => api.set({rn:(event.target as HTMLInputElement).value}), saveRn: () => rename(api), rnKey: (event: KeyboardEvent) => {if(event.key === 'Enter'){event.preventDefault();void rename(api);}if(event.key === 'Escape')api.set({renaming:false});}, asking: false, asked: false, canAsk,
           askLabel: linkable && !selected.excerptOnly ? 'Ask Alpha' : 'Use excerpt', ask, close,
           startRename: () => selected.result.status === 'renamed-reselect' ? api.toast('Reselect file') : api.set({renaming:true,rn:name}),

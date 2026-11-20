@@ -37,6 +37,7 @@ import { DailyApps } from '../daily';
 import { formatMonthDay, formatTime, formatFullDateTime, weekdayName } from './locale-time';
 import { formatBytes } from '../browser/storage-usage';
 import { BrowserReviews } from '../browser/review';
+import { errorNotice, ERROR_TOAST } from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
 const MAIL_MENU_TOKENS=['--bg','--fg','--s2','--mut','--line','--acct'],MAIL_MENU_SELECTED={width:112,background:'var(--fg)',color:'var(--bg)'};
@@ -951,7 +952,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
         if(!current||!api?.isActive())throw new Error('Reopen this email before sending.');
         return validateMailContext(review,mailContext(),current);
       });
-    }catch(error){api?.toast((error as Error).message);}
+    }catch(error){api?.toast(errorNotice(error,'Couldn’t share this email with Alpha. Try again.'),ERROR_TOAST);}
   }
   const nativeAttachmentDestination=Capacitor.isNativePlatform();
   const attachmentSaveLabel=nativeAttachmentDestination?'Save as…':'Save to Files';

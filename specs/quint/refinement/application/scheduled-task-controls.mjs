@@ -109,6 +109,9 @@ export async function checkScheduledTaskControls() {
     ['open'], ['pick', 'fire'], ['chooseCatalog', 'failed'], ['refresh'], confirm,
     ['chooseCatalog', 'available'], ['refresh'], ['pick', 'fire'], ['cancelReview'],
   ]);
+  await scenario('releasing one owner\'s unconfirmed request keeps the other owner\'s request', [
+    ...openRun, ['answer', 'wrong-id'], ['switchOwner'], ...openRun, ['answer', 'wrong-id'], ['release', true],
+  ]);
   await scenario('a previous owner response cannot acknowledge its retained request', [
     ...openRun, ['switchOwner'], ['answer', 'exact'], ['open'],
   ]);

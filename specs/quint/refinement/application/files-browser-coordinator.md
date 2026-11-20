@@ -9,7 +9,10 @@ access, volumes, entries, loading fields and pending request history.
 
 Thirteen schedules cover a current denial, late old denial/grant/failure,
 late old listing success/failure, leave and re-entry at either await point,
-primary-volume ordering and overlapping registered share requests. Each
+primary-volume ordering and overlapping registered share requests. Two more
+cover the split between the listing read (`loading`) and the mutation counter
+(`mutations`): an open tap is admitted while a listing loads, and a reload that
+completes during an open leaves that open counted until its own reply. Each
 observation is compared against the model. Listing replies in this campaign
 are ready or rejected transport promises. Other provider status variants remain
 uncovered. The model bounds two folders, three
@@ -29,7 +32,8 @@ obsolete access request cannot dispatch a share after a newer request replaces
 it. Full agent cancellation and review ownership remain separate obligations.
 
 This is the first part of the current Files controller. Category and Trash
-aggregation, filter queries, selection, preview, mutation dialogs, pressed-item
+aggregation, filter queries, selection, preview, copy, rename, the Undo
+restore, Empty Trash batching, truncation, mutation dialogs, pressed-item
 and timer ownership, native watch sequencing and durable storage semantics
 still need their own source-transition coverage. `FilesPreview` separately
 checks selected-capability ownership. `FilesTree` covers the separate storage and reviewed transfer contract.

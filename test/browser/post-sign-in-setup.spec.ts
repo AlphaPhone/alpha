@@ -141,7 +141,7 @@ test('a verified email code goes straight to access setup while the agent restar
  await expect(setup).toHaveCount(0);
  // The owner may open Account while the agent starts. It has no AI or billing claim yet.
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
- await expect(accountSheet.getByRole('region',{name:'AI inference',exact:true}).getByText('Starting',{exact:true})).toBeVisible();
+ await expect(accountSheet.getByRole('region',{name:'AI service',exact:true}).getByText('Starting',{exact:true})).toBeVisible();
  await shot(page,info,'05-account-while-agent-starts');
  for(const text of STARTING_SLOP)expect(await accountSheet.innerText()).not.toContain(text);
  host.release!();
@@ -149,7 +149,7 @@ test('a verified email code goes straight to access setup while the agent restar
  await expect.poll(async()=>(await snapshot(page)).session,{timeout:30_000}).toBe(true);
  await expect(accountSheet).toHaveCount(0);
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
- await expect(accountSheet.getByRole('region',{name:'AI inference',exact:true}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
+ await expect(accountSheet.getByRole('region',{name:'AI service',exact:true}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
  await expect(accountSheet.getByText('No plan',{exact:true})).toBeVisible();
  await shot(page,info,'06-account-with-agent-ready');
  expect(host.bound).toBe(true);expect(host.starts).toBe(2);

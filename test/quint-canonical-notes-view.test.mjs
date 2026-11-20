@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {readFileSync} from 'node:fs';
 import {checkTraces} from '../specs/quint/refinement/check-traces.mjs';
-import {captureSources, boundInputs, call, tick} from '../specs/quint/refinement/application/support.mjs';
+import {captureSources, boundInputs, call, tick, sourceModule} from '../specs/quint/refinement/application/support.mjs';
 import {compileCanonicalNotesUi, createCanonicalNotesUiFixture} from '../specs/quint/refinement/application/canonical-notes-feedback.mjs';
 
 const driver = fileURLToPath(import.meta.url);
@@ -17,8 +17,11 @@ const noData = {kind: 'none', title: 0, body: 0, hasPinned: false, pinned: false
   hasFolder: false, folder: 0, voiceContent: false, linkUrl: false, handles: false};
 const noDraft = {present: false, id: 0, token: 0, base: 0, data: noData};
 const localHandles = ['audio', 'documentSource', 'webSource'];
-const note = (id = 1, format, title = 'Title', body = '\nBody') => ({id: id === 1 ? 'note-one' : 'note-two', title, body, color: 'yellow',
-  ...(format ? {format} : {}), createdAt: '2026-11-08T00:00:00Z', updatedAt: '2026-11-08T00:00:00Z'});
+// Update-time classes: each instant is one class, larger is newer, and -1 has no readable time.
+const instants = ['2026-11-07T00:00:00Z', '2026-11-08T00:00:00Z', '2026-11-09T00:00:00Z'];
+const atOf = value => {if (!(value >= 0)) return -1; const index = instants.map(Date.parse).indexOf(value); assert.notEqual(index, -1, 'Time needs an explicit class'); return index;};
+const note = (id = 1, format, title = 'Title', body = '\nBody', updatedAt = instants[1]) => ({id: id === 1 ? 'note-one' : 'note-two', title, body, color: 'yellow',
+  ...(format ? {format} : {}), createdAt: instants[0], updatedAt});
 const state = (notes, revision = 1, trash = []) => ({revision, notes, trash: trash.map(note => ({note, deletedAt: '2026-11-08T00:00:00Z'}))});
 
 const observationPlugin = {name: 'read-canonical-view-callbacks', setup(builder) {
@@ -39,7 +42,7 @@ const observationPlugin = {name: 'read-canonical-view-callbacks', setup(builder)
   });
 }};
 
-async function fixture(compiled) {
+async function fixture(compiled, view) {
   const tokens = new Map(), waiters = new Map(), steps = [];
   let f;
   const tokenOf = token => {if (!token) return 0; if (!tokens.has(token)) tokens.set(token, tokens.size + 1); return tokens.get(token);};
@@ -57,16 +60,16 @@ async function fixture(compiled) {
     data: dataOf(value.format, value.title, value.body)} : noDraft;
   const rowOf = row => ({id: idOf(row.id), kind: row.kind, title: textOf(row.title), body: textOf(row.body),
     revision: row.canonicalRevision, pinned: !!row.pinned, folder: folderOf(row.folderId),
-    handles: localHandles.some(key => Object.hasOwn(row, key))});
+    handles: localHandles.some(key => Object.hasOwn(row, key)), at: atOf(view.noteInstant(row))});
   const observe = ui => ({'s.current': ui.current, 's.baseRows': ui.baseRows.map(rowOf), 's.rows': ui.rowsValue.map(rowOf),
     's.open': idOf(ui.openValue), 's.blank': idOf(ui.blankCreationValue), 's.trash': ui.trashValue.map(row => idOf(row.id)),
     's.draft': draftOf(ui.editor.draft), 's.waiters': ui.idleWaiters.map(waiterOf),
-    PublicRows: ui.list.map(rowOf), PublicOpen: idOf(ui.open)});
+    PublicRows: ui.list.map(rowOf), PublicOpen: idOf(ui.open), PublicShown: view.sortNotes(ui.list).map(rowOf)});
   function record(event, payload, ui) {
     let action;
     if (event === 'base') action = call('published', payload.notes.map(value => {
       const parts = f.projectNoteForModel(value);
-      return {id: idOf(value.id), data: dataOf(value.format, parts.title, parts.body)};
+      return {id: idOf(value.id), at: atOf(Date.parse(value.updatedAt)), data: dataOf(value.format, parts.title, parts.body)};
     }), (payload.trash ?? []).map(value => idOf(value.note.id)), payload.revision);
     if (event === 'paint') action = call('painted', draftOf(payload));
     if (event === 'wait') action = call('wait', waiterOf(payload));
@@ -87,34 +90,42 @@ async function fixture(compiled) {
 async function checkCanonicalNotesView(extraSources = []) {
   captureSources([driver, ...extraSources]);
   const compiled = await compileCanonicalNotesUi([driver, ...extraSources], [observationPlugin]), traces = [];
+  // The list order the Notes view shows (model.js renders sortNotes over this list).
+  const view = await sourceModule('apps/app/src/runtime/notes-view.ts');
   const cases = ['text', 'list', 'empty-voice', 'rich-voice', 'empty-link', 'rich-link', 'local-handles',
     'forged-view-fields', 'pin-folder', 'open-second', 'edit-title', 'new-text', 'new-list', 'new-folder',
     'clean-refresh', 'dirty-refresh', 'clean-removal', 'dirty-removal', 'save-new-id', 'save-newer-edit',
     'convert-to-text', 'clear-format-preserves-base', 'owner-loss', 'retire', 'wait-navigation',
-    'wait-two-navigations', 'wait-queued-save', 'retire-waiting', 'failed-save-waiting', 'blank-new-delete'];
+    'wait-two-navigations', 'wait-queued-save', 'retire-waiting', 'failed-save-waiting', 'blank-new-delete',
+    'order-newest', 'order-pinned', 'order-new-draft', 'order-edit-keeps-time'];
   for (const name of cases) {
-    const f = await fixture(compiled);
+    const f = await fixture(compiled, view);
     try {
       let format;
       if (name === 'list') format = {kind: 'list', data: {items: []}};
       if (name.includes('voice')) format = {kind: 'voice', data: name === 'rich-voice' ? {lines: [{t: 'Body', at: 0, s: 'me'}]} : {}};
       if (name.includes('link')) format = {kind: 'link', data: name === 'rich-link' ? {url: 'https://example.invalid/'} : {}};
       if (name === 'local-handles') format = {kind: 'text', data: {audio: 'local', documentSource: {uri: 'local'}, webSource: 'local'}};
-      if (name === 'forged-view-fields') format = {kind: 'text', data: {id: 'forged', title: 'Forged', body: 'Forged', kind: 'voice', canonicalRevision: 999}};
+      if (name === 'forged-view-fields') format = {kind: 'text', data: {id: 'forged', title: 'Forged', body: 'Forged', kind: 'voice', canonicalRevision: 999,
+        createdAt: instants[2], updatedAt: instants[2], modifiedAt: instants[2]}};
+      if (name === 'order-pinned') format = {kind: 'text', data: {pinned: true}};
       if (['pin-folder', 'clear-format-preserves-base', 'convert-to-text'].includes(name)) format = {kind: 'voice', data: {pinned: true, folderId: 'folder-one', lines: [{t: 'Body', at: 0, s: 'me'}]}};
-      const first = note(1, format), second = note(2, undefined, 'Second');
+      const ordered = name.startsWith('order-');
+      const first = note(1, format, 'Title', '\nBody', ordered ? instants[name === 'order-new-draft' ? 2 : 0] : instants[1]);
+      const second = note(2, name === 'order-new-draft' ? {kind: 'text', data: {pinned: true}} : undefined, 'Second', '\nBody',
+        ordered ? instants[name === 'order-new-draft' ? 0 : name === 'order-edit-keeps-time' ? 1 : 2] : instants[1]);
       f.run('refresh'); await f.resolveRequest(state(name === 'save-new-id' ? [first] : [first, second]));
       if (['local-handles', 'forged-view-fields'].includes(name)) await f.ui.leave('note-one');
-      if (['new-text', 'new-list', 'new-folder', 'save-new-id', 'blank-new-delete'].includes(name)) {
+      if (['new-text', 'new-list', 'new-folder', 'save-new-id', 'blank-new-delete', 'order-new-draft'].includes(name)) {
         await f.ui.create(name === 'new-list' ? 'list' : 'text', name === 'new-folder' ? 'folder-two' : null);
         if (name === 'save-new-id') {
           f.ui.editor.edit({title: 'New'}); f.run('update', f.ui.open, {title: 'New'}); await tick();
           const saved = note(2, undefined, 'New', ''); await f.resolveRequest(state([first, saved], 2), saved);
         }
         if (name === 'blank-new-delete') await f.ui.remove(f.ui.open, f.api);
-      } else if (!['text', 'list', 'empty-voice', 'rich-voice', 'empty-link', 'rich-link', 'local-handles', 'forged-view-fields', 'pin-folder'].includes(name)) {
+      } else if (!['text', 'list', 'empty-voice', 'rich-voice', 'empty-link', 'rich-link', 'local-handles', 'forged-view-fields', 'pin-folder', 'order-newest', 'order-pinned'].includes(name)) {
         await f.ui.leave(name === 'open-second' ? 'note-two' : 'note-one');
-        if (['edit-title', 'dirty-refresh', 'dirty-removal'].includes(name)) f.ui.editor.edit({title: 'Edited'});
+        if (['edit-title', 'dirty-refresh', 'dirty-removal', 'order-edit-keeps-time'].includes(name)) f.ui.editor.edit({title: 'Edited'});
         if (name.endsWith('refresh') || name.endsWith('removal')) {
           f.run('refresh'); await f.resolveRequest(state(name.endsWith('removal') ? [second] : [note(1, undefined, 'New'), second], 2));
         }
@@ -140,13 +151,20 @@ async function checkCanonicalNotesView(extraSources = []) {
         }
       }
       f.steps.push({label: 'settled source projection', action: null, expect: f.observe()});
+      const shown = f.observe().PublicShown.map(row => row.id);
+      if (name === 'order-newest') assert.deepEqual(shown, [2, 1]);
+      if (name === 'order-pinned') assert.deepEqual(shown, [1, 2]);
+      if (name === 'order-new-draft') assert.deepEqual(shown, [2, 3, 1]);
+      if (name === 'order-edit-keeps-time') assert.deepEqual(shown, [2, 1]);
+      // Times in an open note's format data never replace its saved time.
+      if (name === 'forged-view-fields') assert.equal(f.observe()['s.rows'][0].at, 1);
       traces.push({name, init: call('init'), expect: f.initial, steps: f.steps.slice()});
     } finally {await f.close();}
   }
   return checkTraces(boundInputs({model: 'CanonicalNotesView', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
     'Actual CanonicalNotesUi, NotesEditor, NotesController and wire codecs execute. Read-only build-time observers report accepted base publication, draft paint, waiter admission, phase drain and retirement. No production state is altered by observers.',
     'Editor draft callbacks and accepted controller snapshots are inputs to this view projection. Their source-transition protocols are covered separately by CanonicalNotesDraft, CanonicalNotesMutation and CanonicalNotesController.',
-    'Two canonical identities, five draft tokens, eight waiter identities and explicit text/rich metadata classes bound the campaign. Rows retain identity/order/kind/title/body/revision/pin/folder and local-handle omission. Arbitrary metadata bytes, dates, link domain and voice-array normalization remain payload obligations.',
+    'Two canonical identities, five draft tokens, eight waiter identities, three update-time classes and explicit text/rich metadata classes bound the campaign. Rows retain identity/order/kind/title/body/revision/pin/folder/time and local-handle omission, and the shown order is the actual sortNotes over the public list. Arbitrary metadata bytes, dates, link domain and voice-array normalization remain payload obligations.',
     'The waiter list is observed directly at admission and drain. The eight-attempt settle loop and competing navigation intent policy are exercised in selected schedules but not proven universally. Recorder, dictation, folder-store and Calendar handoff remain separate protocols.'] }));
 }
 
@@ -155,5 +173,5 @@ test('canonical Notes rows and navigation waiters refine actual view callbacks',
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 30);
+  assert.equal(receipt.traces, 34);
 });

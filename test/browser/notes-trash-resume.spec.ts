@@ -15,7 +15,7 @@ async function trashTextNote(page:Page,title:string){
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('Erase me on time');
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
 }
 async function seedVoice(page:Page){
@@ -33,7 +33,7 @@ test('a resume on Home erases expired text and voice Trash entries without openi
  await page.reload();await openNotes(page);
  await trashTextNote(page,'Resume text');
  await page.getByRole('button',{name:'Open Resume memo',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await expect.poll(async()=>(await describe(page)).deletedAt).toBeGreaterThan(0);
  const entries=await trashEntries(page);

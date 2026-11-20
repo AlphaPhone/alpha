@@ -53,5 +53,5 @@ test('actual scheduled-task controls refine their reviewed request model', {time
   const receipt = await checkScheduledTaskControls();
   assert.equal(receipt.passed, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 20);
+  assert.equal(receipt.traces, 21);
 });

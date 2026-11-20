@@ -32,6 +32,14 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
 .alpha-phone [data-alpha-toast] { --alpha-toast-row:56px; --alpha-toast-top:max(8px,min(var(--alpha-notice-top),calc(100% - var(--alpha-dock-clearance,102px) - 12px - var(--alpha-toast-row)))); position:absolute; top:var(--alpha-toast-top); left:16px; right:16px; z-index:97; min-height:0; max-height:max(var(--alpha-toast-row),calc(100% - var(--alpha-toast-top) - var(--alpha-dock-clearance,102px) - 12px)); overflow:auto; }
 [data-alpha-toast] { display:flex; align-items:flex-start; justify-content:center; pointer-events:none; }
 [data-alpha-toast] > * { flex-shrink:0; }
+/* Persistent notices (lost work, a privacy state left on) stay in the chat's notice area, in the
+ * page flow so they cover nothing, until dismissed. */
+.alpha-persistent-notice { margin:0 20px 8px; min-height:56px; box-sizing:border-box; padding:4px 4px 4px 16px; border-radius:28px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; display:flex; gap:12px; align-items:center; }
+.alpha-persistent-notice > span { flex-grow:1; min-width:0; padding:6px 0; overflow-wrap:anywhere; }
+/* A reply that says to check history carries the way there. */
+.alpha-history-link { align-self:flex-start; min-height:48px; padding:0 16px; margin-left:26px; border-radius:24px; background:var(--s2); color:var(--fg); font:inherit; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:8px; }
+.alpha-history-link .i { width:16px; height:16px; }
+.alpha-persistent-notice > button { flex-shrink:0; min-height:48px; padding:0 16px; border-radius:24px; color:var(--fg); background:var(--s1); font-weight:700; font-size:14px; }
 .alpha-chat-notices { max-height:30%; overflow:auto; flex-shrink:0; }
 .alpha-chat-notices:empty { display:none; }
 /* Full-screen chat on the launcher is drawn under Android's status bar. Its header starts 16
@@ -491,12 +499,14 @@ html:not(.alpha-landscape) .alpha-phone [data-screen][data-alpha-chat-half="true
  * for scrollers this rule does not name). */
 html:not(.alpha-landscape) .alpha-phone [data-screen]:not([data-alpha-chat-half="true"]) :is([data-alpha-app-scroll],.calendar-timeline,.calendar-draft-fields) { scroll-padding-bottom:calc(var(--alpha-dock-clearance,102px) + 16px); }
 
-/* Existing inline app dialogs own focus above a nonblocking half sheet too. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-layer="conversation"] { visibility:hidden; }
+/* Existing inline app dialogs and Notes popup menus own focus above a nonblocking half sheet too.
+ * Only the Notes menus, which render only while open: other app menus (Inbox's, inside a closed
+ * <details>) stay in the DOM while shut and must not hide the sheet. */
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-layer="conversation"] { visibility:hidden; }
 /* The sheet is hidden behind that dialog, and in landscape it docks beside the app: neither covers
  * anything, so a touch outside it stays the app's. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-chat-scrim],
-[data-screen]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-dock-scrim="true"],
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-chat-scrim],
+[data-screen]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-dock-scrim="true"],
 .alpha-landscape .alpha-phone [data-alpha-chat-scrim]:not([data-alpha-dock-scrim="true"]) { pointer-events:none!important; }
 
 /* Assistant owns only its conversation surface. */
@@ -567,6 +577,14 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] [d
 html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] [data-alpha-maps-status] { margin-inline:20px; }
 html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > .alpha-map-credits { margin-inline:16px; align-self:stretch; }
 html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-guidance-controls] { margin-inline:12px; }
+/* Full-bleed Maps keeps the assistant dock and lays its own bottom controls out above it.
+   In guidance Recenter joins the stack above the guidance bar instead of a fixed offset
+   that the bar and a taller dock both covered. On the base map, credits and Recenter
+   follow the dock's measured reserve when a long draft makes the dock taller. */
+[data-alpha-maps-guidance="true"] > [data-alpha-maps-recenter] { position:relative!important; inset:auto!important; flex:none; align-self:flex-end; }
+html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-recenter] { margin-right:16px; }
+html:not(.alpha-landscape) [data-alpha-maps-base="true"] > .alpha-map-credits { bottom:max(124px,calc(var(--alpha-dock-reserve,108px) + 16px))!important; }
+html:not(.alpha-landscape) [data-alpha-maps-base="true"] > [data-alpha-maps-recenter] { bottom:min(max(124px,calc(var(--alpha-dock-reserve,108px) + 16px)),calc(100% - 176px))!important; }
 
 /* Keep the guidance controls and credits in flow on the clear side of the
    landscape assistant. Status and maneuvers share the space above the right dock. */
@@ -770,6 +788,9 @@ button[aria-label$=" on or off"][aria-pressed]::before { content:""; position:ab
 .calendar-agenda-event { display:flex; flex-direction:column; gap:4px; width:100%; min-height:48px; padding:12px 16px; margin-bottom:8px; border-radius:14px; background:var(--s2); color:var(--fg); text-align:left; box-sizing:border-box; overflow-wrap:anywhere; }
 .calendar-agenda-event span { font-size:13px; color:var(--mut); }
 .calendar-agenda-event strong { font-size:16px; line-height:1.35; }
+/* Calendar Schedule and search (calendar-schedule.ts): the day layout stays mounted, hidden, under the list. */
+[data-alpha-calendar-list="true"] :is([data-alpha-calendar-week],[data-alpha-calendar-invites],[data-alpha-calendar-all-day],[data-alpha-calendar-day-heads],.calendar-timeline,.calendar-agenda) { display:none!important; }
+.calendar-month-dialog [role="group"] button[aria-pressed="true"] { background:var(--fg)!important; color:var(--bg)!important; }
 /* Large text in a short canvas (200% text, launcher Home): the header, notices and the day strip
  * above the agenda can outgrow the screen and leave the day strip under the dock. The whole list
  * then scrolls as one column whose end clears the dock (runtime/dock-clearance.ts); the agenda
@@ -892,7 +913,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .mail-sender-avatar{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--s2);font-size:14px;font-weight:700;overflow:hidden}
 .mail-sender-avatar img{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;object-fit:contain;padding:9px;background:var(--s2)}
 
-.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
+.calendar-search-input::-webkit-search-cancel-button,.calendar-search-input::-webkit-search-decoration,.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
 .content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
 .content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}
@@ -953,7 +974,7 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 [data-alpha-device-receipt="true"] { align-self:flex-start; max-width:100%; box-sizing:border-box; padding:10px 14px; border-radius:6px 16px 16px 6px; border-left:3px solid var(--acct); background:var(--s2); font-size:14px!important; line-height:1.45!important; overflow-wrap:anywhere; }
 /* Narrow phones keep New chat and History reachable by dropping the assistant's name beside its mark. */
 @media (max-width: 439px) { [data-alpha-chat-lead] [data-alpha-chat-name] { display:none; } }
-.alpha-action-review button > div > div:last-child { white-space:pre-wrap!important; overflow:visible!important; text-overflow:clip!important; overflow-wrap:anywhere; line-height:1.45; }
+.alpha-action-review button > div > div:nth-child(2) { white-space:pre-wrap!important; overflow:visible!important; text-overflow:clip!important; overflow-wrap:anywhere; line-height:1.45; }
 
 /* Older Android WebViews ignore popover; React visibility must still hide the menu. */
 .mail-folder-menu[hidden]{display:none!important}
@@ -1048,7 +1069,7 @@ dialog.alarm-page{position:fixed;inset:0 auto auto 0;margin:0;width:100vw;height
 .photo-album-membership{padding:6px 16px;color:var(--mut);font-size:14px}
 /* The overflow menu is anchored below its header, so a dock bottom must cap,
  * not stretch, its intrinsic height. Keep short screens scrollable. */
-[data-alpha-popup] .notes-menu[role="dialog"]{bottom:auto!important;height:auto;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
+[data-alpha-popup] .notes-menu[role="menu"]{bottom:auto!important;height:auto;overflow-y:auto;box-sizing:border-box;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
 
 .chat-image-preview{position:absolute;inset:0;z-index:130;background:var(--alpha-black);color:var(--alpha-white);overflow:hidden;touch-action:none}
 .chat-image-preview>[role="dialog"]{height:100%;display:flex;align-items:center;justify-content:center;padding:64px 16px 16px;box-sizing:border-box;overflow:hidden}

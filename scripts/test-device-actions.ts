@@ -72,7 +72,7 @@ async function reviewNoticesAndForeground(){
  const notices=review.filter(item=>!item.proposal).map(item=>item.notice);
  assert.equal(notices.length,2,'two invalid pending proposals; completed or expired invalid history stays quiet');
  assert.equal(review[0].proposal?.reviewDestination,'notes');
- const staleReview=await reviewClient.approve('note-delete',home,signal());assert.equal(staleReview.status,'unknown');assert.equal(posted.length,0,'navigation-only card cannot dispatch approval');
+ const staleReview=await reviewClient.approve('note-delete',home,signal());assert.deepEqual([staleReview.status,staleReview.summary],['failed','Not started, so nothing was sent.'],'refused before dispatch closes as not started');assert.equal(posted.length,0,'navigation-only card cannot dispatch approval');
  assert.ok(notices.every(notice=>notice==="This action isn't available on this phone."));
  assert.ok(!notices.join('\n').includes(target.noteId),'notices never expose record identities');
  assert.deepEqual((await client().pending(home,signal())).map(card=>card.id),['note-delete','open']);
@@ -132,12 +132,12 @@ async function executionIdentityAndRetirement(){
   const foreign: ActionJournal = {...journal,reserve:async input=>({created:true,entry:{...input,phase:'reserved',[field]:field==='scope'?'d'.repeat(64):'different'}})};
   const actions=new DeviceActions(session,credential,'c'.repeat(64),async()=>{requests++;return {proposals:[localProposal]};},foreign,async()=>{ran++;return {status:'succeeded',summary:'Must not run'};});
   await actions.pending(context,signal());const result=await actions.approve('proposal',context,signal());
-  assert.equal(result.status,'unknown');assert.equal(requests,1,'foreign reservation is rejected before decision');assert.equal(ran,0);
+  assert.deepEqual([result.status,result.summary],['failed','Not started, so nothing was sent.'],'a foreign reservation is refused before dispatch');assert.equal(requests,1,'foreign reservation is rejected before decision');assert.equal(ran,0);
  }
  const stopped=new AbortController();let ran=0,posts=0;
  const retiring: ActionJournal = {...journal,reserve:async input=>{stopped.abort();return {created:true,entry:{...input,phase:'reserved'}};}};
  const stoppedActions=new DeviceActions(session,credential,'c'.repeat(64),async(_path,body)=>{if(body)posts++;return {proposals:[localProposal]};},retiring,async()=>{ran++;return {status:'succeeded',summary:'Must not run'};});
- await stoppedActions.pending(context,signal());assert.equal((await stoppedActions.approve('proposal',context,stopped.signal)).status,'unknown');assert.equal(posts,0);assert.equal(ran,0);
+ await stoppedActions.pending(context,signal());const stoppedResult=await stoppedActions.approve('proposal',context,stopped.signal);assert.deepEqual([stoppedResult.status,stoppedResult.summary],['failed','Not started, so nothing was sent.'],'stopped before dispatch closes as not started');assert.equal(posts,0);assert.equal(ran,0);
  records.clear();state='pending';attemptId=undefined;mode='ok';const afterDispatch=new AbortController(),before=effects;
  const actions=new DeviceActions(session,credential,'c'.repeat(64),request,journal,async()=>{effects++;afterDispatch.abort();return {status:'succeeded',summary:'Known saved result'};});
  await actions.pending(context,signal());const known=await actions.approve('proposal',context,afterDispatch.signal);

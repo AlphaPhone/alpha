@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {app,root} from './java.mjs';
 import {reminderPlatform} from './reminder-delivery-platform.mjs';
+import {stringResources} from './string-resources.mjs';
 
 export const gmailProduct=['GmailBackground','GmailDeliveryWorker','GmailNoticePoster','AlphaGmailPlugin','CloudDeployment','LocalAgentProviderAdmission','PluginWorkers'].map(name=>app+name+'.java');
 const notificationSource='plugins/plugin-native-notifications/android/src/main/java/ai/eliza/plugins/notifications/';
@@ -11,6 +12,7 @@ export const gmailShared=['MailBackgroundDelivery','MailHistoryReconciliation'].
 export const providerAdmission='plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/runtime/NativeProviderAdmission.java';
 
 export function gmailBackgroundPlatform() {
+  const strings=stringResources();
   const directory=mkdtempSync(join(tmpdir(),'quint-gmail-background-'));
   const close=()=>rmSync(directory,{recursive:true,force:true});
   try {
@@ -28,7 +30,7 @@ public class Context {
  private static final android.app.NotificationManager notices=new android.app.NotificationManager();
  public final android.app.KeyguardManager keyguard=new android.app.KeyguardManager();
  public Context getApplicationContext(){return this;}
- public String getPackageName(){return "fixture.alpha";}
+${strings.getString} public String getPackageName(){return "fixture.alpha";}
  public int checkSelfPermission(String name){return android.content.pm.PackageManager.PERMISSION_GRANTED;}
  public <T>T getSystemService(Class<T> type){return type.cast(type==android.app.NotificationManager.class?notices:keyguard);}
 }`,
@@ -214,7 +216,7 @@ final class AlphaDataReset {
  boolean pending(Context context){return GmailBackgroundTraces.reset;}
 }
 final class MainActivity extends android.app.Activity {}
-final class R {static final class drawable {static final int notification_icon=1;}}
+final class R {static final class drawable {static final int notification_icon=1;} ${strings.rString}}
 `,
     };
     const paths=Object.entries(files).map(([name,source])=>{

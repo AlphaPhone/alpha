@@ -5,10 +5,10 @@ final class SourceRenewalNoticesTest {
  interface Run{void run()throws Exception;}
  static void rejected(String pattern,Run run)throws Exception{try{run.run();}catch(SecurityException expected){if(expected.getMessage()!=null&&java.util.regex.Pattern.compile(pattern).matcher(expected.getMessage()).find())return;throw new AssertionError("Expected /"+pattern+"/ but got "+expected,expected);}throw new AssertionError("Expected rejection /"+pattern+"/");}
  static final class Fixture implements SourceRenewalNotices.Store,SourceRenewalNotices.Guard,SourceRenewalNotices.Poster{
-  String stored;boolean revoked,failWrite,offline,paused,failPost,revokeAfterWrite,offlineAfterWrite;int posted,cancelled;String revision="r1",owner="owner";long expiry=200000;
+  String stored,access;JSONObject scope;boolean revoked,failWrite,offline,paused,failPost,revokeAfterWrite,offlineAfterWrite;int posted,cancelled;String revision="r1",owner="owner";long expiry=200000;
   public String read(){return stored;}public void write(String value)throws Exception{if(failWrite)throw new IllegalStateException("disk unavailable");stored=value;if(revokeAfterWrite){revokeAfterWrite=false;revoked=true;}if(offlineAfterWrite){offlineAfterWrite=false;offline=true;}}
-  public JSONObject describe(JSONObject selection)throws Exception{if(offline)throw new java.io.IOException("resident starting");if(paused)throw new SecurityException("Native source connection unavailable");if(!owner.equals(selection.optString("ownerId"))||!"enrollment".equals(selection.optString("enrollmentId")))throw new SourceRenewalNotices.RenewalStale("Native source binding changed");return new JSONObject().put("revision",revision).put("expiresAt",java.time.Instant.ofEpochMilli(expiry).toString()).put("revoked",revoked);}
-  public void post(String key,long expiry,long now){if(failPost)throw new IllegalStateException("notifications disabled");posted++;}public void cancel(String key){cancelled++;}
+  public JSONObject describe(JSONObject selection)throws Exception{if(offline)throw new java.io.IOException("resident starting");if(paused)throw new SecurityException("Native source connection unavailable");if(!owner.equals(selection.optString("ownerId"))||!"enrollment".equals(selection.optString("enrollmentId")))throw new SourceRenewalNotices.RenewalStale("Native source binding changed");return new JSONObject().put("revision",revision).put("expiresAt",java.time.Instant.ofEpochMilli(expiry).toString()).put("revoked",revoked).putOpt("scope",scope);}
+  public void post(String key,long expiry,long now,String access){if(failPost)throw new IllegalStateException("notifications disabled");posted++;this.access=access;}public void cancel(String key){cancelled++;}
   SourceRenewalNotices core(){return new SourceRenewalNotices(this,this,this);}
   JSONObject selection(){return new JSONObject().put("provider","native").put("ownerId",owner).put("agentId","agent").put("installationId","install").put("enrollmentId","enrollment").put("sourceId","source").put("revision",revision);}
  }
@@ -42,6 +42,11 @@ final class SourceRenewalNoticesTest {
   crashed.core().arm(crashed.selection(),crashed.expiry,1001);check("armed".equals(new JSONObject(crashed.stored).getJSONObject(crashedKey).getString("phase")),"re-arm resets an interrupted post");
   rows=new JSONObject(crashed.stored);rows.getJSONObject(crashedKey).put("phase","dispatching");crashed.stored=rows.toString();
   crashed.core().post(crashedKey,1002);check(crashed.posted==1&&"posted".equals(new JSONObject(crashed.stored).getJSONObject(crashedKey).getString("phase")),"interrupted post retries");
+  // The notice names the kind of access from the grant read just before posting, never the source label.
+  String[][] kinds={{"[{\"id\":\"1\"}]","true","calendar-reminders"},{"[{\"id\":\"1\"}]","false","calendar"},{"[]","true","reminders"},{"[]","false",null}};
+  for(String[] kind:kinds){Fixture named=new Fixture();named.scope=new JSONObject().put("calendars",new JSONArray(kind[0])).put("reminders",Boolean.parseBoolean(kind[1]));SourceRenewalNotices s=named.core();String namedKey=s.arm(named.selection(),named.expiry,1000);s.post(namedKey,1000);check(named.posted==1&&java.util.Objects.equals(kind[2],named.access),"access kind "+kind[2]);}
+  Fixture unscoped=new Fixture();SourceRenewalNotices u=unscoped.core();u.post(u.arm(unscoped.selection(),unscoped.expiry,1000),1000);check(unscoped.posted==1&&unscoped.access==null,"a grant without a scope keeps the general title");
+  Fixture moved=new Fixture();SourceRenewalNotices m=moved.core();String movedKey=m.arm(moved.selection(),moved.expiry,1000);moved.scope=new JSONObject().put("calendars",new JSONArray()).put("reminders",true);m.post(movedKey,1000);check("reminders".equals(moved.access),"the kind comes from the grant at post time");
   System.out.println("PASS source renewal notices");
  }
 }

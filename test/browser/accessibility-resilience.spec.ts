@@ -170,8 +170,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
     ['photos:viewer', ['Share'], 'Share', 'Close share', 'Photo actions'],
     ['notes:editor', ['More', 'Share note'], 'Share', 'Cancel', 'Share note'],
     ['files-storage', ['Files options'], 'Sort and more', 'Close menu', 'Files options'],
-    ['files:preview', ['File actions', 'Add to folder'], 'Move to', 'Close move', 'File actions'],
-    ['files:preview', ['File actions', 'Share file'], 'Share file', 'Close share', 'File actions'],
     ['workflows:new', ['Add Read step'], 'Step editor', 'Close', null],
     // Settings > Google (live: the panel is not mounted in mock mode). The Google accounts panel
     // has no scrim button; its Close button is the pointer dismissal, and Escape returns focus to
@@ -195,12 +193,13 @@ test.describe('menus and sheets over a scrim own focus', () => {
       else await page.goto(`/?mode=mock&start=${start}`);
       for (const step of steps.slice(0, -1)) await page.getByRole('button', { name: step, exact: true }).first().click();
       if(photoShare)await page.getByLabel('Photo actions',{exact:true}).click();
-      const last = page.getByRole('button', { name: steps.at(-1)!, exact: true }).first();
+      // Share note is an entry of the Note actions menu.
+      const last = page.getByRole(noteShare ? 'menuitem' : 'button', { name: steps.at(-1)!, exact: true }).first();
       await expect(last).toBeVisible();
       // Everything the user could operate before the popup opened must be operable again after it.
       await page.evaluate(() => { for (const el of document.querySelectorAll('.os button, .os input, .os textarea, .os a[href]')) if (el.getClientRects().length && !el.closest('[inert],[aria-hidden="true"]')) (el as any).__alphaBefore = true; });
       if(noteShare){
-        await expect(page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true})).toBeVisible();
+        await expect(page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true})).toBeVisible();
         await last.focus();await page.keyboard.press('Enter');
       }else await last.click();
       const dialog = page.getByRole('dialog', { name, exact: true });
@@ -228,15 +227,15 @@ test.describe('menus and sheets over a scrim own focus', () => {
       for (let step = 0; step < 2; step++) { await page.keyboard.press('Shift+Tab'); expect(await inside()).toBe(true); }
       await page.keyboard.press('Escape');
       await expect(dialog).toHaveCount(0);
-      if (opener) await expect(opener==='Photo actions'?page.getByLabel(opener,{exact:true}):page.getByRole('button', { name: opener, exact: true }).first()).toBeFocused();
+      if (opener) await expect(opener==='Photo actions'?page.getByLabel(opener,{exact:true}):page.getByRole(noteShare ? 'menuitem' : 'button', { name: opener, exact: true }).first()).toBeFocused();
       const stranded = await page.evaluate(() => Array.from(document.querySelectorAll('.os button, .os input, .os textarea, .os a[href]'))
         .filter(el => (el as any).__alphaBefore && el.isConnected && !!el.closest('[inert],[aria-hidden="true"]')).map(el => el.getAttribute('aria-label') || el.textContent));
       expect(stranded).toEqual([]);
       if(noteShare){
         // Closing the nested native share panel returns to its still-open menu, then Escape closes that menu.
-        await expect(page.getByRole('dialog',{name:'Note actions',exact:true})).toBeVisible();
+        await expect(page.getByRole('menu',{name:'Note actions',exact:true})).toBeVisible();
         await page.keyboard.press('Escape');
-        await expect(page.getByRole('dialog',{name:'Note actions',exact:true})).toHaveCount(0);
+        await expect(page.getByRole('menu',{name:'Note actions',exact:true})).toHaveCount(0);
         await expect(page.getByRole('button',{name:'More',exact:true})).toBeFocused();
       }
     });
@@ -304,7 +303,7 @@ test.describe('photo editor in landscape', () => {
     const editor = page.locator('[data-alpha-subview="photos-edit"]');
     await expect(editor).toBeVisible();
     expect(await editor.evaluate(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')).toBe(true);
-    for (const name of ['Rotate', 'Center crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
+    for (const name of ['Rotate', 'Crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
     // Keyboard: a filter is operable without a pointer, and Save is still reachable afterwards.
     const mono = page.getByRole('button', { name: 'Mono filter', exact: true });
     await mono.focus(); await page.keyboard.press('Enter');

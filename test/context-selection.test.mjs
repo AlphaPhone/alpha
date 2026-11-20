@@ -63,7 +63,7 @@ test('a saved capture identity is its id and a local counter, never the library 
  const flagged={...plain,revision:'1760000000:52344|917',mutationRevision:'1760000000:52344:917:0'};
  assert.throws(()=>sanitizePhoneContext({view:'photos',revision:1,sensitive:false,selectedObject:{kind:'photo',id:flagged.id,revision:flagged.revision}}));
  const first=captures(plain);
- assert.deepEqual(Object.keys(first).sort(),['id','kind','revision']);assert.equal(first.kind,'photo');assert.equal(first.id,'native-camera-42');
+ assert.deepEqual(Object.keys(first).sort(),['id','kind','revision']);assert.equal(first.kind,'photo');assert.equal(first.id,'42','the library id, without the Photos row prefix');
  assert.match(first.revision,/^capture-[0-9a-f]{12}-1$/);
  assert.doesNotMatch(JSON.stringify(first),/1760000000|52344|\|/,'no added time, size or provider separator');
  assert.deepEqual(captures({...plain}),first,'an unchanged item keeps its identity');
@@ -84,7 +84,14 @@ test('a saved capture identity is its id and a local counter, never the library 
  const issued=new Set();for(let index=0;index<300;index++){const next=captures({...plain,id:'native-camera-many-'+index}).revision;assert.ok(!issued.has(next));issued.add(next);}
  assert.ok(!issued.has(captures({...plain,id:'native-camera-many-0'}).revision));
  // Anything without an opaque id or a library revision has no identity.
- for(const bad of [undefined,{},{id:'native-camera-1'},{id:'native-camera-1',revision:''},{id:'/storage/DCIM/1.jpg',revision:'1'},{id:'has space',revision:'1'},{id:'native-camera-1',revision:7}])assert.equal(captures(bad),null);
+ for(const bad of [undefined,{},{id:'native-camera-1'},{id:'native-camera-1',revision:''},{id:'/storage/DCIM/1.jpg',revision:'1'},{id:'has space',revision:'1'},{id:'native-camera-1',revision:7},{id:'native-camera-',revision:'1'},{id:'native-camera-has space',revision:'1'}])assert.equal(captures(bad),null);
+ // The agent receives the id Photos operations name (an Android permitted id such as m:42), and the
+ // selection counts only while that item is the one open in the viewer.
+ const permitted=captures({kind:'image',id:'native-camera-m:42',revision:'1760000000:52344'});
+ assert.equal(permitted.id,'m:42');
+ assert.equal(m.captureSelectionOpen('native-camera-m:42',permitted),true);
+ for(const open of ['m:42','native-camera-m:43',null,undefined])assert.equal(m.captureSelectionOpen(open,permitted),false,String(open));
+ assert.equal(m.captureSelectionOpen('native-camera-m:42',null),false);
 });
 test('location tiles ask the picker for a list of valid document types',()=>{
  const valid=/^[a-z]+\/([a-z0-9][a-z0-9.+-]{0,126}|\*)$/;

@@ -60,6 +60,56 @@ export type MainLibraryHost = {
   trashed(ids: string[]): void;
 };
 let mainHost: MainLibraryHost | undefined;
+/** The rows an agent request names: those in the loaded Library window, then each other id read
+ * from the library one at a time (it may be older than the window). An id the library cannot
+ * read, or reads as deleted, is missing. Reads stop when the request is cancelled. */
+export async function resolveRequestedRows<T>(loaded: readonly T[], ids: readonly string[], idOf: (row: T) => string,
+  read: (id: string) => Promise<T | undefined>, signal: AbortSignal): Promise<{ rows: T[]; missing: number }> {
+  const wanted = new Set(ids), rows = loaded.filter(row => wanted.has(idOf(row)));
+  const found = new Set(rows.map(idOf));
+  for (const id of wanted) {
+    if (found.has(id)) continue;
+    signal.throwIfAborted();
+    let row: T | undefined;
+    try { row = await read(id); } catch { row = undefined; }
+    signal.throwIfAborted();
+    if (row !== undefined && idOf(row) === id && !found.has(id)) { rows.push(row); found.add(id); }
+  }
+  return { rows, missing: ids.length - rows.length };
+}
+/** A request that names library items for the main host: select them, or open an album or share review. */
+export type HostItemsOperation = Extract<HostOperation, { type: 'photo_library_select' | 'photos_album_create' | 'photos_share' }>;
+/** What the main Photos host lends an item request (specs/quint/application/PhotosAgentHost.qnt). */
+export type HostRequestPorts<T> = {
+  loaded(): readonly T[]; idOf(row: T): string; read(id: string): Promise<T | undefined>;
+  /** Photos is still active and showing in the visit the request started in. */
+  current(): boolean;
+  /** The editor, a video edit, a change or a share is running. */
+  busy(): boolean;
+  /** Any review over the grid: the host's album or share review, or the library's own review or change. */
+  reviewOpen(): boolean;
+  select(rows: T[]): void;
+  openReview(operation: Exclude<HostItemsOperation, { type: 'photo_library_select' }>, rows: T[], missing: number): void;
+};
+/** Resolves the named items, then checks again that the same visible visit is free before it
+ * selects them or opens the one review: the reads can outlast a hide, a departure, a busy start
+ * or another review. */
+export async function runHostItemsRequest<T>(operation: HostItemsOperation, ports: HostRequestPorts<T>, signal: AbortSignal) {
+  const { rows, missing } = await resolveRequestedRows(ports.loaded(), operation.ids, ports.idOf, ports.read, signal);
+  if (!ports.current()) throw new LibraryAgentRefusal('Open Photos, then ask again.');
+  if (ports.busy()) throw new LibraryAgentRefusal('Photos is busy right now.');
+  if (operation.type === 'photo_library_select') {
+    if (!rows.length) throw new LibraryAgentRefusal('None of those items are in Photos.');
+    ports.select(rows);
+    return { kind: 'photo_library_select' as const, selected: rows.length, missing };
+  }
+  if (!rows.length) throw new LibraryAgentRefusal('Those items are not in Photos.');
+  if (ports.reviewOpen()) throw new LibraryAgentRefusal('Finish the open review first.');
+  ports.openReview(operation, rows, missing);
+  return operation.type === 'photos_share'
+    ? { kind: 'photos_share' as const, status: 'review_opened' as const, count: rows.length, missing }
+    : { kind: 'photos_album_create' as const, status: 'review_opened' as const, count: rows.length, missing };
+}
 export function setMainLibraryHost(host: MainLibraryHost | undefined) { mainHost = host; return () => { if (mainHost === host) mainHost = undefined; }; }
 
 /** One instance per Photos module mount. */
@@ -179,6 +229,8 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (!review) return undefined;
       return { title: review.title, detail: review.detail, busy: acting, confirm: () => { void confirmReview(); }, cancel: () => { review = undefined; status = ''; changed(); } };
     },
+    /** The library's own review is open or its confirmed change is with Android. */
+    reviewBusy() { return !!review || acting; },
     /** One short line after a confirmed review, for the host's toast. */
     takeStatus() { const value = status; status = ''; return value; },
     agent,

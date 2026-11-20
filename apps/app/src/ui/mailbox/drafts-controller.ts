@@ -31,6 +31,9 @@ import type { InboxUnsaved } from "@elizaos/plugin-inbox/mailbox/retained-draft"
 import type { GmailMessage } from "@elizaos/plugin-inbox/mailbox/types";
 import { readFileAsBase64 } from "../utils/image-attachment";
 
+/** A failure this controller words for the owner; any other caught error is shown as fixed copy. */
+class DraftNotice extends Error {}
+
 // biome-ignore lint/suspicious/noExplicitAny: proposals and composer events are host data validated here.
 type Bag = Record<string, any>;
 
@@ -476,7 +479,7 @@ export function createMailDraftsController(
     const receipt = await store.compareExchange(shelfSlot(), expected, value);
     if (token !== epoch) throw Error("Draft account changed");
     if (receipt.status !== "saved")
-      throw Error(
+      throw new DraftNotice(
         "Drafts changed in another window. Reload before continuing.",
       );
     shelf = value;
@@ -964,7 +967,9 @@ export function createMailDraftsController(
         const receipt = await store.compareExchange(slot(), saved, null);
         if (token !== epoch) return false;
         if (receipt.status !== "saved")
-          throw Error("The saved draft changed. Reload before continuing.");
+          throw new DraftNotice(
+            "The saved draft changed. Reload before continuing.",
+          );
         saved = null;
       }
       await retained?.clear();
@@ -980,7 +985,7 @@ export function createMailDraftsController(
     } catch (error) {
       if (token === epoch)
         toast(
-          error instanceof Error
+          error instanceof DraftNotice
             ? error.message
             : "The draft could not be saved. Your edits remain here.",
         );

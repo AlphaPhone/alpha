@@ -92,6 +92,8 @@ test('list rows: pinned first, newest first, two-line previews and short dates',
  const now=Date.UTC(2026,10,6,15);
  const list=[{id:'old',kind:'text',title:'Old',modifiedAt:now-40*864e5},{id:'new',kind:'text',title:'New',modifiedAt:now-1000},{id:'pin',kind:'text',title:'Pin',pinned:true,modifiedAt:now-90*864e5},{id:'x',kind:'text',title:'Unknown'}];
  assert.deepEqual(view.sortNotes(list).map(n=>n.id),['pin','new','old','x']);
+ // A note with no time stays ahead of every note stored after it, not only the next one.
+ assert.deepEqual(view.sortNotes([{id:'x',title:'Undated'},{id:'old',modifiedAt:now-40*864e5},{id:'new',modifiedAt:now-1000}]).map(n=>n.id),['x','new','old']);
  assert.equal(view.notePreview({kind:'list',items:[{t:'Milk',done:true},{t:'Eggs'}]}),'☑ Milk\n☐ Eggs');
  assert.equal(view.notePreview({kind:'voice',body:'',lines:[{t:'hello'},{t:'there'}]}),'hello there');
  assert.equal(view.notePreview({kind:'link',domain:'example.com'}),'example.com');
@@ -100,4 +102,15 @@ test('list rows: pinned first, newest first, two-line previews and short dates',
  assert.equal(view.noteDateLabel({modifiedAt:Date.UTC(2026,0,5)},now,'en-US','UTC'),'Jan 5');
  assert.equal(view.noteDateLabel({modifiedAt:Date.UTC(2025,0,5)},now,'en-US','UTC'),'Jan 5, 2025');
  assert.equal(view.noteDateLabel({},now),'');
+});
+
+test('a checklist turned into text and back keeps each item and its checked state',()=>{
+ const items=[{t:'Milk',done:false},{t:'Eggs',done:true},{t:'[x] literal mark',done:false},{t:'Bread',done:true}];
+ const text=view.checklistText(items);
+ assert.equal(text,'Milk\n[x] Eggs\n[ ] [x] literal mark\n[x] Bread');
+ assert.deepEqual(view.checklistItems(text),items);
+ // Plain text still becomes unchecked items; blank lines are dropped and lines are trimmed.
+ assert.deepEqual(view.checklistItems('  Call the vet \n\n[X] Book flights\n[ ] Pack'),[{t:'Call the vet',done:false},{t:'Book flights',done:true},{t:'Pack',done:false}]);
+ assert.equal(view.checklistText(undefined),'');
+ assert.deepEqual(view.checklistItems(undefined),[]);
 });

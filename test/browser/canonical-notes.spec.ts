@@ -34,7 +34,7 @@ test('Undo for a canonical deletion cannot restore a replacement trash entry',as
  await canonicalNotesFixture(page,{notes:[trashedNote]});await openCanonicalNotes(page);
  await page.getByRole('button',{name:'Open A trashed note',exact:true}).click();
  await page.getByRole('button',{name:'More',exact:true}).click();
- await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  const undo=page.getByRole('button',{name:'Undo',exact:true});await expect(undo).toBeVisible();
  await replaceTrashEntry(page,'2026-11-09T12:00:00Z');await undo.click();
  await expect(page.getByText('Review deletion again',{exact:true})).toBeVisible();
@@ -119,7 +119,7 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.find((n:any)=>n.id===before.id)?.body)).toBe('\nUpdated exact text.');
  await page.getByRole('button',{name:'Open Canonical browser note',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.length)).toBe(0);
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  // The agent's restore-only Trash is the Recently deleted folder: no retention line, no Empty, no Delete now.
@@ -250,7 +250,7 @@ test('a checklist, pin and Back leave Alpha cards in the same canonical record',
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('Oat milk\nLemons');
  await page.getByRole('button',{name:'Turn into checklist',exact:true}).click();
  await page.getByRole('button',{name:'Check Oat milk',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Pin',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Pin',exact:true}).click();
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes[0]?.format)).toEqual({kind:'list',data:{items:[{t:'Oat milk',done:true},{t:'Lemons',done:false}],pinned:true}});
  const card=page.getByRole('button',{name:'Open Groceries',exact:true});
@@ -261,12 +261,32 @@ test('a checklist, pin and Back leave Alpha cards in the same canonical record',
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
+test('removing a checklist item keeps each remaining item in its own row',async({page})=>{
+ const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
+ await page.getByRole('button',{name:'New note',exact:true}).click();
+ await page.getByRole('textbox',{name:'Title',exact:true}).fill('Errands');
+ await page.getByRole('textbox',{name:'Note',exact:true}).fill('Post office\nBank\nPharmacy');
+ await page.getByRole('button',{name:'Turn into checklist',exact:true}).click();
+ const items=page.getByRole('textbox',{name:'Item',exact:true});
+ await expect(items).toHaveCount(3);
+ // Mark the row elements, then remove the first item: each remaining item keeps its own row.
+ await items.nth(1).evaluate((el:any)=>{el.dataset.testRow='bank';});
+ await items.nth(2).evaluate((el:any)=>{el.dataset.testRow='pharmacy';});
+ await page.getByRole('button',{name:'Remove Post office',exact:true}).click();
+ await expect(items).toHaveCount(2);
+ await expect(items.nth(0)).toHaveValue('Bank');await expect(items.nth(0)).toHaveAttribute('data-test-row','bank');
+ await expect(items.nth(1)).toHaveValue('Pharmacy');await expect(items.nth(1)).toHaveAttribute('data-test-row','pharmacy');
+ await page.getByRole('button',{name:'Back to notes',exact:true}).click();
+ await expect.poll(()=>snapshot(page).then((s:any)=>s.notes[0]?.format?.data?.items)).toEqual([{t:'Bank',done:false},{t:'Pharmacy',done:false}]);
+ expect(foreign).toEqual([]);expect(errors).toEqual([]);
+});
+
 test('Delete on a new note that was never saved closes it without a Notes request',async({page})=>{
  const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
  const before=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length);
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Title',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Title',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'New note',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length)).toBe(before);
@@ -287,7 +307,7 @@ test('slow saves: typing during a new note\'s first save makes one record, and D
  // Delete while the first save of a new note is still in flight: it waits, then trashes that record.
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await title.fill('Fresh');
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.trash.map((entry:any)=>entry.note.title)),{timeout:10_000}).toEqual(['Fresh']);
  await expect(title).toHaveCount(0);
  await expect(review).toHaveCount(0);
