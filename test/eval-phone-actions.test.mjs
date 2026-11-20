@@ -12,6 +12,24 @@ test('a turn passes only when every expectation is proposed and nothing else is'
   assert.equal(judge([['phone_keypad']], ['phone_keypad', 'phone_call']), 'unexpected');
   assert.equal(judge([], []), 'pass');
   assert.equal(judge([], ['phone_call']), 'unexpected');
+  // An allowed operation may be proposed or not; anything else still fails.
+  assert.equal(judge([], ['reminder_create_after'], ['reminder_create_after']), 'pass');
+  assert.equal(judge([], [], ['reminder_create_after']), 'pass');
+  assert.equal(judge([], ['clock_handoff'], ['reminder_create_after']), 'unexpected');
+  assert.equal(judge([['phone_call']], ['open_view'], ['open_view']), 'missing');
+});
+
+test('cases with more than one right answer say so, and none expects an operation a phone lacks', () => {
+  const byId = Object.fromEntries(CASES.map(item => [item.id, item]));
+  // Clock takes an alarm at a time of day; it has no timer. An alarm in a timer's place is wrong.
+  assert.deepEqual(byId['timer-from-notes'].expect, []);
+  assert.ok(byId['timer-from-notes'].allow.includes('reminder_create_after'));
+  assert.equal(judge(byId['timer-from-notes'].expect, ['clock_handoff'], byId['timer-from-notes'].allow), 'unexpected');
+  // Availability with no phone calendar selected belongs to the Calendar service.
+  assert.deepEqual(byId['free-busy'].expect, []);
+  assert.equal(byId['free-busy'].allow, undefined);
+  for (const id of ['open-messages', 'show-contacts', 'open-camera']) assert.deepEqual(byId[id].allow, ['open_view']);
+  assert.deepEqual(byId['alarm-vague'].expect, [['clock_*']]);
 });
 
 test('the case set covers each device family, off-surface requests and requests that must not propose', () => {

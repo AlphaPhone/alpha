@@ -37,16 +37,22 @@ import { selectDeviceCapabilities } from '../apps/app/src/runtime/phone-context.
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** An Alpha-image phone: every reviewed surface the launcher can run. */
 export const DEVICE_PROFILE = Object.freeze({ android: true, native: true, camera: true, foregroundReview: true, canonicalNotes: true, photoLibrary: true, files: true, clockRepeatDays: true, aospImage: true });
-const CASESET_REVISION = 1;
+const CASESET_REVISION = 2;
 
 /**
  * `expect` lists what the turn must propose: each entry is a set of acceptable operation
  * types (a trailing `*` matches a prefix), and every entry needs a matching proposal. An
  * empty list means the turn must create no device proposal (a reply, a view change, or a
- * canonical Notes/Calendar/Maps action).
+ * canonical Notes/Calendar/Maps action). `allow` lists operations a turn may also propose
+ * without failing, where more than one answer is right.
  */
-export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[] }
+export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[]; allow?: readonly string[] }
 const CALL = ['phone_call', 'phone_dial'], TEXT = ['sms_compose', 'sms_send'], CLOCK = ['clock_*'];
+// A phone has no timer operation: Clock takes an alarm at a time of day, never a duration. A
+// relative reminder is the nearest it can offer, and an alarm in its place is wrong.
+const REMINDER = ['reminder_create_after', 'reminder_create', 'create_reminder'];
+// Where the client does not deliver view changes itself, opening a view is a device proposal.
+const VIEW = ['open_view'];
 export const CASES: readonly PhoneCase[] = Object.freeze([
   { id: 'call-number', family: 'telephony', view: 'home', text: 'Call 415-555-0100.', expect: [CALL] },
   { id: 'call-contact', family: 'telephony', view: 'home', text: 'Call Sam.', expect: [CALL] },
@@ -67,17 +73,18 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
   { id: 'selfie-from-maps', family: 'camera', view: 'maps', text: 'Take a selfie.', expect: [['camera_capture_photo']] },
   { id: 'alarm', family: 'clock', view: 'home', text: 'Set an alarm for 7am.', expect: [CLOCK] },
   { id: 'alarm-vague', family: 'clock', view: 'home', text: 'Wake me at 6:30 tomorrow.', expect: [CLOCK] },
-  { id: 'timer-from-notes', family: 'clock', view: 'notes', text: 'Set a timer for 10 minutes.', expect: [CLOCK] },
+  { id: 'timer-from-notes', family: 'clock', view: 'notes', text: 'Set a timer for 10 minutes.', expect: [], allow: REMINDER },
   { id: 'new-tab', family: 'browser', view: 'browser', text: 'Open a new tab.', expect: [['browser_tab_new']] },
   { id: 'open-site', family: 'browser', view: 'home', text: 'Open example.com.', expect: [['browser_navigate', 'browser_tab_new']] },
   { id: 'find-in-page', family: 'browser', view: 'browser', text: 'Find "refund" on this page.', expect: [['browser_find']] },
   { id: 'files', family: 'files', view: 'home', text: 'Show my PDFs in Files.', expect: [['files_*']] },
-  { id: 'free-busy', family: 'calendar', view: 'home', text: 'Am I free tomorrow from 3pm to 4pm?', expect: [['calendar_availability']] },
+  // With no phone calendar selected, availability is the Calendar service's to answer.
+  { id: 'free-busy', family: 'calendar', view: 'home', text: 'Am I free tomorrow from 3pm to 4pm?', expect: [] },
   { id: 'text-and-alarm', family: 'multi', view: 'home', text: "Text Sam I'll be late, and set an alarm for 7am.", expect: [TEXT, CLOCK] },
   { id: 'call-or-text-choice', family: 'multi', view: 'home', text: 'Call Sam, and if you cannot, do nothing else.', expect: [CALL] },
-  { id: 'open-messages', family: 'navigation', view: 'home', text: 'Open Messages.', expect: [] },
-  { id: 'show-contacts', family: 'navigation', view: 'home', text: 'Show my contacts.', expect: [] },
-  { id: 'open-camera', family: 'navigation', view: 'home', text: 'Open the camera.', expect: [] },
+  { id: 'open-messages', family: 'navigation', view: 'home', text: 'Open Messages.', expect: [], allow: VIEW },
+  { id: 'show-contacts', family: 'navigation', view: 'home', text: 'Show my contacts.', expect: [], allow: VIEW },
+  { id: 'open-camera', family: 'navigation', view: 'home', text: 'Open the camera.', expect: [], allow: VIEW },
   { id: 'directions', family: 'other-actions', view: 'home', text: 'Directions to the Ferry Building in San Francisco.', expect: [] },
   { id: 'note', family: 'other-actions', view: 'home', text: 'Create a note called Groceries with milk and eggs.', expect: [] },
   { id: 'calendar-read', family: 'other-actions', view: 'calendar', text: "What's on my calendar tomorrow?", expect: [] },
@@ -88,10 +95,10 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
 const CASESET_SHA256 = createHash('sha256').update(JSON.stringify(CASES)).digest('hex');
 
 const matches = (type: string, pattern: string) => (pattern.endsWith('*') ? type.startsWith(pattern.slice(0, -1)) : type === pattern);
-/** Every expectation needs a proposal, and every proposal must answer an expectation. */
-export function judge(expect: PhoneCase['expect'], proposed: readonly string[]): 'pass' | 'missing' | 'unexpected' {
+/** Every expectation needs a proposal, and every proposal must answer an expectation or be allowed. */
+export function judge(expect: PhoneCase['expect'], proposed: readonly string[], allow: readonly string[] = []): 'pass' | 'missing' | 'unexpected' {
   if (expect.some(accepted => !proposed.some(type => accepted.some(pattern => matches(type, pattern))))) return 'missing';
-  if (proposed.some(type => !expect.some(accepted => accepted.some(pattern => matches(type, pattern))))) return 'unexpected';
+  if (proposed.some(type => ![...expect, allow].some(accepted => accepted.some(pattern => matches(type, pattern))))) return 'unexpected';
   return 'pass';
 }
 
@@ -175,7 +182,7 @@ export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs
           const context = { view: item.view, revision: 1, sensitive: false, timeZone: 'America/New_York' };
           const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, { text: item.text, channelType: 'DM', metadata: { uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
           row.proposed = (await rejectUnseen()).map(proposal => proposal.payload?.operation?.type ?? 'unknown');
-          row.outcome = judge(item.expect, row.proposed);
+          row.outcome = judge(item.expect, row.proposed, item.allow);
           row.replyChars = String(reply.text ?? '').length;
         } catch (error) {
           row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200);
