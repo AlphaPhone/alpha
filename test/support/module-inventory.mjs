@@ -760,6 +760,7 @@ export const moduleInventory = {
     "apps/app/src/ui/device-actions/client-coordinator.ts",
     "apps/app/src/ui/device-actions/device-action-messages.ts",
     "apps/app/src/ui/device-actions/device-record-presentation.ts",
+    "apps/app/src/ui/device-actions/owner-request.ts",
     "apps/app/src/ui/digests/hosted-digests.ts",
     "apps/app/src/ui/documents/local-ocr-messages.ts",
     "apps/app/src/ui/documents/scan-correction-messages.ts",

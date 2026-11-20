@@ -2,8 +2,8 @@ import { normalizePhoneNumber } from "@elizaos/contracts/native-telephony";
 import type { DeviceContextEnvelope, ReviewableDeviceOperation } from "@elizaos/plugin-assistant/device-actions/client-coordinator";
 
 /** Read the authored turn only. An agent's proposed body or arguments never supply missing consent. */
-export function ownerCommand(text: string): string {
-  return text.trim().replace(/^(?:(?:hey )?alpha[,\s]+)?(?:(?:could|can|would) you\s+)?(?:please\s+)?/i, "");
+export function ownerCommand(text?: string): string {
+  return (text ?? "").trim().replace(/^(?:(?:hey )?alpha[,\s]+)?(?:(?:could|can|would) you\s+)?(?:please\s+)?/i, "");
 }
 
 function unquote(text: string) {
