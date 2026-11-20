@@ -713,6 +713,11 @@ private static final class ResidentAttachDiagnostic {
   env.put("ELIZA_PLANNER_MAX_TOKENS","4096");
   env.put("ELIZA_STAGE1_MAX_TOKENS","4096");
   env.put("ELIZA_EVALUATOR_MAX_TOKENS","4096");
+  // The hosted model answers a per-minute refusal with Retry-After 59 and admits the same request
+  // seconds later: its allowance refills 2,500 tokens a second (measured). On an owner's own key
+  // the runtime held the model for the stated minute and failed every turn in it. Five seconds is
+  // what the runtime waits before it re-sends a refused step once.
+  env.put("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","5");
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");

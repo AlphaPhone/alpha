@@ -8,7 +8,7 @@ const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'ut
 // every request repeated the conversation under fresh references, so none shared a prefix.
 test('the phone launches its agent with stable references and output caps the pinned runtime reads', () => {
   const host = read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java');
-  const env = Object.fromEntries([...host.matchAll(/env\.put\("([A-Z_]+)","([^"]*)"\)/g)].map(match => [match[1], match[2]]));
+  const env = Object.fromEntries([...host.matchAll(/env\.put\("([A-Z0-9_]+)","([^"]*)"\)/g)].map(match => [match[1], match[2]]));
   assert.equal(env.ELIZA_SECRET_SWAP_ENABLED, 'true');
   assert.equal(env.ELIZA_SECRET_SWAP_STABLE_REFERENCES, 'true');
   // A call holds its cap against the per-minute limit when it starts; one that sends none holds 16,384.
@@ -22,4 +22,17 @@ test('the phone launches its agent with stable references and output caps the pi
   const caps = read('vendor/eliza/plugins/plugin-assistant/src/runtime/output-cap.ts');
   assert.match(caps, /"ELIZA_STAGE1_MAX_TOKENS"/);
   assert.match(caps, /"ELIZA_EVALUATOR_MAX_TOKENS"/);
+});
+
+// Measured on the hosted model: a request refused with Retry-After 59 is admitted seconds
+// later, because the allowance refills all the time. Held for the stated minute, the model
+// failed every turn in it.
+test('the phone holds a refused model for seconds, not for the provider\'s stated minute', () => {
+  const host = read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java');
+  const hold = Number(/env\.put\("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","([^"]*)"\)/.exec(host)?.[1]);
+  // No shorter than the wait before the runtime's one re-send, and well under the minute.
+  assert.ok(hold >= 5 && hold <= 15, String(hold));
+  assert.match(read('vendor/eliza/plugins/plugin-assistant/src/runtime/evaluator.ts'), /RATE_LIMIT_RETRY_MAX_WAIT_MS = 5_000/);
+  // A setting the pinned runtime does not read would change nothing on the phone.
+  assert.match(read('vendor/eliza/plugins/plugin-openai/models/text.ts'), /"OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS"/);
 });
