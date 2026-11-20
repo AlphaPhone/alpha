@@ -2222,8 +2222,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }catch(error){throw error instanceof NotDispatched?error:new NotDispatched(error instanceof Error?error.message:'The agent connection is unavailable. Nothing was sent.');}
       const sourceSession=connectionController.getSnapshot().session;
       navigation=connectionController.captureViewNavigation(alphaClient.getState().context);
-      // The request becomes pending after the render above; render again so Stop is offered before any streamed text.
-      queueMicrotask(()=>{if(this.live&&alphaClient.getState().pending)this.setState({});});
       if(!transcriptCurrent())throw new NotDispatched('The recording changed. Attach the transcript again.');
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
       if(sentAttachment?.fileAttachments?.length&&(!sameChat()||!filesCurrent()||!this.live||document.hidden))
@@ -2243,6 +2241,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       localTurnStatus.addEventListener('label',showStatus);
       let reply;
       // The Notes view context carries the exact selected record and revision.
+      // Wait until attachments are ready, then render Stop as soon as the send is pending.
+      queueMicrotask(()=>{if(this.live&&alphaClient.getState().pending)this.setState({});});
       try{reply = await alphaClient.send(requestText,value=>{
         attempt.streamed=true;
         if(!this.live)return;
