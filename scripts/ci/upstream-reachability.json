@@ -3,11 +3,11 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
-  "head": "cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
-  "recordedAt": "2026-11-19",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
+  "head": "bc1cc39afc3aa96e459357936ccd97de9bed42fc",
+  "recordedAt": "2026-11-20",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...bc1cc39afc3aa96e459357936ccd97de9bed42fc",
   "status": "ahead",
-  "aheadBy": 27,
+  "aheadBy": 47,
   "behindBy": 0,
   "mergeBase": "d00acaff090cb8f1c99ac1dd06cc295bac3347d6",
   "pinOnlyCommits": [
@@ -78,6 +78,86 @@
     {
       "sha": "cc4fae4092a80bcf3c81eae6d715e658f59b5f2a",
       "subject": "Sort Assistant draft and navigation imports"
+    },
+    {
+      "sha": "57fde30369fdfaf8012c406e28931bb3e4dfe946",
+      "subject": "Reuse Calendar source discovery during event creation"
+    },
+    {
+      "sha": "83cc63fc1fc3b9fdd4763e7156675ef88413f7be",
+      "subject": "Overlap speech relay warm-up with consent persistence"
+    },
+    {
+      "sha": "aa2ac5aa7d4377e139e561c531c5f26e260f1d0a",
+      "subject": "Preserve built-in Calendar scope for next-event reads"
+    },
+    {
+      "sha": "4c29476aa633c8db80771ea0af465291530064e7",
+      "subject": "Type-check the Calendar scope regression fixture"
+    },
+    {
+      "sha": "8b615fb77ede08263f23de0df5f500905e2eb2e8",
+      "subject": "Use the bound built-in Calendar ID without model retries"
+    },
+    {
+      "sha": "4c4ab9b4e3f9cfb0c0f85b67147bbd6201f3e718",
+      "subject": "Assert Calendar source identity independently of sync time"
+    },
+    {
+      "sha": "cf9c154c8467535dc6ed837ec49319bcbf9a7150",
+      "subject": "Exercise Cloud speech audio after the original lease deadline"
+    },
+    {
+      "sha": "944a36f97491674a68a96cad4cdfac7be97fe341",
+      "subject": "Bind exact Calendar read intent references and source scopes"
+    },
+    {
+      "sha": "f39b42a28eaddfef3fd550917f1929f28583cc4b",
+      "subject": "Use a complete response fixture for Calendar intent binding"
+    },
+    {
+      "sha": "42bb92e529e5d9cb39ca50d09e566596b1cd991b",
+      "subject": "Keep a verified next-event answer when the model omits its citation"
+    },
+    {
+      "sha": "8ede343f6366ce111401d4f688618cf144238a2b",
+      "subject": "Preserve the verified Calendar date in next-event replies"
+    },
+    {
+      "sha": "52dfd3d1a2846e4431d6d88fb162425b46b01bea",
+      "subject": "Keep renewed speech sessions alive across stale expiry alarms"
+    },
+    {
+      "sha": "0e6732ed98b647b09a0f9a148ea24d3af9f14d7a",
+      "subject": "Route a single owned named note read without another planner call"
+    },
+    {
+      "sha": "1876f64e88d3ff2cbfbe67d5be10c96b7deeed93",
+      "subject": "Route a plain built-in next-event read through its canonical tool"
+    },
+    {
+      "sha": "9068629237424f465405ee1bd0fa9c43d7c0b462",
+      "subject": "Decode serialized Calendar read bindings before validation"
+    },
+    {
+      "sha": "13039435126795bb567cd0a9753f1202e05e2f39",
+      "subject": "Normalize abbreviated Calendar intent references"
+    },
+    {
+      "sha": "dd5559deac227f76430709bd3ea0cb852dbe908f",
+      "subject": "Route a verified Calendar title and day without replanning"
+    },
+    {
+      "sha": "c831e1d281b17b38cfe2acf55cdcfd38008e546a",
+      "subject": "Ask for the literal Calendar search day in the read binding"
+    },
+    {
+      "sha": "af8669aff16d4b066f4722e46b5f250ed3e12303",
+      "subject": "Answer a verified Calendar slot preview from its actual local times"
+    },
+    {
+      "sha": "bc1cc39afc3aa96e459357936ccd97de9bed42fc",
+      "subject": "Keep a verified dated title lookup on the Calendar search route"
     }
   ],
   "pullRequests": [
