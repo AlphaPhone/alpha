@@ -734,6 +734,7 @@ export class DeviceActionCoordinator<
         signal: AbortSignal,
       ) => Promise<string[] | null>;
       smsRecipient?: (query: string, signal: AbortSignal) => Promise<ContactMatch | null>;
+      chooseSmsRecipient?: (query: string, body: string, signal: AbortSignal) => Promise<ContactMatch | null | "not-found">;
     } = {},
   ) {
     this.ports = ports;
@@ -1895,6 +1896,7 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     approval?: "send-draft",
+    approvedDescription?: string,
   ): Promise<DeviceOperationReceipt> {
     if (this.busy) throw new Error("Another device action is being reviewed");
     const reviewed = this.proposals.get(proposalId);
@@ -1917,19 +1919,13 @@ export class DeviceActionCoordinator<
       throw Error("Review these files again before making changes");
     const p = reviewed.proposal;
     const sendDraft = approval === "send-draft";
+    if (sendDraft && approvedDescription !== undefined &&
+      this.card(p, context, undefined, reviewed.smsRecipient).description !== approvedDescription)
+      throw Error("The text draft changed. Review it again before sending.");
     let promoted: SmsComposeOperation | undefined;
     let journalOperation = p.operation;
-    if (sendDraft) {
-      const draft = p.operation;
-      if (!isSmsCompose(draft) || !("draft" in draft) || p.workflow)
-        throw Error("This draft is no longer available to send");
-      const target = smsComposeTarget(draft);
-      const number = target.kind === "number" ? target.number : reviewed.smsRecipient?.number;
-      if (!number) throw Error("Choose a recipient before sending this draft");
-      // Keep the contact lookup for execution, but bind Android to the exact displayed number.
-      promoted = { type: "sms_compose", target, body: draft.body };
-      journalOperation = { type: "sms_compose", target: { kind: "number", number }, body: draft.body };
-    }
+    if (sendDraft && (!isSmsCompose(p.operation) || !("draft" in p.operation) || p.workflow))
+      throw Error("This draft is no longer available to send");
     const minted =
       // Minted before `busy` is taken: a context without randomUUID refuses
       // this approval instead of leaving the coordinator busy for good.
@@ -1940,6 +1936,29 @@ export class DeviceActionCoordinator<
     this.proposals.delete(proposalId);
     let execution: ReturnType<typeof createDeviceActionExecution> | undefined;
     try {
+      if (sendDraft && isSmsCompose(p.operation)) {
+        const draft = p.operation, target = smsComposeTarget(draft);
+        let number = target.kind === "number" ? target.number : reviewed.smsRecipient?.number;
+        let sendTarget = target;
+        if (!number && target.kind === "contact") {
+          // Choosing a row is provisional. Only the picker's Send resolves the exact number
+          // and lets the local journal reserve a carrier send.
+          const chosen = await this.options.chooseSmsRecipient?.(target.query, draft.body, signal);
+          signal.throwIfAborted();
+          if (chosen === "not-found")
+            return { proposalId, status: "failed", summary: "No matching contact. Nothing was sent." };
+          if (!chosen)
+            return { proposalId, status: "cancelled", summary: "Message cancelled." };
+          number = chosen.number;
+          sendTarget = { kind: "number", number };
+        }
+        if (!number) throw Error("Choose a recipient before sending this draft");
+        if (p.expiresAt <= Date.now())
+          return { proposalId, status: "failed", summary: "This review expired. Nothing was sent." };
+        // A recipient already resolved on the card is still checked by the executor.
+        promoted = { type: "sms_compose", target: sendTarget, body: draft.body };
+        journalOperation = { type: "sms_compose", target: { kind: "number", number }, body: draft.body };
+      }
       const operationHash = await actionScope(JSON.stringify(journalOperation));
       // A reservation left by an approval that never reached its claim is
       // adopted: nothing was dispatched under it, so this is the same attempt.
@@ -3494,7 +3513,7 @@ function describeTelephonyAction(
             title: "Draft SMS",
             description: `${to}\n\n${operation.body}\n\n${target.kind === "number" || smsRecipient
               ? `From: the SIM chosen in Messages, or your default texting SIM\n${smsSendFacts(1, operation.body)}`
-              : "Choose a recipient to open this draft in Messages."}`,
+              : "Choose a recipient before sending."}`,
           }
         : {
             title: "Review SMS",

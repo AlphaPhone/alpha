@@ -133,7 +133,7 @@ async function setup(page: Page, contactMode?: 'one' | 'two' | 'none') {
 }
 const state = (page: Page) => page.evaluate(() => {
   const f = (window as any).smsCardFixture;
-  return {decisions: f.decisions, sends: f.sends.length, refused: f.refused.length, receipts: f.receipts.map((receipt: any) => receipt.outcome), sendSms: ((window as any).telephonyCalls as string[]).filter(method => method === 'sendSms').length};
+  return {decisions: f.decisions, sends: f.sends.length, refused: f.refused.length, receipts: f.receipts.map((receipt: any) => receipt.outcome), journalEntries:f.journal.size, sendSms: ((window as any).telephonyCalls as string[]).filter(method => method === 'sendSms').length};
 });
 
 test('Send on the Review SMS card sends the text once, under that card, with no dialog after it', async ({page}) => {
@@ -212,22 +212,49 @@ for(const contactMode of ['one','two','none'] as const) test(voiceCases[contactM
       const picker = page.getByRole('group',{name:'Choose a recipient'});
       const first = picker.getByRole('radio',{name:/Carson.*0199/});
       const second = picker.getByRole('radio',{name:/Carson.*0198/});
-      const done = page.getByRole('button',{name:'Done',exact:true});
-      await expect(done).toBeDisabled();
+      const send = page.locator('[data-alpha-proposal-review]').getByRole('button',{name:'Send',exact:true});
+      await expect(send).toBeDisabled();
       await expect(page.getByRole('button',{name:'Not now',exact:true})).toBeEnabled();
       await first.check();
-      await expect(done).toBeEnabled();
+      await expect(send).toBeEnabled();
       await first.press('ArrowDown');
       await expect(second).toBeChecked();
       await expect(first).not.toBeChecked();
       await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
-      expect((await state(page)).sendSms).toBe(0);
+      expect(await state(page)).toMatchObject({sendSms:0,journalEntries:0,decisions:[]});
       await info.attach('Two matching contacts', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
-      await done.click();
+      await send.click();
       await expect(picker).toHaveCount(0);
-      const draft = page.getByRole('group',{name:/Message draft to Carson.*0198/});
-      await expect(draft.getByRole('textbox',{name:'Message draft',exact:true})).toHaveValue(BODY);
-      expect((await state(page)).sendSms).toBe(0);
+      await expect(page.getByText('Message sent.',{exact:true})).toBeVisible();
+      await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+      await expect(page.getByRole('textbox',{name:'Message draft',exact:true})).toHaveCount(0);
+      expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,sendSms:1,journalEntries:1});
+      const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends[0]);
+      expect(sent).toMatchObject({recipients:['+15550100198'],body:BODY});
+      await page.evaluate(() => (window as any).smsCardFixture.voice('Send this text.'));
+      expect((await state(page)).sendSms).toBe(1);
     }
   }
+});
+
+test('Not now cancels a selected SMS recipient before any send is reserved',async({page})=>{
+  const card=await setup(page,'two');
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Draft a text to Carson saying On my way.'));
+  await card.click();
+  const review=page.locator('[data-alpha-proposal-review]');
+  await review.getByRole('radio',{name:/Carson.*0198/}).check();
+  await review.getByRole('button',{name:'Not now',exact:true}).click();
+  await expect(page.getByText('Message cancelled.',{exact:true})).toBeVisible();
+  await expect(review).toHaveCount(0);
+  expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0,journalEntries:0});
+});
+
+test('an addressed SMS draft sends on one explicit tap in chat',async({page})=>{
+  const card=await setup(page,'one');
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Draft a text to Carson saying On my way.'));
+  await expect(card).toContainText(/\bSend\b/);
+  await card.click();
+  await expect(page.getByText('Message sent.',{exact:true})).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+  expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,sendSms:1});
 });

@@ -552,11 +552,12 @@ export class AlphaClient {
     },options?.signal);
   }
   /** Call only after the user reviews and explicitly approves this exact proposal. */
-  async approve(proposalId: string, approvalSignal?: AbortSignal, approval?: "send-draft"): Promise<OperationReceipt> {
+  async approve(proposalId: string, approvalSignal?: AbortSignal, approval?: "send-draft", approvedDescription?: string): Promise<OperationReceipt> {
     const proposal = this.proposals.get(proposalId);
     if (
       !proposal ||
-      (approval === "send-draft" && proposal.smsReview !== "addressed-draft") ||
+      (approval === "send-draft" && proposal.smsReview !== "addressed-draft" && proposal.smsReview !== "draft") ||
+      (approvedDescription !== undefined && proposal.description !== approvedDescription) ||
       proposal.expiresAt <= Date.now() ||
       proposal.contextRevision !== this.context.revision ||
       this.consumed.has(proposalId)

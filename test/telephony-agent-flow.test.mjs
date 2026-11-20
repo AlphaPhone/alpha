@@ -86,7 +86,9 @@ test('a confirmed Talk draft retires the editor handoff and journals exactly one
   assert.match(review.proposal.description,/To: \+14155550132\n\nOn my way/);
   assert.deepEqual(await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,origin),[]);
   assert.equal(f.effects,0);
-  const receipt = await f.client.approve(id,context,signal(),'send-draft');
+  await assert.rejects(f.client.approve(id,context,signal(),'send-draft','Changed draft'),/text draft changed/i);
+  assert.equal(f.effects,0);
+  const receipt = await f.client.approve(id,context,signal(),'send-draft',review.proposal.description);
   assert.equal(receipt.status,'succeeded');
   assert.deepEqual(f.entry.record.operation,send);
   assert.equal(f.entry.operationId,id);
@@ -97,11 +99,11 @@ test('a confirmed Talk draft retires the editor handoff and journals exactly one
   assert.equal(f.effects,1);
 });
 
-test('an unresolved contact draft cannot be approved as a send', async () => {
+test('an unresolved contact draft makes no changes without a confirmed recipient', async () => {
   const f = fixture({operation:{type:'sms_compose',target:{kind:'contact',query:'Priya'},body:'On my way',draft:true}});
   const [review] = await f.client.pending(context,signal());
   assert.equal(review.smsReview,'draft');
-  await assert.rejects(f.client.approve(id,context,signal(),'send-draft'),/choose a recipient/i);
+  assert.equal((await f.client.approve(id,context,signal(),'send-draft')).status,'cancelled');
   assert.equal(f.effects,0);
   assert.deepEqual(f.posts,[]);
 });
@@ -142,7 +144,7 @@ test('a text to a number, a draft, a single contact value, a contact search and 
   assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nChoose the person and number on your phone before sending. Your carrier may charge for texts.');
   for (const shown of [await card(number), toContact]) assert.doesNotMatch(shown, /Android|again/);
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
-  assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
+  assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Choose a recipient before sending/); assert.doesNotMatch(draft, /Android/);
   const change = await card(add);
   assert.match(change, /^Change contact\nContact: Priya Nair\nAdd: \+14155550100\nRemove: p@example\.com\n/); assert.match(change, /other details stay/); assert.doesNotMatch(change, /Replaces/);
   assert.match(await card({type: 'contact_update', query: 'Priya', set: {displayName: 'Priya N'}}), /Name: Priya N\n\nReplaces these details/);

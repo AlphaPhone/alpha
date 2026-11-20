@@ -2369,7 +2369,7 @@ export const connectionController = {
         await review(proposal,context,signal);signal.throwIfAborted();
         if(selected!==active||generation!==epoch||state.session!==session||conversationMemory.get(conversationKey(session))!==conversation||JSON.stringify(service?.identity??null)!==account||document.hidden||state.open)throw Error('The Notes review changed. Nothing was shared.');
       }
-      return selected.actions!.approve(proposal.id, context, signal, approval);
+      return selected.actions!.approve(proposal.id, context, signal, approval, approval==='send-draft'?proposal.description:undefined);
     })();
     actionReceipts.set(proposal.id, { sessionId, result });
     // A refusal (before the journal reserved anything) can be approved again; a settled receipt stays.
@@ -2409,7 +2409,7 @@ export const connectionController = {
     current();if(JSON.stringify(choice)!==JSON.stringify(after))throw Error('Saved conversation selection changed.');
     return proposals;
   },
-  async approvePendingAction(id:string,context:ContextEnvelope,signal:AbortSignal):Promise<OperationReceipt> {
+  async approvePendingAction(id:string,context:ContextEnvelope,signal:AbortSignal,approval?: 'send-draft',approvedDescription?:string):Promise<OperationReceipt> {
     // Refresh authenticated state and exact source preconditions at the tap. No
     // cached chat prose or prior approval can authorize a recovered proposal.
     const selected=active,session=state.session;
@@ -2417,8 +2417,9 @@ export const connectionController = {
     signal.throwIfAborted();
     if(active!==selected||state.session!==session)throw Error('The agent changed.');
     const proposal=proposals.find(proposal=>proposal.id===id);
-    if(!proposal)throw Error('No longer pending');
-    return this.execute(proposal,context,signal);
+    if(!proposal||approval==='send-draft'&&proposal.smsReview!=='draft'&&proposal.smsReview!=='addressed-draft')throw Error('No longer pending');
+    if(approvedDescription!==undefined&&proposal.description!==approvedDescription)throw Error('The text draft changed. Review it again before sending.');
+    return this.execute(proposal,context,signal,approval);
   },
   getWorkflowPresentationProtocol():1|2 { return active?.actions && (active.workflowProtocol ?? 1) >= 2 ? 2 : 1; },
   /** The protocol admitted by this agent for the current enrolled device. */

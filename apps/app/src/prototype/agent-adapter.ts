@@ -13,7 +13,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity,setSmsReviewRecipient} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setChooseSmsRecipient,setContactReviewMatches,setFilesReviewIdentity,setSmsReviewRecipient} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -348,12 +348,22 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     signal.throwIfAborted();
     return found&&found.map(contact=>contactChoiceName(contact.displayName));
   });
-  setSmsReviewRecipient(async(query,signal)=>{
-    if(!aospImage)return null;
+  const smsRecipientMatches=async(query:string,signal:AbortSignal)=>{
+    if(!aospImage)return [];
     const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
     const matches=contactCallOptions(await client.searchContacts(query,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber);
     signal.throwIfAborted();
+    return matches;
+  };
+  setSmsReviewRecipient(async(query,signal)=>{
+    const matches=await smsRecipientMatches(query,signal);
     return matches.length===1&&matches[0].name.toLowerCase()===query.trim().toLowerCase()?matches[0]:null;
+  });
+  setChooseSmsRecipient(async(query,body,signal)=>{
+    const options=await smsRecipientMatches(query,signal);
+    if(!options.length)return 'not-found';
+    const choice=await askTelephonyReview({kind:'message',options,body,draftOnly:false},signal);
+    return choice===null?null:options[choice]??null;
   });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
@@ -477,7 +487,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
-    const approvalLabel=proposal.smsReview==='addressed-draft'?'Open draft':proposal.smsReview==='send'?'Send':
+    const approvalLabel=proposal.smsReview==='addressed-draft'||proposal.smsReview==='send'?'Send':
       proposal.smsReview==='draft'||proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
     return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
@@ -2612,7 +2622,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const beforeView = this.S().view;
         let receipt;
         const readLease=this.readReplyLeases?.get(card.proposalId);
-        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId,approval.signal,approveAs); }
+        const approvalMode=approveAs??(card.smsReview==='draft'||card.smsReview==='addressed-draft'?'send-draft':undefined);
+        const approvedDescription=approvalMode==='send-draft'?card.sub:undefined;
+        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal,approvalMode,approvedDescription):await alphaClient.approve(card.proposalId,approval.signal,approvalMode,approvedDescription); }
         catch (error) {
           // Navigation may cancel the context-bound chat wait after the effect.
           // Await only that already-started journaled action; never execute again.
