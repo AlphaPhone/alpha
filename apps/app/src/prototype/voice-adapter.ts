@@ -482,7 +482,12 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const chat=chatDestination;if(!chat)return false;const state=chat.shell.S(),view=state.view||'home',owned=ownedNavigation?.chat===chat?ownedNavigation:undefined;
     let contextCurrent=!conversationPrepared||chat.shell.voiceConversationCurrent(conversationPrepared);
     // Only the claimed destination may transition before its React callback pins the exact ACK context.
-    if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
+    if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{
+      const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);
+      contextCurrent=actual.view===owned.view&&(owned.context
+        ?chat.shell.voiceConversationCurrent({...conversationPrepared,context:owned.context})
+        :owned.view!==(chat.view||'home'));
+    }catch{contextCurrent=false;}}
     return chat.shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open
       &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden'||!!chat.comms&&['input','hidden'].includes(state.chat))&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
       &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent
@@ -510,7 +515,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         attempted=false;
         if(!held||chat.shell.voiceSendTurnId!==turnId||ownedNavigation!==held||token!==generation||chatDestination!==chat)return;
         if(!delivered||!held.context||!chatCurrent()||(chat.shell.S().view||'home')!==held.view){cleanup(true,true,'owned-navigation-unconfirmed');return;}
-        try{const next=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(next.view!==held.view||JSON.stringify(next)!==JSON.stringify(held.context))throw Error('Voice navigation changed.');chat.view=held.view==='home'?null:held.view;conversationPrepared={...conversationPrepared!,context:next};ownedNavigation=undefined;return next;}catch{cleanup(true,true,'owned-navigation-unconfirmed');return;}
+        try{const next=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(next.view!==held.view||!chat.shell.voiceConversationCurrent({...conversationPrepared!,context:held.context}))throw Error('Voice navigation changed.');chat.view=held.view==='home'?null:held.view;conversationPrepared={...conversationPrepared!,context:next};ownedNavigation=undefined;return next;}catch{cleanup(true,true,'owned-navigation-unconfirmed');return;}
       },
     };
   }
@@ -749,7 +754,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         const sent=await sendVoiceEntry({policy:voiceSendPolicy(),transcript:input.text,review:text=>reviewConversationTurn(text,input.signal,current),send:async text=>{
           current();
           if(local&&!streamingCloud)try{void Promise.resolve(deviceVoice.warmSpeechOutput()).catch(()=>{});}catch{/* Advisory warm-up never gates a turn. */}
-          const turn={...conversationPrepared!};conversationReplyWatch=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));
+          const prepared=conversationPrepared!;
+          const turn=conversationPrepared={...prepared,context:chat.shell.voiceConversationContext(prepared.binding)};
+          conversationReplyWatch=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));
           const cue=cueSpeech;const ack=cue?createBatchProgressAcknowledgment({turnId:input.turnId,conversationId:turn.binding.conversationId,ownerId:turn.binding.session.ownerId,signal:input.signal,assertCurrent:current,captureRetired:cue.captureRetired,speak:async(label,signal)=>{const pending=Promise.resolve().then(()=>cue.speak(label,signal,cueTurn));const owned=pending.catch(failure=>{if((failure as {code?:string})?.code!=='speech-cleanup-unconfirmed')return;mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});throw failure;});conversationSpeech=owned;try{await owned;}finally{if(conversationSpeech===owned)conversationSpeech=undefined;}}}):undefined;
           const retireAck=()=>{try{current();}catch{void ack?.stop().catch(()=>{});}};
           const unsubscribeAck=ack?connectionController.subscribe(retireAck):()=>{};

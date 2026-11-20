@@ -124,6 +124,30 @@ test('a requested app projected before the reply keeps the voice sheet and rearm
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
 
+for(const when of ['during the ACK','after opening'])test(`Talk survives the first canonical Notes list load ${when}`,async({page})=>{
+ await setup(page,'sheet',false,true);
+ const held=when==='during the ACK';
+ await page.evaluate(held=>{(window as any).ownedVoiceNavigation.holdAck=held;},held);
+ await utterance(page,'notes');
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
+ if(held)await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.acks)).toBe(1);
+ else await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.releaseNotesRead());
+ await expect.poll(()=>page.evaluate(async()=>{
+  const {alphaClient}=await import('/src/runtime/alpha-client.ts');
+  return alphaClient.getState().context.selectedObject?.kind;
+ })).toBe('canonical-note-source');
+ if(held)await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.holdAck=false;f.releaseAck();});
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.prompt='Read my checklist.';f.answer='Your checklist is ready.';});
+ await utterance(page);
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return f.inputs.at(-1).context.selectedObject;}))
+  .toEqual({kind:'canonical-note-source',id:'notes',revision:'1'});
+});
+
 test('a text draft offers Open draft and returns to listening without sending',async({page})=>{
  await setup(page);
  await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
@@ -160,7 +184,7 @@ test('the next spoken Send this text confirms one visible addressed SMS without 
 
 test('an addressed draft sends once by voice without leaving Talk or opening Messages',async({page})=>{
  await setup(page,'full');
- await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.addressedDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.enableSmsRecovery('same');f.smsDraft=true;f.addressedDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
  await utterance(page);
  const card=page.locator('[data-alpha-voice-send-review="draft-review"]');
  await expect(card).toContainText('Carson (+15550100200)');
@@ -170,6 +194,7 @@ test('an addressed draft sends once by voice without leaving Talk or opening Mes
  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.reviewRefreshes)).toBeGreaterThan(0);
  await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
  await utterance(page);
  await expect(page.getByText('Text submitted.',{exact:true})).toBeVisible();
@@ -180,6 +205,21 @@ test('an addressed draft sends once by voice without leaving Talk or opening Mes
  await utterance(page);
  await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts};})).toEqual({requests:1,approvals:['draft-review']});
+});
+
+test('a changed background SMS review cannot inherit the live voice confirmation',async({page})=>{
+ await setup(page,'full');
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.enableSmsRecovery('changed');f.smsDraft=true;f.addressedDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
+ await utterance(page);
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await expect(page.getByText('A different message',{exact:false})).toBeVisible();
+ await expect(page.locator('[data-alpha-voice-send-review="draft-review"]')).toHaveCount(0);
+ await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
+ await utterance(page);
+ await expect(page.getByText('There’s no visible text review ready to send.',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts??[])).toEqual([]);
 });
 
 test('speaking Send this text with an unresolved draft stages no send and forwards no command',async({page})=>{

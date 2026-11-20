@@ -206,7 +206,7 @@ export class AlphaClient {
   /** A page the request in flight changes itself (the agent's own Browser back, forward or reload). */
   private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
   private ownViewChange: { active: AbortController; from: string; to: string } | null = null;
-  /** Admitted navigation revisions and the contexts they replaced. */
+  /** Continuous foreground revisions and the contexts they replaced. */
   private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
   private consumed = new Set<string>();
@@ -291,18 +291,27 @@ export class AlphaClient {
     const ownView = !!promisedView && promisedView.active === this.active &&
       !this.context.sensitive && !next.sensitive && this.context.view === promisedView.from && next.view === promisedView.to;
     this.ownViewChange = null;
+    // The Notes list publishes its source when its initial read finishes. No note
+    // was selected, and an already open Talk session still owns the same screen.
+    const notesSourceLoaded = !this.context.sensitive && !next.sensitive &&
+      this.context.view === "notes" && next.view === "notes" &&
+      this.localSelection === null && selection === null && !this.context.selectedObject &&
+      next.selectedObject?.kind === "canonical-note-source" && next.selectedObject.id === "notes" &&
+      this.context.timeZone === next.timeZone;
     const ownChange = ownView || this.isOwnPageChange(next, selection), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
     // A view or page change committed by this request keeps its reply in flight.
     // Approvals stay bound to the earlier screen and are retired above.
-    if (ownChange) {
-      this.activeRevision = this.context.revision;
+    if (ownChange || notesSourceLoaded) {
+      if (ownChange) this.activeRevision = this.context.revision;
       if (this.ownMoves.size >= 32) this.ownMoves.clear();
       this.ownMoves.set(this.context.revision, previous);
-    } else {
-      this.ownMoves.clear();
+    } else this.ownMoves.clear();
+    // A turn submitted before the list was ready keeps its original source
+    // binding. Do not dispatch against the newly published source implicitly.
+    if (!ownChange) {
       if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;}
     }
     this.emit();
@@ -332,10 +341,8 @@ export class AlphaClient {
     return () => { if (this.ownViewChange === admitted) this.ownViewChange = null; };
   }
   /**
-   * True when the published context is `expected`, or was reached from it only by own page
-   * changes (see `admitOwnPageChange`) with no other change since. A caller that holds the context
-   * it sent a turn with uses this in place of an exact comparison, so the reply's own Browser
-   * back or reload does not read as the owner leaving the page. Approvals stay revision-bound.
+   * True when the published context is `expected` or follows it through admitted navigation
+   * or passive Notes list initialization. Approvals stay bound to the exact revision.
    */
   continuesContext(expected: ContextEnvelope): boolean {
     const want = JSON.stringify(expected);

@@ -622,6 +622,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!card?.proposalId||card.done||card.type==='proposal'&&card.state!=='open')return message;
           const proposal=pending.get(card.proposalId);
           if(proposal){
+            const voiceReview=shell.pendingVoiceSmsReview;
+            // The resident also lists the current turn's proposal as pending. Keep the live
+            // review when the refresh returns the exact same recipient, text and binding.
+            if(voiceReview?.id===proposal.id&&!card.recovered&&!card.reviewUnavailable&&
+              voiceReview.revision===currentContext.revision&&proposal.contextRevision===voiceReview.revision&&
+              proposal.description===voiceReview.details&&card.sub===voiceReview.details&&
+              proposal.smsReview===card.smsReview&&proposal.expiresAt===voiceReview.expiresAt&&
+              proposal.expiresAt>Date.now())return message;
             if(card.recovered&&!card.reviewUnavailable&&card.expiresAt===proposal.expiresAt&&card.privateNotesRead===proposal.privateNotesRead&&card.reviewDestination===proposal.reviewDestination&&JSON.stringify(card.reviewNoteTarget)===JSON.stringify(proposal.reviewNoteTarget)&&JSON.stringify(card.proposalSession)===JSON.stringify(connection.session))return message;
             return {...message,card:{...card,...(card.type==='proposal'?commsProposal(proposal):proposalCard(proposal)),recovered:true,proposalSession:connection.session,reviewUnavailable:false}};
           }
@@ -1880,7 +1888,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // title repeated as the detail and no second copy printed above it.
       if(c.systemNotice&&m.cGeneric)return {...m,cGeneric:false,cNotice:true,noticeSub:c.sub&&c.sub!==c.title?c.sub:'',hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub&&m.displayText!==c.title};
       const waitingForReply=!!c.recovered&&this.S().typing;
-      const voiceSendId=(c.smsReview==='send'||c.smsReview==='addressed-draft')&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
+      const voiceSendId=(c.smsReview==='send'||c.smsReview==='addressed-draft')&&!c.done&&!c.recovered&&!c.reviewUnavailable&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
       if(m.cProposal)return {...m,voiceSendId,...(waitingForReply?{proposalDisabled:true}:{})};
       if(!c.proposalId||c.done||c.reviewUnavailable||!m.cGeneric)return m;
       const message=live.find(item=>item.card===c);if(!message)return m;
