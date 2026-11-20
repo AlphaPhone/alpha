@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {CASES, DEVICE_PROFILE, evaluate, judge, summarize} from '../scripts/eval-phone-actions.ts';
+import {CASES, DEVICE_PROFILE, evaluate, FOLLOW_UPS, judge, judgeTurn, summarize} from '../scripts/eval-phone-actions.ts';
 import {startLoopback, stopLoopback} from '../scripts/fixtures/loopback.ts';
 
 test('a turn passes only when every expectation is proposed and nothing else is', () => {
@@ -17,6 +17,19 @@ test('a turn passes only when every expectation is proposed and nothing else is'
   assert.equal(judge([], [], ['reminder_create_after']), 'pass');
   assert.equal(judge([], ['clock_handoff'], ['reminder_create_after']), 'unexpected');
   assert.equal(judge([['phone_call']], ['open_view'], ['open_view']), 'missing');
+});
+
+test('a turn that routes right can still fail on what its proposal or its reply carries', () => {
+  const item = {id: 'x', family: 'follow-up', view: 'home', text: 'Send the same message to Alex.', expect: [['sms_compose']], proposal: /keys are under the mat/i};
+  assert.equal(judgeTurn(item, [{type: 'sms_compose', body: 'The keys are under the mat.'}], ''), 'pass');
+  assert.equal(judgeTurn(item, [{type: 'sms_compose', body: 'Hello'}], ''), 'content');
+  assert.equal(judgeTurn(item, [{type: 'phone_call'}], ''), 'missing');
+  const asked = {...item, expect: [], proposal: undefined, reply: /\bnot\b/i};
+  assert.equal(judgeTurn(asked, [], 'It was not sent.'), 'pass');
+  assert.equal(judgeTurn(asked, [], 'Yes, it was sent.'), 'content');
+  // The follow-ups reuse an earlier request, ask about an earlier outcome, and repeat one.
+  assert.deepEqual(FOLLOW_UPS.map(follow => follow.family), Array(FOLLOW_UPS.length).fill('follow-up'));
+  assert.ok(FOLLOW_UPS.some(follow => follow.proposal) && FOLLOW_UPS.some(follow => follow.reply));
 });
 
 test('cases with more than one right answer say so, and none expects an operation a phone lacks', () => {
@@ -96,11 +109,25 @@ test('every proposal a run causes is rejected, late ones are never credited to t
     assert.deepEqual(sentTo, opened, 'each case has its own conversation');
     // As an owner uses a phone for a while: a run's cases follow each other in one conversation.
     opened.length = 0; sentTo.length = 0;
-    const session = await evaluate({origin, token, cases, runs: 2, oneConversation: true});
+    const session = await evaluate({origin, token, cases, followUps: [], runs: 2, oneConversation: true});
     assert.equal(session.conversations, 'one-per-run');
     assert.deepEqual(sentTo, ['c0', 'c0', 'c0', 'c0', 'c1', 'c1', 'c1', 'c1']);
     assert.deepEqual(session.rows.map(row => row.outcome), result.rows.map(row => row.outcome));
     assert.equal(revokes, 2);
+    // Follow-up turns come after the cases, in the same conversation, and are judged on what
+    // the proposal and the reply carry as well as on the routing. Separate conversations skip them.
+    const call = cases.filter(item => item.id === 'call-number');
+    const followUps = [
+      {id: 'again', family: 'follow-up', view: 'home', text: 'Call again.', expect: [['phone_call']], proposal: /"type":"phone_call"/},
+      {id: 'wrong-number', family: 'follow-up', view: 'home', text: 'Call the other one.', expect: [['phone_call']], proposal: /5550199/},
+      {id: 'outcome', family: 'follow-up', view: 'home', text: 'Did it go out?', expect: [], reply: /review/i},
+      {id: 'outcome-missed', family: 'follow-up', view: 'home', text: 'Did it really?', expect: [], reply: /was sent/},
+    ];
+    opened.length = 0; sentTo.length = 0;
+    const followed = await evaluate({origin, token, cases: call, followUps, oneConversation: true});
+    assert.deepEqual(followed.rows.map(row => [row.id, row.outcome]), [['call-number', 'pass'], ['again', 'pass'], ['wrong-number', 'content'], ['outcome', 'pass'], ['outcome-missed', 'content']]);
+    assert.deepEqual(sentTo, ['c0', 'c0', 'c0', 'c0', 'c0']);
+    assert.equal((await evaluate({origin, token, cases: call, followUps})).rows.length, 1);
     await assert.rejects(evaluate({origin: 'https://agent.example.com', token}), /loopback/);
   } finally { server.closeAllConnections(); await stopLoopback(server); }
   assert.deepEqual(summarize([{id: 'a', family: 'f', run: 1, outcome: 'pass', proposed: [], ms: 5}, {id: 'a', family: 'f', run: 2, outcome: 'missing', proposed: [], ms: 9}]).unstableCases, ['a']);

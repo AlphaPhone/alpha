@@ -18,7 +18,8 @@
  * With --only the run sends just the named cases, to repeat the few a change is about.
  * With --one-conversation every case of a run is sent in the same conversation, in order,
  * the way an owner uses a phone for a while: each request then carries the turns before
- * it, which is where history, caching and the per-minute limit show.
+ * it, which is where history, caching and the per-minute limit show. Such a run ends with
+ * the follow-up turns, which only make sense after other turns.
  *
  * A pass means the proposals matched the case's expectation. It says nothing about reply
  * wording, about actions that are not device proposals (Maps, Notes, Calendar records),
@@ -37,16 +38,18 @@ import { selectDeviceCapabilities } from '../apps/app/src/runtime/phone-context.
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** An Alpha-image phone: every reviewed surface the launcher can run. */
 export const DEVICE_PROFILE = Object.freeze({ android: true, native: true, camera: true, foregroundReview: true, canonicalNotes: true, photoLibrary: true, files: true, clockRepeatDays: true, aospImage: true });
-const CASESET_REVISION = 3;
+const CASESET_REVISION = 4;
 
 /**
  * `expect` lists what the turn must propose: each entry is a set of acceptable operation
  * types (a trailing `*` matches a prefix), and every entry needs a matching proposal. An
  * empty list means the turn must create no device proposal (a reply, a view change, or a
  * canonical Notes/Calendar/Maps action). `allow` lists operations a turn may also propose
- * without failing, where more than one answer is right.
+ * without failing, where more than one answer is right. `proposal` must match the JSON of
+ * some proposed operation and `reply` the reply text, where the routing alone does not
+ * show the turn used what came before it.
  */
-export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[]; allow?: readonly string[] }
+export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[]; allow?: readonly string[]; proposal?: RegExp; reply?: RegExp }
 const CALL = ['phone_call', 'phone_dial'], TEXT = ['sms_compose', 'sms_send'], CLOCK = ['clock_*'];
 // A phone has no timer operation: Clock takes an alarm at a time of day, never a duration. A
 // relative reminder is the nearest it can offer, and an alarm in its place is wrong.
@@ -81,6 +84,7 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
   // With no phone calendar selected, availability is the Calendar service's to answer.
   { id: 'free-busy', family: 'calendar', view: 'home', text: 'Am I free tomorrow from 3pm to 4pm?', expect: [] },
   { id: 'text-and-alarm', family: 'multi', view: 'home', text: "Text Sam I'll be late, and set an alarm for 7am.", expect: [TEXT, CLOCK] },
+  { id: 'photo-and-text', family: 'multi', view: 'home', text: "Take a picture and text mom that I'm here.", expect: [['camera_capture_photo'], TEXT] },
   { id: 'call-or-text-choice', family: 'multi', view: 'home', text: 'Call Sam, and if you cannot, do nothing else.', expect: [CALL] },
   { id: 'open-messages', family: 'navigation', view: 'home', text: 'Open Messages.', expect: [], allow: VIEW },
   { id: 'show-contacts', family: 'navigation', view: 'home', text: 'Show my contacts.', expect: [], allow: VIEW },
@@ -94,7 +98,20 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
   { id: 'thanks', family: 'chat', view: 'home', text: 'Thanks!', expect: [] },
   { id: 'phone-question', family: 'chat', view: 'home', text: 'How do phone alarms differ from timers?', expect: [] },
 ]);
-const CASESET_SHA256 = createHash('sha256').update(JSON.stringify(CASES)).digest('hex');
+/**
+ * Turns that depend on the turns before them, sent after the cases when a run is one
+ * conversation: a request that reuses an earlier one, a question about an earlier outcome,
+ * and a repeat. Every proposal is rejected as soon as its turn ends, so the truthful answer
+ * to "did it go out" is that it did not.
+ */
+export const FOLLOW_UPS: readonly PhoneCase[] = Object.freeze([
+  { id: 'follow-text', family: 'follow-up', view: 'home', text: 'Text Sam that the keys are under the mat.', expect: [TEXT] },
+  { id: 'follow-same-text', family: 'follow-up', view: 'home', text: 'Send the same message to Alex.', expect: [TEXT], proposal: /keys are under the mat/i },
+  { id: 'follow-outcome', family: 'follow-up', view: 'home', text: 'Did the text to Sam about the keys go out?', expect: [], allow: ['messages_read_selected', 'sms_latest_sender'], reply: /\b(not|no|n't|declin|reject|cancel|pending|wasn't|never)\b/i },
+  { id: 'follow-alarm', family: 'follow-up', view: 'home', text: 'Set an alarm for 7am.', expect: [CLOCK] },
+  { id: 'follow-again', family: 'follow-up', view: 'home', text: 'Do that again for 8am.', expect: [CLOCK], proposal: /"hour":\s*8\b/ },
+]);
+const CASESET_SHA256 = createHash('sha256').update(JSON.stringify([CASES, FOLLOW_UPS], (_key, value) => (value instanceof RegExp ? value.source : value))).digest('hex');
 
 const matches = (type: string, pattern: string) => (pattern.endsWith('*') ? type.startsWith(pattern.slice(0, -1)) : type === pattern);
 /** Every expectation needs a proposal, and every proposal must answer an expectation or be allowed. */
@@ -103,8 +120,15 @@ export function judge(expect: PhoneCase['expect'], proposed: readonly string[], 
   if (proposed.some(type => ![...expect, allow].some(accepted => accepted.some(pattern => matches(type, pattern))))) return 'unexpected';
   return 'pass';
 }
+/** A case's full verdict: the routing, then what the proposals and the reply had to carry. */
+export function judgeTurn(item: PhoneCase, operations: readonly { type?: string }[], reply: string): ReturnType<typeof judge> | 'content' {
+  const routed = judge(item.expect, operations.map(operation => operation.type ?? 'unknown'), item.allow);
+  if (routed !== 'pass') return routed;
+  if (item.proposal && !operations.some(operation => item.proposal!.test(JSON.stringify(operation)))) return 'content';
+  return item.reply && !item.reply.test(reply) ? 'content' : 'pass';
+}
 
-export interface CaseRun { id: string; family: string; run: number; outcome: ReturnType<typeof judge> | 'error'; proposed: string[]; ms: number; replyChars?: number; error?: string }
+export interface CaseRun { id: string; family: string; run: number; outcome: ReturnType<typeof judgeTurn> | 'error'; proposed: string[]; ms: number; replyChars?: number; error?: string }
 export function summarize(rows: readonly CaseRun[]) {
   const rate = (subset: readonly CaseRun[]) => (subset.length ? subset.filter(row => row.outcome === 'pass').length / subset.length : null);
   const families = [...new Set(rows.map(row => row.family))];
@@ -137,11 +161,11 @@ function loopback(origin: string) {
   if (!['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.pathname !== '/' || url.search || url.username) throw Error('The evaluation talks only to a loopback resident runtime origin');
   return url.origin;
 }
-interface Proposal { id: string; digest: string; state: string; payload?: { operation?: { type?: string } } }
+interface Proposal { id: string; digest: string; state: string; payload?: { operation?: { type?: string } & Record<string, unknown> } }
 
 /** Sends every case `runs` times; every proposal a turn caused is rejected before the next turn. */
-export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs = 0, oneConversation = false, now = () => new Date() }: {
-  origin: string; token: string; cases?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; now?: () => Date;
+export async function evaluate({ origin, token, cases = CASES, followUps = FOLLOW_UPS, runs = 1, pauseMs = 0, oneConversation = false, now = () => new Date() }: {
+  origin: string; token: string; cases?: readonly PhoneCase[]; followUps?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; now?: () => Date;
 }) {
   const base = loopback(origin), installationId = randomUUID();
   const device: Record<string, string> = { 'X-Eliza-Device-Id': installationId, 'X-Eliza-Device-Key': randomBytes(32).toString('hex'), 'X-Eliza-Device-Capabilities': selectDeviceCapabilities([], DEVICE_PROFILE).join(',') };
@@ -175,7 +199,7 @@ export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs
     const open = async (title: string) => (await call<{ conversation: { id: string } }>('/api/conversations', { title })).conversation.id;
     for (let run = 1; run <= runs; run++) {
       const shared = oneConversation ? await open(`Phone-action eval run ${run}`) : null;
-      for (const item of cases) {
+      for (const item of shared ? [...cases, ...followUps] : cases) {
         const row: CaseRun = { id: item.id, family: item.family, run, outcome: 'error', proposed: [], ms: 0 };
         const began = Date.now();
         try {
@@ -183,8 +207,9 @@ export async function evaluate({ origin, token, cases = CASES, runs = 1, pauseMs
           const conversation = shared ?? await open(`Phone-action eval ${item.id}`);
           const context = { view: item.view, revision: 1, sensitive: false, timeZone: 'America/New_York' };
           const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, { text: item.text, channelType: 'DM', metadata: { uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
-          row.proposed = (await rejectUnseen()).map(proposal => proposal.payload?.operation?.type ?? 'unknown');
-          row.outcome = judge(item.expect, row.proposed, item.allow);
+          const operations = (await rejectUnseen()).map(proposal => proposal.payload?.operation ?? {});
+          row.proposed = operations.map(operation => operation.type ?? 'unknown');
+          row.outcome = judgeTurn(item, operations, String(reply.text ?? ''));
           row.replyChars = String(reply.text ?? '').length;
         } catch (error) {
           row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200);
@@ -216,7 +241,7 @@ if (import.meta.main) {
     console.error(`Unknown case: ${unknown.join(', ') || '(none named)'}`);
     process.exit(2);
   }
-  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)) } : {}) });
+  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: [] } : {}) });
   const database = flag('--database');
   // The run's own model calls, read from the resident's records after the last turn.
   const usage = database ? audit((await loadCalls(database)).filter(call => call.at >= Date.parse(result.recordedAt))) : null;
