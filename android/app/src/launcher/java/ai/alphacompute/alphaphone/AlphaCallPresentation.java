@@ -7,6 +7,7 @@
 package ai.alphacompute.alphaphone;
 
 import android.telecom.Call;
+import android.telecom.CallAudioState;
 import java.util.Locale;
 
 final class AlphaCallPresentation {
@@ -130,6 +131,40 @@ final class AlphaCallPresentation {
             case Call.STATE_SELECT_PHONE_ACCOUNT: return "Choose a SIM to call from";
             default: return "Getting the call ready…";
         }
+    }
+
+    /** A call the owner is placing, on, or holding: the phone may be at the ear. A ringing call is not. */
+    static boolean offHook(int state) {
+        return state == Call.STATE_CONNECTING || state == Call.STATE_DIALING || state == Call.STATE_ACTIVE
+            || state == Call.STATE_HOLDING || state == Call.STATE_PULLING_CALL;
+    }
+
+    /**
+     * Whether the display and its touch input turn off while the phone is at the owner's ear, so a
+     * cheek cannot press End, Mute or the keypad. Only while some call is off the hook and heard
+     * through the earpiece: a call that only rings needs the screen to answer it, and the speaker, a
+     * wired headset or Bluetooth means the phone is not at the ear. Until Telecom reports an audio
+     * route, the screen is left alone.
+     *
+     * @param callStates the Telecom state of every call the service holds.
+     * @param audioKnown Telecom reported an audio state.
+     * @param route its {@link CallAudioState} route.
+     */
+    static boolean proximityLock(int[] callStates, boolean audioKnown, int route) {
+        if (!audioKnown || route != CallAudioState.ROUTE_EARPIECE) return false;
+        for (int state : callStates) if (offHook(state)) return true;
+        return false;
+    }
+
+    /**
+     * Whether a released proximity lock turns the display back on at once. Yes when the owner moved a
+     * live call off the earpiece (speaker, headset): they are looking at the screen. Otherwise (the
+     * call ended at the ear) the display stays off until the phone is taken away.
+     */
+    static boolean screenOnAtRelease(int[] callStates, boolean audioKnown, int route) {
+        if (!audioKnown || route == CallAudioState.ROUTE_EARPIECE) return false;
+        for (int state : callStates) if (offHook(state)) return true;
+        return false;
     }
 
     /**

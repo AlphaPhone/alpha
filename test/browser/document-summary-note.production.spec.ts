@@ -42,6 +42,7 @@ async function askAboutDocument(page: Page) {
   expect(await harness(page, f => f.documents.picks)).toEqual([{ action: 'files', path: 'Documents/garden-report.txt' }]);
   await button(page, 'File actions').click();
   await button(page, 'Ask Alpha').click();
+  await page.getByRole('button', { name: /^Edit excerpt from / }).click();
   const question = page.getByRole('dialog', { name: 'Ask about selected content' });
   await expect(question.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue(contents);
   await expect(question.getByRole('checkbox', { name: 'Link source' })).toBeChecked();

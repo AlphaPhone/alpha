@@ -9,6 +9,10 @@
  * as the phone app there. Telecom keeps emergency calls working through the system dialer if this
  * service fails.
  *
+ * While a call is off the hook on the earpiece the service holds the proximity lock, so the display
+ * and its touch input are off at the owner's ear on every screen, the call screen and Alpha alike
+ * (Telecom does not do this for the call UI). The lock goes with the call, the route or the service.
+ *
  * Installed identity, unchanged from the shared service Alpha configured before: the ringing channel
  * {@value #CHANNEL_ID}, the quiet channel {@value #ONGOING_CHANNEL_ID}, notices tagged by call ID with
  * ID 1, and immutable request-code-0 PendingIntents to the call screen with data
@@ -23,6 +27,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Person;
 import android.os.Build;
+import android.os.PowerManager;
 import android.telecom.CallAudioState;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +57,8 @@ public final class AlphaInCallService extends InCallService {
     /** Status-bar icon of call notices: the platform call glyph. */
     static final int NOTIFICATION_ICON = android.R.drawable.sym_action_call;
     static final String ANSWER = "Answer", DECLINE = "Decline", END_CALL = "End call";
+    /** The proximity lock's tag in power diagnostics. */
+    static final String PROXIMITY_TAG = "alphaphone:call-proximity";
 
     /** Process-wide registry of active calls keyed by stable id. */
     private static final Map<String, Call> ACTIVE_CALLS =
@@ -68,6 +75,10 @@ public final class AlphaInCallService extends InCallService {
     /** What each call's notice last said, by call ID (AlphaCallPresentation.noticeContent). Main thread only. */
     private final Map<String, String> posted = new HashMap<>();
     private java.util.concurrent.ExecutorService lookups;
+    /** The last audio state Telecom reported to this service. Main thread only. */
+    private CallAudioState audio;
+    /** Held while the display must turn off at the ear; created on first need. Main thread only. */
+    private PowerManager.WakeLock proximity;
     private static AlphaInCallService activeService;
 
     @Override public void onCreate() {
@@ -96,7 +107,37 @@ public final class AlphaInCallService extends InCallService {
     public static void mute(boolean muted) { if (activeService != null) activeService.setMuted(muted); }
     public static void route(int route) { if (activeService != null) activeService.setAudioRoute(route); }
 
-    @Override public void onCallAudioStateChanged(CallAudioState state) { publish(); }
+    @Override public void onCallAudioStateChanged(CallAudioState state) {
+        audio = state;
+        holdProximity();
+        publish();
+    }
+
+    /** Takes or drops the proximity lock for the calls and audio route as they are now. */
+    private void holdProximity() {
+        CallAudioState state = audio != null ? audio : getCallAudioState();
+        int[] states;
+        synchronized (ACTIVE_CALLS) {
+            states = new int[ACTIVE_CALLS.size()];
+            int next = 0;
+            for (Call call : ACTIVE_CALLS.values()) states[next++] = call.getState();
+        }
+        boolean known = state != null;
+        int route = known ? state.getRoute() : 0;
+        if (AlphaCallPresentation.proximityLock(states, known, route)) {
+            if (proximity == null) {
+                PowerManager power = getSystemService(PowerManager.class);
+                // A phone without the sensor keeps its screen on, as before.
+                if (power == null || !power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return;
+                proximity = power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, PROXIMITY_TAG);
+                proximity.setReferenceCounted(false);
+            }
+            if (!proximity.isHeld()) proximity.acquire();
+        } else if (proximity != null && proximity.isHeld()) {
+            proximity.release(AlphaCallPresentation.screenOnAtRelease(states, known, route)
+                ? 0 : PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
+        }
+    }
 
     @Override
     public void onCallAdded(Call call) {
@@ -126,6 +167,7 @@ public final class AlphaInCallService extends InCallService {
     }
 
     private void openCallSurface(String event, String callId, Call call) {
+        holdProximity();
         NotificationManager notifications = getSystemService(NotificationManager.class);
         if ("removed".equals(event) || call.getState() == Call.STATE_DISCONNECTED) {
             if (callId != null) { posted.remove(callId); notifications.cancel(callId, 1); }
@@ -241,6 +283,8 @@ public final class AlphaInCallService extends InCallService {
         if (lookups != null) lookups.shutdownNow();
         ACTIVE_CALLS.clear();
         CALL_IDS.clear();
+        holdProximity();
+        audio = null;
         if (activeService == this) activeService = null;
         publish();
         super.onDestroy();
