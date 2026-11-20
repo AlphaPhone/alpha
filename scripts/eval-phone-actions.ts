@@ -15,7 +15,8 @@
  *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--only <case id>[,...]]
  *     [--database <resident .elizadb>]
  *
- * With --only the run sends just the named cases, to repeat the few a change is about.
+ * With --only the run sends just the named cases and follow-ups, to repeat the few a
+ * change is about.
  * With --one-conversation every case of a run is sent in the same conversation, in order,
  * the way an owner uses a phone for a while: each request then carries the turns before
  * it, which is where history, caching and the per-minute limit show. Such a run ends with
@@ -107,7 +108,7 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
 export const FOLLOW_UPS: readonly PhoneCase[] = Object.freeze([
   { id: 'follow-text', family: 'follow-up', view: 'home', text: 'Text Sam that the keys are under the mat.', expect: [TEXT] },
   { id: 'follow-same-text', family: 'follow-up', view: 'home', text: 'Send the same message to Alex.', expect: [TEXT], proposal: /keys are under the mat/i },
-  { id: 'follow-outcome', family: 'follow-up', view: 'home', text: 'Did the text to Sam about the keys go out?', expect: [], allow: ['messages_read_selected', 'sms_latest_sender'], reply: /\b(not|no|n't|declin|reject|cancel|pending|wasn't|never)\b/i },
+  { id: 'follow-outcome', family: 'follow-up', view: 'home', text: 'Did the text to Sam about the keys go out?', expect: [], allow: ['messages_read_selected', 'sms_latest_sender'], reply: /\b(not|no|never)\b|n't|declin|reject|cancel|pending|waiting/i },
   { id: 'follow-alarm', family: 'follow-up', view: 'home', text: 'Set an alarm for 7am.', expect: [CLOCK] },
   { id: 'follow-again', family: 'follow-up', view: 'home', text: 'Do that again for 8am.', expect: [CLOCK], proposal: /"hour":\s*8\b/ },
 ]);
@@ -128,7 +129,7 @@ export function judgeTurn(item: PhoneCase, operations: readonly { type?: string 
   return item.reply && !item.reply.test(reply) ? 'content' : 'pass';
 }
 
-export interface CaseRun { id: string; family: string; run: number; outcome: ReturnType<typeof judgeTurn> | 'error'; proposed: string[]; ms: number; replyChars?: number; error?: string }
+export interface CaseRun { id: string; family: string; run: number; outcome: ReturnType<typeof judgeTurn> | 'error'; proposed: string[]; ms: number; replyChars?: number; reply?: string; error?: string }
 export function summarize(rows: readonly CaseRun[]) {
   const rate = (subset: readonly CaseRun[]) => (subset.length ? subset.filter(row => row.outcome === 'pass').length / subset.length : null);
   const families = [...new Set(rows.map(row => row.family))];
@@ -211,6 +212,8 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
           row.proposed = operations.map(operation => operation.type ?? 'unknown');
           row.outcome = judgeTurn(item, operations, String(reply.text ?? ''));
           row.replyChars = String(reply.text ?? '').length;
+          // The requests are synthetic, so the start of the reply is kept for reading a content verdict.
+          if (item.reply) row.reply = String(reply.text ?? '').slice(0, 300);
         } catch (error) {
           row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200);
         }
@@ -236,12 +239,12 @@ if (import.meta.main) {
     process.exit(2);
   }
   const only = flag('--only')?.split(',').filter(Boolean);
-  const unknown = only?.filter(id => !CASES.some(item => item.id === id)) ?? [];
+  const unknown = only?.filter(id => ![...CASES, ...FOLLOW_UPS].some(item => item.id === id)) ?? [];
   if (unknown.length || only?.length === 0) {
     console.error(`Unknown case: ${unknown.join(', ') || '(none named)'}`);
     process.exit(2);
   }
-  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: [] } : {}) });
+  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: FOLLOW_UPS.filter(item => only.includes(item.id)) } : {}) });
   const database = flag('--database');
   // The run's own model calls, read from the resident's records after the last turn.
   const usage = database ? audit((await loadCalls(database)).filter(call => call.at >= Date.parse(result.recordedAt))) : null;

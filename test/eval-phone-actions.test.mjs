@@ -30,6 +30,11 @@ test('a turn that routes right can still fail on what its proposal or its reply 
   // The follow-ups reuse an earlier request, ask about an earlier outcome, and repeat one.
   assert.deepEqual(FOLLOW_UPS.map(follow => follow.family), Array(FOLLOW_UPS.length).fill('follow-up'));
   assert.ok(FOLLOW_UPS.some(follow => follow.proposal) && FOLLOW_UPS.some(follow => follow.reply));
+  // Every proposal is rejected as soon as its turn ends, so a truthful answer says it did not go out.
+  const outcome = FOLLOW_UPS.find(follow => follow.id === 'follow-outcome');
+  for (const reply of ['No, it was rejected on your phone.', "It hasn't been sent.", 'That text was declined.', 'It is still waiting for your approval.', 'It did not go out.'])
+    assert.equal(judgeTurn(outcome, [], reply), 'pass', reply);
+  for (const reply of ['Yes, it went out.', 'Sent!']) assert.equal(judgeTurn(outcome, [], reply), 'content', reply);
 });
 
 test('cases with more than one right answer say so, and none expects an operation a phone lacks', () => {
