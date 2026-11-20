@@ -199,7 +199,7 @@ import { describeLibraryOperation } from "../photos/library-presentation.ts";
 import { describePhotosViewOperation } from "../photos/photos-view-presentation.ts";
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
-import { UNNAMED_CONTACT } from "../telephony/telephony-messages.ts";
+import { UNNAMED_CONTACT, type ContactMatch } from "../telephony/telephony-messages.ts";
 import { SMS_CARRIER_CHARGES, smsSendFacts } from "../telephony/sms-card-facts.ts";
 
 function object(value: unknown): Record<string, unknown> {
@@ -232,7 +232,11 @@ export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
  * Camera open is marked, and names the message that asked for it when the agent bound one
  * (direct mode). A reviewable card names its bound message the same way.
  */
-export type ReviewItem = PendingReviewItem & {
+type AlphaProposalCard = DeviceActionProposalCard & {
+  smsReview?: "draft" | "send" | "recipient";
+};
+export type ReviewItem = Omit<PendingReviewItem, "proposal"> & {
+  proposal: AlphaProposalCard | null;
   cameraCapture?: true;
   cameraRequestMessageId?: string;
   requestMessageId?: string;
@@ -647,6 +651,10 @@ function describeForegroundReview(
 
 // ── Coordinator ─────────────────────────────────────────────────────────────
 
+type RequestedAction = CurrentDeviceActionRequest & {
+  projectView?: ((view: string, signal: AbortSignal) => Promise<boolean>) | "canonical";
+};
+
 type ExecutionResult = DeviceExecutionResult & {
   foregroundResult?: ForegroundReviewResult;
   cancelledBeforeCapture?: true;
@@ -673,6 +681,7 @@ export class DeviceActionCoordinator<
     string,
     { digest: string; identities: FilesIdentity[] }
   >();
+  private readonly smsReviews = new Map<string, { digest: string; recipient: ContactMatch | null }>();
   private proposals = new Map<
     string,
     {
@@ -680,7 +689,8 @@ export class DeviceActionCoordinator<
       context: C;
       workflowReview?: R;
       requestKey?: string;
-      currentRequest?: CurrentDeviceActionRequest;
+      currentRequest?: RequestedAction;
+      smsRecipient?: ContactMatch;
     }
   >();
   private readReplies = new Map<
@@ -721,6 +731,7 @@ export class DeviceActionCoordinator<
         query: string,
         signal: AbortSignal,
       ) => Promise<string[] | null>;
+      smsRecipient?: (query: string, signal: AbortSignal) => Promise<ContactMatch | null>;
     } = {},
   ) {
     this.ports = ports;
@@ -1087,7 +1098,8 @@ export class DeviceActionCoordinator<
     proposal: DeviceProposal,
     context: C,
     contacts?: string[],
-  ): DeviceActionProposalCard {
+    smsRecipient?: ContactMatch,
+  ): AlphaProposalCard {
     const op = proposal.operation;
     const readReply = proposal.readReplyOrigin
       ? {
@@ -1132,14 +1144,19 @@ export class DeviceActionCoordinator<
     if (isTelephonyAction(op))
       return {
         ...base,
-        ...describeTelephonyAction(op, contacts),
+        ...describeTelephonyAction(op, contacts, smsRecipient),
         ...readReply,
+        ...(isSmsCompose(op) ? {
+          smsReview: "draft" in op ? "draft" as const :
+            smsRecipient || smsComposeTarget(op).kind === "number" ? "send" as const : "recipient" as const,
+        } : {}),
       };
     if (isSmsSend(op)) {
       const sim = this.profile.simLabel?.(op.subscriptionId);
       return {
         ...base,
         title: "Review SMS",
+        smsReview: "send",
         // Approve sends it: no dialog follows, so the card says everything the send depends on.
         description: `To: ${op.recipients.join(", ")}${sim ? `\nFrom: ${sim}` : ""}\n\n${op.body}\n\n${smsSendFacts(op.recipients.length, op.body)}`,
       };
@@ -1246,6 +1263,8 @@ export class DeviceActionCoordinator<
     const pendingIds = new Set(valid.map((proposal) => proposal.id));
     for (const id of this.filesReviews.keys())
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
+    for (const id of this.smsReviews.keys())
+      if (!pendingIds.has(id)) this.smsReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
     const items: ReviewItem[] = [];
@@ -1364,6 +1383,21 @@ export class DeviceActionCoordinator<
       // A Files move or trash binds the identity of each file as the card shows
       // it; whatever identity the agent sent is replaced.
       let reviewed = proposal;
+      let smsRecipient: ContactMatch | undefined;
+      if (isSmsCompose(proposal.operation) && this.options.smsRecipient) {
+        const target = smsComposeTarget(proposal.operation);
+        if (target.kind === "contact") {
+          let observed = this.smsReviews.get(proposal.id);
+          if (!observed || observed.digest !== proposal.digest) {
+            const recipient = await this.options.smsRecipient(target.query, signal).catch(() => null);
+            assertCurrentReview();
+            observed = { digest: proposal.digest, recipient };
+            this.smsReviews.set(proposal.id, observed);
+          }
+          smsRecipient = observed.recipient ?? undefined;
+          if (smsRecipient) card = this.card(proposal, context, undefined, smsRecipient);
+        }
+      }
       if (
         isFilesOperation(proposal.operation) &&
         filesNeedsIdentity(proposal.operation)
@@ -1415,6 +1449,7 @@ export class DeviceActionCoordinator<
         proposal: reviewed,
         context: structuredClone(context),
         requestKey: browserRequestKey,
+        smsRecipient,
       });
       if (proposal.readReplyOrigin && !this.readReplies.has(proposal.id))
         this.readReplies.set(proposal.id, {
@@ -1453,7 +1488,7 @@ export class DeviceActionCoordinator<
   async pending(
     context: C,
     signal: AbortSignal,
-  ): Promise<DeviceActionProposalCard[]> {
+  ): Promise<AlphaProposalCard[]> {
     const { items, failures } = await this.review(context, signal);
     const proposals = items.flatMap((item) =>
       item.proposal ? [item.proposal] : [],
@@ -1475,7 +1510,7 @@ export class DeviceActionCoordinator<
     signal: AbortSignal,
     allowed: () => Promise<boolean>,
     operationType?: ReviewableDeviceOperation["type"],
-    proof?: CurrentDeviceActionRequest,
+    proof?: RequestedAction,
   ): Promise<DeviceOperationReceipt[]> {
     const directTypes: readonly ReviewableDeviceOperation["type"][] = [
       "create_note",
@@ -1517,6 +1552,7 @@ export class DeviceActionCoordinator<
         (entry.proposal.operation.type === "browser_navigate" ||
           entry.proposal.operation.type === "browser_search");
       const requestKey = this.requestKey(messageId);
+      if (entry.proposal.operation.type === "open_view" && proof?.projectView === "canonical") continue;
       if (
         browser &&
         proof?.messageId === messageId &&
@@ -1553,9 +1589,16 @@ export class DeviceActionCoordinator<
           continue;
         entry.currentRequest = proof;
       }
+      if (entry.proposal.operation.type === "open_view" && typeof proof?.projectView === "function") {
+        if (proof.messageId !== messageId || entry.requestKey !== requestKey || this.proposals.get(proposalId) !== entry)
+          continue;
+        proof.current();
+        entry.currentRequest = proof;
+      }
       const result = await this.approve(proposalId, context, signal);
       results.push(result);
-      if (result.status !== "succeeded" || signal.aborted) break;
+      if (result.status !== "succeeded" || signal.aborted ||
+          (entry.proposal.operation.type === "open_view" && typeof proof?.projectView === "function")) break;
     }
     return results;
   }
@@ -1984,8 +2027,15 @@ export class DeviceActionCoordinator<
         if (p.expiresAt <= Date.now())
           throw new DeviceActionNotStarted("This action expired.");
         execution.markDispatched(reserved.entry);
-        const journalIdentity = { scope: this.scope, proposalId: p.id };
-        if (isForegroundReviewOperation(p.operation)) {
+        const journalIdentity = { scope: this.scope, proposalId: p.id, ...(reviewed.smsRecipient ? { smsRecipient: reviewed.smsRecipient } : {}) };
+        if (p.operation.type === "open_view" && typeof reviewed.currentRequest?.projectView === "function") {
+          assertCurrent();
+          const opened = await reviewed.currentRequest.projectView(p.operation.view, signal);
+          const view = this.profile.presentRecord(p.operation, context.timeZone)?.title.replace(/^Open /, "") ?? p.operation.view;
+          result = opened
+            ? { status: "succeeded", summary: `Opened ${view} on this phone.` }
+            : { status: "failed", summary: "This view is unavailable." };
+        } else if (isForegroundReviewOperation(p.operation)) {
           if (!this.ports.executeForeground)
             throw Error("Foreground review is unavailable");
           result = await this.ports.executeForeground(
@@ -3336,6 +3386,7 @@ function contactTarget(
 function describeTelephonyAction(
   operation: TelephonyActionOperation,
   contacts?: string[],
+  smsRecipient?: ContactMatch,
 ): {
   title: string;
   description: string;
@@ -3412,10 +3463,8 @@ function describeTelephonyAction(
       };
     case "sms_compose": {
       const target = smsComposeTarget(operation);
-      const to =
-        target.kind === "number"
-          ? `To: ${target.number}`
-          : `To contact: ${target.query}`;
+      const to = smsRecipient ? `To: ${smsRecipient.name} (${smsRecipient.number})`
+        : target.kind === "number" ? `To: ${target.number}` : `To contact: ${target.query}`;
       return "draft" in operation
         ? {
             title: "Draft SMS",
@@ -3423,12 +3472,10 @@ function describeTelephonyAction(
           }
         : {
             title: "Review SMS",
-            // Approve sends it: no dialog follows. A name is still matched on the phone, where
-            // the owner picks the person and number before anything is sent.
             description:
-              target.kind === "number"
+              target.kind === "number" || smsRecipient
                 ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body)}`
-                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_CARRIER_CHARGES}`,
+                : `${to}\n\n${operation.body}\n\nChoose the person and number on your phone before sending. ${SMS_CARRIER_CHARGES}`,
           };
     }
     case "phone_keypad":

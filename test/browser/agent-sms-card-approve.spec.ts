@@ -1,7 +1,7 @@
 import {test, expect, type Page} from '@playwright/test';
 import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
 
-// The owner's Approve on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
+// The owner's Send on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
 // and no dialog follows. Real renderer, pairing, connection controller, proposal parser, coordinator
 // and installed executor. The agent host, the encrypted action journal and AlphaTelephony are
 // controlled bridge boundaries (scripts/fixtures/native-telephony.ts plus the host below): no model,
@@ -106,17 +106,17 @@ const state = (page: Page) => page.evaluate(() => {
   return {decisions: f.decisions, sends: f.sends.length, refused: f.refused.length, receipts: f.receipts.map((receipt: any) => receipt.outcome), sendSms: ((window as any).telephonyCalls as string[]).filter(method => method === 'sendSms').length};
 });
 
-test('Approve on the Review SMS card sends the text once, under that card, with no dialog after it', async ({page}) => {
+test('Send on the Review SMS card sends the text once, under that card, with no dialog after it', async ({page}) => {
   const card = await setup(page);
   // Everything the send depends on is on the card itself; it never says to confirm again.
   await expect(card).toContainText(`To: ${NUMBER}`);
   await expect(card).toContainText('From: the SIM chosen in Messages, or your default texting SIM');
   await expect(card).toContainText(BODY);
-  await expect(card).toContainText('Approve sends it right away. Your carrier may charge for texts.');
+  await expect(card).toContainText('Send submits it right away. Your carrier may charge for texts.');
   await expect(card).not.toContainText(/Android|again/);
   expect((await state(page)).sendSms).toBe(0);
-  // The card's own Approve control is what the owner taps; nothing opens after it.
-  await expect(card).toContainText('Approve');
+  // The card's own Send control is what the owner taps; nothing opens after it.
+  await expect(card).toContainText('Send');
   await card.click();
   await expect.poll(async () => (await state(page)).receipts).toEqual(['applied']);
   expect(await state(page)).toMatchObject({decisions: ['approve'], sends: 1, refused: 0, sendSms: 1});

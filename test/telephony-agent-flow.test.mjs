@@ -13,7 +13,7 @@ const dir = mkdtempSync(join(tmpdir(), 'telephony-flow-'));
 process.on('exit', () => rmSync(dir, {recursive: true, force: true}));
 const output = await build({entryPoints: [resolve('apps/app/src/runtime/device-actions.ts')], bundle: true, format: 'esm', platform: 'node', write: false});
 writeFileSync(join(dir, 'sdk.mjs'), output.outputFiles[0].text);
-const {DeviceActions, setContactReviewMatches} = await import(pathToFileURL(join(dir, 'sdk.mjs')));
+const {DeviceActions, setContactReviewMatches, setSmsReviewRecipient} = await import(pathToFileURL(join(dir, 'sdk.mjs')));
 // The phone's address book as the review lookup reads it: the names matching each query.
 let addressBook = query => ['Priya Nair'].filter(name => name.toLowerCase().includes(query.toLowerCase()));
 const lookups = [];
@@ -27,7 +27,7 @@ const messageId = '77bc5ac9-0000-4000-8000-a61a04b11111';
 const proof = {messageId, text: 'Help with this conversation', current() {}};
 const ALL = ['phone.call.v1', 'contacts.write.v1', 'contacts.write.v2', 'contacts.show.v1', 'contacts.read.v1', 'sms.compose.v1', 'sms.compose.v2', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
 const callPriya = {type: 'phone_call', target: {kind: 'contact', query: 'Priya'}};
-function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId, present} = {}) {
+function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId, present, onExecute} = {}) {
   let state = 'pending', attemptId, effects = 0, entry;
   const posts = [];
   const proposal = () => ({id, digest, state, subjectUserId: 'owner', requestedBy: 'agent', action: 'device_action', expiresAt: new Date(Date.now() + 600000).toISOString(),
@@ -45,11 +45,45 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
     get: async () => ({entry}), list: async () => ({entries: entry ? [entry] : []})};
   const seen = [];
   const client = new DeviceActions(session, {installationId: 'device', enrollmentId: 'enrollment', key: 'a'.repeat(64), capabilities}, 'c'.repeat(64), request, journal,
-    async (op, operationId) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {}), ...(present ? {present: () => present(posts.map(post => post.path.split('/').pop()))} : {})}; });
+    async (op, operationId, _context, _signal, _binding, _workflow, review) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); onExecute?.(review); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {}), ...(present ? {present: () => present(posts.map(post => post.path.split('/').pop()))} : {})}; });
   return {client, posts, seen, get entry() { return entry; }, get effects() { return effects; }, online() { receiptOutage = false; }};
 }
 const signal = () => new AbortController().signal;
 const receiptOf = f => f.posts.find(post => post.path.endsWith('/receipt'))?.body.receipt;
+
+test('the single reviewed SMS recipient stays bound to the first address shown', async () => {
+  let recipient = {id: '1', name: 'Priya Nair', number: '+14155550132'};
+  const shown = recipient;
+  setSmsReviewRecipient(async () => recipient);
+  try {
+    let reviewed;
+    const f = fixture({operation:{type:'sms_compose',target:{kind:'contact',query:'Priya Nair'},body:'On my way'},
+      result:{kind:'sms-compose',status:'submitted'},onExecute:identity=>{reviewed=identity.smsRecipient;}});
+    const [card] = await f.client.pending(context,signal());
+    assert.equal(card.smsReview,'send');
+    assert.match(card.description,/Priya Nair \(\+14155550132\)/);
+    recipient = {...recipient,number:'+14155550199'};
+    const [refreshed] = await f.client.pending(context,signal());
+    assert.equal(refreshed.description,card.description);
+    await f.client.approve(id,context,signal());
+    assert.deepEqual(reviewed,shown);
+  } finally {
+    setSmsReviewRecipient(async()=>null);
+  }
+});
+
+test('only the current requested navigation can transfer to the voice projection', async () => {
+  const operation={type:'open_view',view:'notes'};
+  const f=fixture({operation,requestMessageId:messageId,result:null});
+  const seen=[];
+  const own={messageId,text:'Open Notes.',current(){},projectView:async view=>{seen.push(view);return true;}};
+  await f.client.pendingReview(context,signal(),own);
+  const receipts=await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,own);
+  assert.deepEqual(seen,['notes']);
+  assert.equal(f.effects,0,'the older unowned local executor must not run');
+  assert.equal(receipts[0].status,'succeeded');
+  assert.equal(receiptOf(f).outcome,'applied');
+});
 
 test('the phone advertises telephony actions only on the image and only what the agent offers', () => {
   const profile = {android: true, native: true, aospImage: true};
@@ -68,10 +102,10 @@ test('a text to a number, a draft, a single contact value, a contact search and 
     await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
   const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
   // Approve sends a text at once: the card, not a dialog after it, says the SIM and the carrier charge.
-  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nApprove sends it right away. Your carrier may charge for texts.');
-  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nApprove sends it right away. Your carrier may charge for texts.`);
+  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nSend submits it right away. Your carrier may charge for texts.');
+  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nSend submits it right away. Your carrier may charge for texts.`);
   const toContact = await card({...number, target: {kind: 'contact', query: 'Priya'}});
-  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. Your carrier may charge for texts.');
+  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nChoose the person and number on your phone before sending. Your carrier may charge for texts.');
   for (const shown of [await card(number), toContact]) assert.doesNotMatch(shown, /Android|again/);
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
   assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);

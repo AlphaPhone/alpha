@@ -121,6 +121,8 @@ export function sendRefusalText(error: unknown, fallback: string): string {
 export const UNNAMED_CONTACT = "Unnamed contact";
 
 /** The name a call choice shows for a contact row: its own name, else {@link UNNAMED_CONTACT}. */
+export type ContactMatch = {id: string; name: string; number: string};
+
 export function contactChoiceName(displayName: string): string {
   return displayName.trim() || UNNAMED_CONTACT;
 }

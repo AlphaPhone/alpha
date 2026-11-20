@@ -17,6 +17,14 @@ export async function setup(page:Page,detent='sheet',development=false){
   const navigation=f.navigation=new ViewNavigationClient(async(path,body,signal)=>{signal.throwIfAborted();f.requests.push({path,body:structuredClone(body)});if(path.endsWith('interact-claim')){f.claims++;if(f.holdClaim)await new Promise<void>(resolve=>f.releaseClaim=resolve);return {claimId:'claim-'+(body as any).requestId};}f.acks++;if(f.holdAck)await new Promise<void>(resolve=>f.releaseAck=resolve);return {accepted:true};},()=>snapshot.session===f.session&&!snapshot.open,()=>alphaClient.getState().context);
   c.captureViewNavigation=context=>({client:navigation,attempt:navigation.capture(context)});
   const transport={session:f.session,send:async input=>{input.signal.throwIfAborted();if(input.channelType!=='VOICE_DM')throw Error('Only new voice turns expected');f.inputs.push({requestId:input.requestId,context:structuredClone(input.context),text:input.text,conversationId:input.expectedConversationId});
+   if(f.projectBeforeReply){
+    f.projected=await input.projectRequestedView?.(f.target,input.signal);
+    return {text:'Opened '+f.target+'.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session}};
+   }
+   if(f.smsDraft){
+    const proposal={id:'draft-review',title:'Draft SMS',description:'To: Carson\n\nCan you bring ice?',smsReview:'draft',expiresAt:Date.now()+60000,contextRevision:input.context.revision} as const;
+    return {text:'Your draft is ready to review.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},proposals:[proposal]};
+   }
    if(f.answer){
     input.onText?.(f.answer,{provisional:false,direct:true});
     return {text:f.answer,messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session}};

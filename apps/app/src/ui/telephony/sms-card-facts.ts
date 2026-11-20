@@ -58,6 +58,6 @@ export function smsSendFacts(recipients: number, body: string): string {
   if (recipients > 1) lines.push('Each person gets their own text. This isn’t a group message.');
   const count = smsPartEstimate(body);
   if (count > 1) lines.push(`${recipients > 1 ? 'Each person likely gets it' : 'It likely goes'} as ${count} linked texts.`);
-  lines.push(`Approve sends it right away. ${SMS_CARRIER_CHARGES}`);
+  lines.push(`Send submits it right away. ${SMS_CARRIER_CHARGES}`);
   return lines.join('\n');
 }

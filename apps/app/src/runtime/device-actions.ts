@@ -32,6 +32,7 @@ import {
   type WorkflowNoticeRoute,
   type WorkflowPresentationOperation,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
+import type { ContactMatch } from './telephony-executor';
 import {
   CAMERA_CONTEXT_NOTICE,
   ContextNotice,
@@ -119,10 +120,14 @@ let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<string[]|n
 export function setContactReviewMatches(read: (query:string,signal:AbortSignal)=>Promise<string[]|null>) {
   contactReviewMatches=read;
 }
+let smsReviewRecipient: ((query:string,signal:AbortSignal)=>Promise<ContactMatch|null>)|undefined;
+export function setSmsReviewRecipient(read: (query:string,signal:AbortSignal)=>Promise<ContactMatch|null>) {
+  smsReviewRecipient=read;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null,smsRecipient:async(query,signal)=>smsReviewRecipient?smsReviewRecipient(query,signal):null});
   }
 }

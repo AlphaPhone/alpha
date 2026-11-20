@@ -15,9 +15,9 @@ import {
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts';
 import {contactLookupMatches} from '../../../../.eliza/client-features/packages/contracts/src/phone-dial.ts';
 import {telephonyActionResultText} from '../ui/telephony/telephony-receipt-text';
-import {contactChoiceName} from '../ui/telephony/telephony-messages';
+import {contactChoiceName,type ContactMatch} from '../ui/telephony/telephony-messages';
 
-export type ContactMatch = {id: string; name: string; number: string};
+export type {ContactMatch} from '../ui/telephony/telephony-messages';
 export type ContactRecord = {id: string; version: string; displayName: string; phoneNumbers: {number: string; type: string}[]; emailAddresses: {address: string; type: string}[]};
 export type ContactDraft = Omit<ContactRecord, 'id' | 'version'>;
 /** What the owner is shown on the phone before a telephony action takes effect. */
@@ -42,6 +42,8 @@ export type TelephonyPorts = {
   removeContact(id: string, version: string): Promise<{status: 'deleted' | 'stale' | 'not-found' | 'failed' | 'unknown'}>;
   /** The native send of one SMS the owner approved on its card, under `operationId`; a repeated id never sends twice. */
   sendSms(number: string, body: string, operationId: string, signal: AbortSignal): Promise<SmsComposeResult['status']>;
+  /** Exact on-device match already displayed with the body on the approved SMS card. */
+  reviewedSmsRecipient?: ContactMatch;
   /**
    * Puts a draft in the draft slot of the conversation the owner has open (only the one with exactly
    * `number`, when given), replacing any unsent text, which is kept for one Undo. `occupied`: a
@@ -159,26 +161,33 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
   // owner can edit it; the separate review is for a conversation that is not on screen.
   const replyThreadId = "replyThreadId" in operation ? operation.replyThreadId : undefined;
   const inOpenThread = (number: string) => ports.draftInOpenThread(operation.body, number, replyThreadId);
-  let number: string, placed: ReturnType<typeof inOpenThread>;
+  let number: string, placed: ReturnType<typeof inOpenThread> | undefined;
   if (target.kind === 'number') {
     // The approval card showed this exact number (`sms.compose.v2`), so nothing is asked again here.
-    number = target.number; placed = inOpenThread(number);
+    number = target.number;
   } else {
     let options: ContactMatch[];
     try { options = await numbers(target.query, ports); } catch { return result('unavailable'); }
     ports.current();
     if (!options.length) return result('not-found');
-    const only = options.length === 1 ? inOpenThread(options[0].number) : null;
-    if (only === 'drafted') return result('drafted');
-    // A name is never texted unseen: the lookup is a fuzzy filter and the card showed only the name,
-    // so the owner confirms or chooses the matched name and number here, even for one match.
-    const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
-    if (choice === null || !options[choice]) return result('cancelled');
-    ports.current();
-    number = options[choice].number; placed = only ?? inOpenThread(number);
+    const reviewed = ports.reviewedSmsRecipient, match = options[0];
+    if (reviewed) {
+      if (options.length !== 1 || match.id !== reviewed.id || match.name !== reviewed.name || match.number !== reviewed.number)
+        return result('unavailable');
+      number = match.number;
+    } else {
+      const only = draftOnly && options.length === 1 ? inOpenThread(match.number) : undefined;
+      if (only === 'drafted') return result('drafted');
+      // The card did not show an exact number; the owner's choice is required here.
+      const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
+      if (choice === null || !options[choice]) return result('cancelled');
+      ports.current();
+      number = options[choice].number; placed = only;
+    }
   }
-  if (placed === 'drafted') return result('drafted');
   if (draftOnly) {
+    placed ??= inOpenThread(number);
+    if (placed === 'drafted') return result('drafted');
     // A draft-only request never reaches the send review. That conversation is opened with the text
     // in its field; one that is open but busy (a send in flight, pictures attached) is left alone.
     if (placed !== 'none-selected') return result('unavailable');

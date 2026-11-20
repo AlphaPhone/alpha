@@ -26,7 +26,7 @@ import {aospImage} from './aosp-image';
 import {assertAutomationRequestAllowed, AutomationRequestNotDispatchedError, type AutomationsMethod} from './automations-route-policy.ts';
 import {iconStyle} from '../icon-style';
 import {validateUuid} from '../../../../vendor/eliza/packages/core/src/utils/uuid';
-import type {ConversationMessageTarget, ChatChannel, VoiceConversationBinding,VoiceTurnSignal,ReadReplyBinding,NativeNotesReadReplyHint} from './alpha-client';
+import type {ConversationMessageTarget, ChatChannel, VoiceConversationBinding,VoiceTurnSignal,ReadReplyBinding,NativeNotesReadReplyHint,RequestedViewProjection} from './alpha-client';
 import {ViewNavigationClient,type NavigationAttempt} from './view-navigation';
 import {captureConversationChoice,selectConversation,conversationSelectionDocument,type ConversationChoice} from './conversation-selection';
 import {developmentDigestDocument} from '../browser/development-digest-document';
@@ -3504,7 +3504,7 @@ export const connectionController = {
     try{current();const conversationId=await ensureSelectedConversation(selected,session,controller.signal,current);current();return {conversationId,session:{...session},connectionEpoch:generation};}
     finally{signal.removeEventListener('abort',cancel);releaseOperation(controller);}
   },
-  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
+  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>,projectRequestedView?:RequestedViewProjection): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
     if(!ownProviderSelected()&&state.cloudAccount&&state.membershipBalance==='zero')throw fundingNeeded();
     // P-43: before the resident has a session, say it is starting (or recovering); nothing is sent.
     if (!active && residentAlwaysPresent) throw noSessionError('');
@@ -3621,7 +3621,10 @@ export const connectionController = {
       if (selected.actions) {
         // A pending action that does not fit this screen, time zone or negotiated support is
         // named to the owner instead of being dropped; it stays unapprovable.
-        try { const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent}:undefined;
+        try { const projectView=channelType==='VOICE_DM'&&projectRequestedView
+          ? (findViewActionHandoff(reply.actionResults)?'canonical' as const:projectRequestedView)
+          : undefined;
+          const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,projectView}:undefined;
           let items = await selected.actions.pendingReview(context, requestSignal,authoredRequest);
           if(!failed&&directRequestedActions&&typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)){
             const performed=await selected.actions.performRequested(reply.userMessageId,context,requestSignal,async()=>!(await readDevicePreferences(requestSignal)).askBeforeAgentActions,undefined,authoredRequest);

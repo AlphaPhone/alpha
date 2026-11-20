@@ -61,6 +61,8 @@ export interface ActionProposal {
   reviewDestination?:'home'|'notes'|'calendar';
   /** Validated exact target for navigation only. Opening it never approves the operation. */
   reviewNoteTarget?:import('./notes-contract').NotesTarget;
+  /** Presentation of a validated SMS operation. Approval remains bound to the original proposal. */
+  smsReview?: 'draft' | 'send' | 'recipient';
   title: string;
   /** Human-readable exact target/action review. Must contain no secret values. */
   description: string;
@@ -80,6 +82,7 @@ export interface ConversationMessageTarget {
 /** A committed voice turn omits the text end-of-turn score (voice-adapter.ts `turnSignal`). */
 export type VoiceTurnSignal = Omit<import('@elizaos/voice/turn').VoiceTurnSignal,'endOfTurnProbability'>&{endOfTurnProbability?:number};
 export type ChatChannel = 'DM' | 'VOICE_DM';
+export type RequestedViewProjection = (view: string, signal: AbortSignal) => Promise<boolean>;
 export interface VoiceConversationBinding { conversationId:string;session:VerifiedSession;connectionEpoch:number }
 export interface ReadReplyBinding extends VoiceConversationBinding {cloudAccount:string}
 /** Local host projection invoked only inside the canonical claimed view effect. Never wire metadata or authority. */
@@ -130,6 +133,7 @@ export interface VerifiedSessionTransport {
     signal: AbortSignal;
     onText?:import('./local-agent-stream').StreamTextListener;
     onReplyReady?:(results:readonly unknown[]|undefined)=>void;
+    projectRequestedView?:RequestedViewProjection;
     replyTo?: ConversationMessageTarget;
   }): Promise<AgentReply>;
   /** Server must revalidate ownership, context/preconditions, approval and dedupe. */
@@ -196,11 +200,12 @@ export class AlphaClient {
   private localSelection: string | null = null;
   private active: AbortController | null = null;
   private activeWorkflow = false;
-  /** The context revision the request in flight answers for; moves only with `ownPageChange`. */
+  /** The request's revision follows only its own admitted navigation. */
   private activeRevision = 0;
   /** A page the request in flight changes itself (the agent's own Browser back, forward or reload). */
   private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
-  /** Each context an own page change published, keyed by its revision, with the context it replaced. */
+  private ownViewChange: { active: AbortController; from: string; to: string } | null = null;
+  /** Admitted navigation revisions and the contexts they replaced. */
   private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
   private consumed = new Set<string>();
@@ -261,6 +266,7 @@ export class AlphaClient {
     this.active = null;
     this.activeWorkflow = false;
     this.ownPageChange = null;
+    this.ownViewChange = null;
     this.ownMoves.clear();
     const old = this.transport;
     this.transport = null;
@@ -280,12 +286,16 @@ export class AlphaClient {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
-    const ownChange = this.isOwnPageChange(next, selection), previous = this.context;
+    const promisedView = this.ownViewChange;
+    const ownView = !!promisedView && promisedView.active === this.active &&
+      !this.context.sensitive && !next.sensitive && this.context.view === promisedView.from && next.view === promisedView.to;
+    this.ownViewChange = null;
+    const ownChange = ownView || this.isOwnPageChange(next, selection), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
-    // The request's own page command moved the page it acts on: the reply continues and answers
-    // for the new document. Approvals bound to the earlier document are still retired above.
+    // A view or page change committed by this request keeps its reply in flight.
+    // Approvals stay bound to the earlier screen and are retired above.
     if (ownChange) {
       this.activeRevision = this.context.revision;
       if (this.ownMoves.size >= 32) this.ownMoves.clear();
@@ -311,6 +321,14 @@ export class AlphaClient {
     const prior = this.ownPageChange?.active === active ? this.ownPageChange : null;
     const admitted = this.ownPageChange = { active, kind: page.kind, id: page.id };
     return () => { if (this.ownPageChange === admitted) this.ownPageChange = prior; };
+  }
+  /** Admit the one screen change projected by the current turn's exact, authenticated action. */
+  admitOwnViewChange(view: string): () => void {
+    const active = this.active;
+    if (!active || this.activeWorkflow || this.context.sensitive || view === this.context.view)
+      return () => {};
+    const admitted = this.ownViewChange = { active, from: this.context.view, to: view };
+    return () => { if (this.ownViewChange === admitted) this.ownViewChange = null; };
   }
   /**
    * True when the published context is `expected`, or was reached from it only by own page
@@ -429,6 +447,7 @@ export class AlphaClient {
       if (abortListener)
         controller.signal.removeEventListener("abort", abortListener);
       if (this.ownPageChange?.active === controller) this.ownPageChange = null;
+      if (this.ownViewChange?.active === controller) this.ownViewChange = null;
       if (this.active === controller) {
         this.active = null;
         this.activeWorkflow = false;
@@ -449,7 +468,7 @@ export class AlphaClient {
       return reply.text;
     },signal,automatic);
   }
-  async send(text: string, onText?:import('./local-agent-stream').StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal;images?:Array<{data:string;mimeType:string;name:string}>}): Promise<AgentReply> {
+  async send(text: string, onText?:import('./local-agent-stream').StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal;images?:Array<{data:string;mimeType:string;name:string}>;projectRequestedView?:RequestedViewProjection}): Promise<AgentReply> {
     if (!text.trim() && !(options?.channelType==='DM'&&options.images?.length)) throw new Error("Enter a message.");
     if(options?.channelType==='VOICE_DM'&&replyTo)throw Error("A voice turn cannot resend or edit a selected message.");
     return this.run(async (transport, context, signal) => {
@@ -459,6 +478,7 @@ export class AlphaClient {
         ...(options?{channelType:options.channelType,expectedConversationId:options.expectedConversationId,voiceTurnSignal:options.voiceTurnSignal}:{}),
         text,
         images:options?.images,
+        projectRequestedView:options?.projectRequestedView,
         ...(replyTo?{replyTo}:{}),
         context,
         signal,

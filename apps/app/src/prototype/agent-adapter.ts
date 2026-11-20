@@ -13,7 +13,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity,setSmsReviewRecipient} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -29,7 +29,7 @@ import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runti
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
 import {isTelephonyAction} from '../runtime/telephony-actions-contract';
-import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseTelephonyAction,type TelephonyPorts} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseTelephonyAction,type ContactMatch,type TelephonyPorts} from '../runtime/telephony-executor';
 import {contactChoiceName} from '../ui/telephony/telephony-messages';
 import {normalizePhoneNumber} from '../runtime/aosp-telephony';
 import {askTelephonyReview} from './telephony-review';
@@ -348,6 +348,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     signal.throwIfAborted();
     return found&&found.map(contact=>contactChoiceName(contact.displayName));
   });
+  setSmsReviewRecipient(async(query,signal)=>{
+    if(!aospImage)return null;
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    const matches=contactCallOptions(await client.searchContacts(query,CONTACT_CALL_LOOKUP_LIMIT),normalizePhoneNumber);
+    signal.throwIfAborted();
+    return matches.length===1&&matches[0].name.toLowerCase()===query.trim().toLowerCase()?matches[0]:null;
+  });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
   function modalPanels(){
@@ -470,7 +477,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
-    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+    const approvalLabel=proposal.smsReview==='draft'?'Open draft':proposal.smsReview==='send'?'Send':proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
+    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
   /**
    * AP-16 D8/AC-26: on a Phone, Messages or Contacts screen a pending action is one proposal card
@@ -488,7 +496,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const call=proposal.title==='Place call',target=callTargetOf(proposal);
     // AC-20: name and number; the phone's contacts fill in what the proposal leaves out (sayProposal).
     const text=target?callCardText(target,null,displayNumber):{title:call?'Call contact':proposal.title,detail:proposal.description};
-    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
+    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':review.approvalLabel,acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
   }
   /** A card update that also moves a proposal card's shown detail and state. */
   function cardWith(card:Shell,patch:Shell){
@@ -1009,7 +1017,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (connection.session) {
         alphaClient.attachVerifiedTransport({
           session: connection.session,
-          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images)),
+          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,projectRequestedView }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,projectRequestedView)),
           // Remote text is not authority to execute device actions. This path
           // accepts chat only until the server supports verified proposals.
           execute: ({ proposal, context, signal }) => connectionController.execute(proposal, context, signal),
@@ -1139,6 +1147,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
+          reviewedSmsRecipient:(journalIdentity as {smsRecipient?:ContactMatch}|undefined)?.smsRecipient,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
           placeCall:number=>client.placeCall(number),
           ...imageContactPorts(book,current),
@@ -1867,7 +1876,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.approvalLabel??(c.reviewDestination?'Open':'Approve'),icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'',text:'Keep things as they are.',label:declining?'':'Decline',ariaLabel:declining?'Declining…':'Decline Keep things as they are.',secondaryAction:true,icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
@@ -1997,6 +2006,35 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
+    const continuation=input.navigation;
+    const projectRequestedView=continuation?async(target:string,actionSignal:AbortSignal)=>{
+      const view=alphaViewKey(target);
+      const check=()=>{actionSignal.throwIfAborted();current();};
+      check();
+      if(!view)return false;
+      if(view===(this.S().view||'home'))return true;
+      let delivered=false;
+      const release=alphaClient.admitOwnViewChange(view);
+      try{
+        delivered=await continuation.apply(view,check,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{
+          try{
+            check();
+            if(!openInternalView(this,view,chat)){resolve(false);return;}
+            this.setState({},()=>{try{
+              check();
+              const next=alphaClient.getState().context;
+              if(next.view!==view||next.sensitive){resolve(false);return;}
+              onCommitted(next);resolve(true);
+            }catch(error){reject(error);}});
+          }catch(error){reject(error);}
+        }));
+      }finally{
+        release();
+        const next=continuation.finish(delivered);
+        if(next)acceptedContext=next;
+      }
+      return delivered&&acceptedContext.view===view;
+    }:undefined;
     try{
       // Explicit questions use the open page or file as a one-turn attachment.
       // Ordinary voice turns continue to send only the opaque selected-object observation.
@@ -2025,7 +2063,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       try{reply=await alphaClient.send(text,(value,frame)=>{current();streamed=true;
         if(frame?.provisional!==false)provisionalSeen=true;
         else if(input.onText&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
-        this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal,...(images?{images}:{})});}
+        this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal,projectRequestedView,...(images?{images}:{})});}
       finally{batchVoiceProgressEvents.removeEventListener('progress',progress);batchVoiceReplyEvents.removeEventListener('reply',replyStarted);}
       input.onReplyStarted?.();
       current();const identity=reply.messageBinding;
@@ -2076,8 +2114,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
       const completedActions=reply.completedActions;
       if(completedActions?.length)this.setState({},()=>{if(this.live&&connectionController.voiceConversationCurrent(binding,false))for(const receipt of completedActions)publishCommittedDeviceChanges(receipt,alphaClient,binding.session);});
-      const review=!!reply.proposals?.length||pendingNotice||emailCardReady;
-      const speechText=spokenActionReply(text,reply,emailCardReady);
+      // The SMS card can wait for its owner's input while Talk remains available.
+      // Receipt of the card itself never authorizes the SMS.
+      const smsReview=!pendingNotice&&!emailCardReady&&reply.proposals?.length===1?reply.proposals[0].smsReview:undefined;
+      const review=!smsReview&&(!!reply.proposals?.length||pendingNotice||emailCardReady);
+      const speechText=smsReview==='draft'?'Your draft is ready. Tap Open draft to see it in Messages.'
+        :smsReview==='send'?'Review the text on your phone, then tap Send.'
+        :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
+        :spokenActionReply(text,reply,emailCardReady);
       return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
       input.navigation?.finish(false);

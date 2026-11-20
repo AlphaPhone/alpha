@@ -113,3 +113,24 @@ test('a voice draft suggestion speaks naturally while chat keeps the full recipi
  await expect(voice(page)).toHaveCount(0);
  expect(await page.evaluate(()=> (window as any).ownedVoiceNavigation.shell.S().msgs.filter((m:any)=>m.from==='agent').at(-1)?.text)).toBe(answer);
 });
+test('a requested app projected before the reply keeps the voice sheet and rearms',async({page})=>{
+ await setup(page);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.projectBeforeReply=true);
+ await utterance(page,'notes');
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {projected:f.projected,chat:f.shell.S().chat,error:f.error};})).toEqual({projected:true,chat:'sheet',error:undefined});
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+});
+
+test('a text draft offers Open draft and returns to listening without sending',async({page})=>{
+ await setup(page);
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsDraft=true;f.prompt='Draft a text to Carson asking him to bring ice.';});
+ await utterance(page);
+ await expect(page.getByRole('button',{name:/Draft SMS.*Open draft/})).toBeVisible();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken)).toEqual(['Your draft is ready. Tap Open draft to see it in Messages.']);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+});
