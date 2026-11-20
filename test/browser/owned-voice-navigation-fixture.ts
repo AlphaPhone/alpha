@@ -25,11 +25,20 @@ export async function setup(page:Page,detent='sheet',development=false){
     const proposal={id:'draft-review',title:'Draft SMS',description:'To: Carson\n\nCan you bring ice?',smsReview:'draft',expiresAt:Date.now()+60000,contextRevision:input.context.revision} as const;
     return {text:'Your draft is ready to review.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},proposals:[proposal]};
    }
+   if(f.smsSendReview){
+    const proposal={id:'send-reviewed-text',title:'Review SMS',description:'To: Carson (+15550100200)\n\nCan you bring ice?',smsReview:'send',expiresAt:Date.now()+60000,contextRevision:input.context.revision} as const;
+    return {text:'Here is the text to review.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},proposals:[proposal]};
+   }
    if(f.answer){
     input.onText?.(f.answer,{provisional:false,direct:true});
     return {text:f.answer,messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session}};
    }
-   const id=crypto.randomUUID(),viewId=f.target==='home'?'chat':f.target,values={mode:'show',viewId,viewPath:'/'+viewId,viewType:'gui',label:f.target,completedActionDelivered:true,completedActionHandoffId:id,navigationPrepared:true,navigationBinding:{clientId:navigation.clientId,requestId:id,viewId,viewType:'gui',installationId:f.installationId}};return {text:'Opened '+f.target+'.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},actionResults:[{actionName:'VIEWS_SHOW',success:true,values}]};},execute:async()=>{throw Error('No approval or device action is admitted');}};
+   const id=crypto.randomUUID(),viewId=f.target==='home'?'chat':f.target,values={mode:'show',viewId,viewPath:'/'+viewId,viewType:'gui',label:f.target,completedActionDelivered:true,completedActionHandoffId:id,navigationPrepared:true,navigationBinding:{clientId:navigation.clientId,requestId:id,viewId,viewType:'gui',installationId:f.installationId}};return {text:'Opened '+f.target+'.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},actionResults:[{actionName:'VIEWS_SHOW',success:true,values}]};},execute:async({proposal,signal})=>{
+    signal.throwIfAborted();
+    if(!f.smsSendReview||proposal.id!=='send-reviewed-text')throw Error('No approval or device action is admitted');
+    (f.approvedTexts??=[]).push(proposal.id);
+    return {proposalId:proposal.id,status:'succeeded',summary:'Text submitted.'};
+   }};
   BrowserVoice.prototype.getRecordingMetrics=async function(input){f.mediaDriver=this;if(f.peak>0)(f.speechSamples??=[]).push(performance.now());return {recordingId:input.recordingId,peak:f.peak};};
   BrowserVoice.prototype.synthesize=async(input:any)=>{(f.spoken??=[]).push(input.text);(window as any).cloudNotesVoice.syntheses++;if(f.holdSynthesis)await new Promise<void>(resolve=>f.releaseSynthesis=resolve);return {playbackId:crypto.randomUUID()};};
   BrowserVoice.prototype.play=async function(input:any){f.playAdmissions=(f.playAdmissions||0)+1;f.finishPlayback=()=>void (this as any).notifyListeners('playbackEnded',input);};

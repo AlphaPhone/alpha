@@ -544,7 +544,7 @@ export class AlphaClient {
     },options?.signal);
   }
   /** Call only after the user reviews and explicitly approves this exact proposal. */
-  async approve(proposalId: string): Promise<OperationReceipt> {
+  async approve(proposalId: string, approvalSignal?: AbortSignal): Promise<OperationReceipt> {
     const proposal = this.proposals.get(proposalId);
     if (
       !proposal ||
@@ -581,7 +581,7 @@ export class AlphaClient {
         );
       }
       return { ...receipt };
-    });
+    }, approvalSignal);
   }
 }
 export const alphaClient = new AlphaClient();

@@ -478,7 +478,20 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
     const approvalLabel=proposal.smsReview==='draft'?'Open draft':proposal.smsReview==='send'?'Send':proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
-    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+  }
+  function visibleSmsReview(proposalId:string):boolean {
+    if(document.hidden||document.querySelector('dialog[open]'))return false;
+    const rows=Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-voice-send-review]'))
+      .filter(row=>row.dataset.alphaVoiceSendReview===proposalId&&!row.closest('[inert],[hidden],[aria-hidden="true"]'));
+    return rows.some(row=>{
+      const clip=row.closest('[data-alpha-transcript]')?.getBoundingClientRect();
+      const review=row.getBoundingClientRect();
+      if(!clip||review.height<=0||review.top<Math.max(clip.top,0)-1||
+        review.bottom>Math.min(clip.bottom,window.innerHeight)+1||getComputedStyle(row).visibility!=='visible')return false;
+      const hit=document.elementFromPoint(review.left+review.width/2,review.top+review.height/2);
+      return !!hit&&row.contains(hit);
+    });
   }
   /**
    * AP-16 D8/AC-26: on a Phone, Messages or Contacts screen a pending action is one proposal card
@@ -1867,7 +1880,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // title repeated as the detail and no second copy printed above it.
       if(c.systemNotice&&m.cGeneric)return {...m,cGeneric:false,cNotice:true,noticeSub:c.sub&&c.sub!==c.title?c.sub:'',hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub&&m.displayText!==c.title};
       const waitingForReply=!!c.recovered&&this.S().typing;
-      if(m.cProposal&&waitingForReply)return {...m,proposalDisabled:true};
+      const voiceSendId=c.smsReview==='send'&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
+      if(m.cProposal)return {...m,voiceSendId,...(waitingForReply?{proposalDisabled:true}:{})};
       if(!c.proposalId||c.done||c.reviewUnavailable||!m.cGeneric)return m;
       const message=live.find(item=>item.card===c);if(!message)return m;
       // Only the card being approved or declined shows progress; the others stay readable but wait.
@@ -1876,7 +1890,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.approvalLabel??(c.reviewDestination?'Open':'Approve'),icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.approvalLabel??(c.reviewDestination?'Open':'Approve'),voiceSendId:busy||held||waitingForReply?'':voiceSendId,reviewTextStyle:c.smsReview?'white-space:pre-wrap;overflow-wrap:anywhere;':'',icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'',text:'Keep things as they are.',label:declining?'':'Decline',ariaLabel:declining?'Declining…':'Decline Keep things as they are.',secondaryAction:true,icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
@@ -1999,11 +2013,31 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
   };
-  p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
+  p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;approvalSignal?:AbortSignal;talkGeneration?:number;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
     const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
+    const reviewed=this.pendingVoiceSmsReview;
+    this.pendingVoiceSmsReview=undefined;
+    // The immediate next accepted microphone turn can confirm exactly one displayed Send card.
+    // Never send the confirmation to the model or reopen a consumed approval.
+    if(/^(?:yes[,]?\s+)?send this (?:text|message)[.!]?$/i.test(text.trim())){
+      const message=reviewed&&input.approvalSignal&&reviewed.generation===input.talkGeneration&&
+        reviewed.conversationId===binding.conversationId&&reviewed.revision===input.context.revision&&
+        reviewed.expiresAt>Date.now()&&this.emergencyLive?.()!==true&&visibleSmsReview(reviewed.id)
+        ?this.S().msgs.find((m:Shell)=>m.card?.proposalId===reviewed.id&&m.card.smsReview==='send'&&
+          m.card.sub===reviewed.details&&!m.card.done&&!m.card.recovered&&!m.card.reviewUnavailable&&
+          (m.card.type!=='proposal'||m.card.state==='open')):undefined;
+      input.approvalSignal?.throwIfAborted();
+      this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+      const receipt=message?await this.cardAct(message,input.approvalSignal):undefined;
+      current();
+      const answer=receipt?.summary??(message?'I couldn’t confirm the send. Check Messages before trying again.':'There’s no visible text review ready to send.');
+      const replyId=receipt?`device-receipt:${receipt.proposalId}`:`voice-review:${turnId}`;
+      if(!receipt)this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
+      return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     const continuation=input.navigation;
@@ -2118,8 +2152,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // Receipt of the card itself never authorizes the SMS.
       const smsReview=!pendingNotice&&!emailCardReady&&reply.proposals?.length===1?reply.proposals[0].smsReview:undefined;
       const review=!smsReview&&(!!reply.proposals?.length||pendingNotice||emailCardReady);
+      if(smsReview==='send'&&input.talkGeneration!==undefined&&input.approvalSignal){
+        const proposal=reply.proposals![0];
+        this.pendingVoiceSmsReview={id:proposal.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:proposal.contextRevision,expiresAt:proposal.expiresAt,details:proposal.description};
+      }
       const speechText=smsReview==='draft'?'Your draft is ready. Tap Open draft to see it in Messages.'
-        :smsReview==='send'?'Review the text on your phone, then tap Send.'
+        :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
         :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
         :spokenActionReply(text,reply,emailCardReady);
       return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
@@ -2461,7 +2499,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.setState({ msgs: this.S().msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, declined: true, title: 'Declined', sub: result.message }) } : m) });
   };
   const originalCardAct=p.cardAct;
-  p.cardAct = async function (message: Shell) {
+  p.cardAct = async function (message: Shell, voiceSignal?:AbortSignal) {
     const card = message.card || {};
     // AC-26: a replaced or finished proposal never acts. A view's own proposal (a fixture call or
     // "Screen it") is dispatched by the shell to that view's action; live ones are approved below.
@@ -2528,7 +2566,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(card.expiresAt<=Date.now()){
         this.setState((previous:Shell)=>({msgs:previous.msgs.map((m:Shell)=>m.id===message.id?{...m,card:cardWith(m.card,{reviewUnavailable:true,title:'Review expired',sub:'This review has expired. Request a new action if still needed.'})}:m)}));return;
       }
+      const abortVoiceApproval=()=>this.pendingActionApproval?.abort(voiceSignal?.reason);
       try {
+        voiceSignal?.throwIfAborted();
         context(this);
         const session=connectionController.getSnapshot().session;
         if(card.recovered&&JSON.stringify(card.proposalSession)!==JSON.stringify(session))throw Error('The agent changed. Review this action again.');
@@ -2555,13 +2595,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
         this.pendingActionRecoveryAbort?.abort();
         const approval=this.pendingActionApproval=new AbortController();
+        voiceSignal?.addEventListener('abort',abortVoiceApproval,{once:true});
         this.pendingActionApprovalProposalId=card.proposalId;
         this.pendingActionApprovalContext=alphaClient.getState().context;this.pendingActionApprovalSession=session;this.setState({});
         const sessionId = session?.sessionId;
         const beforeView = this.S().view;
         let receipt;
         const readLease=this.readReplyLeases?.get(card.proposalId);
-        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId); }
+        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId,approval.signal); }
         catch (error) {
           // Navigation may cancel the context-bound chat wait after the effect.
           // Await only that already-started journaled action; never execute again.
@@ -2585,8 +2626,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!alphaClient.getState().pending)this.notesCommittedHandler?.();
           publishCommittedDeviceChanges(receipt,alphaClient,session);
         }});
+        return receipt;
       } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
-      finally {this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
+      finally {voiceSignal?.removeEventListener('abort',abortVoiceApproval);this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
     } else if (card.go) this.openView(card.go.view, card.go.patch);
   };
   p.startVoice = async function () {
