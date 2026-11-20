@@ -117,6 +117,7 @@ public final class AlphaTelephonySendTest {
     boolean imageAllowed=true, smsAllowed=true;
     /** The chat's action journal, in memory: the cards the owner approved. */
     final ActionJournal approvals;
+    final Map<String, String> deviceClaims = new HashMap<>();
     final java.util.Set<String> contactNumbers = new java.util.HashSet<>();
     Host(AppCompatActivity activity) {
       this.activity = activity;
@@ -126,6 +127,7 @@ public final class AlphaTelephonySendTest {
         public void write(String slot, String value) { slots.put(slot, value); }
       }, ActionJournal.BOUNDED_RESULTS);
     }
+    @Override protected synchronized boolean reserveSmsClaim(String id, String binding) { return deviceClaims.putIfAbsent(id, binding) == null; }
     @Override protected ActionJournal approvals() { return approvals; }
     @Override protected boolean contactNumber(String number) { return contactNumbers.contains(number); }
     @Override public Context getContext() { return activity; }
@@ -333,7 +335,7 @@ public final class AlphaTelephonySendTest {
     Host host = host("replayed-sms");
     approve(host, smsSend(TEXT, 1));
     // The approval already admitted a dispatch whose send record is gone (lost before it was written).
-    AlphaApprovedSms.claim(host.approvals, card("cancel-1"), "cancel-1", new String[] {NUMBER}, TEXT, 1, number -> false, System.currentTimeMillis());
+    AlphaApprovedSms.claim(host.approvals, host::reserveSmsClaim, card("cancel-1"), "cancel-1", new String[] {NUMBER}, TEXT, 1, number -> false, System.currentTimeMillis());
     Call replay = send("sendSms");
     host.sendSms(replay);
     settle();
@@ -341,7 +343,7 @@ public final class AlphaTelephonySendTest {
     noDialog();
     noRadioAndNoRetainedOwner(host);
     // The claim is written once: a second claim of the same approval is refused.
-    try { AlphaApprovedSms.claim(host.approvals, card("cancel-1"), "cancel-1", new String[] {NUMBER}, TEXT, 1, number -> false, System.currentTimeMillis()); fail("claimed twice"); }
+    try { AlphaApprovedSms.claim(host.approvals, host::reserveSmsClaim, card("cancel-1"), "cancel-1", new String[] {NUMBER}, TEXT, 1, number -> false, System.currentTimeMillis()); fail("claimed twice"); }
     catch (SecurityException expected) {}
   }
   @Test public void aTextToANumberOrContactMatchesItsApprovedCard() throws Exception {
