@@ -1824,7 +1824,7 @@ export const REPLY_FAILURES = {
   context_overflow: 'Too long',
   missing_capability: 'Not supported',
   planner_exhaustion: 'Couldn’t finish',
-  handler_error: 'Partly done · Check first',
+  handler_error: 'Couldn’t finish',
   reply_generation_error: 'No reply',
   persistence_error: 'Reply not saved',
   local_inference: 'No answer',

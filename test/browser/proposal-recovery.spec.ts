@@ -112,7 +112,7 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
       await expect(page.getByText('Review Notes on Home',{exact:true})).toBeVisible();
     } else {
       const failure = mode === 'rate-limit-empty' ? /The AI request rate limit was reached/
-        : /Partly done · Check first/;
+        : /Couldn’t finish/;
       await expect(page.getByText(failure).first()).toBeVisible();
       await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
     }
