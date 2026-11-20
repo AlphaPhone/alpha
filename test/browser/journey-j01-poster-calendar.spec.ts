@@ -36,7 +36,8 @@ const ready=(page:Page)=>expect(page.getByRole('button',{name:'Settings',exact:t
 /** Ask Alpha to scan the poster, correct the recognized text and open the event suggestions. */
 async function scanPoster(page:Page){
  const dialog=page.getByRole('dialog',{name:'Review scanned text'}),text=dialog.getByRole('textbox',{name:'Scanned text'});
- await page.getByRole('button',{name:'Type',exact:true}).click();{const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();await input.fill('Scan this');await input.press('Enter');}
+ const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
+ await expect(input).toBeVisible();await input.fill('Scan this');await input.press('Enter');
  await expect(text).toBeEnabled({timeout:120_000});
  // The real local OCR result must already contain the poster's date and time.
  await expect(text).toHaveValue(/Open studio/);await expect(text).toHaveValue(/October 10, 2026/);await expect(text).toHaveValue(/6:30 PM/);
@@ -72,7 +73,7 @@ test('J01 poster scan becomes exactly one reviewed Calendar event; suggestions a
  expect(await events(page)).toHaveLength(0);
 
  // 1. Scan, review suggestions, then cancel from the scan review: nothing is saved.
- await openScanMode(page);
+ await openScanMode(page);await page.getByRole('button',{name:'Type',exact:true}).click();
  let dialog=await scanPoster(page);
  expect(await events(page)).toHaveLength(0);
  await dialog.getByRole('button',{name:'Close scan',exact:true}).click();
