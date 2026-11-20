@@ -1,15 +1,17 @@
 #!/usr/bin/env bun
 /**
- * Measures how the hosted text model's prompt cache treats a request: the size of the
- * unit it reuses, and the order in which it reads tool definitions, the system prompt and
- * the messages. scripts/agent-context-audit.ts applies those two facts to recorded
- * requests (CEREBRAS_QWEN), so run this again when the provider or the model changes.
+ * Measures how the hosted text model treats a request: the size of the unit its prompt
+ * cache reuses, the order in which it reads tool definitions, the system prompt and the
+ * messages, and how many tokens a request holds against the per-minute limit when it is
+ * admitted. scripts/agent-context-audit.ts applies those facts to recorded requests
+ * (CEREBRAS_QWEN), so run this again when the provider or the model changes.
  *
  *   bun scripts/agent-cache-probe.ts [--key-file <path>] [--model <id>] [--base <url>]
  *
- * It sends about 20 synthetic requests, roughly 70K tokens in all, with the key in the
- * owner-only file ~/.config/alphaphone/cerebras-key. Nothing from a phone is sent, and
- * each run marks its requests so an earlier run cannot answer for it.
+ * It sends about 25 synthetic requests, roughly 75K tokens in all, with the key in the
+ * owner-only file ~/.config/alphaphone/cerebras-key, and takes about two minutes because
+ * the admission measurements each start from a refilled limit. Nothing from a phone is
+ * sent, and each run marks its requests so an earlier run cannot answer for it.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
@@ -39,7 +41,23 @@ export function orderOf(cached: Record<Part, number>): Part[] | null {
   return cached[order[0]] < cached[order[1]] && cached[order[1]] < cached[order[2]] ? order : null;
 }
 
-type Body = { model: string; messages: { role: string; content: string }[]; tools?: unknown[]; tool_choice?: string; reasoning_effort: string; max_tokens: number; stream: false };
+/** What the provider held when it admitted a request, from the rate-limit headers that precede the body. */
+export type Admission = { cap: number | null; prompt: number; held: number };
+
+/**
+ * The two admission facts the audit uses. A capped request holds its estimated input plus
+ * its cap, so the smallest cap gives the input estimate; an uncapped one holds the same
+ * input plus a fixed amount.
+ */
+export function admissionOf(samples: Admission[]): { inputFactor: number; uncappedHold: number } | null {
+  const capped = samples.filter((sample): sample is Admission & { cap: number } => sample.cap !== null).sort((a, b) => a.cap - b.cap)[0];
+  const uncapped = samples.find(sample => sample.cap === null);
+  if (!capped || !uncapped || capped.prompt <= 0) return null;
+  const input = capped.held - capped.cap;
+  return { inputFactor: input / capped.prompt, uncappedHold: uncapped.held - input };
+}
+
+type Body = { model: string; messages: { role: string; content: string }[]; tools?: unknown[]; tool_choice?: string; reasoning_effort: string; max_tokens?: number; stream: boolean; stream_options?: { include_usage: boolean } };
 
 /** One request of about 6,500 tokens: three tools, a system prompt and a user message, each marked. */
 export function probeRequest(model: string, marks: Record<Part, string>): Body {
@@ -119,11 +137,30 @@ if (import.meta.main) {
   }
   sized.push(same);
 
+  console.log('Held at admission: one fresh request per output cap, each after the limit has refilled');
+  const admit = async (cap: number | null): Promise<Admission> => {
+    await new Promise(resolve => setTimeout(resolve, 20_000));
+    const body: Body = { ...sizedRequest(model, randomUUID(), 40), stream: true, stream_options: { include_usage: true } };
+    if (cap === null) delete body.max_tokens;
+    else body.max_tokens = cap;
+    const response = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(`Provider answered ${response.status}`);
+    const limit = Number(response.headers.get('x-ratelimit-limit-tokens-minute'));
+    const remaining = Number(response.headers.get('x-ratelimit-remaining-tokens-minute'));
+    const prompt = Number(/"prompt_tokens":\s*(\d+)/.exec(await response.text())?.[1] ?? 0);
+    console.log(`  cap ${String(cap ?? 'none').padStart(5)}  prompt ${String(prompt).padStart(6)}  held ${String(limit - remaining).padStart(6)}`);
+    return { cap, prompt, held: limit - remaining };
+  };
+  const admission = admissionOf([await admit(16), await admit(4096), await admit(null)]);
+
   const unit = unitOf(sized);
   const order = orderOf(changed);
   console.log(`\nUnit of reuse: ${unit ?? 'not shown (nothing was reused)'} tokens; the audit assumes ${CEREBRAS_QWEN.cacheBlockTokens}`);
   console.log(`Order read: ${order ? order.join(', ') : 'not shown'}; the audit assumes tools, system, messages`);
-  if (unit !== CEREBRAS_QWEN.cacheBlockTokens || order?.join() !== 'tools,system,messages') {
+  console.log(`Held with no cap: ${admission?.uncappedHold ?? 'not shown'} output tokens; the audit assumes ${CEREBRAS_QWEN.uncappedOutputHold}`);
+  console.log(`Input held per prompt token: ${admission ? admission.inputFactor.toFixed(2) : 'not shown'}; the audit assumes ${CEREBRAS_QWEN.admissionInputFactor}`);
+  const admissionMatches = admission !== null && admission.uncappedHold === CEREBRAS_QWEN.uncappedOutputHold && Math.abs(admission.inputFactor - CEREBRAS_QWEN.admissionInputFactor) <= 0.1;
+  if (unit !== CEREBRAS_QWEN.cacheBlockTokens || order?.join() !== 'tools,system,messages' || !admissionMatches) {
     console.log('The provider no longer matches what scripts/agent-context-audit.ts assumes. Update CEREBRAS_QWEN and simulateProvider.');
     process.exit(1);
   }

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {audit, bucketsOf, CEREBRAS_QWEN, estimateTokens, readUsage, renderReport, renderSimulation, simulateProvider, stageOf, wireText} from '../scripts/agent-context-audit.ts';
 
 const system = 'You are Alpha.\n\n';
+// The limit tests below state their thresholds in tokens a call uses: no estimate margin, no hold for a missing cap.
+const PLAIN = {...CEREBRAS_QWEN, admissionInputFactor: 1, uncappedOutputHold: 0};
 // About 1,900 tokens of history, the same on every call that carries it.
 const receipts = JSON.stringify(Array.from({length: 120}, (_, row) => [`history:${row}`, [['NOTES_CREATE', true, [row]]]]));
 const stage1 = (at, history, message, extra = {}) => ({
@@ -119,17 +121,17 @@ test('the provider simulation counts a call against both per-minute limits, with
   const receipts = 'x '.repeat(4000);
   const calls = [0, 10_000, 20_000].map((at, index) => stage1(at, `${index}${receipts}`, 'go', {maxTokens: 2000}));
   const each = simulateProvider([calls[0]]).inputTokens;
-  const fits = simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm: 3 * each + 2000, totalTpm: 10 * each});
+  const fits = simulateProvider(calls, {...PLAIN, uncachedTpm: 3 * each + 2000, totalTpm: 10 * each});
   assert.equal(fits.uncachedMinute.callsOver, 0);
   assert.equal(fits.uncachedMinute.max, 3 * each);
   // The third call's cap no longer fits, though what was used so far does.
-  const tight = simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm: 3 * each + 1999, totalTpm: 10 * each});
+  const tight = simulateProvider(calls, {...PLAIN, uncachedTpm: 3 * each + 1999, totalTpm: 10 * each});
   assert.equal(tight.uncachedMinute.callsOver, 1);
   assert.equal(tight.turnsOver, 1);
   // A stage with no recorded cap takes the reserve given for it; cached tokens are exempt
   // from the uncached limit and not from the total one.
   const shared = [0, 10_000].map(at => stage1(at, receipts, 'go'));
-  const reused = simulateProvider(shared, {...CEREBRAS_QWEN, outputReserve: {stage1: 500}});
+  const reused = simulateProvider(shared, {...PLAIN, outputReserve: {stage1: 500}});
   assert.ok(reused.uncachedMinute.max < reused.totalMinute.max);
   assert.equal(reused.totalMinute.max, reused.inputTokens);
   assert.match(renderSimulation(reused), /Cached \d+ of \d+ input tokens: \d+\.\d%/);
@@ -141,7 +143,7 @@ test('the per-minute windows follow when calls start, not when they finish', () 
   // Started at 0 s, 30 s and 70 s; finished at 100 s, 31 s and 71 s.
   const calls = [[100_000, 100_000], [31_000, 1_000], [71_000, 1_000]].map(([at, ms], index) => stage1(at, `${index}${history}`, 'go', {ms}));
   const each = simulateProvider([calls[0]]).inputTokens;
-  const result = simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm: 2 * each, totalTpm: 2 * each});
+  const result = simulateProvider(calls, {...PLAIN, uncachedTpm: 2 * each, totalTpm: 2 * each});
   assert.equal(result.cachedTokens, 0);
   // The third call starts more than 60 s after the first did, so no window holds all three.
   assert.equal(result.uncachedMinute.max, 2 * each);
@@ -152,7 +154,7 @@ test('the per-minute windows follow when calls start, not when they finish', () 
 
 test('a call still running when another starts is held at its output cap, a finished one at what it used', () => {
   const running = (start, hash, extra = {}) => stage1(start + 30_000, '[]', 'go', {ms: 30_000, maxTokens: 8192, usage: {input: 20_000, output: 300, cached: 0}, tools: [{name: 'PROPOSE_DEVICE_ACTION', chars: 28_000, hash}], ...extra});
-  const over = (calls, uncachedTpm, model = {}) => simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm, ...model}).uncachedMinute.callsOver;
+  const over = (calls, uncachedTpm, model = {}) => simulateProvider(calls, {...PLAIN, uncachedTpm, ...model}).uncachedMinute.callsOver;
   // The second starts 5 s into the first: 20,000 in and the 8,192 cap for each.
   const overlapping = [running(0, 'aaaa'), running(5_000, 'bbbb')];
   assert.equal(over(overlapping, 56_384), 0);
@@ -162,8 +164,8 @@ test('a call still running when another starts is held at its output cap, a fini
   assert.equal(over(sequential, 48_492), 0);
   assert.equal(over(sequential, 48_491), 1);
   // The total limit holds the cap the same way.
-  assert.equal(simulateProvider(overlapping, {...CEREBRAS_QWEN, totalTpm: 56_384}).totalMinute.callsOver, 0);
-  assert.equal(simulateProvider(overlapping, {...CEREBRAS_QWEN, totalTpm: 56_383}).totalMinute.callsOver, 1);
+  assert.equal(simulateProvider(overlapping, {...PLAIN, totalTpm: 56_384}).totalMinute.callsOver, 0);
+  assert.equal(simulateProvider(overlapping, {...PLAIN, totalTpm: 56_383}).totalMinute.callsOver, 1);
   // The 60-second figures report what was used, not what was held.
   assert.equal(simulateProvider(overlapping).uncachedMinute.max, 40_600);
 
@@ -177,13 +179,13 @@ test('a call still running when another starts is held at its output cap, a fini
   const sequentialSilent = [running(0, 'aaaa', silent), running(31_000, 'bbbb', silent)];
   assert.equal(over(sequentialSilent, 2 * each + 500, reserve), 0);
   assert.equal(over(sequentialSilent, 2 * each + 499, reserve), 1);
-  assert.equal(simulateProvider(overlappingSilent, {...CEREBRAS_QWEN, ...reserve}).uncachedMinute.max, 2 * each);
+  assert.equal(simulateProvider(overlappingSilent, {...PLAIN, ...reserve}).uncachedMinute.max, 2 * each);
 });
 
 test('where a call carries the provider\'s cached count, the hit rate and the uncached windows use it and not the rules', () => {
   const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 3_000, hash: 'bbbb'}];
   const calls = cached => [0, 20_000, 40_000].map((at, index) => stage1(at, receipts, `message ${index}`, {tools, usage: {input: 12_000, output: 50, ...cached(index)}}));
-  const tight = {...CEREBRAS_QWEN, uncachedTpm: 30_000};
+  const tight = {...PLAIN, uncachedTpm: 30_000};
   // By the rules the second and third calls would each reuse 6,144 tokens. The provider reused none.
   const missed = simulateProvider(calls(() => ({cached: 0})), tight);
   assert.deepEqual(missed.reported, {calls: 3, provider: 0, simulated: 12_288});
@@ -216,4 +218,29 @@ test('a cached count the provider did not report stays absent when a logged call
   assert.deepEqual(readUsage({response: {usage: {prompt_tokens: 9000, completion_tokens: 30, prompt_tokens_details: {cached_tokens: 8192}}}}), {input: 9000, output: 30, cached: 8192});
   assert.equal(readUsage({}), undefined);
   assert.equal(audit([stage1(0, '[]', 'one', {usage: {input: 9000, output: 30}})]).providerUsage.cached, 0);
+});
+
+// Measured on the provider: at admission a call holds its whole input, cached or not, estimated
+// about a quarter high, plus its output cap, or 16,384 tokens when it sends no cap.
+test('a call is admitted against its estimated input and its cap, and charged what it used', () => {
+  assert.equal(CEREBRAS_QWEN.admissionInputFactor, 1.25);
+  assert.equal(CEREBRAS_QWEN.uncappedOutputHold, 16_384);
+  const receipts = 'x '.repeat(4000);
+  const call = (at, extra = {}) => stage1(at, receipts, 'go', extra);
+  const input = simulateProvider([call(0)]).inputTokens;
+  const over = (calls, uncachedTpm) => simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm}).uncachedMinute.callsOver;
+  const held = Math.round(1.25 * input);
+  // No cap sent: the provider holds 16,384 for the output.
+  assert.equal(over([call(0)], held + 16_384), 0);
+  assert.equal(over([call(0)], held + 16_383), 1);
+  // A cap replaces that hold.
+  assert.equal(over([call(0, {maxTokens: 4096})], held + 4096), 0);
+  assert.equal(over([call(0, {maxTokens: 4096})], held + 4095), 1);
+  // A cached prefix lowers what the call is charged, not what it needs to start.
+  const warm = [call(0, {maxTokens: 16}), call(20_000, {maxTokens: 16})];
+  const result = simulateProvider(warm, {...CEREBRAS_QWEN, uncachedTpm: input + held + 16});
+  assert.ok(result.cachedTokens > 0);
+  assert.equal(result.uncachedMinute.callsOver, 0);
+  assert.equal(over(warm, input + held + 15), 1);
+  assert.ok(result.uncachedMinute.max < 2 * input);
 });

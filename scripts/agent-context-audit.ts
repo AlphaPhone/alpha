@@ -275,10 +275,14 @@ export type ProviderModel = {
   totalTpm: number;
   cacheBlockTokens: number;
   cacheMinutes: number;
-  /** Output tokens to count at admission for a stage whose calls record no cap. */
+  /** What a call holds at admission for its input, as a multiple of the tokens it turns out to have. */
+  admissionInputFactor: number;
+  /** Output tokens a call holds at admission when it sends no cap. */
+  uncappedOutputHold: number;
+  /** The cap a stage's calls sent, where the log does not record it (runtimes before the usage record). */
   outputReserve?: Record<string, number>;
 };
-export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 5 };
+export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 5, admissionInputFactor: 1.25, uncappedOutputHold: 16_384 };
 
 export type ProviderSimulation = ReturnType<typeof simulateProvider>;
 
@@ -296,13 +300,13 @@ export type ProviderSimulation = ReturnType<typeof simulateProvider>;
  * messages alone, as if their definitions were equal. That is the estimate their record
  * allows, not a bound.
  *
- * Each 60-second figure sums the calls that started in the 60 seconds up to a call:
- * input, less cached tokens for the uncached figure, plus the output the provider
- * reported, which is unknown and counted as zero on a call without usage. A call starts
- * over a limit when that sum exceeds it with the output cap (recorded, or the stage's
- * reserve) in place of the output for the call itself and for every call still running
- * at that instant. That a call gives back the unused part of its cap when it finishes is
- * an assumption, not a measurement.
+ * Each 60-second figure sums what the calls that started in the 60 seconds up to a call
+ * were charged: input that missed the cache, plus the output the provider reported
+ * (unknown, and counted as zero, on a call without usage). A call starts over a limit when
+ * that sum, plus what calls still running hold beyond their charge, plus what this call
+ * holds at admission, exceeds it. Measured on the provider, a call holds its whole input,
+ * cached or not, estimated about a quarter high, plus its output cap, or 16,384 tokens when
+ * it sends no cap.
  */
 export function simulateProvider(calls: RecordedCall[], model: ProviderModel = CEREBRAS_QWEN) {
   const cacheMs = model.cacheMinutes * 60_000;
@@ -342,7 +346,12 @@ export function simulateProvider(calls: RecordedCall[], model: ProviderModel = C
     row.cached = Math.min(row.input, row.call.usage?.cached ?? row.simulated);
   });
 
-  const reserve = (row: Row) => row.call.maxTokens ?? model.outputReserve?.[row.stage] ?? 0;
+  // Measured: at admission a call holds its whole input, cached or not, estimated high, plus
+  // its output cap, or a fixed amount when it sends none. When it finishes it is charged what
+  // it used: input that missed the cache, and output.
+  const reserve = (row: Row) => row.call.maxTokens ?? model.outputReserve?.[row.stage] ?? model.uncappedOutputHold;
+  const admitted = (row: Row) => Math.round(model.admissionInputFactor * row.input) + reserve(row);
+  const charged = (row: Row) => row.input - row.cached + (row.call.usage?.output ?? 0);
   const byStart = [...rows].sort((a, b) => a.start - b.start);
   const uncachedWindows: number[] = [];
   const totalWindows: number[] = [];
@@ -357,15 +366,15 @@ export function simulateProvider(calls: RecordedCall[], model: ProviderModel = C
       uncached -= old.input - old.cached + (old.call.usage?.output ?? 0);
       total -= old.input + (old.call.usage?.output ?? 0);
     }
-    // Admission counts the cap; what stays in the window once a call has finished is what
-    // it used. One still running when this call starts is still held at its cap.
+    // What stays in the window once a call has finished is what it was charged. One still
+    // running when this call starts is held at what it was admitted with.
     let held = 0;
     for (let at = first; at < end; at++) {
       const old = byStart[at];
-      if (old.call.at > row.start) held += Math.max(0, reserve(old) - (old.call.usage?.output ?? 0));
+      if (old.call.at > row.start) held += Math.max(0, admitted(old) - charged(old));
     }
-    const over = uncached + held + row.input - row.cached + reserve(row) > model.uncachedTpm;
-    const overAll = total + held + row.input + reserve(row) > model.totalTpm;
+    const over = uncached + held + admitted(row) > model.uncachedTpm;
+    const overAll = total + held + admitted(row) > model.totalTpm;
     if (over) overUncached++;
     if (overAll) overTotal++;
     if (over || overAll) refused.add(row.call.runId);
