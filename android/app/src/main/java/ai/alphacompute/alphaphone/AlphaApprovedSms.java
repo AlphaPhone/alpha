@@ -20,8 +20,8 @@ import org.json.JSONObject;
  *       SIM (and its proposal ID is the operation ID); an {@code sms_compose} to a number that exact
  *       number; an {@code sms_compose} to a contact only a number that belongs to a contact, since the
  *       owner picked that contact on the card;</li>
- *   <li>the entry carries no earlier {@link #CLAIM}; the claim is written under the journal lock, so
- *       one approval admits one dispatch.</li>
+ *   <li>the device reserves the operation ID for this entry before marking it with {@link #CLAIM}.
+ *       A lost journal acknowledgement cannot give a second chat the same operation ID.</li>
  * </ul>
  *
  * A repeated request for the same operation ID is answered from the SMS send journal before this
@@ -30,12 +30,15 @@ import org.json.JSONObject;
 final class AlphaApprovedSms {
  /** The one-time native admission of an approved text. It never changes once written. */
  static final String CLAIM = "smsDispatchClaim";
+ interface OperationClaim {
+  boolean reserve(String operationId, String binding) throws Exception;
+ }
  private static final Pattern DIALABLE = Pattern.compile("^\\+?[\\d\\s().-]{2,40}$"), DIGITS = Pattern.compile("^\\+?\\d{2,20}$");
 
  private AlphaApprovedSms() {}
 
- /** Admits one dispatch of exactly this text for the approved card {@code identity}, or throws and records nothing. */
- static void claim(ActionJournal journal, JSONObject identity, String operationId, String[] recipients, String body, int subscriptionId,
+ /** Admits one dispatch of exactly this text for the approved card {@code identity}, or refuses without dispatch. */
+ static void claim(ActionJournal journal, OperationClaim deviceClaim, JSONObject identity, String operationId, String[] recipients, String body, int subscriptionId,
    Predicate<String> contactNumber, long now) throws Exception {
   if (identity == null || identity.length() != 2) throw new SecurityException("No approved card names this text");
   String scope = ActionJournal.scope(identity.optString("scope", null)), proposal = ActionJournal.id(identity.optString("proposalId", null));
@@ -43,7 +46,11 @@ final class AlphaApprovedSms {
   if (!approves(open(journal.get(scope, proposal), operationId, now), proposal, operationId, recipients, body, subscriptionId, contactNumber))
    throw new SecurityException("The approved card names another text");
   synchronized (journal.lock()) {
-   open(journal.get(scope, proposal), operationId, now);
+   JSONObject entry = journal.get(scope, proposal);
+   open(entry, operationId, now);
+   JSONObject binding = new JSONObject().put("scope", scope).put("proposalId", proposal)
+    .put("operationHash", entry.getString("operationHash"));
+   if (!deviceClaim.reserve(operationId, binding.toString())) throw new SecurityException("This operation was already claimed");
    journal.update(scope, proposal, current -> current.put(CLAIM, new JSONObject().put("operationId", operationId)));
   }
  }

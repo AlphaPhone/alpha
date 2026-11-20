@@ -102,13 +102,10 @@ test('J03 on Android: a picked document, a trimmed question and the resident ans
   await expect(page.getByRole('region', { name: 'Notes' }).getByRole('button', { name: /^Open (?!Trash$)/ })).toHaveCount(1);
   await button(page, 'Open Garden summary').click();
   await button(page, 'Attachment').click();
-  const source = page.getByRole('dialog', { name: 'Note source document' });
-  await expect(source).toContainText('garden-report.txt');
-  // The simplified source details show type/size; retained and reopened bytes are checked by SHA below.
-  await expect(source.getByRole('region', { name: 'Source details' })).toContainText('Text file · 1 KB');
-  await source.getByRole('button', { name: 'Open linked source', exact: true }).click();
-  await expect(source.getByRole('status')).toHaveText('Opened garden-report.txt.');
-  expect(await harness(page, f => f.documents.opened)).toEqual([{ reference: saved[0].documentSource.reference, sha256, size: Buffer.byteLength(contents), mimeType: 'text/plain' }]);
+  await expect.poll(() => harness(page, f => f.documents.opened)).toEqual([
+    { reference: saved[0].documentSource.reference, sha256, size: Buffer.byteLength(contents), mimeType: 'text/plain' },
+  ]);
+  await expect(page.getByRole('dialog', { name: 'Note source document' })).toHaveCount(0);
   expect(await savedNotes(page)).toEqual(saved);
   expect(await harness(page, f => f.streams)).toBe(0);
   await expectNoDevelopmentSurface(page);

@@ -388,14 +388,17 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  notes.render=(state:Bag,value:Bag)=>{
   const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
   if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
-  const withPreviousNotes=(view:Bag)=>{
-   if(!older||older.selected||view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
-   return {...view,previousNotesAction:older.chooseFromMenu,previousNotesMenu:!!state.previousNotesMenu,
-    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:()=>value.set({previousNotesMenu:false})};
+  const withNotesMenu=(view:Bag)=>{
+   if(view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
+   if(!ui&&(!older||older.selected))return view;
+   const close=()=>value.set({previousNotesMenu:false});
+   return {...view,previousNotesAction:!older?.selected?older?.chooseFromMenu:undefined,previousNotesMenu:!!state.previousNotesMenu,
+    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:close,
+    notesMenuTrash:ui?()=>{close();view.openTrash();}:undefined,notesMenuTrashDisabled:!view.hasDeleted};
   };
-  if(ui)return withPreviousNotes(ui.decorate(render(state,value),value,state));
+  if(ui)return withNotesMenu(ui.decorate(render(state,value),value,state));
   // A pending New note request waits for the binding instead of drafting into no collection.
   const waiting={...state,...DEVICE_ONLY_STATE,list:[],open:null,compose:false,trashOpen:false,storageStatus:state.storageStatus||agentAvailabilityNotice(undefined,UNAVAILABLE)};
-  return withPreviousNotes({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
+  return withNotesMenu({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
  };
 }

@@ -553,10 +553,10 @@ public abstract class AlphaTelephonyBase extends Plugin {
   fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.messages(getContext(), thread, limit, before, cursor, cancel));
  }
 
- /** Reads the masked sender of one incoming SMS through the normal foreground fence. */
+ /** Reads the latest SMS sender through the foreground fence, masked by default. */
  @PluginMethod public void latestIncomingSender(PluginCall call) {
   if (refused(call)) return;
-  fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.latestIncomingSender(getContext(), cancel));
+  fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.latestIncomingSender(getContext(), cancel, call.getBoolean("includeAddress", false)));
  }
 
  /**
@@ -819,6 +819,10 @@ public abstract class AlphaTelephonyBase extends Plugin {
  }
  /** The action journal the chat records each approved card in ({@link AlphaApprovedSms}). */
  protected ActionJournal approvals() { return AlphaActionJournal.get(getContext()); }
+ protected boolean reserveSmsClaim(String operationId, String binding) throws Exception {
+  return new AlphaCredentialStore(getContext()).compareExchangeCredentialSlot(
+   "alpha-sms-operation:claim:v1:" + SmsSendJournal.sha256(operationId), null, binding);
+ }
  /** Whether this exact number belongs to a contact (Android's own number matching). Runs on {@link SmsTelephony#WORK}. */
  protected boolean contactNumber(String number) {
   if (getPermissionState("contacts") != PermissionState.GRANTED) return false;
@@ -870,7 +874,7 @@ public abstract class AlphaTelephonyBase extends Plugin {
    catch (Exception unreadable) { call.reject("The send record could not be read. Nothing was sent.", "unavailable"); return; }
    if (existing != null) { call.resolve(SmsTelephony.result(existing)); return; }
    if (call.ownerGuard == null) {
-    try { AlphaApprovedSms.claim(approvals(), approval, operationId, recipients, body, subscriptionId, this::contactNumber, System.currentTimeMillis()); }
+    try { AlphaApprovedSms.claim(approvals(), this::reserveSmsClaim, approval, operationId, recipients, body, subscriptionId, this::contactNumber, System.currentTimeMillis()); }
     catch (Exception notApproved) { call.reject("This text is not the one approved on its card. Nothing was sent.", "not-approved"); return; }
    }
    main.post(() -> sendSmsOnMain(call, journal, binding, operationId, recipients, body, subscriptionId));

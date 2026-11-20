@@ -199,7 +199,6 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         if (!questionCurrent()) throw Error('The selected file changed.');
         return {version:1,name:file.name,mimeType:file.mimeType,sha256:file.sha256,size:file.size,...(reference ? {reference} : {})};
       };
-      let attachedSource: Source | undefined;
       const editExcerpt: SelectedChatFile['edit'] = (compose, current, question) => {
         if (!current() || !questionCurrent()) return;
         closeQuestion?.();
@@ -207,7 +206,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           name: selected.pdf ? name+' · page '+(selected.pdf.page+1) : name,
           text:selected.text??'', question, current:()=>current() && questionCurrent(),
           validate:text=>!sensitiveReadingText(text), compose,
-          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>attachedSource ?? await link(await readSelected())} : {}),
+          ...(linkable && selected.excerptOnly!=='size' ? {source:async()=>link(await readSelected())} : {}),
           ...(image||selected.pdf ? {image:async(signal:AbortSignal)=>(await fetch(image||selected.pdf!.image,{signal})).blob()} : {}),
         });
       };
@@ -225,9 +224,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
             try {
               const file=await readSelected();
               if (!stillCurrent()) return undefined;
-              const attachment=decodedFile(file);
-              attachedSource=await link(file);
-              return {file:attachment,source:attachedSource};
+              return decodedFile(file);
             } catch(error) {
               if (!(error instanceof SourceUnavailableError)) throw error;
               if (stillCurrent() && current) {
@@ -246,7 +243,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
           read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw new AttachmentNotice('Selected file changed. Select it again.');return file;},
           current:()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
           target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>views.inbox.attachReviewedFile(file,token),
-          inserted:()=>api.open('inbox'),
+          inserted:()=>api.open('inbox'),notify:message=>api.toast(message),
         });
       };
       if (module === 'files') {
@@ -255,8 +252,10 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
+          canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg'),
+          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected()),questionCurrent),
           name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, ...previewMeta(selected.result,mime), d: '',
-          textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF',
+          textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
           mediaError:()=>{if(!sameSelection()||!current)return;current={...current,mediaFailed:true,status:'Preview unavailable for this file.'};refresh();},
           previewStatus:!media&&!selected.pdf&&selected.text===undefined?selected.status:'',

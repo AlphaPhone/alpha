@@ -540,6 +540,9 @@ final class AlphaCredentialStore {
  private final Context context;
  AlphaCredentialStore(Context context){this.context=context;}
  String readCredentialSlot(String slot){return context.slots.get(slot);}
+ boolean compareExchangeCredentialSlot(String slot,String expected,String value)throws Exception{
+  return ai.eliza.plugins.messages.SmsDispatchTraces.reserveClaim(context,slot,expected,value);
+ }
  void writeCredentialSlot(String slot,String value)throws Exception{ai.eliza.plugins.messages.SmsDispatchTraces.write(context,slot,value);}
 }`,
   'ai/eliza/plugins/messages/SmsFixtureSupport.java': `package ai.eliza.plugins.messages;

@@ -276,7 +276,7 @@ test('dirty edits require a discard decision and cancelled replacement preserves
  await expect(page.getByRole('button',{name:'Edit photo',exact:true})).toBeVisible();
 });
 
-test('photo zoom keeps controls hidden and the actions menu has labeled actions without zoom controls',async({page},info)=>{
+test('photo zoom keeps controls hidden and the actions menu has labeled actions without zoom controls',async({page,browserName},info)=>{
  await seed(page);await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();
  const viewport=page.locator('[data-alpha-photo-viewport]'),image=page.locator('[data-alpha-photo-image]');
  await page.evaluate(()=>document.documentElement.style.setProperty('--native-bottom-inset','24px'));
@@ -298,23 +298,34 @@ test('photo zoom keeps controls hidden and the actions menu has labeled actions 
  await viewport.press('+');await viewport.press('ArrowRight');await expect(image).toHaveCSS('transform','matrix(2, 0, 0, 2, -48, 0)');
  await viewport.press('0');await expect(image).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');
  await viewport.dblclick({position:{x:200,y:350}});await expect(viewport).toHaveAttribute('aria-label',/Zoom 250 percent/);await viewport.press('0');
- const touch=await page.context().newCDPSession(page);
- await touch.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
- await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:150,y:350},{id:2,x:250,y:350}]});
- await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:100,y:350},{id:2,x:300,y:350}]});
- await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ const touch=browserName==='chromium'?await page.context().newCDPSession(page):undefined;
+ if(touch)await touch.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
+ type Contact={id:number;x:number;y:number};
+ let active:Contact[]=[];
+ async function sendTouch(type:'touchStart'|'touchMove'|'touchEnd',points:Contact[]){
+  if(touch){await touch.send('Input.dispatchTouchEvent',{type,touchPoints:points});return;}
+  const event={touchStart:'pointerdown',touchMove:'pointermove',touchEnd:'pointerup'}[type];
+  for(const {id,x,y} of type==='touchEnd'?active:points){
+   await viewport.dispatchEvent(event,{pointerId:id,pointerType:'touch',isPrimary:id===1,
+    button:0,buttons:type==='touchEnd'?0:1,clientX:x,clientY:y});
+  }
+  active=points;
+ }
+ await sendTouch('touchStart',[{id:1,x:150,y:350},{id:2,x:250,y:350}]);
+ await sendTouch('touchMove',[{id:1,x:100,y:350},{id:2,x:300,y:350}]);
+ await sendTouch('touchEnd',[]);
  await expect(viewport).toHaveAttribute('aria-label',/Zoom 200 percent/);
  await page.clock.install();
  for(let tap=0;tap<2;tap++){
-  await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:200,y:350}]});
-  await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await sendTouch('touchStart',[{id:1,x:200,y:350}]);
+  await sendTouch('touchEnd',[]);
  }
  await page.clock.runFor(400);
  await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
  await expect(chrome).toHaveCSS('opacity','0');
  await expect(menu).not.toHaveAttribute('open','');
  await expect(page.getByRole('dialog',{name:'Add to album',exact:true})).toHaveCount(0);
- await touch.detach();
+ await touch?.detach();
  await viewport.click({position:{x:200,y:350}});
  await page.clock.runFor(400);
  await expect(chrome).toHaveCSS('opacity','1');

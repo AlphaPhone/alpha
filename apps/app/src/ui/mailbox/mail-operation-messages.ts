@@ -31,6 +31,7 @@ export const MAIL_OPERATION_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["An Inbox operation is already pending", "Another email action is still in progress. Wait for it to finish."],
   ["Inbox operation changed. Reload its receipt before continuing.", `This email action changed. ${RELOAD_RECEIPT}`],
   ["Invalid saved Inbox operation", "The saved email action can’t be read. Discard it to continue."],
+  ["Invalid source request identity", "This email draft couldn’t be matched to its chat request. Reopen the draft before sending."],
   ["Review the saved operation before starting another.", "Review the saved email action before starting another."],
   ["Message exceeds the supported review size", "This email is too large to review."],
   ["Review recovery is unavailable", "The saved review can’t be recovered right now."],

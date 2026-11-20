@@ -282,7 +282,7 @@ export interface MailDraftsProvider {
       providerDraft?: { draftId: string; providerDigest: string };
     },
     mode?: "send-from-composer",
-  ): Promise<void>;
+  ): Promise<unknown>;
   capabilities(): {
     send: boolean;
     providerDrafts: boolean;

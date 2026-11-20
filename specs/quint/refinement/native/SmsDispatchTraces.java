@@ -36,6 +36,18 @@ public final class SmsDispatchTraces {
  public static long now=1_760_000_000_000L;
  static final ArrayDeque<String> faults=new ArrayDeque<>();
  static boolean historicalListeners;
+ public static String claimFault="";
+
+ public static boolean reserveClaim(Context context,String slot,String expected,String value)throws Exception{
+  check(slot.equals("alpha-sms-operation:claim:v1:"+SmsSendJournal.sha256(OP))&&expected==null,"Write-once device operation identity");
+  synchronized(context.slots){
+   if(claimFault.equals("claim-before"))throw new IOException("Synthetic claim refusal");
+   if(context.slots.putIfAbsent(slot,value)!=null)return false;
+   if(claimFault.equals("claim-after"))throw new IOException("Synthetic lost claim acknowledgement");
+   return true;
+  }
+ }
+
 
  public static void write(Context context,String slot,String value)throws Exception{
   if(!slot.equals(SLOT))throw new AssertionError("Exact Alpha installed journal slot");
@@ -84,6 +96,15 @@ public final class SmsDispatchTraces {
    return encrypted==null?"":new JSONObject(encrypted).getString("journal");
   }
 
+  int claimOwner()throws Exception{
+   String saved=context.slots.get("alpha-sms-operation:claim:v1:"+SmsSendJournal.sha256(OP));
+   if(saved==null)return 0;
+   JSONObject claim=new JSONObject(saved);
+   int card=Arrays.asList(SCOPE).indexOf(claim.getString("scope"));
+   check(card>0&&OP.equals(claim.getString("proposalId"))&&claim.getString("operationHash").equals(
+    AlphaActionJournal.get(context).get(SCOPE[card],OP).getString("operationHash")),"The device claim names its exact approved entry");
+   return card;
+  }
   int tombstoneBinding(){
    String prefix="t1|"+OP+"|";
    return durableLedger().lines().filter(line->line.startsWith(prefix)).findFirst()
@@ -243,6 +264,7 @@ public final class SmsDispatchTraces {
     default -> throw new AssertionError(request);
    }
    context.radio.mode=mode;
+   claimFault=mode;
    switch(mode){
     case "begin-before" -> faults.add("before");
     case "journal-refused" -> {faults.add("before");faults.add("before");}
@@ -311,7 +333,7 @@ public final class SmsDispatchTraces {
     switch((int)row.get(Sms.TYPE)){case 4 -> outbox.put(recipient);case 2 -> sentRows.put(recipient);case 5 -> failedRows.put(recipient);default -> throw new AssertionError();}
    }
    return Trace.fields("recipients",recipients,"parts",parts,"reply",reply,"replyBinding",replyBinding,
-    "memory",record(readMemory()),"disk",record(readDisk()),"tombstoneBinding",tombstoneBinding(),
+    "memory",record(readMemory()),"disk",record(readDisk()),"tombstoneBinding",tombstoneBinding(),"claimOwner",claimOwner(),
     "attempts",context.radio.attempts,"accepted",context.radio.accepted.size(),
     "cards",cards,"foreground",foreground,"closed",closed,"listeners",listeners,"events",events,
     "image",context.admitted,"send",context.send,"phone",context.phone,"read",context.read,"locked",context.lock.locked,
@@ -503,6 +525,15 @@ public final class SmsDispatchTraces {
     check(f.readDisk()==null&&f.context.radio.attempts==0,"Nothing reached Android and nothing was journaled");
     f.restart(false);f.send(2,1,1,"complete","complete");
     check(f.reply.equals("not-approved")&&f.context.radio.attempts==0,"A claimed card cannot admit another send");
+    f.approveCard(2,2);f.send(2,2,2,"complete","complete");
+    check(f.reply.equals("not-approved")&&f.claimOwner()==1&&f.context.radio.attempts==0,"The device claim survives a new chat and restart");
+    break;
+   case "uncertain-device-claim":
+    f.approveCard(1,1);f.approveCard(2,2);
+    f.send(1,1,1,"complete","claim-before");
+    check(f.claimOwner()==0&&f.context.radio.attempts==0,"A refused write never admits a dispatch");
+    f.send(1,1,1,"complete","claim-after");f.restart(false);f.send(2,2,2,"complete","complete");
+    check(f.reply.equals("not-approved")&&f.claimOwner()==1&&f.context.radio.attempts==0,"A committed claim with lost confirmation remains spent");
     break;
    case "queued-cancellation":
     f.approveCard(1,1);f.send(1,1,1,"complete","cancel-queued");f.readback(2);f.send(2,1,1,"complete","complete");

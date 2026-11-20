@@ -149,6 +149,7 @@ import {
   validateReminderCreateResult,
 } from "@elizaos/plugin-assistant/device-actions/reminder-create-contract";
 import {
+  directSmsRequest,
   isSmsCompose,
   isTelephonyAction,
   isTelephonyRead,
@@ -1538,7 +1539,8 @@ export class DeviceActionCoordinator<
     for (const [proposalId, entry] of [...this.proposals]) {
       if (
         results.length >= 4 ||
-        !directTypes.includes(entry.proposal.operation.type) ||
+        (!directTypes.includes(entry.proposal.operation.type) &&
+          !(proof?.messageId === messageId && directSmsRequest(entry.proposal.operation, proof.text))) ||
         entry.proposal.workflow ||
         entry.proposal.requestMessageId !== messageId ||
         (operationType !== undefined &&
@@ -1583,6 +1585,7 @@ export class DeviceActionCoordinator<
         continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
+      if (entry.proposal.operation.type === "sms_latest_sender" || entry.proposal.operation.type === "sms_compose") proof?.current();
       if (browser) {
         if (
           this.proposals.get(proposalId) !== entry ||
@@ -3595,7 +3598,7 @@ function describeTelephonyAction(
     case "sms_latest_sender":
       return {
         title: "Read latest text sender",
-        description: "Share the last four digits of the newest incoming SMS sender.",
+        description: operation.includeAddress ? "Read the phone number of your latest incoming text." : "Share the last four digits of the newest incoming SMS sender.",
       };
     case "voicemail_read_selected":
       return {

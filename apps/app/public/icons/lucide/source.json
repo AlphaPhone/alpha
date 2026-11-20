@@ -53,6 +53,7 @@
     "clock.mjs": "420874ee15698e2215695767aca90d2d054927f0d56f83b56d576eb48ded8841",
     "message-square.mjs": "89932efd8277f2c26d6913f64cbb47e119b1803e839c7860a1d851d33d942e8e",
     "mail.mjs": "d001160393bb25afe8a6cfcbae51ab56d067cc6a69f56b70c87bfb817f32ff2f",
+    "mail-open.mjs": "3b0275188b46ad9852350aa41f361ca0203434587b926527b63e1c4bb56eda6e",
     "video.mjs": "2c721d3b4c9eb49ee7043da315ce36b59bbf559f9812a66ee5b9aae2e20eb322",
     "fingerprint-pattern.mjs": "9b04c1f4734e5bee17c29306b924891b43e9ae91d082c119c20988bdb68a889e",
     "flashlight.mjs": "3f4f6ea742cfd5e30d1ea80ccd5a497dc1969c6c9bdba4927314074fff5e8671",
@@ -362,6 +363,10 @@
     "mail.svg": {
       "source": "mail.mjs",
       "sha256": "92ea10e1f58c80654110ae99ced9ea43c68fec968158f61a3f37b879df63e54a"
+    },
+    "mail-open.svg": {
+      "source": "mail-open.mjs",
+      "sha256": "61efb70a41c80331ba30f6387dee9d2cd54bb198ed3d1dd683a749f45418ed6c"
     },
     "video.svg": {
       "source": "video.mjs",

@@ -337,7 +337,7 @@ test.describe('recovery screen', () => {
     await page.addInitScript(offline);
     await page.goto('/');
     await openLegacyAttachment(page);
-    const dialog = page.getByRole('dialog', { name: 'Note source document' });
+    const dialog = page.getByRole('dialog', { name: 'Reviewed attachment' });
     await expect(dialog).toBeVisible();
     // A modal <dialog> is in the top layer: left open, it covers recovery and makes it inert.
     expect(await page.evaluate(() => document.querySelector('dialog[open]')?.matches(':modal'))).toBe(true);
