@@ -2,15 +2,17 @@
 /**
  * Measures how the hosted text model treats a request: the size of the unit its prompt
  * cache reuses, the order in which it reads tool definitions, the system prompt and the
- * messages, and how many tokens a request holds against the per-minute limit when it is
- * admitted. scripts/agent-context-audit.ts applies those facts to recorded requests
+ * messages, how many tokens a request holds against the per-minute limit when it is
+ * admitted, and how fast that limit's allowance comes back afterwards.
+ * scripts/agent-context-audit.ts applies those facts to recorded requests
  * (CEREBRAS_QWEN), so run this again when the provider or the model changes.
  *
  *   bun scripts/agent-cache-probe.ts [--key-file <path>] [--model <id>] [--base <url>]
  *
- * It sends about 25 synthetic requests, roughly 75K tokens in all, with the key in the
- * owner-only file ~/.config/alphaphone/cerebras-key, and takes about two minutes because
- * the admission measurements each start from a refilled limit. Nothing from a phone is
+ * It sends about 40 synthetic requests, roughly 115K tokens in all, with the key in the
+ * owner-only file ~/.config/alphaphone/cerebras-key, and takes about three minutes because
+ * the admission and refill measurements each start from a refilled limit. Run it while
+ * nothing else uses the key: another caller's tokens are read as this probe's. Nothing from a phone is
  * sent, and each run marks its requests so an earlier run cannot answer for it.
  */
 import { randomUUID } from 'node:crypto';
@@ -55,6 +57,20 @@ export function admissionOf(samples: Admission[]): { inputFactor: number; uncapp
   if (!capped || !uncapped || capped.prompt <= 0) return null;
   const input = capped.held - capped.cap;
   return { inputFactor: input / capped.prompt, uncappedHold: uncapped.held - input };
+}
+
+/** The allowance the provider reported at a moment. */
+export type Reading = { at: number; left: number };
+
+/**
+ * Tokens the allowance regains each second, from readings taken after a large request:
+ * the rise between the first and the last reading that are still below the limit. The
+ * provider reports the allowance in steps, so readings a second or two apart say little.
+ */
+export function refillOf(readings: Reading[], limit: number): number | null {
+  const rising = readings.filter(reading => reading.left < limit - 1_000);
+  const [first, last] = [rising[0], rising.at(-1)];
+  return first && last && last.at - first.at >= 5_000 ? (last.left - first.left) / ((last.at - first.at) / 1000) : null;
 }
 
 type Body = { model: string; messages: { role: string; content: string }[]; tools?: unknown[]; tool_choice?: string; reasoning_effort: string; max_tokens?: number; stream: boolean; stream_options?: { include_usage: boolean } };
@@ -153,14 +169,35 @@ if (import.meta.main) {
   };
   const admission = admissionOf([await admit(16), await admit(4096), await admit(null)]);
 
+  console.log('Refill: the allowance after one request of about 36,000 tokens, read every two seconds with requests of a few tokens');
+  await new Promise(resolve => setTimeout(resolve, 20_000));
+  let limit = 0;
+  const reading = async (): Promise<Reading> => {
+    const response = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ok' }], reasoning_effort: 'none', max_tokens: 1, stream: false }) });
+    if (!response.ok) throw new Error(`Provider answered ${response.status}`);
+    await response.text();
+    limit = Number(response.headers.get('x-ratelimit-limit-tokens-minute'));
+    return { at: Date.now(), left: Number(response.headers.get('x-ratelimit-remaining-tokens-minute')) };
+  };
+  await send(sizedRequest(model, randomUUID(), 1700));
+  const readings: Reading[] = [];
+  for (let index = 0; index < 7; index++) {
+    readings.push(await reading());
+    console.log(`  +${String(Math.round((readings.at(-1)!.at - readings[0].at) / 1000)).padStart(2)} s  left ${String(readings.at(-1)!.left).padStart(7)}`);
+    await pause();
+  }
+  const refill = refillOf(readings, limit);
+
   const unit = unitOf(sized);
   const order = orderOf(changed);
   console.log(`\nUnit of reuse: ${unit ?? 'not shown (nothing was reused)'} tokens; the audit assumes ${CEREBRAS_QWEN.cacheBlockTokens}`);
   console.log(`Order read: ${order ? order.join(', ') : 'not shown'}; the audit assumes tools, system, messages`);
   console.log(`Held with no cap: ${admission?.uncappedHold ?? 'not shown'} output tokens; the audit assumes ${CEREBRAS_QWEN.uncappedOutputHold}`);
   console.log(`Input held per prompt token: ${admission ? admission.inputFactor.toFixed(2) : 'not shown'}; the audit assumes ${CEREBRAS_QWEN.admissionInputFactor}`);
+  console.log(`Allowance regained: ${refill === null ? 'not shown' : `${Math.round(refill)} tokens a second`}; the audit assumes a sixtieth of the limit, ${Math.round(limit / 60)}`);
   const admissionMatches = admission !== null && admission.uncappedHold === CEREBRAS_QWEN.uncappedOutputHold && Math.abs(admission.inputFactor - CEREBRAS_QWEN.admissionInputFactor) <= 0.1;
-  if (unit !== CEREBRAS_QWEN.cacheBlockTokens || order?.join() !== 'tools,system,messages' || !admissionMatches) {
+  const refillMatches = refill !== null && Math.abs(refill - limit / 60) <= 0.25 * (limit / 60);
+  if (unit !== CEREBRAS_QWEN.cacheBlockTokens || order?.join() !== 'tools,system,messages' || !admissionMatches || !refillMatches) {
     console.log('The provider no longer matches what scripts/agent-context-audit.ts assumes. Update CEREBRAS_QWEN and simulateProvider.');
     process.exit(1);
   }

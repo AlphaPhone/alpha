@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {admissionOf, orderOf, probeRequest, sizedRequest, unitOf} from '../scripts/agent-cache-probe.ts';
+import {admissionOf, orderOf, probeRequest, refillOf, sizedRequest, unitOf} from '../scripts/agent-cache-probe.ts';
 
 // What the provider reported on 18 November 2026 for the same request sent twice.
 const measured = [[579, 0], [999, 0], [1143, 1024], [1314, 1024], [1942, 1024], [2150, 2048], [2887, 2048], [11829, 11264]].map(([prompt, cached]) => ({prompt, cached}));
@@ -45,4 +45,15 @@ test('what a request holds at admission gives the input estimate and the hold fo
   assert.ok(Math.abs(admission.inputFactor - 1.23) < 0.01);
   assert.equal(admissionOf(measured.slice(0, 2)), null);
   assert.equal(admissionOf(measured.slice(2)), null);
+});
+
+test('the refill rate is the rise between readings still below the limit', () => {
+  // Measured on 20 November 2026 after a request of 18,947 tokens: readings a second apart, in steps.
+  const measured = [[1300, 131036], [2200, 136022], [3200, 136008], [4300, 140994], [5300, 140980], [6300, 145966], [7200, 145952], [8200, 149999], [9100, 149985]].map(([at, left]) => ({at, left}));
+  const rate = refillOf(measured, 150_000);
+  // A sixtieth of the 150,000 limit a second.
+  assert.ok(Math.abs(rate - 2500) < 100, String(rate));
+  // Readings at the limit, or too close together, show nothing.
+  assert.equal(refillOf(measured.slice(-2), 150_000), null);
+  assert.equal(refillOf(measured.slice(0, 2), 150_000), null);
 });

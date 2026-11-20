@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {audit, bucketsOf, CEREBRAS_QWEN, estimateTokens, readUsage, renderReport, renderSimulation, simulateProvider, stageOf, wireText} from '../scripts/agent-context-audit.ts';
+import {audit, bucketsOf, CEREBRAS_QWEN, estimateTokens, readUsage, renderReport, renderSimulation, simulateProvider, stageOf, wireText, withAssumedTools} from '../scripts/agent-context-audit.ts';
 
 const system = 'You are Alpha.\n\n';
 // The limit tests below state their thresholds in tokens a call uses: no estimate margin, no hold for a missing cap.
@@ -117,74 +117,82 @@ test('a call with no tool record is compared only with another such call, on its
   assert.equal(cached(first, {...next, tools: []}), 0);
 });
 
-test('the provider simulation counts a call against both per-minute limits, with its output cap, when it starts', () => {
-  const receipts = 'x '.repeat(4000);
-  const calls = [0, 10_000, 20_000].map((at, index) => stage1(at, `${index}${receipts}`, 'go', {maxTokens: 2000}));
-  const each = simulateProvider([calls[0]]).inputTokens;
-  const fits = simulateProvider(calls, {...PLAIN, uncachedTpm: 3 * each + 2000, totalTpm: 10 * each});
-  assert.equal(fits.uncachedMinute.callsOver, 0);
-  assert.equal(fits.uncachedMinute.max, 3 * each);
-  // The third call's cap no longer fits, though what was used so far does.
-  const tight = simulateProvider(calls, {...PLAIN, uncachedTpm: 3 * each + 1999, totalTpm: 10 * each});
-  assert.equal(tight.uncachedMinute.callsOver, 1);
-  assert.equal(tight.turnsOver, 1);
-  // A stage with no recorded cap takes the reserve given for it; cached tokens are exempt
-  // from the uncached limit and not from the total one.
-  const shared = [0, 10_000].map(at => stage1(at, receipts, 'go'));
-  const reused = simulateProvider(shared, {...PLAIN, outputReserve: {stage1: 500}});
-  assert.ok(reused.uncachedMinute.max < reused.totalMinute.max);
-  assert.equal(reused.totalMinute.max, reused.inputTokens);
-  assert.match(renderSimulation(reused), /Cached \d+ of \d+ input tokens: \d+\.\d%/);
-  assert.doesNotMatch(renderSimulation(reused), /x x x/);
+test('a log that records no tool definitions can be given them at a known size', () => {
+  const calls = [stage1(0, receipts, 'one'), stage1(20_000, receipts, 'two'), stage1(40_000, receipts, 'three', {tools: [{name: 'HANDLE_RESPONSE', chars: 9_000, hash: 'aaaa'}]})];
+  const bare = simulateProvider(calls.slice(0, 2));
+  // The same definition on every call adds its tokens and is reused with the text after it.
+  const same = simulateProvider(withAssumedTools(calls.slice(0, 2), {stage1: 14_000}, false));
+  assert.ok(same.inputTokens > bare.inputTokens + 2 * 3_000);
+  assert.ok(same.cachedTokens > bare.cachedTokens);
+  // A definition that changed on every call, read first, leaves nothing to reuse.
+  assert.equal(simulateProvider(withAssumedTools(calls.slice(0, 2), {stage1: 14_000}, true)).cachedTokens, 0);
+  // A recorded definition is kept, and a stage with no size named is left as it was.
+  const given = withAssumedTools(calls, {stage1: 14_000}, true);
+  assert.deepEqual(given[2].tools, calls[2].tools);
+  assert.equal(withAssumedTools(calls, {planner: 29_000}, true)[0].tools, undefined);
 });
 
-test('the per-minute windows follow when calls start, not when they finish', () => {
-  const history = 'x '.repeat(4000);
-  // Started at 0 s, 30 s and 70 s; finished at 100 s, 31 s and 71 s.
-  const calls = [[100_000, 100_000], [31_000, 1_000], [71_000, 1_000]].map(([at, ms], index) => stage1(at, `${index}${history}`, 'go', {ms}));
-  const each = simulateProvider([calls[0]]).inputTokens;
-  const result = simulateProvider(calls, {...PLAIN, uncachedTpm: 2 * each, totalTpm: 2 * each});
-  assert.equal(result.cachedTokens, 0);
-  // The third call starts more than 60 s after the first did, so no window holds all three.
-  assert.equal(result.uncachedMinute.max, 2 * each);
-  assert.equal(result.totalMinute.max, 2 * each);
+// Measured on the provider: a per-minute limit is an allowance that refills a sixtieth of the
+// limit each second, never above the limit. It is not a count over the last 60 seconds.
+// A call that starts at `start` ms, runs for `ms`, and reports what it used.
+const used = (start, input, extra = {}) => stage1(start + (extra.ms ?? 500), '[]', 'go', {ms: 500, usage: {input, output: 0, cached: 0}, ...extra});
+
+test('an allowance refills all the time, and a call is refused when what is left is less than what it holds', () => {
+  // 60,000 a minute is 1,000 a second.
+  const model = {...PLAIN, uncachedTpm: 60_000, totalTpm: 600_000};
+  const three = [0, 1_000, 2_000].map(start => used(start, 20_000));
+  const result = simulateProvider(three, model);
+  // Each call is charged 20,000 when it finishes half a second in, and 1,000 comes back a
+  // second: the third starts with 38,500 still charged and holds 20,000.
+  assert.equal(result.allowanceLeft.lowest, 1_500);
   assert.equal(result.uncachedMinute.callsOver, 0);
-  assert.equal(result.totalMinute.callsOver, 0);
+  // The 60-second sum is at the limit, which decides nothing.
+  assert.equal(result.uncachedMinute.max, 60_000);
+  // A fourth call half a second later finds 2,500; one 18 seconds later finds the 20,000 it holds.
+  const fourth = start => simulateProvider([...three, used(start, 20_000)], model);
+  assert.equal(fourth(3_000).uncachedMinute.callsOver, 1);
+  assert.equal(fourth(3_000).turnsOver, 1);
+  assert.equal(fourth(20_499).uncachedMinute.callsOver, 1);
+  assert.equal(fourth(20_500).uncachedMinute.callsOver, 0);
+  // A minute of 60,000 tokens would have been refused whole under a 60-second count; here ten
+  // calls of 6,000, six seconds apart, never leave less than 53,500.
+  const steady = simulateProvider(Array.from({length: 10}, (_, index) => used(index * 6_000, 6_000)), model);
+  assert.equal(steady.uncachedMinute.max, 60_000);
+  assert.equal(steady.allowanceLeft.lowest, 53_500);
+  // An allowance never refills above the limit.
+  assert.equal(simulateProvider([used(0, 1_000), used(600_000, 1_000)], model).allowanceLeft.lowest, 59_000);
+  assert.match(renderSimulation(result), /left once a call holds its share: p50 \d+, p10 \d+, lowest 1500; 0 of 3 calls start without enough/);
+  assert.match(renderSimulation(result), /Cached \d+ of \d+ input tokens: \d+\.\d%/);
 });
 
-test('a call still running when another starts is held at its output cap, a finished one at what it used', () => {
-  const running = (start, hash, extra = {}) => stage1(start + 30_000, '[]', 'go', {ms: 30_000, maxTokens: 8192, usage: {input: 20_000, output: 300, cached: 0}, tools: [{name: 'PROPOSE_DEVICE_ACTION', chars: 28_000, hash}], ...extra});
-  const over = (calls, uncachedTpm, model = {}) => simulateProvider(calls, {...PLAIN, uncachedTpm, ...model}).uncachedMinute.callsOver;
-  // The second starts 5 s into the first: 20,000 in and the 8,192 cap for each.
-  const overlapping = [running(0, 'aaaa'), running(5_000, 'bbbb')];
-  assert.equal(over(overlapping, 56_384), 0);
-  assert.equal(over(overlapping, 56_383), 1);
-  // The second starts after the first finished having used 300 of its cap.
-  const sequential = [running(0, 'aaaa'), running(31_000, 'bbbb')];
-  assert.equal(over(sequential, 48_492), 0);
-  assert.equal(over(sequential, 48_491), 1);
-  // The total limit holds the cap the same way.
-  assert.equal(simulateProvider(overlapping, {...PLAIN, totalTpm: 56_384}).totalMinute.callsOver, 0);
-  assert.equal(simulateProvider(overlapping, {...PLAIN, totalTpm: 56_383}).totalMinute.callsOver, 1);
-  // The 60-second figures report what was used, not what was held.
-  assert.equal(simulateProvider(overlapping).uncachedMinute.max, 40_600);
+test('a running call holds its input and its output cap; a finished one was charged only what it used', () => {
+  const model = {...PLAIN, uncachedTpm: 60_000, totalTpm: 600_000};
+  // 20,000 in and a cap of 8,192, of which 300 were used, over three seconds.
+  const call = start => used(start, 20_000, {ms: 3_000, maxTokens: 8192, usage: {input: 20_000, output: 300, cached: 0}});
+  const lowest = calls => simulateProvider(calls, model).allowanceLeft.lowest;
+  // The second starts two seconds into the first: both hold 28,192.
+  assert.equal(lowest([call(0), call(2_000)]), 60_000 - 28_192 - 28_192);
+  // The second starts a second after the first finished, charged 20,300 of the 28,192 it held.
+  assert.equal(lowest([call(0), call(4_000)]), 60_000 - 20_300 + 1_000 - 28_192);
+  // The total limit holds a call the same way.
+  const total = simulateProvider([call(0), call(2_000)], {...PLAIN, totalTpm: 56_000});
+  assert.equal(total.totalMinute.callsOver, 1);
+  assert.equal(simulateProvider([call(0), call(2_000)], {...PLAIN, totalTpm: 60_000}).totalMinute.callsOver, 0);
+  // The 60-second figures report what was charged, not what was held.
+  assert.equal(simulateProvider([call(0), call(2_000)], model).uncachedMinute.max, 40_600);
 
   // Without usage the output is unknown: the stage's reserve while the call runs, nothing once it has finished.
-  const silent = {usage: undefined, maxTokens: undefined};
-  const reserve = {outputReserve: {stage1: 500}};
-  const each = simulateProvider([running(0, 'aaaa', silent)]).inputTokens;
-  const overlappingSilent = [running(0, 'aaaa', silent), running(5_000, 'bbbb', silent)];
-  assert.equal(over(overlappingSilent, 2 * each + 1000, reserve), 0);
-  assert.equal(over(overlappingSilent, 2 * each + 999, reserve), 1);
-  const sequentialSilent = [running(0, 'aaaa', silent), running(31_000, 'bbbb', silent)];
-  assert.equal(over(sequentialSilent, 2 * each + 500, reserve), 0);
-  assert.equal(over(sequentialSilent, 2 * each + 499, reserve), 1);
-  assert.equal(simulateProvider(overlappingSilent, {...PLAIN, ...reserve}).uncachedMinute.max, 2 * each);
+  const silent = start => stage1(start + 3_000, receipts, `go ${start}`, {ms: 3_000});
+  const each = simulateProvider([silent(0)]).inputTokens;
+  const reserve = {...model, outputReserve: {stage1: 500}};
+  assert.equal(simulateProvider([silent(0), silent(2_000)], reserve).allowanceLeft.lowest, 60_000 - (each + 500) - (each + 500));
+  assert.equal(simulateProvider([silent(0), silent(4_000)], reserve).allowanceLeft.lowest, 60_000 - each + 1_000 - (each + 500));
 });
 
 test('where a call carries the provider\'s cached count, the hit rate and the uncached windows use it and not the rules', () => {
   const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 3_000, hash: 'bbbb'}];
   const calls = cached => [0, 20_000, 40_000].map((at, index) => stage1(at, receipts, `message ${index}`, {tools, usage: {input: 12_000, output: 50, ...cached(index)}}));
+  // 30,000 a minute is 500 a second.
   const tight = {...PLAIN, uncachedTpm: 30_000};
   // By the rules the second and third calls would each reuse 6,144 tokens. The provider reused none.
   const missed = simulateProvider(calls(() => ({cached: 0})), tight);
@@ -193,16 +201,22 @@ test('where a call carries the provider\'s cached count, the hit rate and the un
   assert.equal(missed.hitRate, 0);
   assert.equal(missed.stages.stage1.cached, 0);
   assert.equal(missed.uncachedMinute.max, 3 * 12_050);
-  // The third call starts with 24,100 uncached tokens already in its minute.
-  assert.equal(missed.uncachedMinute.callsOver, 1);
-  assert.equal(missed.turnsOver, 1);
+  // Each call is charged 12,050: 14,100 is still charged after the second, 4,550 when the third starts.
+  assert.equal(missed.allowanceLeft.lowest, 30_000 - 4_550 - 12_000);
+  assert.equal(missed.uncachedMinute.callsOver, 0);
+  // At 18,000 a minute the second and third calls both start without the 12,000 they hold.
+  const tighter = {...PLAIN, uncachedTpm: 18_000};
+  assert.equal(simulateProvider(calls(() => ({cached: 0})), tighter).uncachedMinute.callsOver, 2);
   // The provider reused more than the rules give.
   const hit = simulateProvider(calls(index => ({cached: index ? 11_264 : 0})), tight);
   assert.deepEqual(hit.reported, {calls: 3, provider: 22_528, simulated: 12_288});
   assert.equal(hit.cachedTokens, 22_528);
   assert.equal(hit.hitRate, 22_528 / 36_000);
   assert.equal(hit.uncachedMinute.max, 3 * 12_050 - 22_528);
-  assert.equal(hit.uncachedMinute.callsOver, 0);
+  // A cached prefix is not charged: the lowest point is the second call, after the uncached first.
+  assert.equal(hit.allowanceLeft.lowest, 30_000 - 2_500 - 12_000);
+  // And the third call fits where it did not.
+  assert.equal(simulateProvider(calls(index => ({cached: index ? 11_264 : 0})), tighter).uncachedMinute.callsOver, 1);
   assert.match(renderSimulation(hit), /provider counted 22528 cached tokens, these rules give 12288/);
   // Usage that carries no cached count is not a count of zero: the rules stand in for it.
   const silent = simulateProvider(calls(() => ({})), tight);
@@ -236,11 +250,15 @@ test('a call is admitted against its estimated input and its cap, and charged wh
   // A cap replaces that hold.
   assert.equal(over([call(0, {maxTokens: 4096})], held + 4096), 0);
   assert.equal(over([call(0, {maxTokens: 4096})], held + 4095), 1);
-  // A cached prefix lowers what the call is charged, not what it needs to start.
-  const warm = [call(0, {maxTokens: 16}), call(20_000, {maxTokens: 16})];
-  const result = simulateProvider(warm, {...CEREBRAS_QWEN, uncachedTpm: input + held + 16});
-  assert.ok(result.cachedTokens > 0);
-  assert.equal(result.uncachedMinute.callsOver, 0);
-  assert.equal(over(warm, input + held + 15), 1);
-  assert.ok(result.uncachedMinute.max < 2 * input);
+  // A cached prefix lowers what a call is charged, not what it needs to start: the call after
+  // one that reused its prefix finds that much more allowance than after one that did not.
+  const roomy = {...CEREBRAS_QWEN, uncachedTpm: 60_000};
+  const three = history => [call(0, {maxTokens: 16}), stage1(20_000, history, 'go', {maxTokens: 16}), stage1(21_000, history, 'go', {maxTokens: 16})];
+  const reused = simulateProvider(three(receipts).slice(0, 2), roomy).cachedTokens;
+  assert.ok(reused > 0);
+  assert.equal(simulateProvider(three('y '.repeat(4000)).slice(0, 2), roomy).cachedTokens, 0);
+  const lowest = history => simulateProvider(three(history), roomy).allowanceLeft.lowest;
+  assert.equal(lowest(receipts) - lowest('y '.repeat(4000)), reused);
+  // Both third calls held the same amount to start.
+  assert.equal(lowest('y '.repeat(4000)), 60_000 - input + 100 - held - 16);
 });

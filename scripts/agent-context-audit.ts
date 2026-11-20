@@ -267,8 +267,8 @@ export function audit(calls: RecordedCall[], options: { cacheMinutes?: number; t
  * documentation in two ways: a prompt prefix is reused in units of 1,024 tokens (not 128),
  * and the prefix is read as tool definitions, then system prompt, then messages. A prefix
  * is kept for at least 5 minutes. Tokens that miss count against the uncached per-minute
- * limit and every token against the total one; a request's output cap is counted before
- * it runs.
+ * limit and every token against the total one; a request holds its estimated input and
+ * its output cap against both while it runs.
  */
 export type ProviderModel = {
   uncachedTpm: number;
@@ -300,13 +300,14 @@ export type ProviderSimulation = ReturnType<typeof simulateProvider>;
  * messages alone, as if their definitions were equal. That is the estimate their record
  * allows, not a bound.
  *
- * Each 60-second figure sums what the calls that started in the 60 seconds up to a call
- * were charged: input that missed the cache, plus the output the provider reported
- * (unknown, and counted as zero, on a call without usage). A call starts over a limit when
- * that sum, plus what calls still running hold beyond their charge, plus what this call
- * holds at admission, exceeds it. Measured on the provider, a call holds its whole input,
- * cached or not, estimated about a quarter high, plus its output cap, or 16,384 tokens when
- * it sends no cap.
+ * Measured on the provider, each per-minute limit is an allowance that refills all the time,
+ * a sixtieth of the limit each second and never above the limit. A call is refused when the
+ * allowance left is less than what it holds: its whole input, cached or not, estimated
+ * about a quarter high, plus its output cap, or 16,384 tokens when it sends no cap. When it
+ * finishes it gives that back and is charged what it used: input that missed the cache,
+ * plus the output the provider reported (unknown, and counted as zero, on a call without
+ * usage). The 60-second figures sum what the calls that started in the 60 seconds up to a
+ * call were charged; they describe the rate of use and decide nothing.
  */
 export function simulateProvider(calls: RecordedCall[], model: ProviderModel = CEREBRAS_QWEN) {
   const cacheMs = model.cacheMinutes * 60_000;
@@ -355,33 +356,53 @@ export function simulateProvider(calls: RecordedCall[], model: ProviderModel = C
   const byStart = [...rows].sort((a, b) => a.start - b.start);
   const uncachedWindows: number[] = [];
   const totalWindows: number[] = [];
+  for (let end = 0, first = 0, uncached = 0, total = 0; end < byStart.length; end++) {
+    const row = byStart[end];
+    while (row.start - byStart[first].start > 60_000) {
+      const old = byStart[first++];
+      uncached -= charged(old);
+      total -= old.input + (old.call.usage?.output ?? 0);
+    }
+    uncached += charged(row);
+    total += row.input + (row.call.usage?.output ?? 0);
+    uncachedWindows.push(uncached);
+    totalWindows.push(total);
+  }
+
+  // Measured: a per-minute limit is an allowance that refills all the time, a sixtieth of the
+  // limit each second and never above the limit. It is not a count over the last 60 seconds.
+  // What is left is the limit, less what finished calls were charged and has not refilled
+  // yet, less what running calls hold. A call is refused when that is less than what it holds.
+  const events = rows
+    .flatMap(row => [{ at: row.start, row, starts: true }, { at: Math.max(row.start, row.call.at), row, starts: false }])
+    .sort((a, b) => a.at - b.at || (a.row === b.row ? Number(b.starts) - Number(a.starts) : Number(a.starts) - Number(b.starts)));
+  const uncached = { charged: 0, held: 0 };
+  const total = { charged: 0, held: 0 };
+  const headroom: number[] = [];
   const refused = new Set<string>();
   let overUncached = 0;
   let overTotal = 0;
-  for (let end = 0, first = 0, uncached = 0, total = 0; end < byStart.length; end++) {
-    const row = byStart[end];
-    const output = row.call.usage?.output ?? 0;
-    while (row.start - byStart[first].start > 60_000) {
-      const old = byStart[first++];
-      uncached -= old.input - old.cached + (old.call.usage?.output ?? 0);
-      total -= old.input + (old.call.usage?.output ?? 0);
+  let clock = events[0]?.at ?? 0;
+  for (const { at, row, starts } of events) {
+    const minutes = (at - clock) / 60_000;
+    clock = at;
+    uncached.charged = Math.max(0, uncached.charged - minutes * model.uncachedTpm);
+    total.charged = Math.max(0, total.charged - minutes * model.totalTpm);
+    if (starts) {
+      const over = model.uncachedTpm - uncached.charged - uncached.held < admitted(row);
+      const overAll = model.totalTpm - total.charged - total.held < admitted(row);
+      if (over) overUncached++;
+      if (overAll) overTotal++;
+      if (over || overAll) refused.add(row.call.runId);
+      uncached.held += admitted(row);
+      total.held += admitted(row);
+      headroom.push(Math.round(model.uncachedTpm - uncached.charged - uncached.held));
+    } else {
+      uncached.held -= admitted(row);
+      total.held -= admitted(row);
+      uncached.charged += charged(row);
+      total.charged += row.input + (row.call.usage?.output ?? 0);
     }
-    // What stays in the window once a call has finished is what it was charged. One still
-    // running when this call starts is held at what it was admitted with.
-    let held = 0;
-    for (let at = first; at < end; at++) {
-      const old = byStart[at];
-      if (old.call.at > row.start) held += Math.max(0, admitted(old) - charged(old));
-    }
-    const over = uncached + held + admitted(row) > model.uncachedTpm;
-    const overAll = total + held + admitted(row) > model.totalTpm;
-    if (over) overUncached++;
-    if (overAll) overTotal++;
-    if (over || overAll) refused.add(row.call.runId);
-    uncached += row.input - row.cached + output;
-    total += row.input + output;
-    uncachedWindows.push(uncached);
-    totalWindows.push(total);
   }
 
   const stages: Record<string, { calls: number; input: number; cached: number }> = {};
@@ -404,6 +425,8 @@ export function simulateProvider(calls: RecordedCall[], model: ProviderModel = C
     /** Calls that carry the provider's own cached count: it beside what the rules give for the same calls. */
     reported: measured.length ? { calls: measured.length, provider: measured.reduce((sum, row) => sum + row.cached, 0), simulated: measured.reduce((sum, row) => sum + row.simulated, 0) } : null,
     uncachedMinute: { p50: quantile(uncachedWindows, 0.5), p90: quantile(uncachedWindows, 0.9), max: quantile(uncachedWindows, 1), callsOver: overUncached },
+    /** The uncached allowance left once a call has taken what it holds; below zero, the provider would have refused it. */
+    allowanceLeft: { p50: quantile(headroom, 0.5), p10: quantile(headroom, 0.1), lowest: headroom.length ? Math.min(...headroom) : model.uncachedTpm },
     totalMinute: { p50: quantile(totalWindows, 0.5), p90: quantile(totalWindows, 0.9), max: quantile(totalWindows, 1), callsOver: overTotal },
     turnsOver: refused.size,
     turns: new Set(rows.map(row => row.call.runId)).size,
@@ -476,6 +499,19 @@ export async function loadCalls(databaseDirectory: string): Promise<RecordedCall
 
 const percent = (value: number) => `${(100 * value).toFixed(1)}%`;
 
+/**
+ * Gives calls that record no tool definitions (runtimes before the usage record) one
+ * definition of the size named for their stage. `changing` says whether that runtime sent a
+ * different definition on every call, as the phone's did until November 2026: such a call
+ * reuses nothing, because the provider reads tool definitions first.
+ */
+export function withAssumedTools(calls: RecordedCall[], chars: Record<string, number>, changing: boolean): RecordedCall[] {
+  return calls.map((call, index) => {
+    const size = chars[stageOf(call)];
+    return call.tools || !size ? call : { ...call, tools: [{ name: '(assumed)', chars: size, hash: changing ? `call-${index}` : 'same' }] };
+  });
+}
+
 export function renderSimulation(result: ProviderSimulation): string {
   const { model } = result;
   const lines = [`Prefix cache and per-minute limits by the provider's rules (${model.cacheBlockTokens}-token units, tools then system prompt then messages, ${model.cacheMinutes} min; cached tokens are the provider's count where a call records one, otherwise worked out from the recorded text)`];
@@ -483,9 +519,11 @@ export function renderSimulation(result: ProviderSimulation): string {
   for (const [name, stage] of Object.entries(result.stages).sort((a, b) => b[1].input - a[1].input))
     lines.push(`  ${name.padEnd(22)}${String(stage.calls).padStart(6)} calls${percent(stage.hitRate).padStart(8)} cached`);
   if (result.reported) lines.push(`  On the ${result.reported.calls} calls with the provider's cached count: provider counted ${result.reported.provider} cached tokens, these rules give ${result.reported.simulated}`);
-  lines.push(`  Uncached tokens in any 60 s: p50 ${result.uncachedMinute.p50}, p90 ${result.uncachedMinute.p90}, max ${result.uncachedMinute.max} (limit ${model.uncachedTpm}); ${result.uncachedMinute.callsOver} of ${result.calls} calls start over it`);
-  lines.push(`  All tokens in any 60 s: p50 ${result.totalMinute.p50}, p90 ${result.totalMinute.p90}, max ${result.totalMinute.max} (limit ${model.totalTpm}); ${result.totalMinute.callsOver} calls start over it`);
-  lines.push(`  Turns with a call that this phone alone puts over a limit: ${result.turnsOver} of ${result.turns}`);
+  lines.push(`  Uncached tokens charged in any 60 s: p50 ${result.uncachedMinute.p50}, p90 ${result.uncachedMinute.p90}, max ${result.uncachedMinute.max}`);
+  lines.push(`  All tokens in any 60 s: p50 ${result.totalMinute.p50}, p90 ${result.totalMinute.p90}, max ${result.totalMinute.max}`);
+  lines.push(`  Uncached allowance (${model.uncachedTpm}, refilled ${Math.round(model.uncachedTpm / 60)} a second) left once a call holds its share: p50 ${result.allowanceLeft.p50}, p10 ${result.allowanceLeft.p10}, lowest ${result.allowanceLeft.lowest}; ${result.uncachedMinute.callsOver} of ${result.calls} calls start without enough`);
+  lines.push(`  Calls that start without enough of the total allowance (${model.totalTpm}): ${result.totalMinute.callsOver}`);
+  lines.push(`  Turns with a call that this phone alone leaves without enough allowance: ${result.turnsOver} of ${result.turns}`);
   return lines.join('\n');
 }
 
@@ -524,7 +562,7 @@ if (import.meta.main) {
   };
   const directory = args.find((arg, at) => !arg.startsWith('--') && !args[at - 1]?.startsWith('--'));
   if (!directory) {
-    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--json <file>] [--show-text]');
+    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
     process.exit(2);
   }
   const since = value('--since') ? Date.parse(value('--since')!) : 0;
@@ -533,13 +571,15 @@ if (import.meta.main) {
     console.error('Invalid --since or --tpm');
     process.exit(2);
   }
-  const calls = (await loadCalls(directory)).filter(call => call.at >= since);
+  const pairs = (text: string | undefined) => Object.fromEntries((text ?? '').split(',').filter(Boolean).map(pair => {
+    const [stage, amount] = pair.split('=');
+    return [stage, Number(amount)];
+  }));
+  const assumedTools = pairs(value('--assume-tools'));
+  const calls = withAssumedTools((await loadCalls(directory)).filter(call => call.at >= since), assumedTools, args.includes('--assumed-tools-change'));
   const cacheMinutes = value('--cache-minutes') ? Number(value('--cache-minutes')) : undefined;
   const result = audit(calls, { cacheMinutes, tpm });
-  const outputReserve = Object.fromEntries((value('--reserve') ?? '').split(',').filter(Boolean).map(pair => {
-    const [stage, tokens] = pair.split('=');
-    return [stage, Number(tokens)];
-  }));
+  const outputReserve = pairs(value('--reserve'));
   const model: ProviderModel = {
     ...CEREBRAS_QWEN,
     ...(cacheMinutes ? { cacheMinutes } : {}),
@@ -547,8 +587,8 @@ if (import.meta.main) {
     ...(value('--total-tpm') ? { totalTpm: Number(value('--total-tpm')) } : {}),
     outputReserve,
   };
-  if (![model.uncachedTpm, model.totalTpm, model.cacheMinutes, ...Object.values(outputReserve)].every(number => number >= 0 && Number.isFinite(number))) {
-    console.error('Invalid --uncached-tpm, --total-tpm, --cache-minutes or --reserve');
+  if (![model.uncachedTpm, model.totalTpm, model.cacheMinutes, ...Object.values(outputReserve), ...Object.values(assumedTools)].every(number => number >= 0 && Number.isFinite(number))) {
+    console.error('Invalid --uncached-tpm, --total-tpm, --cache-minutes, --reserve or --assume-tools');
     process.exit(2);
   }
   const simulation = simulateProvider(calls, model);
