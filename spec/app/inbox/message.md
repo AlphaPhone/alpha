@@ -350,6 +350,8 @@ pure def closeAttachment(s: MessageView): MessageView = settledAt(s.position, s.
 ### An attachment whose saving may have happened is not saved again, from this message of this account or after closing it, and is remembered once
 
 The owner is told the save could not be confirmed, and looks in Files.
+Discovered by the proof: an attachment under review to be saved is one
+whose saving may have happened only once its own save ended unknown.
 
 ```quint
 pure def stepAnUncertainSaveIsNotRepeated(before: MessageView, after: MessageView, out: List[Effect]): bool =
@@ -360,7 +362,7 @@ pure def stepAnUncertainSaveIsNotRepeated(before: MessageView, after: MessageVie
   })
 
 pure def alwaysAnUncertainSaveIsNotOffered(s: MessageView): bool =
-  (s.attachment != 0 and s.handling == Saving and A::canRecord(s.file)) implies not(s.unsure.includes(heldOf(s)))
+  (s.attachment != 0 and s.handling == Saving and s.file.outcome != A::Unknown) implies not(s.unsure.includes(heldOf(s)))
 
 pure def stepAnUncertainSaveIsRememberedOnce(before: MessageView, after: MessageView): bool =
   after.unsure.length() <= before.unsure.length() + 1
@@ -375,11 +377,14 @@ pure def alwaysReviewsAreOnTheLoadedMessage(s: MessageView): bool =
     (s.message != 0 and s.body.status == R::Loaded and not(s.fromPhone) and (s.link == 0 or s.attachment == 0))
 ```
 
-### An attachment use in flight belongs to the attachment under review
+### An attachment use in flight belongs to the attachment under review, and goes out as soon as it is recorded
+
+Discovered by the proof: a use left recorded and not sent would outlive
+its review.
 
 ```quint
 pure def alwaysAnAttachmentUseBelongsToItsReview(s: MessageView): bool =
-  ((s.file.outcome == A::Sent or s.file.outcome == A::Recorded) implies s.attachment != 0)
+  s.file.outcome != A::Recorded and (s.file.outcome == A::Sent implies s.attachment != 0)
     and 0 <= s.file.id and s.file.id <= s.attempts
 ```
 

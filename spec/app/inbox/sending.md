@@ -355,9 +355,12 @@ pure def alwaysAnUnseenUnknownIsOfThisSession(s: Operations): bool =
 
 ### A draft already sent, or whose send is unknown, is never sent again without the owner choosing to
 
+Discovered by the proof: the owner's choice holds for the whole
+operation, through a refusal and a review again.
+
 ```quint
 pure def alwaysASendAgainIsChosen(s: Operations): bool =
-  (s.kind == Send and s.repeat and s.attempt.id != 0 and not(A::ended(s.attempt))) implies s.again
+  (s.kind == Send and s.repeat) implies s.again
 ```
 
 ### Only the operation in flight tells how it ended, once: the draft is cleared only after a fresh confirmation of its send, and a stopped operation tells its draft nothing went out

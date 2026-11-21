@@ -533,10 +533,13 @@ pure def sessionChanged(s: Mailbox, signedIn: bool): Moved =
 
 ### Accounts are known only from an answer of this session, and the newest one taken
 
+Discovered by the proof: a check that was ever asked has a ticket.
+
 ```quint
 pure def alwaysAccountsAreKnownOnlyFromAnAnswer(s: Mailbox): bool =
   (s.connected.length() > 0 implies (s.accounts.status != R::Idle and s.checked >= 1 and s.signedIn))
     and 0 <= s.checked and s.checked <= s.accounts.ticket
+    and (s.accounts.status != R::Idle implies s.accounts.ticket >= 1)
 ```
 
 ### Once the accounts have answered, the account selected is a connected one

@@ -119,13 +119,14 @@ pure def poll(s: Notices): Noticed =
 
 ### The first answer only sets the starting point, and so does a history Google has reset, which says earlier messages were not looked at; later ones post a notice for each new message, and the point moves on only with the last page
 
-A history point never moves back but by a reset. Google refusing the
+A history point never moves back but by a reset, and an answer is taken
+only when it names each new message by a number. Google refusing the
 account as unauthorized stops watching at once; refusing it otherwise
 three times in a row stops it too; either until it is chosen again.
 
 ```quint
-pure def canChecked(s: Notices, ticket: int, ok: bool, reset: bool, point: int): bool =
-  R::canAnswer(s.check, ticket) and s.account != 0
+pure def canChecked(s: Notices, ticket: int, ok: bool, reset: bool, point: int, messages: Set[int]): bool =
+  R::canAnswer(s.check, ticket) and s.account != 0 and not(messages.contains(0))
     and (ok implies (point >= 1 and ((s.since != 0 and not(reset)) implies point >= s.since)))
 
 pure def checked(s: Notices, ticket: int, ok: bool, problem: Problem, reset: bool, point: int, page: int, messages: Set[int], now: int): Noticed =
