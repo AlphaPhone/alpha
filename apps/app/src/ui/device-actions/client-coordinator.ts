@@ -89,10 +89,12 @@ import {
 import {
   FILES_CAPABILITY,
   FILES_DIRECT_TYPES,
+  FILES_SHOWN_TARGET_CAPABILITY,
   type FilesAgentOperation,
   type FilesIdentity,
   filesContextAllowed,
   filesNeedsIdentity,
+  filesShownTarget,
   isFilesOperation,
   validateFilesOperation,
 } from "@elizaos/plugin-assistant/device-actions/files-browser-contract";
@@ -120,6 +122,7 @@ import {
   NOTES_ORGANIZE_CAPABILITY,
   NOTES_ORGANIZE_DIRECT_TYPES,
   notesOrganizeContextAllowed,
+  notesRecordCapabilityAvailable,
 } from "@elizaos/plugin-assistant/device-actions/notes-organize-contract";
 import {
   type NotesQueryResult,
@@ -135,8 +138,8 @@ import {
   isPhotosViewOperation,
   PHOTOS_VIEW_DIRECT_TYPES,
   type PhotosViewResult,
-  photosViewCapabilityAvailable,
   photosViewContextAllowed,
+  photosViewFormSupported,
   validatePhotosViewResult,
 } from "@elizaos/plugin-assistant/device-actions/photos-view-contract";
 import {
@@ -983,18 +986,30 @@ export class DeviceActionCoordinator<
       throw Error("Device library access was not negotiated with this agent");
     if (isFilesOperation(op) && !this.capability(FILES_CAPABILITY))
       throw Error("Files access was not negotiated with this agent");
+    // The pinned Files contract also accepts files named by their shown
+    // positions; such an operation needs its own capability, as the shared
+    // coordinator checks.
+    if (
+      isFilesOperation(op) &&
+      filesShownTarget(op) &&
+      !this.capability(FILES_SHOWN_TARGET_CAPABILITY)
+    )
+      throw Error("Files shown items were not negotiated with this agent");
     if (
       isNotesOrganizeOperation(op) &&
-      !this.capability(
-        op.type === "notes_list_filter"
-          ? NOTES_LIST_FILTER_CAPABILITY
-          : NOTES_ORGANIZE_CAPABILITY,
-      )
+      !(op.type === "notes_record"
+        ? notesRecordCapabilityAvailable(this.credential.capabilities)
+        : this.capability(
+            op.type === "notes_list_filter"
+              ? NOTES_LIST_FILTER_CAPABILITY
+              : NOTES_ORGANIZE_CAPABILITY,
+          ))
     )
       throw Error("Notes folders were not negotiated with this agent");
+    // An album or share of the open Photos item needs its own capability.
     if (
       isPhotosViewOperation(op) &&
-      !photosViewCapabilityAvailable(this.credential.capabilities)
+      !photosViewFormSupported(op, this.credential.capabilities)
     )
       throw Error("Photos actions were not negotiated with this agent");
     if (
@@ -2018,10 +2033,13 @@ export class DeviceActionCoordinator<
       assertClockHandoffTimeZone(reviewed.proposal.operation, context.timeZone);
     if (isNativeNotesQuery(reviewed.proposal.operation))
       assertNotesQueryContext(context);
+    // Files named only by shown positions were never resolved to the files a
+    // card names, so they are never approved.
     if (
       isFilesOperation(reviewed.proposal.operation) &&
-      filesNeedsIdentity(reviewed.proposal.operation) &&
-      !reviewed.proposal.operation.reviewed
+      (filesShownTarget(reviewed.proposal.operation) ||
+        (filesNeedsIdentity(reviewed.proposal.operation) &&
+          !reviewed.proposal.operation.reviewed))
     )
       throw Error("Review these files again before making changes");
     const p = reviewed.proposal,
