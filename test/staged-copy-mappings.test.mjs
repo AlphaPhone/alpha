@@ -153,7 +153,8 @@ test('every calendar API client refusal is worded by Alpha',()=>{
  assert.deepEqual([...CALENDAR_API_REFUSALS.keys()].sort(),[...sentences].sort());
  assert.equal(CALENDAR_API_REFUSALS.get('Calendar event deletion requires an explicit cancellationMode.'),'Choose how to cancel this event before deleting it. Nothing was deleted.');
  const adapter=readFileSync(new URL('../apps/app/src/prototype/agent-calendar-adapter.ts',import.meta.url),'utf8');
- assert.match(adapter,/refusalText\([^;]*CALENDAR_API_REFUSALS,'Couldn’t update'\)/);
+ assert.match(adapter,/calendarErrorText\(error:unknown,fallback="Couldn’t update"\)/);
+ assert.match(adapter,/refusalText\([^;]*CALENDAR_API_REFUSALS,fallback\)/);
 });
 
 const {ENTITLEMENT_ERROR_TEXT,entitlementErrorText}=await import('../apps/app/src/ui/cloud/subscription-presentation.ts');
