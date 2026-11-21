@@ -15,13 +15,13 @@ public final class AlphaDeletionsPlugin extends Plugin {
  private AlertDialog review;private volatile boolean retired;private volatile long reviewEpoch;
  private final java.util.Set<DeletionReviewAdmission> reviews=java.util.concurrent.ConcurrentHashMap.newKeySet();
  @Override public void load(){super.load();NativeDeletionCoordinator.get(getContext()).start();}
- private void task(PluginCall call,java.util.concurrent.Callable<JSONObject> action){AlphaUtil.submit(worker,()->{try{if(retired)throw new IllegalStateException();call.resolve(JSObject.fromJSONObject(action.call()));}catch(Exception unavailable){call.reject("Deletion state could not be confirmed. Saved data is retained; refresh before reviewing again.");}},()->call.reject("Deletion view retired"));}
+ private void task(PluginCall call,java.util.concurrent.Callable<JSONObject> action){PluginWorkers.submit(worker,()->{try{if(retired)throw new IllegalStateException();call.resolve(JSObject.fromJSONObject(action.call()));}catch(Exception unavailable){call.reject("Deletion state could not be confirmed. Saved data is retained; refresh before reviewing again.");}},()->call.reject("Deletion view retired"));}
  @PluginMethod public void pending(PluginCall call){task(call,()->new JSONObject().put("deletions",NativeDeletionCoordinator.get(getContext()).pending()).put("deletedOrigins",NativeDeletionCoordinator.get(getContext()).deletedNoteOrigins()));}
  @PluginMethod public void dismiss(PluginCall call){task(call,()->NativeDeletionCoordinator.get(getContext()).dismiss(call.getString("kind"),call.getString("id")));}
  @PluginMethod public void undo(PluginCall call){task(call,()->NativeDeletionCoordinator.get(getContext()).undo(call.getString("kind"),call.getString("id")));}
  @PluginMethod public void reviewReminder(PluginCall call){reviewReminder(call,null,null,null);}
  @PluginMethod public void reviewAgentReminder(PluginCall call){
-  AlphaUtil.submit(worker,()->{try{
+  PluginWorkers.submit(worker,()->{try{
    if(retired)throw new IllegalStateException();JSONObject operation=call.getObject("operation"),identity=call.getObject("journalIdentity");
    if(operation==null||!"reminder_cancel".equals(operation.getString("type")))throw new IllegalArgumentException();
    JSONObject owner=NativeDeletionCoordinator.get(getContext()).agentOwner();String id=call.getString("operationId");
@@ -35,7 +35,7 @@ public final class AlphaDeletionsPlugin extends Plugin {
   final DeletionReviewAdmission admission=new DeletionReviewAdmission();reviews.add(admission);
   try{getActivity().runOnUiThread(()->{
    if(retired||reviewEpoch!=epoch||!admission.queued()||review!=null||!foreground()){finishStatus(call,admission,"unavailable");return;}
-   AlphaUtil.submit(worker,()->{
+   PluginWorkers.submit(worker,()->{
     try{
      JSONObject raw=binding==null?call.getObject("target"):binding.getJSONObject("operation").getJSONObject("target");
      if(raw==null)throw new IllegalArgumentException();
@@ -55,7 +55,7 @@ public final class AlphaDeletionsPlugin extends Plugin {
   own[0]=new AlertDialog.Builder(getActivity()).setTitle("Delete reminder?").setMessage(title+"\n\nIts alert pauses now. You can undo for 10 seconds.").setNegativeButton("Cancel",(d,w)->{}).setPositiveButton("Delete reminder",(d,w)->{
    if(submitted[0]||retired||reviewEpoch!=epoch||review!=own[0]||getContext().getSystemService(android.app.KeyguardManager.class).isDeviceLocked()||!getActivity().getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))return;
    submitted[0]=true;
-   AlphaUtil.submit(worker,()->{
+   PluginWorkers.submit(worker,()->{
     // The tap queues one task. Pause and the worker compete for its admission lease;
     // once admitted, its exact durable receipt is returned even if the Activity has since left.
     JSONObject outcome;

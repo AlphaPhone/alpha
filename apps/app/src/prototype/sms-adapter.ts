@@ -14,8 +14,7 @@ import {askedDraftPlaced,draftAdopted,draftStageFit,draftUndone,emptyDraft,readi
 import {handoffResultText,sendRefusalText} from '../ui/telephony/telephony-messages';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 import {placeOwnerCall} from './place-owner-call';
-/** The open thread's visible tail, available to the agent's explicitly selected-thread read. */
-export type OpenThread={participant:string|null;messages:{direction:'in'|'out';date:number;body:string}[];truncated:boolean};
+import type {OpenThread} from '../runtime/telephony-executor';
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
 /** The selected thread identity for on-device approval checks. */
 export const openSmsThreadSelection=()=>openThreadSelection?.()??null;

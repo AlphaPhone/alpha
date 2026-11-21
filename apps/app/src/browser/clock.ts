@@ -47,7 +47,7 @@ export class BrowserClock {
    if(!this.allowed())return;this.loaded=true;this.render();const ringing=ringingAlarms(this.rows);
    if(!ringing)this.releaseRing();
    else if(this.owns){if(ringing!==this.ringing)this.ring(ringing);}
-   else{void navigator.locks.request('alpha.browser.alarm-owner',{ifAvailable:true},async lock=>{if(!lock||!this.allowed()||this.owns)return;const current=ringingAlarms((await this.daily.listReminders()).reminders);if(!current||!this.allowed())return;this.owns=true;await new Promise<void>(resolve=>{this.release=resolve;this.ring(current);});});}
+   else if(navigator.locks){void navigator.locks.request('alpha.browser.alarm-owner',{ifAvailable:true},async lock=>{if(!lock||!this.allowed()||this.owns)return;const current=ringingAlarms((await this.daily.listReminders()).reminders);if(!current||!this.allowed())return;this.owns=true;await new Promise<void>(resolve=>{this.release=resolve;this.ring(current);});});}
    const notices=(await this.notifications.list()).items.filter(n=>!n.id.startsWith('alarm_'));
    if(!this.allowed())return;
    const active=notices.map(n=>n.source+':'+n.id+':'+n.revision.split(':')[0]),initial=()=>({seen:[] as string[]}),before=await alertSoundDocument.read(initial);

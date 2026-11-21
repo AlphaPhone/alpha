@@ -182,10 +182,7 @@ export function installHomeCardVisibility(Component: any, openGoogle: () => void
   const p = Component.prototype, render = p.renderVals;
   p.renderVals = function () {
     const out = render.call(this);
-    return {...out, homeShowCalendar: true, homeShowWorkflows: true, homeShowInbox: true, homeShowDate: false,
-      homeShowSetup: false,
-      homeDateLabel: '',
-      connectGoogle: openGoogle};
+    return {...out, homeShowCalendar: true, homeShowWorkflows: true, homeShowInbox: true, connectGoogle: openGoogle};
   };
 }
 

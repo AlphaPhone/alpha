@@ -27,7 +27,7 @@ export function filterNotes<N extends Note>(list:readonly N[],filter:NotesFilter
  if(!filter)return [...list];
  return list.filter(note=>(!filter.kind||note.kind===filter.kind)&&(filter.folder===undefined||noteFolderOf(note,folders)===filter.folder)&&(!filter.text||noteMatchesText(note,filter.text)));
 }
-export const KIND_LABEL:Record<NotesKind,string>={text:'Notes',list:'Checklists',voice:'Voice notes',link:'Links'};
+const KIND_LABEL:Record<NotesKind,string>={text:'Notes',list:'Checklists',voice:'Voice notes',link:'Links'};
 /** The chip text for an active filter, e.g. “term sheet” · Voice notes · Work. */
 export function notesFilterLabel(filter:NotesFilter,folders:readonly Pick<NotesFolder,'id'|'name'>[]):string{
  const folder=filter.folder===undefined?undefined:folders.find(f=>f.id===filter.folder)?.name;

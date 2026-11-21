@@ -29,7 +29,7 @@ export async function filesAndSharing() {
     const changedReview = await attachment.exports.reviewMailAttachment(second);
     const module = sourceContext([source], ['reviewFileEmail'], {window: page.window, document,
       getComputedStyle: page.window.getComputedStyle.bind(page.window),
-      reviewSharedAttachment: value => (lastReview = attachment.exports.reviewMailAttachment(value)), attachmentRefusalText: drafts.exports.attachmentRefusalText,
+      reviewMailAttachment: value => (lastReview = attachment.exports.reviewMailAttachment(value)), rethrowAttachmentRefusal: drafts.exports.rethrowAttachmentRefusal,
       holdPhoneInert: modal.exports.holdPhoneInert,
       describeEmailTarget: () => ({account: 'Owner', destination: 'Draft'})});
     const t = trace(`attachment-${changed ? 'changed' : 'exact'}`, {'s.inserted': !!inserted});

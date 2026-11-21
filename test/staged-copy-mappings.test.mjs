@@ -121,9 +121,9 @@ test('shared attachment review rejections carry the composer-safe refusal',async
   assert.notEqual(text,sentence);assert.ok(text.length>10,sentence);
   await assert.rejects(Promise.reject(reason).catch(rethrowAttachmentRefusal),{message:text});
  }
- // Use in email and the note source review reach the shared review (and Use in email its selection
- // read) only through that refusal, so no staged sentence reaches either dialog.
- for(const file of ['apps/app/src/prototype/file-email-review.ts','apps/app/src/prototype/note-source-adapter.ts']){
+ // Use in email reaches the shared review (and its selection read) only through that refusal, so
+ // no staged sentence reaches its dialog.
+ for(const file of ['apps/app/src/prototype/file-email-review.ts']){
   const text=readFileSync(new URL('../'+file,import.meta.url),'utf8');
   const reviews=text.match(/reviewMailAttachment\([^)]*\)(\.catch\(rethrowAttachmentRefusal\))?/g)||[];
   assert.ok(reviews.length>0,file);

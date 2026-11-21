@@ -395,50 +395,6 @@ public final class BrowserPageQuestionInstrumentedTest {
     return reviewed;
  }
 
- /** The note shape the summary save writes, stored through the real encrypted Notes bridge. */
- @Test public void noteWithAWebSourceKeepsItAcrossRecreationAndReopensThatAddress() throws Exception {
-  gate();
-  String id = "page-question-" + UUID.randomUUID();
-  try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   Throwable primary = null;
-   try {
-    sourceNoteSurvivesRecreationAndReopens(scenario, id, BASE + "/garden");
-   } catch (Exception | AssertionError failure) { primary = failure; throw failure; } finally {
-    try {
-     restoreNativeCalls();
-     NotesSecureFixture.replaceRecords("records=>records.filter(n=>n.id!==" + JSONObject.quote(id) + ")");
-    } catch (Exception | AssertionError failure) { if (primary != null) primary.addSuppressed(failure); else throw failure; }
-   }
-  }
- }
-
- /** Stores a note with this web source through the encrypted Notes bridge, recreates the Activity and
-  * reopens the source from the note. Shared with JourneyJ05InstrumentedTest; the caller removes `id`. */
- void sourceNoteSurvivesRecreationAndReopens(BoundedActivityScenario<MainActivity> scenario, String id, String url) throws Exception {
-    String title = "Orchard summary " + letters(UUID.randomUUID()).substring(0, 8);
-    AppNavigation.liveMode(); js(AppNavigation.request("Notes")); waitFor(AppNavigation.selected("Notes")); waitFor(AppNavigation.SETTLED);
-    String note = new JSONObject().put("id", id).put("kind", "text").put("title", title).put("body", "The orchard has twelve raised beds.")
-     .put("webSource", new JSONObject().put("kind", "web-page").put("version", 1).put("name", "Orchard report").put("url", url))
-     .put("pinned", false).put("when", "Now").put("createdAt", System.currentTimeMillis()).put("modifiedAt", System.currentTimeMillis()).toString();
-    NotesSecureFixture.replaceRecords("records=>[" + note + ",...records.filter(n=>n.id!==" + JSONObject.quote(id) + ")]");
-    scenario.recreate();
-    AppNavigation.liveMode(); js(AppNavigation.request("Notes")); waitFor(AppNavigation.selected("Notes"));
-    String open = "document.querySelector('button[aria-label=" + JSONObject.quote("Open " + title).replace("'", "\\'") + "]')";
-    waitFor(open); js(open + ".click()");
-    // The note still offers its source after the process rebuilt its state from encrypted storage.
-    tap("Web source linked");
-    String source = "document.querySelector('dialog[aria-label=\"Note web source\"]')";
-    waitFor(source);
-    assertEquals("The source dialog shows the exact saved address", "true", js(source + ".textContent.includes(" + JSONObject.quote(url) + ")"));
-    assertEquals("true", NotesSecureFixture.evaluate("__notesEnvelope.records.find(n=>n.id===" + JSONObject.quote(id) + ")?.webSource?.url===" + JSONObject.quote(url)));
-    // Open source page asks the native browser for exactly that address.
-    recordNativeCalls();
-    String openSource = "[..." + source + ".querySelectorAll('button')].find(b=>b.textContent.trim()==='Open source page'&&!b.disabled)";
-    waitFor(openSource); js("(" + openSource + ").click()");
-    waitFor(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
-    waitFor("window.__pageCalls.some(c=>c.plugin==='AlphaBrowser'&&c.method==='navigate'&&JSON.parse(c.body).url===" + JSONObject.quote(url) + ")");
- }
-
  void cleanup(Pages pages, Throwable primary) throws Exception {
   try {
    js("Capacitor.Plugins.AlphaBrowser.cancelReading(window.__pageTab||{}).catch(()=>{})");

@@ -363,7 +363,7 @@ export class CanonicalNotesUi {
  }
  /** Decorate this view's API only. No global client or shared NotesStore swap. */
  api(original:Bag):Bag{
-  return {...original,canonicalNotes:this,notesSourceMode:'canonical',notesTrash:undefined,moveNoteToTrash:undefined,storageReady:()=>this.controller.current&&this.controller.revision!==null&&!this.controller.pending,
+  return {...original,canonicalNotes:this,storageReady:()=>this.controller.current&&this.controller.revision!==null&&!this.controller.pending,
    set:(patch:Bag)=>{
     // `record` opens the Notes recorder (voice-adapter.ts); the old simulated recorder state is refused.
     if(patch.rec){original.toast('Not in agent Notes');return false;}
@@ -382,10 +382,8 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  prototype.api=function(key:string){
   const value=api.call(this,key);if(key!=='notes')return value;
   if(this.canonicalNotesUi)return this.canonicalNotesUi.api({...value,reviewCalendarDraft:(draft:Bag)=>this.reviewScannedCalendarDraft?.(draft)??false});
-  // Agent Notes are the default source (agent-adapter.ts); retained notes are an explicit choice.
-  if(this.notesSourceMode==='legacy')return value;
   // Waiting for a connection: an attempted action explains why, nothing is drafted.
-  return {...value,notesSourceMode:'canonical',notesTrash:undefined,moveNoteToTrash:()=>false,set:(patch:Bag)=>{if(patch.compose||patch.record===true){value.toast(this.vget('notes').storageStatus||agentPendingText(undefined,UNAVAILABLE));return false;}return value.set(patch);}};
+  return {...value,moveNoteToTrash:()=>false,set:(patch:Bag)=>{if(patch.compose||patch.record===true){value.toast(this.vget('notes').storageStatus||agentPendingText(undefined,UNAVAILABLE));return false;}return value.set(patch);}};
  };
  const notes=views.notes,render=notes.render,back=notes.back;
  // Back closes the Recently deleted choice first, then Recently deleted itself.
@@ -395,16 +393,10 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
   return back(state,value);
  };
  notes.render=(state:Bag,value:Bag)=>{
-  const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
-  if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
-  const withPreviousNotes=(view:Bag)=>{
-   if(!older||older.selected||view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
-   return {...view,previousNotesAction:older.chooseFromMenu,previousNotesMenu:!!state.previousNotesMenu,
-    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:()=>value.set({previousNotesMenu:false})};
-  };
-  if(ui)return withPreviousNotes(ui.decorate(render(state,value),value,state));
+  const ui:CanonicalNotesUi|undefined=value.canonicalNotes;
+  if(ui)return ui.decorate(render(state,value),value,state);
   // A pending New note request waits for the binding instead of drafting into no collection.
   const waiting={...state,...DEVICE_ONLY_STATE,list:[],open:null,compose:false,trashOpen:false,storageStatus:state.storageStatus||agentAvailabilityNotice(undefined,UNAVAILABLE)};
-  return withPreviousNotes({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
+  return {...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false};
  };
 }

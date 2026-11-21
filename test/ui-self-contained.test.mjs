@@ -100,14 +100,12 @@ const VENDOR_RUNTIME = new Map([
   ['vendor/eliza/packages/core/src/utils/uuid.ts', 'UUID validation'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts', 'password website normalization'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/client.ts', 'native passwords bridge client and failure codes'],
-  ['vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts', 'password transfer bridge client'],
 ]);
 // Upstream submodule files the TypeScript program reaches from app modules only through type-only
 // imports (erased from the bundle). Each is reviewed framework-free declarations or logic.
 const VENDOR_TYPES = new Map([
-  ...['index', 'definitions', 'sense', 'sense-bridge', 'sense-web', 'web'].map(name =>
-    [`vendor/eliza/plugins/plugin-native-system/src/${name}.ts`, 'System plugin type (apps/app/src/native.ts)']),
   ['vendor/eliza/plugins/plugin-native-passwords/src/definitions.ts', 'password plugin declarations'],
+  ['vendor/eliza/plugins/plugin-native-calendar/src/android-definitions.ts', 'Android calendar plugin declarations (apps/app/src/native/alpha-calendar.ts)'],
   ...['types/primitives', 'types/interactions', 'types/json', 'types/reminder-presentation', 'types/system-notice', 'ambient-context', 'errors', 'utils/errors'].map(name =>
     [`vendor/eliza/packages/core/src/${name}.ts`, 'UUID type behind the UUID validation helper']),
 ]);

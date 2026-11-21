@@ -30,6 +30,9 @@ export async function inboxPagingFixture(implementation){
   let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
   requests.push({ordinal:++ordinal,grant,query,cursor:cursor??null,signal,resolve,reject,settled:false});return promise;
  };
+ // The list prepares the first message bodies after each page. This projection observes paging only,
+ // so the prepared reads stay unanswered and are cancelled with the list.
+ fixture.client.gmailRead=()=>new Promise(()=>{});
  // Account discovery is the precondition of this paging projection. The real render supplies
  // the API while inactive; refreshAccounts then selects the grant without opening a list.
  class Shell{constructor(){this.st={q:null,compose:null};}renderVals(){return {};}vset(_view,patch){Object.assign(this.st,patch);}S(){return this.st;}}

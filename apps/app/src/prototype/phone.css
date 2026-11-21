@@ -914,10 +914,6 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .maps-chat-choice button { min-height:44px;padding:8px 16px;border-radius:22px;background:var(--s2);color:var(--fg);font:inherit;font-weight:600; }
 .maps-chat-choice button:first-child { background:var(--acc);color:var(--alpha-white); }
 
-.home-date-line { min-height:180px; flex-shrink:0; box-sizing:border-box; padding:0 24px 6px; display:flex; flex-direction:column; justify-content:flex-end; align-items:flex-start; gap:14px; }
-.home-date-text { font-size:40px; line-height:1.08; letter-spacing:-.01em; overflow-wrap:anywhere; }
-.home-date-setup { min-height:48px; padding:0 18px; border-radius:24px; background:var(--s2); color:var(--fg); font-size:15px; font-weight:600; }
-
 .note-transcript-chip { display:inline-flex; align-items:center; align-self:flex-start; gap:12px; max-width:calc(100% - 32px); margin:0 16px 6px; padding:2px 2px 2px 14px; border:1px solid var(--line); border-radius:16px; background:var(--bg); color:var(--fg); }
 .note-transcript-chip-label { display:grid; min-width:0; line-height:1.25; }
 .note-transcript-chip-label small { color:var(--mut); font-size:12px; }

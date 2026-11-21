@@ -5,7 +5,7 @@ import {openDomainRecovery} from './domain-recovery';
 import {BrowserReviews} from './review';
 export type CalendarEditorFields={title:string;body:string;location:string;start:string;end:string;zone:string;allDay:boolean;repeat:string;alert:string;video:boolean;who:string[];timed?:{start:string;end:string;firstDay:string;lastDay:string}};
 type RecordDraft={version:1;id:string;revision:string;fields:CalendarEditorFields};
-function readCalendarEditorDraft(raw:string,id:string):RecordDraft{
+export function readCalendarEditorDraft(raw:string,id:string):RecordDraft{
  const row=JSON.parse(raw),f=row?.fields;
  const keys=(v:any,list:string[])=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).every(k=>list.includes(k));
  if(new TextEncoder().encode(raw).length>64000||!keys(row,['version','id','revision','fields'])||row.version!==1||row.id!==id||typeof row.revision!=='string'||!row.revision||!keys(f,['title','body','location','start','end','zone','allDay','repeat','alert','video','who','timed']))throw Error('Saved calendar editor needs recovery.');

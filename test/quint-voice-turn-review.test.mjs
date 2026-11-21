@@ -5,12 +5,12 @@ import {runVoiceTurnReviewReplay} from '../specs/quint/refinement/application/vo
 
 // VoiceTurnReview model traces (scenarios, witnesses and random walks from the pinned Quint CLI)
 // replayed step by step against the installed voice adapter in the voice view fixture: a spoken
-// turn is held for review, edited, sent or discarded through the panel's own controls, and the
+// turn is sent as the turn, and the
 // reply decides whether voice listens again, pauses for the owner or stops for a phone action.
-test('the voice transcript review follows every VoiceTurnReview model trace', {timeout: scaledTimeout(300000)}, async () => {
+test('the voice turn reply follows every VoiceTurnReview model trace', {timeout: scaledTimeout(300000)}, async () => {
   const receipt = await runVoiceTurnReviewReplay();
-  assert.equal(receipt.traces, 92);
+  assert.equal(receipt.traces, 85);
   assert.ok(receipt.checkpoints > 2000, `checkpoints ${receipt.checkpoints}`);
-  for (const action of ['start', 'transcriptReady', 'edit', 'sendReviewed', 'discard', 'currencyLost', 'currencyBack', 'replyArrives', 'recover', 'close'])
+  for (const action of ['start', 'transcriptReady', 'currencyLost', 'currencyBack', 'replyArrives', 'recover', 'close'])
     assert.ok(receipt.actions[action] > 0, `${action} was replayed`);
 });

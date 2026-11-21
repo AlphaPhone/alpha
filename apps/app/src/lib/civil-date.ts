@@ -7,5 +7,5 @@ export const civilDay = (date: Date, utc = false): number => Date.UTC(utc ? date
 /** Whole device-local calendar days from `b` to `a` (positive when `a` is later). */
 export const civilDayDiff = (a: Date, b: Date): number => (civilDay(a) - civilDay(b)) / DAY_MS;
 
-/** The device's IANA time zone as reported by `Intl` (no fallback; add `|| 'UTC'` where a site had one). */
+/** The device's IANA time zone as reported by `Intl` with no fallback; callers choose one (for example `|| 'UTC'`) when the zone is empty. */
 export const deviceTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;

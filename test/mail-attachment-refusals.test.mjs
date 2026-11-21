@@ -10,7 +10,8 @@ import {tsImport} from './support/ts-import.mjs';
 
 const {attachmentRefusalText, outgoingAttachmentRefusal, createMailDraftsController} = await tsImport('../apps/app/src/ui/mailbox/drafts-controller.ts', import.meta.url);
 const {checkOutgoingAttachments} = await tsImport('../apps/app/src/runtime/inbox-operation.ts', import.meta.url);
-const {AttachmentRefusedError, reviewMailAttachment} = await tsImport('../apps/app/src/runtime/inbox-attachment.ts', import.meta.url);
+const {reviewMailAttachment} = await tsImport('../apps/app/src/runtime/inbox-attachment.ts', import.meta.url);
+const {AttachmentRefusedError} = await tsImport('../.eliza/client-features/plugins/plugin-inbox/src/mailbox/failures.ts', import.meta.url);
 
 const MiB = 1024 * 1024;
 const TOO_LARGE = 'This file is larger than 5 MiB. Choose a file up to 5 MiB.';

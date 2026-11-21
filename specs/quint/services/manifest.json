@@ -228,7 +228,6 @@
       "apps/app/src/runtime/agent-calendar.ts",
       "apps/app/src/runtime/agent-calendar-client.ts",
       "apps/app/src/runtime/canonical-calendar-draft.ts",
-      "apps/app/src/ui/calendar/sync-host.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CalendarSyncConsent.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CalendarSyncFreshness.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CalendarSyncMutation.java",

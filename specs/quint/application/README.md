@@ -16,9 +16,8 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `CalendarApprovalReview` | `CalendarApprovalClient.read`, `resolve`, exact Calendar DTO and finite result parsers | One authenticated read object and revision, captured owner/context, consumed admission before typed POST, cancellation and late-result fencing |
 | `ShellNavigation` | `ViewNavigationClient.capture`, `deliver`, `cancel`, shell `back`, `goHome`, `openView` | All 19 `AlphaView` values, modal/shade/composer ordering, focus, draft and one completed-action claim. View-specific record bodies use their domain models |
 | `StartupPermissions` | `createStartupPermissionFlow`, `readStartupPermissionMemory`, `readStartupPermissionProgress`, `writeStartupPermissionProgress` | One representative permission transaction, seven ordered native setup steps, durable prompt attempt and progress, legacy completed installation |
-| `PermissionWalkthrough` | `StartupPermissions.allow`, `advance`, `finish`, `savedProgress` | Seven independent permission maps, owner/sequence fences, read-only reactivation, targeted Settings review, durable choices and historical completed records |
+| `PermissionWalkthrough` | `StartupPermissions.allow`, `advance`, `finish`, `savedProgress` | Seven independent permission maps, owner/sequence fences, read-only reactivation, targeted Settings review, durable choices and completed records |
 | `AssistantConversation` | `AlphaClient.run`, `send`, `approve`, `cancel`, `disconnect`, `assistantDraftStore` | One foreground request and one proposal identity that survives a failed or aborted send, expiry, consumption kept across a same-session reload with an explicit agent-journal assumption for other sessions, automatic-workflow survival across ordinary navigation, sensitive-view cancellation, compare-and-exchange composer draft |
-| `NotesLifecycle` | Legacy `editNotesTrash`/`planNotesTrash`, canonical `NotesController`, `NotesEditor`, `NotesSnapshotState`, `CanonicalNotesUi` and the Notes folder document | Separate legacy Trash/CAS and canonical owner/read/write generations, dirty-draft preservation, queued edits, uncertain writes, current selection, stable folder identity and deleted-folder projection |
 | `CanonicalNotesFeedback` | Canonical Notes UI, controller and editor callbacks | Read errors, save review and uncertain mutation outcomes |
 | `CanonicalNotesMutation` | Prepared shared Notes editor and the Alpha host binding | Save-before-delete, queued edits, restore and owner fencing |
 | `CanonicalNotesView` | Canonical Notes UI collection and navigation | Draft projection, Trash, owner visibility and navigation waiters |
@@ -91,11 +90,11 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `ViewAdmission` | `applyImageContacts`, `admitImageContacts`, `ENABLED_MVP_VIEWS`, `DEFERRED_MVP_VIEWS`, `refreshImage` | Runtime Contacts admission against the stored shell view: an open view leaves before it is deferred, the view order follows admission, and re-admission never restores a masked view |
 | `SettingsListenerReads` | `listenerReadGate` (`beginAction`, `endAction`, `beginRead`, `readApplies`), `listenerAction`, `refreshCapabilities` | Listener status reads ordered against Pause and Turn off: none starts during an action, an older read is dropped, and the action result is always applied |
 | `MediaCopyIntent` | `admitMediaCopyIntent`, `acknowledgeMediaCopyIntent`, `readMediaCopyIntent` | One pending saved-copy request: compare-and-swap admission from empty, exact acknowledgement, recovery after restart, browser revision identity versus Android token-only identity |
-| `FilesRecentIndex` | `createFilesIndex().record`, `revokeTree`, `recentKey`, selection adapter `accept` and `clear`, `exportScanPdf` | Bounded Recent rows, replacement by key and by revoked folder name, grant release on eviction and Forget, grants kept for Recent on close, and the grant an exported scan leaves held |
+| `FilesRecentIndex` | `createFilesIndex().record`, `recentKey`, selection adapter `accept` and `clear`, `exportScanPdf` | Bounded Recent rows, replacement by key, grant release on eviction and Forget, grants kept for Recent on close, and the grant an exported scan leaves held |
 | `PhotoLibraryAgentReview` | `createDeviceLibrary().agent.run`, `confirmReview`, `validCurrent`, `reviewCard`, `leave` | One pending assistant review over the visible library, provider validation fenced by the visit epoch, re-validation at confirm, single dispatch under repeated confirms, pending review retirement on document hide, and Android settlement of an already dispatched change |
 | `AgentPhotoRequest` | `takeRequestedPhoto`, `untilSettled`, `agentRequest` | Mounted Chromium replay checks preview ownership, owner photo/recording exclusions, stale request and abort, exact IndexedDB photo receipts, and post-dispatch uncertainty with and without a committed row |
 | `CameraFocusWrites` | `BrowserCameraFocus.select`, `clear` | Per-track serialized focus writes, taps retired while waiting never reaching the driver, applied target only for the latest tap |
-| `NotesDocumentTransfer` | `installNotesDocumentAdapter`, `perform`, `receipt`, `whenVisible` | One document import or export at a time, results dropped after Notes is left, receipts held until the page is visible and shown only in their own visit |
+| `NotesDocumentTransfer` | `installNotesDocumentAdapter`, `perform`, `receipt`, `whenVisible` | One document export at a time, results dropped after Notes is left, receipts held until the page is visible and shown only in their own visit |
 | `BackDispatch` | `updateBackAvailability`, `alphaCanGoBack`, `backHandler`, `modalPanels`, `p.back`, `closeEdit`, `openAllApps`, `back()`, `shellNavigate`, `closeAssistant`, `stopVoice`, `handleOnBackPressed`, `showsHome`, `moveTaskToBack` | host, popover/dialog/panel/inert, view/inner/stack/chat/drawer/shade/voice, menu/homeEdit/homeAdd, outcome/closed/removed/lostLayer |
 | `ChatDock` | `chatRelease`, `settleChatMotion`, `tapChatMotion`, `paintChatMotion`, `retire`, `chatDraggedAt`, `chatSheetShare`, `grabTap`, `closeChat`, `swallowed()`, `openSheet`, `toInput`, `rest()`, `chatPullBinding` | view/chat/voice, drag, swallowAge/dragAge, ghost/ghostLabel, remembered, dismissed |
 | `KeyboardGeometry` | `canvasGeometry`, `keyboardFreeHeight`, `WIDE_CANVAS`, `isEditing` | portrait/keyboard/focused, baseWidth/baseHeight, free/landscape/wide/canvasWidth, primed |
@@ -106,29 +105,6 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `PhoneRecents` | `installPhoneAdapter`, `available`, `clear`, `sync`, `async function refresh`, `async function dial`, `epoch`, `needsAccess`, `createAospTelephony`, `normalizePhoneNumber` | mounted/phoneView/hidden/active, epoch/busy/rows/needsAccess/notice, access/reads/dials, requests/prompts/discarded/handoffs |
 | `InertHold` | `holdPhoneInert`, `released`, `previous`, `createInlineModal` | inert/previous/count, holding/released, outside |
 | `ShadePull` | `installSystemShade`, `expandAndroidShade`, `alphaShadeAsking`, `shadePortWithin`, `SHADE_REQUEST_TIMEOUT`, `alphaOverflowPull`, `installOverflowPull`, `openSystemShade`, `simulatedShade` | surface, mounted/home/secure/listening, asking/waiting/late, standIn/requests/fallbacks/opened/ignoredPulls |
-
-## Notes lifecycle modes
-
-`NotesLifecycle` starts either the legacy local Trash/CAS contract or a canonical
-resident Notes contract. The canonical mode has one existing note, one editor
-draft, one current owner, a distinct foreign callback identity and two successive
-folder identities. Three read generations and two writes bound the exploration.
-The legacy mode retains eight storage, queued-write, retained-draft, deletion and restore scenarios.
-
-Canonical scenarios exercise owner retirement, superseded reads, clean and dirty
-refreshes, selection validity and edits typed during a pending save. A queued save
-captures the edit version that requested it. Only an acknowledged write can start
-that captured newer edit automatically. An uncertain write keeps the draft for
-review, while a subsequent explicit save remains available through the public
-editor API. Read completion and a coalesced invalidation's next refresh are
-separate model actions.
-
-The folder contract uses document identity as its compare-and-exchange revision.
-Rename keeps a folder ID. Deletion leaves the note's stored reference intact and
-projects it as unfiled. A newly created folder has a distinct ID and cannot adopt
-that reference. Rich authored values, folder names and content are equality
-classes. New-note creation, canonical Trash operations and complete implementation
-refinement remain outside this bounded variant.
 
 ## Trace conformance
 

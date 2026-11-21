@@ -37,7 +37,7 @@ function contactChangeLines(before: ContactRecord, after: ContactDraft): {text: 
     ...will.map(text => ({text, struck: false, added: !was.includes(text)}))];
 }
 /** Template values of the sheet for the review that is open, or `{open: false}`. */
-function presentTelephonyReview(entry: Pending | null) {
+export function presentTelephonyReview(entry: Pending | null) {
   if (!entry) return {open: false, rows: [] as never[], dismiss: () => {}};
   const {review, settle} = entry;
   const style = (lines: {text: string; struck: boolean; added: boolean}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400}));

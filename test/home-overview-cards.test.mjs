@@ -128,8 +128,8 @@ test('the Home agenda values come from the shared card model for an event, an ov
   const event=h.homeCalendarValues(h.presentHomeAgendaCard({now,item:review,provenance:read,emptyTitle:'No upcoming events'}));
   assert.deepEqual(event,{homeCalendarHasEvent:true,homeCalendarFooter:'4:00 PM – 5:00 PM',homeCalendarLabel:'Open calendar event: Design review, Wed, Oct 7, 4:00 PM – 5:00 PM',homeCalendarTime:'Wed, Oct 7',
     homeCalendarTitle:'Design review',homeCalendarHasMeta:true,homeCalendarSource:'',homeCalendarOrigin:'Work',homeCalendarOverdue:false,homeCalendarStale:false,
-    homeCalendarDescription:'Work. Read 3:04 PM from calendars on this device',
-    homeCalendarNext:'',homeCalendarNextSource:'',homeCalendarHasNext:false,homeCalendarVideo:true,homePeopleVisibility:'visible'});
+    homeCalendarDescription:'Work. Read 3:04 PM from calendars on this device',homeCalendarItemDescription:'Work. Read 3:04 PM from calendars on this device',
+    homeCalendarNext:'',homeCalendarNextSource:'',homeCalendarHasNext:false,homeCalendarVideo:true,homeCalendarPeople:[{ini:'AL'}],homePeopleVisibility:'visible'});
   const reminder=h.presentHomeCalendarSource({state:'ready',overdue:true,reminderReadAt:at(15,1),readAt:at(15,4),now,native:true});
   const overdue=h.homeCalendarValues(h.presentHomeAgendaCard({now,item:{title:'Pay rent',begin:at(9),end:Infinity,allDay:false,overdue:true},provenance:reminder,next:{item:review,provenance:read},overdueCount:1,emptyTitle:''}));
   assert.equal(overdue.homeCalendarTime,'Overdue reminder');assert.equal(overdue.homeCalendarFooter,'Due 9:00 AM');assert.equal(overdue.homeCalendarLabel,'Open overdue reminder: Pay rent, Due 9:00 AM');

@@ -18,11 +18,6 @@ export function expectString(value: unknown, fail: () => Error): string {
   return value;
 }
 
-/** `null` for `null`/`undefined`, otherwise `expectString(value, fail)`. */
-export function optionalString(value: unknown, fail: () => Error): string | null {
-  return value == null ? null : expectString(value, fail);
-}
-
 /** A non-blank string that is an RFC 4122 v1–v5 UUID (any case); throws `fail()` otherwise. */
 export function expectUuidRfc(value: unknown, fail: () => Error): string {
   const id = expectString(value, fail);

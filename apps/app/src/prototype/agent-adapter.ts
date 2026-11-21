@@ -598,7 +598,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(!shell.live||state.view!=='notes'||
        state.shade||state.drawer||state.secure||state.screen==='lock'||state.screen==='off'||
        document.hidden||shell.pageSuspended||connection.open||
-       notes.open||notes.folder||notes.compose||notes.record||notes.menu||notes.sheet||notes.folderSheet||notes.trashOpen||notes.previousNotesMenu||
+       notes.open||notes.folder||notes.compose||notes.record||notes.menu||notes.sheet||notes.folderSheet||notes.trashOpen||
        notesRecorderControl()?.isOpen()||!connectionController.canonicalNotesFilterAvailable())return;
     const revision=shell.canonicalNotesUi?.listFilterRevision;
     const session=connection.session,port=connectionController.getAppRecordClient();
@@ -1064,7 +1064,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         catch{return {status:'failed',summary:'Nothing was changed because Notes changed or became unavailable.'};}
       }
       if(isNotesOperation(operation)){
-        return {status:'failed',summary:'Reviewing this device-record change isn’t available'};
+        return {status:'failed',summary:'Reviewing this device-record change isn’t available. Nothing was changed.'};
       }
       if(operation.type==='read_calendar_range'&&agendaSource){
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive)throw Error('Calendar read context changed');};current();

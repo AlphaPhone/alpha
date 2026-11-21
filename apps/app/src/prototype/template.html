@@ -2535,12 +2535,7 @@
     <h1 data-alpha-app-title class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">{{notes.notesTitle}}</h1>
     <sc-if value="{{notes.canRecord}}"><button class="ib" data-agent-id="notes-record" aria-label="Record voice note" onClick="{{notes.record}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.mic}}"></path></svg></button></sc-if>
       <sc-if value="{{notes.canCreate}}"><button class="ib" data-agent-id="notes-new" aria-label="New note" disabled="{{notes.createDisabled}}" onClick="{{notes.newNote}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg></button></sc-if>
-    <sc-if value="{{notes.previousNotesAction}}"><button class="ib" aria-label="Notes options" aria-haspopup="dialog" aria-expanded="{{notes.previousNotesMenu}}" onClick="{{notes.openPreviousNotesMenu}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
   </div>
-  <sc-if value="{{notes.previousNotesMenu}}"><div ref="{{notes.previousNotesModal}}" data-alpha-popup style="display:contents">
-    <button aria-hidden="true" tabindex="-1" onClick="{{notes.closePreviousNotesMenu}}" style="position:absolute;inset:0;z-index:11;background:transparent"></button>
-    <div class="notes-menu" role="dialog" aria-label="Notes options"><button onClick="{{notes.previousNotesAction}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg>On this phone</button></div>
-  </div></sc-if>
   <sc-if value="{{notes.hasDeleted}}"><div style="padding:0 16px 10px"><button class="tap notes-chip" data-agent-id="notes-trash" onClick="{{notes.openTrash}}"><svg class="i" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></div></sc-if>
   <sc-if value="{{notes.filterOn}}">
     <div style="display: flex; padding: 0 16px 10px; flex-shrink: 0">

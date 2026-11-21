@@ -2,7 +2,7 @@ import type {BrowserDocumentStore} from '../ui/platform/browser-document-store';
 type Snapshot = NonNullable<Awaited<ReturnType<BrowserDocumentStore['read']>>>;
 /** Product recovery policy; the injected upstream store owns transactions. */
 type Documents = Pick<BrowserDocumentStore,'read'|'compareExchange'|'edit'>;
-/** The stored envelope. `legacy` is always written as null. */
+/** The stored envelope. New, restored and reset envelopes write `legacy:null`; edit() keeps an existing `legacy` value unchanged. */
 type Envelope = {version:1;legacy:string|null;value:string|null};
 export type DomainRecovery = {
  snapshot:Snapshot|undefined;

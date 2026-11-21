@@ -245,71 +245,6 @@
     ]
   },
   {
-    "path": "specs/quint/application/NotesLifecycle.qnt",
-    "module": "NotesLifecycle",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "failedSaveKeepsDraftTest",
-      "deletionRestartRestoreTest",
-      "expiryTest",
-      "concurrentEditTest",
-      "canonicalDirtyRefreshKeepsDraftTest",
-      "canonicalCleanRefreshFollowsSnapshotTest",
-      "canonicalInvalidationsCoalesceTest",
-      "canonicalWriteRetiresOlderReadTest",
-      "canonicalTypingDuringSaveQueuesOnlyNewEditTest",
-      "canonicalUnknownWriteRetainsDraftTest",
-      "canonicalExplicitRetryRemainsAvailableTest",
-      "canonicalQueueBeforeNewEditDoesNotReplayTest",
-      "canonicalReadFailureRecoversTest",
-      "canonicalForeignReadCannotPublishTest",
-      "canonicalRetiredOwnerCannotPublishTest",
-      "canonicalFolderRenameKeepsMembershipTest",
-      "canonicalDeletedFolderIsUnfiledTest",
-      "canonicalNewFolderNeverAdoptsOldReferenceTest",
-      "canonicalFolderCasRejectsStaleWriteTest",
-      "canonicalMissingCleanSelectionClosesTest",
-      "canonicalDiscardIsExplicitTest",
-      "queuedUnknownCommitKeepsDraftTest",
-      "restartKeepsConflictingDraftTest",
-      "restartAppliesUncommittedDraftTest",
-      "deletedNoteDraftDoesNotResurrectTest"
-    ],
-    "sources": [
-      "apps/app/src/runtime/notes-store.ts",
-      "apps/app/src/runtime/notes-trash.ts",
-      "apps/app/src/runtime/notes-trash-policy.ts",
-      "apps/app/src/runtime/notes-secure-store.ts",
-      "apps/app/src/prototype/notes-document-adapter.ts",
-      "apps/app/src/browser/domain-document.ts",
-      "apps/app/src/prototype/canonical-notes-controller.ts",
-      "apps/app/src/prototype/canonical-notes-ui.ts",
-      "apps/app/src/prototype/notes-folders-adapter.ts",
-      "apps/app/src/runtime/notes-folders.ts",
-      "apps/app/src/runtime/notes-folders-model.ts",
-      "apps/app/src/prototype/agent-adapter.ts",
-      "apps/app/src/runtime/note-default-title.ts",
-      "apps/app/src/ui/notes/notes-controller.ts",
-      "apps/app/src/ui/notes/notes-editor.ts",
-      "apps/app/src/ui/notes/notes-snapshot-state.ts",
-      "apps/app/src/ui/notes/note-schedule-draft.ts"
-    ],
-    "abstractions": [
-      "Legacy mode preserves the existing one-note local Trash/CAS compatibility contract. Canonical mode represents one existing record, one editor draft, one initial folder and one newly allocated folder identity.",
-      "Canonical source identities, revisions and edit generations are bounded. Content values stand for authored text and rich metadata. Folder-document revisions represent exact compare-and-exchange document identity, not a stored revision field.",
-      "Canonical refresh, owner retirement, dirty-draft preservation, queued edits and uncertain mutation outcomes are explicit. An uncertain response forbids automatic follow-up; explicit user retries retain the current public API behavior.",
-      "Native/provider/transport correctness and complete implementation refinement require separate evidence.",
-      "The legacy variant separates queued writes, confirmed content, durable content and retained drafts. Reopening retains the draft. Model recovery transitions require an explicit recovery boundary; they do not assert automatic replay in the current renderer."
-    ],
-    "sharedSources": [
-      "plugins/plugin-notes/src/client/notes-document-store.ts",
-      "plugins/plugin-notes/src/client/notes-secure-store.ts",
-      "plugins/plugin-notes/src/client/notes-draft.ts"
-    ]
-  },
-  {
     "path": "specs/quint/application/BrowserSession.qnt",
     "module": "BrowserSession",
     "init": "init",
@@ -770,7 +705,7 @@
       "deniedPermissionCannotAdvanceTest",
       "revokedAfterReviewPreservesCompletionTest",
       "failedProgressWriteTest",
-      "legacyCompletionTest",
+      "completedInstallTest",
       "failedAttemptWriteRestartTest",
       "failedChoiceWriteStillAdvancesTest",
       "ownerChangeRetiresPendingTest",
@@ -1579,7 +1514,7 @@
       "browserFourProgressTest",
       "failedProgressAdvancesTest",
       "failedCompletionResumesTest",
-      "legacyReviewPreservesCompletionTest",
+      "completedReviewPreservesCompletionTest",
       "ownerChangeRetiresPendingTest",
       "staleCompletionKeepsNewPendingTest",
       "skippedRequestCannotAdvanceNextTest",
@@ -7571,8 +7506,6 @@
     "tests": [
       "thirdDocumentEvictsOldestTest",
       "sameNamePickedTwiceKeepsBothTest",
-      "treeEntryReopenedTest",
-      "revokedTreeRowReplacedByNameTest",
       "closeKeepsRecentGrantForgetReleasesTest",
       "exportEvictsRowAndReleasesGrantTest",
       "exportKeepsOpenDocumentGrantTest",
@@ -7591,7 +7524,6 @@
     ],
     "witnesses": [
       "EvictedGrantWitness",
-      "RevokedTreeRowWitness",
       "UnlistedOpenWitness",
       "ExportReleasesGrantWitness",
       "ExportEvictsOpenDocumentWitness",
@@ -7614,10 +7546,6 @@
       {
         "path": "apps/app/src/prototype/files-index.ts",
         "name": "record"
-      },
-      {
-        "path": "apps/app/src/prototype/files-index.ts",
-        "name": "revokeTree"
       },
       {
         "path": "apps/app/src/prototype/files-index.ts",
@@ -7655,8 +7583,7 @@
       "opened": "The open selected document (filesIndex.open)"
     },
     "abstractions": [
-      "Two rows stand for the source limit of 24; two folder identities and two names. MIME type is folded into the name.",
-      "revokeTree is modeled as the index operation it is; the app has no caller for it at this revision.",
+      "Two rows stand for the source limit of 24, and two names. MIME type is folded into the name.",
       "A release is modeled as succeeding at once; a failed forgetSelected call (ignored on the export path, a toast on the picker path) is not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."
     ]
@@ -7891,12 +7818,10 @@
       "secondChoiceRefusedWhileBusyTest",
       "resultAfterLeavingNotesIsDroppedTest",
       "receiptOfEarlierVisitIsNotShownTest",
-      "visibleReceiptShownAtOnceTest",
-      "unsavedImportShowsNoReceiptTest"
+      "visibleReceiptShownAtOnceTest"
     ],
     "invariants": [
       "SingleDocumentOperation",
-      "ImportNeedsCompletedRead",
       "ReceiptFollowsFinishedOperation",
       "WaitingReceiptNotFromLaterVisit",
       "ShownReceiptFromOwnVisit",
@@ -7905,8 +7830,7 @@
     "witnesses": [
       "ReceiptWaitsForVisiblePageWitness",
       "LateResultDroppedWitness",
-      "StaleReceiptDroppedWitness",
-      "ImportedWitness"
+      "StaleReceiptDroppedWitness"
     ],
     "sources": [
       "apps/app/src/prototype/notes-document-adapter.ts"
@@ -7930,26 +7854,17 @@
       },
       {
         "path": "apps/app/src/prototype/notes-document-adapter.ts",
-        "name": "importText"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-document-adapter.ts",
         "name": "exportText"
-      },
-      {
-        "path": "apps/app/src/prototype/notes-document-adapter.ts",
-        "name": "testMocksEnabled"
       }
     ],
     "stateMapping": {
       "active/epoch/hidden": "The Notes view, the epoch bumped on leave and document.hidden",
       "busy/operation": "The single document operation and the epoch it started in",
       "receipts/shown/dropped": "Receipts waiting for a visible page, shown, or dropped as belonging to an earlier visit",
-      "imported/reads/settled": "Notes created by import, files read and finished operations"
+      "settled": "Finished operations"
     },
     "abstractions": [
-      "Three operations and three visits. Import is available only with test mocks enabled; export is always available.",
-      "The Notes list save and its conflict checks belong to NotesLifecycle; here an import is stored or not.",
+      "Three operations and three visits. Export is the only document operation.",
       "A receipt issued on a visible page is shown in the same turn; receipts wait only while the page is hidden and are all resolved when it shows again.",
       "Trace replay: test/quint-notes-document-transfer.test.mjs replays simulator traces step by step against installNotesDocumentAdapter with the document plugin, the Notes api and page visibility as ports and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
     ]
@@ -9112,43 +9027,23 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "reviewedTurnIsSentAsEditedTest",
-      "emptyReviewCannotBeSentTest",
-      "discardEndsConversationTest",
-      "closingDropsHeldReviewTest",
       "reviewRequiredDoesNotResumeTest",
       "staleReplyClosesVoiceTest",
       "failedReplyStartsOverTest",
       "ownerInputPauseIsNotAReviewRequirementTest"
     ],
     "invariants": [
-      "NothingSentWithoutSend",
-      "EmptyTextIsNeverSent",
-      "ReviewSettlesOnce",
-      "HeldReviewNeedsVoice",
-      "DiscardClosesVoice",
       "ReviewRequiredStopsListening",
       "ClosedVoiceHoldsNothing",
-      "SendsNeedReviews"
+      "SendsNeedTurns"
     ],
     "witnesses": [
-      "EditedTextSentWitness",
-      "DiscardedWitness",
-      "ReviewRequiredClosesWitness",
-      "AbortedReviewWitness"
+      "ReviewRequiredClosesWitness"
     ],
     "sources": [
       "apps/app/src/prototype/voice-adapter.ts"
     ],
     "symbols": [
-      {
-        "path": "apps/app/src/prototype/voice-adapter.ts",
-        "name": "reviewConversationTurn"
-      },
-      {
-        "path": "apps/app/src/prototype/voice-adapter.ts",
-        "name": "conversationReview"
-      },
       {
         "path": "apps/app/src/prototype/voice-adapter.ts",
         "name": "conversationReviewRequired"
@@ -9171,18 +9066,16 @@
       }
     ],
     "stateMapping": {
-      "review/text/outcome/settles": "conversationReview, its editable text, and how the promise of reviewConversationTurn settled",
-      "sentText/sends": "The text the review resolved with and handed to sendVoiceTurn",
+      "sends": "The transcripts the conversation sent with sendVoiceEntry (policy auto-send) and handed to sendVoiceTurn",
       "reviewRequired": "conversationReviewRequired",
       "phase/restarts": "conversationState.phase and beginConversation calls",
       "voice/current": "chatDestination and the panel's owned() check"
     },
     "abstractions": [
-      "One held review at a time; its text is empty, the spoken transcript or an edited one.",
       "The reply is reduced to whether it requires a phone action review, whether it is an owner-input pause, and whether the turn failed. A reply that requires a review ends the turn in the error phase with the microphone off. Reply text, speech and proposals are in VoiceSession, ReadReplyLease and ApprovalRoutes.",
-      "A transcript is held and a reply is taken only while the chat is current; a reply for a chat that is no longer current closes voice.",
-      "Settings, sign-in and connection recovery of the panel's primary control, and the unconfirmed-media latch that hides the review, are outside this model (VoiceSurfaceRetirement).",
-      "At most three conversation starts per trace."
+      "A turn is sent and a reply is taken only while the chat is current; a reply for a chat that is no longer current closes voice.",
+      "Settings, sign-in and connection recovery of the panel's primary control, and the unconfirmed-media latch, are outside this model (VoiceSurfaceRetirement).",
+      "At most three conversation starts per trace, and at most three sent turns per start."
     ]
   },
   {

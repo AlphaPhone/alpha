@@ -220,7 +220,7 @@ export function notifyGoogleAccountsChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(GOOGLE_ACCOUNTS_CHANGED));
 }
 
-export function googleDisconnectConfirmation(label: string, _serviceName = 'Cloud'): string {
+export function googleDisconnectConfirmation(label: string): string {
   return `Disconnect ${label}? Mail and events stay.`;
 }
 

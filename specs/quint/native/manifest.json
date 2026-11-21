@@ -541,7 +541,6 @@
       "apps/app/src/runtime/cloud-protocol.ts",
       "apps/app/src/runtime/voice-assistant.ts",
       "apps/app/src/runtime/local-agent.ts",
-      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/inbox-operation.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDataReset.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/LocalAgentProviderAdmission.java"
@@ -1367,40 +1366,30 @@
     "sources": [
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/cloud-protocol.ts",
-      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/voice-assistant.ts",
       "apps/app/src/prototype/voice-adapter.ts"
     ],
     "components": [
       "specs/quint/services/IdentitySession.qnt",
-      "specs/quint/services/CalendarLinkedSync.qnt",
       "specs/quint/native/VoiceSession.qnt"
     ],
     "invariants": [
       "RendererHasActivatedCredential",
       "VoiceBindingCurrent",
-      "CalendarBindingCurrent",
-      "LiveCalendarBinding",
       "Identity::safety",
-      "Calendar::safety",
       "Voice::safety"
     ],
     "tests": [
       "signInAndVoiceTest",
       "nativeCommitPrecedesRendererPublicationTest",
-      "accountReplacementRetiresCalendarReviewTest",
-      "alreadyDispatchedEffectCanFinishAfterReplacementTest",
-      "signOutKeepsUnknownCalendarIntentTest",
-      "foregroundLossRejectsNewCalendarDispatchTest",
       "cancelledReplacementKeepsOldBindingTest",
       "lateVoiceReplyCannotUseReplacementTest",
       "uncoordinatedIdentityChangeDetectedTest"
     ],
     "abstractions": [
       "Two native credential attempts and two renderer owners. Native commit, acknowledgement and renderer publication are separate transitions.",
-      "One durable Calendar link retains the old owner binding across account changes. New-account link collections require a separate instance and are not represented by resetting the old link.",
       "Initial restored authentication and native authentication completion are explicit contract macros in renderer traces. Intermediate native storage/ack state is checked by the separate native sign-in campaign.",
-      "This bounded renderer composition imports IdentitySession, CalendarLinkedSync and VoiceSession. ApplicationComposition retains the separate Inbox, Resident and Reset coordination contracts."
+      "This bounded renderer composition imports IdentitySession and VoiceSession. Client Calendar linked sync is retired (agent-side Calendar sync is CalendarLinkedSync). ApplicationComposition retains the separate Inbox, Resident and Reset coordination contracts."
     ]
   },
   {

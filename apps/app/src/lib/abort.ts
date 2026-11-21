@@ -7,9 +7,6 @@ export const abortError = (message = 'Cancelled'): DOMException => new DOMExcept
 /** True for a `DOMException` named `AbortError` (what `fetch`, the Web Share API and `abortError()` throw). */
 export const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === 'AbortError';
 
-/** True for any `Error` (including `DOMException`) named `AbortError`, such as the upstream voice errors. */
-export const isNamedAbortError = (error: unknown): boolean => error instanceof Error && error.name === 'AbortError';
-
 /** Resolves after `ms`; with a signal, throws `signal.reason` if already aborted and rejects with it on abort. */
 export function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (!signal) return new Promise(resolve => setTimeout(resolve, ms));
