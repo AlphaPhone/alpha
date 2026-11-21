@@ -44,7 +44,7 @@ test('a turn that routes right can still fail on what its proposal or its reply 
   // A create that did not take effect fails, however politely it is reported.
   const reminder = CASES.find(item => item.id === 'reminder-before');
   assert.equal(judgeTurn(reminder, [], "Got it. I'll remind you to take out the trash tonight at 10 PM."), 'pass');
-  for (const reply of ["I tried to save that trash reminder three times but each one hit a temporary system error. It's not saved.", "Setting that reminder ran into a hiccup, so I can't confirm it went through.", "I hit a snag and couldn't complete that request."])
+  for (const reply of ["I tried to save that trash reminder three times but each one hit a temporary system error. It's not saved.", "Setting that reminder ran into a hiccup, so I can't confirm it went through.", "I hit a snag and couldn't complete that request.", 'I tried to complete that, but the available runtime step failed before it produced a usable result. The request remains incomplete.'])
     assert.equal(judgeTurn(reminder, [], reply), 'content', reply);
 });
 
