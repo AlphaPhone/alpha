@@ -8,7 +8,7 @@ lemma redeemed_ensures(c: Codes, attempt: int, ok: bool, known: bool)
 {
   if inv(c) && canRedeemed(c, attempt) {
     var after := redeemed(c, attempt, ok, known);
-    AddKeeps(c.unknown, c.redeemCode);
+    reveal Std.Collections.Seq.Filter();
     if !known { assert after.state.redeem.outcome.Unknown?; assert c.redeemCode in after.state.unknown; }
     assert after.state.apply == c.apply;
   }
@@ -18,7 +18,7 @@ lemma lawAnUnknownRedemptionIsNeverSentUnderANewNumber_ensures(code: string)
   ensures (lawAnUnknownRedemptionIsNeverSentUnderANewNumber(code) == true)
 {
   var sent := redeem(initial, code, 1, app__account__outside_Origin.ByOwner, false).state;
-  AddKeeps(sent.unknown, sent.redeemCode);
+  reveal Std.Collections.Seq.Filter();
   var lost := planAnswered(redeemed(sent, sent.redeem.id, false, false).state);
   assert code in lost.unknown;
 }
@@ -31,7 +31,7 @@ lemma referralApplied_ensures(c: Codes, attempt: int, result: Applied)
 {
   if inv(c) && canReferralApplied(c, attempt) {
     var after := referralApplied(c, attempt, result);
-    AddKeeps(c.unknown, c.applyCode);
+    reveal Std.Collections.Seq.Filter();
     if result.CodeUnknown? { assert after.state.apply.outcome.Unknown?; assert c.applyCode in after.state.unknown; }
     assert after.state.redeem == c.redeem;
   }
@@ -44,27 +44,12 @@ lemma restart_ensures(c: Codes)
   ensures (inv(c) ==> stepANewSignInLeavesNothingUnderWay(c, "restart", restart(c).state))
 {
   if inv(c) {
+    reveal Std.Collections.Seq.Filter();
     var after := restart(c);
-    var u1 := c.unknown + Std.Collections.Seq.Filter((set_x: string) => !((set_x in c.unknown)), (if c.redeem.outcome.Sent? then [c.redeemCode] else []));
-    AddKeepsAll(c.unknown, (if c.redeem.outcome.Sent? then [c.redeemCode] else []));
-    AddKeepsAll(u1, (if c.apply.outcome.Sent? then [c.applyCode] else []));
-  }
-}
-
-lemma AddKeeps(xs: seq<string>, x: string)
-  ensures x in xs + Std.Collections.Seq.Filter((set_x: string) => !((set_x in xs)), [x])
-  ensures forall y :: y in xs ==> y in xs + Std.Collections.Seq.Filter((set_x: string) => !((set_x in xs)), [x])
-{
-  AddKeepsAll(xs, [x]);
-}
-
-lemma AddKeepsAll(xs: seq<string>, ys: seq<string>)
-  ensures forall y :: y in xs ==> y in xs + Std.Collections.Seq.Filter((set_x: string) => !((set_x in xs)), ys)
-  ensures forall y :: y in ys ==> y in xs + Std.Collections.Seq.Filter((set_x: string) => !((set_x in xs)), ys)
-{
-  var p := (set_x: string) => !((set_x in xs));
-  assert ProofLib.Filter(p, ys) == Std.Collections.Seq.Filter(p, ys);
-  forall y | y in ys ensures y in xs + Std.Collections.Seq.Filter(p, ys) {
-    ProofLib.FilterMember(p, ys, y);
+    var once := c.unknown + Std.Collections.Seq.Filter((set_x: string) => !((set_x in c.unknown)), (if c.redeem.outcome.Sent? then [c.redeemCode] else []));
+    assert forall y :: y in c.unknown ==> y in once;
+    assert c.redeem.outcome.Sent? ==> c.redeemCode in once;
+    assert forall y :: y in once ==> y in after.state.unknown;
+    assert c.apply.outcome.Sent? ==> c.applyCode in after.state.unknown;
   }
 }

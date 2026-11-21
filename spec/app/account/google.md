@@ -303,13 +303,19 @@ pure def keepAccount(g: Google): Google = { ...g, leaving: 0, review: V::dismiss
 
 ### Confirming tells Calendar to pause that account's sync and asks Cloud to disconnect it, and whatever Cloud answers, the accounts are read back to confirm it
 
+An account whose sync is still paused from a disconnect a restart cut
+short, and which the accounts last read back still list, has its sync
+resumed first. Discovered by the proof: without it, a second disconnect
+left the first account paused for good.
+
 ```quint
 pure def canConfirmDisconnect(g: Google): bool =
   V::canConfirm(g.review) and g.work == Resting and holds(g.links, g.leaving) and g.list.status != R::Loading
 
 pure def confirmDisconnect(g: Google): Moved =
   { state: { ...g, work: Disconnecting, ticket: g.ticket + 1, review: V::confirm(g.review), paused: g.leaving },
-    out: List(PauseSync({ account: g.leaving }), Disconnect({ ticket: g.ticket + 1, account: g.leaving })) }
+    out: (if (g.paused > 0 and g.paused != g.leaving and holds(g.links, g.paused)) List(ResumeSync({ account: g.paused })) else List())
+      .concat(List(PauseSync({ account: g.leaving }), Disconnect({ ticket: g.ticket + 1, account: g.leaving }))) }
 
 pure def canDisconnectAnswered(g: Google, ticket: int): bool = g.work == Disconnecting and ticket == g.ticket
 
@@ -327,7 +333,7 @@ pure def alwaysADisconnectNamesItsAccount(g: Google): bool = and {
   g.work != Resting implies (g.leaving > 0 and holds(g.links, g.leaving) and not(g.tab.open)),
   g.work == Disconnecting implies g.list.status != R::Loading,
   g.work == Confirming implies g.list.status == R::Loading,
-  g.review.showing implies (g.leaving > 0 and g.work == Resting),
+  g.review.showing implies (g.leaving > 0 and g.work == Resting and not(g.tab.open)),
 }
 ```
 
