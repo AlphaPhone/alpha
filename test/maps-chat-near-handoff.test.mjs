@@ -12,7 +12,7 @@ const FERRY={latitude:37.7955,longitude:-122.3937},VIEWPORT={latitude:40.7,longi
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};};
 
-function fixture(){
+function fixture({unconfigured=false}={}){
  const searched=[],now=1_760_000_000_000;
  const place={providerId:'fixture',id:'rx1',name:'Pharmacy 1',coordinate:{latitude:37.8,longitude:-122.3937},attribution:'Fixture data',fetchedAt:now};
  const provider={providerId:'fixture',connectionId:'conn_fixture_123456789',
@@ -21,7 +21,9 @@ function fixture(){
  const config={status:'configured',providerId:'fixture',connectionId:'conn_fixture_123456789',revision:'1',
   capabilities:{map:false,search:true,placeDetails:true,modes:['drive','walk'],traffic:'none',transit:'none',offline:{map:false,search:false,routing:false}}};
  const location={awaitingPermission:()=>false,async start(){},async stop(){}};
- const host={connection:()=>({config,provider}),onConnectionChange:()=>()=>{},initialize:async()=>{},
+ const connection={config:unconfigured?{status:'unconfigured'}:config};let changed;
+ const host={connection:()=>({config:connection.config,provider:connection.config.status==='configured'?provider:undefined}),
+  onConnectionChange:listener=>{changed=listener;return ()=>{changed=undefined;};},initialize:async()=>{},
   diagnostics:()=>({configured:true,error:''}),coverage:()=>undefined,attribution:()=>'Fixture data',
   createController:(current,maps)=>new MapsController(current,maps,new SavedPlaces('near-handoff.test',memory()),location),
   navigationLocation:location,agentLocation:location,locationGranted:async()=>false,
@@ -30,7 +32,7 @@ function fixture(){
   share:async()=>'copied',openWebsite(){},active:()=>true,invalidate(){},toast(){},discardHandoff(){},handoffReturn:()=>false,
   released(){},now:()=>now,publishContext(){},clearContext(){}};
  const screen=new MapsScreenController(host);screen.ensure();
- return {screen,searched};
+ return {screen,searched,activate:()=>{connection.config=config;changed?.();}};
 }
 
 test('a chat card hand-off searches around the named place once, then the map is the bias again',async()=>{
@@ -51,4 +53,15 @@ test('a chat card hand-off searches around the named place once, then the map is
  screen.handoff('pharmacy',false,{latitude:200,longitude:0});
  await settle();
  assert.deepEqual(searched.at(-1),{query:'pharmacy',near:VIEWPORT});
+});
+
+test('a hand-off made before the provider is ready keeps its search point when the search resumes',async()=>{
+ const {screen,searched,activate}=fixture({unconfigured:true});
+ screen.setViewport(VIEWPORT,15);
+ screen.handoff('pharmacy',false,FERRY);
+ await settle();
+ assert.deepEqual(searched,[]);
+ activate();
+ await settle();
+ assert.deepEqual(searched,[{query:'pharmacy',near:FERRY}]);
 });
