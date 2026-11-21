@@ -342,8 +342,10 @@ One conversation of 36 turns on a local resident in Android mode (section 2), br
 
 Output is about 2% of input. Over 295 calls the provider counted, Stage 1 wrote 196
 tokens at the median and 342 at most, the planner 103 and 263, the evaluator 180 and
-540. What output costs is its cap, which a call holds while it runs: 4,096 with the
-phone's settings, 16,384 without one.
+540. What output costs is its cap, which a call holds while it runs: at most 16,384,
+which is also what a call that sends no cap holds. Calls that reason write far more: a
+first step that reads history back reasons with 700 to 3,600 output tokens, and the
+personal assistant's planning call used more than 4,096.
 
 ## 2. Whole turns on a local resident
 
@@ -523,7 +525,11 @@ row, so earlier logs cannot show how often it happened. Before revision 7 the ev
 scored these turns as passes.
 
 The owner's decision is that there is no 4,096 cap: output may use the model's maximum
-and input its context window. What each policy costs, on the Pixel's own turns of
+and input its context window. The phone now launches with no output cap on any call (the
+five `*_MAX_TOKENS` lines are gone from `AlphaLocalAgentPlugin.java`): a call that sends
+none may write 40,960 tokens and holds the same as an explicit 40,960. The planner's
+upstream default of 8,192 stays until the runtime accepts `ELIZA_PLANNER_MAX_TOKENS=model`
+(a follow-up change); no recorded planner call wrote more than 301 tokens. What each policy costs, on the Pixel's own turns of
 November 19 and 20 replayed through the branch (Stage 1 and the first planner call of
 158 turns at the phone's real spacing; a host replay, nothing sent):
 

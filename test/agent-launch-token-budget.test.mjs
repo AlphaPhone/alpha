@@ -6,24 +6,19 @@ const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'ut
 
 // One phone exhausted the hosted model's per-minute token limit in a short conversation:
 // every request repeated the conversation under fresh references, so none shared a prefix.
-test('the phone launches its agent with stable references and output caps the pinned runtime reads', () => {
+test('the phone launches its agent with stable references and no output cap', () => {
   const host = read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java');
   const env = Object.fromEntries([...host.matchAll(/env\.put\("([A-Z0-9_]+)","([^"]*)"\)/g)].map(match => [match[1], match[2]]));
   assert.equal(env.ELIZA_SECRET_SWAP_ENABLED, 'true');
   assert.equal(env.ELIZA_SECRET_SWAP_STABLE_REFERENCES, 'true');
-  // A call holds its cap against the per-minute limit when it starts; one that sends none holds 16,384.
-  for (const name of ['ELIZA_PLANNER_MAX_TOKENS', 'ELIZA_STAGE1_MAX_TOKENS', 'ELIZA_EVALUATOR_MAX_TOKENS', 'TEXT_SMALL_MAX_TOKENS', 'TEXT_LARGE_MAX_TOKENS']) {
-    const cap = Number(env[name]);
-    assert.ok(Number.isInteger(cap) && cap >= 2048 && cap < 8192, `${name}: room for a long note or reply, below what an uncapped call holds`);
-  }
+  // A call that sends no cap may write the model's maximum and holds no more of the per-minute
+  // limit than a cap of 16,384 does. A smaller cap cut off calls that reason before they answer.
+  for (const name of ['ELIZA_STAGE1_MAX_TOKENS', 'ELIZA_EVALUATOR_MAX_TOKENS', 'TEXT_SMALL_MAX_TOKENS', 'TEXT_LARGE_MAX_TOKENS', 'DEFAULT_MAX_TOKENS'])
+    assert.equal(env[name], undefined, `${name} caps the phone's calls`);
+  // The planner may only be given the model's maximum.
+  assert.ok(env.ELIZA_PLANNER_MAX_TOKENS === undefined || env.ELIZA_PLANNER_MAX_TOKENS === 'model', env.ELIZA_PLANNER_MAX_TOKENS);
   // A flag the pinned runtime does not read would change nothing on the phone.
   assert.match(read('vendor/eliza/packages/core/src/security/secret-swap.ts'), /"ELIZA_SECRET_SWAP_STABLE_REFERENCES"/);
-  assert.match(read('vendor/eliza/plugins/plugin-assistant/src/runtime/planner-loop.ts'), /"ELIZA_PLANNER_MAX_TOKENS"/);
-  const caps = read('vendor/eliza/plugins/plugin-assistant/src/runtime/output-cap.ts');
-  assert.match(caps, /"ELIZA_STAGE1_MAX_TOKENS"/);
-  assert.match(caps, /"ELIZA_EVALUATOR_MAX_TOKENS"/);
-  // The side calls' caps are runtime settings, which reach the agent only if it projects them from its environment.
-  assert.match(read('vendor/eliza/packages/agent/src/runtime/runtime-settings.ts'), /TEXT_GENERATION_MODEL_TYPES\.map\(\(modelType\) => `\$\{modelType\}_MAX_TOKENS`\)/);
 });
 
 // Measured on the hosted model: a request refused with Retry-After 59 is admitted seconds
