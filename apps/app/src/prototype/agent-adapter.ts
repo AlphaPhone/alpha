@@ -734,9 +734,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     current();
     if(shell.canonicalNotesUi!==notes||!notes.current||notes.pending)return unavailable;
     const titleKey=(value:string)=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
-    const key=titleKey(title);
-    const matches=notes.notes().filter(note=>titleKey(note.title)===key);
-    if(matches.length>1)return {message:`More than one note is titled “${title}”. Open Notes and choose the one you want.`};
+    const key=titleKey(title),saved=notes.notes();
+    const exact=saved.filter(note=>titleKey(note.title)===key);
+    const words=(value:string)=>titleKey(value).match(/[\p{L}\p{N}]+/gu)??[];
+    const query=words(title);
+    // Exact titles take precedence. Shorthand must match complete title words in order.
+    // A second matching record makes the selection ambiguous even when one is newer.
+    const matches=exact.length||!query.length?exact:saved.filter(note=>{
+      const titleWords=words(note.title);
+      let next=0;
+      for(const word of titleWords)if(word===query[next])next++;
+      return next===query.length;
+    });
+    if(matches.length>1)return {message:exact.length?
+      `More than one note is titled “${title}”. Open Notes and choose the one you want.`:
+      `More than one note matches “${title}”. Give me the full title.`};
     const note=matches[0];
     if(!note)return {message:`I couldn’t find a note titled “${title}”.`};
     if(notes.editing&&notes.open!==note.id)return {message:'Close the note you’re editing before opening another one.'};
@@ -2148,7 +2160,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:savedEmailReply,complete:true,localVoiceReply:true as const};
       }
     }
-    const noteTitle=input.navigation&&input.context.view!=='notes'?namedNoteOpenRequest(text):undefined;
+    const noteTitle=input.navigation?namedNoteOpenRequest(text):undefined;
     if(noteTitle&&input.navigation){
       this.voiceSendTurnId=turnId;
       try{
@@ -2159,7 +2171,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         else{
           let opened=false;
           try{
-            opened=await input.navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(this,target,chat,onCommitted));
+            opened=await input.navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(this,target,chat,onCommitted),target.id);
           }finally{
             const next=input.navigation.finish(opened);
             if(next)acceptedContext=next;

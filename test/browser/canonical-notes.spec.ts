@@ -585,16 +585,16 @@ for(const stale of [false,true])test(`recording summary uses canonical update an
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
-test('typing an exact note title on Home opens the saved editor without writing the note',async({page})=>{
+test('typing a unique shorthand on Home opens the saved editor without writing the note',async({page})=>{
  await canonicalNotesFixture(page,{notes:[
-  {...trashedNote,id:'different-list',title:'Groceries for breakfast'},
-  {...trashedNote,id:'dinner-list',title:'Groceries',body:'\nLimes and cheese.'},
+  {...trashedNote,id:'different-list',title:'Browser Preview'},
+  {...trashedNote,id:'dinner-list',title:'Browser Grocery Rehearsal',body:'\nLimes and cheese.'},
  ]});
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
- await input.fill('Open the note titled groceries in Notes.');
+ await input.fill('open browser grocery note');
  await input.press('Enter');
  const editor=page.locator('[data-alpha-subview="notes-editor"]');
- await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Groceries');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Browser Grocery Rehearsal');
  await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Limes and cheese.');
  expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.some((request:any)=>request.method==='POST'))).toBe(false);
 });

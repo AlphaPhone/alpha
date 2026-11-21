@@ -352,3 +352,43 @@ test('a spoken title matching two notes asks the owner to choose and opens neith
  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
  await expect(page.locator('[data-alpha-subview="notes-editor"]')).toHaveCount(0);
 });
+
+test('a unique spoken shorthand opens the editor from the Notes list without ending Talk',async({page})=>{
+ await setup(page,'sheet',false,true);
+ await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.notes=[
+   {id:'site-note',title:'Browser Learning',body:'\nWebsite.',color:'yellow',createdAt:'2026-11-21T12:00:00Z',updatedAt:'2026-11-21T12:00:00Z'},
+   {id:'groceries',title:'Browser Grocery Rehearsal',body:'\nAvocados and limes.',color:'yellow',createdAt:'2026-11-21T12:01:00Z',updatedAt:'2026-11-21T12:01:00Z'},
+  ];
+  f.releaseNotesRead();
+ });
+ await utterance(page,'notes');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await expect(page.getByRole('button',{name:'Open Browser Grocery Rehearsal',exact:true})).toBeVisible();
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.prompt='Open browser grocery note.');
+ await utterance(page);
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Browser Grocery Rehearsal');
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Avocados and limes.');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
+});
+
+test('a shorthand matching two distinct titles asks for the full title',async({page})=>{
+ await setup(page,'sheet',false,true);
+ await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.prompt='Open grocery note.';
+  f.notes=['Grocery Trip','Grocery Rehearsal'].map((title,id)=>({id:'grocery-'+id,title,body:'\nDifferent list.',color:'yellow',createdAt:'2026-11-21T12:00:00Z',updatedAt:'2026-11-21T12:00:00Z'}));
+  f.releaseNotesRead();
+ });
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken))
+  .toEqual(['More than one note matches "grocery". Give me the full title.']);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+});

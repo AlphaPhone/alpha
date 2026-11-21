@@ -43,6 +43,9 @@ test('named note opening requires an explicit Notes or note reference',()=>{
   assert.equal(namedNoteOpenRequest('Switch to Notes and show me the note called Groceries.'),'Groceries');
   assert.equal(namedNoteOpenRequest('Open "Ideas in Notes." in Notes.'),'Ideas in Notes.');
   assert.equal(namedNoteOpenRequest('Open the note titled Notes.'),'Notes');
+  assert.equal(namedNoteOpenRequest('open browser grocery note'),'browser grocery');
+  assert.equal(namedNoteOpenRequest('Show me my Browser Grocery note.'),'Browser Grocery');
+  assert.equal(namedNoteOpenRequest('Open browser grocery in Notes.'),'browser grocery');
   for (const prompt of ['Open Notes.','Open "Calendar".','Open the note you just created.','Read the note titled Groceries.',
-    'Show me what I wrote in Notes.','Delete the note called Groceries.']) assert.equal(namedNoteOpenRequest(prompt),undefined);
+    'Show me what I wrote in Notes.','Open a new note.','Open this note.','Delete the note called Groceries.']) assert.equal(namedNoteOpenRequest(prompt),undefined);
 });

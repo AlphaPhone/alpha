@@ -90,7 +90,7 @@ export interface VoiceConversationBinding { conversationId:string;session:Verifi
 export interface ReadReplyBinding extends VoiceConversationBinding {cloudAccount:string}
 /** Local host projection invoked only inside the canonical claimed view effect. Never wire metadata or authority. */
 export interface VoiceNavigationContinuation {
- apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>):Promise<boolean>;
+ apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>,expectedNoteId?:string):Promise<boolean>;
  finish(delivered:boolean):ContextEnvelope|undefined;
 }
 export interface AgentReply {

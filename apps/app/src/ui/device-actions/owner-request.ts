@@ -21,8 +21,14 @@ export function namedNoteOpenRequest(text: string): string | undefined {
   const named = /^(?:open|show)(?: me)? (?:the |my )?note (?:called|named|titled) (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command);
   const quoted = /^(?:open|show)(?: me)? ((?:the |my )?note )?(".+"|“.+”)( in (?:the )?notes(?: app)?)?$/i.exec(command);
   const quotedTitle = quoted && (request !== command || quoted[1] || quoted[3]) ? quoted[2] : undefined;
-  const target = named?.[1] ?? quotedTitle;
+  // In speech the owner can put the reference before or after “note”.
+  const shorthand = /^(?:open|show)(?: me)? (?:the |my )?(.+?) note(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
+    ?? /^(?:open|show)(?: me)? (?:the |my )?note (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
+    ?? /^open (.+?) in (?:the )?notes(?: app)?$/i.exec(command);
+  const target = named?.[1] ?? quotedTitle ?? shorthand?.[1];
   if (!target) return;
+  const generic = /^(?:(?:a|an|the|my) )?(?:this|that|it|new|empty|blank|any|another|some|last|latest|recent|previous|you just (?:made|created)|note|one)(?: (?:note|one))?$/i;
+  if (!named && !quotedTitle && (generic.test(target) || /^(?:a|an|the|my)$/i.test(target))) return;
   const title = unquote(target).trim();
   if (title && !/[\r\n]/.test(title)) return title;
 }
