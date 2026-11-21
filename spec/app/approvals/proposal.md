@@ -277,11 +277,15 @@ pure def request(p: Proposal, id: int, operation: Operation, message: int, typed
     out: List(Reserve) }
 ```
 
-### A run asked for directly changes nothing and never had a card
+### A run asked for directly changes nothing and never had a card, and a proposal not yet made is blank
+
+Discovered by the proof: nothing is kept for a number before the agent
+uses it, and a direct run is never a card waiting.
 
 ```quint
 pure def alwaysADirectRunChangesNothing(p: Proposal): bool =
-  p.message > 0 implies (changesNothing(p.operation) and p.review == R::unreviewed)
+  (p.message > 0 implies (changesNothing(p.operation) and p.review == R::unreviewed and p.stage != Pending))
+    and (p.stage == Unproposed implies p == initial)
 ```
 
 ### The journal answers the reservation: written, it reserves the row and asks the agent for the claim; not written, or written under another identity, nothing is reserved and the agent is told
