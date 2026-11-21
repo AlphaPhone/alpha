@@ -462,7 +462,7 @@ const actionReceipts = new Map<string, { sessionId: string; result: Promise<Oper
 const readReplyOwners=new Map<ReadReplyBinding,{actions:DeviceActions;proposalId:string;digest:string;cancelled:boolean}>();
 function retireReadReplies(){for(const binding of [...readReplyOwners.keys()])void connectionController.cancelReadReply(binding).catch(()=>{});}
 let navigationContext:(()=>ContextEnvelope|null)|undefined;
-let requestedCameraContinuation:{messageId:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
+let requestedCameraContinuation:{messageId:string;text:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
 let deviceRecovery: DeviceRecovery | undefined;
 let deviceExecutor: DeviceExecutor = async () => ({ status: 'failed', summary: 'Device action executor is unavailable.' });
 /** Foreground local reviews (free/busy over owner-chosen calendars). The phone shell supplies the
@@ -2339,8 +2339,10 @@ export const connectionController = {
     // photo waits there as its review card instead of failing the reply. Nothing is taken without a readable direct mode.
     const allowed=async()=>{current();const preferences=await readDevicePreferences(signal).catch(()=>{signal.throwIfAborted();return {askBeforeAgentActions:true};});current();return !preferences.askBeforeAgentActions;};
     if(!await allowed())return [];
-    await pending.selected.actions.pendingReview(context,signal);current();
-    return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo');
+    // The owner's own words prove the photo was asked for: a capture the model proposed for other words keeps its card.
+    const proof:CurrentDeviceActionRequest={messageId,text:pending.text,current};
+    await pending.selected.actions.pendingReview(context,signal,proof);current();
+    return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo',proof);
   },
   /** The agent proposed this message's photo without showing Camera, and the phone is still on the screen the request was sent from. */
   requestedCameraNeedsOpening(messageId:string):boolean {
@@ -3663,7 +3665,7 @@ export const connectionController = {
       }
       // Ask-first phones also open Camera for the requested photo; there it waits as its review card (continueRequestedCamera takes nothing).
       if(!failed&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&(Array.isArray(reply.actionResults)||cameraProposalOnly)){
-        requestedCameraContinuation={messageId:reply.userMessageId,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
+        requestedCameraContinuation={messageId:reply.userMessageId,text:authoredRequestText,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
       }
       // A reply that got through means the last Cloud limit no longer applies.
       if(!failed&&(state.lastServiceLimit||state.fundingRefused))update({lastServiceLimit:null,fundingRefused:false});

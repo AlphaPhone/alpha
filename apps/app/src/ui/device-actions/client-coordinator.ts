@@ -69,6 +69,7 @@ import {
   isCameraCapture,
   validateCameraCaptureResult,
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
+import { authoredCameraCapture } from "@elizaos/plugin-assistant/device-actions/camera-request";
 import {
   BROWSER_CONTROL_DIRECT_TYPES,
   BROWSER_OPEN_NEW_TAB_CAPABILITY,
@@ -697,6 +698,8 @@ export class DeviceActionCoordinator<
   private executing: string | undefined;
   private readonly ports: DeviceActionCoordinatorPorts<C, R>;
   private browserAttempts = new Map<string, CurrentDeviceActionRequest>();
+  /** Request keys whose one direct photo has been started. */
+  private cameraAttempts = new Set<string>();
   private browserPolicy = new Map<
     string,
     { key: string; allowed: boolean; grounded: boolean }
@@ -819,6 +822,28 @@ export class DeviceActionCoordinator<
       return false;
     proof.current();
     this.browserAttempts.set(key, proof);
+    return true;
+  }
+  /** A photo runs without its card only when this very message, as the owner
+   * typed it, asks for one now; a capture the model proposed for any other
+   * words ("summarize this page", "don't take a photo") keeps its card. */
+  private cameraAllowed(
+    messageId: string,
+    proof?: CurrentDeviceActionRequest,
+  ): boolean {
+    if (!proof || proof.messageId !== messageId) return false;
+    proof.current();
+    return requestedCameraCapture(proof.text, this.profile.assistantName);
+  }
+  /** One requested photo is one shot, however many captures were proposed. */
+  private consumeCameraRequest(messageId: string): boolean {
+    const key = this.requestKey(messageId);
+    if (this.cameraAttempts.has(key)) return false;
+    if (this.cameraAttempts.size >= 128) {
+      const oldest = this.cameraAttempts.values().next().value;
+      if (oldest !== undefined) this.cameraAttempts.delete(oldest);
+    }
+    this.cameraAttempts.add(key);
     return true;
   }
   get supportsCalendarAgenda(): boolean {
@@ -1593,6 +1618,8 @@ export class DeviceActionCoordinator<
         !keypadGrounded(entry.proposal.operation, messageId, proof)
       )
         continue;
+      const camera = entry.proposal.operation.type === "camera_capture_photo";
+      if (camera && !this.cameraAllowed(messageId, proof)) continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
       if (entry.proposal.operation.type === "sms_latest_sender" || entry.proposal.operation.type === "sms_compose") proof?.current();
@@ -1607,6 +1634,13 @@ export class DeviceActionCoordinator<
           continue;
         entry.currentRequest = proof;
       }
+      if (
+        camera &&
+        (this.proposals.get(proposalId) !== entry ||
+          !this.cameraAllowed(messageId, proof) ||
+          !this.consumeCameraRequest(messageId))
+      )
+        continue;
       const result = await this.approve(proposalId, context, signal);
       results.push(result);
       if (result.status !== "succeeded" || signal.aborted) break;
@@ -3442,6 +3476,30 @@ export function numberContradictsRequest(
 }
 /** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
 /** An empty keypad, or a number written in the owner's own current message. */
+/**
+ * The owner's message asks for one photo now: the whole-message command
+ * ("take a picture", "Eliza, snap a selfie please") or the same command asked
+ * as "(can|could|would|will) you (please) take a picture ...?". This is the
+ * agent's own reading (plugin-assistant camera-request requestedCameraCapture),
+ * built on the shared strict command: negations ("don't take a photo"),
+ * questions about the past, deferrals and compound requests never match.
+ */
+export function requestedCameraCapture(
+  text: string,
+  assistantName?: string,
+): boolean {
+  if (authoredCameraCapture(text, assistantName) !== undefined) return true;
+  const asked =
+    /^(.{0,80}?)(?:can|could|would|will)\s+you\s+(?:please\s+)?(.+?)[?.!]*$/i.exec(
+      typeof text === "string" && text.length <= 512 ? text.trim() : "",
+    );
+  return (
+    !!asked &&
+    !/[?]/.test(asked[1]) &&
+    authoredCameraCapture(`${asked[1]}${asked[2]}`, assistantName) !== undefined
+  );
+}
+
 function keypadGrounded(
   operation: { number?: string },
   messageId: string,
