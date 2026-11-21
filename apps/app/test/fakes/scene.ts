@@ -5,31 +5,38 @@ import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
+  /** The page runs on a phone: its world is Capacitor's plugins (phone.ts), and not fetch. */
+  phone: boolean;
+  /** The phone is an Alpha image, which admits Phone, Messages and Contacts. */
   image: boolean;
-  textScale: number;
+  /** The world's time, in milliseconds: it only moves on, also while Alpha is closed. */
+  now: number;
   readonly secrets: Map<string, string>;
-  /** The hardware Back and Home: a journey dispatches `new CustomEvent("press", { detail: "back" })`. */
-  readonly buttons: EventTarget;
   readonly sample: SampleScene;
   readonly ask: AskScene;
 }
 
+/** A fresh world: each area adds its field here, one line each. */
 export function scene(): Scene {
-  return { image: false, textScale: 1, secrets: new Map(), buttons: new EventTarget(), sample: sampleScene(), ask: askScene() };
-}
-
-/** Which button a press dispatched on `Scene.buttons` stands for. @throws {never} */
-export function pressed(event: Event): "back" | "home" {
-  return event instanceof CustomEvent && event.detail === "home" ? "home" : "back";
+  return {
+    phone: false, image: false, now: 0, secrets: new Map(),
+    sample: sampleScene(),
+    ask: askScene(),
+  };
 }
 
 /** The agent says it is ready, as eliza's does: its client asks before each request. */
 const health: Route = (request, url) => (request.method === "GET" && url.pathname === "/api/health" ? Response.json({ ready: true }) : undefined);
 
-/** The resident agent and the cloud over `world`: each area adds its routes here. @throws {never} */
+/** The resident agent and the cloud over `world`: each area adds its routes here, one line each. @throws {never} */
 export function services(world: Scene) {
   return {
-    agent: answering([health, ...sampleRoutes(world.sample), ...askRoutes(world.ask)]),
-    cloud: answering([]),
+    agent: answering([
+      health,
+      ...sampleRoutes(world.sample),
+      ...askRoutes(world.ask),
+    ]),
+    cloud: answering([
+    ]),
   };
 }

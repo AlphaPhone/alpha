@@ -1,8 +1,7 @@
 // spec/kit/read.md, "Story: Read from outside"
-import { relayed } from "./bridge.vibe"
-import { type Remote, remoteAt } from "./remote.vibe"
+import { type Remote, Unsent, remoteAt } from "./remote.vibe"
 
-/** The cloud account's API: inference, speech, Gmail, Calendar and Maps. Areas reach it with `ask(Cloud, …)` and `listen(Cloud, …)`. */
+/** The cloud account's API: eliza's cloud. Areas reach it with `ask(Cloud, …)`, `listen(Cloud, …)` and `attempted(Cloud, …)`. */
 export service Cloud: Remote {}
 
 /** The cloud over HTTP at `base`: in a browser the page's own `/cloud`, which the dev server answers. */
@@ -10,5 +9,14 @@ export function cloudAt(base: string) {
   return Layer.effect(Cloud, remoteAt(base))
 }
 
-/** The cloud on the phone, through `AlphaConnection`, which holds the session and chooses the host. */
-export const relayedCloud = Layer.effect(Cloud, relayed("AlphaConnection"))
+const absent = new Unsent({ cause: "eliza's Android package has no plugin that relays a page's request to the cloud" })
+
+/**
+ * The cloud on the phone, where the device key lives in native code and eliza's Android package gives a page no way
+ * to send a request under it: every request is `Unsent`, until that package has the plugin. The agent reaches the
+ * cloud itself, so what the owner asks of it works without this.
+ */
+export const absentCloud = Layer.succeed(Cloud, {
+  call: () => Effect.fail(absent),
+  events: () => Stream.fail(absent),
+})

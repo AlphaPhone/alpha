@@ -1,4 +1,15 @@
 // spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Attempts, Install, attemptsOf } from "./attempts.vibe"
+import { Time } from "./time.vibe"
+
+module pure {
+  /** `value` as text, to tell whether two facts are the same. @throws {never} */
+  export function written(value: unknown): string {
+    try { return JSON.stringify(value) ?? "" } catch { return "" }
+  }
+}
+import { written } from pure
 
 /** What a transition that returns effects gives: the state it led to and what it asks of the world. */
 export interface Moved<S, Fx> {
@@ -6,139 +17,326 @@ export interface Moved<S, Fx> {
   readonly out: ReadonlyArray<Fx>
 }
 
-/** The members of every generated `Machine`, whatever its module; `M` is what `send` returns: the state, or a `Moved`. */
-export interface Steps<S, Ev, M, Refused, Undecoded> {
+/**
+ * The members of every generated `Machine`, whatever its module. `M` is what `send` returns, the state or a `Moved`;
+ * `By` is `[]`, or `[by: Sender]` where the spec's events take a sender.
+ */
+export interface Steps<S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>> {
   readonly changes: Stream.Stream<S>
   get(): S!!
-  send(event: Ev): M!Refused
-  receive(input: unknown): M!Undecoded
+  send(event: Ev, ...by: By): M!Refused
+  receive(input: unknown, ...by: By): M!Undecoded
+}
+
+/** A generated module, as `import * as Notes from "../../gen/app__notes.effect.vibe"` names one. */
+export interface Spec<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR> {
+  readonly Machine: Context.Key<I, Steps<S, Ev, M, Refused, Undecoded, By>> & { readonly key: string }
+  readonly machine: (start?: S) => Layer.Layer<I>
+  readonly stored: (key: string, start?: S) => Layer.Layer<I, SE, SR>
 }
 
 /**
- * How the shell carries out one item of `out`. `Run` streams its answers back to the machine as events, and the first
- * one the rules refuse ends it; a later `Run` or a `Stop` under the same key interrupts it.
+ * How the shell carries out one item of `out`. `Run` sends each of its answers to the machine as an event from `by`.
+ * It ends with its stream, at the first answer the rules refuse, or when it dies; ended in one of the last two ways it
+ * sends `lost`, so that no state waits for ever on a job that is gone. A later `Run` or a `Stop` under the same key
+ * interrupts it, and then nothing more is sent.
  */
-export data Job<Ev, R> {
-  Run { key: string; answers: Stream.Stream<Ev, never, R> }
+export data Job<Ev, R, By> {
+  Run { key: string; answers: Stream.Stream<Ev, never, R>; lost: Option.Option<Ev>; by: By }
   Stop { key: string }
 }
 
-/** What a component writes for `now`: the machine replaces every `now` with the clock's time when it applies the event. */
-export const untimed = 0
-
-/** The one answer of `answered`, an effect that has already turned each failure into an event. */
-export function answer<Ev, R>(key: string, answered: Ev!!R): Job<Ev, R> {
-  return Job.Run({ key, answers: Stream.fromEffect(answered) })
+/** A deadline a state waits on: `event`, from `by`, once the time is `at`. */
+export interface Due<Ev, By> {
+  readonly key: string
+  readonly at: number
+  readonly event: Ev
+  readonly by: By
 }
 
-/** Every answer of `answers`, a stream that has already turned its failure into a last event. */
-export function stream<Ev, R>(key: string, answers: Stream.Stream<Ev, never, R>): Job<Ev, R> {
-  return Job.Run({ key, answers })
+/** What a screen and a shell write for an event's `now`: the reactor replaces it with Alpha's time. */
+export const untimed = 0
+
+/** The one answer of `answered`, an effect that has already turned each failure into an event; `lost` where it never answers. */
+export function answer<Ev, R, By extends ReadonlyArray<unknown>>(key: string, answered: Ev!!R, lost: Ev, ...by: By): Job<Ev, Exclude<R, Attempts>, By> {
+  return stream(key, Stream.fromEffect(answered), lost, ...by)
+}
+
+/** Every answer of `answers`, a stream that has already turned its failure into a last event; `lost` where it is cut short. */
+export function stream<Ev, R, By extends ReadonlyArray<unknown>>(key: string, answers: Stream.Stream<Ev, never, R>, lost: Ev, ...by: By): Job<Ev, Exclude<R, Attempts>, By> {
+  // The reactor gives every job the attempts of its machine, so a job that names them asks nothing of the runtime for it.
+  return Job.Run({ key, answers: answers as Stream.Stream<Ev, never, Exclude<R, Attempts>>, lost: Option.some(lost), by })
+}
+
+/** `work`, which has nothing to tell the machine. */
+export function run<Ev, R, By extends ReadonlyArray<unknown>>(key: string, work: unknown!!R, ...by: By): Job<Ev, R, By> {
+  return Job.Run({ key, answers: Stream.fromEffectDrain(work), lost: Option.none(), by })
 }
 
 /** Interrupt what runs under `key`. */
-export function stop<Ev>(key: string): Job<Ev, never> {
+export function stop<Ev, By extends ReadonlyArray<unknown>>(key: string): Job<Ev, never, By> {
   return Job.Stop({ key })
 }
 
-/** How long a wake sleeps before it reads the clock again, so that a phone that slept wakes it at most this late. */
-const glance = 1000
+/** `event` once the time is `at`, for a spec that asks for its own wakes in `out`; a deadline the state holds is a `due` in `timers`. */
+export function wake<Ev, By extends ReadonlyArray<unknown>>(key: string, at: number, event: Ev, ...by: By): Job<Ev, Time, By> {
+  return Job.Run({ key, answers: Stream.fromEffect(effect { try (try Time).until(at); return event }), lost: Option.none(), by })
+}
 
-/** `event` once the clock reaches `at`, or at once if it has. */
-export function wake<Ev>(key: string, at: number, event: Ev): Job<Ev, never> {
-  return answer(key, effect {
-    for (let now = try Clock.currentTimeMillis; now < at; now = try Clock.currentTimeMillis) try sleep(Math.min(at - now, glance))
-    return event
+/** A deadline of `timers`: `event` once the time is `at`. */
+export function due<Ev, By extends ReadonlyArray<unknown>>(key: string, at: number, event: Ev, ...by: By): Due<Ev, By> {
+  return { key, at, event, by }
+}
+
+/**
+ * Send `said` to the machine `target` names, of this runtime, and answer `taken` where its rules took it and
+ * `refused` where they did not, or it could not be sent.
+ */
+export function tell<IB, Ev2, Refused2, By2 extends ReadonlyArray<unknown>, Ev, By extends ReadonlyArray<unknown>>(
+  key: string,
+  target: Context.Key<IB, { send(event: Ev2, ...by: By2): unknown!Refused2 }>,
+  said: readonly [event: Ev2, ...by: By2],
+  answers: { readonly taken?: Ev; readonly refused: Ev },
+  ...by: By
+): Job<Ev, IB, By> {
+  const told = effect {
+    const to = try target
+    return effect {
+      try to.send(...said)
+      return answers.taken === undefined ? Stream.empty : Stream.succeed(answers.taken)
+    } catch () => Stream.succeed(answers.refused)
+  }
+  return Job.Run({ key, answers: Stream.unwrap(told), lost: Option.some(answers.refused), by })
+}
+
+/**
+ * Every service of the runtime a machine lives in, once that runtime is whole. A job and a follower take their
+ * services from it when they start, so machines that tell or follow each other are built in any order.
+ */
+export service Whole {
+  readonly context: Context.Context<never>!!
+  fill(context: Context.Context<never>): void!!
+}
+
+/**
+ * `layer`, the machines of one runtime, closed: each machine a job or a follower of it needs must be one it provides.
+ * What is left to provide is the platform, and for an area the resident machines.
+ */
+export function whole<Out, E, In>(layer: Layer.Layer<Out, E, In>): Layer.Layer<Out, E, Exclude<In, Out | Whole>> {
+  const late = Layer.effect(Whole, effect {
+    const cell = try Deferred.make<Context.Context<never>>()
+    return { context: Deferred.await(cell), fill: (context: Context.Context<never>) => asVoid(Deferred.succeed(cell, context)) }
   })
+  const filled = Layer.effectDiscard(effect {
+    try (try Whole).fill(try Effect.context<never>())
+  })
+  return Layer.provideMerge(filled, Layer.provideMerge(layer, late)) as unknown as Layer.Layer<Out, E, Exclude<In, Out | Whole>>
 }
 
 function stamped<A>(event: A, now: number): A {
   return typeof event === "object" && event !== null && "now" in event ? { ...event, now } : event
 }
 
-/** `work` with a defect logged, so that a job or a follower never dies silently. */
-function watched<R>(work: void!!R, what: string): void!!R {
-  return Effect.tapCause(work, (cause) => Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError(`${what} died`, cause))
+/** `work`, with what killed it logged: nothing here dies silently, and nothing that dies takes its neighbours along. Whether it succeeded. */
+export effect function contained(work: unknown!unknown, what: string): boolean!! {
+  const ended = try exit(work)
+  if (Exit.isSuccess(ended)) return true
+  if (!Cause.hasInterruptsOnly(ended.cause) && Cause.hasDies(ended.cause)) try logError(`${what} died`, ended.cause)
+  return false
 }
 
-function steps<I, S, Ev, M, Fx, Refused, Undecoded, R>(
-  tag: Context.Key<I, Steps<S, Ev, M, Refused, Undecoded>>,
-  outOf: (moved: M) => ReadonlyArray<Fx>,
-  carry: (fx: Fx) => Job<Ev, R>,
-  opening: Ev | undefined,
+/** Where a machine's state is kept: under the spec's own path, so no two machines share a key, and a version the area raises when the state's shape changes. */
+function storeKey(machine: string, version: number): string {
+  return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
+}
+
+/**
+ * The machine kept under `key`. What is stored there and is not a state, after a change of its shape or of an
+ * `always` rule, is set aside under `<key>.unreadable` and the machine starts afresh: one area's state never keeps
+ * Alpha from opening. A store that cannot be read at all leaves the machine in memory.
+ */
+function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Layer.Layer<I, SE, SR>, memory: Layer.Layer<I>) {
+  const aside = Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const found = store.get(key) catch () => undefined
+    try logError(`what is kept under ${key} is not a state: set aside under ${key}.unreadable`)
+    if (found !== undefined) try ignore(store.set(`${key}.unreadable`, found))
+    try ignore(store.remove(key))
+    return Layer.catch(Layer.fresh(stored(key)), () => memory)
+  })
+  return Layer.catch(stored(key), () => aside)
+}
+
+interface Parts<S, Ev, M, Fx, R, By extends ReadonlyArray<unknown>> {
+  /** What names this machine: its key in the store, or, in memory, its spec. */
+  readonly scope: string
+  /** Whether the state is kept: the attempts of a machine in memory start again at each launch, so their keys name the launch too. */
+  readonly durable: boolean
+  readonly stateOf: (moved: M) => S
+  readonly outOf: (moved: M) => ReadonlyArray<Fx>
+  readonly carry: (fx: Fx) => Job<Ev, R, By>
+  readonly timers: (state: S) => ReadonlyArray<Due<Ev, By>>
+  readonly open: readonly [event: Ev, ...by: By] | undefined
+}
+
+function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<unknown>, R>(
+  tag: Context.Key<I, Steps<S, Ev, M, Refused, Undecoded, By>>,
+  { scope, durable, stateOf, outOf, carry, timers, open }: Parts<S, Ev, M, Fx, R, By>,
 ) {
   return Layer.effect(tag, effect {
     const inner = try tag
-    const world = try Effect.context<R>()
+    const whole = try Whole
+    const time = try Time
+    const install = try Install
+    const attempts = attemptsOf(install, durable ? scope : `${scope}@${install.launch}`)
     const running = try FiberMap.make<string>()
-    effect function taken(event: Ev): boolean!! {
-      return effect { try send(event); return true } catch () => false
+    const turn = try Semaphore.make(1)
+    /** Each deadline a job waits on or has told the machine of, so that none is told twice. */
+    const armed = new Map<string, number>()
+
+    function halt(key: string): void {
+      const found = FiberMap.getUnsafe(running, key)
+      if (Option.isSome(found)) found.value.interruptUnsafe()
+    }
+    effect function launch(key: string, work: void!!R): void!! {
+      const provided = flatMap(whole.context, (context) => Effect.provideContext(Effect.provideService(work, Attempts, attempts), context as Context.Context<R>))
+      try FiberMap.run(running, key, provided, { startImmediately: false })
+    }
+    effect function taken(event: Ev, by: By): boolean!! {
+      return effect { try send(event, ...by); return true } catch () => false
+    }
+    effect function job(key: string, answers: Stream.Stream<Ev, never, R>, lost: Option.Option<Ev>, by: By): void!!R {
+      let refused = false
+      const ended = try exit(Stream.runForEachWhile(answers, effect (event: Ev) => {
+        refused = !(try taken(event, by))
+        return !refused
+      }))
+      if (Exit.isFailure(ended)) {
+        if (Cause.hasInterruptsOnly(ended.cause)) return
+        try logError(`job ${key} died`, ended.cause)
+      }
+      if ((refused || Exit.isFailure(ended)) && Option.isSome(lost)) try contained(send(lost.value, ...by), `job ${key}, telling that it was lost,`)
     }
     effect function start(moved: M): void!! {
       for (const fx of outOf(moved)) {
         match (carry(fx)) {
-          when { _tag: "Run", let key, let answers }: try FiberMap.run(running, key, Effect.provideContext(watched(Stream.runForEachWhile(answers, taken), `job ${key}`), world));
-          when { _tag: "Stop", let key }: try FiberMap.remove(running, key);
+          when { _tag: "Run", let key, let answers, let lost, let by }: try launch(key, job(key, answers, lost, by));
+          when { _tag: "Stop", let key }: halt(key);
         }
       }
     }
-    effect function send(event: Ev): M!Refused {
-      const now = try Clock.currentTimeMillis
-      uninterruptible {
-        const moved = try inner.send(stamped(event, now))
-        try start(moved)
-        return moved
+    effect function arm(state: S): void!! {
+      const waiting = timers(state)
+      const wanted = new Set(waiting.map((one) => `timer ${one.key}`))
+      for (const key of [...armed.keys()]) {
+        if (wanted.has(key)) continue
+        armed.delete(key)
+        halt(key)
+      }
+      for (const { key, at, event, by } of waiting) {
+        const name = `timer ${key}`
+        if (armed.get(name) === at) continue
+        armed.set(name, at)
+        try launch(name, effect {
+          try time.until(at)
+          try contained(send(event, ...by), name)
+        })
       }
     }
-    effect function receive(input: unknown): M!Undecoded {
-      const now = try Clock.currentTimeMillis
+    effect function send(event: Ev, ...by: By): M!Refused {
       uninterruptible {
-        const moved = try inner.receive(stamped(input, now))
-        try start(moved)
-        return moved
+        return try Semaphore.withPermit(turn, effect {
+          const moved = try inner.send(stamped(event, try time.now()), ...by)
+          try start(moved)
+          try arm(stateOf(moved))
+          return moved
+        })
       }
     }
-    if (opening !== undefined) try ignore(send(opening))
+    effect function receive(input: unknown, ...by: By): M!Undecoded {
+      uninterruptible {
+        return try Semaphore.withPermit(turn, effect {
+          const moved = try inner.receive(stamped(input, try time.now()), ...by)
+          try start(moved)
+          try arm(stateOf(moved))
+          return moved
+        })
+      }
+    }
+    if (open !== undefined) try contained(send(...open), `opening ${scope}`)
+    try contained(Semaphore.withPermit(turn, effect { try arm(try inner.get()) }), `arming ${scope}`)
     return { changes: inner.changes, get: () => inner.get(), send, receive }
   })
 }
 
-/** An opening for a machine kept in a store, which must take one; one in memory may. */
-type Opening<Ev, LR> = [LR] extends [never] ? [opening?: Ev] : [opening: Ev]
+/** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen` or `restart`. */
+type Kept<Ev, By extends ReadonlyArray<unknown>> =
+  | { readonly keep: number; readonly open: readonly [event: Ev, ...by: By] }
+  | { readonly keep?: undefined; readonly open?: readonly [event: Ev, ...by: By] }
 
-/**
- * The machine `tag` names, kept by `inner`, with each `now` stamped from the clock on `send` and `receive`, and each item
- * of `out` carried out by `carry` once the state that asked for it is kept. A machine kept in a store must take the
- * spec's `opening` event, sent once when the layer is built: what was under way when Alpha stopped is taken up again.
- */
-export function reacting<I, S, Ev, Fx, Refused, Undecoded, R, LE, LR>(
-  tag: Context.Key<I, Steps<S, Ev, Moved<S, Fx>, Refused, Undecoded>>,
-  inner: Layer.Layer<I, LE, LR>,
-  carry: (fx: Fx) => Job<Ev, R>,
-  ...[opening]: Opening<Ev, LR>
-) {
-  return Layer.provide(steps(tag, (moved: Moved<S, Fx>) => moved.out, carry, opening), inner)
+/** What `reacting` takes beside the spec. */
+export type Options<S, Ev, By extends ReadonlyArray<unknown>> = Kept<Ev, By> & {
+  /** The deadlines `state` waits on. Each is told to the machine once its time has come, also after a restart. */
+  readonly timers?: (state: S) => ReadonlyArray<Due<Ev, By>>
 }
 
-/** `reacting` for a machine whose transitions return only the state: it stamps `now` and takes its `opening`. */
-export function quiet<I, S, Ev, Refused, Undecoded, LE, LR>(tag: Context.Key<I, Steps<S, Ev, S, Refused, Undecoded>>, inner: Layer.Layer<I, LE, LR>, ...[opening]: Opening<Ev, LR>) {
-  return Layer.provide(steps(tag, (): never[] => [], (fx: never): Job<Ev, never> => fx, opening), inner)
+/** `carry`, for a machine whose transitions return `{ state, out }`, and nothing for one whose transitions return the state. */
+type Carrying<M, Ev, R, By extends ReadonlyArray<unknown>> = M extends { readonly out: ReadonlyArray<infer Fx> }
+  ? { readonly carry: (fx: Fx) => Job<Ev, R, By> }
+  : { readonly carry?: undefined }
+
+/** What a reacting machine needs to be built: the platform's part, and, in name only, what its jobs need when they run. */
+type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | R
+
+/**
+ * The machine of the generated module `spec`, in memory or, with `keep`, in the store under the spec's own name.
+ * Each event's `now` is Alpha's time, on `send` and on `receive`. Each item of `out` is carried out by `carry` once
+ * the state that asked for it is kept, and each deadline of `timers` is told when its time has come. `open` is sent
+ * once when the layer is built.
+ */
+export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never>(
+  spec: Spec<I, S, Ev, M, Refused, Undecoded, By, SE, SR>,
+  options: Options<S, Ev, By> & Carrying<M, Ev, R, By>,
+): Layer.Layer<I, never, Needs<SR, R>> {
+  const carry = options.carry as ((fx: unknown) => Job<Ev, R, By>) | undefined
+  const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
+  const parts: Parts<S, Ev, M, unknown, R, By> = {
+    scope: key ?? spec.Machine.key,
+    durable: key !== undefined,
+    stateOf: (moved) => (carry === undefined ? moved as unknown as S : (moved as unknown as Moved<S, unknown>).state),
+    outOf: (moved) => (carry === undefined ? [] : (moved as unknown as Moved<S, unknown>).out),
+    carry: carry ?? ((fx: unknown) => Job.Stop({ key: written(fx) })),
+    timers: options.timers ?? (() => []),
+    open: options.open,
+  }
+  const inner = key === undefined ? spec.machine() : kept(key, spec.stored, spec.machine())
+  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R>>
 }
 
 /**
- * Tell the machine `target` names each new fact it needs from the machine `source` names, which another area owns:
- * `fact` reads it from each state the source publishes, now and on every change, and `told` makes it the target's
- * event. A fact is a primitive, so equal facts in a row are told once; one the target refuses changes nothing.
+ * Tell the machine `target` names each new fact it needs from the machine `source` names: `fact` reads it from each
+ * state the source publishes, and `told` makes it the target's event, from `by`. Equal facts in a row are told once.
+ * A fact the target refuses is told again each time the target changes, until it is taken or a newer one replaces it.
  */
-export function following<IA, A, IB, Ev, Refused, F extends string | number | boolean>(
+export function following<IA, A, IB, Ev, Refused, By extends ReadonlyArray<unknown>, F>(
   source: Context.Key<IA, { readonly changes: Stream.Stream<A> }>,
   fact: (a: A) => F,
-  target: Context.Key<IB, { send(event: Ev): unknown!Refused }>,
+  target: Context.Key<IB, { readonly changes: Stream.Stream<unknown>; send(event: Ev, ...by: By): unknown!Refused }>,
   told: (fact: F) => Ev,
-) {
-  return Layer.effectDiscard(effect {
+  ...by: By
+): Layer.Layer<never, never, IA | IB | Whole> {
+  const followed = effect {
     const from = try source
     const to = try target
-    try fork.scoped watched(Stream.runForEach(Stream.changes(Stream.map(from.changes, fact)), (value) => ignore(to.send(told(value)))), "following")
-  })
+    let taken: string | undefined
+    try Stream.runForEach(Stream.zipLatest(Stream.map(from.changes, fact), to.changes), effect ([value]) => {
+      const text = written(value)
+      if (text === taken) return
+      if (try contained(to.send(told(value), ...by), "following")) taken = text
+    })
+  }
+  return Layer.effectDiscard(effect {
+    const whole = try Whole
+    try fork.scoped contained(flatMap(whole.context, (context) => Effect.provideContext(followed, context as Context.Context<IA | IB>)), "following")
+  }) as unknown as Layer.Layer<never, never, IA | IB | Whole>
 }

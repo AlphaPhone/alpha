@@ -66,8 +66,10 @@ const digest = "a".repeat(64);
 await Effect.runPromise(Effect.provide(migrate({ digest, environment: "staging", now: Date.now() }), store));
 
 const mail: Mail[] = [];
-const replies: Reply[] = [];
-const asked: Message[][] = [];
+/** What the model says next to each agent, and what each asked it: an agent is told apart by its character's system prompt, so journeys share one cloud. */
+const replies = new Map<string, Reply[]>();
+const asked = new Map<string, Message[][]>();
+const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
 const encoder = new TextEncoder();
 const chunk = (data: unknown) => encoder.encode(`data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`);
 const usage = (messages: readonly Message[], said: string) => ({ prompt_tokens: JSON.stringify(messages).length, completion_tokens: said.length });
@@ -75,9 +77,11 @@ const usage = (messages: readonly Message[], said: string) => ({ prompt_tokens: 
 /** The model binding: it says what the test scripted, or repeats the owner's last message, and reports the tokens it is paid for. */
 function model(name: string, input: Record<string, unknown>, options: { signal: AbortSignal }): Promise<Response> {
   const messages = (input.messages ?? []) as Message[];
-  asked.push(messages);
+  const character = messages.find((message) => message.role === "system")?.content;
+  const system = typeof character === "string" ? character : "";
+  listed(asked, system).push(messages);
   const last = messages.findLast((message) => message.role === "user")?.content;
-  const reply = replies.shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
+  const reply = listed(replies, system).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
   const said = reply.kind === "text" ? reply.parts.join("") : reply.first;
   if (input.stream !== true) {
     return Promise.resolve(Response.json({ id: "local", object: "chat.completion", model: name, choices: [{ index: 0, message: { role: "assistant", content: said }, finish_reason: "stop" }], usage: usage(messages, said) }));
@@ -147,8 +151,8 @@ async function operated(incoming: IncomingMessage, outgoing: ServerResponse) {
   const body = request.method === "POST" ? await request.json() as Record<string, unknown> : {};
   const reply = (data: unknown) => answered(Response.json(data), outgoing);
   if (url.pathname === "/operator/mail") return reply(mail);
-  if (url.pathname === "/operator/model") return reply({ scripted: replies.push(body as unknown as Reply) });
-  if (url.pathname === "/operator/asked") return reply(asked);
+  if (url.pathname === "/operator/model") return reply({ scripted: listed(replies, String(body.system)).push(body.reply as Reply) });
+  if (url.pathname === "/operator/asked") return reply(listed(asked, url.searchParams.get("system") ?? ""));
   if (url.pathname === "/operator/credits") return reply(await Effect.runPromise(Effect.provide(addCredits({ organizationId: String(body.organizationId), amount: Number(body.amount), requestKey: String(body.requestKey) }), store)));
   if (url.pathname === "/operator/ledger") {
     const organization = url.searchParams.get("organizationId");

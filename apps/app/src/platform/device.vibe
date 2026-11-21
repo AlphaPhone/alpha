@@ -3,14 +3,21 @@ import { Bridge } from "./bridge.vibe"
 
 module web {
   /** @throws {never} */
-  export function zoom(scale: number): void {
-    document.documentElement.style.fontSize = `${scale * 100}%`
+  export function zoom(percent: number): void {
+    document.documentElement.style.fontSize = `${percent}%`
   }
+  /** @throws {never} */
+  export const page = (): EventTarget => window
+  /** @throws {never} */
+  export const pages = (): EventTarget => document
 }
-import { zoom } from web
+import { page, pages, zoom } from web
 
 /** What this phone admits: an Alpha image's apps, and Contacts where the image grants them. */
-export schema Capabilities { readonly image: boolean; readonly contacts: boolean }
+export interface Capabilities {
+  readonly image: boolean
+  readonly contacts: boolean
+}
 
 /** A hardware or gesture button the system hands to the launcher. */
 export type Button = "back" | "home"
@@ -18,37 +25,47 @@ export type Button = "back" | "home"
 /** The phone itself: what it admits, its text size, and the Back and Home it hands to Alpha. */
 export service Device {
   capabilities(): Capabilities!!
-  setTextScale(scale: number): void!!
+  /** Text at `percent` of its size, 75 to 150: the page's root size, which every `rem` follows, on a phone as in a browser. */
+  setTextScale(percent: number): void!!
   readonly buttons: Stream.Stream<Button>
+  /** Each time the page may have slept: Alpha's time looks at the clock again then. */
+  readonly resumed: Stream.Stream<unknown>
 }
 
-const nothing: Capabilities = { image: false, contacts: false }
+/**
+ * The events Alpha's Android host dispatches on the page's window, since eliza's Android package hands a page neither
+ * button: `alpha-back` for Back while the page says it can go back, in `data-alpha-can-go-back` on its root element,
+ * and `launcher-home` for Home, and for Back where it cannot.
+ */
+const buttons: Stream.Stream<Button> = Stream.suspend(() => Stream.merge(
+  Stream.as(Stream.fromEventListener(page(), "alpha-back"), "back" as const),
+  Stream.as(Stream.fromEventListener(page(), "launcher-home"), "home" as const),
+))
 
-/** The phone, through its plugins; a plugin that fails is a capability the phone does not admit, and is logged. */
+const paged = {
+  effect setTextScale(percent: number) { zoom(Math.min(150, Math.max(75, Math.round(percent)))) },
+  buttons,
+  resumed: Stream.suspend(() => Stream.fromEventListener(pages(), "visibilitychange")),
+}
+
+/** The plugins whose presence in this build is what the phone admits: the host registers Alpha's telephony plugin only on an Alpha image, and eliza's contacts plugin where that image grants contacts. */
+const telephony = "AlphaTelephony"
+const contacts = "ElizaContacts"
+
+/** The phone: what it admits is which plugins its host registered. */
 export const capacitorDevice = Layer.effect(Device, effect {
   const bridge = try Bridge
   return {
+    ...paged,
     effect capabilities() {
-      return effect {
-        return try Schema.decodeUnknownEffect(Capabilities)(try bridge.call("DeviceApps", "platformCapabilities", {}))
-      } catch effect (cause) => {
-        try logWarning("capabilities unread", cause)
-        return nothing
-      }
+      const image = try bridge.has(telephony)
+      return { image, contacts: image && (try bridge.has(contacts)) }
     },
-    effect setTextScale(scale: number) {
-      bridge.call("AlphaDevice", "setTextScale", { scale }) catch effect (cause) => { try logWarning("text scale not set", cause) }
-    },
-    buttons: Stream.merge(
-      Stream.as(bridge.listen("App", "backButton"), "back" as const),
-      Stream.as(bridge.listen("AlphaDevice", "home"), "home" as const),
-    ) |> Stream.catch(%, (cause) => Stream.fromEffectDrain(logWarning("buttons unheard", cause))),
   }
 })
 
-/** A browser: no Alpha image, its root text size as the scale, and no buttons beyond its own. */
+/** A browser: no Alpha image. */
 export const browserDevice = Layer.succeed(Device, {
-  effect capabilities() { return nothing },
-  effect setTextScale(scale: number) { zoom(scale) },
-  buttons: Stream.never,
+  ...paged,
+  effect capabilities() { return { image: false, contacts: false } },
 })

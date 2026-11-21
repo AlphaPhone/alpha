@@ -24,9 +24,12 @@ the device. This branch rebuilds it on the stack below.
 - **The app is built area by area.** An area's requirements are
   `spec/app/<area>/`: `index.md`, and a child spec for each further machine.
   Its screens and shell are `apps/app/src/<area>/`, its journeys
-  `apps/app/test/<area>.*`, and what it shows is built from components in
-  `packages/ui`. `spec/app/shell/` with `apps/app/src/shell/` is the worked
-  area: read it before starting another.
+  `apps/app/test/<area>.*`, one file per area and runner so that areas built
+  side by side do not meet in one file, and what it shows is built from
+  components in `packages/ui`. Every area is built on `apps/app/src/runtime/`.
+  `spec/app/sample/` with `apps/app/test/sample/` is the worked area, which
+  only its own journeys mount, and `spec/app/ask/` with `apps/app/src/ask/`
+  the one that talks to the real agent: read both before starting another.
 - **The kit holds what areas share.** `spec/kit/` has the rules several areas
   keep: a read whose late answers are refused, an attempt sent once with an
   honest outcome, a review of what was shown, an undo window, a draft and a
@@ -39,7 +42,10 @@ the device. This branch rebuilds it on the stack below.
   carries each item out through the service and sends the answer back as an
   event that names its ticket, so the rules refuse a late answer. The shell
   passes the time in as an event's `now`: no component reads a clock, runs a
-  timer or uses an effect hook.
+  timer or uses an effect hook. A journey runs over the real agent and cloud
+  where what it checks is theirs, and otherwise over the fakes of
+  `apps/app/test/fakes/`, which stand at the network and at the bridge to
+  Android and nowhere inside Alpha.
 - **Components show, areas decide.** A component in `packages/ui` takes props
   and holds no rule. A screen in `apps/app/src/<area>/` reads its machine
   through `useMachine`, offers each control exactly when `can` allows its
@@ -48,9 +54,12 @@ the device. This branch rebuilds it on the stack below.
   application, its tests, every build, release and device script. What
   `legacy/` runs with Bun is rebuilt for Node when its area is rebuilt; no
   Bun command, lock file or runtime comes across.
-- **Upstream is pinned.** The agent runtime is elizaOS at the commit
-  `legacy/upstream.lock.json` records, in the submodule `legacy/vendor/eliza`.
-  Never edit its checkout: make shared changes upstream and advance the pin.
+- **Upstream is pinned.** The resident agent, the cloud and the Android
+  device package are elizaOS's, branch `vibestack`, at the commit
+  `eliza.lock.json` records: `pnpm eliza` builds that commit outside the
+  repository and links it as `.eliza`. Never edit its checkout, and never
+  restate a shape it exports: make shared changes upstream and advance the
+  pin. `legacy/` keeps its own pin, for reading only.
 - **Do not import another product's interface or identity.**
 - **Say what was shown.** An APK build, an emulator HOME-role test, a full
   AOSP image boot, a real integration and device or user acceptance are

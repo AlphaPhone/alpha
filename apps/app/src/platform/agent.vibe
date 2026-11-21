@@ -1,48 +1,73 @@
 // spec/kit/read.md, "Story: Read from outside"
 import type { ReplyFrame, TurnReply } from "@elizaos/agent"
-import { type RuntimeJsonBridge, RuntimeRequestError, type RuntimeStatus, createRuntimeJsonClient } from "@elizaos/agent/client"
-import { Bridge, relayed } from "./bridge.vibe"
-import { type Failure, type Remote, Refused, Unreachable, remoteAt } from "./remote.vibe"
+import { type RuntimeJsonBridge, type RuntimeJsonResponse, RuntimeRequestError, type RuntimeStatus, createRuntimeJsonClient } from "@elizaos/agent/client"
+import { fresh } from "../runtime/attempts.vibe"
+import { Bridge, BridgeFailed } from "./bridge.vibe"
+import { type Failure, type Remote, Refused, Unreachable, Unsent, parsed, patience, remoteAt } from "./remote.vibe"
 
-/** The resident agent's HTTP and event-stream API: eliza's agent. Areas reach it with `ask(Agent, …)` and `listen(Agent, …)` of remote.vibe. */
+/** The resident agent's HTTP and event-stream API: eliza's agent. Areas reach it with `ask(Agent, …)`, `listen(Agent, …)` and `attempted(Agent, …)` of remote.vibe. */
 export service Agent: Remote {}
 
-/** A conversation as eliza's agent names it. It exports no type for one: this follows `packages/agent/src/conversation/turns.vibe` at the commit of eliza.lock.json. */
-export schema Conversation { readonly id: string; readonly roomId: string; readonly title: string; readonly createdAt: number; readonly updatedAt: number }
-
-/** What the agent answers to `POST /api/conversations`. */
-export schema Created { readonly conversation: Conversation }
+/**
+ * `schema`, where what it decodes is exactly eliza's wire type `Wire`: a variant or a field eliza adds, removes or
+ * changes stops Alpha compiling, at the commit of eliza.lock.json, and not on a phone.
+ */
+function wire<Wire>() {
+  return <A extends Wire>(schema: Schema.Decoder<A> & ([Wire] extends [A] ? unknown : never)): Schema.Decoder<A> => schema
+}
 
 schema Token { readonly type: "token"; readonly text: string; readonly fullText: string }
 schema Done { readonly type: "done"; readonly fullText: string }
 schema Broken { readonly type: "error"; readonly message: string }
 
-/** One frame of a reply as the agent streams it: eliza's `ReplyFrame`, so a change of theirs fails here and not on a phone. */
-export const Frame: Schema.Decoder<ReplyFrame> = Schema.Union([Token, Done, Broken])
+/** One frame of a reply as the agent streams it, from `POST /api/conversations/{id}/messages/stream`: eliza's `ReplyFrame`. */
+export const Frame = wire<ReplyFrame>()(Schema.Union([Token, Done, Broken]))
 
-schema Whole { readonly fullText: string }
+schema Entire { readonly fullText: string }
 
-/** A whole reply, where it is not streamed: eliza's `TurnReply`. */
-export const Reply: Schema.Decoder<TurnReply> = Whole
+/** A whole reply, where it is not streamed, from `POST /api/conversations/{id}/messages`: eliza's `TurnReply`. */
+export const Reply = wire<TurnReply>()(Entire)
+
+/** What the plugin answers to `request`: eliza's `RuntimeJsonResponse`. */
+const Relayed = wire<RuntimeJsonResponse>()(Schema.Struct({ status: Schema.Number, data: Schema.Unknown }))
+
+// eliza exports no type for the three shapes below: they follow `packages/agent/src/conversation/turns.vibe` at the
+// commit of eliza.lock.json, here and nowhere else, until it does.
+
+/** A conversation as eliza's agent names it. */
+export schema Conversation { readonly id: string; readonly roomId: string; readonly title: string; readonly createdAt: number; readonly updatedAt: number }
+
+/** What the agent answers to `POST /api/conversations`. */
+export schema Created { readonly conversation: Conversation }
 
 /** What the agent answers to `POST /api/turns/{roomId}/abort`. */
 export schema Aborted { readonly aborted: boolean }
 
 /** How long eliza's client waits for a stopped agent to run, between two looks at it, and for one answer. */
-const patience = { startupTimeoutMs: 30_000, pollMs: 250, requestTimeoutMs: 10_000 }
+const waits = { startupTimeoutMs: 30_000, pollMs: 250, requestTimeoutMs: 10_000 }
 
 schema Health { readonly ready: boolean }
 
-/** `request` as eliza's client takes one, a path and a JSON body or none; it carries only GET, and POST with a body. */
-function plain(request: HttpClientRequest.HttpClientRequest): { readonly path: string; readonly body?: unknown } | undefined {
+function located(request: HttpClientRequest.HttpClientRequest): string {
   const query = UrlParams.toString(request.urlParams)
-  const path = query === "" ? request.url : `${request.url}?${query}`
-  if (request.method === "GET") return { path }
-  if (request.method !== "POST" || request.body._tag !== "Uint8Array") return undefined
-  return Result.match(Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(new TextDecoder().decode(request.body.body)), {
-    onFailure: () => undefined,
-    onSuccess: (body) => ({ path, body }),
-  })
+  return query === "" ? request.url : `${request.url}?${query}`
+}
+
+/** The JSON `request` carries, or nothing where it carries none; a body that is not JSON cannot be relayed. */
+effect function carried(request: HttpClientRequest.HttpClientRequest): Option.Option<unknown>!Unsent {
+  if (request.body._tag === "Empty") return Option.none()
+  if (request.body._tag !== "Uint8Array") throw new Unsent({ cause: "only a JSON body is relayed" })
+  return Option.some(parsed(new TextDecoder().decode(request.body.body)) catch effect (cause) => { throw new Unsent({ cause }) })
+}
+
+/** `request` as eliza's client takes one, a path and a JSON body or none: it carries only GET, and POST with a body, and no header of ours. */
+effect function plain(request: HttpClientRequest.HttpClientRequest): Option.Option<{ readonly path: string; readonly body?: unknown }>!! {
+  const ours = Object.keys(request.headers).filter((name) => name !== "content-type" && name !== "content-length")
+  if (ours.length > 0) return Option.none()
+  if (request.method === "GET") return request.body._tag === "Empty" ? Option.some({ path: located(request) }) : Option.none()
+  if (request.method !== "POST") return Option.none()
+  const body = carried(request) catch () => Option.none<unknown>()
+  return Option.map(body, (json) => ({ path: located(request), body: json }))
 }
 
 /**
@@ -72,31 +97,18 @@ function httpBridge(direct: Remote): RuntimeJsonBridge {
   }
 }
 
-/** eliza's bridge to the agent the phone runs, through the plugin its Android package registers: what it answers is decoded by eliza's client. */
-effect function pluginBridge(plugin: string): RuntimeJsonBridge!!Bridge {
-  const bridge = try Bridge
-  const said = <A>(method: string, options: unknown) => runPromise(bridge.call(plugin, method, options)) as Promise<A>
-  return {
-    status: () => said("getStatus", {}),
-    start: () => said("start", {}),
-    restart: () => said("restart", {}),
-    request: (input) => said("request", input),
-  }
-}
-
 /**
  * The agent through eliza's own runtime client over `bridge`, which waits for an agent that is starting and tells a
- * refusal from a failure. That client carries GET, and POST with a JSON body, and no stream: every other request, and
- * each stream, goes to `direct`.
+ * refusal from a failure. Every request that client cannot carry, and each stream, goes to `direct`.
  */
 function over(bridge: RuntimeJsonBridge, direct: Remote): Remote {
-  const client = createRuntimeJsonClient({ bridge: () => bridge, ...patience })
+  const client = createRuntimeJsonClient({ bridge: () => bridge, ...waits })
   return {
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
-      const sent = plain(request)
-      if (sent === undefined) return try direct.call(request)
+      const sent = try plain(request)
+      if (Option.isNone(sent)) return try direct.call(request)
       return try tryPromise({
-        try: () => client.request(sent.path, sent.body),
+        try: () => client.request(sent.value.path, sent.value.body),
         catch: (cause): Failure => cause instanceof RuntimeRequestError ? new Refused({ status: cause.status }) : new Unreachable({ cause }),
       })
     },
@@ -112,7 +124,76 @@ export function agentAt(base: string) {
   })
 }
 
-/** The agent on the phone, through the `EmbeddedAgent` plugin of eliza's Android package, which holds the launch token. */
+/** The plugin of eliza's Android package that is the page's only way to the agent the phone runs: it holds the launch token and checks each route against the host's list. */
+const plugin = "EmbeddedAgent"
+
+/** The codes the plugin rejects a call with before it reaches the agent. */
+const unsent = ["UNIMPLEMENTED", "ROUTE_REFUSED", "TOO_LARGE", "BUSY", "INVALID_REQUEST", "INVALID_STREAM_ID"]
+
+function undelivered(cause: BridgeFailed): Unsent | Unreachable {
+  return cause.code !== undefined && unsent.includes(cause.code) ? new Unsent({ cause }) : new Unreachable({ cause })
+}
+
+schema Piece { readonly id: string; readonly data: string }
+schema Ending { readonly id: string; readonly status?: number; readonly aborted?: boolean; readonly error?: string }
+
+/** `request` as the plugin's `request` and `requestStream` read one: a method, a path with its query, and a JSON object or no body. It relays no header. */
+effect function relayed(request: HttpClientRequest.HttpClientRequest): { readonly method: string; readonly path: string; readonly body?: unknown }!Unsent {
+  const body = try carried(request)
+  return Option.isNone(body) ? { method: request.method, path: located(request) } : { method: request.method, path: located(request), body: body.value }
+}
+
+/** The plugin as a `Remote`, for what eliza's client does not carry: the plugin's own `request`, and a stream by `requestStream`, heard as `streamData` and `streamEnd` under an id made here. */
+function plugged(bridge: Bridge.Shape): Remote {
+  return {
+    effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
+      const sent = try relayed(request)
+      const said = timeout(bridge.call(plugin, "request", sent), patience) catch effect (cause) => match (cause) {
+        when BridgeFailed: throw undelivered(cause);
+        default: throw new Unreachable({ cause });
+      }
+      const answered = Schema.decodeUnknownEffect(Relayed)(said) catch effect (cause) => { throw new Unreachable({ cause }) }
+      if (answered.status < 200 || answered.status >= 300) throw new Refused({ status: answered.status })
+      return answered.data
+    },
+    events(request: HttpClientRequest.HttpClientRequest) {
+      const heard = Stream.callback<string, Failure>((queue) => effect {
+        const sent = try relayed(request)
+        const id = fresh()
+        // The plugin keeps no event for a listener that comes late: hear first, then ask.
+        bridge.heard(plugin, "streamData", (said) => {
+          const piece = Schema.decodeUnknownOption(Piece)(said)
+          if (Option.isSome(piece) && piece.value.id === id) Queue.offerUnsafe(queue, piece.value.data)
+        }) catch effect (cause) => { throw undelivered(cause) }
+        bridge.heard(plugin, "streamEnd", (said) => {
+          const ending = Schema.decodeUnknownOption(Ending)(said)
+          if (Option.isNone(ending) || ending.value.id !== id) return
+          const { status, aborted, error } = ending.value
+          if (error !== undefined) Queue.failCauseUnsafe(queue, Cause.fail(new Unreachable({ cause: error })))
+          else if (aborted !== true && status !== undefined && (status < 200 || status >= 300)) Queue.failCauseUnsafe(queue, Cause.fail(new Refused({ status })))
+          else Queue.endUnsafe(queue)
+        }) catch effect (cause) => { throw undelivered(cause) }
+        try addFinalizer(() => ignore(bridge.call(plugin, "abort", { id })))
+        bridge.call(plugin, "requestStream", { ...sent, id }) catch effect (cause) => { throw undelivered(cause) }
+      })
+      return Stream.mapEffect(heard, (text) => parsed(text))
+    },
+  }
+}
+
+/** eliza's bridge to the agent the phone runs: what the plugin answers is decoded by eliza's client. */
+function pluginBridge(bridge: Bridge.Shape): RuntimeJsonBridge {
+  const said = <A>(method: string, options: unknown) => runPromise(bridge.call(plugin, method, options)) as Promise<A>
+  return {
+    status: () => said("getStatus", {}),
+    start: () => said("start", {}),
+    restart: () => said("restart", {}),
+    request: (input) => said("request", input),
+  }
+}
+
+/** The agent on the phone, through the `EmbeddedAgent` plugin. */
 export const relayedAgent = Layer.effect(Agent, effect {
-  return over(try pluginBridge("EmbeddedAgent"), try relayed("EmbeddedAgent"))
+  const bridge = try Bridge
+  return over(pluginBridge(bridge), plugged(bridge))
 })

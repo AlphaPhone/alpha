@@ -1,11 +1,8 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
-import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
-import type { Platform } from "../../src/platform/platform.ts"
-import type { Scene } from "../fakes/scene.ts"
-import { fakePhone } from "../fakes/world.vibe"
+import { type Platform, pagePlatform } from "../../src/platform/platform.vibe"
 
 /** Where the services of services.ts answer: the agent with this launch's token, and the cloud's loopback origin. */
 export interface Running {
@@ -20,11 +17,9 @@ function bearing(token: string) {
   }) |> Layer.provide(%, NodeHttpClient.layerNodeHttp)
 }
 
-/** The world a journey with real services runs in: eliza's agent and cloud as `running` has them, and the phone faked over `world`. */
-export function elizaWorld(world: Scene, store: Layer.Layer<KeyValueStore.KeyValueStore>, running: Running): Layer.Layer<Platform> {
-  return Layer.mergeAll(
-    store,
-    fakePhone(world),
+/** The world a journey with real services runs in: Alpha's own page platform over eliza's agent and cloud as `running` has them, on the real clock. */
+export function elizaWorld(running: Running): Layer.Layer<Platform> {
+  return pagePlatform(
     Layer.provide(agentAt(running.agent.origin), bearing(running.agent.token)),
     Layer.provide(cloudAt(running.cloud.local), NodeHttpClient.layerNodeHttp),
   )

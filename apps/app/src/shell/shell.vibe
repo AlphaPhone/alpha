@@ -1,19 +1,52 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
-import { Machine, stored } from "../../gen/app__shell.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { quiet } from "../runtime/reactor.vibe"
+import { contained, reacting } from "../runtime/reactor.vibe"
+
+/** The screens that take Back before the shell does: a screen with a step of its own, such as a thread over its list. */
+export service Backs {
+  register(place: string, took: boolean!!): void!!
+  take(place: string): boolean!!
+}
+
+const backs = Layer.sync(Backs, () => {
+  const held = new Map<string, boolean!!>()
+  return {
+    register: (place: string, took: boolean!!) => sync(() => { held.set(place, took) }),
+    take: (place: string) => held.get(place) ?? succeed(false),
+  }
+})
+
+/** While the screen at `place` shows, `took` is asked for each Back. */
+export effect function taking(place: string, took: () => Promise<boolean>): void!!Backs {
+  try (try Backs).register(place, Effect.orElseSucceed(tryPromise(took), () => false))
+}
 
 // spec/app/shell/index.md, "When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed"
-const kept = quiet(Machine, stored("alpha.shell"), { type: "reopen" })
+const kept = reacting(Shell, { keep: 1, open: [{ type: "reopen" }] })
 
-// spec/app/shell/index.md, "The phone says what it admits, and an app it no longer admits leaves the trail"; spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
+// spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
+/** Back, from the phone as from the header: the drawer and Ask Alpha close first; then the screen showing may take a step of its own; then the app on top closes. */
+export effect function back(): void!!(Shell.Machine | Backs) {
+  const shell = try Shell.Machine
+  const state = try shell.get()
+  const view = state.trail.at(-1)
+  if (!state.drawer && state.assistant === "Bar" && view !== undefined && (try (try Backs).take(`view:${view}`))) return
+  try contained(shell.send({ type: "goBack" }), "back")
+}
+
+// spec/app/shell/index.md, "The phone says what it admits, and an app it no longer admits leaves the trail"; spec/app/shell/index.md, "Home leaves every app and closes every layer at once"
 const told = Layer.effectDiscard(effect {
   const device = try Device
-  const shell = try Machine
+  const shell = try Shell.Machine
+  const pressed = try Backs
   const facts = try device.capabilities()
-  try ignore(shell.send({ type: "admit", image: facts.image, contacts: facts.contacts }))
-  try fork.scoped Stream.runForEach(device.buttons, (button) => ignore(shell.send(button === "back" ? { type: "goBack" } : { type: "goHome" })))
+  try contained(shell.send({ type: "admit", image: facts.image, contacts: facts.contacts }), "admitting")
+  try fork.scoped Stream.runForEach(device.buttons, (button) => contained(
+    button === "back" ? Effect.provideService(Effect.provideService(back(), Shell.Machine, shell), Backs, pressed) : shell.send({ type: "goHome" }),
+    `the ${button} button`,
+  ))
 })
 
 /** The shell, kept across restarts, told what the phone admits and which buttons it hands over. */
-export const shell = Layer.provideMerge(told, kept)
+export const shell = Layer.provideMerge(told, Layer.merge(kept, backs))

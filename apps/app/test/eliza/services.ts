@@ -12,10 +12,10 @@ import type { CloudAddress, Reply } from "./cloud-host.ts";
 export interface Cloud extends CloudAddress {
   /** Every sign-in mail sent so far. */
   mail(): Promise<{ to: string; text: string }[]>;
-  /** What the model says to the next call, in place of repeating the owner. */
-  script(reply: Reply): Promise<void>;
-  /** The messages of every model call so far. */
-  asked(): Promise<{ role: string; content?: unknown }[][]>;
+  /** What the model says to the next call of the agent whose character is `system`, in place of repeating the owner. */
+  script(system: string, reply: Reply): Promise<void>;
+  /** The messages of every model call that agent has made so far. */
+  asked(system: string): Promise<{ role: string; content?: unknown }[][]>;
   /** The operator adds credits, once per `requestKey`. */
   credit(organizationId: string, amount: number, requestKey: string): Promise<void>;
   ledger(organizationId: string): Promise<{ balance: number; charges: { charged: number; outcome: string }[] }>;
@@ -78,7 +78,7 @@ function exchange(url: string, init: { method?: string; headers?: Record<string,
   });
 }
 
-async function said<A>(url: string, init?: Parameters<typeof exchange>[1]): Promise<A> {
+export async function said<A>(url: string, init?: Parameters<typeof exchange>[1]): Promise<A> {
   const answer = await exchange(url, init);
   if (answer.status < 200 || answer.status >= 300) throw new Error(`${url} answered ${answer.status} ${answer.text}`);
   return (answer.text === "" ? undefined : JSON.parse(answer.text)) as A;
@@ -97,8 +97,8 @@ export async function startCloud(state: string): Promise<Cloud> {
   return {
     ...address,
     mail: () => operator("mail"),
-    script: (reply) => operator("model", reply),
-    asked: () => operator("asked"),
+    script: (system, reply) => operator("model", { system, reply }),
+    asked: (system) => operator(`asked?system=${encodeURIComponent(system)}`),
     credit: (organizationId, amount, requestKey) => operator("credits", { organizationId, amount, requestKey }),
     ledger: (organizationId) => operator(`ledger?organizationId=${organizationId}`),
     stop: () => ended(child),
@@ -144,16 +144,19 @@ export async function signIn(cloud: Cloud, email: string): Promise<DeviceKey> {
   return redeem(cloud, redirectUrl, verifier);
 }
 
-/** Start the agent bundle of the pinned checkout as the owner's, over `state`, with `key` as its cloud credential. */
-export async function startAgent(state: string, cloud: Cloud, key: DeviceKey): Promise<Agent> {
+/** The character of the agent of `email`: its system prompt names its owner, which is also how the local cloud's model tells one journey's agent from another's. */
+export const characterOf = (email: string) => ({ name: "Alpha", system: `You are Alpha, the phone agent of ${email}.` });
+
+/** Start the agent bundle of the pinned checkout as the owner's, over `state`, with `key` as its cloud credential; `persist` keeps its conversations in `state`. */
+export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean): Promise<Agent> {
   const launch = path.join(owned(state), "launch.json");
   fs.writeFileSync(launch, JSON.stringify({
     schema: 1,
-    character: { name: "Alpha", system: "You are Alpha, the owner's phone agent." },
+    character,
     policy: { actions: { allowed: ["REPLY", "IGNORE", "NONE"] }, plugins: { load: [] } },
     model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: "alpha-chat", largeModel: "alpha-chat", imageModel: "alpha-chat" },
     account: { userId: key.accountId, organizationId: key.organizationId },
-    embeddings: "none", persistMemory: true, callerRole: "owner",
+    embeddings: "none", persistMemory: persist, callerRole: "owner",
   }), { mode: 0o600 });
   const token = base64url(randomBytes(32));
   const port = await freePort();
@@ -176,11 +179,15 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey): P
 /** The owner the dev server signs in, and what the operator grants: enough for a day of talking to a scripted model. */
 const owner = { email: "owner@alpha.test", credits: 50_000_000 };
 
-/** The cloud and the agent a dev server runs against: one signed-in, funded owner over `state`, kept between runs. */
-export async function startEliza(state: string) {
+/**
+ * The cloud and the agent a dev server runs against: one signed-in, funded owner. Their state is a directory of this
+ * run, gone with it, so nothing piles up between runs; `keep` names a directory to keep it in instead.
+ */
+export async function startEliza(keep?: string) {
+  const state = keep ?? scratch();
   const cloud = await startCloud(state);
   const key = await signIn(cloud, owner.email);
   await cloud.credit(key.organizationId, owner.credits, "dev-grant");
-  const agent = await startAgent(state, cloud, key);
-  return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); } };
+  const agent = await startAgent(state, cloud, key, characterOf(owner.email), keep !== undefined);
+  return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); if (keep === undefined) fs.rmSync(state, { recursive: true, force: true }); } };
 }

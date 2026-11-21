@@ -1,12 +1,11 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { TestClock } from "effect/testing"
 import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
-import { Device } from "../../src/platform/device.vibe"
-import type { Platform } from "../../src/platform/platform.ts"
-import { Vault } from "../../src/platform/vault.vibe"
+import { type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
+import { plugIn } from "./phone.ts"
 import { type Answering, fetched } from "./routes.ts"
-import { type Scene, pressed, services } from "./scene.ts"
+import { type Scene, services } from "./scene.ts"
 
 /** An HttpClient that hands each request to a fake service as fetch would: a web Request, with its abort signal. */
 function fetching(answer: Answering) {
@@ -20,29 +19,20 @@ function fetching(answer: Answering) {
   }))
 }
 
-/** The phone itself, faked over `world`: what it admits, its buttons and its secrets. */
-export function fakePhone(world: Scene) {
-  return Layer.mergeAll(
-    Layer.succeed(Device, {
-      capabilities: () => sync(() => ({ image: world.image, contacts: world.image })),
-      setTextScale: (scale: number) => sync(() => { world.textScale = scale }),
-      buttons: Stream.map(Stream.fromEventListener<Event>(world.buttons, "press"), pressed),
-    }),
-    Layer.succeed(Vault, {
-      read: (slot: string) => sync(() => Option.map(Option.fromUndefinedOr(world.secrets.get(slot)), Redacted.make)),
-      write: (slot: string, secret: Redacted.Redacted<string>) => sync(() => { world.secrets.set(slot, Redacted.value(secret)) }),
-      remove: (slot: string) => sync(() => { world.secrets.delete(slot) }),
-    }),
-  )
+/** A clock the journey moves, at the world's time: time never goes back when Alpha opens again. */
+export function clockAt(world: Scene) {
+  return Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(world.now)), TestClock.layer())
 }
 
-/** The world outside Alpha, faked over `world`, keeping machines in `store`: the real agent and cloud clients over the fake services. */
-export function fakeWorld(world: Scene, store: Layer.Layer<KeyValueStore.KeyValueStore>): Layer.Layer<Platform> {
+/**
+ * The world outside Alpha, faked over `world` at its two boundaries, with Alpha's own platform layers over them: a
+ * browser's fetch, answered by the fake services' routes, or, where `world.phone`, the plugins Android gives the page,
+ * over the same routes.
+ */
+export function fakeWorld(world: Scene): Layer.Layer<Platform | TestClock.TestClock> {
   const { agent, cloud } = services(world)
-  return Layer.mergeAll(
-    store,
-    fakePhone(world),
-    Layer.provide(agentAt("http://agent.test"), fetching(agent)),
-    Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)),
-  )
+  const platform = world.phone
+    ? Layer.provide(phonePlatform(), Layer.effectDiscard(acquireRelease(sync(() => plugIn(world, agent)), (unplug) => sync(unplug))))
+    : pagePlatform(Layer.provide(agentAt("http://agent.test"), fetching(agent)), Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)))
+  return Layer.provideMerge(platform, clockAt(world))
 }

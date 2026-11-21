@@ -6,4 +6,4 @@ rules.
 
 - [Shell](./shell/): where the owner is, and the layers over it
 - [Ask Alpha](./ask/): one conversation with the resident agent
-- [Reminders](./sample/): the sample area, read from the resident agent and shown for Notes
+- [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside

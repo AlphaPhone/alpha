@@ -1,0 +1,7 @@
+# The lists every area adds one line to. A line is only ever added, so two branches that each add theirs merge by
+# keeping both, with no conflict to resolve by hand.
+apps/app/src/areas.ts merge=union
+apps/app/src/resident.vibe merge=union
+apps/app/test/fakes/scene.ts merge=union
+apps/app/test/bombadil.ts merge=union
+spec/app/index.md merge=union

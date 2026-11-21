@@ -1,14 +1,17 @@
-// spec/kit/read.md, "Story: Read from outside"
+// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"
 import * as Sse from "effect/encoding/Sse"
+import { Attempts } from "../runtime/attempts.vibe"
 
-/** The other side could not be reached, or did not answer in time. */
+/** The request provably never left Alpha: its route is not one the phone relays, or the bridge was busy or is not there. */
+export error Unsent { cause: unknown }
+/** The other side could not be reached, did not answer in time, or stopped mid-answer: it may have acted. */
 export error Unreachable { cause: unknown }
 /** The other side answered with a status other than 2xx. */
 export error Refused { status: number }
-/** The other side answered with something that is not what was asked for. */
+/** The other side answered 2xx with something that is not what was asked for. */
 export error Garbled { cause: unknown }
 
-export type Failure = Unreachable | Refused | Garbled
+export type Failure = Unsent | Unreachable | Refused | Garbled
 
 /** An HTTP service outside Alpha, such as the resident agent or the cloud. What it answers is untrusted until `ask` or `listen` has decoded it. */
 export interface Remote {
@@ -19,10 +22,28 @@ export interface Remote {
 }
 
 /** How long Alpha waits for an answer before the other side counts as unreachable. */
-const patience = "10 seconds"
+export const patience = "10 seconds"
 
-function ok(status: number) {
-  return status >= 200 && status < 300
+/** How a write outside ended, as the kit's `A::conclude(attempt, confirmed, known)` takes it. */
+export interface Outcome {
+  readonly confirmed: boolean
+  readonly known: boolean
+}
+
+/** The statuses that say the other side understood the request and did not do it. Every other one leaves it unknown: a 5xx, a timeout or a throttle can follow a write that took effect. */
+const declined = [400, 401, 402, 403, 404, 405, 406, 409, 410, 411, 412, 413, 414, 415, 416, 417, 422, 426, 428, 431, 451]
+
+/**
+ * How a write that failed ended. It is known not to have happened only where it never left, or the other side said
+ * it declined; an answer that came back 2xx and unreadable is a write that happened.
+ */
+export function outcomeOf(failure: Failure): Outcome {
+  return match (failure) {
+    when Unsent: { confirmed: false, known: true };
+    when Refused: { confirmed: false, known: declined.includes(failure.status) };
+    when Garbled: { confirmed: true, known: true };
+    when Unreachable: { confirmed: false, known: false };
+  }
 }
 
 /** `text` as JSON, untrusted; an empty body is `undefined`. */
@@ -36,7 +57,7 @@ export effect function remoteAt(base: string): Remote!!HttpClient.HttpClient {
   const client = HttpClient.mapRequest(try HttpClient.HttpClient, HttpClientRequest.prependUrl(base))
   effect function answered(request: HttpClientRequest.HttpClientRequest): HttpClientResponse.HttpClientResponse!(Unreachable | Refused) {
     const response = client.execute(request) catch effect (cause) => { throw new Unreachable({ cause }) }
-    if (!ok(response.status)) throw new Refused({ status: response.status })
+    if (response.status < 200 || response.status >= 300) throw new Refused({ status: response.status })
     return response
   }
   return {
@@ -72,4 +93,17 @@ export function listen<I, A>(remote: Context.Key<I, Remote>, request: HttpClient
     const events = (try remote).events(request)
     return Stream.mapEffect(events, (data) => Schema.decodeUnknownEffect(schema)(data) |> Effect.mapError(%, (cause) => new Garbled({ cause })))
   })
+}
+
+/**
+ * Carry out the kit attempt `id` of the machine whose job this is: `request` to `remote`, once, under that attempt's
+ * idempotency key, and how it ended. Every attempt of every area goes through here, so no area decides for itself
+ * what a status means or what its key is.
+ */
+export effect function attempted<I>(remote: Context.Key<I, Remote>, request: HttpClientRequest.HttpClientRequest, id: number): Outcome!!(I | Attempts) {
+  const key = try (try Attempts).key(id)
+  return effect {
+    try (try remote).call(HttpClientRequest.setHeader(request, "idempotency-key", key))
+    return { confirmed: true, known: true }
+  } catch (failure) => outcomeOf(failure)
 }

@@ -1,13 +1,13 @@
-import { type Context, Effect, Layer, type ManagedRuntime, Stream } from "effect";
-import * as KeyValueStore from "effect/persistence/KeyValueStore";
+import { type Context, Effect, type Layer, type ManagedRuntime, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../src/App.tsx";
-import { areas } from "../src/areas.ts";
+import { type Mount, type Place, mounts as every } from "../src/areas.ts";
 import { boot } from "../src/boot.tsx";
-import type { Platform } from "../src/platform/platform.ts";
+import type { Platform } from "../src/platform/platform.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
+import { pressButton } from "./fakes/phone.ts";
 import type { Scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -24,7 +24,12 @@ export function underAct() {
   environment.IS_REACT_ACT_ENVIRONMENT = true;
 }
 
+/** Alpha's screens at `places` alone: what a journey passes `open`, so that it loads only what it draws. */
+export const only = (...places: Place[]) => every.filter((mount) => places.includes(mount.at));
+
 const closing: (() => Promise<void>)[] = [];
+/** What each open Alpha was opened with: the world a journey moves, and the screens its `until` loads. */
+const opened = new WeakMap<Alpha, { world?: Scene; mounts: readonly Mount[] }>();
 
 /** Close every Alpha the test opened, and forget what it stored: for `afterEach`. */
 export async function closeAll() {
@@ -32,19 +37,27 @@ export async function closeAll() {
   localStorage.clear();
 }
 
-/** This page's localStorage, where Alpha keeps its machines. */
-export const stored = KeyValueStore.layerStorage(() => localStorage);
-
-/** Alpha as main.tsx opens it, over this page's localStorage, the fake world and a clock the test moves. `close` is the process dying. */
-export function open(world: Scene) {
-  return openOver(Layer.merge(fakeWorld(world, stored), TestClock.layer()));
+/**
+ * Alpha as main.tsx opens it, over this page's localStorage, the fake world and a clock at the world's time, which
+ * the test moves. `mounts` are the screens it draws: every screen of Alpha, or the journey's own. `close` is the
+ * process dying.
+ */
+export async function open(world: Scene, mounts: readonly Mount[] = every) {
+  const running = await openOver(fakeWorld(world), mounts);
+  opened.set(running.alpha, { world, mounts });
+  return running;
 }
 
 /** Alpha over `platform`, which a journey with real services builds itself (test/eliza/world.vibe). */
-export async function openOver(platform: Layer.Layer<Platform>) {
-  const alpha = boot(platform);
+export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every) {
+  const alpha = boot(platform, mounts);
+  opened.set(alpha, { mounts });
   const root = createRoot(document.body.appendChild(document.createElement("div")));
-  await drawn(() => root.render(<App alpha={alpha} />));
+  // Drawn once the root runtime is built, and with it the shell's first state.
+  await drawn(async () => {
+    root.render(<App alpha={alpha} />);
+    await alpha.runtime.runPromise(Effect.void);
+  });
   let open = true;
   const close = async () => {
     if (!open) return;
@@ -56,16 +69,25 @@ export async function openOver(platform: Layer.Layer<Platform>) {
   return { alpha, close };
 }
 
-/** Wait, with every area's screen loaded, until the machine `key` names reaches a state `ok` accepts, and React has drawn it. */
-export async function until<I, S>(runtime: ManagedRuntime.ManagedRuntime<I, unknown>, key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) {
+/** Wait, with every screen of `alpha` loaded, until the machine `key` names in `runtime` reaches a state `ok` accepts, and React has drawn it. */
+export async function until<I, S>(alpha: Alpha, runtime: ManagedRuntime.ManagedRuntime<I, unknown>, key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) {
   await drawn(async () => {
-    await Promise.all([...Object.values(areas).map((load) => load()), import("../src/ask/index.tsx")]);
+    await Promise.all((opened.get(alpha)?.mounts ?? []).map((mount) => mount.load()));
     await runtime.runPromise(Effect.flatMap(key, (machine) => Stream.runHead(Stream.filter(machine.changes, ok))));
   });
 }
 
-/** Move the clock the test controls on by `ms`. */
-export const later = (alpha: Alpha, ms: number) => drawn(() => alpha.runtime.runPromise(TestClock.adjust(ms)));
+/** Let `ms` pass, in the world and on the clock of `alpha`. */
+export const later = (alpha: Alpha, ms: number) => drawn(() => {
+  const world = opened.get(alpha)?.world;
+  if (world) world.now += ms;
+  return alpha.runtime.runPromise(TestClock.adjust(ms));
+});
+
+/** Let `ms` pass in the world while no Alpha is open: the next one opens that much later. */
+export function asleep(world: Scene, ms: number) {
+  world.now += ms;
+}
 
 /** The button whose accessible name is `name`, if one is shown. */
 export const button = (name: string) => [...document.querySelectorAll("button")].find((found) => (found.getAttribute("aria-label") ?? found.textContent) === name);
@@ -85,4 +107,4 @@ export const fill = (name: string, text: string) => drawn(() => {
 });
 
 /** Hand Alpha a hardware button, as the phone does. */
-export const hardware = (world: Scene, pressed: "back" | "home") => drawn(() => world.buttons.dispatchEvent(new CustomEvent("press", { detail: pressed })));
+export const hardware = (pressed: "back" | "home") => drawn(() => pressButton(pressed));

@@ -3,11 +3,13 @@ import { Alert, Button, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine } from "../../gen/app__sample.effect.vibe";
 import { useMachine } from "../../gen/app__sample.react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { useTimed } from "../../src/runtime/react.ts";
+import { untimed } from "../../src/runtime/reactor.vibe";
+import type { Time } from "../../src/runtime/time.vibe";
 
 export interface RemindersProps {
-  /** Provides the reminders machine, `reminders` of sample.vibe, which is resident. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine, unknown>;
+  /** Provides the reminders machine, `reminders` of sample.vibe, and Alpha's time, at which `can` is asked. */
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Time, unknown>;
 }
 
 const outcomes = {
@@ -17,7 +19,7 @@ const outcomes = {
 
 /** The reminders the agent keeps, each one dismissable, with Undo offered and focused exactly while a dismissal is held. */
 export function Reminders({ runtime }: RemindersProps) {
-  const { state, cause, can, send } = useMachine(runtime);
+  const { state, cause, can, send } = useTimed(runtime, useMachine);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not read its reminders</Alert>;
   if (!state) return null;
   const undo = { type: "undoDismiss", now: untimed } as const;

@@ -30,8 +30,16 @@ export function checkout(): Checkout {
 
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
 
-/** `.eliza` at the repository root names the checkout, so that `link:` dependencies and tools find the pinned packages. */
+const versionOf = (file: string, name: string) => (JSON.parse(fs.readFileSync(file, "utf8")) as { dependencies?: Record<string, string> }).dependencies?.[name];
+
+/**
+ * `.eliza` at the repository root names the checkout, so that `link:` dependencies and tools find the pinned packages.
+ * The page runs eliza's client on its own copy of Effect, so the two must be one version: a pin that moves eliza's
+ * Effect is refused here, and not found out in a browser.
+ */
 function linked(at: Checkout) {
+  const [theirs, ours] = [versionOf(path.join(at.root, "packages/agent/package.json"), "effect"), versionOf(path.join(import.meta.dirname, "../../package.json"), "effect")];
+  if (theirs !== ours) throw new Error(`eliza ${at.commit.slice(0, 12)} is on effect ${theirs} and Alpha on ${ours}: move both together`);
   const link = path.join(import.meta.dirname, "../../../../.eliza");
   if (fs.existsSync(link) && fs.realpathSync(link) === fs.realpathSync(at.root)) return;
   fs.rmSync(link, { force: true });
@@ -57,13 +65,31 @@ function run(cwd: string, command: string, ...args: string[]) {
   process.stdout.write(`  ${Math.round((Date.now() - started) / 1000)} s\n`);
 }
 
+/** Only one worktree builds the checkout all of them share: the others wait for it, and then find it ready. */
+async function alone<A>(at: Checkout, work: () => Promise<A>): Promise<A> {
+  const lock = `${at.root}.building`;
+  fs.mkdirSync(path.dirname(at.root), { recursive: true });
+  for (let waited = 0; ; waited += 1) {
+    try { fs.mkdirSync(lock); break; } catch { /* Another worktree holds it. */ }
+    // A build that died leaves its lock: after an hour without it finishing, it is taken over.
+    const held = fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs;
+    if (held !== undefined && Date.now() - held > 3_600_000) fs.rmSync(lock, { recursive: true, force: true });
+    if (waited % 12 === 0) process.stdout.write(`another worktree is building eliza ${at.commit.slice(0, 12)}: waiting\n`);
+    await new Promise((done) => setTimeout(done, 5_000));
+  }
+  try { return await work(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
+}
+
 /** Clone eliza at the pinned commit, install it, and build the agent bundle and the cloud Worker. Each step is skipped once it is done. */
 async function prepare() {
   const at = checkout();
-  if (ready(at)) {
-    linked(at);
-    return void process.stdout.write(`eliza ${at.commit.slice(0, 12)} is ready at ${at.root}\n`);
-  }
+  if (!ready(at)) await alone(at, () => build(at));
+  linked(at);
+  process.stdout.write(`eliza ${at.commit.slice(0, 12)} is ready at ${at.root}\n`);
+}
+
+async function build(at: Checkout) {
+  if (ready(at)) return;
   const source = process.env.ALPHA_ELIZA_SOURCE ?? lock.remote;
   if (!fs.existsSync(path.join(at.root, ".git"))) {
     fs.mkdirSync(path.dirname(at.root), { recursive: true });
@@ -82,7 +108,13 @@ async function prepare() {
   await buildAgentBundle({ plugins: [], outDir: at.bundle, sourceCommit: at.commit, sourceRoot: at.root });
   process.stdout.write(`agent bundle: ${Math.round((Date.now() - started) / 1000)} s\n`);
   fs.writeFileSync(stamp(at), JSON.stringify({ commit: at.commit }));
-  linked(at);
 }
 
-if (process.argv[1] === import.meta.filename) await prepare();
+/** After `pnpm install`: link the checkout where it is built, and say the one command where it is not. Installing never builds it. */
+function link() {
+  const at = checkout();
+  if (ready(at)) return linked(at);
+  process.stdout.write(`eliza ${at.commit.slice(0, 12)} is not built yet: run \`pnpm eliza\` once (about twelve minutes) before typecheck, test or dev\n`);
+}
+
+if (process.argv[1] === import.meta.filename) await (process.argv.includes("--link") ? link() : prepare());

@@ -9,6 +9,7 @@
     "typecheck": "vibelang --noEmit -p .",
     "test": "vitest run",
     "test:browser": "vitest run --project browser",
+    "prepare": "node test/eliza/checkout.ts --link",
     "eliza": "node test/eliza/checkout.ts",
     "eliza:page": "node test/eliza/page.ts"
   },

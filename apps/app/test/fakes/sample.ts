@@ -11,12 +11,14 @@ export interface SampleScene {
   down: boolean;
   /** A deletion is taken and never answered, as when the phone dies before the agent replies. */
   stalled: boolean;
+  /** A read waits for this before it answers: a journey decides what happens meanwhile. */
+  gate: Promise<unknown>;
   /** The open feeds, each told every list the agent pushes. */
   readonly feeds: Set<(data: unknown) => void>;
 }
 
 export function sampleScene(): SampleScene {
-  return { titles: ["Water the plants", "Call the bank"], asked: [], deleted: [], down: false, stalled: false, feeds: new Set() };
+  return { titles: ["Water the plants", "Call the bank"], asked: [], deleted: [], down: false, stalled: false, gate: Promise.resolve(), feeds: new Set() };
 }
 
 /** The agent pushes `titles` to every open feed. */
@@ -29,7 +31,7 @@ export function sampleRoutes(scene: SampleScene): Route[] {
   return [
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/reminders") return;
-      return scene.down ? Response.json({ error: "starting" }, { status: 503 }) : Response.json({ titles: scene.titles });
+      return scene.gate.then(() => (scene.down ? Response.json({ error: "starting" }, { status: 503 }) : Response.json({ titles: scene.titles })));
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/reminders/feed") return;
