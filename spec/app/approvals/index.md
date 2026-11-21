@@ -74,6 +74,9 @@ pure val ticketValues = Set(1, 2)
 
 ### Every proposal the desk holds keeps the rules of a proposal under its own number, every lease the rules of a lease, and the pass the rules of a pass
 
+Discovered by the proof: a lease is held only for a proposal the desk
+holds.
+
 ```quint
 pure def keepsItsRules(i: int, p: P::Proposal, l: L::Lease): bool =
   P::alwaysNoProposalIsAnEmergencyCall(p) and P::alwaysASettledCardIsInert(p) and P::alwaysADirectRunChangesNothing(p)
@@ -83,6 +86,7 @@ pure def keepsItsRules(i: int, p: P::Proposal, l: L::Lease): bool =
 pure def alwaysEveryProposalKeepsItsRules(d: Approvals): bool =
   d.ids.forall(i => i > 0 and keepsItsRules(i, entry(d, i), leaseOf(d, i)))
     and D::alwaysAtMostFourDirectRunsAMessage(d.pass) and d.interrupted.forall(i => d.ids.contains(i))
+    and d.leases.keys().forall(i => d.ids.contains(i))
 ```
 
 ### The agent proposes under a number not used before, and a card waiting is posted as a notice until it is decided
