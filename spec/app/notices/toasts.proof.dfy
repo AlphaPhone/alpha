@@ -23,3 +23,33 @@ lemma lawUndoStaysLonger_ensures(chars: int, scale: int)
     assert JSFloorDiv(1000000, 100) == 10000;
   }
 }
+
+lemma RetractKeepsTheRest(s: Toasts, area: string, about: int)
+  ensures !(s.showing && offers(s.current, area, about)) ==> retract(s, area, about) == s.(undos := ProofLib.Filter((t: Toast) => !(offers(t, area, about)), s.undos))
+{
+}
+
+lemma retract_ensures(s: Toasts, area: string, about: int)
+  ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysTheScaleNeverShortens(retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysAToastStaysItsTime(retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysOnlyBehindAnUndoToastsWait(retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysToastsAreNumbered(retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysAToastIsShownOnTop(retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> stepAToastGoesOnlyInItsTime(s, "retract", retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> stepNoToastIsRefused(s, "retract", retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> stepAnUndoIsNeverPushedAside(s, "retract", retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> stepUndoIsPassedOnOnce(s, "retract", retract(s, area, about), []))
+{
+  if inv(s) && canRetract(s, area, about) && !(s.showing && offers(s.current, area, about)) {
+    RetractKeepsTheRest(s, area, about);
+    var p := (t: Toast) => !(offers(t, area, about));
+    var after := retract(s, area, about);
+    assert after.undos == ProofLib.Filter(p, s.undos);
+    forall t | t in after.undos ensures t in s.undos {
+      ProofLib.FilterMember(p, s.undos, t);
+    }
+    if |s.undos| == 0 {
+      ProofLib.FilterNil(p, s.undos);
+    }
+  }
+}
