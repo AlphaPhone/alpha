@@ -3489,6 +3489,11 @@ export function requestedCameraCapture(
   assistantName?: string,
 ): boolean {
   if (authoredCameraCapture(text, assistantName) !== undefined) return true;
+  // The agent refuses control characters anywhere in the message, so the
+  // question form is never read past one either ("can you<TAB>take a photo?").
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Reject controls before matching.
+  if (typeof text !== "string" || /[\u0000-\u001f\u007f]/.test(text))
+    return false;
   const asked =
     /^(.{0,80}?)(?:can|could|would|will)\s+you\s+(?:please\s+)?(.+?)[?.!]*$/i.exec(
       typeof text === "string" && text.length <= 512 ? text.trim() : "",

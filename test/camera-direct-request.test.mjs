@@ -37,6 +37,9 @@ test('the phone reads a photo request as the agent does',async()=>{
  for(const text of ["don't take a photo",'do not take a picture','summarize the page I have open','did you take a photo?','what can you take a picture of?','take a photo of the page and send it to Sam','take a picture?','Luna, take a picture'])
   assert.equal(requestedCameraCapture(text),false,text);
  assert.equal(requestedCameraCapture('Luna, take a picture','Luna'),true);
+ // A control character anywhere refuses the message, as the agent's own reading does.
+ for(const text of ['can you\ttake a photo?','could you take a photo\u0000?','can you take a\npicture?'])
+  assert.equal(requestedCameraCapture(text),false,JSON.stringify(text));
 });
 test('the Camera continuation hands the owner\'s words to the direct run',()=>{
  const source=fs.readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
