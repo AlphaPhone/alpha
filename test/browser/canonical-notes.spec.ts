@@ -30,6 +30,37 @@ test('canonical Trash dates the deletion and requires a fresh review after its s
  expect(restores.map((request:any)=>request.body.params)).toEqual([{id:trashedNote.id,expectedRevision:revision}]);
 });
 
+// The agent permanently erased a voice note from its Trash: this phone erases the recording that note owned,
+// and only then acknowledges the agent's receipt. A recording another note owns is left alone and stays pending.
+test('an erased agent voice note has its recording erased on this phone before the receipt is acknowledged',async({page})=>{
+ const voice={id:'erased-voice',title:'Erased memo',body:'\nErased words',color:'yellow',createdAt:'2026-11-01T12:00:00Z',updatedAt:'2026-11-02T12:00:00Z',
+  format:{kind:'voice',data:{recordingId:'erased-audio',audio:{audioId:'erased-audio',durationMs:1000},lines:[],summary:[],actions:[],dur:1}}};
+ await canonicalNotesFixture(page,{trash:[{note:voice,deletedAt:'2026-11-08T12:00:00Z'}]});
+ const erased={operationId:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',noteId:'erased-voice',audioId:'erased-audio',deletedAt:'2026-11-08T12:00:00Z'};
+ const foreign={operationId:'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',noteId:'erased-other',audioId:'kept-audio',deletedAt:'2026-11-08T12:00:00Z'};
+ await page.evaluate(async()=>{
+  const {retainAudio}=await import('/src/browser/note-audio-store.ts');
+  await retainAudio('erased-audio','erased-voice','Erased words',{blob:new Blob(['synthetic'],{type:'audio/wav'}),durationMs:1000});
+  await retainAudio('kept-audio','live-voice','Kept words',{blob:new Blob(['synthetic'],{type:'audio/wav'}),durationMs:1000});
+ });
+ await openCanonicalNotes(page);
+ // The agent erases the entry (Delete forever or expiry) and keeps a cleanup receipt for each recording.
+ await page.evaluate(receipts=>{
+  const f=(window as any).canonicalNotesFixture;
+  f.state.trash=[];f.recordingCleanup=receipts;const revision=++f.state.revision;
+  window.dispatchEvent(new CustomEvent('alpha:canonical-notes-invalidated',{detail:{sessionId:'canonical-fixture-session',revision}}));
+ },[erased,foreign]);
+ await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.completions?.length??0)).toBe(1);
+ const fixture=await page.evaluate(()=>{const f=(window as any).canonicalNotesFixture;return {completions:f.completions,pending:f.recordingCleanup};});
+ expect(fixture.completions).toEqual([{receipt:erased,status:'purged'}]);
+ expect(fixture.pending).toEqual([foreign]);
+ const recording=(audioId:string)=>page.evaluate(async audioId=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return registerPlugin<any>('AlphaNoteAudio').describe({audioId});},audioId);
+ const gone=await recording('erased-audio');
+ expect(gone.deletionOperations[erased.operationId]).toBe('purged');expect(gone.transcript).toBe('');
+ const kept=await recording('kept-audio');
+ expect(kept.noteId).toBe('live-voice');expect(kept.deletedAt).toBeUndefined();expect(kept.transcript).toBe('Kept words');
+});
+
 test('Undo for a canonical deletion cannot restore a replacement trash entry',async({page})=>{
  await canonicalNotesFixture(page,{notes:[trashedNote]});await openCanonicalNotes(page);
  await page.getByRole('button',{name:'Open A trashed note',exact:true}).click();
@@ -140,7 +171,7 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  for(const capability of ['create-note','update-note','delete-note','restore-note'])expect(requests.some((r:any)=>r.path==='/api/views/notes/interact'&&r.body.capability===capability)).toBe(true);
  // Every edit of an existing record names the revision it was made against.
  for(const update of requests.filter((r:any)=>r.body?.capability==='update-note'))expect(Number.isSafeInteger(update.body.params.expectedRevision)).toBe(true);
- expect(requests.every((r:any)=>['/api/notes/state','/api/views/notes/interact'].includes(r.path))).toBe(true);expect(requests.filter((r:any)=>r.path==='/api/notes/state').length).toBeGreaterThanOrEqual(2);
+ expect(requests.every((r:any)=>['/api/notes/state','/api/views/notes/interact'].includes(r.path)||r.path==='/api/notes/trash/recordings'&&r.method==='GET')).toBe(true);expect(requests.filter((r:any)=>r.path==='/api/notes/state').length).toBeGreaterThanOrEqual(2);
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 

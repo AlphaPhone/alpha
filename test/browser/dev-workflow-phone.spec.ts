@@ -6,17 +6,19 @@ import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 test.beforeEach(async({context,page})=>{await guardNoMedia(context);await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());});
 /** The agent's Notes, bound when the development session connects: a closed canonical record transport.
- * As in the agent's store, saving text identical to an existing note replays that note. */
+ * As in the agent's store, a repeated creation id returns the note that creation made and a new one never
+ * binds by content; without a creation id, saving text identical to an existing note replays that note. */
 async function canonicalNotesPort(page:Page){await page.evaluate(async()=>{
  const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
  const identity={ownerId:'workflow-notes-owner',agentId:'workflow-notes-agent',sessionId:'workflow-notes-session',origin:location.origin};
- const state={notes:[] as any[],trash:[] as any[],revision:0},fixture=(window as any).workflowCanonicalNotes={state,creates:0};
+ const state={notes:[] as any[],trash:[] as any[],revision:0},creations:Record<string,string>={},fixture=(window as any).workflowCanonicalNotes={state,creates:0,creationIds:[] as string[]};
  c.getAppRecordClient=()=>({sessionId:identity.sessionId,identity,current:()=>true,request:async(path:string,method:string,body:any)=>{
   if(path==='/api/notes/state'&&method==='GET')return {success:true,data:structuredClone(state)};
   if(path!=='/api/views/notes/interact'||method!=='POST'||body.capability!=='create-note')throw Error('Unexpected canonical Notes request');
   const content:string=body.params.content,split=content.indexOf('\n'),now=new Date().toISOString();
-  let note=state.notes.find(saved=>saved.title+saved.body===content);
-  if(!note){note={id:crypto.randomUUID(),title:split<0?content:content.slice(0,split),body:split<0?'':content.slice(split),color:'yellow',createdAt:now,updatedAt:now};state.notes.push(note);state.revision++;fixture.creates++;}
+  const creationId:unknown=body.params.creationId;if(creationId!==undefined)fixture.creationIds.push(String(creationId));
+  let note=typeof creationId==='string'?state.notes.find(saved=>saved.id===creations[creationId]):state.notes.find(saved=>saved.title+saved.body===content);
+  if(!note){note={id:crypto.randomUUID(),title:split<0?content:content.slice(0,split),body:split<0?'':content.slice(split),color:'yellow',createdAt:now,updatedAt:now};state.notes.push(note);state.revision++;fixture.creates++;if(typeof creationId==='string')creations[creationId]=note.id;}
   return {requestId:crypto.randomUUID(),success:true,result:{success:true,text:'Completed',state:structuredClone(state),data:{note:structuredClone(note)}}};
  }} as any);
 });}
@@ -44,6 +46,7 @@ async function setup(page:Page,mode='write',discover=false){if(mode==='notes')aw
 const notes=(page:Page)=>page.evaluate(async()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records.filter((n:any)=>n.title==='Workflow approved note'));
 for(const profile of ['write','cloud'])test(`approved ${profile} workflow phone write resumes from its exact receipt once`,async({page})=>{await setup(page,profile,profile==='write');expect(await notes(page)).toHaveLength(0);await page.getByRole('button',{name:'Approve',exact:true}).click();expect(await notes(page)).toHaveLength(0);await page.getByRole('button',{name:'Confirm approve',exact:true}).click();await expect.poll(()=>notes(page)).toHaveLength(1);const output=page.getByText('Saved: Exact workflow text',{exact:true});await expect(async()=>{if(await output.isVisible())return;await page.getByRole('button',{name:'Refresh',exact:true}).click({timeout:2_000});await expect(output).toBeVisible({timeout:2_000});}).toPass({timeout:20_000});await expect(page.getByRole('button',{name:'Check saved device results',exact:true})).toHaveCount(0);expect(await notes(page)).toHaveLength(1);await page.reload();await installWorkflowListFixture(page);await openLegacyNotes(page);await returnToApps(page);expect(await notes(page)).toHaveLength(1);});
 // The owner's default Notes are the agent's canonical records: an approved workflow save lands there, not in Previous notes.
+// The save carries the device operation id as its creation id, which the agent replays on a repeat instead of adding a note.
 test('an approved workflow note write is saved in canonical Notes when they are the open source',async({page})=>{
  await setup(page,'canonical');
  const saved=()=>page.evaluate(()=>(window as any).workflowCanonicalNotes.state.notes.map((note:any)=>[note.title,note.body]));
@@ -58,6 +61,12 @@ test('an approved workflow note write is saved in canonical Notes when they are 
  await expect(page.getByRole('heading',{name:'Previous notes',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Open Workflow approved note',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).workflowCanonicalNotes.creates)).toBe(1);
+ const creationIds:string[]=await page.evaluate(()=>(window as any).workflowCanonicalNotes.creationIds);
+ expect(creationIds).toHaveLength(1);expect(creationIds[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+ // A Save a note step can be authored while the agent's Notes are the open source.
+ await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await workflowCard(page,'Phone workflow').click();
+ await page.getByRole('button',{name:'Change',exact:true}).click();await page.getByRole('button',{name:'Add Write step',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Save a note',exact:true})).toBeVisible();
 });
 test('denied workflow phone step ends the run without writing a note',async({page})=>{await setup(page);await page.getByRole('button',{name:'Deny',exact:true}).click();await page.getByRole('button',{name:'Confirm deny',exact:true}).click();await page.getByRole('button',{name:'Refresh',exact:true}).click();await expect(page.getByText('This run stopped with an error on your agent.',{exact:true})).toBeVisible();expect(await notes(page)).toHaveLength(0);});
 test('cancellation blocks a retained pending proposal from claiming an effect',async({page})=>{await setup(page);await page.getByRole('button',{name:'Cancel run',exact:true}).click();await page.getByRole('button',{name:'Confirm cancel',exact:true}).click();await expect(page.getByRole('button',{name:'Back to workflow',exact:true})).toBeEnabled();await expect(page.locator('.workflow-run-summary').getByText('Cancelled',{exact:true})).toBeVisible();const refused=await page.evaluate(async()=>{const {developmentActionRequest}=await import('/src/browser/development-actions.ts');const p=(await (await import('/src/browser/development-execution-document.ts')).readExecutionPart({namespace:'local'} as any,'actions',()=>({proposals:[],journal:[]}))).proposals[0];try{await developmentActionRequest('local',`/api/client-devices/proposals/${p.id}/decision`,{digest:p.digest,decision:'approve'},new AbortController().signal);return false;}catch{return true;}});expect(refused).toBe(true);expect(await notes(page)).toHaveLength(0);});

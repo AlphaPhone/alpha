@@ -99,6 +99,7 @@ import { managePlanCardCopy } from '../runtime/cloud-plans';
 import { DailyApps } from '../daily';
 import { isAndroid } from '../native';
 import { registerPlugin } from '../platform-plugins';
+import type {CanonicalRecordingCleanupStore} from '../runtime/canonical-notes-recording-cleanup';
 import { SystemBars, SystemBarsStyle } from '@capacitor/core';
 import {mergeConversationDelivery, connectionController, STOPPED_REPLY_NOTICE, STOPPED_CANCELLED_NOTICE, STOPPED_CONFIRMED_NOTICE, STOPPED_UNCHECKED_NOTICE, RESIDENT_STARTING_NOTICE, RESIDENT_RECOVERING_NOTICE, NO_AGENT_SEND, NO_AGENT_VOICE, residentAlwaysPresent, agentPendingText, agentAvailabilityNotice } from '../runtime/connection-ui';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
@@ -710,7 +711,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(previous)originalSet.call(shell,'notes',{filter:null});
     let binding:CanonicalNotesUi;
     const paint=()=>{if(shell.live&&shell.canonicalNotesUi===binding)shell.setState({},()=>context(shell));};
-    binding=new CanonicalNotesUi(port,{paint,review:paint,committed:()=>paint(),dropped:title=>{if(shell.live)shell.toast(`Your unsaved edit to “${title}” was lost when the agent connection changed.`,PERSISTENT_NOTICE);}});
+    // The recordings of agent voice notes made on this phone stay in its recording store; an agent erase is carried out there.
+    binding=new CanonicalNotesUi(port,{paint,review:paint,committed:()=>paint(),dropped:title=>{if(shell.live)shell.toast(`Your unsaved edit to “${title}” was lost when the agent connection changed.`,PERSISTENT_NOTICE);},recordings:registerPlugin<CanonicalRecordingCleanupStore>('AlphaNoteAudio')});
     shell.canonicalNotesUi=binding;
     shell.notesReady=binding.refresh().catch(()=>{if(shell.canonicalNotesUi===binding)paint();});
   }
@@ -1391,7 +1393,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!notes?.current||notes.pending)return {status:'failed',summary:'Nothing was saved because Notes isn’t ready.'};
           try{
             // The saved record's identity reaches the Notes view; the shared create_note receipt carries no typed result.
-            const created=await notes.createFromText(operation.title?operation.title+(operation.body?'\n'+operation.body:''):operation.body);
+            // The operation id is the creation's identity, so a repeated run of this step returns the note it made.
+            const created=await notes.createFromText(operation.title?operation.title+(operation.body?'\n'+operation.body:''):operation.body,operationId);
             return created&&this.canonicalNotesUi===notes?{status:'succeeded',summary:presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary}:unconfirmed;
           }catch{return unconfirmed;}
         }
