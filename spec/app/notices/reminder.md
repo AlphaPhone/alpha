@@ -344,13 +344,13 @@ pure def lawADecisionOnAnOlderRevisionIsRefused(change: Change, number: int, tar
     change, 0, number, target, now, 1, who))
 ```
 
-### A reminder with a time is removed only when its deletion was carried out, which withdraws its notification
+### A reminder with a time is removed only when its deletion was carried out, which withdraws its notification; one whose saving is not yet known is not removed
 
 The [deletion notice](./deletions.md) holds it, with Undo, until then.
 
 ```quint
 pure def canDeleted(r: Reminder, by: O::Actor): bool =
-  by == O::Phone and r.at > 0 and r.status != Unscheduled and r.status != Deleted and A::ended(r.attempt)
+  by == O::Phone and r.at > 0 and r.status != Unscheduled and r.status != Pending and r.status != Deleted and A::ended(r.attempt)
 
 pure def deleted(r: Reminder, by: O::Actor): Worked =
   { state: { ...r, status: Deleted },

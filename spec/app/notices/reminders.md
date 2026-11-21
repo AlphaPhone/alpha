@@ -90,9 +90,12 @@ pure def listed(d: Reminders, ticket: int, ok: bool, by: O::Actor): Acted =
 
 ### The list shown is current only after a read answered since the last change, and a failure is said once until a read succeeds
 
+Discovered by the proof: a read that was asked has a ticket.
+
 ```quint
 pure def alwaysTheListIsCurrentOrMarked(d: Reminders): bool =
   ((d.listing.status == W::Failed or d.listing.ticket == 0) implies d.stale) and (d.reported implies d.listing.status != W::Loaded)
+    and d.listing.ticket >= 0 and (d.listing.status != W::Idle implies d.listing.ticket > 0)
 
 pure def stepAFailureIsSaidOnce(before: Reminders, via: str, after: Reminders, out: List[Effect]): bool =
   out.every(e => match e {
@@ -149,7 +152,7 @@ pure def alwaysFewCreationsAreUnconfirmed(d: Reminders): bool = unconfirmed(d) <
 pure def sometimesFull(d: Reminders): bool = d.full
 ```
 
-### Android is asked once, its answer settles the change, and a refused change is tried again, for the reminder they name; each answer marks the list out of date
+### Android is asked once, its answer settles the change, and a refused change is tried again, for the reminder they name; each answer marks the list out of date, and a refused scheduling is tried again only while few creations are unconfirmed
 
 ```quint
 pure val weight_operate = 3
@@ -171,6 +174,7 @@ pure def answer(d: Reminders, number: int, result: M::Answer, reason: M::Reason,
 
 pure def canRetry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): bool =
   d.numbers.contains(number) and M::canRetry(held(d, number), now, signedIn, by)
+    and (held(d, number).change == M::Schedule implies unconfirmed(d) < maxUnconfirmed)
 
 pure def retry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): Acted =
   kept(number, d, M::retry(held(d, number), now, signedIn, by))
