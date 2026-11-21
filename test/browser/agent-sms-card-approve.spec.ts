@@ -193,7 +193,11 @@ for(const contactMode of ['one','two','none'] as const) test(voiceCases[contactM
     await expect(card).toContainText('Say “Send this text”');
     expect(spoken).toContain('confirm by voice');
     await info.attach('Addressed draft', {body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
-    await page.evaluate(() => (window as any).smsCardFixture.voice('Send this text.'));
+    const mismatch=await page.evaluate(() => (window as any).smsCardFixture.voice('Yeah, send it to Maya.'));
+    expect(mismatch.text).toContain('recipient doesn’t match');
+    expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0});
+    await card.evaluate(node=>node.scrollIntoView({block:'center'}));
+    await page.evaluate(() => (window as any).smsCardFixture.voice('Yeah, send it to Carson.'));
     // The host draft is retired. The distinct, explicitly confirmed device send is journaled once.
     expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,refused:0,sendSms:1});
     const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends[0]);

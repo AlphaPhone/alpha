@@ -2395,6 +2395,9 @@ export const connectionController = {
     return calendarApprovals.read(id,signal);
   },
   async resolveCalendarApproval(row:CalendarApproval,decision:CalendarApprovalDecision,signal:AbortSignal){return calendarApprovals.resolve(row,decision,signal);},
+  matchesSmsReviewRecipient(proposalId:string,spoken:string):boolean {
+    return active?.actions?.matchesSmsReviewRecipient(proposalId,spoken)===true;
+  },
   async pendingActions(context:ContextEnvelope,signal:AbortSignal):Promise<ActionProposal[]> {
     const selected=active,session=state.session,generation=epoch,history=state.history;
     if(!selected?.actions||!session||state.open||state.busy||document.hidden||context.sensitive)return [];

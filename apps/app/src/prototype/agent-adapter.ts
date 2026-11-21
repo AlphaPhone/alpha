@@ -495,6 +495,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   type PlainSmsDraft={proposal:import('../runtime/alpha-client').ActionProposal;binding:NonNullable<AgentReply['messageBinding']>};
   const sendThisText=/^(?:yes[,]?\s+)?send this (?:text|message|draft)[.!]?$/i;
+  const sendReviewedText=/^(?:(?:yes|yeah|yep),?\s+)?send (?:it|(?:this|the) (?:text|message|draft))(?:\s+to\s+(.+?))?[.!?]?$/iu;
   function rememberPlainSmsDraft(shell:Shell,reply:AgentReply){
     const proposal=reply.proposals?.find(item=>item.plainSmsDraft===true);
     if(proposal&&reply.messageBinding)shell.plainSmsDraft={proposal,binding:reply.messageBinding};
@@ -2071,7 +2072,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.plainSmsDraft=undefined;
     // The immediate next accepted microphone turn can confirm exactly one displayed Send card.
     // Never send the confirmation to the model or reopen a consumed approval.
-    if(sendThisText.test(text.trim())){
+    const approvalPhrase=(reviewed||plain)?sendReviewedText.exec(text.trim()):null;
+    if(sendThisText.test(text.trim())||approvalPhrase){
       const message=reviewed&&input.approvalSignal&&reviewed.generation===input.talkGeneration&&
         reviewed.conversationId===binding.conversationId&&reviewed.revision===input.context.revision&&
         reviewed.expiresAt>Date.now()&&this.emergencyLive?.()!==true&&visibleSmsReview(reviewed.id)
@@ -2080,6 +2082,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           (m.card.type!=='proposal'||m.card.state==='open')):undefined;
       input.approvalSignal?.throwIfAborted();
       this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+      const namedRecipient=approvalPhrase?.[1],pendingId=message?.card?.proposalId??plain?.proposal.id;
+      if(namedRecipient&&(!pendingId||!connectionController.matchesSmsReviewRecipient(pendingId,namedRecipient))){
+        if(message)this.pendingVoiceSmsReview=reviewed;
+        if(plain)this.plainSmsDraft=plain;
+        const answer="That recipient doesn’t match the current text. Check the recipient shown before sending.";
+        const replyId=`voice-review:${turnId}`;
+        this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
+        return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+      }
       const receipt=message?await this.cardAct(message,input.approvalSignal,message.card.smsReview==='addressed-draft'?'send-draft':undefined):undefined;
       current();
       const answer=receipt?.summary??(plain&&input.approvalSignal?await sendPlainSmsDraft(plain,input.approvalSignal):message?'I couldn’t confirm the send. Check Messages before trying again.':'Give me the recipient and message you want to send.');

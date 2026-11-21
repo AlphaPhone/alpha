@@ -1515,6 +1515,21 @@ export class DeviceActionCoordinator<
       samePhoneRecipient(request.recipient,target.kind==="number"?target.number:target.query,target.kind==="number")&&
       (request.body===undefined||request.body===operation.body);
   }
+  /** A spoken name must identify the same resolved recipient shown on the live review. */
+  matchesSmsReviewRecipient(proposalId:string,spoken:string):boolean {
+    const entry=this.proposals.get(proposalId);
+    const operation=entry?.proposal.operation;
+    if(!entry||!operation)return false;
+    if(isSmsSend(operation))
+      return operation.recipients.length===1&&samePhoneRecipient(spoken,operation.recipients[0],true);
+    if(!isSmsCompose(operation))return false;
+    const target=smsComposeTarget(operation);
+    if(target.kind==="number")return samePhoneRecipient(spoken,target.number,true);
+    const recipient=entry.smsRecipient;
+    const name=spoken.trim().toLowerCase();
+    return !!recipient&&(samePhoneRecipient(name,recipient.name,false)||
+      samePhoneRecipient(name,target.query,false)||samePhoneRecipient(spoken,recipient.number,true));
+  }
   /** Only proposals bound by the host to this exact freshly sent user message may run.
    * An explicit send or other data-changing request must also match the proposed effect.
    * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
