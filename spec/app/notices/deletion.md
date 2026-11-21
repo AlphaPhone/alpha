@@ -172,9 +172,9 @@ pure def alwaysUndoIsOfferedOnlyWhileItCanBeUndone(d: Deletion): bool =
 
 ### Nothing is deleted while the deletion is being written, queued, paused, being undone, undone or kept
 
-Discovered by the proof: a deletion not yet queued is blank, and one kept
-by an Undo after its window stays out of its window and is never paused
-again.
+Discovered by the proof: a deletion not yet queued is blank; one undone,
+or kept by an Undo after its window, is never paused again; and one that
+could not be written is never held or sent.
 
 ```quint
 pure def alwaysNothingIsDeletedEarly(d: Deletion): bool =
@@ -186,6 +186,8 @@ pure def alwaysNothingIsDeletedEarly(d: Deletion): bool =
     and (d.writing implies (d.window.holding == U::Free and d.attempt.id > 0))
     and (d.attempt.id > 0 implies (d.itemId > 0 and d.owner > 0)) and (d.attempt.id == 0 implies d == initial)
     and (d.kept implies (d.window.holding == U::Released and not(d.paused) and not(d.undoing)))
+    and (d.window.holding == U::Undone implies (not(d.paused) and not(d.undoing)))
+    and (d.trouble == NotQueued implies (d.window.holding == U::Free and d.attempt.outcome == A::Planned and not(d.writing)))
 ```
 
 ### A deletion is sent once, for the owner who queued it, only when its window is up, nothing is being undone, and the item is unchanged
