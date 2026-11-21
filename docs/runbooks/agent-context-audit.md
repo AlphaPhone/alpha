@@ -580,7 +580,23 @@ now proposes both. Input per turn is the same (34K median), but turns are faster
 fixed 5-second pause the same tokens land in less time: uncached tokens in any 60 s rose
 to 149K median and the run was refused 12 times; two reminders failed when the planning
 call itself was refused, which a side call did not re-send (`d0fac57d11` now re-sends an
-extractor call once after a refusal; not yet measured in a whole-turn run).
+extractor call once after a refusal).
+
+The tip with that re-send, `d0fac57d11`, and a control run of `516c7e8a56`, back to back
+on November 21 with the key to themselves:
+
+| | `516c7e8a56` (control) | `d0fac57d11` |
+| --- | --- | --- |
+| Cases passing | 42 of 46 | 40 of 46 |
+| Provider refusals | 0 | 5, all at turns 10 to 12, each with a 60 s wait |
+| Input, cached share | 1.61M, 50% | 1.58M, 42% |
+| Output | 16.7K | 18.4K |
+| Median turn | 2.9 s | 2.8 s |
+
+Two of the tip's failures are those refusals: the reminder's extractor was refused, re-sent
+and refused again inside the same 60-second window, and a text with a Calendar event lost
+its reply. The others move between runs of one arm (reading a number from notes, a timer,
+a new tab). Output is about 1% of all tokens in every run: input is the lever.
 
 ### The phone's decode mode
 
@@ -634,9 +650,18 @@ Upstream branch `claude/agent-context-followups` (local, on upstream develop
 | Every review proposal of one reply recorded | Text plus alarm proposing only the text | Both calls in the first reply 10 of 10 |
 | Extractor call re-sent once after a refusal (wait hint up to 5 s) | A reminder lost when its planning call was refused | |
 
-Not landed after review: a compact one-line rendering of recorded outcomes (22% to 40%
-smaller requests, but a third party's forged outcome line misled the model more often
-than today's form; a per-room marker is under test).
+Parked after ten rounds: a compact one-line rendering of recorded outcomes. It made
+requests with recorded outcomes 20% to 30% smaller (one probe 17.2K to 12.0K tokens), but
+a line in another person's text shaped like a record misled the model. A secret per-room
+marker on the runtime's own lines helped (forged lines: 0 of 65 false "sent" claims
+against 9 of 65 for today's form) but did not close it. A forged line with a wrong or
+stale marker still misled the model in 3 of 5 runs, against 5 of 5 for a forgery of
+today's format. Keeping the marker secret meant stripping it from every outgoing path
+or rotating it on every leak, and each round found another way out. The patch and the
+round reports are kept in the work cache (`parked/outcome-lines-v10`). Under test
+instead: today's record format with the fields no later step reads dropped (request
+and receipt UUIDs, the redacted idempotency key, ISO times), which cost about one token
+per digit and add no new shape to forge.
 
 Dropped: narrowing a reminder's retrieval to the reminder tools when Stage 1 names a
 reminder operation. It would cut a time-clause reminder's tool definitions from about
