@@ -200,7 +200,11 @@ import { describePhotosViewOperation } from "../photos/photos-view-presentation.
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT } from "../telephony/telephony-messages.ts";
-import { SMS_CARRIER_CHARGES, smsSendFacts } from "../telephony/sms-card-facts.ts";
+import {
+  SMS_CARRIER_CHARGES,
+  SMS_OPEN_THREAD_DRAFT,
+  smsSendFacts,
+} from "../telephony/sms-card-facts.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -3418,27 +3422,59 @@ export function numberContradictsRequest(
   if (!proposed.length && contact === undefined) return false;
   // The body as the owner wrote it is taken out of the request, so its numbers
   // are never the addressee and a body that repeats the addressee does not
-  // hide it. A body the model reworded can only keep its own numbers out.
+  // hide it. It is cut only as whole words ("hi" is not the "hi" in "Phil",
+  // "55" not the "55" in "555"), preferring its last occurrence and one whose
+  // cut leaves the proposed recipient. A body the model reworded can only keep
+  // its own numbers out.
   const body = typeof op.body === "string" ? op.body.trim() : "";
-  const at = body ? request.toLowerCase().indexOf(body.toLowerCase()) : -1;
-  const addressed =
-    at >= 0 ? `${request.slice(0, at)} ${request.slice(at + body.length)}` : request;
-  const bodyDigits = at >= 0 ? "" : body.replace(/\D/g, "");
-  const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
-    .map(([text]) => dialDigits(text))
-    .filter(
-      (digits) =>
-        digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
-    );
-  if (!written.length) return false;
-  if (contact !== undefined) {
-    const name = requestWords(contact).trim();
-    return !name || !requestWords(addressed).includes(` ${name} `);
-  }
-  return proposed.some((number) => {
-    const digits = dialDigits(number);
-    return !written.some((wrote) => sameLine(wrote, digits));
-  });
+  const occurrences = body ? wholeWordOccurrences(request, body) : [];
+  const bodyDigits = occurrences.length ? "" : body.replace(/\D/g, "");
+  const contradicts = (addressed: string) => {
+    const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
+      .map(([text]) => dialDigits(text))
+      .filter(
+        (digits) =>
+          digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
+      );
+    if (!written.length) return false;
+    if (contact !== undefined) {
+      const name = requestWords(contact).trim();
+      return !name || !requestWords(addressed).includes(` ${name} `);
+    }
+    return proposed.some((number) => {
+      const digits = dialDigits(number);
+      return !written.some((wrote) => sameLine(wrote, digits));
+    });
+  };
+  if (!occurrences.length) return contradicts(request);
+  const cuts = occurrences
+    .map((at) => `${request.slice(0, at)} ${request.slice(at + body.length)}`)
+    .reverse();
+  return cuts.every(contradicts);
+}
+/**
+ * Where `part` occurs in `text` as whole words, case aside: an edge that is a
+ * letter or digit never matches inside a longer word or number.
+ */
+function wholeWordOccurrences(text: string, part: string): number[] {
+  const haystack = text.toLowerCase(),
+    needle = part.toLowerCase();
+  const word = /[\p{L}\p{N}]/u;
+  const found: number[] = [];
+  for (
+    let at = haystack.indexOf(needle);
+    at >= 0;
+    at = haystack.indexOf(needle, at + 1)
+  )
+    if (
+      !(word.test(needle[0] ?? "") && word.test(haystack[at - 1] ?? "")) &&
+      !(
+        word.test(needle.at(-1) ?? "") &&
+        word.test(haystack[at + needle.length] ?? "")
+      )
+    )
+      found.push(at);
+  return found;
 }
 /** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
 /** An empty keypad, or a number written in the owner's own current message. */
@@ -3582,11 +3618,13 @@ function describeTelephonyAction(
         : {
             title: "Review SMS",
             // Approve sends it: no dialog follows. A name is still matched on the phone, where
-            // the owner picks the person and number before anything is sent.
+            // the owner picks the person and number before anything is sent. When that person's
+            // conversation is open in Messages, the phone drafts it there instead (AC-14), which
+            // the card says, since it cannot know what will be open when Approve is tapped.
             description:
               target.kind === "number"
-                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body)}`
-                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_CARRIER_CHARGES}`,
+                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body, true)}`
+                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_OPEN_THREAD_DRAFT} ${SMS_CARRIER_CHARGES}`,
           };
     }
     case "phone_keypad":
