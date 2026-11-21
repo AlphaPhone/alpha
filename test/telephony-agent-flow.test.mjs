@@ -68,11 +68,13 @@ test('a text to a number, a draft, a single contact value, a contact search and 
     await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
   const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
   // Approve sends a text at once: the card, not a dialog after it, says the SIM and the carrier charge.
-  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nApprove sends it right away. Your carrier may charge for texts.');
-  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nApprove sends it right away. Your carrier may charge for texts.`);
+  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nApprove sends it right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.');
+  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nApprove sends it right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.`);
   const toContact = await card({...number, target: {kind: 'contact', query: 'Priya'}});
-  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. Your carrier may charge for texts.');
+  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.');
   for (const shown of [await card(number), toContact]) assert.doesNotMatch(shown, /Android|again/);
+  // Approving a text whose conversation is open drafts it there (telephony-executor), so the card says so.
+  for (const shown of [await card(number), toContact]) assert.match(shown, /open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there/);
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
   assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
   const change = await card(add);

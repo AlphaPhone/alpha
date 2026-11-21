@@ -52,12 +52,21 @@ export function smsPartEstimate(body: string): number {
   return encodable ? parts(gsm, 160, 153) : parts(unicode, 70, 67);
 }
 
-/** The lines under a text's body on its card. */
-export function smsSendFacts(recipients: number, body: string): string {
+/**
+ * What a reviewed text to one person does when that person's conversation is already open in
+ * Messages: the phone puts it in that conversation's text field and sends nothing (AC-14).
+ */
+export const SMS_OPEN_THREAD_DRAFT = 'If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there.';
+
+/**
+ * The lines under a text's body on its card. `draftsInOpenThread`: a text to one person
+ * (`sms_compose`) that becomes a draft when that person's conversation is open.
+ */
+export function smsSendFacts(recipients: number, body: string, draftsInOpenThread = false): string {
   const lines: string[] = [];
   if (recipients > 1) lines.push('Each person gets their own text. This isn’t a group message.');
   const count = smsPartEstimate(body);
   if (count > 1) lines.push(`${recipients > 1 ? 'Each person likely gets it' : 'It likely goes'} as ${count} linked texts.`);
-  lines.push(`Approve sends it right away. ${SMS_CARRIER_CHARGES}`);
+  lines.push(`Approve sends it right away.${draftsInOpenThread ? ` ${SMS_OPEN_THREAD_DRAFT}` : ''} ${SMS_CARRIER_CHARGES}`);
   return lines.join('\n');
 }

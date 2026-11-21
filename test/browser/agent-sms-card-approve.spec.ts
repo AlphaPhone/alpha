@@ -112,7 +112,7 @@ test('Approve on the Review SMS card sends the text once, under that card, with 
   await expect(card).toContainText(`To: ${NUMBER}`);
   await expect(card).toContainText('From: the SIM chosen in Messages, or your default texting SIM');
   await expect(card).toContainText(BODY);
-  await expect(card).toContainText('Approve sends it right away. Your carrier may charge for texts.');
+  await expect(card).toContainText('Approve sends it right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.');
   await expect(card).not.toContainText(/Android|again/);
   expect((await state(page)).sendSms).toBe(0);
   // The card's own Approve control is what the owner taps; nothing opens after it.
