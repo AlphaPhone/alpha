@@ -175,7 +175,13 @@ pure def discard(s: Trash, id: int, revision: int, recording: int, asked: int, n
 
 ### An action is carried out only once it is written down, and one that could not be written is dropped, and a deletion so dropped is answered as refused
 
+Only a deletion's own end lets go of the note the editor holds open for
+it: the phone's maintenance, run while the owner is asked what to do with
+a note Recently deleted had no room for, leaves that question about it.
+
 ```quint
+pure def released(s: Trash): int = if (s.act == Discard) 0 else s.holding
+
 pure def answer(binned: bool, told: Told, s: Trash): List[Effect] =
   if (s.act == Discard) List(Answers({ ticket: s.asked, note: s.subject, binned: binned, told: told })) else List()
 
@@ -185,7 +191,7 @@ pure def canKept(s: Trash, ticket: int, by: Actor): bool =
 pure def kept(s: Trash, ticket: int, ok: bool, by: Actor): Moved =
   if (ok) { state: { ...s, attempt: A::dispatch(s.attempt), pending: false },
     out: List(Does({ ticket: ticket, owner: s.owner, act: s.act, subject: s.subject, revision: s.revision, asOf: s.asOf })) }
-  else { state: { ...s, attempt: A::plan(s.attempt.id), pending: false, failed: true, holding: 0 }, out: answer(false, WasRefused, s) }
+  else { state: { ...s, attempt: A::plan(s.attempt.id), pending: false, failed: true, holding: released(s) }, out: answer(false, WasRefused, s) }
 ```
 
 ### An action written down when the phone went down is written down again, under its own number
@@ -225,7 +231,7 @@ pure def canFinished(s: Trash, ticket: int, verdict: Verdict, revision: int, by:
   by == Phone and A::canConclude(s.attempt, ticket) and (verdict == NoRoom implies revision > 0)
 
 pure def finished(s: Trash, ticket: int, verdict: Verdict, revision: int, by: Actor): Moved =
-  val t = { ...s, attempt: A::conclude(s.attempt, verdict == Done, verdict != Lost), holding: 0 }
+  val t = { ...s, attempt: A::conclude(s.attempt, verdict == Done, verdict != Lost), holding: released(s) }
   val shown = s.read.status == R::Loaded or s.read.status == R::Loading
   val left = if (shown) remaining(s) else List()
   val read = R::ask(s.read)
