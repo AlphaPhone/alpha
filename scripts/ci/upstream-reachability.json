@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "a3df983bff6ed878d996971e9092c531dcc76426",
-  "head": "76bdaf03a44f22dde488ddcd275f28038f0ae5a6",
-  "recordedAt": "2026-11-20",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...76bdaf03a44f22dde488ddcd275f28038f0ae5a6",
+  "baseCommit": "0fc3586dce354d2c84f7b54da90cf5fcd29f71fc",
+  "head": "8aa6ed3d995b7e6f7fc226107a7bf4410fc617dc",
+  "recordedAt": "2026-11-21",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...8aa6ed3d995b7e6f7fc226107a7bf4410fc617dc",
   "status": "diverged",
-  "aheadBy": 13,
-  "behindBy": 32,
+  "aheadBy": 19,
+  "behindBy": 70,
   "mergeBase": "e66a28c3ea1b09fefaccb85d72486dada8f00758",
   "pinOnlyCommits": [
     {
@@ -62,6 +62,30 @@
     {
       "sha": "76bdaf03a44f22dde488ddcd275f28038f0ae5a6",
       "subject": "Speak the final reply without planning acknowledgments"
+    },
+    {
+      "sha": "b0d5d9ee4f9636cc05b3fa42b150c00f17c6b3d3",
+      "subject": "Route exact Calendar slot requests without replanning"
+    },
+    {
+      "sha": "ca346a5b7993387d5d8e4ba0322cc033b3110ba1",
+      "subject": "Ground conversational SMS requests in the owner’s named recipient"
+    },
+    {
+      "sha": "7cb07b3846e91adc3fc2e91b2040373a6ce18937",
+      "subject": "Keep authored Calendar availability windows on the read path"
+    },
+    {
+      "sha": "374cdacb0b4079265c774b08ffdc4065c2864bea",
+      "subject": "Bind owner SMS and Calendar reads before replanning"
+    },
+    {
+      "sha": "43c5bc4d8481e93189decefafb052e114e47b187",
+      "subject": "Clarify alternative SMS recipients before contact lookup"
+    },
+    {
+      "sha": "8aa6ed3d995b7e6f7fc226107a7bf4410fc617dc",
+      "subject": "Reuse verified Calendar discovery in event reads"
     }
   ],
   "pullRequests": [
