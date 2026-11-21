@@ -126,6 +126,8 @@ test('a log that records no tool definitions can be given them at a known size',
   assert.ok(same.cachedTokens > bare.cachedTokens);
   // A definition that changed on every call, read first, leaves nothing to reuse.
   assert.equal(simulateProvider(withAssumedTools(calls.slice(0, 2), {stage1: 14_000}, true)).cachedTokens, 0);
+  // An unchanged definition sent before it is still reused, in whole units: 11,000 characters are 2,895 tokens.
+  assert.equal(simulateProvider(withAssumedTools(calls.slice(0, 2), {stage1: 3_000}, true, {stage1: 11_000})).cachedTokens, 2048);
   // A recorded definition is kept, and a stage with no size named is left as it was.
   const given = withAssumedTools(calls, {stage1: 14_000}, true);
   assert.deepEqual(given[2].tools, calls[2].tools);

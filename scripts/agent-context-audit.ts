@@ -505,13 +505,21 @@ const percent = (value: number) => `${(100 * value).toFixed(1)}%`;
 /**
  * Gives calls that record no tool definitions (runtimes before the usage record) one
  * definition of the size named for their stage. `changing` says whether that runtime sent a
- * different definition on every call, as the phone's did until November 2026: such a call
- * reuses nothing, because the provider reads tool definitions first.
+ * different definition on every call, as the phone's did until November 2026: the provider
+ * reads tool definitions first, so such a call reuses only what `unchanged` puts before it,
+ * a definition of that size sent the same on every call.
  */
-export function withAssumedTools(calls: RecordedCall[], chars: Record<string, number>, changing: boolean): RecordedCall[] {
+export function withAssumedTools(calls: RecordedCall[], chars: Record<string, number>, changing: boolean, unchanged: Record<string, number> = {}): RecordedCall[] {
   return calls.map((call, index) => {
-    const size = chars[stageOf(call)];
-    return call.tools || !size ? call : { ...call, tools: [{ name: '(assumed)', chars: size, hash: changing ? `call-${index}` : 'same' }] };
+    const stage = stageOf(call);
+    if (call.tools || !(chars[stage] || unchanged[stage])) return call;
+    return {
+      ...call,
+      tools: [
+        ...(unchanged[stage] ? [{ name: '(assumed, unchanged)', chars: unchanged[stage], hash: 'same' }] : []),
+        ...(chars[stage] ? [{ name: '(assumed)', chars: chars[stage], hash: changing ? `call-${index}` : 'same' }] : []),
+      ],
+    };
   });
 }
 
@@ -565,7 +573,7 @@ if (import.meta.main) {
   };
   const directory = args.find((arg, at) => !arg.startsWith('--') && !args[at - 1]?.startsWith('--'));
   if (!directory) {
-    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
+    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=[<unchanged chars>+]<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
     process.exit(2);
   }
   const since = value('--since') ? Date.parse(value('--since')!) : 0;
@@ -578,8 +586,15 @@ if (import.meta.main) {
     const [stage, amount] = pair.split('=');
     return [stage, Number(amount)];
   }));
-  const assumedTools = pairs(value('--assume-tools'));
-  const calls = withAssumedTools((await loadCalls(directory)).filter(call => call.at >= since), assumedTools, args.includes('--assumed-tools-change'));
+  // planner=29000 is one definition; stage1=10900+3100 is an unchanged one, then one that may change.
+  const sized = (part: 0 | 1) => Object.fromEntries((value('--assume-tools') ?? '').split(',').filter(Boolean).map(pair => {
+    const [stage, amount] = pair.split('=');
+    const sizes = amount.split('+').map(Number);
+    return [stage, sizes.length > 1 ? sizes[part] : part ? sizes[0] : 0];
+  }));
+  const assumedTools = sized(1);
+  const unchangedTools = sized(0);
+  const calls = withAssumedTools((await loadCalls(directory)).filter(call => call.at >= since), assumedTools, args.includes('--assumed-tools-change'), unchangedTools);
   const cacheMinutes = value('--cache-minutes') ? Number(value('--cache-minutes')) : undefined;
   const result = audit(calls, { cacheMinutes, tpm });
   const outputReserve = pairs(value('--reserve'));
@@ -590,7 +605,7 @@ if (import.meta.main) {
     ...(value('--total-tpm') ? { totalTpm: Number(value('--total-tpm')) } : {}),
     outputReserve,
   };
-  if (![model.uncachedTpm, model.totalTpm, model.cacheMinutes, ...Object.values(outputReserve), ...Object.values(assumedTools)].every(number => number >= 0 && Number.isFinite(number))) {
+  if (![model.uncachedTpm, model.totalTpm, model.cacheMinutes, ...Object.values(outputReserve), ...Object.values(assumedTools), ...Object.values(unchangedTools)].every(number => number >= 0 && Number.isFinite(number))) {
     console.error('Invalid --uncached-tpm, --total-tpm, --cache-minutes, --reserve or --assume-tools');
     process.exit(2);
   }

@@ -84,24 +84,35 @@ One conversation of 283 messages; 323 model calls in 129 turns that day; runtime
 `f17ac0ccc45`, Eliza Cloud route. Estimated from recorded messages. That runtime did not
 record tool definitions, so they are counted at their sizes as it sent them: 14K
 characters with Stage 1, the second of its two tools different on every turn, and the
-29K-character device tool with the planner, different on every call.
+29K-character device tool with the planner, different on every call
+(`--assume-tools stage1=10900+3100,planner=29000 --assumed-tools-change`).
 
 | Measure | Value |
 | --- | --- |
-| Stage 1 input per call | 25K tokens median, 37K maximum |
-| Planner input per call | 24K median, 44K maximum |
-| Evaluator input per call | 9K median, 27K maximum |
-| Input per turn | 45K median, 104K at the 90th percentile, 213K maximum |
-| Input that day | 6.9M tokens |
-| Tokens the cache rules give as reused | 7% (Stage 1 8%, planner 0%, evaluator 38%) |
-| Uncached tokens charged in any 60 seconds | 83K median, 145K at the 90th percentile, 251K maximum |
-| Allowance left once a call holds its share | 92K median, 48K at the 10th percentile, 20K short at the lowest |
-| Turns in which this phone alone runs out of allowance | 2 of 129 |
+| Stage 1 input per call | 29K tokens median, 44K maximum |
+| Planner input per call | 27K median, 52K maximum |
+| Evaluator input per call | 10K median, 32K maximum |
+| Input per turn | 53K median, 119K at the 90th percentile, 222K maximum |
+| Input that day | 7.9M tokens |
+| Tokens the cache rules give as reused | 6% (Stage 1 7%, planner 0%, evaluator 38%) |
+| Uncached tokens charged in any 60 seconds | 93K median, 170K at the 90th percentile, 294K maximum |
+| Allowance left once a call holds its share | 84K median, 14K at the 10th percentile, 62K short at the lowest |
+| Turns with a call a 150K allowance would not cover | 18 of 129 |
 | Turns that ended in HTTP 429, one 38-turn log on the shared Cloud key | 12 |
 
-A Stage 1 call of 25K tokens with no output cap held about 47K while it ran, a third of
-the account's allowance. One phone alone seldom ran out. One call in ten left less than
-48K, which is less than another phone's next call would hold.
+A Stage 1 call of 29K tokens with no output cap held about 52K while it ran, a third of
+a 150K allowance. One call in ten left less than 14K, which is less than any other
+phone's next call would hold.
+
+The last two allowance rows apply the test key's measured limit (150K, refilled 2,500
+tokens a second) to calls the phone did complete. The phone sends through the Cloud;
+whether the Cloud's account has that same limit is not confirmed, and a refused call
+leaves no record. Read them as how far these requests are from fitting that limit, not
+as a count of failures.
+
+Token counts before November 20 in this file's history used an estimate that read about
+10% low, and 20% low on the requests with the most ids and timestamps. The figures here
+use the estimate fitted to the provider's counts (`estimateTokens`).
 
 Four causes:
 
@@ -128,17 +139,19 @@ phone's output caps. It covers Stage 1 and the first planner call of each turn.
 
 | November 19 and 20 | Pixel as recorded, tools counted | Same turns through the branch |
 | --- | --- | --- |
-| Stage 1 input per call | 52K tokens median, 66K maximum | 15K, 19K |
-| Planner input per call | 59K median, 74K maximum | 20K, 24K |
-| Input per turn | 107K median, 139K p90, 214K maximum | 35K, 40K, 42K |
-| Tokens the cache rules give as reused | 1% | 78% |
-| Uncached tokens charged in any 60 seconds | 106K median, 156K p90, 214K maximum | 3K, 21K, 44K |
-| Allowance left once a call holds its share | 53K median, 75K short at the lowest | 124K median, 102K at the lowest |
-| Turns in which this phone alone runs out of allowance | 41 of 145 | 0 of 158 |
+| Stage 1 input per call | 62K tokens median, 78K maximum | 19K, 23K |
+| Planner input per call | 69K median, 87K maximum | 24K, 28K |
+| Input per turn | 126K median, 164K p90, 248K maximum | 42K, 49K, 51K |
+| Tokens the cache rules give as reused | 3% | 78% |
+| Uncached tokens charged in any 60 seconds | 122K median, 177K p90, 246K maximum | 3K, 25K, 53K |
+| Allowance left once a call holds its share | 38K median, 112K short at the lowest | 119K median, 92K at the lowest |
+| Turns with a call a 150K allowance would not cover | 75 of 145 | 0 of 158 |
 
-One first step of 61K tokens with no output cap holds about 96K of the account's 150K
-while it runs. The phone's log shows it sending such calls in the minutes when the
-probe on the same account read another device's calls (section 2).
+One first step of 62K tokens with no output cap holds about 94K of a 150K allowance
+while it runs, and the planner call that follows is larger. As above, the last row is
+the test key's limit applied to calls the phone completed through the Cloud. The phone's
+log shows it sending such calls in the minutes when the probe on the first test key's
+account read another device's calls (section 2).
 
 ### What the provider counted, before and after
 
