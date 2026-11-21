@@ -119,13 +119,15 @@ pure def sometimesUnreadable(d: Reminders): bool = d.reported and d.numbers.size
 > As the owner, I want the agent to set the reminders I approved, and never
 > to pile up reminders whose saving it could not confirm.
 
-### The agent creates a reminder under a new number; while one is unconfirmed, another needs the owner's explicit choice, and past a few the agent is refused and the owner told until a creation goes through
+### The agent creates a reminder under a new number; while one is unconfirmed or not saved, another needs the owner's explicit choice, and past a few the agent is refused and the owner told until one is saved or discarded
 
-The owner's choice is part of the approval the shell checks.
+The owner's choice is part of the approval the shell checks. A reminder
+that was not saved still counts until the owner tries it again or discards
+it, so trying again never adds to the count.
 
 ```quint
 pure def unconfirmed(d: Reminders): int =
-  d.numbers.filter(n => held(d, n).status == M::Pending and held(d, n).change == M::Schedule).size()
+  d.numbers.filter(n => (held(d, n).status == M::Pending or held(d, n).status == M::Unsaved) and held(d, n).change == M::Schedule).size()
 
 pure def canCreate(d: Reminders, number: int, at: int, daily: bool, now: int, approval: int, insisted: bool, signedIn: int, by: O::Actor): bool =
   not(d.numbers.contains(number)) and unconfirmed(d) < maxUnconfirmed and (unconfirmed(d) > 0 implies insisted)
@@ -152,7 +154,7 @@ pure def alwaysFewCreationsAreUnconfirmed(d: Reminders): bool = unconfirmed(d) <
 pure def sometimesFull(d: Reminders): bool = d.full
 ```
 
-### Android is asked once, its answer settles the change, and a refused change is tried again, for the reminder they name; each answer marks the list out of date, and a refused scheduling is tried again only while few creations are unconfirmed
+### Android is asked once, its answer settles the change, and a refused change is tried again, for the reminder they name; each answer marks the list out of date
 
 ```quint
 pure val weight_operate = 3
@@ -174,7 +176,6 @@ pure def answer(d: Reminders, number: int, result: M::Answer, reason: M::Reason,
 
 pure def canRetry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): bool =
   d.numbers.contains(number) and M::canRetry(held(d, number), now, signedIn, by)
-    and (held(d, number).change == M::Schedule implies unconfirmed(d) < maxUnconfirmed)
 
 pure def retry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): Acted =
   kept(number, d, M::retry(held(d, number), now, signedIn, by))

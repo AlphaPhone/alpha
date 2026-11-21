@@ -204,7 +204,8 @@ pure def stepWhatWasSavedIsSaid(before: Reminder, via: str, after: Reminder): bo
 ### A reminder is unscheduled until the agent creates it, pending while its scheduling is unanswered or unknown, not saved only for a scheduling that was refused or that a read did not find, and cancelled directly only as a to-do
 
 Discovered by the proof: only a to-do is ever cancelled, so a cancellation
-under way never belongs to a reminder with a time.
+under way never belongs to a reminder with a time; a scheduling on its way
+is pending, and one refused is not saved or was discarded.
 
 ```quint
 pure def alwaysTheStatusFollowsTheRecord(r: Reminder): bool =
@@ -215,6 +216,8 @@ pure def alwaysTheStatusFollowsTheRecord(r: Reminder): bool =
     and (r.status == Unsaved implies (r.change == Schedule and (r.attempt.outcome == A::Refused or r.attempt.outcome == A::Unknown)))
     and (r.readBack implies r.attempt.outcome != A::Planned)
     and r.basis <= r.revision and (r.change == Cancel implies r.at == 0)
+    and ((r.change == Schedule and (r.attempt.outcome == A::Recorded or r.attempt.outcome == A::Sent)) implies r.status == Pending)
+    and ((r.change == Schedule and r.attempt.outcome == A::Refused) implies (r.status == Unsaved or r.status == Cancelled))
 ```
 
 ### Whether Alpha cannot tell how the last change ended is shown to the owner
@@ -344,13 +347,13 @@ pure def lawADecisionOnAnOlderRevisionIsRefused(change: Change, number: int, tar
     change, 0, number, target, now, 1, who))
 ```
 
-### A reminder with a time is removed only when its deletion was carried out, which withdraws its notification; one whose saving is not yet known is not removed
+### A reminder with a time is removed only when its deletion was carried out, which withdraws its notification; only a reminder that was saved is removed
 
 The [deletion notice](./deletions.md) holds it, with Undo, until then.
 
 ```quint
 pure def canDeleted(r: Reminder, by: O::Actor): bool =
-  by == O::Phone and r.at > 0 and r.status != Unscheduled and r.status != Pending and r.status != Deleted and A::ended(r.attempt)
+  by == O::Phone and r.at > 0 and (saved(r.status) or r.status == Posted or r.status == Completed) and A::ended(r.attempt)
 
 pure def deleted(r: Reminder, by: O::Actor): Worked =
   { state: { ...r, status: Deleted },
