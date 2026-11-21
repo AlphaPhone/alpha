@@ -51,6 +51,10 @@ test('a short body is cut only as whole words, never out of the recipient it als
  // "hi" is not the "hi" in "Phil".
  assert.equal(numberContradictsRequest({type:'sms_compose',target:{kind:'contact',query:'Phil'},body:'hi'},"text Phil hi, he's at 415-555-0100"),false);
  assert.equal(numberContradictsRequest({type:'sms_compose',target:{kind:'contact',query:'Shaw'},body:'hi'},'text 415-555-0100 hi'),true);
+ // A number written only as the body is never the recipient, whichever occurrence is cut.
+ assert.equal(numberContradictsRequest(compose('4155550100','415-555-0100'),'text 650-571-5862 415-555-0100'),true);
+ assert.equal(numberContradictsRequest(compose('6505715862','415-555-0100'),'text 650-571-5862 415-555-0100'),false);
+ assert.equal(numberContradictsRequest({type:'sms_compose',target:{kind:'contact',query:'Ada'},body:'tell Ada hi'},'text 650-571-5862 saying tell Ada hi'),true);
 });
 
 const context={view:'home',revision:1,sensitive:false},session={ownerId:'owner',agentId:'agent',origin:'https://agent.example',sessionId:'session'},id='5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20',message='7b0d6c1e-52a4-4f0e-9d3b-2f6a8c1e4d70',digest='d'.repeat(64);
