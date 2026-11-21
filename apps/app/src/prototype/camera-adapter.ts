@@ -4,7 +4,7 @@ import {cameraAccessDenied,type CameraAccessKind as AccessKind} from '../../../.
 // Alpha's camera surface resume recovery, which never re-prompts.
 import {restartAfterResume} from '../ui/camera/host-ports';
 // The shared camera session owns the preview/capture/recording lifecycle; this adapter presents it.
-import {createCameraSession} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/session.ts';
+import {createCameraSession,type CameraRecordingControl} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/session.ts';
 // A scanned page reaches Photos only through its explicit Keep, under one operation identity per capture.
 import {createScanCapture} from '../ui/camera/scan-document';
 import type {CameraKeepOutcome} from '../../../../.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts';
@@ -38,7 +38,7 @@ import {BrowserReviews} from '../browser/review';
 import {testMocksEnabled} from '../build-flags';
 import {createPhotoViewport} from './photo-viewport';
 import {cropView,rotateCropQuarter,validCropRect,WHOLE_PHOTO,type CropRect,type CropSession} from './photo-crop';
-import {accessDetail,flashFromReceipt,flashLabel,nextFlashMode,nextTimer,recordingLabel,timerLabel,videoLightLabel,volumeShutterSync,type FlashMode,type TimerSeconds} from './camera-controls';
+import {accessDetail,aspectLabel,flashFromReceipt,flashLabel,frameAspect,nextAspect,nextFlashMode,nextTimer,recordingLabel,supportedAspects,timerLabel,videoLightLabel,volumeShutterSync,type AspectRatio,type FlashMode,type TimerSeconds} from './camera-controls';
 
 type CameraCaptureAttempt={status:'succeeded'|'failed'|'unknown';summary:string;cameraResult?:CameraCaptureResult;cancelledBeforeCapture?:true};
 let requestedPhoto:((operationId:string,signal:AbortSignal,current:()=>void,lens?:'front'|'back')=>Promise<CameraCaptureAttempt>)|undefined;
@@ -60,8 +60,11 @@ type PreviewReceipt = { width: number; height: number; deviceId: string; capture
  * pinned Android implementation ignores it and mounts a full-parent PreviewView.
  * Do not serialize a DOM node or invent rectangle arguments. */
 const nativeCamera = registerPlugin<{
-  startPreview(options: { direction: 'front' | 'back'; resolution: { width: number; height: number }; mirror: boolean }): Promise<PreviewReceipt>;
+  /** `captureAspectRatio` is sent only when the owner chose a ratio other than the camera's 4:3 default. */
+  startPreview(options: { direction: 'front' | 'back'; resolution: { width: number; height: number }; mirror: boolean; captureAspectRatio?: AspectRatio }): Promise<PreviewReceipt>;
   stopPreview(): Promise<void>;
+  /** Android lists the photo ratios each camera accepts; web and iOS list none. */
+  getDevices?(): Promise<{ devices: { deviceId: string; supportedCaptureAspectRatios?: unknown }[] }>;
   capturePhoto(options: { format: 'jpeg'; quality?: number; width?:number; height?:number; saveToGallery: boolean; thumbnailOnly?: boolean }): Promise<Photo>;
   startRecording(options: { audio: boolean; saveToGallery: boolean; quality: string; maxDuration: number; maxFileSize: number }): Promise<void>;
   stopRecording(): Promise<VideoReceipt>;
@@ -230,6 +233,8 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let selfTimer: TimerSeconds = 0, countdown: {left:number;token:number;handle:number}|undefined;
   /** Phone Video mode's light (the torch), and the framing grid; both kept while Camera stays mounted. */
   let light = false, grid = false;
+  /** The photo aspect ratio the owner chose, and the ratios the bound camera lists (none: no choice). */
+  let aspect: AspectRatio = '4:3', aspects: AspectRatio[] = [];
   let lens: Lens = { minZoom: 1, maxZoom: 1, hasFlash: false, zoom: 1, flash: false }, zoomRatio = 1;
   /** The last-capture tile: this session's newest capture, or one library row read after the preview is ready. */
   let lastCapture: SavedPhoto | undefined, lastEpoch=0;
@@ -895,7 +900,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   let pendingZoom:{ratio:number;token:number}|undefined;
   const session=createCameraSession({
     camera:sessionCamera,active,available:()=>browserMode||Capacitor.isPluginAvailable('ElizaCamera'),
-    preview:()=>({direction,resolution:{width:1280,height:720},mirror:direction==='front'}),
+    preview:()=>({direction,resolution:{width:1280,height:720},mirror:direction==='front',...(aspect==='4:3'?{}:{captureAspectRatio:aspect})}),
     recording: () => RECORDING,
     hooks:{
       recordingFinishing(){api?.set({rec:false});},
@@ -990,7 +995,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       hideAccess();adoptLens(previewReceipt);
       // A new preview restores the last light setting, but the light starts off on every visit.
       light=!browserMode&&previewReceipt?.flash==='torch';
-      mask(true);api?.set({flash:shownFlash(api.get('camera').mode),nativeCameraPhase:'ready'});bindMode(api?.get('camera').mode);void loadLast(session.token());
+      mask(true);api?.set({flash:shownFlash(api.get('camera').mode),nativeCameraPhase:'ready'});bindMode(api?.get('camera').mode);void loadLast(session.token());void readAspects(session.token());
       if(light)void lightOff();
     }
     else if(outcome.status==='denied'){mask(false);showAccess('camera');}
@@ -999,9 +1004,9 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
   /** `replacesPreview` marks a control that ends the running preview before starting another
    * (switching cameras in the browser). When it fails no preview is left, so the view offers a
    * restart instead of staying ready with nothing to capture. */
-  async function control<T>(task: () => Promise<T>, completed: (value:T) => void, replacesPreview = false) {
+  async function control<T>(task: () => Promise<T>, completed: (value:T) => void, replacesPreview = false, kind?: CameraRecordingControl) {
     let value:T|undefined;
-    const outcome=await session.control(async()=>{value=await task();});
+    const outcome=await session.control(async()=>{value=await task();},kind);
     if(outcome==='done')completed(value as T);
     else if(outcome==='failed'){if(replacesPreview)await previewGone();else message('Not supported');}
   }
@@ -1042,17 +1047,25 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     nativeFocus?.remove();nativeFocus=undefined;window.clearTimeout(focusTimer);focusTimer=undefined;
     cameraPointers.clear();pinchStart=0;pinchUsed=false;pendingZoom=undefined;
   }
+  /** The phone changes zoom and the light while a recording runs (the shared session admits only
+   * those two controls then). The browser records frames at the zoom it started with, so it keeps
+   * both for before the recording. */
+  const recordingControls=()=>!browserMode&&session.recording&&!session.recordingStarting&&!session.finalizing;
+  const zoomAllowed=()=>session.phase==='ready'&&!session.recordingStarting&&!session.finalizing&&(!session.recording||recordingControls());
   /** Keep the latest pinch position while another camera control is settling. */
   async function takePendingZoom(){
-    if(!pendingZoom||session.busy)return;
-    const requested=pendingZoom;pendingZoom=undefined;
-    if(session.phase!=='ready'||!session.current(requested.token)||session.recording)return;
-    const outcome=await session.control(()=>camera.setZoom({zoom:requested.ratio}));
+    const requested=pendingZoom;
+    if(!requested)return;
+    pendingZoom=undefined;
+    if(!zoomAllowed()||!session.current(requested.token))return;
+    const outcome=await session.control(()=>camera.setZoom({zoom:requested.ratio}),'zoom');
     if(outcome==='done'){zoomRatio=requested.ratio;api?.set({nativeZoom:zoomRatio});}
     else if(outcome==='failed')message('Couldn’t zoom');
+    // Another control (or the shutter) is settling: its end runs this again with the latest pinch.
+    else if(outcome==='skipped'&&!pendingZoom&&session.current(requested.token))pendingZoom=requested;
   }
   function zoomTo(ratio:number){
-    if(session.phase!=='ready'||session.recording||session.recordingStarting||session.finalizing)return;
+    if(!zoomAllowed())return;
     nativeFocus?.remove();nativeFocus=undefined;
     pendingZoom={ratio:Math.max(lens.minZoom,Math.min(lens.maxZoom,ratio)),token:session.token()};
     void takePendingZoom();
@@ -1089,6 +1102,25 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
       adoptLens(receipt);
       owner.set({ front: next === 'front', flash: shownFlash(owner.get('camera').mode) });
     }, browserMode);
+  }
+  /** The photo ratios the bound camera lists. A ratio it does not list falls back to the default. */
+  async function readAspects(token:number){
+    if(browserMode||typeof camera.getDevices!=='function'){aspects=[];return;}
+    let listed:AspectRatio[]=[];
+    try{const {devices}=await camera.getDevices();listed=supportedAspects(devices.find(device=>device.deviceId===previewReceipt?.deviceId));}
+    catch{/* No list: the camera's default ratio stays, with no choice offered. */}
+    if(!session.current(token))return;
+    aspects=listed;if(!aspects.includes(aspect))aspect='4:3';
+    api?.set({nativeAspects:aspects.join(',')});
+  }
+  /** The ratio is a preview option, so a new one restarts the preview with it. Only an idle Photo
+   * preview changes it: never under a capture, a countdown, an agent request or a scan. */
+  async function cycleAspect(owner:Bag){
+    if(session.phase!=='ready'||session.busy||countdown||agentRequest||scanning||owner.get('camera').mode!=='photo')return;
+    const next=nextAspect(aspect,aspects);if(next===aspect)return;
+    aspect=next;owner.set({nativeAspect:next});
+    clearCameraInteraction();await stop();
+    if(!disposed&&active())await start();
   }
   const finishVideo=()=>session.finishRecording();
   async function record(withoutSound = false) {
@@ -1437,21 +1469,26 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
     data.countdownLabel = countdown ? `Photo in ${countdown.left} ${countdown.left === 1 ? 'second' : 'seconds'}` : '';
     if (countdown) data.shutterLabel = 'Cancel timer';
     data.flip = () => { void flipLens(currentApi); };
-    data.flashAvailable = ready && !recordingBusy && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
+    // Photo mode only: the ratio restarts the preview, so it is not offered while recording.
+    data.aspectAvailable = ready && !recordingBusy && !countdown && st.mode === 'photo' && aspects.length > 1;
+    data.aspectText = aspect; data.aspectLabel = aspectLabel(aspect);
+    data.cycleAspect = () => { void cycleAspect(currentApi); };
+    data.frameAspect = frameAspect(st.mode === 'photo' ? aspect : '4:3');
+    data.flashAvailable = ready && (!recordingBusy || recordingControls() && st.mode === 'video') && (browserMode ? browserCamera.flashAvailable() : lens.hasFlash);
     // Native: Off, Auto, On. The browser track has only its torch, on or off.
-    // Phone Video mode: a flash cannot fire during a recording, so the button is the light (torch), chosen before recording.
+    // Phone Video mode: a flash cannot fire during a recording, so the button is the light (torch), also while recording.
     const videoLight = !browserMode && st.mode === 'video';
     data.flashLabel = browserMode ? browserCamera.lightingLabel(flash !== 'off') : videoLight ? videoLightLabel(light) : flashLabel(flash);
     data.flashAuto = !browserMode && !videoLight && flash === 'auto';
     data.toggleFlash = () => {
-      if (videoLight) { const on = !light; void control(() => camera.setSettings({ settings: { flash: on ? 'torch' : flash } }), () => { light = on; currentApi.set({ flash: on }); }); return; }
+      if (videoLight) { const on = !light; void control(() => camera.setSettings({ settings: { flash: on ? 'torch' : flash } }), () => { light = on; currentApi.set({ flash: on }); }, false, 'torch'); return; }
       const next = nextFlashMode(flash, browserMode); void control(() => camera.setSettings({ settings: { flash: next } }), () => { flash = next; currentApi.set({ flash: next !== 'off', flashMode: next }); });
     };
     // The framing grid: thirds of the frame, drawn over the preview only (never into the photo).
     data.gridAvailable = ready; data.gridOn = grid; data.showGrid = ready && grid;
     data.toggleGrid = () => { grid = !grid; currentApi.set({ nativeGrid: grid }); };
     const stops = ready ? zoomStops(lens) : [];
-    data.showZoom = !recordingBusy && stops.length > 1;
+    data.showZoom = (!recordingBusy || recordingControls()) && stops.length > 1;
     data.zooms = stops.map(([ratio, label]) => ({ label, aria: `Zoom ${label.replace('×', '')}x`, css: Math.abs(ratio - zoomRatio) < 1e-3 ? ZOOM_ON : ZOOM_OFF, pick: () => zoomTo(ratio) }));
     data.vfDown = (event:PointerEvent) => {
       event.stopPropagation();cameraPointers.set(event.pointerId,{x:event.clientX,y:event.clientY});

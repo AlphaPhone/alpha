@@ -126,10 +126,11 @@ module CameraModes {
   action limitReached = all {s.rec == "recording", s' = {...s, rec: "finishing", stopCause: "limit"}}
   action recordingSaved(ok: bool): bool = all {s.rec == "finishing",
     s' = {...s, rec: "idle", noSoundChosen: false, saidMaxLength: ok and s.stopCause == "limit"}}
-  /// Flip, the light and zoom are hidden or refused while a recording runs.
+  /// Flip is hidden while a recording runs. The phone's light (like zoom) also changes while a recording
+  /// runs, through the session's recording control; never while it starts or finishes.
   action ownerFlips = all {active, ready, not(recordingBusy),
     s' = control({...s, countdown: false, light: false})}
-  action ownerLight = all {active, ready, s.mode == "video", not(recordingBusy), s' = control({...s, light: not(s.light)})}
+  action ownerLight = all {active, ready, s.mode == "video", s.rec != "finishing", s' = control({...s, light: not(s.light)})}
   /// A volume key press while Android holds the keys: rechecked, then one shutter press; otherwise the
   /// keys are handed back to Android.
   action volumeKey = all {s.volumeKeys,
@@ -168,6 +169,7 @@ module CameraModes {
   val SoundlessRecordingWitness = s.rec == "recording" and not(s.withSound)
   val MaxLengthSavedWitness = s.saidMaxLength
   val PreviewStoppedRetryWitness = s.released and s.notice == "unavailable" and s.visible
+  val LightWhileRecordingWitness = s.rec == "recording" and s.light and s.controlActive
 
   run graceKeepsControlsTest = init.then(sync).then(previewReady).then(ownerOpensChat("full"))
     .then(ownerShoots(false)).expect(safety and s.photos == 1 and s.controlChat == "full")
@@ -191,6 +193,11 @@ module CameraModes {
     .then(bindSettles(true)).then(ownerLight).then(ownerRecords("recording")).expect(s.light)
     .then(ownerLeaves).then(sync).expect(safety and s.rec == "finishing" and s.stopCause == "leave" and not(s.light))
     .then(recordingSaved(true)).expect(safety and not(s.saidMaxLength))
+  run lightChangesWhileRecordingTest = init.then(sync).then(previewReady).then(bindSettles(true))
+    .then(ownerPicksMode("video")).then(bindSettles(true)).then(ownerRecords("recording")).expect(not(s.light))
+    .then(ownerLight).expect(safety and s.rec == "recording" and s.light)
+    .then(ownerLight).expect(safety and s.rec == "recording" and not(s.light))
+    .then(ownerStopsRecording).then(ownerLight.fail())
   run volumeKeyIsTheShutterTest = init.then(sync).then(previewReady).then(sync).expect(s.volumeKeys)
     .then(volumeKey).expect(safety and s.photos == 1).then(ownerOpensChat("full")).then(volumeKey)
     .expect(safety and s.photos == 1 and not(s.volumeKeys))

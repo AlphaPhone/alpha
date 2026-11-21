@@ -102,6 +102,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'clearSaid cycleTimer flip openLast pick shutter toggleFlash vfCancel vfClick vfDown',
     'vfMove vfUp',
     'toggleGrid',
+    'cycleAspect',
   ],
   photos: [
     'addFavorite addToAlbum albumFocus albumsRecover ask askDelete cancel captureSubviewFocus',
