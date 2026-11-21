@@ -702,6 +702,27 @@ private static final class ResidentAttachDiagnostic {
   // Pseudonymize secrets and PII using the pinned upstream runtime.
   env.put("ELIZA_SECRET_SWAP_ENABLED","true");
   env.put("ELIZA_PII_SWAP_ENABLED","true");
+  // A phone conversation has one owner, so a contact or credential keeps its reference from turn
+  // to turn. With a fresh reference each turn no two requests shared a prefix, and the hosted
+  // model's per-minute limit counted the whole conversation again on every call.
+  env.put("ELIZA_SECRET_SWAP_STABLE_REFERENCES","true");
+  // The hosted model holds a call's output cap against that limit from the moment the call is
+  // admitted, and 16,384 tokens for a call that sends none (measured). 4096 holds a long note,
+  // message or reply; the planner's own 8192 only stops a runaway, and the first step of a turn
+  // and its check send no cap at all.
+  env.put("ELIZA_PLANNER_MAX_TOKENS","4096");
+  env.put("ELIZA_STAGE1_MAX_TOKENS","4096");
+  env.put("ELIZA_EVALUATOR_MAX_TOKENS","4096");
+  // The other text calls of a turn sent no cap either: the reply written after a failed delivery
+  // and its check, Calendar field extraction, scheduled-task messages. The longest recorded on a
+  // phone wrote about 450 tokens.
+  env.put("TEXT_SMALL_MAX_TOKENS","4096");
+  env.put("TEXT_LARGE_MAX_TOKENS","4096");
+  // The hosted model answers a per-minute refusal with Retry-After 59 and admits the same request
+  // seconds later: its allowance refills 2,500 tokens a second (measured). On an owner's own key
+  // the runtime held the model for the stated minute and failed every turn in it. The runtime
+  // re-sends a refused step once after five seconds, so the hold must end before that.
+  env.put("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","4");
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");
