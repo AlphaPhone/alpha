@@ -603,25 +603,28 @@ a new tab). Output is about 1% of all tokens in every run: input is the lever.
 Upstream `1627967c86` prints recorded outcomes in the same record format without the
 fields no later step reads (request and receipt UUIDs, the redacted idempotency key, ISO
 times, resource versions), names each request by its history key, keeps the legend fixed
-and folds a proposal's later state into its row. Same run, back to back against its
-parent on November 21:
+and folds a proposal's later state into its row. `6cc102a735` then says each legend rule
+once. Same run on November 21, the first two back to back:
 
-| | `d0fac57d11` | `1627967c86` |
-| --- | --- | --- |
-| Cases passing | 42 of 46 | 44 of 46 |
-| Provider refusals | 0 | 0 |
-| Input | 1.61M | 1.20M |
-| Charged: uncached input plus output | 894K | 579K |
-| Provider's cached share | 46% | 54% |
-| Input per turn, median and p90 | 33K, 64K | 24K, 40K |
-| Stage 1, planner, evaluator median | 12.5K, 18.0K, 14.2K | 8.4K, 14.8K, 8.3K |
-| Output | 17K | 24K |
+| | `d0fac57d11` | `1627967c86` | `6cc102a735` |
+| --- | --- | --- | --- |
+| Cases passing | 42 of 46 | 44 of 46 | 44 of 46 |
+| Provider refusals | 0 | 0 | 0 |
+| Input | 1.61M | 1.20M | 1.13M |
+| Charged: uncached input plus output | 894K | 579K | 528K |
+| Provider's cached share | 46% | 54% | 55% |
+| Input per turn, median and p90 | 33K, 64K | 24K, 40K | 23K, 32K |
+| Stage 1, planner, evaluator median | 12.5K, 18.0K, 14.2K | 8.4K, 14.8K, 8.3K | 8.3K, 14.6K, 8.6K |
+| Output | 17K | 24K | 17K |
+| Median turn | 3.1 s | 2.6 s | 2.3 s |
 
-Charged tokens fall by a third. On synthetic rows the planner routed the same (19 of 20
-in both forms), and a line in another person's text in the form's own record format
-misled the model no more often than today's (6 of 10 against 8 of 10). A room with a
-single record pays about 140 tokens more for the fixed legend. The keys are positions in
-the dialogue window, so rows stay append-only only inside it (100 messages by default).
+Charged tokens fall by 41%. On synthetic rows the planner routed as well as before (19
+of 20 in both forms, then 19 against 17 for the shorter legend), and a line in another
+person's text in the form's own record format misled the model no more often than
+today's (6 of 10 against 8 of 10; 1 of 5 against 4 of 5 for the shorter legend). A room
+with one record is now below the old form in provider tokens (532 against 589). The keys
+are positions in the dialogue window, so rows stay append-only only inside it (100
+messages by default).
 
 ### The phone's decode mode
 
@@ -674,7 +677,7 @@ Upstream branch `claude/agent-context-followups` (local, on upstream develop
 | Reminder planning at low reasoning, both routes | Reasoning at "high" by default | Correct 36 of 40 against 21 of 25; about two thirds fewer output tokens |
 | Every review proposal of one reply recorded | Text plus alarm proposing only the text | Both calls in the first reply 10 of 10 |
 | Extractor call re-sent once after a refusal (wait hint up to 5 s) | A reminder lost when its planning call was refused | |
-| Recorded outcomes without unread ids and times | UUIDs and ISO times at about a token per digit | Whole turn: charged tokens 894K to 579K, 44 of 46 |
+| Recorded outcomes without unread ids and times; legend rules said once | UUIDs and ISO times at about a token per digit | Whole turn: charged tokens 894K to 528K, 44 of 46 |
 
 Parked after ten rounds: a compact one-line rendering of recorded outcomes. It made
 requests with recorded outcomes 20% to 30% smaller (one probe 17.2K to 12.0K tokens), but
