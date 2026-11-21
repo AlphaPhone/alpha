@@ -1553,17 +1553,29 @@ export class DeviceActionCoordinator<
     const results: DeviceOperationReceipt[] = [];
     // Every direct Browser action shows its effect only after the chat request
     // settles, each one checked against the tab and page the request was made
-    // from. After one has run, a second one for the same message would be checked
-    // against the page the first is about to replace and then skipped while still
-    // reporting success, so it keeps its review card instead.
-    let browserRan = false;
+    // from. A later Browser action of the same message was asked of the page the
+    // first one leaves: after the first has run it would be checked against the
+    // page about to be replaced and skipped while still reporting success, and
+    // while the first waits on its card (for review or for the owner's pick of a
+    // tab) it would run on the page showing now. So only a message's first
+    // Browser action may run directly; every later one keeps its review card.
+    let browserSeen = false;
     for (const [proposalId, entry] of [...this.proposals]) {
       const browserEffect =
         entry.proposal.operation.type === "browser_navigate" ||
         isBrowserControl(entry.proposal.operation);
       if (
+        browserEffect &&
+        entry.proposal.requestMessageId === messageId &&
+        !entry.proposal.workflow &&
+        (operationType === undefined ||
+          entry.proposal.operation.type === operationType)
+      ) {
+        if (browserSeen) continue;
+        browserSeen = true;
+      }
+      if (
         results.length >= 4 ||
-        (browserEffect && browserRan) ||
         (!directTypes.includes(entry.proposal.operation.type) &&
           !(proof?.messageId === messageId && directSmsRequest(entry.proposal.operation, proof.text))) ||
         entry.proposal.workflow ||
@@ -1575,16 +1587,12 @@ export class DeviceActionCoordinator<
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
       // Words that match several tabs need the owner's pick, and only the
-      // action's review card can show it. A later Browser action of the same
-      // message was asked for the tab the owner has yet to pick, so it waits
-      // for its own card instead of running on the tab showing now.
+      // action's review card can show it.
       if (
         entry.proposal.operation.type === "browser_tab_switch" &&
         this.options.browserTabNeedsChoice?.(entry.proposal.operation.target)
-      ) {
-        browserRan = true;
+      )
         continue;
-      }
       const browser =
         this.options.currentRequestBrowserPolicy &&
         (entry.proposal.operation.type === "browser_navigate" ||
@@ -1628,7 +1636,6 @@ export class DeviceActionCoordinator<
       }
       const result = await this.approve(proposalId, context, signal);
       results.push(result);
-      if (browserEffect) browserRan = true;
       if (result.status !== "succeeded" || signal.aborted) break;
     }
     return results;

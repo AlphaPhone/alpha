@@ -282,6 +282,21 @@ test('one message runs at most one direct Browser action; a second one keeps its
  held.options.browserTabNeedsChoice=target=>target==='shop';
  assert.deepEqual(await held.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'switch to the shop tab and reload it',current:()=>{}}),[]);
  assert.deepEqual(held.calls,[]);assert.ok(held.proposals.has('switch')&&held.proposals.has('reload'),'both keep their cards');
+ // Any earlier Browser action of the message left on its card holds back the later ones: they
+ // were asked of the page that one leaves, not of the page showing now.
+ for(const [first,second,text] of [
+  [{type:'browser_tab_close',target:'news'},{type:'browser_find',text:'harbour'},'close the news tab and find harbour'],
+  [{type:'browser_navigate',url:'https://nytimes.com/section/world'},{type:'browser_find',text:'harbour'},'open nytimes.com/section/world. and find harbour'],
+ ]){
+  const waits=policyFixture([['first','request',undefined,first.type],['second','request',undefined,second.type]]);
+  Object.assign(waits.proposals.get('first').proposal.operation,first);Object.assign(waits.proposals.get('second').proposal.operation,second);
+  assert.deepEqual(await waits.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text,current:()=>{}}),[],text);
+  assert.deepEqual(waits.calls,[],text);assert.ok(waits.proposals.has('first')&&waits.proposals.has('second'),'both keep their cards');
+ }
+ // A Browser action of another message does not hold this message's one back.
+ const other=policyFixture([['earlier','an-earlier-message',undefined,'browser_tab_close'],['find','request',undefined,'browser_find']]);
+ Object.assign(other.proposals.get('earlier').proposal.operation,{type:'browser_tab_close',target:'news'});Object.assign(other.proposals.get('find').proposal.operation,{type:'browser_find',text:'harbour'});
+ assert.equal((await other.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'find harbour',current:()=>{}})).length,1);assert.deepEqual(other.calls,['find']);
  // Other direct actions of the same message are not held back by a Browser action.
  const mixed=policyFixture([['tab','request',undefined,'browser_tab_new'],['note','request',undefined,'create_note']]);
  assert.equal((await mixed.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'open a new tab',current:()=>{}})).length,2);
