@@ -129,7 +129,7 @@ pure def lawOfflineOffersNothingThatNeedsCloud(method: S::Method, address: str, 
   val choosing = { ...initial, step: Choose, readiness: { status: R::Loaded, ticket: 1 }, google: true, sms: true }
   val atCode = { ...initial, step: Code, attempt: 1, address: "owner@example.com", expiresAt: now + 1 }
   not(canSendCode(choosing, method, address, now, false)) and not(canChooseGoogle(choosing, false))
-    and not(canResend(atCode, now, false)) and not(canVerify(atCode, now, false)) and canCancel(atCode)
+    and not(canResend(atCode, now, false)) and not(canCheckCode(atCode, now, false)) and canCancel(atCode)
 ```
 
 ### Every request takes the next number, the number moves only with a request, and what is asked of the phone names it
@@ -321,10 +321,10 @@ pure def stepAnAttemptBeginsOnlyWhenACodeWentOut(before: SignIn, via: str, after
 ### A typed code is checked only while the attempt is unspent and its time is running
 
 ```quint
-pure def canVerify(s: SignIn, now: int, online: bool): bool =
+pure def canCheckCode(s: SignIn, now: int, online: bool): bool =
   (s.step == Code or (s.step == Second and s.factor != Passkey)) and s.work == Resting and online and not(s.spent) and now < s.expiresAt
 
-pure def verify(s: SignIn, code: SecretCode, now: int, online: bool): Moved =
+pure def checkCode(s: SignIn, code: SecretCode, now: int, online: bool): Moved =
   { state: { ...s, work: Verifying, ticket: s.ticket + 1, trouble: Fine },
     out: List(Verify({ ticket: s.ticket + 1, attempt: s.attempt, code: code })) }
 ```

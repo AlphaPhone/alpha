@@ -44,25 +44,25 @@ lemma resend_ensures(s: SignIn, now: int, online: bool)
   assert after.out[0] in after.out;
 }
 
-lemma verify_ensures(s: SignIn, code: string, now: int, online: bool)
-  ensures (inv(s) ==> canVerify(s, now, online) ==> alwaysTheRequestFitsTheStep(verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> alwaysOnlyARequiredPageWaits(verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> alwaysWrongCodesAreBounded(verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> alwaysASpentCodeIsNeverChecked(verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> alwaysTheCodeStepsNameAnAttempt(verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> alwaysACodeHasAnAddress(verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepEveryRequestTakesTheNextNumber(s, verify(s, code, now, online).state, verify(s, code, now, online).out))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepAFailedSendKeepsTheAttempt(s, "verify", verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepAskingForAnotherCodeKeepsTheOneInHand(s, "verify", verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepAnAttemptBeginsOnlyWhenACodeWentOut(s, "verify", verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepOnlyAVerifiedAnswerHandsOver(s, "verify", verify(s, code, now, online).state, verify(s, code, now, online).out))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepOnlyAWrongCodeIsCounted(s, "verify", verify(s, code, now, online).state))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepABrowserReturnIsUsedOnce(s, "verify", verify(s, code, now, online).state, verify(s, code, now, online).out))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepBackWithdrawsWhatIsInFlight(s, "verify", verify(s, code, now, online).state, verify(s, code, now, online).out))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepOnlyBackAbandonsAnAttempt(s, "verify", verify(s, code, now, online).state, verify(s, code, now, online).out))
-  ensures (inv(s) ==> canVerify(s, now, online) ==> stepErasingLeavesNoAddress(s, "verify", verify(s, code, now, online).state))
+lemma checkCode_ensures(s: SignIn, code: string, now: int, online: bool)
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> alwaysTheRequestFitsTheStep(checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> alwaysOnlyARequiredPageWaits(checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> alwaysWrongCodesAreBounded(checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> alwaysASpentCodeIsNeverChecked(checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> alwaysTheCodeStepsNameAnAttempt(checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> alwaysACodeHasAnAddress(checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepEveryRequestTakesTheNextNumber(s, checkCode(s, code, now, online).state, checkCode(s, code, now, online).out))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepAFailedSendKeepsTheAttempt(s, "checkCode", checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepAskingForAnotherCodeKeepsTheOneInHand(s, "checkCode", checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepAnAttemptBeginsOnlyWhenACodeWentOut(s, "checkCode", checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepOnlyAVerifiedAnswerHandsOver(s, "checkCode", checkCode(s, code, now, online).state, checkCode(s, code, now, online).out))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepOnlyAWrongCodeIsCounted(s, "checkCode", checkCode(s, code, now, online).state))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepABrowserReturnIsUsedOnce(s, "checkCode", checkCode(s, code, now, online).state, checkCode(s, code, now, online).out))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepBackWithdrawsWhatIsInFlight(s, "checkCode", checkCode(s, code, now, online).state, checkCode(s, code, now, online).out))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepOnlyBackAbandonsAnAttempt(s, "checkCode", checkCode(s, code, now, online).state, checkCode(s, code, now, online).out))
+  ensures (inv(s) ==> canCheckCode(s, now, online) ==> stepErasingLeavesNoAddress(s, "checkCode", checkCode(s, code, now, online).state))
 {
-  var after := verify(s, code, now, online);
+  var after := checkCode(s, code, now, online);
   assert after.out[0] in after.out;
 }
 
