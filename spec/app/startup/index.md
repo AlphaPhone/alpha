@@ -251,6 +251,9 @@ pure def alwaysAProductionBuildNeverMocks(s: Boot): bool = (s.mock != NoMock or 
 
 ### Mock mode shows its banner on every surface, and Exit mock mode leaves it
 
+The banner is drawn whenever mock mode is on, whatever the surface; this
+holds by how each surface is drawn, and guards it.
+
 ```quint
 pure def canExitMock(s: Boot): bool = s.mock == Mocking
 
@@ -296,7 +299,8 @@ pure def sometimesAlphaIsAPlainPage(s: Boot): bool = s.known and not(s.phone) an
 Home, on the launcher or the plain page, is what the home area and the
 shell draw there, its own way back included. The Alpha mark covers Home
 until the connection resolves; chat on the assistant-only surface shows
-at once, and Close with it.
+at once, and Close with it. The rule holds by how each surface is drawn,
+and guards it.
 
 ```quint
 type Part = Mark | Home | Chat | Close | MockBanner
@@ -324,6 +328,8 @@ pure def sometimesAlphaIsTheAssistantSurface(s: Boot): bool = shows(s, Chat) and
 > not answer, until Alpha knows whether its agent is there.
 
 ### Until the connection has resolved, Home shows only the Alpha mark
+
+This holds by how Home is drawn, and guards it.
 
 ```quint
 pure def marked(s: Boot): bool = s.connection == Pending
