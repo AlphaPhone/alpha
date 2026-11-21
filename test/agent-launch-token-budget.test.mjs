@@ -15,8 +15,11 @@ test('the phone launches its agent with stable references and no output cap', ()
   // limit than a cap of 16,384 does. A smaller cap cut off calls that reason before they answer.
   for (const name of ['ELIZA_STAGE1_MAX_TOKENS', 'ELIZA_EVALUATOR_MAX_TOKENS', 'TEXT_SMALL_MAX_TOKENS', 'TEXT_LARGE_MAX_TOKENS', 'DEFAULT_MAX_TOKENS'])
     assert.equal(env[name], undefined, `${name} caps the phone's calls`);
-  // The planner may only be given the model's maximum.
+  // The planner may only be given the model's maximum, and only on a runtime that reads that
+  // value: an older one refuses it on every planner call.
   assert.ok(env.ELIZA_PLANNER_MAX_TOKENS === undefined || env.ELIZA_PLANNER_MAX_TOKENS === 'model', env.ELIZA_PLANNER_MAX_TOKENS);
+  if (env.ELIZA_PLANNER_MAX_TOKENS === 'model')
+    assert.match(read('vendor/eliza/plugins/plugin-assistant/src/runtime/planner-loop.ts'), /"model"/);
   // A flag the pinned runtime does not read would change nothing on the phone.
   assert.match(read('vendor/eliza/packages/core/src/security/secret-swap.ts'), /"ELIZA_SECRET_SWAP_STABLE_REFERENCES"/);
 });
