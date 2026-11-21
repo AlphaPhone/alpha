@@ -62,6 +62,7 @@ async function systemBack(page: Page) {
 
 test('calendar event location is handed to Maps once, routed by explicit choices, and returns to the event', async ({page}) => {
   test.setTimeout(240_000);
+  await page.clock.setFixedTime(await page.evaluate(() => Date.now()));
   await page.addInitScript(() => { if (!localStorage.getItem('alpha.connection.selection.v1')) localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})); });
   await page.goto('/?mode=dev&tools=1');
   await installMaps(page);
@@ -74,6 +75,8 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     await button(page, 'New event').click();
     await page.getByRole('textbox', {name: 'Title', exact: true}).fill('Harbour meeting');
     await page.getByRole('textbox', {name: 'Location', exact: true}).fill(address);
+    await button(page, 'Today').click();
+    await page.getByLabel('Start time', {exact: true}).fill('12:00');
     await button(page, 'Save event').click();
     await expect(heading).toBeVisible();
     await expect(button(page, address)).toBeVisible();
