@@ -598,3 +598,23 @@ test('typing a unique shorthand on Home opens the saved editor without writing t
  await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Limes and cheese.');
  expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.some((request:any)=>request.method==='POST'))).toBe(false);
 });
+
+test('opening a saved title can replace a clean editor and preserves a dirty draft',async({page})=>{
+ await canonicalNotesFixture(page,{notes:[
+  {...trashedNote,id:'first-note',title:'First note'},
+  {...trashedNote,id:'second-note',title:'Second note',body:'\nSecond body.'},
+ ]});
+ const result=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {CanonicalNotesUi}=await import('/src/prototype/canonical-notes-ui.ts');
+  const notes=new CanonicalNotesUi(connectionController.getAppRecordClient()!,{paint(){},review(){}});
+  try{
+   await notes.refresh();
+   const first=notes.openSaved('first-note'),second=notes.openSaved('second-note');
+   notes.editor.edit({body:'Unsaved edits'});
+   const dirtySwitch=notes.openSaved('first-note');
+   return {first,second,dirtySwitch,open:notes.open,body:notes.editor.draft?.body};
+  }finally{notes.retire();}
+ });
+ expect(result).toEqual({first:true,second:true,dirtySwitch:false,open:'second-note',body:'Unsaved edits'});
+});

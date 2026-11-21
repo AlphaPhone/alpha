@@ -730,7 +730,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const notes:CanonicalNotesUi|null=shell.canonicalNotesUi;
     const unavailable={message:'I couldn’t read your saved notes. Try again from Notes.'};
     if(shell.notesSourceMode!=='canonical'||!notes?.current)return unavailable;
-    try{await notes.refresh();}catch{return unavailable;}
+    // The visible Notes collection already owns its current records and receives invalidations.
+    // Refresh offscreen or on first load. A second foreground read can briefly retire the list's context.
+    if(shell.S().view!=='notes'||notes.controller.revision===null){
+      try{await notes.refresh();}catch{return unavailable;}
+    }
     current();
     if(shell.canonicalNotesUi!==notes||!notes.current||notes.pending)return unavailable;
     const titleKey=(value:string)=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
@@ -751,7 +755,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       `More than one note matches “${title}”. Give me the full title.`};
     const note=matches[0];
     if(!note)return {message:`I couldn’t find a note titled “${title}”.`};
-    if(notes.editing&&notes.open!==note.id)return {message:'Close the note you’re editing before opening another one.'};
+    if(notes.dirty&&notes.open!==note.id)return {message:'Finish the unsaved edits in your note before opening another one.'};
     return {notes,id:note.id,title:note.title};
   }
   function openNamedNote(shell:Shell,target:{notes:CanonicalNotesUi;id:string},chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void):Promise<boolean>{
