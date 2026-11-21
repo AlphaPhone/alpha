@@ -41,6 +41,11 @@ test('a turn that routes right can still fail on what its proposal or its reply 
   assert.equal(judgeTurn(open, [{type: 'open_view'}], 'Review this on your phone.'), 'pass');
   assert.equal(judgeTurn(open, [], "I can't open apps from here."), 'content');
   assert.equal(judgeTurn(CASES.find(item => item.id === 'question'), [], 'Paris.'), 'pass');
+  // A create that did not take effect fails, however politely it is reported.
+  const reminder = CASES.find(item => item.id === 'reminder-before');
+  assert.equal(judgeTurn(reminder, [], "Got it. I'll remind you to take out the trash tonight at 10 PM."), 'pass');
+  for (const reply of ["I tried to save that trash reminder three times but each one hit a temporary system error. It's not saved.", "Setting that reminder ran into a hiccup, so I can't confirm it went through.", "I hit a snag and couldn't complete that request."])
+    assert.equal(judgeTurn(reminder, [], reply), 'content', reply);
 });
 
 test('cases with more than one right answer say so, and none expects an operation a phone lacks', () => {
