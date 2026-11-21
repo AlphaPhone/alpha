@@ -87,6 +87,19 @@ test('a Google change that makes an event all-day or replaces its guests shows t
   assert.equal(shown({attendees:[]}).Guests,'No guests');
  }finally{setLocalePreferences();}
 });
+test('an invitation answer reads as Accept or Maybe with the answer, never as an empty change',()=>{
+ const current={event:'Planning',eventStartsAt:Date.parse('2026-11-11T18:00:00Z'),eventEndsAt:Date.parse('2026-11-11T19:00:00Z'),targetVerified:true};
+ const patch={title:null,startsAtMs:null,endsAtMs:null,attendees:null,location:null,description:null};
+ const answer=(invitationResponse,change={})=>calendarApprovalFields(row({action:'modify_event',payload:{...dto().payload,action:'modify_event',invitationResponse,patch:{...patch,...change}}}),current);
+ const accepted=answer('accepted');
+ assert.equal(accepted.complete,true);assert.equal(accepted.heading,'Accept invitation');assert.equal(accepted.fields.find(field=>field.label==='Answer').value,'Going');
+ assert.equal(accepted.reason,'Accept the invitation to “Planning”.');
+ const maybe=answer('tentative');
+ assert.equal(maybe.complete,true);assert.equal(maybe.heading,'Answer maybe');assert.equal(maybe.fields.find(field=>field.label==='Answer').value,'Maybe');
+ assert.equal(answer('accepted',{title:'Renamed'}).complete,false,'an answer that also edits the event is not a readable review');
+ assert.equal(answer('declined').complete,false,'a decline is the reviewed cancellation, not a modify_event answer');
+ assert.equal(calendarApprovalFields(row({action:'modify_event',payload:{...dto().payload,action:'modify_event',patch}}),current).complete,false,'an empty change without an answer still has no changes');
+});
 test('unknown effect fields and malformed event times cannot be approved as a readable review',()=>{
  for(const payload of [{...dto().payload,unrecognizedEffect:true},{action:'schedule_event',side:'owner',calendarId:'primary',title:'Event',startsAtMs:1,endsAtMs:0}])assert.equal(calendarApprovalFields(row({payload,action:payload.action})).complete,false);
 });

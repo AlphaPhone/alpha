@@ -2853,7 +2853,9 @@
       "changedPreservationNeverDispatchesTest",
       "recurringAndDispositionAdmissionTest",
       "retiredResultCannotClearSuccessorMutationTest",
-      "sameOwnerNewSessionRefusesOldBindingTest"
+      "sameOwnerNewSessionRefusesOldBindingTest",
+      "inviteeAloneAnswersTest",
+      "organizerNeverAnswersTest"
     ],
     "invariants": [
       "SingleActive",
@@ -2868,7 +2870,7 @@
       "apps/app/src/ui/calendar/event-editor-policy.ts"
     ],
     "abstractions": [
-      "Actual create/update/delete admission, exact preservation read, captured owner/session and dispatch fields, synthetic provider completion, and latest deferred refresh.",
+      "Actual create/update/delete/respond admission, exact preservation read, captured owner/session and dispatch fields, synthetic provider completion, and latest deferred refresh.",
       "Two owner/session identities and windows, eight epochs and six attempts. One active mutation, plus retired replies, and one visible event partition. Native provider effects, idempotency/replay, linked control and Maps readback remain external."
     ]
   },

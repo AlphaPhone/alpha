@@ -63,6 +63,8 @@ test('a completed Calendar change reads its operation, title and duplicate flag 
  assert.equal(done('Completed Calendar schedule event: Lunch.'),'Added “Lunch” to Calendar.');
  assert.equal(done('Already completed Calendar schedule event: Lunch.'),'Already added “Lunch” to Calendar.');
  assert.equal(done('Completed Calendar modify event: the reviewed event.'),'Changed this event in Calendar.');
+ assert.equal(done('Completed Calendar modify event: Lunch.',{invitationResponse:'accepted'}),'Accepted “Lunch”.');
+ assert.equal(done('Already completed Calendar modify event: Lunch.',{invitationResponse:'tentative'}),'Already answered maybe to “Lunch”.');
  assert.equal(done('Completed Calendar cancel event: Standup.',{cancellationMode:'organizer_cancel'}),'Cancelled “Standup”.');
  assert.equal(done('Completed Calendar cancel event: Standup.',{cancellationMode:'decline_invitation'}),'Declined “Standup”.');
  assert.equal(done('Already completed Calendar cancel event: Standup.',{cancellationMode:'remove_private_copy'}),'Already removed “Standup” from your calendar.');
@@ -83,6 +85,8 @@ test('a queued Calendar change is described in Alpha’s words; only the event t
   ['modify_event',{recurrenceScope:'series'},`Modify every occurrence of the recurring series "Standup" (not only ${at}) without sending attendee notifications.`,'Standup','Change every occurrence of “Standup”, not only the one shown.'],
   ['modify_event',{recurrenceScope:'instance'},`Modify "Standup" on ${at} and notify attendees.`,'Standup','Change only this occurrence of “Standup”.'],
   ['modify_event',{},`Modify "Lunch" on ${at} without sending attendee notifications.`,'Lunch','Change “Lunch”.'],
+  ['modify_event',{invitationResponse:'accepted'},'Accept the invitation "Lunch" from the authenticated owner calendar editor.','Lunch','Accept the invitation to “Lunch”.'],
+  ['modify_event',{invitationResponse:'tentative'},'Tentatively accept the invitation "Lunch" from the authenticated owner calendar editor.','Lunch','Answer maybe to “Lunch”.'],
   ['cancel_event',{cancellationMode:'organizer_cancel',recurrenceScope:'this_and_following'},`Cancel "Standup" from ${at} forward by truncating the recurring series; every later occurrence and exception will be removed, and attendees will be notified.`,'Standup','Cancel “Standup” from this occurrence on. Every later occurrence and its changes are removed.'],
   ['cancel_event',{cancellationMode:'decline_invitation',recurrenceScope:'series'},`Decline the invitation for every occurrence of the recurring series "Standup" (not only ${at}); every occurrence and exception will be removed.`,'Standup','Decline every occurrence of “Standup”. Every occurrence and its changes are removed.'],
   ['cancel_event',{cancellationMode:'remove_private_copy'},`Decline the invitation for "Party" on ${at} without sending attendee notifications.`,'Party','Remove “Party” from your calendar.'],

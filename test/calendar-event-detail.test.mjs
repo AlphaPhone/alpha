@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {calendarEventLinks,calendarHttpsLink,calendarInvitationPending,calendarRepeatText} from '../apps/app/src/prototype/calendar-event-detail.ts';
+import {CALENDAR_INVITATION_NOTICE,calendarEventLinks,calendarHttpsLink,calendarInvitationAnswer,calendarInvitationPending,calendarRepeatText} from '../apps/app/src/prototype/calendar-event-detail.ts';
 
 test('only plain HTTPS links leave Alpha',()=>{
   assert.equal(calendarHttpsLink('https://meet.google.com/abc-defg-hij')?.href,'https://meet.google.com/abc-defg-hij');
@@ -50,6 +50,17 @@ test('an unanswered invitation is the owner’s own needsAction row, never an ev
   assert.equal(calendarInvitationPending({attendees:null}),false);
 });
 
+test('the owner’s answer is read from the owner’s own invitee row only',()=>{
+  const own=responseStatus=>({attendees:[{self:false,organizer:true,responseStatus:'accepted'},{self:true,organizer:false,responseStatus}]});
+  for(const status of ['needsAction','accepted','tentative','declined'])assert.equal(calendarInvitationAnswer(own(status)),status);
+  assert.equal(calendarInvitationAnswer(own('needs-action')),'needsAction','an imported feed’s PARTSTAT');
+  assert.equal(calendarInvitationAnswer(own('delegated')),null,'an answer Alpha cannot send back is not offered');
+  assert.equal(calendarInvitationAnswer({attendees:[{self:true,organizer:true,responseStatus:'accepted'}]}),null,'the organizer is never invited');
+  assert.equal(calendarInvitationAnswer({attendees:[{self:false,organizer:false,responseStatus:'needsAction'}]}),null);
+  assert.equal(calendarInvitationAnswer({attendees:null}),null);
+  assert.deepEqual(Object.keys(CALENDAR_INVITATION_NOTICE).sort(),['accepted','declined','needsAction','tentative']);
+});
+
 test('the event detail renders the repeat, invitation, Google notice and Google Calendar link the adapter sets',()=>{
   const template=readFileSync('apps/app/src/prototype/template.html','utf8'),adapter=readFileSync('apps/app/src/prototype/agent-calendar-adapter.ts','utf8');
   for(const key of ['repeatText','inviteNotice','providerNotice','openProvider','hasVideo','join']){
@@ -60,12 +71,17 @@ test('the event detail renders the repeat, invitation, Google notice and Google 
   assert.doesNotMatch(adapter,/providerNotice='Open in Google'/,'the managed Google notice says what to do there');
 });
 
-test('an unanswered invitation can be declined from its notice, and the event form says Alpha sends no alert',()=>{
+test('an invitation is answered from its notice, and the event form says Alpha sends no alert',()=>{
   const template=readFileSync('apps/app/src/prototype/template.html','utf8'),adapter=readFileSync('apps/app/src/prototype/agent-calendar-adapter.ts','utf8');
-  // Decline reuses the reviewed, Undo-able delete; only for an invitee, never for a managed Google calendar (del is null there).
-  assert.ok(adapter.includes("out.ev.inviteDecline=out.ev.inviteNotice&&out.ev.singleDelete&&!out.ev.readOnly&&cancellationModeForEditorEvent(e)==='decline_invitation'?out.ev.del:null"));
+  // Answers only for an invitee's one-off invitation, never for a managed Google calendar or a read-only source.
+  assert.ok(adapter.includes("answerable=!!answer&&out.ev.singleDelete&&!out.ev.readOnly&&!managed&&cancellationModeForEditorEvent(e)==='decline_invitation'"));
+  // Decline reuses the reviewed, Undo-able delete; Going and Maybe go through AgentCalendar.respond; the current answer is not offered.
+  assert.ok(adapter.includes("out.ev.inviteDecline=answerable&&answer!=='declined'?out.ev.del:null;"));
+  assert.ok(adapter.includes("out.ev.inviteAccept=answerable&&answer!=='accepted'?()=>respond('accepted'):null;"));
+  assert.ok(adapter.includes("out.ev.inviteMaybe=answerable&&answer!=='tentative'?()=>respond('tentative'):null;"));
   assert.ok(adapter.indexOf('out.ev.inviteDecline=')>adapter.indexOf('if(managed){out.ev.del=null;'),'set after the managed Google rule removes delete');
-  assert.ok(template.includes('aria-label="Decline this invitation" disabled="{{calendar.ev.busy}}" onClick="{{calendar.ev.inviteDecline}}"'));
+  for(const [key,label] of [['inviteAccept','Accept this invitation'],['inviteMaybe','Answer maybe to this invitation'],['inviteDecline','Decline this invitation']])
+    assert.ok(template.includes(`aria-label="${label}" disabled="{{calendar.ev.busy}}" onClick="{{calendar.ev.${key}}}"`),key);
   assert.ok(adapter.includes("out.f.alerts=null;out.f.alertNote='Alpha won’t alert you about this event.';"));
   assert.ok(template.includes('{{calendar.f.alertNote}}'));
 });

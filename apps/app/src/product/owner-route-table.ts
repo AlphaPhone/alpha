@@ -19,6 +19,8 @@ export const OWNER_ROUTE_TABLE = {
         {methods: ["GET"], paths: ["/api/lifeops/calendar/feed", "/api/lifeops/calendar/calendars", "/api/lifeops/calendar/next-context"],
          query: ["mode", "side", "grantId", "calendarId", "includeHiddenCalendars", "timeMin", "timeMax", "timeZone", "forceSync"]},
         {methods: ["PATCH"], paths: ["/api/lifeops/calendar/events/{id}"], query: ["mode", "side", "grantId", "calendarId"]},
+        // The owner's invitation answer (elizaOS/eliza#39947); its fields are in the body.
+        {methods: ["POST"], paths: ["/api/lifeops/calendar/events/{id}/response"], query: []},
         {methods: ["DELETE"], paths: ["/api/lifeops/calendar/events/{id}"],
          query: ["mode", "side", "grantId", "calendarId", "recurrenceScope", "notifyAttendees", "expectedProviderVersion", "idempotencyKey", "cancellationMode"]}
       ]
