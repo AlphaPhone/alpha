@@ -43,21 +43,24 @@ export type RecordedCall = {
 export type ProviderUsage = { input: number; output: number; cached?: number };
 
 /**
- * Dependency-free estimate of byte-pair tokens. Fitted on recorded phone calls against a
- * 200k-vocabulary tokenizer: within about 4% per call. Identifiers, hashes and JSON
- * punctuation cost far more tokens per character than prose, which a flat
- * characters-per-token ratio misses by up to 50%.
+ * Dependency-free estimate of the provider's input tokens. Fitted on 467 recorded Stage 1
+ * and planner calls from four resident runs against the provider's own counts: the whole
+ * comes out 0.6% high, and nine calls in ten within -6% and +10%. A digit costs this model
+ * about one token each, so ids and timestamps cost several times what prose does per
+ * character; a flat characters-per-token ratio misses that by up to 50%.
  */
 export function estimateTokens(text: string): number {
-  let pieces = 0;
+  let words = 0;
+  let digits = 0;
+  let marks = 0;
   for (const match of text.matchAll(/[A-Za-z]+|[0-9]+|[^A-Za-z0-9\s]+/g)) {
     const run = match[0];
     const code = run.charCodeAt(0);
-    if (code >= 48 && code <= 57) pieces += Math.ceil(run.length / 3);
-    else if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) pieces += run.length <= 10 ? 1 : Math.ceil(run.length / 5);
-    else pieces += Math.ceil(run.length / 2);
+    if (code >= 48 && code <= 57) digits += run.length;
+    else if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) words += run.length <= 10 ? 1 : Math.ceil(run.length / 5);
+    else marks += Math.ceil(run.length / 2);
   }
-  return Math.round(pieces / 1.1);
+  return Math.round(1.2 * words + digits + 0.4 * marks);
 }
 
 type Message = { role?: string; content?: unknown; tool_calls?: unknown };
@@ -102,8 +105,8 @@ const paragraphBucket = (paragraph: string, section: string): string => {
 };
 
 const toolChars = (call: Pick<RecordedCall, 'tools'>) => (call.tools ?? []).reduce((total, tool) => total + tool.chars, 0);
-/** Tool schemas are JSON: about four characters per token on the phone's device tool. */
-const toolTokens = (call: Pick<RecordedCall, 'tools'>) => Math.round(toolChars(call) / 4);
+/** Tool schemas are JSON: 3.8 characters per token in the same fit as estimateTokens. */
+const toolTokens = (call: Pick<RecordedCall, 'tools'>) => Math.round(toolChars(call) / 3.8);
 
 /** Characters of one recorded call by what they carry. Buckets partition the call. */
 export function bucketsOf(call: Pick<RecordedCall, 'system' | 'prompt' | 'tools'>): Record<string, number> {

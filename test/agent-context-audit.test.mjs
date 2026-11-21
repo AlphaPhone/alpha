@@ -5,7 +5,7 @@ import {audit, bucketsOf, CEREBRAS_QWEN, estimateTokens, readUsage, renderReport
 const system = 'You are Alpha.\n\n';
 // The limit tests below state their thresholds in tokens a call uses: no estimate margin, no hold for a missing cap.
 const PLAIN = {...CEREBRAS_QWEN, admissionInputFactor: 1, uncappedOutputHold: 0};
-// About 1,900 tokens of history, the same on every call that carries it.
+// About 1,600 tokens of history, the same on every call that carries it.
 const receipts = JSON.stringify(Array.from({length: 120}, (_, row) => [`history:${row}`, [['NOTES_CREATE', true, [row]]]]));
 const stage1 = (at, history, message, extra = {}) => ({
   id: `call-${at}`, type: 'RESPONSE_HANDLER', at, room: 'room', runId: `turn-${at}`, ms: 900, system,
@@ -66,18 +66,18 @@ test('provider usage, when recorded, replaces estimates and yields the cache hit
 test('the provider simulation caches whole prefix units in tools, system, messages order', () => {
   // Every boundary ends in a 1,024-token unit of its own, so each rule below gives a
   // different count: first tool 3,500 tokens, both tools 4,250, half the system prompt
-  // 5,505, all of it 6,757, the whole request 8,651.
+  // 5,504, all of it 6,754, the whole request 8,403.
   const rule = 'Keep replies short and say what you did. ';
-  const longSystem = `${system}${rule.repeat(306)}`;
-  assert.equal(estimateTokens(longSystem), 2507);
-  assert.equal(estimateTokens(`${system}${rule.repeat(153)}`), 1255);
-  const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 3_000, hash: 'bbbb'}];
+  const longSystem = `${system}${rule.repeat(250)}`;
+  assert.equal(estimateTokens(longSystem), 2504);
+  assert.equal(estimateTokens(`${system}${rule.repeat(125)}`), 1254);
+  const tools = [{name: 'HANDLE_RESPONSE', chars: 13_300, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 2_850, hash: 'bbbb'}];
   const first = stage1(0, receipts, 'one', {tools, system: longSystem});
   const next = stage1(20_000, receipts, 'two', {tools, system: longSystem});
   const cached = later => simulateProvider([first, later]).cachedTokens;
   const result = simulateProvider([first, next]);
   assert.equal(CEREBRAS_QWEN.cacheBlockTokens, 1024);
-  assert.equal(result.inputTokens, 2 * 8651);
+  assert.equal(result.inputTokens, 2 * 8403);
   // Only the end of the last message differs: all but the last partial unit is reused.
   assert.equal(result.cachedTokens, 8192);
   assert.equal(result.hitRate, 8192 / result.inputTokens);
@@ -85,7 +85,7 @@ test('the provider simulation caches whole prefix units in tools, system, messag
   // A system prompt that changes keeps the tool definitions and the part of itself before
   // the change, and loses the messages.
   assert.equal(cached({...next, system: `Changed. ${longSystem}`}), 4096);
-  assert.equal(cached({...next, system: `${system}${rule.repeat(153)}Changed. ${rule.repeat(153)}`}), 5120);
+  assert.equal(cached({...next, system: `${system}${rule.repeat(125)}Changed. ${rule.repeat(125)}`}), 5120);
   // A changed second tool keeps the first tool only: not the second, not the system prompt.
   assert.equal(cached({...next, tools: [tools[0], {...tools[1], hash: 'cccc'}]}), 3072);
   // A changed first tool, or the same tools in another order, loses the whole request,
@@ -94,7 +94,7 @@ test('the provider simulation caches whole prefix units in tools, system, messag
   assert.equal(cached({...next, tools: [tools[1], tools[0]]}), 0);
   // One tool fewer or one more keeps the tools they share and stops there.
   assert.equal(cached({...next, tools: [tools[0]]}), 3072);
-  assert.equal(cached({...next, tools: [...tools, {name: 'EXTRA', chars: 6_000, hash: 'eeee'}]}), 4096);
+  assert.equal(cached({...next, tools: [...tools, {name: 'EXTRA', chars: 5_700, hash: 'eeee'}]}), 4096);
   // A prefix older than the provider keeps it, or one still being read, is not reused.
   assert.equal(cached(stage1(400_000, receipts, 'two', {tools, system: longSystem})), 0);
   assert.equal(cached({...next, at: 500, ms: 900}), 0);
@@ -103,7 +103,7 @@ test('the provider simulation caches whole prefix units in tools, system, messag
 });
 
 test('a call with no tool record is compared only with another such call, on its system prompt and messages', () => {
-  const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000, hash: 'aaaa'}];
+  const tools = [{name: 'HANDLE_RESPONSE', chars: 13_300, hash: 'aaaa'}];
   const [first, next] = [stage1(0, receipts, 'one'), stage1(20_000, receipts, 'two')];
   const cached = (...calls) => simulateProvider(calls).cachedTokens;
   // Older runtimes record no definitions on either call: only the recorded text is compared.
@@ -182,7 +182,7 @@ test('a running call holds its input and its output cap; a finished one was char
   assert.equal(simulateProvider([call(0), call(2_000)], model).uncachedMinute.max, 40_600);
 
   // Without usage the output is unknown: the stage's reserve while the call runs, nothing once it has finished.
-  const silent = start => stage1(start + 3_000, receipts, `go ${start}`, {ms: 3_000});
+  const silent = start => stage1(start + 3_000, receipts, start ? 'go later' : 'go first', {ms: 3_000});
   const each = simulateProvider([silent(0)]).inputTokens;
   const reserve = {...model, outputReserve: {stage1: 500}};
   assert.equal(simulateProvider([silent(0), silent(2_000)], reserve).allowanceLeft.lowest, 60_000 - (each + 500) - (each + 500));
@@ -190,13 +190,13 @@ test('a running call holds its input and its output cap; a finished one was char
 });
 
 test('where a call carries the provider\'s cached count, the hit rate and the uncached windows use it and not the rules', () => {
-  const tools = [{name: 'HANDLE_RESPONSE', chars: 14_000, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 3_000, hash: 'bbbb'}];
+  const tools = [{name: 'HANDLE_RESPONSE', chars: 13_300, hash: 'aaaa'}, {name: 'READ_CONTEXT', chars: 2_850, hash: 'bbbb'}];
   const calls = cached => [0, 20_000, 40_000].map((at, index) => stage1(at, receipts, `message ${index}`, {tools, usage: {input: 12_000, output: 50, ...cached(index)}}));
   // 30,000 a minute is 500 a second.
   const tight = {...PLAIN, uncachedTpm: 30_000};
-  // By the rules the second and third calls would each reuse 6,144 tokens. The provider reused none.
+  // By the rules the second and third calls would each reuse 5,120 tokens. The provider reused none.
   const missed = simulateProvider(calls(() => ({cached: 0})), tight);
-  assert.deepEqual(missed.reported, {calls: 3, provider: 0, simulated: 12_288});
+  assert.deepEqual(missed.reported, {calls: 3, provider: 0, simulated: 10_240});
   assert.equal(missed.cachedTokens, 0);
   assert.equal(missed.hitRate, 0);
   assert.equal(missed.stages.stage1.cached, 0);
@@ -209,7 +209,7 @@ test('where a call carries the provider\'s cached count, the hit rate and the un
   assert.equal(simulateProvider(calls(() => ({cached: 0})), tighter).uncachedMinute.callsOver, 2);
   // The provider reused more than the rules give.
   const hit = simulateProvider(calls(index => ({cached: index ? 11_264 : 0})), tight);
-  assert.deepEqual(hit.reported, {calls: 3, provider: 22_528, simulated: 12_288});
+  assert.deepEqual(hit.reported, {calls: 3, provider: 22_528, simulated: 10_240});
   assert.equal(hit.cachedTokens, 22_528);
   assert.equal(hit.hitRate, 22_528 / 36_000);
   assert.equal(hit.uncachedMinute.max, 3 * 12_050 - 22_528);
@@ -217,12 +217,12 @@ test('where a call carries the provider\'s cached count, the hit rate and the un
   assert.equal(hit.allowanceLeft.lowest, 30_000 - 2_500 - 12_000);
   // And the third call fits where it did not.
   assert.equal(simulateProvider(calls(index => ({cached: index ? 11_264 : 0})), tighter).uncachedMinute.callsOver, 1);
-  assert.match(renderSimulation(hit), /provider counted 22528 cached tokens, these rules give 12288/);
+  assert.match(renderSimulation(hit), /provider counted 22528 cached tokens, these rules give 10240/);
   // Usage that carries no cached count is not a count of zero: the rules stand in for it.
   const silent = simulateProvider(calls(() => ({})), tight);
   assert.equal(silent.reported, null);
-  assert.equal(silent.cachedTokens, 12_288);
-  assert.equal(silent.uncachedMinute.max, 3 * 12_050 - 12_288);
+  assert.equal(silent.cachedTokens, 10_240);
+  assert.equal(silent.uncachedMinute.max, 3 * 12_050 - 10_240);
   assert.doesNotMatch(renderSimulation(silent), /provider counted/);
 });
 
