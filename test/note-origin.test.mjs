@@ -2,8 +2,7 @@
 // Maps "Back to event" identity. Pure rules; the rendered flows are in test/browser.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {addNoteOrigin,findNoteOrigin,noteOriginFor,noteOriginTitle,noteOriginIndex,noteOriginKey,noteOriginLimit,noteOriginOf,recordNoteRevision,removeNoteOrigin,resolveNoteLink,voiceNoteContentRevision} from '../apps/app/src/runtime/note-origin.ts';
-import {recordingRevision} from '../apps/app/src/prototype/summary-source.ts';
+import {addNoteOrigin, findNoteOrigin, noteOriginFor, noteOriginTitle, noteOriginIndex, noteOriginKey, noteOriginLimit, noteOriginOf, removeNoteOrigin, voiceNoteContentRevision} from '../apps/app/src/runtime/note-origin.ts';
 import {mapsEventOriginFor, mapsEventOriginOf, mapsEventReturnOffered, mapsEventStillThere} from '../apps/app/src/runtime/maps-event-return.ts';
 import {encodeCalendarForm, decodeCalendarForm, calendarEditFields, snapshotCalendarForm} from '../apps/app/src/runtime/calendar-form-draft.ts';
 
@@ -105,4 +104,13 @@ test('Maps offers "Back to event" only for the event it was opened from, while C
   assert.equal(mapsEventStillThere(mapsEventOriginFor({...row, alphaCalendarId: 71, nativeEvent: {id: 71, begin: 1000}}, 2), [{id: 71, begin: 1000}]), true, 'numeric provider ids compare by value');
 });
 
-
+test('a voice-note content revision changes only when the note content changed', async () => {
+  const voice = {...note, lines: [{s: 'me', at: 0, t: 'Transcript'}], summary: ['Venue booked'], actions: [{t: 'Book the venue', done: false}], pinned: false};
+  const revision = await voiceNoteContentRevision(voice);
+  assert.match(revision, /^[a-f0-9]{64}$/);
+  assert.ok(noteOriginFor(voice, revision), 'a content revision is a valid link revision');
+  for (const flags of [{pinned: true}, {onCal: true}, {actions: [{t: 'Book the venue', done: true}]}, {when: 'Yesterday'}])
+    assert.equal(await voiceNoteContentRevision({...voice, ...flags}), revision, JSON.stringify(flags));
+  for (const edit of [{lines: [{s: 'me', at: 0, t: 'Edited transcript'}]}, {body: 'Edited'}, {title: 'Renamed'}, {summary: ['Venue cancelled']}, {actions: [{t: 'Cancel the venue', done: false}]}, {audio: {audioId: 'audio-1', transcript: 'Other'}}])
+    assert.notEqual(await voiceNoteContentRevision({...voice, ...edit}), revision, JSON.stringify(edit));
+});

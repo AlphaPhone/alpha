@@ -20,10 +20,12 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 public final class MmsDispatchTraces {
+ static boolean historicalListeners;
  static final String OP="synthetic-mms", SLOT="sms-send-ledger:v1:device", BODY="Synthetic message";
- static final long NOW=1_760_000_000_000L;
+ public static final long NOW=1_760_000_000_000L;
  static final int SUB=7;
  static final String[] RECIPIENTS={"+15555550100","+15555550101"};
  static final byte[][] IMAGES={ {}, {1,2,3}, {1,2,4} };
@@ -36,14 +38,18 @@ public final class MmsDispatchTraces {
   if(failure!=null&&!failure.equals("pass"))throw new IOException("Synthetic journal refusal "+failure);
  }
  static void check(boolean value,String reason){if(!value)throw new AssertionError(reason);}
- static void drain()throws Exception{SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);}
+ static void drain()throws Exception{
+  // A queued review can enqueue its durable decision after the first barrier.
+  SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
+  SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
+ }
  static String digest(byte[] bytes)throws Exception{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}
  static boolean group(int binding){return binding==1||binding==2;}
 
  static final class Fixture {
   final Context context=new Context();
   final AlphaSmsSendReceiver receiver=new AlphaSmsSendReceiver();
-  final TelephonyPlugin[] plugins=new TelephonyPlugin[3];
+  final AlphaTelephonyPlugin[] plugins=new AlphaTelephonyPlugin[3];
   final PluginCall[] reviewCalls=new PluginCall[3];
   final int[] reviews=new int[3];
   final boolean[] reviewSims=new boolean[3];
@@ -63,7 +69,7 @@ public final class MmsDispatchTraces {
      :SmsSendJournal.bindingText(to,BODY,SUB);
     bindings.put(SmsSendJournal.sha256(text),binding);
    }
-   load();config=plugins[1].telephonyConfiguration();
+   load();config=(SmsTelephonyConfiguration)Trace.read(plugins[1],"config");
    context.radio.beforeMms=this::beforeMms;
    trace=new Trace(name,observe());trace.value.put("init",Trace.action("initWith",groupRecipients));
   }
@@ -94,6 +100,12 @@ public final class MmsDispatchTraces {
 
   static java.lang.reflect.Field sharedField(String name)throws Exception{
    var field=SmsTelephony.class.getDeclaredField(name);field.setAccessible(true);return field;
+  }
+
+  Set<?> registeredListeners()throws Exception{
+   if(!historicalListeners)return (Set<?>)sharedField("LISTENERS").get(null);
+   Object listener=sharedField("listener").get(null);
+   return listener==null?Set.of():Set.of(listener);
   }
 
   SmsSendJournal.Record readMemory()throws Exception{
@@ -176,12 +188,12 @@ public final class MmsDispatchTraces {
    if(plugins[actor].activity.dialogs.size()>count){
     reviewCalls[actor]=call;reviews[actor]=binding;reviewSims[actor]=context.subscriptions.revision==1;
     AlertDialog dialog=dialog(actor);
-    check(dialog.message.contains(BODY)&&dialog.message.contains(to[0])&&dialog.message.contains("Synthetic SIM")&&
+    check(dialog.message.contains(BODY)&&dialog.message.contains("To: "+String.join(", ",to)+"\n")&&dialog.message.contains("Synthetic SIM")&&
      (dialog.getWindow().flags&android.view.WindowManager.LayoutParams.FLAG_SECURE)!=0&&dialog.getButton(-1).filtered,
      "Reviewed message is private and obscured tap is filtered");
-    if(group(binding))check(dialog.message.contains("Attachment: synthetic.png")&&dialog.preview.images.size()==1&&
+    if(group(binding))check(dialog.message.contains(historicalListeners?"Attachment: synthetic.png":"Picture: synthetic.png")&&dialog.preview.images.size()==1&&
      Arrays.equals(dialog.preview.images.getFirst().image.bytes(),IMAGES[binding])&&
-     (to.length==1||dialog.message.contains("every recipient sees all the others")),"Exact attachment preview and group disclosure");
+     (to.length==1||dialog.message.contains(historicalListeners?"every recipient sees all the others":"everyone sees who else it went to")),"Exact attachment preview and group disclosure");
    }
    classify(call);point("request",actor,binding,input);
   }
@@ -273,7 +285,9 @@ public final class MmsDispatchTraces {
     ((java.util.concurrent.ExecutorService)Trace.read(plugins[actor],"reader")).shutdownNow();
     reviewCalls[actor]=null;
    }
-   ((Map<?,?>)sharedField("JOURNALS").get(null)).clear();sharedField("listener").set(null,null);
+   ((Map<?,?>)sharedField("JOURNALS").get(null)).clear();
+   if(historicalListeners)sharedField("listener").set(null,null);
+   else ((Set<?>)sharedField("LISTENERS").get(null)).clear();
    context.dynamicReceivers.clear();if(reboot)context.boot++;
    load();process++;reply="none";replyKind="none";replyBinding=0;positiveBinding=0;
    point("restart",reboot);
@@ -287,7 +301,15 @@ public final class MmsDispatchTraces {
    int review1=Trace.read(plugins[1],"reviewCall")==null?0:reviews[1];
    int review2=Trace.read(plugins[2],"reviewCall")==null?0:reviews[2];
    int mmsBox=context.provider.mms.isEmpty()?0:(int)context.provider.mms.values().iterator().next().get(Telephony.Mms.MESSAGE_BOX);
-   int events=plugins[1].notices.size()+plugins[2].notices.size();
+   JSONArray listeners=new JSONArray(),deliveries=new JSONArray();
+   Set<?> registered=registeredListeners();
+   for(int actor=1;actor<=2;actor++){
+    if(registered.contains(Trace.read(plugins[actor],"sendListener")))listeners.put(actor);
+    for(JSObject notice:plugins[actor].notices)check(OP.equals(notice.opt("operationId")),"Every bridge notice names the exact fixed operation");
+    deliveries.put(new JSONArray().put(actor).put(plugins[actor].notices.size()));
+   }
+   check(registered.size()==listeners.length(),"Every native listener belongs to an observed current bridge");
+   JSONObject events=new JSONObject().put("listeners",listeners).put("deliveries",deliveries);
    return Trace.fields("groupRecipients",to.length==2,"reviewA",review(review1,1),"reviewB",review(review2,2),"reply",reply,
     "replyKind",replyKind,"replyBinding",replyBinding,"positiveBinding",positiveBinding,
     "memory",record(readMemory()),"disk",record(readDisk()),"tombstoneBinding",tombstoneBinding(),
@@ -301,7 +323,7 @@ public final class MmsDispatchTraces {
   void point(String name,Object... args)throws Exception{trace.step(name,observe(),args);}
 
   void close()throws Exception{
-   Looper.runMain(()->{for(int i=1;i<=2;i++)plugins[i].handleOnDestroy();});
+   Looper.runMain(()->{for(int i=1;i<=2;i++)plugins[i].fixtureDestroy();});
    SmsTelephony.WORK.shutdown();SmsTelephony.WORK.awaitTermination(5,TimeUnit.SECONDS);
    try(var entries=Files.walk(context.noBackup.toPath())){
     for(var entry:entries.sorted(Comparator.reverseOrder()).toList())Files.delete(entry);
@@ -310,6 +332,7 @@ public final class MmsDispatchTraces {
  }
 
  public static void main(String[] args)throws Exception{
+  historicalListeners=args.length>1&&args[1].equals("historical");
   String mode=args[0];
   Fixture f=new Fixture(mode,mode.equals("group-carrier-confirm"));
   try{

@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,7 +15,9 @@ const write = (root, file, value) => { const target=path.join(root,file); fs.mkd
 function fixture(t, auth = original) {
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-dependency-fingerprint-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- write(root,'android/consumer-host.json',JSON.stringify({schema:1,residentHost:{},profile:{schema:1,dependencies:[],modules:[{name:'eliza-cloud-auth',source:{root:'patchedNative',path:'packages/auth/android'}}]}}));
+ fs.copyFileSync(new URL('../app.config.json',import.meta.url),path.join(root,'app.config.json'));
+ const {residentHost}=JSON.parse(fs.readFileSync(new URL('../android/consumer-host.json',import.meta.url),'utf8'));
+ write(root,'android/consumer-host.json',JSON.stringify({schema:1,residentHost,profile:{schema:1,dependencies:[],modules:[{name:'eliza-cloud-auth',source:{root:'patchedNative',path:'packages/auth/android'}}]}}));
  write(root,'vendor/eliza/packages/app/scripts/mobile/android/consumer-host/toolchain.json',JSON.stringify({androidGradlePlugin:'8.7.2',kotlin:'2.1.0',versions:{}}));
  write(root,'vendor/eliza/packages/app/scripts/mobile/android/consumer-host/app.gradle',"dependencies { implementation project(':eliza-cloud-auth') }\n");
  write(root,`vendor/eliza/${descriptor}`,auth);
@@ -26,7 +29,7 @@ function fixture(t, auth = original) {
  return {root,pin};
 }
 
-test('Android dependency fingerprint includes pinned auth declarations under a stable source label',t=>{
+fixtureTest('Android dependency fingerprint includes pinned auth declarations under a stable source label',t=>{
  const before=androidDependencyFingerprint(fixture(t).root);
  const declaration=version=>original+"dependencies {\n implementation 'androidx.browser:browser:"+version+"'\n}\n";
  const source=fixture(t,declaration('1.9.0'));
@@ -38,7 +41,7 @@ test('Android dependency fingerprint includes pinned auth declarations under a s
  assert.notEqual(updated,androidDependencyFingerprint(fixture(t,declaration('1.8.0')).root),'later dependency changes invalidate the snapshot again');
 });
 
-test('Android dependency fingerprint includes transitive credential custody but excludes fixture modules',t=>{
+fixtureTest('Android dependency fingerprint includes transitive credential custody but excludes fixture modules',t=>{
  const {root}=fixture(t);
  const host=JSON.parse(fs.readFileSync(path.join(root,'android/consumer-host.json'),'utf8'));
  const nativeOnly='plugins/plugin-native-secure-store/android-nativeonly';

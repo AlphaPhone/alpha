@@ -28,7 +28,7 @@ async function clockBridge(page: Page, repeatDaysVersion: number | null) {
         w.flagOff.calls.push('Agent.request');
         return { status: 200, body: JSON.stringify({ [emptyDiscoveries[input.path]]: [] }) };
       }
-      if (plugin === 'DailyApps' && method === 'surfaceInfo') { w.flagOff.calls.push('DailyApps.surfaceInfo'); return { developmentBuild: false, assistant: false, ...(version === null ? {} : { clockRepeatDaysVersion: version }) }; }
+      if (plugin === 'DailyApps' && method === 'surfaceInfo') { w.flagOff.calls.push('DailyApps.surfaceInfo'); return { assistant: false, ...(version === null ? {} : { clockRepeatDaysVersion: version }) }; }
       if (plugin === 'DailyApps' && method === 'clockHandoff') { w.flagOff.calls.push('DailyApps.clockHandoff'); (w.clockHandoffs ??= []).push(structuredClone(input)); return { action: input.action, status: 'opened', message: 'Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.' }; }
       return original(plugin, method, input);
     };
@@ -69,7 +69,7 @@ for (const version of [1, 2]) test(`clockRepeatDaysVersion ${version}: Mon to Fr
   await clock.getByRole('button', { name: 'Confirm Clock request', exact: true }).evaluate(button => {
     (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click();
   });
-  await expect(clock).toContainText('Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.');
+  await expect(clock).toContainText('Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.');
   const sent = await handoffs(page);
   expect(sent).toHaveLength(1);
   expect(sent[0]).toMatchObject({ action: 'set', hour: 6, minute: 30, label: 'Weekday wake', reviewed: true, days: [2, 3, 4, 5, 6] });

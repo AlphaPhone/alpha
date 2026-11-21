@@ -1,13 +1,14 @@
+import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './android-identity.ts';
 /**
- * Verify the four APKs of one build and record the result in apk-manifest.json.
+ * Verify the launcher APKs of one build and record the result in apk-manifest.json.
  *
- *   node scripts/verify-apks.ts [--test-mocks] [--allow-unpackaged-runtime] [--signer-api-level=N]
+ *   bun scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
  *
- * Default: the distribution APKs in artifacts/. They must be flag-off
- * (testMocks:false), pass the shared production bundle audit, carry no
- * development hooks, and releases must package the authenticated resident
- * runtime. --allow-unpackaged-runtime is a developer option that records such
- * releases as distributable:false instead of failing.
+ * It verifies the debug APK, and the release APK unless the build record says the build was
+ * debug-only (`release: false`, a local `bun run android:build:local`).
+ * The APKs in artifacts/ must be flag-off (testMocks:false), pass the shared production
+ * bundle audit, carry no development hooks and package the authenticated resident runtime
+ * and on-device voice.
  *
  * Licences (decision P-09): open-source licences never fail verification and never
  * make a release distributable:false. Every flagged entry of the packaged notices
@@ -18,26 +19,24 @@
  * statement in licenses/font-licenses.json (the Denton typeface), `items` lists
  * fonts with no record. Unresolved items are copied to `licenceBlockers` and keep
  * a release distributable:false only while
- * UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION (scripts/licence-policy.ts) is true.
- * It never fails verification of a developer build.
+ * UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION (scripts/licence-policy.ts) is true. A font check
+ * that could not run always keeps the release distributable:false and is printed as a blocker.
  * App Links: each row records `appLinks` ({present, hosts}), the https autoVerify filters in
- * the packaged manifest. Default builds declare the configured production web host.
+ * the packaged manifest: the configured production web host.
  * Every http/https VIEW filter in the merged manifest must be in an exact allowed set
- * (webViewFiltersAllowed below; the staging return only in test-mocks debug APKs); an extra or
- * missing filter fails verification.
- * --test-mocks: the separate artifacts/test-mocks/ build, which is never
- * distributable. This is APK-build evidence only; it does not install or run
- * anything.
+ * (webViewFiltersAllowed below); an extra or missing filter fails verification.
+ * This is APK-build evidence only; it does not install or run anything.
  */
 import fs from "node:fs";
 import {renderSensePermissions} from "../vendor/eliza/packages/os/scripts/android/pixel10a-product.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import {sha256, sha256File} from "./sha256.ts";
 import { CLOUD_DEPLOYMENT } from "./cloud-deployment-policy.ts";
+import { readUpstreamPin } from "./upstream-pin.ts";
 import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
-import {releaseDistributable} from './release-distributable.ts';
+import {releaseBlockers} from './release-blockers.ts';
 import {
   auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
 } from "./apk.ts";
@@ -46,28 +45,31 @@ import { androidEnv, tool } from "./toolchain.ts";
 import { readApkEntries } from "../vendor/eliza/packages/app/scripts/mobile/artifact-inspection/apk-distribution.mjs";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
 import { BUN_ENTRY } from "./generate-licenses.ts";
-import { fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
+import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
 import { licenceFlagLines, licenceFlagRecords } from "./licence-policy.ts";
 import { packagedGzipProblems } from "./android-gzip-assets.ts";
 import { appLinkFilters, requiredAppLinkProblems, webViewFilterProblems } from "./render-assetlinks.ts";
 import { readVoiceHost, voiceBundleAdmission } from "./voice-host.ts";
+import {embeddingApkProblems,type EmbeddingManifest} from './stage-embedding-host.ts';
+import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage } from "./aosp-listener.ts";
 
-import {cloudVoiceAdmission, cloudVoiceBlockers} from '../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs';
+import {cloudVoiceAdmission} from '../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs';
 import { preparePatchedNative, nativePatchReceipt, verifyNativePatchReceipt } from './prepare-patched-native.ts';
-import {refuseRemovedProfileFlags} from './removed-profile-flags.ts';
-const USAGE = "Usage: node scripts/verify-apks.ts [--test-mocks] [--allow-unpackaged-runtime] [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
+const USAGE = "Usage: bun scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
 interface RuntimePackaging {
   apk: string;
-  runtime: "PACKAGED" | "NOT_PACKAGED";
-  distributable: boolean;
+  runtime: "PACKAGED";
+  distributable?: boolean;
 }
 interface BuildRecord {
+  applicationId?: string;
   updateChannel?: unknown;
   runtimeProfile?: string;
   localEmbeddings?: boolean;
   testMocks?: boolean;
   mapsProvider?: string;
+  release?: boolean;
 }
 type ApkInspection = ReturnType<typeof validateApk>;
 type RuntimeVoiceHost = ReturnType<typeof voiceHostAdmission>;
@@ -88,37 +90,33 @@ type VerificationRow = Omit<ApkInspection, "badging" | "xml" | "names" | "dexCla
   licenceFlags: ReturnType<typeof licenceFlagRecords>;
   fontLicenceCheck: Omit<ReturnType<typeof fontLicenceCheck>, "blockers">;
   licenceBlockers: string[];
-  runtimeProfile?: "native" | "cloud";
+  runtimeProfile?: "native";
   releaseAdmission?: ReturnType<typeof releaseAdmission>;
   runtime?: RuntimePackaging["runtime"];
   voiceHost?: RuntimeVoiceHost;
   cloudVoice?: ReturnType<typeof cloudVoiceAdmission>;
   distributable?: boolean;
 };
-const variants = ["standalone", "launcher"] as const;
-const modes = ["debug", "release"] as const;
+const variant: ApkVariant = "launcher";
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const args = process.argv.slice(2);
-// One profile: every build packages local speech and embeddings.
-refuseRemovedProfileFlags(args);
 for (const arg of args)
-  if (!["--test-mocks", "--allow-unpackaged-runtime"].includes(arg) && !/^--signer-api-level=[1-9][0-9]*$/.test(arg) && !/^--cloud-voice-evidence=.+$/.test(arg)) throw new Error(`Unknown option ${arg}. ${USAGE}`);
+  if (!/^--signer-api-level=[1-9][0-9]*$/.test(arg) && !/^--cloud-voice-evidence=.+$/.test(arg)) throw new Error(`Unknown option ${arg}. ${USAGE}`);
 // Artifact signing admission is explicitly scoped to this Android API. Device
 // install/update independently verify the certificate applicable to the actual device.
 const signerApiArgs = args.filter(arg => arg.startsWith("--signer-api-level="));
 if (signerApiArgs.length > 1) throw new Error("Specify --signer-api-level only once");
 const signerApiLevel = signerApiArgs.length ? Number(signerApiArgs[0].split("=")[1]) : undefined;
 if (signerApiLevel !== undefined && !Number.isSafeInteger(signerApiLevel)) throw new Error("Invalid signer API level");
-const testMocks = args.includes("--test-mocks");
 // The one profile's name in records; a build record naming another profile is refused below.
 const runtimeProfile="native";
 // Optional Cloud speech (Cartesia) evidence for these exact release bytes. When supplied it is
-// recorded and must pass; on-device voice is required of every distributable release regardless.
+// recorded as row.cloudVoice. It does not decide `distributable` for the native profile:
+// releaseBlockers judges Cloud voice evidence only for a cloud-profile row, and release.yml
+// admits the evidence itself (scripts/ci/qualified-app-update.py) before publication.
 const cloudEvidenceArgs=args.filter(arg=>arg.startsWith('--cloud-voice-evidence='));
 if(cloudEvidenceArgs.length>1)throw Error('Specify --cloud-voice-evidence only once');
-if(cloudEvidenceArgs.length&&(testMocks||args.includes("--allow-unpackaged-runtime")))throw Error("Cloud voice evidence requires a genuine resident without mocks");
-const allowUnpackaged = args.includes("--allow-unpackaged-runtime");
-const directory = testMocks ? "artifacts/test-mocks" : "artifacts";
+const directory = "artifacts";
 const manifestFile = path.join(directory, "apk-manifest.json");
 // Never leave an older passing manifest beside APKs that failed verification.
 fs.rmSync(manifestFile, { force: true });
@@ -127,35 +125,45 @@ if(cloudEvidenceArgs.length){
   try {
     const bytes=fs.readFileSync(cloudEvidenceArgs[0].slice('--cloud-voice-evidence='.length));
     cloudEvidence=JSON.parse(bytes.toString('utf8'));
-    cloudEvidenceSha256=createHash('sha256').update(bytes).digest('hex');
+    cloudEvidenceSha256=sha256(bytes);
   } catch { throw Error('Cloud voice evidence could not be read as JSON'); }
 }
 
-const identity = JSON.parse(fs.readFileSync("app.config.json", "utf8"));
+const identity = androidIdentity(process.cwd());
 const callbackHost = new URL(CLOUD_DEPLOYMENT.production.web).hostname;
-// The only web VIEW filters any APK may carry: the main manifest's two returns on the production web
-// host (android/app/product.gradle supplies appLinkHost), plus the staging sign-in return in the
-// test-mocks overlay, which is attached to debug variants only.
-// Add a new app link here deliberately.
+// The only web VIEW filters an APK may carry: the main manifest's two returns on the production web
+// host (android/app/product.gradle supplies appLinkHost), and the Alpha Cloud billing return alias,
+// enabled for the current Cloud checkout. Add a new app link here deliberately.
 const mainActivity = `${identity.appId}.MainActivity`;
-const webViewFiltersAllowed = (mode: ApkMode) => [
+const webViewFiltersAllowed = [
   `${mainActivity} https://${callbackHost}/alphaphone/auth/callback`,
   `${mainActivity} https://${callbackHost}/alphaphone/gmail/callback`,
-  ...(testMocks && mode === "debug" ? [`${mainActivity} https://${new URL(CLOUD_DEPLOYMENT.staging.web).hostname}/alphaphone/auth/callback`] : []),
+  // The in-app checkout's return (apps/app/src/runtime/cloud-plans.ts): opening the app is its whole job.
+  `${identity.appId}.AlphaCloudBillingReturn https://${callbackHost}/alphaphone/billing/return`,
 ];
 const buildRecordFile = path.join(directory, "build-config.json");
-if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run npm run android:build first.`);
+if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run bun run android:build first.`);
 const buildRecord: BuildRecord = JSON.parse(fs.readFileSync(buildRecordFile, "utf8"));
+const configuredIdentity = JSON.parse(fs.readFileSync('app.config.json', 'utf8')).appId;
+if (buildRecord.applicationId !== undefined && buildRecord.applicationId !== identity.appId ||
+    identity.appId !== configuredIdentity && buildRecord.applicationId !== identity.appId)
+ throw Error('Build installation identity differs from APK verification');
+const identityProjection = stageAndroidIdentity(process.cwd(), identity, true);
+if (identityProjection) verifyAndroidIdentity(process.cwd());
 const updateChannel=validateUpdateChannel(buildRecord?.updateChannel);
-if(updateChannel.kind==='public'&&updateChannel.manifestUrlSha256!==createHash('sha256').update(identity.updateManifestUrl).digest('hex'))throw Error('Public update channel differs from source configuration');
-if(updateChannel.kind==='private-qa'&&(testMocks||allowUnpackaged))throw Error('Private update QA requires a complete packaged build with test mocks off');
+if(updateChannel.manifestUrlSha256!==sha256(identity.updateManifestUrl))throw Error('Public update channel differs from source configuration');
 if((buildRecord?.runtimeProfile||"native")!==runtimeProfile||buildRecord?.localEmbeddings!==undefined)throw Error("Build record names a removed runtime profile; rebuild (there is one profile now)");
-if (buildRecord && buildRecord.testMocks !== testMocks)
-  throw new Error(`${buildRecordFile} records testMocks=${buildRecord.testMocks}; refusing to verify it as testMocks=${testMocks}`);
+if (buildRecord.testMocks !== false)
+  throw new Error(`${buildRecordFile} records testMocks=${buildRecord.testMocks}; an APK build is always flag-off`);
+
+if (buildRecord.release !== undefined && typeof buildRecord.release !== "boolean")
+  throw new Error(`${buildRecordFile} records release=${buildRecord.release}; expected a boolean`);
+// A debug-only build (upstream consumer `release: false`) has no release APK to verify.
+const modes: ApkMode[] = buildRecord.release === false ? ["debug"] : ["debug", "release"];
 
 const admittedNativePatches = preparePatchedNative();
 
-function releaseFile(dir: string, variant: ApkVariant) {
+function releaseFile(dir: string) {
   const signed = path.join(dir, `${variant}-release.apk`);
   const unsigned = path.join(dir, `${variant}-release-unsigned.apk`);
   const present = [signed, unsigned].filter(file => fs.existsSync(file));
@@ -168,30 +176,30 @@ function releaseFile(dir: string, variant: ApkVariant) {
 function voiceHostAdmission(file: string, names: string[]) {
   return voiceBundleAdmission({ names, read: (entry: string) => execFileSync("unzip", ["-p", file, entry], { maxBuffer: 1536 * 1024 * 1024 }) }, () => readVoiceHost("."));
 }
+const embeddingManifest:EmbeddingManifest=readNativeBuildReceipt('.')?.embedding as EmbeddingManifest ?? JSON.parse(fs.readFileSync('android/embedding-host/qualified-host.json','utf8'));
 
 const results: VerificationRow[] = [];
 const failures: string[] = [];
 const flagLines = new Set<string>();
 const entriesByApk = new Map<string, string[]>();
-for (const variant of variants)
-  for (const mode of modes) {
+for (const mode of modes) {
     const { file, signed } = mode === "release"
-      ? releaseFile(directory, variant)
+      ? releaseFile(directory)
       : { file: path.join(directory, `${variant}-debug.apk`), signed: true };
     if (!fs.existsSync(file)) throw new Error(`Missing ${file}`);
-    const d = validateApk(file, identity, variant === "launcher");
+    const d = validateApk(file, identity);
     if (d.debuggable !== (mode === "debug"))
       throw new Error(`Wrong debug flag: ${file}`);
-    const { facts, problems } = distributionProblems(d, { mode, testMocks });
+    const { facts, problems } = distributionProblems(d, { mode, appId: identity.appId });
     const tree = parseXmlTree(d.xml);
     try{
-      const compiled=apkUpdateChannel(tree);
+      const compiled=apkUpdateChannel(tree,identity);
       if(compiled.kind!==updateChannel.kind||compiled.manifestUrlSha256!==updateChannel.manifestUrlSha256)problems.push('Compiled APK update channel differs from build evidence');
     }catch{problems.push('Compiled APK update channel could not be verified');}
     problems.push(...requiredAppLinkProblems(tree, {
       host: callbackHost, path: '/alphaphone/auth/callback', activity: `${identity.appId}.MainActivity`,
     }));
-    problems.push(...webViewFilterProblems(tree, webViewFiltersAllowed(mode)));
+    problems.push(...webViewFilterProblems(tree, webViewFiltersAllowed));
     // Shared web bundle audit on the exact packaged payload.
     const payload = extractWebPayload(file);
     let flags: ReturnType<typeof readBuildFlags> | undefined;
@@ -199,9 +207,11 @@ for (const variant of variants)
     // the bundled agent/worker packages); the committed notices carry only the umbrella entry.
     let runtimeNotices = false;
     // The font check is recorded in full; only its `blockers` (policy constant) affect distributable.
+    // A check that could not run has no result: it is recorded and printed as blocking under
+    // either policy, and releaseBlockers blocks its item.
     let fontCheck: ReturnType<typeof fontLicenceCheck>;
     try { fontCheck = fontLicenceCheck(payload.public); }
-    catch (error) { const items = [`font licence check failed: ${message(error)}`]; fontCheck = { ...fontLicenceCheck(path.join(payload.root, "absent")), status: "unresolved", items, blockers: items }; }
+    catch (error) { const items = [fontCheckFailedItem(message(error))]; fontCheck = { ...fontLicenceCheck(path.join(payload.root, "absent")), status: "unresolved", blocksDistribution: true, items, blockers: items }; }
     const licenceBlockers = fontCheck.blockers;
     // Flags are a record of the packaged notices. They are never a blocker.
     let licenceFlags: ReturnType<typeof licenceFlagRecords> = [];
@@ -214,10 +224,10 @@ for (const variant of variants)
     } catch { runtimeNotices = false; }
     try {
       flags = readBuildFlags(payload.public);
-      if(flags.runtimeProfile!==undefined)problems.push("Packaged web bundle names a removed runtime profile");
-      if (flags.testMocks !== testMocks)
-        problems.push(`Packaged web bundle has testMocks=${flags.testMocks}; expected ${testMocks}`);
-      auditBundle(payload.public, { testMocks });
+      if (Object.hasOwn(flags, "runtimeProfile")) problems.push("Packaged web bundle names a removed runtime profile");
+      if (flags.testMocks !== false)
+        problems.push(`Packaged web bundle has testMocks=${flags.testMocks}; an APK packages only a flag-off bundle`);
+      auditBundle(payload.public);
       // The asset merger unpacks *.gz; the scan engine needs its model under the published name.
       problems.push(...packagedGzipProblems(payload.public));
     } catch (error) {
@@ -229,6 +239,14 @@ for (const variant of variants)
     catch (error) { problems.push(`Native patch provenance: ${message(error)}`); }
     try { verifyOwnerRouteTable(file); }
     catch (error) { problems.push(`Owner route table: ${message(error)}`); }
+    try {
+      if (identityProjection) {
+        const expected = fs.readFileSync(path.join(identityProjection.root, 'identity.json'));
+        if (!execFileSync('unzip', ['-p', file, 'assets/android-identity.json']).equals(expected))
+          throw Error('Packaged Android identity differs from the authenticated source view');
+      } else if (d.names.includes('assets/android-identity.json')) throw Error('Canonical APK contains an unexpected installation identity view');
+    } catch (error) { problems.push(`Android installation identity: ${message(error)}`); }
+    problems.push(...embeddingApkProblems({names:d.names,read:entry=>execFileSync('unzip',['-p',file,entry],{maxBuffer:256*1024*1024})},embeddingManifest));
     let signerSha256: string | null = null;
     if (signed) {
       try { signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
@@ -260,7 +278,7 @@ for (const variant of variants)
 if (failures.length)
   throw new Error(`APK distribution verification failed:\n${failures.join("\n")}`);
 
-// One product version across the four APKs, matching an explicit override.
+// One product version across the debug and release APKs, matching an explicit override.
 const versions = new Set(results.map(row => `${row.versionCode}/${row.versionName}`));
 if (versions.size !== 1) throw new Error(`APK versions differ: ${[...versions].join(", ")}`);
 const { versionCode, versionName } = results[0];
@@ -269,40 +287,25 @@ if (process.env.ELIZAOS_VERSION_CODE && String(versionCode) !== process.env.ELIZ
 if (process.env.ELIZAOS_VERSION_NAME && versionName !== process.env.ELIZAOS_VERSION_NAME)
   throw new Error(`versionName ${versionName} does not match ELIZAOS_VERSION_NAME=${process.env.ELIZAOS_VERSION_NAME}`);
 
-// Standalone and launcher must share a signer per build type.
-for (const mode of modes) {
-  const rows = results.filter(row => row.mode === mode);
-  if (rows.some(row => row.signed) && new Set(rows.map(row => row.signerSha256)).size !== 1)
-    throw new Error(`Standalone and launcher ${mode} APKs do not share one signer: ${rows.map(row => `${row.file}=${row.signerSha256 ?? "unsigned"}`).join(", ")}`);
-}
 const release = results.filter(row => row.mode === "release");
-if (release.some(row => row.signed) && !release.every(row => row.signed))
-  throw new Error("Only one release APK is signed");
 
 // A release is distributable only when signed by the committed release signer with
 // a versionCode above the last recorded release. A mismatch fails verification.
 const releaseSigner = readReleaseSigner();
 for (const row of release) {
   row.runtimeProfile = runtimeProfile;
-  row.releaseAdmission = releaseAdmission(row, releaseSigner, { testMocks });
+  row.releaseAdmission = releaseAdmission(row, releaseSigner);
   if (row.releaseAdmission.failures.length)
     throw new Error(`Release signing admission failed for ${row.file}: ${row.releaseAdmission.failures.join("; ")}`);
 }
 
-// Debug keeps the original report-only semantics; releases need the runtime.
-const runtimeArgs = [
-  ...(allowUnpackaged || testMocks ? ["--allow-unpackaged-runtime"] : []),
-  ...release.flatMap(row => ["--release", row.file]),
-  ...results.filter(row => row.mode === "debug").map(row => row.file),
-];
+// Every APK packages the authenticated resident runtime.
 let runtimeOutput: string;
 try {
-  runtimeOutput = execFileSync("python3", ["scripts/verify-packaged-runtime.py", ...runtimeArgs], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  runtimeOutput = execFileSync("python3", ["scripts/verify-packaged-runtime.py", ...release.flatMap(row => ["--release", row.file]), ...results.filter(row => row.mode === "debug").map(row => row.file)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 } catch (error) {
   const stdout = error instanceof Error && "stdout" in error ? error.stdout : "";
   const stderr = error instanceof Error && "stderr" in error ? error.stderr : "";
-  if (error instanceof Error && "status" in error && error.status === 3)
-    throw new Error(`Release APKs are not distributable: no packaged resident runtime (runtimePackaging NOT_PACKAGED).\n${stderr}`);
   throw new Error(`Packaged runtime verification failed:\n${stdout ?? ""}${stderr ?? ""}`);
 }
 const runtimePackaging: RuntimePackaging[] = JSON.parse(runtimeOutput);
@@ -320,24 +323,22 @@ function checkedVoiceHost(file: string) {
     throw new Error(`On-device voice in ${file} is not admitted:\n  - ${voiceHost.differences.join("\n  - ")}`);
   return voiceHost;
 }
+const blockersByApk = new Map<string, string[]>();
 for (const row of release) {
   if (!row.releaseAdmission) throw new Error(`Missing release signing admission for ${row.file}`);
-  const runtime = checkedRuntime(row.file);
-  row.runtime = runtime.runtime;
-  // Test-mocks builds and releases without the resident runtime are never
-  // distributable. Signing is recorded separately (row.signed).
-  // Without on-device voice, local speech reports unavailable (never a network fallback). A packaged
+  row.runtime = checkedRuntime(row.file).runtime;
+  // Signing is recorded separately (row.signed). The packaged voice
   // bundle must match android/voice-host/qualified-voice-host.json byte for byte.
-  // A supplied Cloud speech receipt must also pass for these exact APK bytes.
+  // A supplied Cloud speech receipt is recorded for these exact APK bytes.
   row.voiceHost = checkedVoiceHost(row.file);
   if (row.voiceHost.differences.length)
     throw new Error(`On-device voice in ${row.file} is not admitted:\n  - ${row.voiceHost.differences.join("\n  - ")}`);
-  if(cloudEvidence)row.cloudVoice=cloudVoiceAdmission(row.sha256,cloudEvidence,cloudEvidenceSha256);
-  // releaseDistributable requires packaged on-device voice with ASR (voiceHost.packaged and .asr).
-  const releaseReady = releaseDistributable({testMocks, signed: row.signed, releaseAdmission: row.releaseAdmission,
-      runtime, runtimeNotices: row.runtimeNotices, voiceHost: row.voiceHost, licenceBlockers: row.licenceBlockers})
-    && (!cloudEvidence || cloudVoiceBlockers(row,'cartesia').length===0);
-  row.distributable = releaseReady && updateChannel.kind === 'public';
+  if (cloudEvidenceSha256 !== undefined) row.cloudVoice = cloudVoiceAdmission(row.sha256, cloudEvidence, cloudEvidenceSha256);
+  // The one admission decision (scripts/release-blockers.ts). The row is judged as the verdict
+  // being recorded, so the shared "not recorded as distributable" item cannot refer to itself.
+  const blockers = releaseBlockers({...row, distributable: true});
+  blockersByApk.set(row.file, blockers);
+  row.distributable = blockers.length === 0;
 }
 for (const row of results.filter(row => row.mode === "debug")) {
   row.runtime = checkedRuntime(row.file).runtime;
@@ -351,7 +352,7 @@ function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
     signerSha256?: string | null; permissionProblem?: string;
     packageName?: string | null; requested?: string[];
     voiceBundle?: {packaged: boolean; abis?: ReturnType<typeof checkListenerSpeechBundle>; problem?: string};
-  } = { file, mode, signed, sha256: createHash("sha256").update(fs.readFileSync(file)).digest("hex") };
+  } = { file, mode, signed, sha256: sha256File(file) };
   if (signed) {
     try { facts.signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
     catch (error) { facts.permissionProblem = `apksigner verify failed: ${message(error)}`; }
@@ -395,17 +396,12 @@ if (listenerFailures.length)
   throw new Error(`Listener APK verification failed:\n${listenerFailures.map(row => `${row.file}:\n  - ${row.problems.join("\n  - ")}`).join("\n")}`);
 const listener = { apks: listenerRows };
 
-const mappings: Partial<Record<ApkVariant, string | null>> = {};
-for (const variant of variants) {
-  const mapping = path.join(directory, "mapping", `${variant}-release-mapping.txt`);
-  mappings[variant] = fs.existsSync(mapping) ? mapping : null;
-}
-// Instrumentation APKs built with these APKs (scripts/android-instrumentation.ts binds to them).
+const mappingFile = path.join(directory, "mapping", `${variant}-release-mapping.txt`);
+const mappings = { [variant]: fs.existsSync(mappingFile) ? mappingFile : null };
+// The instrumentation APK built with these APKs (scripts/android-instrumentation.ts binds to it).
 const instrumentation: Partial<Record<ApkVariant, {file: string; sha256: string}>> = {};
-for (const variant of variants) {
-  const file = testMocks ? path.join(directory, `${variant}-androidTest.apk`) : path.join(directory, "instrumentation", `${variant}-androidTest.apk`);
-  if (fs.existsSync(file)) instrumentation[variant] = { file, sha256: createHash("sha256").update(fs.readFileSync(file)).digest("hex") };
-}
+const instrumentationFile = path.join(directory, "instrumentation", `${variant}-androidTest.apk`);
+if (fs.existsSync(instrumentationFile)) instrumentation[variant] = { file: instrumentationFile, sha256: sha256File(instrumentationFile) };
 let apksignerVersion: string | null = null;
 try { apksignerVersion = execFileSync(tool("apksigner"), ["--version"], { encoding: "utf8", env: androidEnv() }).trim(); }
 catch { /* recorded as unknown */ }
@@ -416,15 +412,18 @@ fs.writeFileSync(
     {
       createdAt: new Date().toISOString(),
       evidence: "apk-build",
-      testMocks,
-      demoEntryPoints: testMocks,
-      mapsProvider: buildRecord?.mapsProvider ?? (testMocks && process.env.VITE_MAPS_BASE_URL ? "regional-gateway" : "cloud"),
-      allowUnpackagedRuntime: allowUnpackaged,
+      // Constant fields that provisioning, qualification and release admission compare.
+      testMocks: false,
+      demoEntryPoints: false,
+      allowUnpackagedRuntime: false,
+      mapsProvider: "cloud",
       runtimeProfile,
+      applicationId: identity.appId,
       updateChannel,
       version: { code: versionCode, name: versionName },
       signing: {
-        release: release.every(row => row.signed) ? { signed: true, signerSha256: release[0].signerSha256 } : { signed: false },
+        // null for a debug-only build, which assembled no release APK.
+        release: release.length === 0 ? null : release.every(row => row.signed) ? { signed: true, signerSha256: release[0].signerSha256 } : { signed: false },
         debugSignerSha256: results.find(row => row.mode === "debug")?.signerSha256 ?? null,
         apksigner: apksignerVersion,
         apiLevel: signerApiLevel ?? null,
@@ -433,7 +432,7 @@ fs.writeFileSync(
       },
       mappings,
       instrumentation,
-      upstream: JSON.parse(fs.readFileSync("upstream.lock.json", "utf8")),
+      upstream: readUpstreamPin(process.cwd()),
       nativePatches: nativePatchReceipt(admittedNativePatches),
       results,
       runtimePackaging,
@@ -446,7 +445,8 @@ fs.writeFileSync(
 console.log(JSON.stringify(results, null, 2));
 const undistributable = release.filter(row => !row.distributable);
 if (undistributable.length)
-  console.warn(`Not distributable: ${undistributable.map(row => `${row.file} (${[row.runtime !== "PACKAGED" && "no packaged runtime", testMocks && "test-mocks build", updateChannel.kind === "private-qa" && "private QA update channel", !row.runtimeNotices && "notices lack the packaged runtime (run node scripts/generate-licenses.ts --packaged-runtime after staging)", !row.voiceHost?.packaged && "no on-device voice packaged", row.voiceHost?.packaged && !row.voiceHost.asr && "on-device voice has no ASR", ...(cloudEvidence ? cloudVoiceBlockers(row, "cartesia") : []), ...(row.releaseAdmission?.blockers ?? []), ...row.licenceBlockers].filter(Boolean).join(", ")})`).join("; ")}`);
+  console.warn(`Not distributable: ${undistributable.map(row => `${row.file} (${(blockersByApk.get(row.file) ?? []).map(item =>
+    item === "notices lack the packaged runtime" ? `${item} (run bun scripts/generate-licenses.ts --packaged-runtime after staging)` : item).join(", ")})`).join("; ")}`);
 // Licence flags are warnings: recorded per APK above, printed once here, never a failure.
 for (const line of flagLines) console.warn(line);
 const fontItems = new Map(release.flatMap(row => [...row.fontLicenceCheck.items, ...row.fontLicenceCheck.resolved].map(item => [item, row.fontLicenceCheck.blocksDistribution] as const)));

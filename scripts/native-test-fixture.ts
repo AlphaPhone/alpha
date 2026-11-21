@@ -2,9 +2,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import {sha256File} from "./sha256.ts";
 import { androidEnv } from "./toolchain.ts";
 import { verifyPinnedUpstream } from "./pinned-upstream-source.ts";
+import { isAndroidAbi } from "./android-abis.ts";
 
 type Instrumentation = typeof import("../vendor/eliza/packages/app/scripts/lib/instrumentation-result.mjs");
 type DeviceLease = typeof import("../vendor/eliza/packages/app/scripts/lib/device-lease.ts");
@@ -96,8 +97,8 @@ export async function runNativeFixture({
 		"../vendor/eliza/packages/app/scripts/lib/isolated-android-user-test.mjs"
 	);
 	const serial = process.env.ANDROID_SERIAL,
-		avd = process.env.ALPHA_NATIVE_TEST_AVD,
-		abi = process.env.ALPHA_NATIVE_TEST_ABI;
+		avd = process.env.ALPHA_TEST_AVD,
+		abi = process.env.ALPHA_TEST_ABI;
 	assert.ok(serial && /^emulator-\d+$/.test(serial), "Explicit emulator serial required");
 	assert.match(
 		avd ?? "",
@@ -105,7 +106,7 @@ export async function runNativeFixture({
 		"Explicit owned AVD name required",
 	);
 	assert.ok(
-		abi === "x86_64" || abi === "arm64-v8a",
+		isAndroidAbi(abi),
 		"Explicit emulator ABI required",
 	);
 	assert.ok(appApk && testApk, "Matching archived app/test APK pair required");
@@ -114,20 +115,18 @@ export async function runNativeFixture({
 	const apk = path.resolve(appApk),
 		test = path.resolve(testApk),
 		directory = path.resolve(output);
-	const hash = (file: string) =>
-		createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 	const manifest: Record<string, string> = JSON.parse(
 		fs.readFileSync(path.join(path.dirname(apk), "apk-manifest.json"), "utf8"),
 	);
 	const variant = path
 		.basename(apk)
-		.match(/^(standalone|launcher)-debug\.apk$/)?.[1];
+		.match(/^(launcher)-debug\.apk$/)?.[1];
 	assert.ok(
 		variant &&
 			path.basename(test) === variant + "-androidTest.apk" &&
 			path.dirname(apk) === path.dirname(test) &&
-			manifest[path.basename(apk)] === hash(apk) &&
-			manifest[path.basename(test)] === hash(test),
+			manifest[path.basename(apk)] === sha256File(apk) &&
+			manifest[path.basename(test)] === sha256File(test),
 		"Exact matching archived distribution required",
 	);
 	assert.ok(!fs.existsSync(directory), "Use a new evidence directory");

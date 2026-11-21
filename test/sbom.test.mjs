@@ -1,4 +1,5 @@
-// The release SBOM is built offline from committed pins and must be reproducible.
+import {fixtureTest} from './support/fixture-build-context.mjs';
+// The release SBOM is built offline from source pins and admitted native outputs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,15 +12,18 @@ import {LICENCE_NOT_RECORDED, buildSbom, integrityHash, renderSbom} from '../scr
 import {METADATA as GRADLE_METADATA, coordinateChecksum, parseVerificationMetadata} from '../scripts/gradle-verification.ts';
 import {packagedRuntimePresent} from '../scripts/generate-licenses.ts';
 import {sbomArgs} from '../scripts/build-android.ts';
+import {readBunLock} from '../scripts/bun-lock.ts';
 import {FLAGS} from '../scripts/licence-policy.ts';
 import {stageAgentBundleDependencies} from '../scripts/agent-bundle-dependencies.ts';
 import {execFileSync} from 'node:child_process';
 import {embeddingProducerInputPaths, nativeInputPaths, nativeBinding, nativeInputs, nativeGenerated} from '../scripts/embedding-native-contract.ts';
 import {verifyEmbeddingInputs} from '../scripts/stage-embedding-host.ts';
+import {readNativeBuildReceipt} from '../scripts/native-build-inputs.ts';
 
 const sbom = buildSbom(ROOT);
 const read = rel => JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
-const lock = read('package-lock.json');
+const native = readNativeBuildReceipt(ROOT);
+const lock = readBunLock(ROOT);
 const byRef = new Map(sbom.components.map(component => [component['bom-ref'], component]));
 const prop = (component, name) => component.properties.find(item => item.name === `alphaphone:${name}`)?.value;
 
@@ -45,7 +49,7 @@ test('every shipped npm package is listed with its lockfile integrity, and no de
   const npm = sbom.components.filter(component => component.purl?.startsWith('pkg:npm/'));
   assert.equal(npm.length, shipped.length);
   for (const pkg of shipped) {
-    const component = npm.find(item => prop(item, 'source') === `package-lock.json ${pkg.key}`);
+    const component = npm.find(item => prop(item, 'source') === `bun.lock ${pkg.key}`);
     assert.ok(component, pkg.key);
     assert.equal(component.version, pkg.version);
     assert.deepEqual(component.hashes, [integrityHash(lock.packages[pkg.key].integrity)]);
@@ -54,7 +58,7 @@ test('every shipped npm package is listed with its lockfile integrity, and no de
   }
   for (const name of Object.keys(read('package.json').dependencies)) assert.ok(npm.some(component => component.name === name), name);
   for (const name of ['vite', 'typescript', '@capacitor/cli', 'source-map-js', 'uuid']) assert.ok(!npm.some(component => component.name === name), `${name} is build tooling`);
-  assert.equal(prop(sbom.metadata, 'package-lock-sha256'), createHash('sha256').update(fs.readFileSync(path.join(ROOT, 'package-lock.json'))).digest('hex'));
+  assert.equal(prop(sbom.metadata, 'bun-lock-sha256'), createHash('sha256').update(fs.readFileSync(path.join(ROOT, 'bun.lock'))).digest('hex'));
 });
 
 test('fonts and OCR cores carry the hashes of the pinned bytes, and no web speech files ship', () => {
@@ -95,7 +99,7 @@ test('Android coordinates, the voice host and the upstream pin match their recor
   const banned = new RegExp(['on' + 'nx', 'sher' + 'pa', 'k2' + 'fsa', 'ort-' + 'wasm'].join('|'), 'i');
   assert.deepEqual(sbom.components.filter(component => banned.test(JSON.stringify(component))).map(component => component['bom-ref']), []);
   if (fs.existsSync(path.join(ROOT, VOICE_HOST))) {
-    const record = read(VOICE_HOST);
+    const record = native?.voice ?? read(VOICE_HOST);
     for (const abi of record.abis) for (const library of abi.libraries) assert.equal(byRef.get(`voice-host:${abi.abi}/${library.name}`).hashes[0].content, library.sha256);
     // Every recorded bundle file (Paradee, misaki, eSpeak NG data, the ASR slot, VAD, notices) is a component.
     for (const model of record.models) assert.equal(byRef.get(`voice-model:${model.path}`).hashes[0].content, model.sha256, model.path);
@@ -106,15 +110,17 @@ test('Android coordinates, the voice host and the upstream pin match their recor
   assert.match(prop(sbom.metadata, 'evidence'), /^source-pin inventory; not a scan of the contents of built APK/);
 });
 
-test('the embedding host is listed from its reviewed pins, without claiming it is staged', () => {
-  const host = read('android/embedding-host/qualified-host.json');
-  for (const library of host.libraries) {
-    const component = byRef.get(`embedding-host:${host.abi}/${library.name}`);
+test('the embedding host is listed from its admitted source record', () => {
+  const host = native?.embedding ?? read('android/embedding-host/qualified-host.json');
+  const sourceRecord = native ? '.eliza/native-inputs/receipt.json' : 'android/embedding-host/qualified-host.json';
+  const scope = native ? 'apk (only one that packages the resident runtime)'
+    : 'legacy qualification record; incompatible with current Paradee engine; not current packaged bytes';
+  for (const abi of [host, ...(host.additionalAbis ?? [])]) for (const library of abi.libraries) {
+    const component = byRef.get(`embedding-host:${abi.abi}/${library.name}`);
     assert.deepEqual(component.hashes, [{alg: 'SHA-256', content: library.sha256}]);
     assert.equal(prop(component, 'bytes'), String(library.bytes));
-    assert.ok(prop(component, 'source').includes(`engine ${host.forkPin}`));
-    // The foundation job's unpackaged APKs contain no embedding host; the pin must not read as if they did.
-    assert.match(prop(component, 'ships-in'), /legacy qualification record; incompatible with current Paradee engine/);
+    assert.equal(prop(component, 'source'), `${sourceRecord} (elizaOS ${host.pin}, engine ${host.forkPin})`);
+    assert.equal(prop(component, 'ships-in'), scope);
   }
   assert.equal(byRef.get('embedding-model:bge-small-en-v1.5-f16.gguf').hashes[0].content, host.model.sha256);
   let current = false;
@@ -148,7 +154,7 @@ test('release-candidate options list what was built and never upgrade it', t => 
   assert.throws(() => buildSbom(ROOT, {apks: dir}), /standalone-release-unsigned\.apk is missing or is not the APK verify-apks recorded/);
   assert.throws(() => buildSbom(ROOT, {apks: path.join(dir, 'none')}), /apk-manifest\.json is missing/);
   // The staged runtime is read, never assumed: without a staged payload the option fails by name.
-  if (!packagedRuntimePresent(ROOT)) assert.throws(() => buildSbom(ROOT, {packagedRuntime: true}), /--packaged-runtime: no resident runtime is staged\. Run: npm run agent:build-workflow-worker && npm run agent:stage-android/);
+  if (!packagedRuntimePresent(ROOT)) assert.throws(() => buildSbom(ROOT, {packagedRuntime: true}), /--packaged-runtime: no resident runtime is staged\. Run: bun run agent:build-workflow-worker && bun run agent:stage-android/);
   else {
     const staged = buildSbom(ROOT, {packagedRuntime: true});
     assert.ok(staged.components.some(component => component['bom-ref'] === 'resident-runtime:android/app/src/main/assets/agent/agent-bundle.js'));
@@ -160,10 +166,9 @@ test('release-candidate options list what was built and never upgrade it', t => 
   fs.mkdirSync(path.join(dir, 'android/app/src/main/assets/agent'), {recursive: true});
   fs.writeFileSync(path.join(dir, 'android/app/src/main/assets/agent/agent-bundle.js'), '');
   assert.deepEqual(sbomArgs('artifacts', dir).slice(-1), ['--packaged-runtime']);
-  assert.match(fs.readFileSync(path.join(ROOT, 'scripts/build-android.ts'), 'utf8'), /else run\("node", \["scripts\/generate-sbom\.ts", \.\.\.sbomArgs\(outDir, root\)\]\);/);
 });
 
-test('staged native candidates retain their actual hashes when the embedding source record is superseded', t => {
+fixtureTest('staged native candidates retain their actual hashes when the embedding source record is superseded', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-sbom-source-record-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const write = (file, bytes) => {
@@ -172,13 +177,15 @@ test('staged native candidates retain their actual hashes when the embedding sou
     fs.writeFileSync(target, bytes);
   };
   // Reuse read-only source dependencies while keeping all staged inputs isolated.
-  for (const file of ['package.json', 'package-lock.json', 'upstream.lock.json', 'app.config.json',
-    'licenses', 'node_modules', 'vendor', '.eliza', 'apps/app/public', 'android/consumer-host.json',
+  for (const file of ['package.json', 'bun.lock', 'upstream.lock.json', 'app.config.json',
+    'licenses', 'node_modules', 'vendor', 'apps/app/public', 'android/consumer-host.json',
     'android/local-speech', GRADLE_METADATA]) {
     const target = path.join(root, file);
     fs.mkdirSync(path.dirname(target), {recursive: true});
     fs.symlinkSync(path.join(ROOT, file), target);
   }
+  // This test deliberately exercises a historical record, without importing a live generated receipt.
+  fs.mkdirSync(path.join(root, '.eliza'), {recursive: true});
   const host = read('android/embedding-host/qualified-host.json');
   host.producerInputs[0].sha256 = '0'.repeat(64);
   write('android/embedding-host/qualified-host.json', JSON.stringify(host));

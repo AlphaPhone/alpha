@@ -8,7 +8,7 @@ import {Busy,StatusDot} from './runtime/status-ui';
 import {browserStartupPermission} from './startup-browser-permissions';
 import {createStartupPermissionFlow, startupFilesAccess, lateReadyNotice, STARTUP_PERMISSIONS_REOPEN, startupPermissionKeys, nativeStartupPermissionKeys, type NativeStartupPermissionKey as PermissionKey, type StartupPermissionState} from './startup-permission-flow';
 import {readStartupPermissionProgress, writeStartupPermissionProgress} from './startup-permission-progress';
-import {locationAccess, permissionStateAccess, photoLibraryAccess, showWalkthroughCompletion} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+import {locationAccess, photoLibraryAccess, showWalkthroughCompletion} from './ui/components/permissions/permission-walkthrough.ts';
 import type {LocationBridge} from '../../../.eliza/client-features/plugins/plugin-maps/src/client/native-location.ts';
 import type {AlphaCalendarPlugin} from './native/alpha-calendar';
 import type {AlphaDevicePlugin} from './native/alpha-device';
@@ -17,6 +17,7 @@ import type {AlphaNotificationsPlugin} from './native/alpha-notifications';
 import type {AlphaPhotoLibraryPlugin} from './native/alpha-photo-library';
 import type {AlphaVoiceCloudPlugin} from './native/alpha-voice-cloud';
 import type {DailyAppsPlugin} from './native/daily-apps';
+import type {DeviceAppsPlugin} from './native/device-apps';
 import './startup-permissions.css';
 
 const notifications = registerPlugin<Pick<AlphaNotificationsPlugin, 'status'>>('AlphaNotifications');
@@ -26,6 +27,7 @@ const location = registerPlugin<Pick<LocationBridge, 'checkPermissions' | 'reque
 const photos = registerPlugin<Pick<AlphaPhotoLibraryPlugin, 'scope' | 'requestAccess'>>('AlphaPhotoLibrary');
 const calendar = registerPlugin<Pick<AlphaCalendarPlugin, 'checkPermissions' | 'requestAccess'>>('AlphaCalendar');
 const device = registerPlugin<Pick<AlphaDevicePlugin, 'openSettings'>>('AlphaDevice');
+const deviceApps = registerPlugin<Pick<DeviceAppsPlugin, 'platformCapabilities'>>('DeviceApps');
 const files = registerPlugin<Pick<AlphaFilesPlugin, 'storageState' | 'storageRequestAccess'>>('AlphaFiles');
 const details = {
   notifications: {title: 'Notifications', icon: 'bell', reason: 'Reminders and updates'},
@@ -44,6 +46,10 @@ function savedProgress(native = false): Progress | null {
     return {step: durable.step, choices: durable.choices ?? Array(durable.step).fill('continued')};
   } catch { return {step: 0, choices: []}; }
 }
+function permissionAccess(value: unknown) {
+  if (typeof value !== 'string' || !['granted', 'denied', 'prompt', 'prompt-with-rationale'].includes(value)) throw Error('Permission status unavailable');
+  return {granted: value === 'granted', enabled: value === 'granted', requestable: value !== 'denied'};
+}
 /** UI progress is never permission authority. Every grant is read back from the platform. */
 export function StartupPermissions({active:enabled = true}: {active?: boolean} = {}) {
   const connection = useSyncExternalStore(connectionController.subscribe,connectionController.getSnapshot);
@@ -54,15 +60,16 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const [silent,setSilent] = useState(false);
   const locationDescription=useRef(''),photoDescription=useRef('');
   const native = Capacitor.getPlatform() === 'android';
+  const [imageDefaults, setImageDefaults] = useState<boolean | undefined>(native ? undefined : false);
   const keys: readonly PermissionKey[] = native ? nativeStartupPermissionKeys : startupPermissionKeys;
   const [flows] = useState(() => {
     const nativeBridges = {
       notifications: {status: async () => {const status = await notifications.status(); return {granted: status.permissionGranted, enabled: status.appEnabled};}, request: () => permissions.requestPermissions({permissions: ['notifications']}), openSettings: () => device.openSettings({page: 'notifications'})},
-      microphone: {status: async () => permissionStateAccess((await microphone.checkPermissions()).microphone), request: () => microphone.requestPermissions({permissions: ['microphone']}), openSettings: () => device.openSettings({page: 'privacy'})},
+      microphone: {status: async () => permissionAccess((await microphone.checkPermissions()).microphone), request: () => microphone.requestPermissions({permissions: ['microphone']}), openSettings: () => device.openSettings({page: 'privacy'})},
       // Shared ElizaCamera requests all aliases. The product DailyApps alias requests CAMERA only.
-      camera: {status: async () => permissionStateAccess((await permissions.checkPermissions()).camera), request: () => permissions.requestPermissions({permissions: ['camera']}), openSettings: () => device.openSettings({page: 'privacy'})},
+      camera: {status: async () => permissionAccess((await permissions.checkPermissions()).camera), request: () => permissions.requestPermissions({permissions: ['camera']}), openSettings: () => device.openSettings({page: 'privacy'})},
       photos: {status: async () => {const access=photoLibraryAccess(await photos.scope());photoDescription.current=access.description;return access;},request: () => photos.requestAccess(),openSettings: () => device.openSettings({page:'privacy'})},
-      calendar: {status: async () => permissionStateAccess((await calendar.checkPermissions()).calendar), request: () => calendar.requestAccess(), openSettings: () => device.openSettings({page: 'privacy'})},
+      calendar: {status: async () => permissionAccess((await calendar.checkPermissions()).calendar), request: () => calendar.requestAccess(), openSettings: () => device.openSettings({page: 'privacy'})},
       // Android's "All files access" page (API 29: the storage permission request, or the app's
       // settings page) returns to Alpha; the flow reads access back then.
       files: {status: async () => startupFilesAccess(await files.storageState()), request: () => files.storageRequestAccess(), openSettings: () => files.storageRequestAccess({settings: true})},
@@ -88,15 +95,41 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   const previousEnabled = useRef(enabled);
   const key = target ?? keys[progress?.step ?? 0];
   const state = states[key];
-  const visible = (active || ready) && (enabled || reopened) && !connection.open && !googleOpen;
+  // Known access is a choice, not a timed gate. Keep the deadline only for stalled reads/prompts.
+  const skipAvailable = canSkip || (!busy && state !== 'checking');
+  const shown = (active || ready) && (enabled || reopened) && !connection.open && !googleOpen;
+  // The image grants startup access at first boot. Read Android's current grants and
+  // pass the allowed steps. Missing access, stalled checks and Settings reviews still show the panel.
+  const automaticImageSetup = imageDefaults === true && !reopened && !target && !review;
+  const hideAccessPanel = automaticImageSetup && active && !ready && (state === 'ready' || (state === 'checking' && !canSkip));
+  const waitingForImage = imageDefaults === undefined && active && !reopened;
+  const visible = shown && !hideAccessPanel && !waitingForImage;
+  useEffect(() => {
+    if (!native) return;
+    let current = true;
+    const finish = (image: boolean) => {
+      if (!current) return;
+      current = false;
+      clearTimeout(timeout);
+      setImageDefaults(image);
+    };
+    const timeout = setTimeout(() => finish(false), 1500);
+    void Promise.resolve().then(() => deviceApps.platformCapabilities())
+      .then(value => finish(value?.startupPermissionDefaults === true), () => finish(false));
+    return () => { current = false; clearTimeout(timeout); };
+  }, [native]);
+  const revokeNotice = connection.previousSignInUnconfirmed && connection.message ? 'Check sign-in' : '';
+  const accountAttention = !!(connection.error || revokeNotice || connection.residentPlanNotice === 'needs-plan' || connection.residentInference === 'unavailable');
   const writeProgress = (value: Progress | null, choices = value?.choices ?? []) => {
+    let saved = true;
     if (!reviewRef.current) try {
       writeStartupPermissionProgress(localStorage, {version: native ? 4 : 1, status: value ? 'pending' : 'completed', step: value?.step ?? keys.length, ...(choices.includes('skipped') ? {choices} : {})}, native);
       setProgressError(false);
-    } catch { setProgressError(true); }
+    } catch { saved = false; setProgressError(true); }
     // Browser storage may be blocked. Keep the current session usable without
     // claiming durable storage or treating a reviewed step as an OS grant.
     progressRef.current = value; setProgress(value);
+    return saved;
   };
 
   const invalidatePending = () => {
@@ -190,10 +223,10 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
 
   useEffect(() => {
     setCanSkip(false);setCheckNotice('');
-    if (!visible || ready) return;
+    if (!shown || ready) return;
     const timer = setTimeout(() => setCanSkip(true), 20_000);
     return () => clearTimeout(timer);
-  }, [key, visible, ready]);
+  }, [key, shown, ready]);
 
   useEffect(() => {if (visible) dialog.current?.querySelector<HTMLHeadingElement>('h2')?.focus({preventScroll: true});}, [key, visible, ready]);
 
@@ -201,11 +234,25 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     if (!currentInteraction()) return;
     if (target) {setActive(false); return;}
     const current = progress ?? {step: 0, choices: []};
-    if (current.step + 1 < keys.length) writeProgress({step: current.step + 1, choices: [...current.choices, choice]});
-    else {finalChoices.current=[...current.choices, choice];writeProgress(null, finalChoices.current);setActive(false);setReady(true);}
+    const choices = [...current.choices, choice];
+    if (current.step + 1 < keys.length) {
+      writeProgress({step: current.step + 1, choices});
+      return;
+    }
+    finalChoices.current = choices;
+    const saved = writeProgress(null, choices);
+    if (automaticImageSetup && saved && !accountAttention && choices.every(value => value === 'continued')) {
+      // Keep the existing late sign-in error path while the resident finishes connecting.
+      setSilent(connection.busy);
+      finish(false);
+      return;
+    }
+    setActive(false);
+    setReady(true);
   }
+  useEffect(() => {if (shown && hideAccessPanel && state === 'ready' && !busy) advance('continued');}, [shown, hideAccessPanel, state, busy, key]);
   function skip() {
-    if (!canSkip || !currentInteraction()) return;
+    if (!skipAvailable || !currentInteraction()) return;
     ++sequence.current;flows[key].cancel();actionPending.current=false;setBusy(false);
     advance('skipped');
   }
@@ -234,12 +281,12 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     } catch {if (contextCurrent(ticket, credentialId)) setStates(previous => ({...previous, [key]: 'unavailable'}));}
     finally {if (id === action.current) {actionPending.current = false; if (alive.current) setBusy(false);}}
   }
-  function finish() {
+  function finish(retryProgress = progressError) {
     if(actionPending.current || !currentInteraction())return;
     // Completing the walkthrough records choices, never permission authority.
     // Each feature still checks current OS/browser access when it is used.
     // A failed completion write is retried here; the session continues either way.
-    if(progressError&&!reviewRef.current)writeProgress(null,finalChoices.current);
+    if(retryProgress&&!reviewRef.current)writeProgress(null,finalChoices.current);
     setActive(false);setReady(false);
     if(!reopened)window.dispatchEvent(new Event('launcher-home'));
   }
@@ -247,7 +294,6 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   if(ready){
     // A missing plan is known at admission. Setup does not wait for the agent to start, so this notice does not either.
     const aiNotice=connection.residentPlanNotice==='needs-plan'?'No plan':connection.residentInference==='unknown'?'AI · checking':connection.residentInference==='unavailable'?'AI off':'';
-    const revokeNotice=connection.previousSignInUnconfirmed&&connection.message?'Check sign-in':'';
     const attention=!!(aiNotice||connection.error||revokeNotice||progressError);
     const title='All set';
     return <dialog ref={dialog} className="alpha-startup-permissions" aria-label={title} data-attention={attention||undefined} onCancel={event=>{event.preventDefault();if(reviewRef.current)close();else finish();}}><div className="alpha-permission-content">
@@ -259,7 +305,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
     {connection.accountCreated&&<p role="status" className="alpha-permission-status"><span aria-hidden="true" style={iconStyle('user-round-plus')}/><span className="alpha-sr">New account </span>{connection.cloudAccount?.email||'New account'}</p>}
     {progressError&&<p role="alert" className="alpha-permission-status"><StatusDot tone="warn">Not saved</StatusDot></p>}
     </div>
-    <div className="alpha-permission-actions"><button type="button" className="alpha-permission-primary" disabled={busy} onClick={finish}>{busy?<Busy label="Checking"/>:'Done'}</button></div>
+    <div className="alpha-permission-actions"><button type="button" className="alpha-permission-primary" disabled={busy} onClick={()=>finish()}>{busy?<Busy label="Checking"/>:'Done'}</button></div>
   </div></dialog>;}
   // One "Access" checklist. The flow still asks one permission at a time, in order: the current row
   // carries its action and each system prompt still appears when that row is tapped.
@@ -271,6 +317,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
   return <dialog ref={dialog} className="alpha-startup-permissions" aria-labelledby="alpha-permission-title" onCancel={event => {event.preventDefault(); close();}}>
     <div className="alpha-permission-content alpha-permission-checklist">
       <h2 id="alpha-permission-title" className="serif" tabIndex={-1}>Access</h2>
+      {progress && !review && !target && <p className="alpha-permission-progress" role="status">Step {progress.step + 1} of {keys.length}</p>}
       <ul className="alpha-permission-rows">{keys.map(k => <li key={k} className="alpha-permission-row" aria-current={k === key ? 'step' : undefined} data-state={states[k]}>
         <span className="alpha-permission-row-icon" aria-hidden="true"><span style={iconStyle(details[k].icon)}/></span>
         <span className="alpha-permission-label"><span className="alpha-permission-name">{details[k].title}</span>{k === key && <span className="alpha-permission-rationale">{details[k].reason}</span>}</span>
@@ -279,7 +326,7 @@ export function StartupPermissions({active:enabled = true}: {active?: boolean} =
       </li>)}</ul>
       {progressError && <p className="alpha-permission-status" role="alert"><StatusDot tone="warn">Not saved</StatusDot></p>}
       {checkNotice && <p className="alpha-permission-status" role="status">{checkNotice}</p>}
-      <div className="alpha-permission-actions"><button className="alpha-permission-primary" type="button" aria-disabled={!continueReady || undefined} onClick={proceed}>{target ? 'Done' : 'Continue'}</button>{canSkip && (!target || busy) && <button className="alpha-permission-skip" type="button" onClick={skip}>Skip</button>}{review && !target && <button className="alpha-permission-skip" type="button" onClick={close}>Close</button>}</div>
+      <div className="alpha-permission-actions"><button className="alpha-permission-primary" type="button" aria-disabled={!continueReady || undefined} onClick={proceed}>{target ? 'Done' : 'Continue'}</button>{skipAvailable && (!target || busy) && <button className="alpha-permission-skip" type="button" onClick={skip}>Skip</button>}{review && !target && <button className="alpha-permission-skip" type="button" onClick={close}>Close</button>}</div>
     </div>
   </dialog>;
 }

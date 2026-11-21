@@ -13,7 +13,11 @@ const dir = mkdtempSync(join(tmpdir(), 'telephony-flow-'));
 process.on('exit', () => rmSync(dir, {recursive: true, force: true}));
 const output = await build({entryPoints: [resolve('apps/app/src/runtime/device-actions.ts')], bundle: true, format: 'esm', platform: 'node', write: false});
 writeFileSync(join(dir, 'sdk.mjs'), output.outputFiles[0].text);
-const {DeviceActions} = await import(pathToFileURL(join(dir, 'sdk.mjs')));
+const {DeviceActions, setContactReviewMatches} = await import(pathToFileURL(join(dir, 'sdk.mjs')));
+// The phone's address book as the review lookup reads it: the names matching each query.
+let addressBook = query => ['Priya Nair'].filter(name => name.toLowerCase().includes(query.toLowerCase()));
+const lookups = [];
+setContactReviewMatches(async query => { lookups.push(query); return addressBook(query); });
 const P = await import('../apps/app/src/runtime/phone-context.ts');
 
 const context = {view: 'home', revision: 1, sensitive: false};
@@ -21,9 +25,9 @@ const session = {ownerId: 'owner', agentId: 'agent', origin: 'https://agent.exam
 const id = '5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20', digest = 'd'.repeat(64);
 const messageId = '77bc5ac9-0000-4000-8000-a61a04b11111';
 const proof = {messageId, text: 'Help with this conversation', current() {}};
-const ALL = ['phone.call.v1', 'contacts.write.v1', 'sms.compose.v1', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
+const ALL = ['phone.call.v1', 'contacts.write.v1', 'contacts.write.v2', 'contacts.show.v1', 'contacts.read.v1', 'sms.compose.v1', 'sms.compose.v2', 'messages.read.v1', 'voicemail.read.v1', 'voicemail.delete.v1'];
 const callPriya = {type: 'phone_call', target: {kind: 'contact', query: 'Priya'}};
-function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId} = {}) {
+function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'phone-call', status: 'placed', contact: true}, status = 'succeeded', receiptOutage = false, requestMessageId, present} = {}) {
   let state = 'pending', attemptId, effects = 0, entry;
   const posts = [];
   const proposal = () => ({id, digest, state, subjectUserId: 'owner', requestedBy: 'agent', action: 'device_action', expiresAt: new Date(Date.now() + 600000).toISOString(),
@@ -41,7 +45,7 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
     get: async () => ({entry}), list: async () => ({entries: entry ? [entry] : []})};
   const seen = [];
   const client = new DeviceActions(session, {installationId: 'device', enrollmentId: 'enrollment', key: 'a'.repeat(64), capabilities}, 'c'.repeat(64), request, journal,
-    async (op, operationId) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {})}; });
+    async (op, operationId) => { effects++; seen.push(operationId); assert.deepEqual(op, operation); return {status, summary: 'done', ...(result ? {telephonyResult: result} : {}), ...(present ? {present: () => present(posts.map(post => post.path.split('/').pop()))} : {})}; });
   return {client, posts, seen, get entry() { return entry; }, get effects() { return effects; }, online() { receiptOutage = false; }};
 }
 const signal = () => new AbortController().signal;
@@ -53,7 +57,111 @@ test('the phone advertises telephony actions only on the image and only what the
   assert.deepEqual(P.selectDeviceCapabilities(offered, profile).filter(capability => ALL.includes(capability)).sort(), [...ALL].sort());
   assert.deepEqual(P.selectDeviceCapabilities(['phone.call.v1'], profile).filter(capability => ALL.includes(capability)), ['phone.call.v1']);
   assert.deepEqual(P.selectDeviceCapabilities(offered, {...profile, aospImage: false}).filter(capability => ALL.includes(capability)), [], 'a standalone install advertises none');
+  // A form that extends an action is never advertised without the action it extends.
+  assert.deepEqual(P.selectDeviceCapabilities(['sms.compose.v2', 'contacts.write.v2'], profile).filter(capability => ALL.includes(capability)), []);
 });
+test('a text to a number, a draft, a single contact value, a contact search and the open contact each need their own capability and say what they do', async () => {
+  const number = {type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late'};
+  const add = {type: 'contact_update', query: 'Priya', add: {phoneNumbers: ['+14155550100']}, remove: {emailAddresses: ['p@example.com']}};
+  const without = capability => ALL.filter(other => other !== capability);
+  for (const [operation, capability] of [[number, 'sms.compose.v2'], [add, 'contacts.write.v2'], [{type: 'contact_show', query: 'Priya'}, 'contacts.show.v1']])
+    await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
+  const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
+  assert.match(await card(number), /^Review SMS\nTo: \+14155550100\n\nRunning late/);
+  const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
+  assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
+  const change = await card(add);
+  assert.match(change, /^Change contact\nContact: Priya Nair\nAdd: \+14155550100\nRemove: p@example\.com\n/); assert.match(change, /other details stay/); assert.doesNotMatch(change, /Replaces/);
+  assert.match(await card({type: 'contact_update', query: 'Priya', set: {displayName: 'Priya N'}}), /Name: Priya N\n\nReplaces these details/);
+  assert.match(await card({type: 'contact_show', query: 'Priya'}), /^Show contact\nSearch: Priya/);
+});
+test('a contact change or deletion is carded only for a contact the phone holds, and still needs approval', async () => {
+  const change = {type: 'contact_update', query: 'Test Alpha', set: {phoneNumbers: ['+14155550101']}}, remove = {type: 'contact_delete', query: 'Test Alpha'};
+  const book = addressBook;
+  try {
+    // No such contact: a notice says so, no card is offered, and nothing can be approved or run.
+    addressBook = () => [];
+    for (const [operation, title] of [[change, 'Change contact'], [remove, 'Delete contact']]) {
+      const f = fixture({operation});
+      lookups.length = 0;
+      const items = await f.client.pendingReview(context, signal());
+      assert.deepEqual(lookups, ['Test Alpha'], 'the phone looks the name up before any card');
+      assert.deepEqual(items.map(item => [item.proposal, item.notice]), [[null, `${title}: No contact matching “Test Alpha” is on this phone. Nothing was changed.`]]);
+      assert.deepEqual(await f.client.pending(context, signal()), []);
+      await assert.rejects(f.client.approve(id, context, signal()), /Review this action again/);
+      assert.equal(f.effects, 0); assert.deepEqual(f.posts, [], 'nothing is decided for the owner');
+    }
+    // Contacts unreadable: the same, with the reason.
+    addressBook = () => null;
+    assert.deepEqual((await fixture({operation: remove}).client.pendingReview(context, signal())).map(item => item.notice), ["Delete contact: Contacts can't be read on this phone right now. Nothing was changed."]);
+    addressBook = () => { throw Object.assign(Error('denied'), {code: 'permission-required'}); };
+    assert.deepEqual((await fixture({operation: change}).client.pendingReview(context, signal())).map(item => item.notice), ["Change contact: Contacts can't be read on this phone right now. Nothing was changed."]);
+    // One match: the card names that contact, and nothing runs until the owner approves.
+    addressBook = () => ['Test Alpha'];
+    let f = fixture({operation: remove, result: {kind: 'contact-write', status: 'deleted'}});
+    let [card] = await f.client.pending(context, signal());
+    assert.equal(`${card.title}\n${card.description}`, 'Delete contact\nContact: Test Alpha\n\nDeletes this contact from your phone after you confirm.');
+    assert.equal(f.effects, 0); assert.deepEqual(f.posts, []);
+    assert.equal((await f.client.approve(id, context, signal())).status, 'succeeded');
+    assert.equal(f.effects, 1); assert.equal(f.posts[0].path.split('/').pop(), 'decision');
+    // Several matches: the card lists them and the owner chooses one on the phone after approving.
+    addressBook = () => ['Test Alpha', 'Test Alphonse'];
+    f = fixture({operation: change});
+    [card] = await f.client.pending(context, signal());
+    assert.match(card.description, /^2 contacts match “Test Alpha”: Test Alpha, Test Alphonse\nNumbers: \+14155550101\n\nReplaces these details after you confirm\. You choose which one on your phone after you confirm\./);
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, '2 contacts match “Test Alpha”: Test Alpha, Test Alphonse\n\nAfter you confirm, you choose which one to delete on your phone.');
+    assert.equal(f.effects, 0);
+    // A provider name is only length-checked: its line breaks, controls and bidi overrides cannot
+    // add or reorder lines on the card, and a name that is nothing else reads as unnamed.
+    addressBook = () => ['Ada\n\nDeletes nothing.\u202e', '\u0007\t'];
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, '2 contacts match “Test Alpha”: Ada Deletes nothing., Unnamed contact\n\nAfter you confirm, you choose which one to delete on your phone.');
+    addressBook = () => ['Ada\u2066\r\nOkafor'];
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, 'Contact: Ada Okafor\n\nDeletes this contact from your phone after you confirm.');
+  } finally { addressBook = book; }
+});
+test('the view change that shows a draft or the matching contacts runs once, after the receipt, and only for a success', async () => {
+  const draft = {type: 'sms_compose', target: {kind: 'number', number: '+14155550100'}, body: 'Running late', draft: true};
+  for (const [operation, result] of [[draft, {kind: 'sms-compose', status: 'drafted'}], [{type: 'contact_show', query: 'Priya'}, {kind: 'contact-show', status: 'shown'}]]) {
+    const shown = [], f = fixture({operation, result, present: posted => shown.push(posted)});
+    await f.client.pending(context, signal());
+    assert.equal((await f.client.approve(id, context, signal())).status, 'succeeded');
+    assert.deepEqual(shown, [['decision', 'claim', 'receipt']], operation.type);
+    assert.deepEqual(receiptOf(f).result, result);
+  }
+  const shown = [], f = fixture({operation: {type: 'contact_show', query: 'Nobody'}, result: {kind: 'contact-show', status: 'not-found'}, status: 'failed', present: posted => shown.push(posted)});
+  await f.client.pending(context, signal()); await f.client.approve(id, context, signal());
+  assert.deepEqual(shown, []); assert.equal(receiptOf(f).outcome, 'failed');
+});
+test('the open contact is returned to the agent as a read result, and a request from elsewhere is asked again from the contact', async () => {
+  const result = {kind: 'contact-read', status: 'read', contact: {displayName: 'Priya Nair', phoneNumbers: ['(415) 555-0132'], emailAddresses: ['p@example.com']}};
+  const contacts = {...context, view: 'contacts'};
+  const f = fixture({operation: {type: 'contact_read_selected'}, result, requestMessageId: messageId});
+  assert.deepEqual((await f.client.pendingReview(context, signal(), proof)).map(item => [item.proposal, item.notice]), [[null, 'Share open contact: Ask again from the open contact.']]);
+  assert.ok((await f.client.pendingReview(contacts, signal(), proof))[0].proposal);
+  assert.equal((await f.client.approve(id, contacts, signal())).status, 'succeeded');
+  assert.equal(receiptOf(f).outcome, 'applied'); assert.deepEqual(receiptOf(f).result, result);
+});
+test('a latest SMS sender read from Home requires the negotiated capability and an approved exact receipt', async () => {
+  const capability = 'sms.latest-sender.v1';
+  const operation = {type: 'sms_latest_sender'};
+  const result = {kind: 'sms-latest-sender', status: 'found', numberEnding: '0123'};
+  const profile = {android: true, native: true, aospImage: true, foregroundReview: false};
+  assert.ok(P.selectDeviceCapabilities([capability], profile).includes(capability));
+  assert.ok(!P.selectDeviceCapabilities([capability], {...profile, aospImage: false}).includes(capability));
+  await assert.rejects(fixture({operation, result, capabilities: []}).client.pending(context, signal()), /not negotiated/);
+  const f = fixture({operation, result, capabilities: [capability], requestMessageId: messageId});
+  const [card] = await f.client.pendingReview(context, signal(), proof);
+  assert.ok(card.proposal);
+  assert.equal(f.effects, 0);
+  assert.equal((await f.client.approve(id, context, signal())).status, 'succeeded');
+  assert.deepEqual(receiptOf(f).result, result);
+  await f.client.approve(id, context, signal()).catch(() => {});
+  assert.equal(f.effects, 1);
+});
+
 test('each action needs its own negotiated capability', async () => {
   await assert.rejects(fixture({capabilities: []}).client.pending(context, signal()), /not negotiated/);
   await assert.rejects(fixture({capabilities: ['contacts.write.v1']}).client.pending(context, signal()), /not negotiated/);
@@ -118,6 +226,7 @@ test('recovery cannot attach a selected telephony proposal to another item or se
   for (const [operation, view] of [
     [{type: 'messages_read_selected'}, 'messages'],
     [{type: 'sms_reply_selected', body: 'On my way'}, 'messages'],
+    [{type: 'contact_read_selected'}, 'contacts'],
     [{type: 'voicemail_read_selected'}, 'phone'],
     [{type: 'voicemail_delete_selected'}, 'phone'],
   ]) {
@@ -132,4 +241,31 @@ test('recovery cannot attach a selected telephony proposal to another item or se
     assert.equal(f.effects, 0);
     assert.deepEqual(await fixture({operation, requestMessageId: messageId}).client.pending(original, signal()), [], 'a replacement coordinator needs a fresh request');
   }
+});
+test('the dialer keypad is advertised only on the image, opens without a review only for a number the owner typed, and never calls', async () => {
+  const profile = {android: true, native: true, aospImage: true};
+  assert.ok(P.selectDeviceCapabilities(['phone.keypad.v1'], profile).includes('phone.keypad.v1'));
+  assert.ok(!P.selectDeviceCapabilities(['phone.keypad.v1'], {...profile, aospImage: false}).includes('phone.keypad.v1'), 'a standalone install draws no keypad for the agent');
+  assert.ok(!P.selectDeviceCapabilities([], profile).includes('phone.keypad.v1'), 'only what the agent offers');
+  const keypad = {type: 'phone_keypad', number: '+14155550100'};
+  await assert.rejects(fixture({operation: keypad}).client.pending(context, signal()), /not negotiated/);
+  const [card] = await fixture({operation: keypad, capabilities: ['phone.keypad.v1']}).client.pending(context, signal());
+  assert.match(`${card.title}\n${card.description}`, /^Open keypad\nNumber: \+14155550100\n\nOpens the Phone keypad with this number filled in\. Nothing is dialed until you tap Call\.$/);
+  const shown = [], f = fixture({operation: keypad, capabilities: ['phone.keypad.v1'], result: {kind: 'phone-keypad', status: 'opened'}, requestMessageId: messageId, present: posted => shown.push(posted)});
+  await f.client.pending(context, signal());
+  assert.deepEqual(await f.client.performRequested('other', context, signal(), async () => true), []);
+  assert.equal(f.effects, 0);
+  // A number the owner did not type in this message (read from an email or a page) keeps its card.
+  const proof = text => ({messageId, text, current() {}});
+  for (const current of [undefined, proof('open the keypad with the number from that email'), proof('open the keypad with 415 555 0199')])
+    assert.deepEqual(await f.client.performRequested(messageId, context, signal(), async () => true, undefined, current), []);
+  assert.equal(f.effects, 0);
+  assert.deepEqual((await f.client.performRequested(messageId, context, signal(), async () => true, undefined, proof('open the dialer with +1 415-555-0100'))).map(result => result.status), ['succeeded']);
+  assert.equal(f.effects, 1); assert.deepEqual(shown, [['decision', 'claim', 'receipt']], 'the keypad comes in front after the receipt');
+  assert.deepEqual(receiptOf(f).result, {kind: 'phone-keypad', status: 'opened'});
+  // A call bound to the same message keeps its review.
+  const call = fixture({operation: {type: 'phone_call', target: {kind: 'number', number: '+14155550100'}}, requestMessageId: messageId});
+  await call.client.pending(context, signal());
+  assert.deepEqual(await call.client.performRequested(messageId, context, signal(), async () => true), []);
+  assert.equal(call.effects, 0);
 });

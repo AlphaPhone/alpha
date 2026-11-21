@@ -17,10 +17,17 @@ export function startNativeGoogleAgentHost(options: {
 }) {
   return startSharedHost({
     ...options,
+    // The resident installs its Android DNS-aware fetch after this host starts.
+    request: options.request ?? Object.assign(
+      (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+      {preconnect(url: string | URL) {
+        const currentFetch: typeof fetch & {preconnect?(url: string | URL): void} = globalThis.fetch;
+        currentFetch.preconnect?.(url);
+      }},
+    ),
     apiOrigin: productionCloud.api,
     userAgent: 'AlphaPhone-Native-Google/1',
     gmailReadBodyMaxCharacters: 32_000,
     access: () => readGoogleAgentAccessFile(process.env.ALPHA_GOOGLE_AGENT_ACCESS_FILE),
-    calendarReadTiming: process.env.ALPHA_CALENDAR_READ_TIMING === '1',
   });
 }

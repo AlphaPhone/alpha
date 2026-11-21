@@ -18,7 +18,6 @@ import androidx.test.uiautomator.UiObject2;
 import androidx.test.uiautomator.Until;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
 import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -27,19 +26,18 @@ import static org.junit.Assert.*;
 /** Alpha's vault as the Android Autofill service (AP-10): with a fixture screen-lock PIN, Alpha is
  * selected as the service, a synthetic sign-in is saved through Android's Save prompt from a native
  * form in the test package (PasswordFillFixtureActivity, its own package and signer), and then:
- * filled only into that exact package after the device credential; not offered to a form in
+ * filled only into that exact package after the device credential (Alpha's PasswordFillActivity); not offered to a form in
  * another package (Alpha's own, hosted over MainActivity); the fill sheet's Cancel leaves the form
  * empty; and after the vault locks, a fill asks for the credential again.
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --classes PasswordVaultFill
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --classes PasswordVaultFill
  * passwordVaultFill=1 is the runner's gate. The class sets and clears a screen-lock PIN and the
  * secure autofill_service setting and restores what it found. The second package is Alpha itself
  * because the instrumentation APK holds one package; a third-party package needs a companion APK.
  * Synthetic values only; emulator evidence, not device acceptance. */
 @RunWith(AndroidJUnit4.class)
 public class PasswordVaultFillInstrumentedTest {
- private static final String SERVICE = BuildConfig.APPLICATION_ID + "/ai.eliza.plugins.passwords.ElizaPasswordAutofillService";
  private static final String TEST_PACKAGE = BuildConfig.APPLICATION_ID + ".test";
- private static final String FILL_OFFER = "Fill with a saved password";
+ private static final String FILL_OFFER = PasswordVaultFixture.text(R.string.alpha_passwords_fill_offer);
  private final UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
 
  private void launchForm() throws Exception {
@@ -62,11 +60,12 @@ public class PasswordVaultFillInstrumentedTest {
  @Test public void saveFillOnlyExactPackageRefuseAnotherCancelAndLock() throws Exception {
   Assume.assumeTrue("Owned emulator campaign only: passwordVaultFill=1 (sets a screen lock and the autofill service)", "1".equals(InstrumentationRegistry.getArguments().getString("passwordVaultFill")));
   String previous = PasswordVaultFixture.shell("settings get secure autofill_service");
+  String service = PasswordVaultFixture.autofillService(InstrumentationRegistry.getInstrumentation().getTargetContext());
   String username = "fixture-" + UUID.randomUUID().toString().substring(0, 8) + "@example.invalid", secret = "SyntheticFill-" + UUID.randomUUID();
   long started = System.currentTimeMillis() / 1000L;
   try (PasswordVaultFixture lock = new PasswordVaultFixture()) {
-   PasswordVaultFixture.shell("settings put secure autofill_service " + SERVICE);
-   assertEquals("Alpha is the selected Autofill service", SERVICE, PasswordVaultFixture.shell("settings get secure autofill_service"));
+   PasswordVaultFixture.shell("settings put secure autofill_service " + service);
+   assertEquals("Alpha is the selected Autofill service", service, PasswordVaultFixture.shell("settings get secure autofill_service"));
 
    // Save: the form commits by finishing; Android offers Save; Alpha's save sheet confirms with the credential.
    launchForm();
@@ -74,11 +73,11 @@ public class PasswordVaultFillInstrumentedTest {
    find(By.desc(PasswordFillFixtureActivity.PASSWORD), "Password field").setText(secret);
    find(By.text(PasswordFillFixtureActivity.SIGN_IN), "Sign in").click();
    find(By.res("android", "autofill_save_yes"), "Android's Save prompt").click();
-   assertTrue("Alpha's save sheet opens", device.wait(Until.hasObject(By.pkg(BuildConfig.APPLICATION_ID).text(Pattern.compile("(Save|Update saved) password\\?"))), 10_000));
-   find(By.pkg(BuildConfig.APPLICATION_ID).text("Save"), "Save in Alpha's sheet").click();
+   assertTrue("Alpha's save sheet opens", device.wait(Until.hasObject(By.pkg(BuildConfig.APPLICATION_ID).text(PasswordVaultFixture.text(R.string.alpha_passwords_save_title))), 10_000));
+   find(By.pkg(BuildConfig.APPLICATION_ID).text(PasswordVaultFixture.text(R.string.alpha_passwords_save)), "Save in Alpha's sheet").click();
    // Saving always asks for the device credential (PasswordSaveActivity.save).
    PasswordVaultFixture.confirmDeviceCredential();
-   assertTrue("Saved", device.wait(Until.hasObject(By.text("Password saved")), 10_000) || device.wait(Until.gone(By.pkg(BuildConfig.APPLICATION_ID).text("Save")), 5_000));
+   assertTrue("Saved", device.wait(Until.hasObject(By.text(PasswordVaultFixture.text(R.string.alpha_passwords_saved))), 10_000) || device.wait(Until.gone(By.pkg(BuildConfig.APPLICATION_ID).text(PasswordVaultFixture.text(R.string.alpha_passwords_save))), 5_000));
 
    // Fill into the exact package and signer it was saved for, after the device credential.
    launchForm();
@@ -98,7 +97,7 @@ public class PasswordVaultFillInstrumentedTest {
    assertNotNull("Offered again", again);
    again.click();
    PasswordVaultFixture.confirmDeviceCredential();
-   find(By.pkg(BuildConfig.APPLICATION_ID).text("Cancel"), "Cancel in the fill sheet").click();
+   find(By.pkg(BuildConfig.APPLICATION_ID).text(PasswordVaultFixture.text(R.string.alpha_passwords_cancel)), "Cancel in the fill sheet").click();
    SystemClock.sleep(1000);
    assertEquals("Cancel leaves the form empty", "user=;password=empty", status());
 

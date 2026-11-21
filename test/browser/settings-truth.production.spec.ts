@@ -33,7 +33,7 @@ async function nativeStub(page:Page,fixture:Fixture={}){
     wifiActive:true,cellularActive:false,wifiEnabled:true,bluetoothEnabled:false,airplaneMode:false,locationEnabled:true,mobileDataEnabled:true,interruptionFilter:'all',adaptiveBrightness:true,textScalePercent:100,...snapshot} as Record<string,unknown>,
    status:{permissionGranted:true,appEnabled:true,interruption:'all',scope:'alpha-phone',channels:[{id:'c-reminders',name:'Reminders',importance:4,blocked:false,groupBlocked:false},{id:'c-results',name:'Daily briefs',importance:3,blocked:false,groupBlocked:false}]} as Record<string,any>,
    cross:{revision:'r1',enabled:false,paused:false,accessGranted:false,connected:false,history:true,apps:[]} as Record<string,unknown>,
-   history:[{appLabel:'Stub Mail',state:'posted',at:now-60_000}] as unknown[],
+   history:[{appLabel:'Stub Mail',state:'Posted',at:now-60_000}] as unknown[],
    items:[] as unknown[],openFails:false,unspecific:[] as string[],unavailable:[] as string[],torch:true,shadeOutcome:'opened' as string,provider:provider??{provider:'elizacloud',configured:false},
   };
   for(const key of drop)delete state.snapshot[key];
@@ -67,7 +67,7 @@ async function nativeStub(page:Page,fixture:Fixture={}){
     if(plugin==='AlphaVoiceCloud')return {microphone:'granted'};
     if(plugin==='Agent'){
      const owned=resident.answer(method,input);if(owned)return owned;
-     if(agentStartFailure&&method==='start')throw Error('Synthetic resident startup failure');
+     if(agentStartFailure&&method==='start')throw Object.assign(Error('Synthetic resident startup failure'),{code:'start-failed'});
      if(method==='request'){const id=residentId;return {status:200,body:JSON.stringify(input.path==='/api/auth/me'?{identity:{id,kind:'owner'},access:{role:'OWNER',mode:'local'}}:input.path==='/api/agents'?{agents:[{id,name:'Alpha',status:'running'}]}:input.path==='/api/conversations'?{conversations:[]}:{} )};}
      return method==='providerStatus'?state.provider:{packaged:true,state:'stopped',serviceActive:false,socketListening:false};
     }
@@ -219,6 +219,13 @@ test('every Settings row is a control backed by real state, with no fixture valu
  expect((await callNames(page)).filter(name=>name!=='Agent.setGoogleAgentAccess'&&/\.set(?!Flashlight)|\.perform$/i.test(name))).toEqual([]);
 });
 
+test('Android settings opens the system Settings page from Alpha Settings',async({page})=>{
+ await nativeStub(page);
+ await openSettings(page);
+ await current(page).getByRole('button',{name:'Android settings',exact:true}).click();
+ await expect.poll(()=>opened(page)).toEqual(['system']);
+});
+
 
 
 
@@ -235,7 +242,7 @@ test('notification state is read back from Android, and local history stays avai
  await expect(state).toContainText('Some off');
  await set(page,{status:{appEnabled:false}});await resume(page);await expect(state).toContainText('Off');
  await current(page).getByRole('button',{name:'View local metadata history',exact:true}).click();
- await expect(current(page)).toContainText(/Stub Mail\s*posted/);
+ await expect(current(page)).toContainText(/Stub Mail\s*Arrived/);
  await page.evaluate(()=>{const truth=(window as any).truth,original=(window as any).Capacitor.nativePromise;(window as any).Capacitor.nativePromise=async(plugin:string,method:string,input:unknown)=>{if(plugin==='AlphaNotifications'&&method==='status'){truth.calls.push({plugin,method,input});throw Error('Notification delivery status unavailable');}return original(plugin,method,input);};});
  await resume(page);await expect(state).toContainText('Unavailable');
 });
@@ -300,23 +307,33 @@ for(const subscription of ['credits','active','canceled'] as const)test(`Setting
 
 
 
-// Rendered production Settings; only native transport and Cloud responses are finite fixtures.
-for(const scenario of ['unbound','recovering','connected'] as const)test(`Agent status is truthful: ${scenario}`,async({page})=>{
- await nativeStub(page,scenario==='unbound'?{subscription:'canceled'}:{subscription:'credits',agentStartFailure:scenario==='recovering'});
+// Rendered production Settings over the finite native and Cloud fixtures.
+for(const scenario of ['unbound','recovering','connected'] as const)test(`Agent activity and account controls in Settings: ${scenario}`,async({page})=>{
+ await nativeStub(page,{subscription:scenario==='unbound'?'canceled':'active',agentStartFailure:scenario==='recovering'});
  await page.goto('/');
- if(scenario==='recovering'){
-  await expect.poll(()=>page.evaluate(()=>(window as any).truth.calls.some((call:any)=>call.plugin==='Agent'&&call.method==='start'))).toBe(true);
-  const close=page.getByRole('button',{name:'Close connection settings',exact:true});if(await close.isVisible())await close.click();
- }
+ await expect.poll(()=>callNames(page)).toContain('Agent.start');
  await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
+ if(scenario!=='recovering'){
+  const plan=await openCloudPlanFromSettings(page);
+  await expect(plan.getByText('synthetic-settings@example.invalid',{exact:true})).toBeVisible();
+  await expect(plan.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+  await plan.getByRole('button',{name:'Close Account',exact:true}).click();
+  await expect(plan).toHaveCount(0);
+ }
  await current(page).getByRole('button',{name:'About',exact:true}).click();
- await current(page).getByRole('button',{name:'Status',exact:true}).click();
- const account=current(page);await expect(account.getByRole('heading',{name:'Status',exact:true})).toBeVisible();
- await expect(account).not.toContainText('On this computer');
- await expect(account).not.toContainText('Running on this phone');
- if(scenario==='recovering')await expect(account).not.toContainText('Running');
- if(scenario==='connected')await expect(account).toContainText('Eliza Cloud');
+ await expect(current(page).getByRole('button',{name:'Status',exact:true})).toHaveCount(0);
+ await current(page).getByRole('button',{name:'Agent activity',exact:true}).click();
+ const activity=current(page);
+ await expect(activity.getByRole('heading',{name:'Agent activity',exact:true})).toBeVisible();
+ await expect(activity.getByRole('button',{name:/^(Retry|Reconnect agent|Restart Alpha)$/})).toHaveCount(0);
+ if(scenario==='recovering'){
+  await expect(activity.getByText('Loads when your agent is ready',{exact:true})).toBeVisible();
+  await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toHaveCount(0);
+ }else{
+  await expect(activity.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
+  expect((await callNames(page)).includes('Agent.configureCloudProvider')).toBe(scenario==='connected');
+ }
 });
 
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

@@ -1,8 +1,10 @@
-import { createHash } from 'node:crypto';
+import {sha256} from './sha256.ts';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readUpstreamPin } from './upstream-pin.ts';
 
 export const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const quintRoot = join(repositoryRoot, 'specs/quint');
@@ -12,8 +14,7 @@ export const runtimeScriptPaths = ['scripts/stage-alpha-os-branding.py', 'script
   'scripts/cloud-email-code.ts', 'scripts/dev-cloud.ts', 'scripts/dev-local.ts',
   'scripts/start-local-voice-agent.ts', 'scripts/start-local-remote.ts',
   'scripts/core-state-patch.ts', 'scripts/core-state-preload.ts', 'scripts/build-policy-source.ts',
-  'scripts/start-reviewed-workflow-agent.ts',
-  'scripts/start-cloud-qa.ts', 'scripts/start-combined-agent.ts', 'scripts/launcher-child.ts',
+  'scripts/start-combined-agent.ts', 'scripts/launcher-child.ts',
   'scripts/private-runtime-launch.ts', 'scripts/host-speech-admission.ts',
   'scripts/local-agent-dev-bridge.ts', 'scripts/local-agent-dev-storage.ts',
   'scripts/prepare-local-agent.ts', 'scripts/local-agent-source.ts', 'scripts/copy-file-clone.ts',
@@ -28,14 +29,15 @@ export const runtimeScriptPaths = ['scripts/stage-alpha-os-branding.py', 'script
   'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts',
   'scripts/stage-embedding-host.ts', 'scripts/voice-host.ts',
   'scripts/android-build-preflight.ts', 'scripts/build-android.ts',
-  'scripts/android-host.ts', 'scripts/android-gzip-assets.ts', 'scripts/stage-aosp.ts',
+  'scripts/android-host.ts', 'scripts/android-identity.ts', 'scripts/android-gzip-assets.ts', 'scripts/stage-aosp.ts',
   'scripts/audit-production-bundle.ts', 'scripts/generate-licenses.ts',
   'scripts/cloud-deployment.ts', 'scripts/cloud-deployment-policy.ts', 'scripts/native-view-policy.ts',
-  'scripts/with-test-mocks.ts', 'scripts/removed-profile-flags.ts', 'scripts/child-command.ts', 'scripts/regular-files.ts', 'capacitor.config.ts', 'vite.config.ts',
+  'scripts/with-test-mocks.ts', 'scripts/child-command.ts', 'scripts/regular-files.ts', 'scripts/sha256.ts', 'scripts/upstream-pin.ts', 'capacitor.config.ts', 'vite.config.ts',
   'scripts/apk.ts', 'scripts/source-snapshot.ts', 'scripts/verify-apks.ts', 'scripts/verify-packaged-runtime.py',
   'scripts/provision-unit.ts', 'scripts/publish-update-manifest.ts', 'scripts/deliver-app-update.ts',
   'scripts/update-apk-admission.ts', 'scripts/update-artifact.ts', 'scripts/owner/InspectUpdateApk.java',
-  'scripts/ci/qualified-app-update.py', 'scripts/ci/admit-cloud-signing-input.py', 'scripts/ci/private-apk-storage.py'];
+  'scripts/ci/qualified-app-update.py', 'scripts/ci/admit-cloud-signing-input.py', 'scripts/ci/app_update_producer.py',
+  'scripts/ci/private-apk-storage.py'];
 export const runtimeAssetPaths = ['apps/app/index.html'];
 const omittedDirectories = new Set(['.cache', 'node_modules', 'build', '.generated', '.gradle', '.cxx', '.kotlin', 'assets', 'jniLibs', 'capacitor-cordova-android-plugins']);
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.java', '.kt', '.cpp', '.h', '.c', '.html', '.mjs', '.jsx', '.cc', '.hpp', '.rs', '.swift']);
@@ -43,6 +45,7 @@ const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.java', '.kt', '.cpp', 
 const modelFamilies = ['application', 'services', 'native', 'legacy'] as const;
 type ModelFamily = (typeof modelFamilies)[number];
 type ExpectedCheck = 'pass' | 'violation';
+export type QuintProofBackend = 'apalache' | 'tlc' | 'tlc-bounded';
 interface ModelCheck {
   init: string;
   step: string;
@@ -61,6 +64,7 @@ interface ModelDefinition {
   init: string;
   step: string;
   invariant: string;
+  verifyBackend?: QuintProofBackend;
   tests: string[];
   sources?: string[];
   sharedSources?: string[];
@@ -78,7 +82,6 @@ export interface QuintModel extends ModelDefinition {
   family: ModelFamily;
   sources: string[];
 }
-interface UpstreamPin { commit: string; appSource?: unknown }
 export interface CheckerResult {
   status: number | null;
   signal: NodeJS.Signals | null;
@@ -89,10 +92,13 @@ export interface CheckerResult {
 type InterruptedAttempt = Pick<CheckerResult, 'signal'> & {exitCode: null};
 
 function readModelFamily(family: ModelFamily) {
-  const document = readJson<ModelDefinition[] | {models: ModelDefinition[]}>(join(quintRoot, family, 'manifest.json'));
-  const models = Array.isArray(document) ? document : document.models;
-  return models.map(model => ({...model, family,
+  return readJson<ModelDefinition[]>(join(quintRoot, family, 'manifest.json')).map(model => ({...model, family,
     sources: [...new Set([...(model.sources || []), ...(model.sharedSources || []).map(path => `vendor/eliza/${path}`)])]}));
+}
+
+/** Registry names for rejecting invalid selections before loading model/source bodies. */
+export function registeredQuintModelNames(): string[] {
+  return modelFamilies.flatMap(readModelFamily).map(model => model.module);
 }
 
 export function filesWithin(directory: string, accept: (path: string) => boolean = () => true): string[] {
@@ -107,10 +113,9 @@ export function filesWithin(directory: string, accept: (path: string) => boolean
 }
 
 export const relativePath = (path: string) => relative(repositoryRoot, path).split('\\').join('/');
-export const sha256 = (bytes: string | NodeJS.ArrayBufferView) => createHash('sha256').update(bytes).digest('hex');
 /** Discover the shared source consumed by this product from its authenticated inputs. */
 export function sharedSourcePaths() {
-  const pin = readJson<UpstreamPin>(join(repositoryRoot, 'upstream.lock.json'));
+  const pin = readUpstreamPin(repositoryRoot);
   // Minimal checker fixtures have no product source descriptor.
   if (!pin.appSource) return [];
   const client = readJson<{baseCommit: string; sourceFiles: Record<string, string>}>(join(repositoryRoot, '.eliza/client-features/.source.json'));
@@ -150,6 +155,121 @@ export const sourcePaths = () => [...new Set([
     path => sourceExtensions.has(extname(path)) || extname(path) === '.css')).map(relativePath),
   ...runtimeScriptPaths, ...runtimeAssetPaths, ...sharedSourcePaths(),
 ])].sort();
+/**
+ * Where remembered Quint results live, for local runs: outside node_modules so a reinstall keeps them. CI never
+ * restores them; promotion runs with ALPHA_QUINT_CACHE=off (see .github/workflows/promotion.yml).
+ */
+export function quintCacheDirectory(root: string = repositoryRoot) {
+  return resolve(root, process.env.ALPHA_QUINT_CACHE_DIR || '.cache/quint');
+}
+export function quintCacheDisabled() {
+  return ['0', 'off', 'false', 'no'].includes((process.env.ALPHA_QUINT_CACHE || '').toLowerCase());
+}
+
+/**
+ * Remembered results carry no provenance: an entry is trusted because only this checker writes it. A file committed
+ * into the cache directory (`git add -f`) would instead be trusted as a past accepted run, so a cache directory in
+ * which git tracks anything, or which git cannot inspect inside this repository, is refused outright. Checked once
+ * per directory and process.
+ */
+const inspectedCaches = new Set<string>();
+export function assertQuintCacheUntracked(root: string = repositoryRoot) {
+  const directory = quintCacheDirectory(root);
+  if (inspectedCaches.has(directory)) return;
+  const paths = [directory];
+  try { if (existsSync(directory)) paths.push(realpathSync(directory)); } catch { /* inspected by its own path */ }
+  for (const path of new Set(paths)) {
+    const listed = spawnSync('git', ['ls-files', '-z', '--', path], {cwd: root, encoding: 'utf8', timeout: 30000});
+    if (listed.status === 0) {
+      const tracked = listed.stdout.split('\0').filter(Boolean);
+      if (tracked.length) throw Error(`Refusing the Quint cache ${directory}: git tracks ${tracked.length} file(s) in it, such as ${tracked[0]}. Remembered results must be written by this checker; remove them from git.`);
+      continue;
+    }
+    // Outside a git checkout, or outside this repository, nothing in it can be committed with the change under check.
+    if (listed.error?.message.includes('ENOENT') || /not a git repository|is outside repository/.test(listed.stderr || '')) continue;
+    throw Error(`Refusing the Quint cache ${directory}: git cannot tell whether it tracks files there: ${(listed.stderr || listed.error?.message || '').trim()}`);
+  }
+  inspectedCaches.add(directory);
+}
+
+/** Every file of the installed Quint package, by relative name and bytes. Computed once per process. */
+const packageDigests = new Map<string, string>();
+export function quintPackageDigest(root: string = repositoryRoot) {
+  const directory = realpathSync(join(root, 'node_modules/@informalsystems/quint'));
+  const known = packageDigests.get(directory);
+  if (known) return known;
+  const parts: string[] = [];
+  const walk = (path: string) => {
+    for (const entry of readdirSync(path, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); }
+      else if (entry.isFile()) parts.push(`${relative(directory, child)}\0${sha256(readFileSync(child))}`);
+    }
+  };
+  walk(directory);
+  const digest = sha256(parts.join('\n'));
+  packageDigests.set(directory, digest);
+  return digest;
+}
+
+/** The repository-relative models a model imports. Quint resolves `from "./X"` beside the importing file. */
+export function importedModelPaths(model: Pick<ModelDefinition, 'path'>, text: string, root: string = repositoryRoot) {
+  const source = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  return [...source.matchAll(/\bimport\s+[\s\S]*?\bfrom\s+["']([^"']+)["']/g)].map(match =>
+    relative(root, resolve(root, dirname(model.path), match[1].endsWith('.qnt') ? match[1] : match[1] + '.qnt')).split('\\').join('/'));
+}
+
+/**
+ * Parsing every model with Quint's ANTLR parser costs about 40 ms each, 16 s per registry load. The validation is a
+ * pure function of this file, the pinned Quint, the model's metadata and its text, so a success is remembered under
+ * exactly those and a failure is never remembered.
+ */
+let metadataCacheBase: string | null | undefined;
+function metadataCacheKey(model: ModelDefinition, text: string) {
+  if (metadataCacheBase === undefined) {
+    if (!quintCacheDisabled()) assertQuintCacheUntracked();
+    try {
+      // This file's validation code and the parser's bytes: a changed parser with the same version is a different key.
+      metadataCacheBase = quintCacheDisabled() ? null : sha256(JSON.stringify([
+        readFileSync(fileURLToPath(import.meta.url)).toString('utf8'), quintPackageDigest()]));
+    } catch { metadataCacheBase = null; }
+  }
+  if (metadataCacheBase === null) return undefined;
+  // The whole manifest entry, so a field a later validation reads cannot be left out of the key.
+  return sha256(JSON.stringify([metadataCacheBase, model, text]));
+}
+
+/**
+ * Where a remembered validation is kept and what it must say: the key, which hashes the validation code, the parser,
+ * the manifest entry and the model text, and the hash of that text. A marker vouches only by these contents, so an
+ * empty or otherwise foreign file at the same path is a miss, not a pass.
+ */
+export function quintMetadataMarker(model: ModelDefinition, text: string) {
+  const key = metadataCacheKey(model, text);
+  if (!key) return undefined;
+  return {file: join(quintCacheDirectory(), 'metadata', `metadata-${key}`),
+    contents: `${JSON.stringify({schema: 1, module: model.module, textSha256: sha256(text), key})}\n`};
+}
+
+function validateQuintModelMetadataCached(model: ModelDefinition, text: string) {
+  const marker = quintMetadataMarker(model, text);
+  if (marker) {
+    try {
+      if (readFileSync(marker.file, 'utf8') === marker.contents) {
+        const now = new Date(); utimesSync(marker.file, now, now); return;
+      }
+    } catch { /* a miss */ }
+  }
+  validateQuintModelMetadata(model, text);
+  if (!marker) return;
+  try {
+    mkdirSync(dirname(marker.file), { recursive: true });
+    const temporary = `${marker.file}.${process.pid}.tmp`;
+    writeFileSync(temporary, marker.contents);
+    renameSync(temporary, marker.file);
+  } catch { /* the cache is a convenience */ }
+}
+
 export function readJson<T = unknown>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
@@ -186,7 +306,17 @@ export function quintModelOptions(model: ModelDefinition, command: string = 'che
   };
 }
 
+export function quintProofBackend(model: Pick<ModelDefinition, 'verifyBackend'>, command: string, override?: QuintProofBackend): QuintProofBackend {
+  if (override === 'tlc-bounded' && command !== 'verify') throw Error('tlc-bounded supports safety verification only');
+  if (override) return override;
+  if (command === 'temporal' || command === 'compare') return 'tlc';
+  return command === 'verify' ? model.verifyBackend ?? 'apalache' : 'apalache';
+}
+
 export function validateQuintModelMetadata(model: ModelDefinition, text: string) {
+  if (model.verifyBackend !== undefined && !['apalache', 'tlc', 'tlc-bounded'].includes(model.verifyBackend)) {
+    throw Error(`Invalid verifyBackend in ${model.module}`);
+  }
   for (const test of model.tests) if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(test)) throw Error(`Invalid scenario ${model.module}.${test}`);
   if (new Set(model.tests).size !== model.tests.length) throw Error(`Duplicate scenarios in ${model.module}`);
   for (const key of ['maxSamples', 'maxSteps', 'maxVerifyDepth'] as const) {
@@ -218,6 +348,65 @@ export function validateQuintModelMetadata(model: ModelDefinition, text: string)
   }
 }
 
+export interface BoundedTlcEvidence {
+  scope: 'safety-through-transition-bound';
+  depth: number;
+  translatedSourceSha256: string;
+  instrumentedSourceSha256: string;
+  configurationSha256: string;
+}
+
+export interface FullTemporalTlcEvidence {
+  scope: 'full-temporal-state-graph';
+  livenessScheduling: 'final';
+  translatedSourceSha256: string;
+  configurationSha256: string;
+  jarSha256: string;
+  javaExecutable: string;
+  javaArgv: string[];
+}
+
+function completeTlaModule(source: string, aliases: readonly string[]) {
+  const endings = [...source.matchAll(/^={4,}[ \t]*\r?$/gm)];
+  if (endings.length !== 1 || source.slice(endings[0].index! + endings[0][0].length).trim()) {
+    throw Error('Expected one complete translated TLA module');
+  }
+  for (const name of aliases) {
+    if (!new RegExp(`^${name}[ \\t]*==`, 'm').test(source)) throw Error(`Missing translated ${name}`);
+  }
+  return endings[0].index!;
+}
+
+/** Full temporal checking keeps the translated relation and properties byte for byte. */
+export function fullTemporalTlcSpec(source: string) {
+  completeTlaModule(source, ['q_init', 'q_step', 'q_temporalProps']);
+  const configuration = 'INIT q_init\nNEXT q_step\nPROPERTY q_temporalProps\n';
+  return {source, configuration, evidence: {scope: 'full-temporal-state-graph' as const,
+    livenessScheduling: 'final' as const, translatedSourceSha256: sha256(source),
+    configurationSha256: sha256(configuration)}};
+}
+
+/** A tool error, deadlock or invariant failure is not a temporal counterexample. */
+export function fullTemporalTlcViolation(result: CheckerResult, output: string) {
+  return result.status === 13 && !result.error && !result.signal
+    && /^Error: Temporal (?:property q_temporalProps was|properties were) violated\.$/m.test(output)
+    && /^Error: The following behavior constitutes a counter-example:$/m.test(output);
+}
+
+/** Retain every original declaration and check all states at depths 0 through depth. */
+export function boundedTlcSpec(source: string, depth: number) {
+  if (!Number.isSafeInteger(depth) || depth < 1) throw Error('Bounded TLC depth must be a positive integer');
+  if (/\bq_bounded_(?:depth|init|next)\b/.test(source)) throw Error('Bounded TLC namespace collision');
+  const index = completeTlaModule(source, ['q_init', 'q_step', 'q_inv']);
+  const declarations = `\nVARIABLE q_bounded_depth\n\nq_bounded_init == q_init /\\ q_bounded_depth = 0\n\nq_bounded_next == /\\ q_bounded_depth < ${depth}\n                  /\\ q_step\n                  /\\ q_bounded_depth' = q_bounded_depth + 1\n\n`;
+  const instrumented = source.slice(0, index) + declarations + source.slice(index);
+  const configuration = 'INIT q_bounded_init\nNEXT q_bounded_next\nINVARIANT q_inv\n';
+  const evidence: BoundedTlcEvidence = {scope: 'safety-through-transition-bound', depth,
+    translatedSourceSha256: sha256(source), instrumentedSourceSha256: sha256(instrumented),
+    configurationSha256: sha256(configuration)};
+  return {source: instrumented, configuration, evidence};
+}
+
 export function loadModels(): QuintModel[] {
   const models = modelFamilies.flatMap(readModelFamily);
   const names = new Set();
@@ -228,7 +417,7 @@ export function loadModels(): QuintModel[] {
     for (const field of ['init', 'step', 'invariant'] as const) if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(model[field])) throw Error(`Invalid ${field} in ${model.module}`);
     if (!Array.isArray(model.tests) || model.tests.length === 0) throw Error(`No scenarios declared for ${model.module}`);
     const text = readFileSync(join(repositoryRoot, model.path), 'utf8');
-    validateQuintModelMetadata(model, text);
+    validateQuintModelMetadataCached(model, text);
     for (const test of model.tests) if (!new RegExp(`\\brun\\s+${test}\\s*=`).test(text)) throw Error(`Missing scenario ${model.module}.${test}`);
     for (const source of model.sources || []) readFileSync(join(repositoryRoot, source));
     for (const name of model.witnesses || []) {

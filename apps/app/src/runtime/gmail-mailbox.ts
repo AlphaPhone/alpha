@@ -1,14 +1,14 @@
-/** Mailbox helpers shared by Inbox and Settings come from @elizaos/plugin-inbox/mailbox. No provider content is stored here. */
+/** Mailbox helpers shared by Inbox and Settings: the request, policy and guard come from
+ * @elizaos/plugin-inbox/mailbox, what the owner is told from ../ui/mailbox. No provider content is stored here. */
 export {
   attachmentReadFailure,
-  classifyGmailFailure,
   disconnectGmailAccount,
-  disconnectMessage,
   type GmailDisconnectOutcome,
-  type GmailFailureKind,
 } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/failures.ts';
+export { classifyGmailFailure, disconnectMessage, type GmailFailure, type GmailFailureKind } from '../ui/mailbox/failures';
 export { gmailReadable } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/grants.ts';
-export { MailReadStateGuard, mailReadStateMessage, setGmailReadState } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/read-state.ts';
+export { MailReadStateGuard, setGmailReadState } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/read-state.ts';
+export { mailReadStateMessage } from '../ui/mailbox/read-state';
 
 /** Fired after a Gmail account is disconnected anywhere in the app so other surfaces re-check. */
 export const GMAIL_ACCOUNTS_CHANGED = 'alpha:gmail-accounts-changed';

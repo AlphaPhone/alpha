@@ -3,7 +3,7 @@ import './cloud-membership-ui.css';
 import {Busy,StatusDot} from './status-ui';
 import {iconStyle} from '../icon-style';
 import {alphaSubscriptionCopy,type ServiceLimit,type SubscriptionView} from './subscription-entitlement';
-import {useCloudSubscriptionSummary} from '../../../../.eliza/client-features/packages/ui/src/components/settings/cloud-subscription-summary.tsx';
+import {useCloudSubscriptionSummary} from '../ui/components/settings/cloud-subscription-summary.tsx';
 export type MembershipBalance='checking'|'zero'|'funded'|'member'|'unavailable';
 /** A plan is needed before the account can use Cloud inference. */
 export const FUNDING_NEEDED='Plan needed';
@@ -17,7 +17,7 @@ function endLabel(endsAt:number):string {
 /**
  * Shared Account presentation. Plan and
  * actions remain bound to the current Cloud account. The shared subscription summary
- * (`@elizaos/cloud-sdk/subscription-entitlement`, through the shared `useCloudSubscriptionSummary` hook) adds, read-only, the plan allowance Cloud reports and
+ * (Alpha's `ui/cloud/subscription-presentation`, through the `useCloudSubscriptionSummary` hook) adds, read-only, the plan allowance Cloud reports and
  * the latest Cloud limit with its retry time. Plan management opens Cloud's
  * billing page after the account review; Enter membership code reveals the code field.
  * A grant's access window is never presented as a paid renewal date.
@@ -25,10 +25,14 @@ function endLabel(endsAt:number):string {
  * `refused`: Cloud declined this account's last AI request for billing, so the sheet says so.
  *
  */
-export function CloudMembershipControls({balance,busy,error,connectionError,notice,email,plan,endsAt,lastLimit,refused=false,serviceName='Cloud',codeEntry=false,credits,onRedeem,onManagePlan,onRefresh}:{balance:MembershipBalance;credits?:{usd:string;observedAt:number}|null;busy:boolean;error?:string;connectionError?:string;notice?:string;email?:string;plan?:SubscriptionView|null;endsAt?:number|null;lastLimit?:(ServiceLimit&{observedAt:number})|null;refused?:boolean;serviceName?:string;codeEntry?:boolean;onRedeem:(code:string)=>Promise<boolean>;onManagePlan:()=>void;onRefresh:()=>void}){
+export function CloudMembershipControls({balance,busy,error,connectionError,notice,email,plan,endsAt,lastLimit,refused=false,serviceName='Cloud',codeEntry=false,credits,onRedeem,onManagePlan,onAddFunds,onCloseCode,onRefresh}:{balance:MembershipBalance;credits?:{usd:string;observedAt:number}|null;busy:boolean;error?:string;connectionError?:string;notice?:string;email?:string;plan?:SubscriptionView|null;endsAt?:number|null;lastLimit?:(ServiceLimit&{observedAt:number})|null;refused?:boolean;serviceName?:string;codeEntry?:boolean;onRedeem:(code:string)=>Promise<boolean>;onManagePlan:()=>void;
+ /** Opens the surface that adds funds (the current Cloud's hosted billing page). Absent where none exists: Alpha
+  * Cloud's in-app plans manage subscriptions only, so the button is not shown rather than opening a plan screen. */
+ onAddFunds?:()=>void;onCloseCode?:()=>void;onRefresh:()=>void}){
  const code=useRef<HTMLInputElement>(null),pending=useRef(false),codeEntryId=useId(),errorId=useId();
  // A retained redemption error must keep its associated input exposed.
  const [codeVisible,setCodeVisible]=useState(Boolean(error)),[submitting,setSubmitting]=useState(false),[submissionError,setSubmissionError]=useState(''),[codeValue,setCodeValue]=useState('');
+ const codeToggle=useRef<HTMLButtonElement>(null);
  const active=plan?.kind==='active',disabled=busy||submitting,showCode=codeVisible||codeEntry,explicitEntry=useRef(codeEntry);
  // The shared hook renders again only when the shown limit's wait ends or its
  // reset passes, so a lapsed retry time is not left on screen; it is not a per-second countdown.
@@ -64,7 +68,7 @@ export function CloudMembershipControls({balance,busy,error,connectionError,noti
     {summary.limit&&<div className="alpha-membership-limit-fact"><dt>Limit</dt><dd role="status">{summary.limit}</dd></div>}
    </dl>
    <p className="alpha-membership-support" role="status">{refused?<StatusDot tone="err">Billing declined</StatusDot>:checking?'':noPlan?'':!active?'Couldn’t refresh':plan.status==='past_due'?'Update payment':plan.refreshFailed?'Couldn’t refresh':''}</p>
-   <div className="alpha-membership-main-actions"><button type="button" className="alpha-membership-primary" aria-label={noPlan?'Choose a plan':'Manage plan'} disabled={disabled} onClick={onManagePlan}><span className="alpha-account-button-icon alpha-account-plan-icon" aria-hidden="true"/>{noPlan?'Choose plan':'Plan'}</button><div className="alpha-membership-secondary-actions"><button type="button" className="alpha-membership-secondary" disabled={disabled} onClick={onManagePlan}><span className="alpha-account-button-icon alpha-account-balance-icon" aria-hidden="true"/>Add funds</button>{!showCode&&<button type="button" className="alpha-membership-secondary" aria-expanded={false} aria-controls={codeEntryId} aria-label="Use code" disabled={disabled} onClick={()=>setCodeVisible(true)}><span className="alpha-account-button-icon alpha-account-code-icon" aria-hidden="true"/>Code</button>}</div></div>
+   <div className="alpha-membership-main-actions"><button type="button" className="alpha-membership-primary" aria-label={noPlan?'Choose a plan':'Manage plan'} disabled={disabled} onClick={onManagePlan}><span className="alpha-account-button-icon alpha-account-plan-icon" aria-hidden="true"/>{noPlan?'Choose plan':'Plan'}</button><div className="alpha-membership-secondary-actions">{onAddFunds&&<button type="button" className="alpha-membership-secondary" disabled={disabled} onClick={onAddFunds}><span className="alpha-account-button-icon alpha-account-balance-icon" aria-hidden="true"/>Add funds</button>}<button ref={codeToggle} type="button" className="alpha-membership-secondary" aria-expanded={showCode} aria-controls={codeEntryId} aria-label={showCode?'Close code':'Use code'} disabled={disabled} onClick={()=>{if(showCode){setCodeVisible(false);setSubmissionError('');onCloseCode?.();codeToggle.current?.focus();}else setCodeVisible(true);}}><span className="alpha-account-button-icon alpha-account-code-icon" aria-hidden="true"/>{showCode?'Close code':'Code'}</button></div></div>
    {showCode&&<div id={codeEntryId} className="alpha-membership-code-entry"><form aria-label="Redeem a membership code" onSubmit={event=>void redeem(event)}>
      <label><span className="alpha-sr">Membership code</span><input ref={code} name="membership-code" value={codeValue} onChange={event=>setCodeValue(event.target.value)} placeholder="Enter code" autoComplete="one-time-code" autoCapitalize="characters" autoCorrect="off" spellCheck={false} data-autofill-ignore="true" maxLength={64} disabled={disabled} required aria-invalid={!!error||!!submissionError||undefined} aria-describedby={error||submissionError?errorId:undefined}/></label>
      <button type="submit" disabled={disabled||!codeValue.trim()}>{submitting?<Busy label="Redeeming"/>:'Redeem'}</button>

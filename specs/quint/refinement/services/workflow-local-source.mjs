@@ -13,7 +13,8 @@ const driver=fileURLToPath(import.meta.url);
 const action=(name,...args)=>({name,args});
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
-async function wait(ready){for(let i=0;i<100;i++){if(ready())return;await tick();}throw Error('Actual workflow source did not reach the selected boundary');}
+// Bun runs a hundred immediates in well under a millisecond, before an off-thread digest can answer, so the bound is also a wall-clock one.
+async function wait(ready){const deadline=Date.now()+5000;for(let i=0;i<100||Date.now()<deadline;i++){if(ready())return;await tick();}throw Error('Actual workflow source did not reach the selected boundary');}
 const common=['upstream.lock.json','.eliza/client-features/.source.json','scripts/prepare-client-features.ts','test/support/strip-types.mjs',driver];
 
 async function prepared(extraSources,entry,implementation,transform){
@@ -39,7 +40,9 @@ const authoringEntry=`export * from './apps/app/src/runtime/workflow-local-time.
 export {normalizePhoneSpec,assertPhoneCapabilities,describePhoneTrigger,phoneTriggerClockChangeNote} from './apps/app/src/runtime/phone-workflow-authoring.ts';
 export {workflowSha,workflowBytes} from './apps/app/src/runtime/workflow-device-contract.ts';
 export {WorkflowTypedRejected} from './apps/app/src/runtime/workflow-protocol.ts';
-export {checkWorkflowScope,WORKFLOW_OPERATION_LABELS} from './.eliza/client-features/packages/contracts/src/workflow-scope.ts';
+export {checkWorkflowScope,WORKFLOW_OPERATION_LABELS} from './apps/app/src/ui/workflows/workflow-scope.ts';
+export {workflowErrorText} from './apps/app/src/ui/workflows/workflow-messages.ts';
+export {PHONE_WORKFLOW_CALENDAR_ANCHOR_PROTOCOL,phoneWorkflowRequiredProtocol,resolvePhoneCalendarRange} from './.eliza/client-features/packages/contracts/src/phone-workflow.ts';
 export {projectNoteForModel} from './.eliza/client-features/plugins/plugin-notes/src/types.ts';`;
 
 function authoringFixture(p,mutant){
@@ -128,17 +131,19 @@ function noticeFixture(p,mutant){
  const queued=[],storage=new Map();let ledger='new',question=false,opens=0,failConsume=false,hold,readCalls=0,consumeCalls=0;
  const session={origin:'https://synthetic.invalid',ownerId:'owner',agentId:'agent'},scope='scope';
  const tap={token:'tap',scope,...session,workflowId:'flow',runId:'run',versionId:'v1',retained:true,operationId:'operation',bindingHash:'b'.repeat(64)};
+ const localStorage={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)};
  const native={async pendingWorkflowTap(){readCalls++;const current=hold;if(current)await current.promise;return ledger==='pending'?{...tap,question}:{};},async consumeWorkflowTap(){consumeCalls++;if(failConsume)throw Error('Synthetic consume refused');ledger='consumed';return {};}};
  const client={async receipt(){return {id:'run',workflowId:'flow',versionId:'v1',finished:true,status:'completed'};},async detail(){return {id:'flow',versionId:'v1',name:'Flow'};}};
  class RealIntentStore extends p.deps.WorkflowIntentStore{constructor(owner){super(owner,{backend:p.deps.storageWorkflowIntentBackend({getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},'',()=>[...storage.keys()])});}}
  const owner={live:true,S:()=>({view:'workflows'}),toast(){},openView(){opens++;}};
- const box=vm.createContext({...p.deps,WorkflowIntentStore:RealIntentStore,AbortController,queueMicrotask:fn=>queued.push(fn),registerPlugin:()=>native,Capacitor:{isNativePlatform:()=>true},
+ const box=vm.createContext({...p.deps,WorkflowIntentStore:RealIntentStore,localStorage,AbortController,queueMicrotask:fn=>queued.push(fn),registerPlugin:()=>native,Capacitor:{isNativePlatform:()=>true},
   connectionController:{getWorkflowClient:()=>({scope,sessionId:'session',client}),getSnapshot:()=>({session,open:false})},alphaClient:{getState:()=>({context:{sensitive:false}})},document:{hidden:false},
   owner,authoring:{active:false,close(){}},publish(){},reviewWorkflowNoticeQuestion(){throw Error('Question review is outside this bounded run-tap campaign');}});
  vm.runInContext(code,box);
  return {readCalls:()=>readCalls,consumeCalls:()=>consumeCalls,opens:()=>opens,
   observe(){const v=box.inspect();return {'s.ledger':ledger,'s.question':question,'s.tapBusy':v.tapBusy,'s.tapRequested':!!v.tapRequested,'s.tapDeferred':v.tapDeferred,'s.noticeQuestion':!!v.noticeQuestion,'s.openedTap':!!v.openedTap,'s.runOpen':!!v.receipt,'s.opens':opens};},
   tap(){ledger='pending';question=false;},hold(){hold=deferred();},check(){return box.checkNotice('event');},release(){hold?.resolve();hold=null;},fail(value){failConsume=value;},async flush(){while(queued.length){queued.shift()();await tick();}},
+  foreignAccount(){storage.set('alpha.workflow.run-accounts.v1',JSON.stringify([{owner:JSON.stringify([session.origin,session.ownerId,session.agentId]),account:'foreign-account',workflowId:tap.workflowId,runId:tap.runId}]));},
  };
 }
 
@@ -147,8 +152,11 @@ export async function checkWorkflowNoticeTaps(extraSources=[],options={}){
  const implementation='apps/app/src/prototype/workflow-adapter.ts';
  const p=await prepared(extraSources,noticeEntry,implementation,text=>{
   const start=text.indexOf(" let tapBusy=false"),end=text.indexOf(' const dismissTap=',start);assert.ok(start>=0&&end>start);
+  const ownershipStart=text.indexOf("const RUN_ACCOUNTS='"),ownershipEnd=text.indexOf('/** Existing remote workflows only;',ownershipStart);
+  const accountStart=text.indexOf(' const runAccounts=workflowRunAccounts();'),accountEnd=text.indexOf(' /** The runs the signed-in account may see.',accountStart);
+  assert.ok(ownershipStart>=0&&ownershipEnd>ownershipStart&&accountStart>=0&&accountEnd>accountStart,'Exact durable run ownership helper and receiver declarations');
   const prefix="let noticeQuestion,editor=null,operation=null,generation=0,detail=null,detailSession=null,receipt=null,runs=[],phase='idle',intentStore=null,phoneReview=null,phoneSteps=[],phoneConfirm=null,phoneStatus='',approvalReceipt=null,approvalReview=null,reviewRun=false,reviewActivation=false,reviewCancel=false;\n";
-  return prefix+text.slice(start,end)+'\nglobalThis.checkNotice=checkNotice;globalThis.inspect=()=>({tapBusy,tapRequested,tapDeferred,noticeQuestion,openedTap,receipt});';
+  return text.slice(ownershipStart,ownershipEnd)+prefix+text.slice(accountStart,accountEnd)+text.slice(start,end)+'\nglobalThis.checkNotice=checkNotice;globalThis.inspect=()=>({tapBusy,tapRequested,tapDeferred,noticeQuestion,openedTap,receipt});';
  });
  const traces=[];
  try{
@@ -164,10 +172,15 @@ export async function checkWorkflowNoticeTaps(extraSources=[],options={}){
    }
    assert.equal(f.opens(),1);assert.ok(f.consumeCalls()>=1);traces.push(t);
   }
-  return await checkTraces({model:'WorkflowNoticeTaps',sources:p.sources,driverHashes:p.hashes,generatedSources:p.generated,traces,scope:'bounded-orchestration',assumptions:[
+  // This separate source-only privacy probe is not projected into a successful model action.
+  const foreign=noticeFixture(p);foreign.foreignAccount();foreign.tap();await foreign.check();
+  const privacyProbe={opens:foreign.opens(),consumeCalls:foreign.consumeCalls(),ledger:foreign.observe()['s.ledger'],runOpen:foreign.observe()['s.runOpen']};
+  assert.deepEqual(privacyProbe,{opens:0,consumeCalls:0,ledger:'pending',runOpen:false},'Actual durable foreign-account ownership retains the tap');
+  const receipt=await checkTraces({model:'WorkflowNoticeTaps',sources:p.sources,driverHashes:p.hashes,generatedSources:p.generated,traces,scope:'bounded-orchestration',assumptions:[
    'The exact complete Alpha checkNotice function and its real authenticated resolveWorkflowTap/readyTapStep/tapRecheck dependencies execute. The owner intent store is the real shared store over closed memory storage. The extraction only supplies outer renderer variables and a read-only closure seam.',
    'Three non-question run-tap schedules observe the closed native ledger, handler concurrency flags, real run receipt presence, remembered token and independently counted shell opens/consume calls. The native notification ledger is a controlled port; Android tap delivery, account authority and physical durable consume are separate.',
-   'Question DOM review/compose/cancel, operation and view-generation races, absent/foreign/stale-version taps, process restart and arbitrary event schedules remain unobserved obligations. The source campaign does not establish the entire model or installed notification behavior.',
+   'A separate source-only probe seeds the real run-account storage with a foreign account and requires no shell open or consume while retaining the tap. It is not projected as a successful model resolve action. Question DOM review/compose/cancel, operation and view-generation races, other absent/foreign/stale-version taps, process restart and arbitrary event schedules remain unobserved obligations. The source campaign does not establish the entire model or installed notification behavior.',
   ]});
+  return {...receipt,partialSourcePrivacyProbe:privacyProbe};
  }finally{p.close();}
 }

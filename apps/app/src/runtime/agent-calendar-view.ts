@@ -1,4 +1,4 @@
-import {calendarEditorCommand} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-command';
+import {calendarEditorCommand} from '../ui/calendar/event-editor-command';
 import type {LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,CreateLifeOpsCalendarEventRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
 import {getZonedDateParts,addDaysToLocalDate,buildUtcDateFromLocalParts} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/internal/time';
 import {calendarEventKey,calendarSourceKey} from './agent-calendar';

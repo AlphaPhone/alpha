@@ -5,7 +5,6 @@ import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
-if(!process.execArgv.some(arg=>arg==='--import=tsx'||arg==='tsx')){const child=spawnSync(process.execPath,['--import','tsx',process.argv[1]],{stdio:'inherit',timeout:60000});if(child.error)throw child.error;process.exit(child.status??1);}
 const {startNativeGoogleAgentHost,startManagedGoogleAgentHost}=await import('./support/managed-google-agent.mjs');
 const {createNativeGoogleCloudPort}=await import('./support/managed-google-agent.mjs');
 const user='11111111-1111-4111-8111-111111111111',org='22222222-2222-4222-8222-222222222222',grant='33333333-3333-4333-8333-333333333333';
@@ -17,7 +16,8 @@ const accessDir=mkdtempSync(join(tmpdir(),'alpha-google-access-'));
 process.env.ALPHA_GOOGLE_AGENT_ACCESS_FILE=join(accessDir,'access.json');
 writeFileSync(process.env.ALPHA_GOOGLE_AGENT_ACCESS_FILE,JSON.stringify({version:1,gmailChanges:true,calendarEdits:true}));
 after(()=>rmSync(accessDir,{recursive:true,force:true}));
-async function fixture({accounts,retireAfterCalendars=false}={}){
+async function fixture({accounts,retireAfterCalendars=false,startHost=startNativeGoogleAgentHost}={}){
+ const loopbackFetch=globalThis.fetch;
  const calls=[],receipts=new Map();let current=true,otherOwner=false,dispatches=0;
  const request=async(url,init={})=>{
   const u=new URL(url);calls.push(u.pathname);assert.equal(init.headers.Authorization,'Bearer synthetic-native-cloud-key');assert.equal(init.redirect,'error');
@@ -35,12 +35,20 @@ async function fixture({accounts,retireAfterCalendars=false}={}){
   if(saved){if(init.method==='POST'){dispatches++;assert.equal(body.reviewDigest,saved.receipt.reviewDigest);assert.deepEqual(body.proposal,saved.proposal);saved.receipt={...saved.receipt,state:'succeeded',providerResult:{messageId:'accepted-mail'}};}return Response.json({version:1,providerExactlyOnce:false,receipt:saved.receipt});}
   throw Error('Unexpected fixture route');
  };
- const host=await startNativeGoogleAgentHost({binding:binding(),apiToken,request,assertCurrent(){if(!current)throw Error('Native owner retired');}});
- const call=async(body,headers={})=>{const response=await fetch('http://127.0.0.1:'+host.port+'/__alpha-owner-gmail',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+apiToken,...headers},body:JSON.stringify(body)});return {status:response.status,data:await response.json()};};
+ const host=await startHost({binding:binding(),apiToken,request,assertCurrent(){if(!current)throw Error('Native owner retired');}});
+ const call=async(body,headers={})=>{const response=await loopbackFetch('http://127.0.0.1:'+host.port+'/__alpha-owner-gmail',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+apiToken,...headers},body:JSON.stringify(body)});return {status:response.status,data:await response.json()};};
  return {host,call,calls,receipts,dispatches:()=>dispatches,retire:()=>{current=false;},otherOwner:()=>{otherOwner=true;}};
 }
-test('native HTTP host uses the SDK token and prepares, dispatches and reads one immutable send receipt',async()=>{
- const f=await fixture();try{
+test('native HTTP host uses the late-installed transport for reads and one review-bound send',async()=>{
+ const originalFetch=globalThis.fetch;
+ let staleRequests=0,f;
+ try{
+  f=await fixture({async startHost({request,...options}){
+   globalThis.fetch=async()=>{staleRequests++;throw Error('Startup DNS cannot reach Cloud');};
+   const host=await startNativeGoogleAgentHost(options);
+   globalThis.fetch=request;
+   return host;
+  }});
   const read=await f.call({limit:1});assert.equal(read.status,200);assert.equal(read.data.items[0].threadTopic,'A & B');
   const calendars=await f.call({calendar:{operation:'sources'}});assert.equal(calendars.status,200);assert.equal(calendars.data.calendars[0].calendarId,'primary');
   const content={requestId:randomUUID(),to:['self@example.invalid'],subject:'Native QA',bodyText:'Synthetic only'};
@@ -48,7 +56,8 @@ test('native HTTP host uses the SDK token and prepares, dispatches and reads one
   const {id,reviewDigest}=prepared.data.send;const send={operation:'dispatch',id,reviewDigest,to:content.to,subject:content.subject,bodyText:content.bodyText};
   assert.equal((await f.call({send})).data.send.state,'succeeded');assert.equal((await f.call({send})).data.send.state,'succeeded');assert.equal(f.dispatches(),1);
   assert.equal((await f.call({send:{operation:'receipt',id}})).data.send.providerResult.messageId,'accepted-mail');
- }finally{await f.host.close();}
+  assert.equal(staleRequests,0);
+ }finally{globalThis.fetch=originalFetch;await f?.host.close();}
 });
 test('native host refuses foreign callers, browser origins, wrong Cloud owners and retired native bindings',async()=>{
  const f=await fixture();try{

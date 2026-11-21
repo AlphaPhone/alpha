@@ -1,8 +1,8 @@
 /**
- * Alpha Phone as a registered product of the shared mobile shell. Identity, theme,
+ * Alpha Phone as the registered product of its mobile shell. Identity, theme,
  * icons, view order and labels, older view ids and installed storage names are the
  * versioned Alpha product registration. The shell, view registry,
- * navigation and launcher join are upstream (@elizaos/ui/mobile-shell). This module
+ * navigation and launcher join are in ui/mobile-shell. This module
  * reads only the React-free core entry, so agent navigation and voice never load Home.
  */
 import {
@@ -13,7 +13,7 @@ import {
   mobileShellViewPaths,
   type MobileProductRegistration,
   type MobileShellAppearance,
-} from '@elizaos/ui/mobile-shell/core';
+} from '../ui/mobile-shell/core.ts';
 import {ALPHA_PRODUCT_REGISTRATION} from './alpha-product-registration';
 import {isMvpView} from '../prototype/mvp-features';
 
@@ -22,8 +22,7 @@ export const ALPHA_PRODUCT: MobileProductRegistration = defineMobileProductRegis
 /** Alpha's view registry and its navigation answers for one availability policy, given by
  * Alpha renderer key. The app uses the MVP scope and AOSP image admission (below). */
 export function alphaNavigation(available: (hostKey: string) => boolean) {
-  // Every view is drawn by Alpha's own renderer: none
-  // is contributed to the shell's MobileViewHost.
+  // Every view is drawn by Alpha's own renderer.
   const views = createMobileViewRegistry(ALPHA_PRODUCT, {available: view => available(views.hostKey(view))});
   return {
     views,
@@ -32,6 +31,11 @@ export function alphaNavigation(available: (hostKey: string) => boolean) {
     viewKey(viewId: string): string | undefined {
       const target = views.target(viewId);
       return !target ? undefined : target.kind === 'home' ? 'home' : views.hostKey(target.view);
+    },
+    /** The name the owner sees for the view an accepted id lands on; the id itself when unknown. */
+    viewLabel(viewId: string): string {
+      const target = views.target(viewId);
+      return target?.kind === 'home' ? 'Home' : (target?.view ?? views.find(viewId))?.label ?? viewId;
     },
     /** Canonical id of a renderer key, as the agent's view metadata names it. */
     canonicalViewId: (view: string): string => views.canonicalId(view) ?? view,
@@ -54,6 +58,7 @@ export function alphaNavigation(available: (hostKey: string) => boolean) {
 const navigation = alphaNavigation(isMvpView);
 export const alphaViews = navigation.views;
 export const alphaViewKey = navigation.viewKey;
+export const alphaViewLabel = navigation.viewLabel;
 export const alphaCanonicalViewId = navigation.canonicalViewId;
 export const alphaViewPaths = navigation.viewPaths;
 export const alphaViewPath = navigation.viewPath;

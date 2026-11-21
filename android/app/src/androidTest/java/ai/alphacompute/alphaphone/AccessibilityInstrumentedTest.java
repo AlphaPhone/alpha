@@ -27,7 +27,7 @@ import org.junit.runner.RunWith;
  * A flag-off build signed out of Eliza Cloud shows nothing but the required sign-in page (P-43),
  * which tests never get past (they never sign in). There the Home journey is skipped by its own
  * assumption and the sign-in page itself, the first screen of a production phone, is checked at
- * 200% instead; on the test-mocks pair (or a phone its owner signed in) it is the other way round.
+ * 200% instead; on a phone its owner signed in it is the other way round.
  */
 @RunWith(AndroidJUnit4.class)
 public final class AccessibilityInstrumentedTest {
@@ -107,7 +107,7 @@ public final class AccessibilityInstrumentedTest {
 
  @Test public void homeShadeSettingsAndComposerAtDoubleFontScale()throws Exception{
   // P-43: a flag-off build signed out of Eliza Cloud shows only the sign-in page, which
-  // requiredCloudSignInAtDoubleFontScale checks; the views need the test-mocks pair or a signed-in phone.
+  // requiredCloudSignInAtDoubleFontScale checks; the views need a signed-in phone.
   AppNavigation.assumeNoRequiredSignIn("The accessibility journey through Home, Settings and the composer");
   androidx.test.uiautomator.Configurator configurator=androidx.test.uiautomator.Configurator.getInstance();
   int previousFlags=configurator.getUiAutomationFlags();
@@ -131,34 +131,32 @@ public final class AccessibilityInstrumentedTest {
     assertEquals("Home app labels split mid-word at 200% font","[]",unquote(js(HOME_LABELS_SPLIT)));
 
     // Gesture zones and Android's shade. Android's shade is the
-    // one notification surface: Alpha draws none, in either flavor.
+    // one notification surface: Alpha draws none.
     until(AndroidShade.ALPHA_SHADE_ABSENT);
     Rect web=device.findObject(By.clazz("android.webkit.WebView")).getVisibleBounds();
-    // 1. A swipe from the very top edge belongs to Android in both flavors and opens Android's shade.
+    // 1. A swipe from the very top edge belongs to Android and opens Android's shade.
     device.swipe(web.centerX(),2,web.centerX(),web.top+web.height()/2,20);
     assertTrue("A top-edge swipe opens Android's own shade",AndroidShade.waitOpen(5000));
     assertEquals("No Alpha panel opens behind Android's shade","true",js(AndroidShade.ALPHA_SHADE_ABSENT));
     AndroidShade.collapse();
     assertTrue("Alpha is in front again after Android's shade closes",device.wait(androidx.test.uiautomator.Until.hasObject(By.pkg(BuildConfig.APPLICATION_ID).depth(0)),5000));
     SystemClock.sleep(500);
-    // Home offers no Notifications button in either flavor: Android's own swipe, above, is the way in.
+    // Home offers no Notifications button: Android's own swipe, above, is the way in.
     assertEquals("Home offers no Notifications button","0",js("document.querySelectorAll('[aria-label=\"Open notifications\"]').length"));
-    if(BuildConfig.IS_LAUNCHER){
-     // 2. On launcher Home a pull down that starts on empty Home asks for the same shade. It starts
-     // mid-screen, outside the system's top-edge zone. At this size Home usually overflows, so the
-     // pull depends on Alpha taking the drag from the WebView; which case ran is in the messages.
-     // The pull must reach Alpha's Home (a swipe on SystemUI's collapsing window is retried) and the
-     // shade counts only when Alpha asked for it.
-     js("document.querySelector('[data-alpha-layer=\"home\"]').scrollTop=0");
-     js(AndroidShade.COUNT_PULLS);
-     String fits=js("document.querySelector('[data-alpha-layer=\"home\"]')?.dataset.alphaHomeFits??'unknown'");
-     assertTrue("Home reports whether it fits the screen (got "+fits+")","\"true\"".equals(fits)||"\"false\"".equals(fits));
-     AndroidShade.pullOnHome(device,web.centerX(),web.top+web.height()/2,web.height()/3);
-     assertTrue("A pull on empty Home opens Android's shade (Home fits: "+fits+")",AndroidShade.waitOpen(5000));
-     assertEquals("Alpha asked Android once for that pull (Home fits: "+fits+")",1,AndroidShade.pullCount("calls"));
-     assertEquals("true",js(AndroidShade.ALPHA_SHADE_ABSENT));
-     AndroidShade.collapse();
-    }
+    // 2. A pull down that starts on empty Home asks for the same shade. It starts
+    // mid-screen, outside the system's top-edge zone. At this size Home usually overflows, so the
+    // pull depends on Alpha taking the drag from the WebView; which case ran is in the messages.
+    // The pull must reach Alpha's Home (a swipe on SystemUI's collapsing window is retried) and the
+    // shade counts only when Alpha asked for it.
+    js("document.querySelector('[data-alpha-layer=\"home\"]').scrollTop=0");
+    js(AndroidShade.COUNT_PULLS);
+    String fits=js("document.querySelector('[data-alpha-layer=\"home\"]')?.dataset.alphaHomeFits??'unknown'");
+    assertTrue("Home reports whether it fits the screen (got "+fits+")","\"true\"".equals(fits)||"\"false\"".equals(fits));
+    AndroidShade.pullOnHome(device,web.centerX(),web.top+web.height()/2,web.height()/3);
+    assertTrue("A pull on empty Home opens Android's shade (Home fits: "+fits+")",AndroidShade.waitOpen(5000));
+    assertEquals("Alpha asked Android once for that pull (Home fits: "+fits+")",1,AndroidShade.pullCount("calls"));
+    assertEquals("true",js(AndroidShade.ALPHA_SHADE_ABSENT));
+    AndroidShade.collapse();
     AppNavigation.open("Settings");onView(isRoot()).check(AccessibilityChecks.accessibilityAssertion());talkBackOrder(device,"Settings");
     AppNavigation.open("Home");js(AppNavigation.type());until(AppNavigation.composer());talkBackOrder(device,"Composer");
    }

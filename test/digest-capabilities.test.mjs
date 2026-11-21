@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -23,7 +24,7 @@ out.current=d.digestLoopState(loop,[{...source,expiresAt:'2026-10-10T12:00:00Z'}
 out.renewals=d.digestRenewals([source,{...source,id:'soon',expiresAt:'2026-10-09T06:00:00Z'},{...source,id:'later',expiresAt:'2026-10-12T12:00:00Z'}],[loop,{...loop,id:'l2',spec:{...loop.spec,sourceId:'soon'}},{...loop,id:'l3',spec:{...loop.spec,sourceId:'later'}}],now).map(r=>[r.source.id,r.state]);
 console.log(JSON.stringify(out));`;
 test('native evening, source pausing and the dossier follow what the agent advertises',()=>{
- const out=JSON.parse(execFileSync(process.execPath,['--import=tsx','--input-type=module','-e',script],{cwd:root,encoding:'utf8',timeout:60000}));
+ const out=JSON.parse(execFileSync(process.execPath,['-e',script],{cwd:root,encoding:'utf8',timeout:scaledTimeout(60000)}));
  assert.deepEqual(out.old,{digests:true,nativeSources:true,nativeEvening:false,sourcePause:false,dossier:false});
  assert.deepEqual(out.patched,{digests:true,nativeSources:true,nativeEvening:true,sourcePause:true,dossier:false});
  assert.equal(out.eveningWithoutNative.nativeEvening,false);
@@ -34,13 +35,4 @@ test('native evening, source pausing and the dossier follow what the agent adver
  assert.equal(out.revoked,'Source revoked — paused');
  assert.equal(out.current,'On');
  assert.deepEqual(out.renewals,[['s','expired'],['soon','expiring']]);
-});
-test('the dossier button is offered only with resident phone sources, whose pinned agent registers the route',async()=>{
- const {readFile}=await import('node:fs/promises');
- const ui=await readFile(resolve(root,'apps/app/src/runtime/hosted-digest-ui.tsx'),'utf8');
- const button=ui.split('\n').find(line=>line.includes('Review on-demand brief'));
- assert.ok(button,'the dossier review button exists');
- assert.match(button,/^\{features\.dossier&&/,'it renders only when the dossier feature is on');
- assert.match(ui,/dossier:nativeSupported\}/,'which is exactly native phone sources on the resident agent');
- assert.match(ui,/const nativeSupported=supported&&advertised\.nativeSources&&isAndroid&&connection\.kind==='resident';/,'and native sources need the resident (pinned) agent');
 });

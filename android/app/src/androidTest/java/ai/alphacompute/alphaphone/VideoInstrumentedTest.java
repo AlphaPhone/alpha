@@ -50,7 +50,6 @@ public class VideoInstrumentedTest {
   if(android.os.Build.VERSION.SDK_INT>=33)InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context().getPackageName(),Manifest.permission.POST_NOTIFICATIONS);
  }
  private void admitAccount()throws Exception{
-  if(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS){AppNavigation.liveMode();return;}
   // Install at launch, before startup settles: the required sign-in page opens by itself (P-43) and
   // its readiness probe must reach the fixture, never Cloud. A late install fails the check below.
   until("window.Capacitor?.nativePromise&&!window.__alphaVideoAccount");
@@ -61,7 +60,7 @@ public class VideoInstrumentedTest {
   // Only its account/runtime boundary is synthetic; Camera/Photos remain native.
   until(AppNavigation.SIGN_IN_PAGE_READY);
   assertEquals("The readiness probe reached the fixture: "+eval("JSON.stringify(window.__alphaVideoAccount.calls)"),"true",eval("window.__alphaVideoAccount.calls.includes('signIn:status')"));
-  eval("(()=>{const toggle=document.getElementById('alpha-sign-in-other-methods')?.previousElementSibling;if(toggle?.getAttribute('aria-expanded')==='false')toggle.click();const field=document.querySelector('.alpha-cloud-sign-in input[name=email]');field.value='video-fixture@example.invalid';[...document.querySelectorAll('.alpha-cloud-sign-in button')].find(b=>b.textContent.trim()==='Email me a code').click();})()");
+  eval(InboxFixtureSignIn.driveEmail("video-fixture@example.invalid"));
   until("document.querySelector('.alpha-cloud-sign-in input[name=one-time-code]')");
   eval("(()=>{const field=document.querySelector('.alpha-cloud-sign-in input[name=one-time-code]');field.value='123456';[...document.querySelectorAll('.alpha-cloud-sign-in button')].find(b=>b.textContent.trim()==='Verify').click();})()");
   // Admission stops the real resident, then binds and starts the synthetic one.

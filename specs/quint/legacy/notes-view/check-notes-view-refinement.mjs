@@ -5,7 +5,8 @@ import {fileURLToPath} from 'node:url';
 import {chromium, expect as baseExpect} from '@playwright/test';
 import {createServer} from 'vite';
 import {checkClientFeatures} from '../../../../scripts/prepare-client-features.ts';
-import {filesWithin, sha256, repositoryRoot as root} from '../../../../scripts/quint-lib.ts';
+import {filesWithin, repositoryRoot as root} from '../../../../scripts/quint-lib.ts';
+import {sha256} from '../../../../scripts/sha256.ts';
 import {canonicalNotesFixture, openCanonicalNotes} from '../../../../test/browser/helpers/canonical-notes.ts';
 import {selectLegacyNotesSource} from '../../../../test/browser/helpers/legacy-notes.ts';
 import {preloadPageModules} from '../../../../test/browser/helpers/page-modules.ts';
@@ -136,7 +137,7 @@ async function recover(page, title, legacy = false) {
   await expect(trash(page)).toBeVisible();
   if (!legacy) await expect(button(page, 'Empty Recently deleted')).toHaveCount(0);
   await trash(page).getByRole('button', {name: legacy ? new RegExp('^'+title+', ') : title, exact: !legacy}).click();
-  const review = page.getByRole('dialog', {name: title, exact: true});
+  const review = page.getByRole('dialog', {name: `${legacy ? 'Recover or delete' : 'Recover'} “${title}”?`, exact: true});
   if (!legacy) await expect(review.getByRole('button', {name: 'Delete now', exact: true})).toHaveCount(0);
   await review.getByRole('button', {name: 'Recover', exact: true}).click();
   await expect(trash(page)).toHaveCount(0);
@@ -364,7 +365,7 @@ async function mounted(extraSources) {
     ...filesWithin(resolve(root, 'vendor/eliza/plugins/plugin-native-passwords/src')),
     ...filesWithin(resolve(root, 'vendor/eliza/plugins/plugin-native-system/src')),
     'vendor/eliza/packages/core/src/utils/uuid.ts',
-    'apps/app/index.html', 'vite.config.ts', 'package.json', 'package-lock.json', 'upstream.lock.json',
+    'apps/app/index.html', 'vite.config.ts', 'package.json', 'bun.lock', 'upstream.lock.json',
     'scripts/prepare-client-features.ts', 'scripts/quint-lib.ts', 'scripts/browser-full-reload.ts',
     modelPath, fileURLToPath(import.meta.url),
     'test/browser/helpers/canonical-notes.ts', 'test/browser/helpers/legacy-notes.ts', 'test/browser/helpers/page-modules.ts',
@@ -376,7 +377,7 @@ async function mounted(extraSources) {
   let server, browser;
   try {
     process.env.ELIZA_DEV_ALLOW_TEST_MOCKS = '';
-    server = await createServer({configFile: resolve(root, 'vite.config.ts'), logLevel: 'error', cacheDir,
+    server = await createServer({configLoader: 'runner', configFile: resolve(root, 'vite.config.ts'), logLevel: 'error', cacheDir,
       // The captured sources are immutable during a replay. Vite's development reload
       // would replace the document and discard its closed provider and recording ports.
       server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null},

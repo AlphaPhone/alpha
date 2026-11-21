@@ -74,7 +74,7 @@ evaluator's `mutateSourceEvidence` reconciliation is a separate owner boundary.
 The insert path awaits `after_memory_persisted` after releasing the per-room
 section, so source liveness additionally depends on hook completion.
 
-Run the campaign with `node --test test/quint-fact-write-dedupe-refinement.test.mjs`.
+Run the campaign with `bun test test/quint-fact-write-dedupe-refinement.test.mjs`.
 
 ## Separate current-source model
 
@@ -87,7 +87,7 @@ same room before either inserts. Distinct rooms may run concurrently within
 one runtime. The model permits both cases and places no uniqueness requirement
 on the normalized fact text.
 
-The [source replay](../../refinement/services/fact-write-scope.mjs) checks SQL
+The [source replay](../../../../test/quint-fact-write-scope.test.mjs) checks SQL
 candidate counts and ranks at 119 and 120 newer rows, including the old row
 that remains durable after it falls out of the candidate window. It also
 checks instance and room boundaries, refusal before an insert or metadata
@@ -97,4 +97,4 @@ and known precommit failure. It leaves concurrent hits on the same metadata,
 ambiguous commits, multiple adapters or processes, and persistence hooks as
 separate obligations.
 
-Run it with `node --test test/quint-fact-write-scope.test.mjs`.
+Run it with `bun test test/quint-fact-write-scope.test.mjs`.

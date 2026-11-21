@@ -1,4 +1,6 @@
+import type { PluginListenerHandle } from '@capacitor/core';
 import type { SystemPlugin } from '../../../../.eliza/client-features/plugins/plugin-native-system/src/definitions.ts';
+import type { NativeNetworkStatus } from '../runtime/native-network';
 
 /** One listed launcher entry and profile whose Android App info page opens. */
 export type AppInfoTarget = { packageName: string; activityName?: string; user?: string };
@@ -10,6 +12,7 @@ export type AppInfoTarget = { packageName: string; activityName?: string; user?:
  */
 export type ElizaSystemPlugin = SystemPlugin & {
   /** The app's active Android network. Omitted facts mean Android could not answer. */
-  getNetworkStatus(): Promise<{ connected?: boolean; internetValidated?: boolean }>;
+  getNetworkStatus(): Promise<NativeNetworkStatus>;
+  addListener(event: 'networkStatusChanged', listener: () => void): Promise<PluginListenerHandle>;
   openAppInfo(target: AppInfoTarget): Promise<void>;
 };

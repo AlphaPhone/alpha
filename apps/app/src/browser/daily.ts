@@ -6,7 +6,6 @@ import { validateReminderOperation, reminderFields, reminderTiming, type Reminde
 import { BrowserFiles } from './files';
 import { initialReminderDue, completeReminderOccurrence, snoozeReminderOccurrence } from '../../../../.eliza/client-features/plugins/plugin-native-reminders/src/occurrence.ts';
 import { WebPlugin } from '@capacitor/core';
-import { devSurfacesEnabled } from '../build-flags';
 import type { Reminder, ClockRequest } from '../daily';
 import { revision } from './revision';
 import {notificationState} from './notification-store';
@@ -21,8 +20,10 @@ async function scheduledStatus():Promise<'scheduled'|'permission-denied'>{return
 function target(data:State,row:DeletableReminder):ReminderTarget {return {...(row.alertMinutes!==undefined?{timingVersion:2 as const}:{}),sourceId:'browser-reminders',sourceRevision:data.sourceRevision,reminderId:row.id,occurrenceId:row.occurrenceId!,revision:row.revision};}
 /** The row still is the reviewed target: every field of its current target matches. */
 const sameTarget=(data:State,row:DeletableReminder,expected:ReminderTarget)=>Object.entries(target(data,row)).every(([key,value])=>expected[key as keyof ReminderTarget]===value);
-export function reminderNoticeRevision(selected:ReminderTarget):string{
-  return JSON.stringify([selected.sourceRevision,selected.reminderId,selected.occurrenceId,selected.revision]);
+/** A digest, so the revision stays an opaque token a notice selection can carry. */
+export async function reminderNoticeRevision(selected:ReminderTarget):Promise<string>{
+  const exact=JSON.stringify([selected.sourceRevision,selected.reminderId,selected.occurrenceId,selected.revision]);
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(exact))),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 function operationBinding(input:{operationId:string;bindingHash:string},operation:ReminderOperation|ReminderCreateOperation) {
   if(!isOperationId(input.operationId)||!isSha256Hex(input.bindingHash))throw Error('Invalid reminder operation binding.');
@@ -67,14 +68,18 @@ export class BrowserDaily extends WebPlugin {
       for(const input of inputs){
         const row=data.reminders.find(row=>row.id===input.id);
         if(claimed.has(input.id)||!row?.occurrenceId||row.pendingDeletion||row.status!=='posted'||
-          row.noticeDismissedOccurrence===row.occurrenceId||reminderNoticeRevision(target(data,row))!==input.revision)continue;
+          row.noticeDismissedOccurrence===row.occurrenceId||await reminderNoticeRevision(target(data,row))!==input.revision)continue;
         row.noticeDismissedOccurrence=row.occurrenceId;
         claimed.add(input.id);dismissed.push(input);
       }
+      // Revision digests yield; recheck the action and alert policy before committing their marks.
+      if(!current()||noticeActionBlocked()||!await notificationsAllowed(signal))throw Error('Notification changed.');
+      signal.throwIfAborted();
+      if(!current()||noticeActionBlocked())throw Error('Notification changed.');
       return dismissed;
     },signal);
   }
-  async surfaceInfo(){return {developmentBuild:devSurfacesEnabled,assistant:false,reminderCreationVersion:1 as const,reminderTimingVersion:2 as const,topInset:0,bottomInset:0};}
+  async surfaceInfo(){return {assistant:false,reminderCreationVersion:1 as const,reminderTimingVersion:2 as const,topInset:0,bottomInset:0};}
   async closeAssistant(){window.dispatchEvent(new Event('alpha-back',{cancelable:true}));return {closed:true};}
   async scheduleReminder(input:{id:string;title:string;body?:string;at:number;recurrence?:Reminder['recurrence'];dueAt?:number;alertMinutes?:number|null}) {
     if(!Number.isSafeInteger(input.at)||input.at<=Date.now())return {status:'past',id:input.id,mode:'inexact'};

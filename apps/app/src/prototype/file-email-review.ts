@@ -1,6 +1,7 @@
 import { holdPhoneInert } from '../runtime/modal-inert';
 import { reviewMailAttachment, type MailAttachment } from '../runtime/inbox-attachment';
-import { describeEmailTarget, type EmailTarget } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/use-in-email.ts';
+import { rethrowAttachmentRefusal } from '../ui/mailbox/drafts-controller';
+import { describeEmailTarget, type EmailTarget } from '../ui/mailbox/use-in-email';
 import type { SelectedFile } from '../native/alpha-mail-attachments';
 
 /** Reads only after an explicit Files action. Selection/context alone never attaches bytes. */
@@ -27,7 +28,13 @@ export function reviewFileEmail(options: {
  cancel.onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=close;
  document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',close);window.addEventListener('launcher-home',close);window.addEventListener('blur',close);window.addEventListener('alpha-back',back,true);
  document.body.append(dialog);dialog.showModal();cancel.focus();{const spin=document.createElement('span'),label=document.createElement('span');spin.className='alpha-spinner';spin.setAttribute('aria-hidden','true');spin.style.cssText='width:18px;height:18px;border-width:2px';label.textContent='Checking';label.style.cssText='position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)';status.replaceChildren(spin,label);}
- const checked=async()=>{const value=await options.read(),review=await reviewMailAttachment(value);if(!current())throw Error('The selection changed. Nothing was added.');if(review.sha256!==value.sha256||review.size!==value.size)throw Error('The selected file changed. Select it again.');return value;};
+ const checked=async()=>{
+  const value=await options.read().catch(rethrowAttachmentRefusal);
+  const review=await reviewMailAttachment(value).catch(rethrowAttachmentRefusal);
+  if(!current())throw Error('The selection changed. Nothing was added.');
+  if(review.sha256!==value.sha256||review.size!==value.size)throw Error('The selected file changed. Select it again.');
+  return value;
+ };
  void (async()=>{try{
   file=await checked();target=options.target();const description=describeEmailTarget(target);
   destination.textContent=[description.account,description.destination].filter(Boolean).join(' · ');

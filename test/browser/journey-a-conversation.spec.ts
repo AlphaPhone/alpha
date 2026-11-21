@@ -215,6 +215,59 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
  expect(external).toEqual([]);
 });
 
+// Journey hardening: journey A had no declined action.
+// The proposal is authored through the development "Action JSON" control (no model decides it);
+// the card, Decline and the read-back of the action journal are the real rendered path.
+test('journey A: a proposed phone action is declined from the conversation and nothing runs, before or after a reload',async({page})=>{
+ test.setTimeout(120_000);
+ const actions=()=>page.evaluate(async()=>(await (await import('/src/browser/development-execution-document.ts')).readExecutionPart({namespace:'local'} as any,'actions',()=>({proposals:[],journal:[]}))) as any);
+ await page.goto('/?mode=dev');
+ await expect(page.getByRole('region',{name:'Home'})).toBeVisible();
+ const ask=page.getByRole('textbox',{name:'Ask Alpha',exact:true}),conversation=page.locator('[data-alpha-layer="conversation"]');
+ await openConnection(page);
+ const dialog=page.getByRole('dialog',{name:'Development connections'});
+ await dialog.getByRole('textbox',{name:'Scripted reply'}).fill(REPLY);
+ await dialog.getByRole('button',{name:'Save development reply'}).click();
+ await dialog.getByRole('button',{name:'Connect development profile'}).click();
+ await expect(dialog).toHaveCount(0);
+ await openConnectionDiagnostics(page);
+ await dialog.getByText('Development device actions',{exact:true}).click();
+ await dialog.getByRole('textbox',{name:'Action JSON'}).fill(JSON.stringify({type:'create_note',title:'Journey A declined note',body:'Must never be saved'}));
+ await dialog.getByRole('button',{name:'Queue action for review'}).click();
+ await expect(dialog.getByText('Action queued. Send a chat message to review it on the current screen.',{exact:true})).toBeVisible();
+ await dialog.getByRole('button',{name:'Close connection settings'}).click();
+ await returnToApps(page);
+
+ await ask.fill('Journey A request with a proposal');await ask.press('Enter');
+ await expect(bubble(page,'Journey A request with a proposal')).toHaveCount(1);
+ await expect(bubble(page,REPLY)).toHaveCount(1);
+ const approve=page.getByRole('button',{name:/^Create note/}),decline=page.getByRole('button',{name:/^Decline Keep things as they are\./});
+ await expect(approve).toHaveCount(1);
+ // The exact content is shown for review and nothing has run.
+ await expect(conversation).toContainText('“Journey A declined note”');
+ await expect(conversation).toContainText('Must never be saved');
+ await decline.dblclick();
+ await expect(conversation.getByText('Declined. No phone action was performed.',{exact:true})).toHaveCount(1);
+ await expect(approve).toHaveCount(0);
+ await expect(decline).toHaveCount(0);
+ let state=await actions();
+ expect(state.proposals.map((p:any)=>[p.payload.operation.type,p.state,p.receipt??null])).toEqual([['create_note','rejected',null]]);
+ expect(state.journal).toEqual([]);
+ // The conversation continues: one reply per accepted request, and the declined action stays declined.
+ // Clicking Decline can move the shared editor from the dock into the conversation.
+ const message=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await message.fill('Journey A request after declining');
+ await message.press('Enter');
+ await expect(bubble(page,'Journey A request after declining')).toHaveCount(1);
+ await expect(bubble(page,REPLY)).toHaveCount(2);
+ await expect(approve).toHaveCount(0);
+
+ await page.reload();
+ await expect(page.getByRole('region',{name:'Home'})).toBeVisible();
+ state=await actions();
+ expect(state.proposals.map((p:any)=>p.state)).toEqual(['rejected']);
+ expect(state.journal).toEqual([]);
+});
 
 // Journey hardening: journey A had no spoken request.
 // Synthetic boundaries only: the microphone is a Web Audio oscillator (the browser's real recorder

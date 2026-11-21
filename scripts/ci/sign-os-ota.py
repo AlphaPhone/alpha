@@ -47,6 +47,17 @@ def read(file):
     return json.loads(file.read_text(), object_pairs_hook=pairs)
 
 
+TARGET_IDENTITY_FIELDS = {"targetFilesSha256", "sourceCommit", "sdkCommit", "targetFingerprint", "buildTimestamp"}
+
+
+def target_binding(plan, reviewed):
+    identity = {"targetFilesSha256": plan["targetFiles"]["sha256"],
+                **{field: plan[field] for field in TARGET_IDENTITY_FIELDS - {"targetFilesSha256"}}}
+    matches = [target for target in reviewed if all(target.get(field) == value for field, value in identity.items())]
+    require(len(matches) == 1, "Target-files bytes and producer lineage must match exactly one reviewed target")
+    return matches[0]
+
+
 def validate(plan):
     fields = {"schema", "purpose", "sourceCommit", "sdkCommit", "targetFiles", "otaTools",
               "outputObject", "product", "device", "targetFingerprint", "buildTimestamp"}
@@ -56,8 +67,12 @@ def validate(plan):
     require(pin["schema"] == 1 and pin["qualified"] is True and HEX.fullmatch(pin["sha256"]) and
             HEX.fullmatch(pin["apkSignerMappingsSha256"]) and HEX.fullmatch(pin["avbKeyConfigurationSha256"]),
             "OS producer/tool identities must be reviewed before signing")
+    # Tool bytes have their own immutable digest. Each reviewed target below
+    # binds its producer SDK independently, so a newer target does not invalidate
+    # retained older targets or require rebuilding unchanged OTA tools.
     require(plan["sourceCommit"] in pin["allowedProducerCommits"] and
-            plan["sdkCommit"] == pin["sdkCommit"] and plan["otaTools"]["sha256"] == pin["sha256"],
+            isinstance(plan["sdkCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", plan["sdkCommit"]) and
+            plan["otaTools"]["sha256"] == pin["sha256"],
             "Unreviewed OS producer or tools")
     require(plan["product"] == "alpha_stallion_phone" and plan["device"] == "stallion" and
             isinstance(plan["targetFingerprint"], str) and
@@ -76,9 +91,12 @@ def validate(plan):
     # independently reviewed exact target bytes may claim the preserving lineage.
     reviewed = pin.get("reviewedTargets")
     require(isinstance(reviewed, list) and reviewed, "No reviewed target-files admission is configured")
-    target_fields = {"targetFilesSha256", "sourceCommit", "sdkCommit", "targetFingerprint", "buildTimestamp"}
+    target_fields = TARGET_IDENTITY_FIELDS
+    target_options = {"apkSignerMappingsSha256", "otaPostTimestamp"}
     for target in reviewed:
-        require(isinstance(target, dict) and set(target) == target_fields and
+        require(isinstance(target, dict) and target_fields <= set(target) <= target_fields | target_options and
+                ("apkSignerMappingsSha256" not in target or isinstance(target["apkSignerMappingsSha256"], str) and HEX.fullmatch(target["apkSignerMappingsSha256"])) and
+                ("otaPostTimestamp" not in target or type(target["otaPostTimestamp"]) is int and target["otaPostTimestamp"] > 0) and
                 isinstance(target["targetFilesSha256"], str) and HEX.fullmatch(target["targetFilesSha256"]) and
                 isinstance(target["sourceCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", target["sourceCommit"]) and
                 isinstance(target["sdkCommit"], str) and re.fullmatch(r"[0-9a-f]{40}", target["sdkCommit"]) and
@@ -86,9 +104,7 @@ def validate(plan):
                 re.fullmatch(r"Alpha/alpha_stallion_phone/stallion:17/[^\s]{1,512}", target["targetFingerprint"]) and
                 type(target["buildTimestamp"]) is int and target["buildTimestamp"] > 0,
                 "Invalid reviewed target-files admission")
-    identity = {"targetFilesSha256": plan["targetFiles"]["sha256"],
-                **{field: plan[field] for field in target_fields - {"targetFilesSha256"}}}
-    require(identity in reviewed, "Target-files bytes and producer lineage have not been reviewed together")
+    target_binding(plan, reviewed)
     return pin
 
 
@@ -131,13 +147,20 @@ def inspect_target(file, plan, pin):
         avb = {k: v for k, v in misc.items() if k.startswith("avb_") and
                k.endswith(("_key_path", "_algorithm", "_rollback_index_location"))}
         canonical = lambda value: hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        require(canonical(signers) == pin["apkSignerMappingsSha256"] and
+        binding = target_binding(plan, pin["reviewedTargets"])
+        require(canonical(signers) == binding.get("apkSignerMappingsSha256", pin["apkSignerMappingsSha256"]) and
                 canonical(avb) == pin["avbKeyConfigurationSha256"], "OS signing identities changed")
         # Alpha's product identity overrides the generic system-image identity.
         props = key_values(member(archive, "PRODUCT/etc/build.prop"))
         require(props.get("ro.build.fingerprint", props.get("ro.product.build.fingerprint")) == plan["targetFingerprint"] and
                 int(props.get("ro.build.date.utc", props.get("ro.product.build.date.utc"))) == plan["buildTimestamp"],
                 "Target build metadata differs")
+        # AOSP releasetools derives post-timestamp from the system build properties.
+        if "otaPostTimestamp" in binding:
+            system = key_values(member(archive, "SYSTEM/build.prop"))
+            require(system.get("ro.build.date.utc") == str(binding["otaPostTimestamp"]),
+                    "Target system timestamp differs from the reviewed OTA timestamp")
+        return binding.get("otaPostTimestamp", plan["buildTimestamp"])
 
 
 def extract_tools(file, destination):
@@ -204,11 +227,19 @@ def download(plan, workspace):
     extract_tools(workspace / "otatools.zip", workspace / "tools")
 
 
+def verify_ota_metadata(file, plan, expected_timestamp):
+    with zipfile.ZipFile(file) as archive:
+        meta = key_values(member(archive, "META-INF/com/android/metadata"))
+        require(meta.get("ota-type") == "AB" and meta.get("pre-device") == plan["device"] and
+                meta.get("post-build") == plan["targetFingerprint"] and meta.get("post-timestamp") == str(expected_timestamp) and
+                "ota-wipe" not in meta and "ota-downgrade" not in meta, "OTA is not the admitted preserving target")
+
+
 def sign(plan, workspace):
     pin = validate(plan)
     require(digest(workspace / "target-files.zip") == plan["targetFiles"]["sha256"] and
             digest(workspace / "otatools.zip") == plan["otaTools"]["sha256"], "Signing input drift")
-    inspect_target(workspace / "target-files.zip", plan, pin)
+    ota_timestamp = inspect_target(workspace / "target-files.zip", plan, pin)
     names = PROOF.SECRET_NAMES[:3]
     secrets = {name: os.environ.pop(name) for name in names}
     files = PROOF.archive_entries(PROOF.decode(secrets[names[0]]) + PROOF.decode(secrets[names[1]]))
@@ -239,12 +270,10 @@ def sign(plan, workspace):
                    "--payload_signer_maximum_signature_size", str(expected_bits // 8), str(workspace / "target-files.zip"), str(output)]
         with (workspace / "signing-private.log").open("xb") as log:
             subprocess.run(command, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=7200)
+    print("OTA package generated.", flush=True)
     verify_whole_file(output, expected, workspace)
-    with zipfile.ZipFile(output) as archive:
-        meta = key_values(member(archive, "META-INF/com/android/metadata"))
-        require(meta.get("ota-type") == "AB" and meta.get("pre-device") == plan["device"] and
-                meta.get("post-build") == plan["targetFingerprint"] and int(meta["post-timestamp"]) == plan["buildTimestamp"] and
-                "ota-wipe" not in meta and "ota-downgrade" not in meta, "OTA is not the admitted preserving target")
+    print("OTA whole-file signature verified.", flush=True)
+    verify_ota_metadata(output, plan, ota_timestamp)
     receipt = {"schema": "alpha-preserving-os-ota/v1", "sourceCommit": plan["sourceCommit"],
                "targetFingerprint": plan["targetFingerprint"], "otaCertificateSha256": expected,
                "sha256": digest(output), "bytes": output.stat().st_size, "platformAPEXOrAVBKeysRotated": False,

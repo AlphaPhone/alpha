@@ -11,13 +11,8 @@ final class AppNavigation {
  static String closeConnection() { return "document.querySelector('.alpha-connection-scrim button[aria-label=\"" + CLOSE_CONNECTION + "\"]')?.click()"; }
  static void liveMode() throws Exception {
   try(StartupDocumentProbe startup=new StartupDocumentProbe()) {
-   // Builds without ELIZA_DEV_ALLOW_TEST_MOCKS have no mock mode: require live directly.
-   if("mock".equals(startup.awaitReady(!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS))) {
-    // One real click only. Never retry effects if their callback is lost.
-    startup.expectNavigation();
-    WebViewTestDriver.withActivity(MainActivity.class,a->a.getBridge().getWebView().evaluateJavascript("document.querySelector('.mock-mode-banner button')?.click()",null));
-    startup.awaitReady(true);
-   }
+   // APK builds have no mock mode: require live directly.
+   startup.awaitReady();
   }
  }
  static String request(String view) {
@@ -37,17 +32,6 @@ final class AppNavigation {
  private static void until(String condition, String what) throws Exception {
   for (int i = 0; i < 200; i++) { if ("true".equals(WebViewTestDriver.evaluate("Boolean(" + condition + ")"))) return; android.os.SystemClock.sleep(100); }
   throw new AssertionError(what + ": " + condition);
- }
- /** From the open connection dialog of a test-mocks build: enters mock mode, which replaces the host document. */
- static void enterMockMode() throws Exception {
-  WebViewTestDriver.evaluate("[...document.querySelectorAll('.alpha-connection summary')].find(e=>e.textContent==='Mock mode').click()");
-  WebViewTestDriver.navigateHostDocument("[...document.querySelectorAll('.alpha-connection button')].find(e=>e.textContent.trim()==='Enter mock mode').click()", false);
-  until("document.documentElement.dataset.connectionMode==='mock'&&document.querySelector('.mock-mode-banner')", "Mock mode entered");
- }
- /** Leaves mock mode from its banner, which replaces the host document with the live one. */
- static void exitMockMode() throws Exception {
-  WebViewTestDriver.navigateHostDocument("document.querySelector('.mock-mode-banner button').click()", true);
-  until("document.documentElement.dataset.connectionMode==='live'&&!document.querySelector('.mock-mode-banner')", "Mock mode left");
  }
  /**
   * A fresh install without notification and microphone access opens the modal "Set up Alpha
@@ -70,16 +54,15 @@ final class AppNavigation {
   * Decision P-43: a flag-off build signed out of Eliza Cloud opens the full-page sign-in screen by
   * itself, and it cannot be dismissed (connection-ui.tsx productionCloudSignInRequired); it covers every view
   * and withdraws the native browser page. Tests never enter credentials, so a journey that needs the
-  * views runs on the test-mocks pair, or on a flag-off phone its owner already signed in. Skips with
+  * views runs on a phone its owner already signed in. Skips with
   * that reason instead of timing out behind the dialog.
   */
  static void assumeNoRequiredSignIn(String journey) throws Exception {
-  org.junit.Assume.assumeTrue(journey + " needs the views: this flag-off build is signed out of Eliza Cloud, so P-43's sign-in screen opens by itself and cannot be dismissed (tests never sign in). Run it on the test-mocks pair or on a flag-off phone its owner signed in.",
+  org.junit.Assume.assumeTrue(journey + " needs the views: this flag-off build is signed out of Eliza Cloud, so P-43's sign-in screen opens by itself and cannot be dismissed (tests never sign in). Run it on a phone its owner signed in.",
    !requiredSignIn());
  }
- /** A flag-off build without a stored Cloud credential: P-43's required sign-in page covers every view. */
+ /** A build without a stored Cloud credential: P-43's required sign-in page covers every view. */
  static boolean requiredSignIn() throws Exception {
-  if (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) return false;
   android.content.Context context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
   return new AlphaCredentialStore(context).readCredentialSlot("cloud:production") == null;
  }

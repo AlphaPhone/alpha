@@ -58,3 +58,19 @@ export function createFilesIndex(store:Store|undefined=defaultStore(),now:()=>nu
 }
 export const filesIndex=createFilesIndex();
 
+type SortMode='recent'|'name';
+type SortableEntry={name:string;directory:boolean;modified?:number};
+const collator=typeof Intl!=='undefined'?new Intl.Collator(undefined,{numeric:true,sensitivity:'base'}):undefined;
+/** Folders first in both modes. Recent: newest modified first, unknown times
+ * last, then name. Name: natural, case-insensitive order. */
+export function compareFilesEntries(mode:SortMode){
+  const byName=(a:SortableEntry,b:SortableEntry)=>(collator?collator.compare(a.name,b.name):a.name.toLowerCase().localeCompare(b.name.toLowerCase()))||(a.name<b.name?-1:a.name>b.name?1:0);
+  return (a:SortableEntry,b:SortableEntry)=>{
+    if(a.directory!==b.directory)return a.directory?-1:1;
+    if(mode==='recent'){
+      const am=Number.isFinite(a.modified)&&a.modified!>0?a.modified!:-1,bm=Number.isFinite(b.modified)&&b.modified!>0?b.modified!:-1;
+      if(am!==bm)return bm-am;
+    }
+    return byName(a,b);
+  };
+}

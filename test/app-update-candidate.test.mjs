@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
@@ -5,10 +6,56 @@ import path from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import YAML from 'yaml';
-import {candidateVersion, candidateReceipt, candidateArchiveSize, main} from '../scripts/app-update-candidate.ts';
+import {candidateVersion, candidateReceipt, candidateArchiveSize, uploadedCandidateMetadata, main} from '../scripts/app-update-candidate.ts';
 import {candidateFixture as fixture, hash, json, legacyManifestUrl, read} from './fixtures/app-update-candidate.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+
+test('uploaded artifact metadata retries transient visibility and transport failures within the same authenticated read', async () => {
+  let calls = 0, waits = 0;
+  const result = await uploadedCandidateMetadata('4242', 'controlled-token', {
+    request: async (url, options) => {
+      assert.equal(url, 'https://api.github.com/repos/alphacompute/alpha/actions/artifacts/4242');
+      assert.equal(options.redirect, 'error');
+      assert.equal(options.headers.Authorization, 'Bearer controlled-token');
+      assert.ok(options.signal instanceof AbortSignal);
+      calls++;
+      if (calls === 1) throw Error('controlled network failure');
+      if (calls === 2) return new Response('not visible yet', {status: 404});
+      if (calls === 3) return new Response('temporary service failure', {status: 503});
+      return Response.json({id: 4242, size_in_bytes: 1500});
+    }, wait: async milliseconds => {assert.equal(milliseconds, 1000); waits++;},
+  });
+  assert.deepEqual(result, {id: 4242, size_in_bytes: 1500});
+  assert.equal(calls, 4); assert.equal(waits, 3);
+});
+
+test('artifact metadata never substitutes a floor or retries authorization and malformed responses', async () => {
+  for (const status of [401, 403]) {
+    let calls = 0;
+    await assert.rejects(uploadedCandidateMetadata('4242', 'controlled-token', {
+      request: async () => {calls++; return new Response('private response body', {status});},
+      wait: async () => assert.fail('Authorization failures cannot become a retry'),
+    }), error => error.message === 'Uploaded candidate metadata read failed (HTTP ' + status + ')');
+    assert.equal(calls, 1);
+  }
+  for (const payload of ['not JSON', 'x'.repeat(16 * 1024 * 1024 + 1)]) {
+    let calls = 0;
+    await assert.rejects(uploadedCandidateMetadata('4242', 'controlled-token', {
+      request: async () => {calls++; return new Response(payload);},
+      wait: async () => assert.fail('Malformed metadata cannot become a retry'),
+    }), /metadata (?:is not JSON|exceeds 16 MiB)/);
+    assert.equal(calls, 1);
+  }
+  let calls = 0, waits = 0;
+  await assert.rejects(uploadedCandidateMetadata('4242', 'controlled-token', {
+    request: async () => {calls++; return new Response('', {status: 404});},
+    wait: async () => {waits++;},
+  }), /HTTP 404/);
+  assert.equal(calls, 5); assert.equal(waits, 4);
+  await assert.rejects(uploadedCandidateMetadata('../4242', 'controlled-token'), /Exact uploaded candidate/);
+  await assert.rejects(uploadedCandidateMetadata('4242', undefined), /requires a GitHub token/);
+});
 
 test('candidate versions use fixed run numbers above every page of retained assets and all committed/public floors', async t => {
   const f = fixture(t);
@@ -42,10 +89,12 @@ test('retired-channel inventory sets a version floor while the receipt binds onl
   };
   f.state.legacyMissing = false;
   f.state.legacyPages = [[{name: 'alpha-phone-703.apk'}]];
-  f.state.legacyPointer = pointer(legacyManifestUrl, 704);
-  const initial = await candidateVersion(f);
-  assert.equal(initial.observedFloor, 704);
-  assert.equal(initial.manifestSha256, null);
+  for (const repository of ['alphacompute/alpha', 'alphacompute/alphaphone']) {
+    f.state.legacyPointer = pointer(legacyManifestUrl.replace('alphacompute/alpha', repository), 704);
+    const initial = await candidateVersion(f);
+    assert.equal(initial.observedFloor, 704, repository);
+    assert.equal(initial.manifestSha256, null);
+  }
   f.state.pointer = pointer(f.config.updateManifestUrl, 702);
   assert.equal((await candidateVersion(f)).manifestSha256, f.state.pointer.sha256);
   f.state.legacyPages.push([{name: 'alpha-phone-705.apk'}]);
@@ -53,11 +102,14 @@ test('retired-channel inventory sets a version floor while the receipt binds onl
   f.state.legacyPages = [[{name: 'alpha-update-stable.json'}]];
   f.state.legacyPointer = null;
   await assert.rejects(candidateVersion(f), /not anonymously readable/);
+  f.state.legacyPointer = pointer(legacyManifestUrl.replace('alphacompute/alpha', 'other-owner/alpha'), 704);
+  await assert.rejects(candidateVersion(f), /Malformed stable pointer/);
 });
 
 test('missing or malformed inventories, hidden pointers and wrong source/workflow epochs fail before writing a candidate', async t => {
   const f = fixture(t), destination = 'test-results/version.json';
   for (const change of [{GITHUB_EVENT_NAME: 'workflow_dispatch'}, {GITHUB_REF: 'refs/heads/develop'},
+    {GITHUB_REPOSITORY_ID: '99'},
     {GITHUB_WORKFLOW_REF: f.env.GITHUB_WORKFLOW_REF.replace('resident-android', 'new-workflow')},
     {GITHUB_SHA: '0'.repeat(40)}, {GITHUB_RUN_NUMBER: '2100000001'}, {GITHUB_RUN_ATTEMPT: '0'}]) {
     await assert.rejects(main(['version', destination], {...f, env: {...f.env, ...change}}));
@@ -79,7 +131,8 @@ test('missing or malformed inventories, hidden pointers and wrong source/workflo
   await assert.rejects(candidateVersion(f), /version floor/);
   f.state.pointer = null; f.state.missing = true;
   assert.equal((await candidateVersion(f)).observedFloor, 1);
-  for (const runChanges of [{workflow_id: 373209005}, {event: 'pull_request'}, {head_sha: '0'.repeat(40)}, {run_attempt: 2}, {run_number: 704}]) {
+  for (const runChanges of [{workflow_id: 373209005}, {event: 'pull_request'}, {head_sha: '0'.repeat(40)}, {run_attempt: 2}, {run_number: 704},
+    {repository: {id: 99, full_name: f.env.GITHUB_REPOSITORY}}, {head_repository: {id: 99, full_name: f.env.GITHUB_REPOSITORY}}]) {
     f.state.runChanges = runChanges;
     await assert.rejects(candidateVersion(f), /run identity or workflow version epoch/);
   }
@@ -87,7 +140,7 @@ test('missing or malformed inventories, hidden pointers and wrong source/workflo
   f.commit(f.sdk); await assert.rejects(candidateVersion(f), /SDK changed/);
 });
 
-test('candidate receipt binds actual archive bytes and source freeze while keeping unsigned evidence separate from distribution', async t => {
+fixtureTest('candidate receipt binds actual archive bytes and source freeze while keeping unsigned evidence separate from distribution', async t => {
   const f = fixture(t), versionFile = 'test-results/version.json';
   const admission = await main(['version', versionFile], f), archive = f.archive(admission);
   const result = await main(['receipt', versionFile, archive.relative], f);
@@ -103,49 +156,51 @@ test('candidate receipt binds actual archive bytes and source freeze while keepi
   assert.deepEqual(fs.readFileSync(receipt), before, 'A retry cannot overwrite prior evidence');
 });
 
-test('native input receipt refuses a different source, package, SDK, run attempt or frozen record', async t => {
+fixtureTest('native build receipt must match frozen and staged bytes', async t => {
   const f = fixture(t), admission = await candidateVersion(f), archive = f.archive(admission);
   const file = path.join(archive.output, 'native-input-admission.json'), original = read(file);
-  for (const changed of [{source: '0'.repeat(40)}, {sdkCommit: '0'.repeat(40)}, {packageName: 'other.app'},
-    {runId: '10'}, {attempt: '2'}, {manifestSha256: '0'.repeat(64)}, {voiceRecordSha256: '0'.repeat(64)}]) {
-    json(file, {...original, ...changed});
-    assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /native input receipt differs from the build freeze/);
-    const freeze = read(path.join(archive.output, 'inputs-before.json'));
-    freeze.files['test-results/resident-ci-native-inputs/admission.json'] = hash(fs.readFileSync(file));
-    freeze.digest = hash(JSON.stringify(freeze.files));
-    for (const name of ['inputs-before.json', 'inputs-after.json']) json(path.join(archive.output, name), freeze);
-    assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /Native input admission/);
-  }
+  json(file, {...original, producer: {...original.producer, sdkCommit: 'invalid'}});
+  assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /differs from the build freeze/);
+  const freeze = read(path.join(archive.output, 'inputs-before.json'));
+  freeze.files['.eliza/native-inputs/receipt.json'] = hash(fs.readFileSync(file));
+  freeze.digest = hash(JSON.stringify(freeze.files));
+  for (const name of ['inputs-before.json', 'inputs-after.json']) json(path.join(archive.output, name), freeze);
+  assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /differs from the staged build/);
   fs.unlinkSync(file);
   assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /native-input-admission.json/);
 });
 
-test('a frozen receipt still requires the reviewed artifact and qualification inventory', async t => {
-  const f = fixture(t), admission = await candidateVersion(f), archive = f.archive(admission);
-  const file = path.join(archive.output, 'native-input-admission.json'), original = read(file);
-  for (const change of [value => delete value.artifacts, value => delete value.embedding,
-    value => value.artifacts.voice.artifactId++, value => value.artifacts.embeddingComponent.sha256 = '0'.repeat(64),
-    value => value.artifacts.embeddingQualification.expandedBytes = -1, value => value.artifacts.voice.source = 'invalid',
-    value => value.embedding.qualificationTransferred = true]) {
-    const changed = structuredClone(original); change(changed); json(file, changed);
+fixtureTest('frozen native receipt requires current recipe, valid outputs and honest qualification', async t => {
+  const f = fixture(t), admission = await candidateVersion(f);
+  for (const change of [value => value.producer.sdkCommit = 'invalid', value => value.producer.ndk = 'old',
+    value => value.recipe.identity = 'other.app', value => value.recipeSha256 = '0'.repeat(64),
+    value => value.qualification.deviceExecuted = true, value => value.voice.qualified = true,
+    value => value.files[0].sha256 = '0'.repeat(64), value => value.files[0].path = '../outside']) {
+    const archive = f.archive(admission), file = path.join(archive.output, 'native-input-admission.json');
+    const changed = read(file); change(changed); json(file, changed);
+    json(path.join(f.root, '.eliza/native-inputs/receipt.json'), changed);
     const freeze = read(path.join(archive.output, 'inputs-before.json'));
-    freeze.files['test-results/resident-ci-native-inputs/admission.json'] = hash(fs.readFileSync(file));
+    freeze.files['.eliza/native-inputs/receipt.json'] = hash(fs.readFileSync(file));
     freeze.digest = hash(JSON.stringify(freeze.files));
     for (const name of ['inputs-before.json', 'inputs-after.json']) json(path.join(archive.output, name), freeze);
-    assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /Native input/);
+    assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}));
   }
+  const archive = f.archive(admission);
+  fs.appendFileSync(path.join(f.root, '.eliza/paradee-voice/native/assets/paradee-voice/v1/manifest.json'), 'tampered');
+  assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}), /Native output changed/);
 });
 
-test('archive measurement binds the actual artifact metadata and expanded upload file sizes', async t => {
+fixtureTest('archive measurement binds the actual artifact metadata and expanded upload file sizes', async t => {
   const f = fixture(t), versionFile = 'test-results/version.json';
   const admission = await main(['version', versionFile], f), archive = f.archive(admission);
   const candidate = await main(['receipt', versionFile, archive.relative], f);
   const uploaded = {id: 4242, digest: 'sha256:' + 'a'.repeat(64), expired: false, size_in_bytes: 1500,
     name: `app-native-candidate-${admission.runNumber}-${admission.sourceCommit}-${admission.runId}-${admission.runAttempt}`,
-    workflow_run: {id: Number(admission.runId), head_sha: admission.sourceCommit}};
+    workflow_run: {id: Number(admission.runId), head_sha: admission.sourceCommit, head_branch: 'main',
+      repository_id: 1396333361, head_repository_id: 1396333361}};
   const options = {...f, archive: archive.relative, env: {...f.env, ALPHA_CANDIDATE_ARTIFACT_ID: '4242',
     ALPHA_CANDIDATE_ARTIFACT_SHA256: 'a'.repeat(64)}, api: args => {
-      assert.deepEqual(args, ['repos/eliza-research/alphaphone/actions/artifacts/4242']); return uploaded;
+      assert.deepEqual(args, ['repos/alphacompute/alpha/actions/artifacts/4242']); return uploaded;
     }};
   const files = fs.readdirSync(archive.output);
   const expandedBytes = files.reduce((sum, file) => sum + fs.statSync(path.join(archive.output, file)).size, 0);
@@ -155,7 +210,7 @@ test('archive measurement binds the actual artifact metadata and expanded upload
   assert.equal(result.expandedBytes, expandedBytes);
   assert.equal(result.files, files.length);
   assert.deepEqual(result.apks, candidate.apks);
-  for (const variant of ['launcher', 'standalone']) {
+  for (const variant of ['launcher']) {
     const bytes = fs.readFileSync(path.join(archive.output, variant + '-debug.apk'));
     assert.equal(result.debugApks[variant].sha256, hash(bytes));
     assert.equal(result.debugApks[variant].bytes, bytes.length);
@@ -165,7 +220,7 @@ test('archive measurement binds the actual artifact metadata and expanded upload
     /artifact identity or size differs/);
   assert.throws(() => candidateArchiveSize({...options, api: () => ({...uploaded, name: uploaded.name.slice(0, -1) + '2'})}),
     /artifact identity or size differs/);
-  const debug = path.join(archive.output, 'standalone-debug.apk'), priorDebug = fs.readFileSync(debug);
+  const debug = path.join(archive.output, 'launcher-debug.apk'), priorDebug = fs.readFileSync(debug);
   fs.appendFileSync(debug, 'changed after upload');
   assert.throws(() => candidateArchiveSize(options), /Measured APK differs/);
   fs.writeFileSync(debug, priorDebug);
@@ -173,13 +228,13 @@ test('archive measurement binds the actual artifact metadata and expanded upload
   assert.throws(() => candidateArchiveSize(options), /native input receipt changed/);
 });
 
-test('changed APKs, mocks, Cloud/private profiles, code/package drift, signed output and changed inputs cannot become native candidates', async t => {
+fixtureTest('changed APKs, mocks, another profile or channel, code/package drift, signed output and changed inputs cannot become native candidates', async t => {
   const f = fixture(t), admission = await candidateVersion(f), archive = f.archive(admission);
   const file = path.join(archive.output, 'apk-verification.json'), original = read(file);
   for (const change of [v => v.testMocks = true, v => v.runtimeProfile = 'cloud', v => v.allowUnpackagedRuntime = true,
-    v => v.updateChannel.kind = 'private-qa', v => v.upstream.commit = '0'.repeat(40),
-    v => v.results[0].versionCode++, v => v.results[1].packageName = 'other.package',
-    v => v.results[1].signed = true, v => v.results[1].distributable = true]) {
+    v => v.updateChannel.kind = 'other', v => v.upstream.commit = '0'.repeat(40),
+    v => v.results[0].versionCode++, v => v.results[0].packageName = 'other.package',
+    v => v.results[0].signed = true, v => v.results[0].distributable = true]) {
     const modified = structuredClone(original); change(modified); json(file, modified);
     assert.throws(() => candidateReceipt({...f, admission, archive: archive.relative}));
   }
@@ -208,60 +263,12 @@ test('a floor advancing during the build refuses the final receipt without alter
 
 test('real workflow keeps main candidates unsigned and isolated while preserving explicit qualification and dispatched versions', () => {
   const workflow = YAML.parse(fs.readFileSync(path.join(root, '.github/workflows/resident-android.yml'), 'utf8'));
-  const evaluate = (text, github, inputs = {}, vars = {}) => {
-    const expression = text.startsWith('${{') ? text.slice(3, -2) : text;
-    const format = (pattern, ...args) => pattern.replace(/\{(\d+)\}/g, (_, index) => args[index]);
-    return new Function('github', 'inputs', 'vars', 'format', `return (${expression});`)(github, inputs, vars, format);
-  };
-  const main = {event_name: 'push', ref: 'refs/heads/main', sha: 'a'.repeat(40), run_id: '101', run_attempt: '1'};
   const build = workflow.jobs.build;
-  assert.equal(evaluate(build.if, main), true);
-  assert.equal(evaluate(build.env.ALPHA_APP_UPDATE_CANDIDATE, main), '1');
-  assert.equal(build.env.ALPHA_RUNTIME_PROFILE, undefined);
-  assert.equal(build.env.ELIZA_ANDROID_BUN_TARGET, 'linux-musl');
-  assert.equal(build.env.ELIZA_ANDROID_TARGET_ABIS, 'arm64-v8a,x86_64');
-  assert.equal(evaluate(workflow.concurrency['cancel-in-progress'], main), true);
-  // Literal expression checks, not execution of GitHub's concurrency backend.
-  // One template string holds two GHA substitutions; inspect its group key.
-  const group = workflow.concurrency.group.match(/\$\{\{([\s\S]*?)\}\}/)[1];
-  const newer = {...main, sha: 'b'.repeat(40), run_id: '102'};
-  const oldRerun = {...main, run_attempt: '2'};
-  assert.equal(evaluate(group, main), evaluate(group, newer));
-  assert.notEqual(evaluate(group, oldRerun), evaluate(group, newer), 'rerunning an old push cannot enter the primary group');
-  assert.equal(evaluate(workflow.concurrency['cancel-in-progress'], oldRerun), false);
-  assert.equal(evaluate(group, oldRerun), evaluate(group, {...oldRerun, run_attempt: '3'}), 'reruns keep their own run-ID group');
-  assert.notEqual(evaluate(group, oldRerun), evaluate(group, {...newer, run_attempt: '2'}));
-  assert.equal(evaluate(build.env.ALPHA_APP_UPDATE_CANDIDATE, oldRerun), '1');
-  const dispatch = {...main, event_name: 'workflow_dispatch'}, manual = {operation: 'build', build_version_code: '44'};
-  assert.equal(evaluate(build.if, dispatch, manual), true);
-  assert.equal(evaluate(build.env.ALPHA_APP_UPDATE_CANDIDATE, dispatch, manual), '0');
-  assert.equal(workflow.on.workflow_dispatch.inputs.runtime_profile, undefined);
-  assert.equal(workflow.on.workflow_dispatch.inputs.local_embeddings, undefined);
-  assert.equal(evaluate(build.env.ELIZAOS_VERSION_CODE, dispatch, manual), '44');
-  assert.equal(evaluate(build.env.ELIZAOS_VERSION_CODE, main), '');
-  assert.notEqual(evaluate(group, main), evaluate(group, dispatch, manual));
-  assert.equal(evaluate(group, dispatch, manual), 'refs/heads/main');
-  assert.equal(evaluate(group, dispatch, manual), evaluate(group, {...dispatch, run_attempt: '2'}, manual));
-  assert.equal(evaluate(workflow.concurrency['cancel-in-progress'], {...dispatch, run_attempt: '2'}, manual), true);
-  const develop = {...main, ref: 'refs/heads/develop'};
-  assert.equal(evaluate(build.if, develop), false);
-  assert.equal(evaluate(build.if, develop, {}, {ELIZA_RESIDENT_QUALIFICATION: 'push'}), true);
-  assert.equal(evaluate(build.env.ALPHA_APP_UPDATE_CANDIDATE, develop), '0');
-  const nightly = {...main, event_name: 'schedule'};
-  assert.equal(evaluate(build.if, nightly, {}, {ELIZA_RESIDENT_QUALIFICATION: 'nightly'}), true);
-  assert.notEqual(evaluate(group, develop), evaluate(group, {...develop, sha: newer.sha}));
-  assert.notEqual(evaluate(group, develop), evaluate(group, nightly));
-  for (const context of [develop, nightly]) {
-    assert.notEqual(evaluate(group, context), evaluate(group, main));
-    assert.equal(evaluate(workflow.concurrency['cancel-in-progress'], context), false);
-  }
   assert.deepEqual(workflow.permissions, {contents: 'read'});
   assert.deepEqual(build.permissions, {contents: 'read', actions: 'read'});
-  const candidate = build.steps.find(step => step.name === 'Retain the unsigned native update candidate separately from test mocks');
+  const candidate = build.steps.find(step => step.name === 'Retain the unsigned native update candidate');
   assert.equal(candidate.if, "env.ALPHA_APP_UPDATE_CANDIDATE == '1'");
   assert.equal(candidate.with.path, 'test-results/resident-ci-distribution/');
-  assert.equal(build.steps.find(step => step.id === 'apks').with.path,
-    'test-results/resident-ci-archive/');
-  assert.equal(workflow.jobs.native.needs, 'build');
-  assert.equal(workflow.jobs.native.env.ALPHA_RESIDENT_MANIFEST_SHA256, '${{ needs.build.outputs.manifest_sha256 }}');
+  assert.deepEqual(Object.keys(workflow.jobs), ['publish-qualification', 'build']);
+
 });

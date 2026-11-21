@@ -32,7 +32,12 @@ import { secureConnectionStore } from "./native-connection";
 import { actionScope } from "./device-actions";
 import {
 	HostedSourceRejected,
+ digestLoopEditRefused,
  digestSummaryText,
+ digestCalendarErrorText,
+ DIGEST_CALENDAR_PERMISSION_DENIED,
+ DIGEST_CALENDARS_UNAVAILABLE,
+ HOSTED_SOURCE_REJECTED_TEXT,
  digestRenewals,
  digestLoopState,
  digestStatusLabel,
@@ -57,6 +62,8 @@ import {
 } from "./hosted-digests";
 import { DailyApps } from "../daily";
 import { formatDateTime } from "../prototype/locale-time";
+import { androidScheduleDelay } from "./workflow-local-time";
+import { DIGEST_RUN_WINDOW_MS } from "../../../../.eliza/client-features/plugins/plugin-workflow/src/services/hosted-digest-policy.ts";
 type Pending = {
 	path: "sources" | "loops" | "sources/revoke" | "dossier";
 	body: Record<string, unknown>;
@@ -485,7 +492,21 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
             await b.storage.write(b.pendingSlot, dispatched);
             if(binding.current!==b)return;
             setPending(dispatched);
-            const saved=await b.client.mutate(value.path, body, b.controller.signal);
+            let saved;
+            try {
+              saved=await b.client.mutate(value.path, body, b.controller.signal);
+            } catch (error) {
+              const sourceRejected=value.path==='sources'&&error instanceof HostedSourceRejected;
+              if(!sourceRejected&&(value.path!=='loops'||!digestLoopEditRefused(body,error)))throw error;
+              if(binding.current!==b)return;
+              try{await b.storage.remove(b.pendingSlot);}
+              catch{if(binding.current===b)setMessage(sourceRejected?'Source not saved. Retry to clear it.':'Schedule not saved. Couldn’t clear this request.');return;}
+              if(binding.current!==b)return;
+              setPending(null);setReview(null);
+              await refresh(true);
+              if(binding.current===b)setMessage(sourceRejected?HOSTED_SOURCE_REJECTED_TEXT:'Schedule changed before saving. Review it again.');
+              return;
+            }
             if(binding.current!==b)return;
             if(value.rebind?.length){
               // One confirmed renewal: the reviewed source above, then each loop moves to its exact new revision.
@@ -506,11 +527,6 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 			setText("");
 			await refresh(true);
 		} catch (error) {
-      if(error instanceof HostedSourceRejected && binding.current===b){
-        try { await b.storage.remove(b.pendingSlot); } catch {if(binding.current===b)setMessage("Source not saved. Retry to clear it.");return;}
-        if(binding.current!==b)return;
-        setPending(null);setReview(null);await refresh(true);if(binding.current===b)setMessage(error.message);return;
-      }
 			if (binding.current === b)
 				setMessage("Save not confirmed. Retry.");
 		} finally {
@@ -526,7 +542,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 		try{await b.storage.remove(b.pendingSlot);if(binding.current!==b)return;setPending(null);setReview(null);setMessage('Discarded');}
 		catch{if(binding.current===b)setMessage('Couldn’t discard');}
 	}
- async function loadNativeCalendars(){const b=binding.current;if(!b||busy)return;setBusy(true);try{const permission=await nativeCalendars.requestWorkflowReadAccess();if(permission.status!=='granted')throw Error('Calendar permission was not granted.');const result=await nativeCalendars.workflowCalendars();if(binding.current!==b)return;if(result.status!=='ready')throw Error('Calendar sources unavailable.');setCalendarChoices(result.calendars);if(digestMissingCalendars(selectedCalendars,result.calendars).length){setSelectedCalendars(ids=>ids.filter(id=>result.calendars.some(c=>c.id===id)));setMessage('Some selected calendars are no longer available. Choose again.');}}catch(error){if(binding.current===b)setMessage((error as Error).message);}finally{setBusy(false);}}
+ async function loadNativeCalendars(){const b=binding.current;if(!b||busy)return;setBusy(true);try{const permission=await nativeCalendars.requestWorkflowReadAccess();if(permission.status!=='granted')throw Error(DIGEST_CALENDAR_PERMISSION_DENIED);const result=await nativeCalendars.workflowCalendars();if(binding.current!==b)return;if(result.status!=='ready')throw Error(DIGEST_CALENDARS_UNAVAILABLE);setCalendarChoices(result.calendars);if(digestMissingCalendars(selectedCalendars,result.calendars).length){setSelectedCalendars(ids=>ids.filter(id=>result.calendars.some(c=>c.id===id)));setMessage('Some selected calendars are no longer available. Choose again.');}}catch(error){if(binding.current===b)setMessage(digestCalendarErrorText(error));}finally{setBusy(false);}}
  async function reviewNativeSource(){try{await prepareNativeSource();}catch{if(mounted.current)setMessage('Couldn’t review');}}
  async function prepareNativeSource(){
   const b=binding.current;if(!b||busy)return;
@@ -601,6 +617,10 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 	}
 	const liveBinding = binding.current;
     const now=Date.now(),renewals=digestRenewals(sources,loops,now);
+    const digestWindowMinutes = DIGEST_RUN_WINDOW_MS / 60_000;
+    const digestScheduleTiming = (connection.kind==='resident'&&isAndroid
+        ? `${androidScheduleDelay} `
+        : '') + `Runs more than ${digestWindowMinutes} minutes late are marked missed.`;
     // Read at render: travel or a changed system setting moves the device zone, never a reviewed schedule.
     const deviceZone=(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone;}catch{return '';}})();
 	if (!open || (binding.current && binding.current.sessionId!==connection.session?.sessionId)) return null;
@@ -658,6 +678,8 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 					<section id="hosted-digest-review" tabIndex={-1}>
 						<h2>Review</h2>
 						<p style={{ whiteSpace: "pre-wrap" }}>{review.summary}</p>
+                        {review.path==='loops'&&(review.body.spec as {enabled?:boolean}|undefined)?.enabled===true&&
+                            <p role="note">{digestScheduleTiming}</p>}
 						{(review.path==='loops'||review.path==='dossier')&&<p><span aria-hidden="true" style={{...iconStyle("info"),width:'16px',height:'16px',marginRight:6,verticalAlign:'middle'}}/>{billing}</p>}
 						<button disabled={busy} onClick={() => void submit(review)}>
 							Confirm
@@ -670,7 +692,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 					available && (
 						<>
 							{isAndroid&&connection.kind==='resident'&&nativeReady&&nativeSourceProtocol&&<details open={nativeOpen} onToggle={e=>setNativeOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>Selected phone sources</summary><label>Source name<input maxLength={200} value={nativeLabel} onChange={e=>setNativeLabel(e.target.value)}/></label><button disabled={busy} onClick={()=>void loadNativeCalendars()}>Choose calendars</button>{calendarChoices.map(c=><label key={c.id}><input type="checkbox" checked={selectedCalendars.includes(c.id)} onChange={e=>setSelectedCalendars(ids=>e.target.checked?[...ids,c.id]:ids.filter(id=>id!==c.id))}/>{c.name} · {c.account}</label>)}<label><input type="checkbox" aria-label="Open phone reminders due today and overdue" checked={selectedReminders} onChange={e=>setSelectedReminders(e.target.checked)}/>Reminders</label><label>Expires (h)<input type="number" aria-label="Consent expires in hours" min={1} max={DIGEST_SOURCE_MAX_HOURS} value={hours} onChange={e=>setHours(Number(e.target.value))}/></label><button disabled={busy} onClick={()=>void reviewNativeSource()}>{renewing&&sources.find(s=>s.id===renewing)?.live?.provider==='native'?'Review renewal':'Review'}</button></details>}
-                            {liveBinding && <HostedLiveSourcePicker key={liveBinding.sessionId} client={liveBinding.client} scope={liveBinding.notices.scope} signal={liveBinding.controller.signal} current={() => binding.current === liveBinding} busy={busy} review={value=>{const renews=renewing&&sources.find(s=>s.id===renewing)?.live?.provider==='google'?renewing:null;setReview(renews?{...value,renews,rebind:renewalLoops(renews),summary:value.summary+renewalNote(renews)}:value);}} />}
+                            {liveBinding && <HostedLiveSourcePicker key={liveBinding.sessionId} client={liveBinding.client} scope={liveBinding.notices.scope} signal={liveBinding.controller.signal} current={() => binding.current === liveBinding && openRef.current} busy={busy} onRevoked={() => void refresh(true)} review={value=>{const renews=renewing&&sources.find(s=>s.id===renewing)?.live?.provider==='google'?renewing:null;setReview(renews?{...value,renews,rebind:renewalLoops(renews),summary:value.summary+renewalNote(renews)}:value);}} />}
 							<details open={snapshotOpen} onToggle={e=>setSnapshotOpen((e.currentTarget as HTMLDetailsElement).open)}>
 								<summary>Share a snapshot</summary>
 								<label>
@@ -793,7 +815,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 								/>
 							</label>}
 							<p>
-								Missed times don’t run later. Only these digests run on a schedule.
+								{digestScheduleTiming}
 							</p>
 							{(["morning", "evening"] as const).filter(t=>t==='morning'||features.nativeEvening||sources.find(source=>source.id===sourceId)?.live?.provider!=='native').map((t) => (
 								<div key={t}>
@@ -833,7 +855,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 				)}
 				<h2>Results</h2>
 				<p>
-					Your latest 100 results are kept here.
+					{binding.current?.sessionId===connection.session?.sessionId&&results.length ? 'Your latest 100 results are kept here.' : 'No results yet.'}
 				</p>
 				{(binding.current?.sessionId===connection.session?.sessionId ? results : [])
 					.slice()

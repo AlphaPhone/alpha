@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { aggregateNativeVoice, nativeTimingFormat, legacyNativeTimingFormat, rejection } from '../scripts/native-voice-latency.ts';
+import { aggregateNativeVoice, nativeTimingFormat, rejection } from '../scripts/native-voice-latency.ts';
 import { aggregate, nativeTable } from '../scripts/aggregate-voice-latency.ts';
 
 const identity = { sourceCommit: 'a'.repeat(40), sourceDirty: false, engineSha256: 'b'.repeat(64), modelSha256: 'c'.repeat(64), device: 'Google Pixel 10a', environment: 'device', abi: 'arm64-v8a', build: 'standalone-release' };
@@ -142,33 +142,6 @@ test('CLI distinguishes insufficient samples, failed budgets and measured timing
   assert.deepEqual(nativeTable({ cohorts: [] }), []);
 });
 
-test('the Android collector times capture from AudioRecord and playback from the output timestamp (host JVM state)', async () => {
-  const { nativeSource, runJvm, upstreamBridgeSource, upstreamVoiceFixture, upstreamVoiceSource } = await import('./fixtures/jvm-tools.mjs');
-  assert.match(runJvm([upstreamVoiceSource('VoiceLatencyTrials.java'), upstreamVoiceFixture('VoiceLatencyTrialsTest.java')], 'ai.eliza.voice.VoiceLatencyTrialsTest'), /^PASS voice latency trials/);
-  const harness = fs.readFileSync(path.join(path.dirname(nativeSource('x')), '../../../../../androidTest/java/ai/alphacompute/alphaphone/NativeVoiceLatencyInstrumentedTest.java'), 'utf8');
-  assert.match(harness, /\},"harness-no-inference",source,LiveVoiceCapture\.detectors\(VoiceAssets\.sharedInference\(app\)\)\);/, 'the harness labels its own trials');
-  const read = name => fs.readFileSync(nativeSource(name), 'utf8'), shared = name => fs.readFileSync(upstreamVoiceSource(name), 'utf8');
-  const probe = shared('VoiceLatencyProbe.java'), capture = shared('LiveVoiceCapture.java'), plugin = fs.readFileSync(upstreamBridgeSource('LocalSpeechBridgePlugin.java'), 'utf8');
-  // The shared probe keeps Alpha's timing document name and build identity, configured once per process.
-  assert.match(read('AlphaApplication.java'), /VoiceLatencyProbe\.configureHost\("alpha-native-voice-timing-v3",BuildConfig\.ELIZA_SOURCE_COMMIT,BuildConfig\.ELIZA_SOURCE_DIRTY,/);
-  assert.match(probe, /getTimestamp\(scratch,AudioTimestamp\.TIMEBASE_MONOTONIC\)/);
-  assert.match(probe, /getAnchorSystemNanoTime\(\)/);
-  assert.match(probe, /\.put\("format",format\)/);
-  assert.match(probe, /\.put\("turnId",trial\.turnId\)/);
-  // Streamed speech (#397): first-pcm at the first AudioTrack write, audible from AudioTrack.getTimestamp.
-  const output = shared('AudioTrackSpeechOutput.java');
-  assert.match(output, /track\.getTimestamp\(stamp\)/);
-  assert.match(output, /MODE_STREAM/);
-  assert.match(plugin, /TRIALS\.firstPcm\(trial,nanos\)/);
-  assert.match(plugin, /TRIALS\.forTurn\(call\.getString\("voiceTurnId"\)\)/);
-  assert.match(plugin, /@PluginMethod public void markVoiceTurn\(PluginCall call\)\{\n  long at=System\.nanoTime\(\);/);
-  assert.equal(probe.includes('Log.'), false, 'the collector logs nothing');
-  assert.match(capture, /TRIALS\.speechEnded\(lastSpeechNs,System\.nanoTime\(\)/);
-  assert.match(plugin, /p\.start\(\);if\(playbackLocalReply\)VoiceLatencyProbe\.playbackStarted\(/);
-  // The trial carries numbers and labels only: no text reaches the collector.
-  for (const source of [probe, shared('VoiceLatencyTrials.java')]) assert.doesNotMatch(source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /transcript|\btext\b/i);
-});
-
 test('duplicate trial provenance changes cannot replace an accepted record', () => {
   for (const mutate of [row => { row.identity.sourceDirty = true; }, row => { row.thermal = 'severe'; }, row => { row.network = 'cellular'; }, row => { row.audibleClock = 'start-call'; }, row => { row.reason = 'no-response'; }]) {
     const rows = samples(), changed = structuredClone(rows[0]); mutate(changed);
@@ -198,14 +171,7 @@ test('v3 trials link one turn end to end; unlinked, legacy and fallback-clock tr
     assert.ok(rejection(rows[0]));
     assert.equal(aggregateNativeVoice([document(rows)]).sufficient, false);
   }
-  // Legacy v2 exports parse (without the new marks or turnId) but cannot be acceptance evidence.
-  const legacy = samples().map(row => { const { turnId, ...rest } = row; const marks = { ...rest.marks }; delete marks.request; delete marks['first-token']; return { ...rest, audibleClock: 'mediaplayer-timestamp', marks }; });
-  const old = aggregateNativeVoice([{ format: legacyNativeTimingFormat, records: legacy }]);
-  assert.equal(old.invalid, 0);
-  assert.equal(old.cohorts[0].ineligibleRows, 50);
-  assert.equal(old.sufficient, false);
-  assert.ok(rejection({ ...legacy[0], marks: { ...legacy[0].marks, request: 1720 } }, legacyNativeTimingFormat), 'v2 has no request mark');
-  assert.throws(() => aggregateNativeVoice([{ format: 'alpha-native-voice-timing-v1', records: [] }]), /export/);
+  assert.throws(() => aggregateNativeVoice([{ format: 'alpha-native-voice-timing-v2', records: [] }]), /export/);
 });
 
 test('an ineligible row on a release device fails the document instead of hiding its cohort failures', () => {

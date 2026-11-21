@@ -1,39 +1,22 @@
-// Check the pinned Files SDK and the client copy used by Alpha Phone.
+// Check the pinned Files SDK, Alpha's coordinator and Files review card, and the client copy used by Alpha Phone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {tsImport} from 'tsx/esm/api';
+import {tsImport} from './support/ts-import.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
-import {upstreamNativeSource} from '../scripts/upstream-native-source.ts';
 const sharedDirectory='plugins/plugin-assistant/src/services/device-actions';
-const vendor=path.join(root,'vendor/eliza');
 const features=path.join(root,'.eliza/client-features');
-const vendorReady=fs.existsSync(path.join(vendor,sharedDirectory,'action.ts'));
 const featuresReady=fs.existsSync(path.join(features,sharedDirectory,'files-browser-contract.ts'));
-
-test('the pinned Files contract gates the schema, registration and reviewed operations', {skip:!vendorReady&&'vendor/eliza not checked out'}, ()=>{
-  const source=upstreamNativeSource(root);
-  const read=name=>{
-    const target=sharedDirectory+'/'+name;
-    return source.read(target).get(target).bytes.toString('utf8');
-  };
-  assert.match(read('action.ts'),/\.\.\.FILES_OPERATION_SCHEMAS,/);
-  assert.match(read('action.ts'),/capabilities\?\.includes\(FILES_CAPABILITY\)/);
-  assert.match(read('contract.ts'),/if \(isFilesOperation\(\{ type \}\)\)\s+return capabilities\?\.includes\(FILES_CAPABILITY\) === true;/);
-  assert.match(read('service.ts'),/\.\.\.FILES_OPERATION_TYPES,/);
-  assert.match(read('service.ts'),/NOTES_SEARCH_CAPABILITY,\s+CALENDAR_AVAILABILITY_CAPABILITY,\s+FILES_CAPABILITY,/);
-  const routePath='packages/agent/src/api/device-action-routes.ts';
-  const route=source.read(routePath).get(routePath).bytes.toString('utf8');
-  assert.equal((route.match(/CALENDAR_AVAILABILITY_CAPABILITY,\s+FILES_CAPABILITY,/g)||[]).length,2);
-});
 
 test('the shipped coordinator and Files view agree on approved operations', {skip:!featuresReady&&'prepared client features are missing'}, async()=>{
  const moduleAt=name=>tsImport(path.join(features,sharedDirectory,name),import.meta.url);
- const {validateDeviceOperation,proposalContextNotice}=await moduleAt('client-coordinator.ts');
+ const {validateDeviceOperation}=await moduleAt('client-coordinator.ts');
+ const {proposalContextNotice}=await tsImport(path.join(root,'apps/app/src/ui/device-actions/client-coordinator.ts'),import.meta.url);
  const {deviceOperationSupportedByCapabilities}=await moduleAt('contract.ts');
  const shared=await moduleAt('files-browser-contract.ts');
+ const review=await tsImport(path.join(root,'apps/app/src/ui/files/files-operation-presentation.ts'),import.meta.url);
  const alpha=await tsImport(path.join(features,'plugins/plugin-files/src/browser/files-agent-contract.ts'),import.meta.url);
  const policy = {admitView: () => true, parseWorkflowRead: () => { throw Error('no'); }};
  const good = [
@@ -56,7 +39,7 @@ test('the shipped coordinator and Files view agree on approved operations', {ski
    assert.deepEqual(valid, op);
    assert.deepEqual(validateDeviceOperation(valid, policy), valid, 'a validated operation validates again unchanged');
    assert.deepEqual(alpha.validateFilesOperation(op), valid, 'Alpha and the shared contract agree');
-   assert.deepEqual(alpha.describeFilesOperation(valid), shared.describeFilesOperation(valid));
+   assert.deepEqual(alpha.describeFilesOperation(valid), review.describeFilesOperation(valid));
    assert.equal(deviceOperationSupportedByCapabilities(op.type, ['files.browser.v1']), true);
    assert.equal(deviceOperationSupportedByCapabilities(op.type, ['camera.capture-photo.v1']), false);
    assert.equal(deviceOperationSupportedByCapabilities(op.type, undefined), false);

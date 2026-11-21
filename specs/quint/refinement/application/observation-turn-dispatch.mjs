@@ -37,7 +37,7 @@ function compiledSend() {
   const conversationKey = source.match(/^function conversationKey\(.*$/m)[0];
   const stopNotices = source.match(/^export const STOPPED_(?:REPLY|CANCELLED|UNCHECKED)_NOTICE = .*$/gm)
     .map(line => line.replace(/^export /, '')).join('\n');
-  return transformSync(`${conversationKey}\n${stopNotices}\nconst controller = {${source.slice(start, end + 5)}};\nglobalThis.send = controller.send.bind(controller);`,
+  return transformSync(`${conversationKey}\n${stopNotices}\nconst controller = {getAppRecordClient: () => null,${source.slice(start, end + 5)}};\nglobalThis.send = controller.send.bind(controller);`,
     {loader: 'ts'}).code;
 }
 
@@ -189,7 +189,7 @@ async function fixture({ClientObservationSupportSession, phoneContextMessage, Lo
 
 export async function checkObservationTurnDispatch(extraSources = []) {
   const sources = [modelPath, sendSource, observationSource, contextSource, protocolSource,
-    projection + '.source.json', 'package-lock.json', fileURLToPath(import.meta.url), ...extraSources];
+    projection + '.source.json', 'bun.lock', fileURLToPath(import.meta.url), ...extraSources];
   captureSources(sources);
   const prepared = JSON.parse(read(projection + '.source.json'));
   assert.equal(prepared.baseCommit, JSON.parse(read('upstream.lock.json')).commit);

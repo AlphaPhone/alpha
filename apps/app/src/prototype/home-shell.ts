@@ -1,9 +1,12 @@
 import {createElement, type CSSProperties} from 'react';
-import type {FavoritesStore, InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
-import {appKey} from '@elizaos/capacitor-system/launcher';
-import {createMobileShellLauncher, mobileShellIconUrl, MobileHomeScreen, type MobileHomeEntry, type MobileHomeTile} from '@elizaos/ui/mobile-shell';
+import type {InstalledApp, LauncherBridge} from '@elizaos/capacitor-system/launcher';
+import {appKey, type FavoritesStore} from '../ui/mobile-shell/installed-launcher.ts';
+import {createMobileShellLauncher, type MobileHomeEntry} from '../ui/mobile-shell/mobile-launcher.ts';
+import {mobileShellIconUrl} from '../ui/mobile-shell/product-registration.ts';
+import {MobileHomeScreen, type MobileHomeTile} from '../ui/mobile-shell/MobileHomeScreen.tsx';
 import {ALPHA_PRODUCT, alphaViews} from '../product/alpha-product';
-import {InstalledAppsGridDrawer, HOLD_MS, SLOP, appsDrawerEntries} from '../../../../.eliza/client-features/packages/ui/src/mobile-shell/InstalledAppsGridDrawer';
+import {InstalledAppsGridDrawer, appsDrawerEntries} from '../ui/mobile-shell/InstalledAppsGridDrawer';
+import {DEFAULT_HOLD_MS, LAUNCHER_PRESS_SLOP} from '../ui/gestures/constants';
 import {createInlineModal} from '../runtime/inline-modal';
 type Bag = Record<string, any>;
 
@@ -25,7 +28,7 @@ const HOME_EDIT_CSS = `
 @media (prefers-reduced-motion: reduce){[data-alpha-home-editing="true"] [data-mobile-shell-tile-face]{animation:none}}
 `;
 
-/** Home and its app grid from the shared mobile shell, and Alpha's Apps drawer, themed by the Alpha
+/** Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer, themed by the Alpha
  * record. The template fills Home's notice and card slots; open state
  * and Back go through the shared navigation reducer (Component.shellNavigate), so Back and Home close
  * the drawer. The installed favorites are the record's (alpha.launcher.favorites.v1, product views as
@@ -74,6 +77,10 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
     changed: () => { reportHomeFailure(); owner?.setState({launcherRevision: Date.now()}); },
   });
   const {launcher} = shell, prefix = ALPHA_PRODUCT.storage.launcherBuiltinPrefix;
+  let homeProjection: Pick<ReturnType<typeof launcher.snapshot>, 'apps' | 'favorites'> & {
+    views: ReturnType<typeof alphaViews.available>;
+    entries?: MobileHomeEntry[];
+  } | undefined;
   const icon = (id: string) => mobileShellIconUrl(ALPHA_PRODUCT, id);
   const grid = icon(ALPHA_PRODUCT.icons.allApps);
   // Installed apps exist on Android, or through the explicitly enabled browser fixture; without
@@ -125,6 +132,7 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
   p.componentWillUnmount = function (...args: any[]) {
     if (owner === this) {
       stop?.(); launcher.cancelPending(); stop = undefined; endPress(); endDrag(); swallow = ''; owner = null;
+      homeProjection = undefined;
     }
     return unmount?.apply(this, args);
   };
@@ -152,8 +160,17 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
   };
   p.renderVals = function () {
     const out = render.call(this), S = this.S(), self = this;
-    shell.syncViews();
-    const snapshot = launcher.snapshot();
+    const available = alphaViews.available(), previous = homeProjection;
+    let snapshot = launcher.snapshot();
+    let projection: NonNullable<typeof homeProjection>;
+    // Availability can change after startup. Compare it each render and keep the
+    // post-sync snapshot identities, since syncing builtins replaces the apps array.
+    if (!previous || snapshot.apps !== previous.apps || snapshot.favorites !== previous.favorites ||
+        available.length !== previous.views.length || !available.every((view, index) => view === previous.views[index])) {
+      shell.syncViews();
+      snapshot = launcher.snapshot();
+      homeProjection = projection = {apps: snapshot.apps, favorites: snapshot.favorites, views: available};
+    } else projection = previous;
     const showDrawer = !!inventory && !out.assistantSurface;
     const drawerOpen = showDrawer && !!S.drawer && !!out.isOn && !out.isView;
     const editing = !!inventory && !!S.homeEdit && !!out.isOn && !out.isView && !drawerOpen && !out.assistantSurface;
@@ -174,7 +191,7 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
       return {...base, face: face(entry.key, base), ...(editing ? {ariaLabel: `Remove ${base.label} from Home`, onOpen: () => {}} : {})};
     };
     const appsTile = {key: 'alpha:apps-drawer', label: 'Apps', glyphUrl: grid, iconId: ALPHA_PRODUCT.icons.allApps, onOpen: () => self.openAllApps(), dialog: true};
-    const tiles = out.assistantSurface ? [] : [...shell.homeEntries().map(tile), ...(editing || !showDrawer ? [] : [appsTile])];
+    const tiles = out.assistantSurface ? [] : [...(projection.entries ??= shell.homeEntries()).map(tile), ...(editing || !showDrawer ? [] : [appsTile])];
     const gridProps: Bag = {
       'data-alpha-home-apps': '', 'data-alpha-home-editing': editing ? 'true' : undefined,
       onPointerDown: (event: PointerEvent) => {
@@ -189,7 +206,7 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
             press = null;
             if (!ownsHomeGesture(self, target)) return;
             swallow = key; self.setState({homeEdit: true, homeAdd: false});
-          }, HOLD_MS)};
+          }, DEFAULT_HOLD_MS)};
           press = started; return;
         }
         // A press on the remove control never starts a drag.
@@ -200,11 +217,11 @@ export function installHomeShell(Component: any, views: Record<string, Bag>, bri
       },
       onPointerMove: (event: PointerEvent) => {
         if (owner !== self) return;
-        if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > SLOP) endPress();
+        if (press?.pointer === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > LAUNCHER_PRESS_SLOP) endPress();
         if (drag?.pointer !== event.pointerId) return;
         if (!ownsHomeGesture(self, drag.tile)) { endDrag(); return; }
         const dx = (event.clientX - drag.x) / drag.scale, dy = (event.clientY - drag.y) / drag.scale;
-        if (!drag.moved && Math.hypot(dx, dy) <= SLOP) return;
+        if (!drag.moved && Math.hypot(dx, dy) <= LAUNCHER_PRESS_SLOP) return;
         if (!drag.moved) {
           drag.moved = true; drag.tile.setAttribute('data-alpha-home-dragging', '');
           // Captured only once it is a drag, so a tap still reaches the icon.

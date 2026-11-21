@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -7,7 +8,7 @@ import {resolve} from 'node:path';
 // unreadable definitions never take the list down, and a retained submission can be repeated only under its
 // own identity. Synthetic agent responses; no runtime.
 const root=resolve(import.meta.dirname,'..');
-const run=script=>JSON.parse(execFileSync(process.execPath,['--import=tsx','--input-type=module','-e',script],{cwd:root,encoding:'utf8',timeout:120000}));
+const run=script=>JSON.parse(execFileSync(process.execPath,['-e',script],{cwd:root,encoding:'utf8',timeout:scaledTimeout(120000)}));
 const prelude=`
 const P=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/workflow-protocol.ts'))});
 const A=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/phone-workflow-authoring.ts'))});
@@ -79,7 +80,9 @@ out.timeOffered=await message(async()=>A.assertPhoneCapabilities(A.normalizePhon
 console.log(JSON.stringify(out));`);
  assert.deepEqual(out.manual,{kind:'manual'});
  assert.deepEqual(out.time,{kind:'time',localTime:'07:30',timeZone:'Europe/Paris',days:[1,2,3,4,5]});
- assert.deepEqual(out.describe,['Next Nov 11, 2026, 06:30','Only when you choose Run now'],'a foreign saved clock names its next instant in the device zone');
+ // The glue between date and time depends on the runtime's CLDR revision (Bun uses the system ICU).
+ assert.match(out.describe[0],/^Next Nov 11, 2026(?:,| at) 06:30$/,'a foreign saved clock names its next instant in the device zone');
+ assert.deepEqual(out.describe.slice(1),['Only when you choose Run now']);
  for(const name of ['schedule','cron','event'])assert.equal(out[name],'PhoneWorkflowSpecError: This workflow trigger is unavailable',name);
  assert.equal(out.legacyTime,'PhoneWorkflowSpecError: Unsupported workflow field');
  for(const name of ['unordered','noDays','badZone','badTime'])assert.equal(out[name],'PhoneWorkflowSpecError: Choose a local time, a valid time zone and at least one day',name);
@@ -139,4 +142,94 @@ console.log(JSON.stringify(out));`);
  assert.match(out.exact,/^WorkflowTypedRejected: This workflow changed on the agent before your edit was saved\. Nothing was saved\.$/);
  for(const key of ['otherWorkflow','otherMutation','otherVersion','otherStatus','otherCode','create'])assert.match(out[key],/^WorkflowHttpError: /,key);
  assert.equal(out.network,'TypeError: Failed to fetch');
+});
+
+test('the workflow screens word every refusal and every check of the pinned contract themselves',()=>{
+ const out=run(`
+const M=await import(${JSON.stringify(resolve(root,'apps/app/src/ui/workflows/workflow-messages.ts'))});
+const C=await import(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/workflow-client.ts'))});
+const W=await import(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/phone-workflow.ts'))});
+const source=(await import('node:fs')).readFileSync(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/phone-workflow.ts'))},'utf8');
+// Every literal message the pinned contract can throw: fail("…"), record(value, "…"), its default and the trigger check.
+const checks=[...new Set([...source.matchAll(/(?:fail\\(|record\\([^,()]+,|message = |const invalid = )\\s*"([^"]+)"/g)].map(match=>match[1]))];
+const clientSource=(await import('node:fs')).readFileSync(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/workflow-client.ts'))},'utf8');
+const clientChecks=[...new Set([...clientSource.matchAll(/new Error\\(\\s*"([^"]+)"/g)].map(match=>match[1]))];
+const unknownPlain=M.workflowErrorText(new Error('A check a later client adds'),'');
+const refusals=['WorkflowAdmissionRejected','WorkflowTypedRejected','WorkflowMetadataRejected','WorkflowLifecycleRejected','WorkflowActivationRejected'];
+console.log(JSON.stringify({
+ checks:checks.length,
+ unworded:checks.filter(text=>M.workflowErrorText(new W.PhoneWorkflowSpecError(text),'')!==text),
+ refusals:refusals.map(name=>[name,M.workflowRefusalText(new C[name]()),M.workflowErrorText(new C[name](),''),new C[name]().message]),
+ http:M.workflowErrorText(new C.WorkflowHttpError(409,{code:'WORKFLOW_LIFECYCLE_NOT_APPLIED'}),''),httpRefusal:M.workflowRefusalText(new C.WorkflowHttpError(409,{})) ?? null,
+ newer:M.workflowErrorText(new W.PhoneWorkflowSpecError('A check a later contract adds'),''),
+ own:M.workflowErrorText(new Error('Notes changed. Reopen Notes before selecting'),''),
+ // Every literal plain error the pinned shared client throws, worded by Alpha rather than shown.
+ client:{checks:clientChecks.length,unknown:unknownPlain,unworded:clientChecks.filter(check=>M.workflowErrorText(new Error(check),'')===unknownPlain)},
+ clarification:M.workflowErrorText(new Error('Workflow needs clarification: Which notes?'),''),
+ thrown:M.workflowErrorText('not an error','Unavailable'),
+}));`);
+ assert.ok(out.checks>=30,'the pinned contract checks were listed');
+ assert.deepEqual(out.unworded,[],'every pinned contract check has Alpha wording');
+ for(const [name,refusal,text,pinned] of out.refusals){assert.equal(refusal,pinned,name);assert.equal(text,pinned,name);}
+ assert.equal(out.http,'Workflow request unavailable. Check execution history before repeating a run.');
+ assert.equal(out.httpRefusal,null);
+ assert.equal(out.newer,'This workflow could not be checked. Review its steps and try again.');
+ assert.equal(out.own,'Notes changed. Reopen Notes before selecting');
+ assert.ok(out.client.checks>=50,'the pinned client checks were listed');
+ assert.deepEqual(out.client.unworded,[],'every pinned client check has Alpha wording');
+ assert.equal(out.client.unknown,'Workflow request unavailable. Check execution history before repeating a run.','an unknown plain error is never shown as written');
+ assert.equal(out.clarification,'Workflow needs clarification: Which notes?');
+ assert.equal(out.thrown,'Unavailable');
+});
+
+test('the workflow editor keeps each local and phone reason, and words an unknown local failure locally',()=>{
+ const out=run(`
+// A zone with a spring-forward gap: 02:30 on 8 March 2026 does not exist there.
+process.env.TZ='America/New_York';
+const M=await import(${JSON.stringify(resolve(root,'apps/app/src/ui/workflows/workflow-messages.ts'))});
+const T=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/workflow-local-time.ts'))});
+const fs=await import('node:fs');
+const thrown=run=>{try{run();return null;}catch(error){return error;}};
+// The phone's own refusals, read from their sources so a reworded refusal fails here.
+const nativeCalendar=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java'))},'utf8');
+const listing=nativeCalendar.slice(nativeCalendar.indexOf('public void workflowCalendars('),nativeCalendar.indexOf('public void readWorkflowRange('));
+const lateLaunch=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java'))},'utf8');
+const notesDocument=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-notes/src/client/notes-document-store.ts'))},'utf8');
+const browserNotes=fs.readFileSync(${JSON.stringify(resolve(root,'apps/app/src/runtime/browser-notes-document.ts'))},'utf8');
+const phone=[
+ ...[...listing.matchAll(/reject\\("([^"]+)"/g)].map(match=>match[1]),
+ /CLOSED="([^"]+)"/.exec(lateLaunch)[1],
+ ...new Set([...notesDocument.matchAll(/new NotesDocumentConflict\\(\\s*"([^"]+)"/g)].map(match=>match[1])),
+ /throw Error\\('(Older Notes changed[^']+)'\\)/.exec(browserNotes)[1],
+];
+const local='Invalid time';
+console.log(JSON.stringify({
+ invalid:M.workflowErrorText(thrown(()=>T.localDate('')),local,local),
+ gap:M.workflowErrorText(thrown(()=>T.localDate('2026-03-08T02:30')),local,local),
+ gapRaised:thrown(()=>T.localDate('2026-03-08T02:30'))?.message??null,
+ phone:phone.map(message=>[message,M.workflowErrorText(new Error(message),'','Local')]),
+ unknownLocal:M.workflowErrorText(new TypeError('calendar.workflowCalendars is not a function'),local,local),
+ unknownRemote:M.workflowErrorText(new TypeError('calendar.workflowCalendars is not a function'),''),
+ thrownLocal:M.workflowErrorText('not an error',local,local),
+}));`);
+ assert.equal(out.invalid,'Choose a valid local date and time.','a cleared or invalid date keeps its own sentence');
+ assert.equal(out.gapRaised,'This local time does not exist. Choose another time.','the time falls in the spring-forward gap');
+ assert.equal(out.gap,'This local time does not exist. Choose another time.','the instruction to pick another time is kept');
+ assert.deepEqual(out.phone.map(([message])=>message),[
+  'Open Workflows before reading calendar sources',
+  'Selected calendar sources could not be read',
+  'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.',
+  'Notes changed in another view. Reopen before editing.',
+  'Older Notes changed. Close older tabs and review recovery before editing.',
+ ],'the phone refusals the editor reaches were read from their sources');
+ assert.deepEqual(Object.fromEntries(out.phone),{
+  'Open Workflows before reading calendar sources':'Open Workflows before reading calendar sources.',
+  'Selected calendar sources could not be read':'The calendars on this phone could not be read. Try again.',
+  'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.':'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.',
+  'Notes changed in another view. Reopen before editing.':'Notes changed in another view. Reopen Notes before selecting.',
+  'Older Notes changed. Close older tabs and review recovery before editing.':'Older Notes changed. Close older tabs and review recovery before selecting.',
+ });
+ assert.equal(out.unknownLocal,'Invalid time','an unknown local failure reads as a local sentence');
+ assert.equal(out.unknownRemote,'Workflow request unavailable. Check execution history before repeating a run.');
+ assert.equal(out.thrownLocal,'Invalid time');
 });

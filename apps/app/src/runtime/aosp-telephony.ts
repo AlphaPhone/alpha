@@ -19,7 +19,7 @@ export {
   advanceSmsState, normalizePhoneNumber, reviewMms, parseContacts, parseHandoff, parseMessages, parseSmsJournal,
   parseSmsSendResult, parseTelephonyStatus, parseThreads, registerTelephonyProfile, reviewSms, smsBindingHash, smsBindingText, smsMayBeReviewedAgain,
   TelephonyUnavailable,
-  type MmsAttachmentDraft, type MmsReview, type MmsReviewProblem, type SmsReview, type SmsReviewProblem, type SmsSendResult,
+  type MmsAttachmentDraft, type MmsReview, type MmsReviewProblem, type SmsMessage, type SmsReview, type SmsReviewProblem, type SmsSendResult,
 } from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 
 export {MMS_MAX_ATTACHMENTS} from '../../../../.eliza/client-features/packages/contracts/src/mms-send.ts';

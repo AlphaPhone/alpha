@@ -2,9 +2,9 @@ import {type Page} from '@playwright/test';
 import {flagOffAndroid,residentHome,fenceNetwork} from './flag-off-android';
 import {observeVoiceFixture} from './voice-fixture-failure-metadata';
 // Synthetic native ports: routing and lifecycle evidence only.
-export async function setupLiveAssistant(page:Page,options:{echoCancelled?:boolean}={}){
+export async function setupLiveAssistant(page:Page,options:{echoCancelled?:boolean;speakerGain?:boolean}={}){
  const foreign=await fenceNetwork(page);await flagOffAndroid(page);
- await page.addInitScript(({echoCancelled})=>{
+ await page.addInitScript(({echoCancelled,speakerGain})=>{
   const w=window as any,c=w.Capacitor,prior=c.nativePromise;
   // An already selected Text key without a Cartesia key is the supported local speech route.
   // The Cloud account is absent at this native storage boundary; no renderer route is overridden.
@@ -28,7 +28,7 @@ export async function setupLiveAssistant(page:Page,options:{echoCancelled?:boole
   f.frames=(frames:number[],vad:Array<{type:string;timestampMs:number}>=[])=>f.emit('liveCaptureFrames',{captureId:f.active,frames:frames.map(f.frame),vad,peak:.3});
   f.finishPlayback=()=>{if(!playback)return;segments.shift();if(segments.length)f.emit('playbackSegmentStarted',{...segments[0],atMs:Date.now()});else{const id=playback;playback=null;f.emit('playbackEnded',{playbackId:id});}};
   const header=c.PluginHeaders.find((p:any)=>p.name==='AlphaVoiceCloud');
-  header.methods=[...['checkPermissions','localSpeechStatus','liveCaptureStatus','startLiveCapture','stopLiveCapture','synthesizeLocal','play','stopPlayback','cancel','releaseLocalSpeech','cancelRecording','holdSpeechEngine','releaseSpeechEngineHold','warmSpeechOutput'].map(name=>({name,rtype:'promise'})),{name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'}];
+  header.methods=[...['checkPermissions','localSpeechStatus','liveCaptureStatus','startLiveCapture','stopLiveCapture','synthesizeLocal','play','stopPlayback','cancel','releaseLocalSpeech','cancelRecording','holdSpeechEngine','releaseSpeechEngineHold','warmSpeechOutput',...(speakerGain?['setSpeechOutputMuted']:[])].map(name=>({name,rtype:'promise'})),{name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'}];
   const callback=c.nativeCallback;c.nativeCallback=(plugin:string,method:string,input:any,fn:any)=>{if(plugin==='AlphaVoiceCloud'&&method==='addListener'){events.push({event:input.eventName,callback:fn});return String(events.length);}return callback(plugin,method,input,fn);};
   c.nativePromise=async(plugin:string,method:string,input:any)=>{
    if(plugin==='Agent'&&method==='providerStatus')return provider;
@@ -62,7 +62,8 @@ export async function setupLiveAssistant(page:Page,options:{echoCancelled?:boole
    if(method==='play'){f.plays.push(input.playbackId);return {};}
    if(method==='stopPlayback'){f.stopped++;playback=null;segments=[];return {};}
    if(['cancel','releaseLocalSpeech','removeListener','cancelRecording','holdSpeechEngine','releaseSpeechEngineHold','warmSpeechOutput'].includes(method))return {};
+   if(speakerGain&&method==='setSpeechOutputMuted'){(f.speaker??=[]).push(input.muted);if(f.speakerFails&&input.muted)throw Error('Speaker gain refused');return {};}
    f.forbidden.push(method);throw Error('Not part of the live voice path: '+method);
   };
- },{echoCancelled:options.echoCancelled??true});await residentHome(page);await page.evaluate(observeVoiceFixture);return foreign;
+ },{echoCancelled:options.echoCancelled??true,speakerGain:options.speakerGain===true});await residentHome(page);await page.evaluate(observeVoiceFixture);return foreign;
 }

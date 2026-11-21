@@ -48,7 +48,7 @@ import static org.junit.Assert.*;
  * stores the note in the shape that save writes instead of producing it from an answer.
  * Emulator evidence for the native boundary only; not a real page, agent or device.
  *
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN --classes BrowserPageQuestion
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN --classes BrowserPageQuestion
  */
 public final class BrowserPageQuestionInstrumentedTest {
  static final String BASE = "https://reading.invalid";
@@ -94,8 +94,8 @@ public final class BrowserPageQuestionInstrumentedTest {
   BoundedActivityScenario.main(() -> {
    try {
     Object plugin = resumedActivity().getBridge().getPlugin("AlphaBrowser").getInstance();
-    java.lang.reflect.Field reading = ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("reading"); reading.setAccessible(true);
-    java.lang.reflect.Field dialog = ai.eliza.plugins.browsersurface.BrowserReviewedReading.class.getDeclaredField("dialog"); dialog.setAccessible(true);
+    java.lang.reflect.Field reading = AlphaBrowserPlugin.class.getDeclaredField("reading"); reading.setAccessible(true);
+    java.lang.reflect.Field dialog = ai.alphacompute.alphaphone.browser.AlphaReviewedReading.class.getDeclaredField("dialog"); dialog.setAccessible(true);
     AlertDialog value = (AlertDialog) dialog.get(reading.get(plugin));
     found.set(value != null && value.isShowing() ? value : null);
    } catch (Exception error) { throw new AssertionError(error); }
@@ -120,7 +120,7 @@ public final class BrowserPageQuestionInstrumentedTest {
   final AtomicInteger requests = new AtomicInteger();
   Pages(String tabId) throws Exception {
    Object plugin = resumedActivity().getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field tabs = ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs"); tabs.setAccessible(true);
+   java.lang.reflect.Field tabs = AlphaBrowserPlugin.class.getDeclaredField("tabs"); tabs.setAccessible(true);
    Object tab = ((Map<?, ?>) tabs.get(plugin)).get(tabId); assertNotNull("The visible tab exists", tab);
    java.lang.reflect.Field field = tab.getClass().getDeclaredField("web"); field.setAccessible(true);
    web = (android.webkit.WebView) field.get(tab); original = web.getWebViewClient(); assertNotNull(original);

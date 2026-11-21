@@ -1,4 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
+import {preloadPageModules} from './helpers/page-modules';
 
 // Voice latency records from the rendered Cloud voice conversation (voice-timing.ts).
 // Closed fixtures only: the recorder, Cloud transcription, the agent reply and playback are
@@ -6,6 +7,12 @@ import {test,expect,type Page} from '@playwright/test';
 // conversation the way sendVoiceTurn does, so first-token is observed from rendered state.
 // Evidence boundary: source/browser (test-mocks build). No device latency sample is produced.
 const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
+const voiceModules={
+ browser:'/src/browser/voice.ts',
+ connection:'/src/runtime/connection-ui.tsx',
+ model:'/src/prototype/model.js',
+ timing:'/src/runtime/voice-timing.ts',
+};
 async function setup(page:Page,options:{playback:'starts'|'fails'}){
  await page.route('https://**/*',route=>route.abort());
  await page.addInitScript(()=>{
@@ -15,9 +22,11 @@ async function setup(page:Page,options:{playback:'starts'|'fails'}){
  });
  await page.goto('/');
  await expect(page.locator('textarea[data-alpha-composer]')).toBeEnabled();
- await page.evaluate(async({playback})=>{
-  const {BrowserVoice}=await import('/src/browser/voice.ts'),{connectionController:c}=await import('/src/runtime/connection-ui.tsx'),{Component}=await import('/src/prototype/model.js');
-  const timing=await import('/src/runtime/voice-timing.ts');timing.clearVoiceTiming();
+ await preloadPageModules(page,Object.values(voiceModules));
+ await page.evaluate(({playback,modules})=>{
+  const loaded=(window as any).__alphaModules;
+  const {BrowserVoice}=loaded[modules.browser],{connectionController:c}=loaded[modules.connection],{Component}=loaded[modules.model];
+  loaded[modules.timing].clearVoiceTiming();
   const f=(window as any).timingFixture;f.playback=playback;
   const snapshot={...c.getSnapshot(),open:false,busy:false,session:{origin:'https://owned.invalid',ownerId:'owner',agentId:'agent',sessionId:'synthetic-agent'}};c.getSnapshot=()=>snapshot as any;
   c.getCloudEnvironment=()=>'production';c.getCloudClient=()=>({sessionId:'synthetic-cloud',credentialId:'synthetic-credential',client:{}} as any);
@@ -44,11 +53,11 @@ async function setup(page:Page,options:{playback:'starts'|'fails'}){
    return {requestId:input.turnId,conversationId:'synthetic-room',userMessageId:'user-'+n,assistantMessageId:'assistant-'+n,text:'Synthetic matching reply.',complete:true};
   };
   c.close();const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){f.shell=this;return render.call(this);};
- },options);
+ },{...options,modules:voiceModules});
  await expect.poll(()=>page.evaluate(()=>!!(window as any).timingFixture.shell)).toBe(true);
 }
 async function utterance(page:Page){await page.evaluate(()=>(window as any).timingFixture.peak=.25);await page.waitForTimeout(950);await page.evaluate(()=>(window as any).timingFixture.peak=0);}
-const records=(page:Page)=>page.evaluate(async()=>JSON.parse((await import('/src/runtime/voice-timing.ts')).exportVoiceTiming()).records);
+const records=(page:Page)=>page.evaluate(path=>JSON.parse((window as any).__alphaModules[path].exportVoiceTiming()).records,voiceModules.timing);
 async function talk(page:Page){await page.getByRole('button',{name:'Talk',exact:true}).click();await expect(voice(page)).toHaveAttribute('data-voice-state','listening');}
 
 test('a Cloud conversation turn records one entry-sourced record from recording end to final reply, without first audio when playback never started',async({page})=>{

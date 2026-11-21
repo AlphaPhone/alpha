@@ -7,16 +7,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
-import {createServer} from 'vite';
+import {createServer,loadConfigFromFile} from 'vite';
 import {fileURLToPath} from 'node:url';
 
 const root=new URL('..',import.meta.url);
+// The renderer's own upstream aliases (vite.config.ts), so every module resolves as it does in the app.
+const rootAliases=async()=>(await loadConfigFromFile({command:'serve',mode:'development'},fileURLToPath(new URL('vite.config.ts',root)),undefined,'silent')).config.resolve.alias;
 const servers={};
 async function server(flag){
  // Vite exposes VITE_* from the process environment when the server starts.
  if(flag)process.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS='1';else delete process.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS;
  // Static SSR fixtures never reload; watching also scans large generated runtime trees.
- try{return await createServer({configFile:false,plugins:[{name:'model-without-dom-renderer',enforce:'pre',resolveId(id){if(id.endsWith('/dc-lite.js'))return '\0policy-test-renderer';},load(id){if(id==='\0policy-test-renderer')return 'export class DCLogic {}';}}],resolve:{alias:{"@elizaos/contracts/device-action-execution":fileURLToPath(new URL('.eliza/client-features/packages/contracts/src/device-action-execution.ts',root)),"@elizaos/contracts/browser-request-grounding":fileURLToPath(new URL('.eliza/client-features/packages/contracts/src/browser-request-grounding.ts',root)),"@elizaos/contracts/phone-dial":fileURLToPath(new URL('.eliza/client-features/packages/contracts/src/phone-dial.ts',root)),"@elizaos/contracts/telephony-actions":fileURLToPath(new URL('.eliza/client-features/packages/contracts/src/telephony-actions.ts',root)),'@elizaos/core/protocol':fileURLToPath(new URL('.eliza/client-features/alpha-voice-core-protocol.ts',root)),'@elizaos/plugin-assistant/device-calendar-contract':fileURLToPath(new URL('.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts',root)),'@elizaos/plugin-assistant/device-foreground-review':fileURLToPath(new URL('.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/foreground-review-contract.ts',root)),"@elizaos/contracts/native-notes-query":fileURLToPath(new URL(".eliza/client-features/packages/contracts/src/native-notes-query.ts",root)),"@elizaos/contracts/sms-send":fileURLToPath(new URL(".eliza/client-features/packages/contracts/src/sms-send.ts",root)),'@elizaos/ui/mobile-shell/core':fileURLToPath(new URL('.eliza/client-features/packages/ui/src/mobile-shell/core.ts',root)),'@elizaos/ui/mobile-shell':fileURLToPath(new URL('.eliza/client-features/packages/ui/src/mobile-shell/index.ts',root)),'@elizaos/capacitor-system/shade':fileURLToPath(new URL('.eliza/client-features/plugins/plugin-native-system/src/client/shade.ts',root)),'@elizaos/capacitor-system/launcher':fileURLToPath(new URL('.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts',root)),'@elizaos/contracts':fileURLToPath(new URL('.eliza/client-features/client-contracts.ts',root))}},root:root.pathname,logLevel:'silent',appType:'custom',server:{middlewareMode:true,hmr:false,ws:false,watch:null},optimizeDeps:{noDiscovery:true,include:[]}});}
+ try{return await createServer({configFile:false,plugins:[{name:'model-without-dom-renderer',enforce:'pre',resolveId(id){if(id.endsWith('/dc-lite.js'))return '\0policy-test-renderer';},load(id){if(id==='\0policy-test-renderer')return 'export class DCLogic {}';}}],resolve:{alias:(await rootAliases())},root:root.pathname,logLevel:'silent',appType:'custom',server:{middlewareMode:true,hmr:false,ws:false,watch:null},optimizeDeps:{noDiscovery:true,include:[]}});}
  finally{delete process.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS;}
 }
 before(async()=>{servers.on=await server(true);servers.off=await server(false);});
@@ -94,8 +96,8 @@ test('the local agent host bridge is unavailable without test mocks',async()=>{
 });
 
 // regional-provider composes the upstream provider at module load; evaluate it
-// with explicit flag bindings and a synthetic transport.
-async function regional({testMocks,devSurfaces,baseUrl,native=false,developmentBuild=true}){
+// with explicit flag bindings.
+async function regional({testMocks,devSurfaces,baseUrl,native=false}){
  const {createRegionalMaps}=await servers.off.ssrLoadModule('/.eliza/client-features/plugins/plugin-maps/src/client/regional-provider.ts');
  const source=fs.readFileSync(new URL('apps/app/src/maps/regional-provider.ts',root),'utf8')
   .replace(/^import [\s\S]*?;\n/gm,'').replace(/^export type \{[^}]*\} from .*;\n/gm,'')
@@ -103,8 +105,7 @@ async function regional({testMocks,devSurfaces,baseUrl,native=false,developmentB
   .replace(/^export (const|function|interface)/gm,'$1');
  const fetched=[],configured=[];
  const context={createRegionalMaps,testMocksEnabled:testMocks,devSurfacesEnabled:devSurfaces,__env:{VITE_MAPS_BASE_URL:baseUrl},
-  Capacitor:{isNativePlatform:()=>native},DailyApps:{surfaceInfo:async()=>({developmentBuild})},
-  registerPlugin:()=>({request:async()=>{throw Error('native transport not expected');},cancel:async()=>{}}),
+  Capacitor:{isNativePlatform:()=>native},
   configureMapsProvider:config=>configured.push(config),
   fetch:async url=>{fetched.push(String(url));throw Error('offline');},URL,TextDecoder,Uint8Array,JSON,Error,Number,Array,Object,crypto,atob};
  vm.runInNewContext(stripTypeScriptTypes(source,{mode:'strip'})+'\nglobalThis.result={regionalDiagnostics,initializeRegionalMaps};',context);
@@ -124,8 +125,10 @@ test('regional Maps is a test-mocks prototype; loopback HTTP and the emulator ga
  }
  const devWeb=await regional({testMocks:true,devSurfaces:true,baseUrl:'http://127.0.0.1:47850'});
  assert.deepEqual(devWeb.fetched,['http://127.0.0.1:47850/capabilities'],'development server may use the loopback gateway');
- const releaseNative=await regional({testMocks:true,devSurfaces:false,baseUrl:'http://10.0.2.2:47850',native:true,developmentBuild:false});
- assert.deepEqual(releaseNative.fetched,[],'a non-development native build never uses the emulator gateway');
+ for(const devSurfaces of [false,true]){
+  const native=await regional({testMocks:true,devSurfaces,baseUrl:'http://10.0.2.2:47850',native:true});
+  assert.deepEqual(native.fetched,[],'Android has no native regional transport, so the emulator gateway is never used');
+ }
  // The regional gateway is a development prototype (#412): product builds use Eliza Cloud Maps.
  const https=await regional({testMocks:false,devSurfaces:false,baseUrl:'https://maps.example/'});
  assert.deepEqual(https.fetched,[],'flag-off builds never contact a regional gateway');

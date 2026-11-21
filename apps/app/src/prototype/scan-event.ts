@@ -1,6 +1,6 @@
-import {reviewScanAllDayEvent,reviewScanEvent,type ScanEventFields,type ScanEventProposal,type ScanEventRepeat} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-event.ts';
-/** Poster/flyer suggestions (J01) are the shared plugin-files rules: explicit or disclosed inferences only, never a save. */
-export {suggestScanEventDetails,type ScanEventSuggestion} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-event.ts';
+import {reviewScanAllDayEvent,reviewScanEvent,type ScanEventFields,type ScanEventProposal,type ScanEventRepeat} from '../ui/documents/scan-event.ts';
+/** Poster/flyer suggestions (J01) are Alpha's scan-event rules (ui/documents/scan-event.ts): explicit or disclosed inferences only, never a save. */
+export {suggestScanEvent,suggestScanEventDetails,type ScanEventContext,type ScanEventFields,type ScanEventRepeat,type ScanEventSuggestion} from '../ui/documents/scan-event.ts';
 /** `creationId` makes Calendar retain the form under review (calendar-form-draft-adapter) and binds its one Save. */
 export type ScanEventDraft={id:null;creationId:string;separateCreation:false;title:string;off:number;t:number;d:number;where:string;notes:string;cal:'native:local';who:never[];repeat:ScanEventRepeat;alert:null;video:false;allDay?:true};
 /** Alpha's local Calendar form for a validated proposal. Calendar's own review and Save remain the only write. */

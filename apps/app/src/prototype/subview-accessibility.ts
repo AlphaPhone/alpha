@@ -15,7 +15,7 @@ type Popup=[key:string,open:(out:Bag)=>boolean,close:(out:Bag)=>void];
 const POPUPS:Record<string,Popup[]>={
  browser:[['menuModal',out=>!!out.menu,out=>out.closeMenu?.()],['shareModal',out=>!!out.share,out=>out.closeShare?.()]],
  photos:[['infoModal',out=>!!out.infoOpen,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareOpen,out=>out.closeSheet?.()]],
- notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['folderModal',out=>!!out.folderSheetOpen,out=>out.closeFolderSheet?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()]],
+ notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()],['previousNotesModal',out=>!!out.previousNotesMenu,out=>out.closePreviousNotesMenu?.()]],
  files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()],['moveModal',out=>!!out.moveSheet,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()]],
  workflows:[['stepModal',out=>!!out.b?.sheetOn,out=>out.b?.closeSheet?.()]],
  settings:[['sheetModal',out=>!!out.hasSheet,out=>out.sheet?.close?.()]],
@@ -31,14 +31,14 @@ export function installSubviewAccessibility(views:Bag){
   let output:Bag={};
   const attachmentModal=reviewFocus(()=>output.attachment?.close());
   const providerModal=reviewFocus(()=>output.provider?.close());
-  const discardModal=reviewFocus(()=>output.c?.cancelDiscard?.());
+  const mailSelectionModal=reviewFocus(()=>output.mailReview?.close());
   const focus=focusHistory(),detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read);
   views.inbox.render=(state:Bag,api:Bag)=>{
    const out=output=render(state,api);
    attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
-   discardModal.render(!!(out.composing&&out.c?.confirm));
-   const review=!!(out.attachmentOpen||out.providerReview||out.composing&&out.c?.confirm);
-   return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,discardModal:discardModal.ref,detailFocus,composeFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
+   mailSelectionModal.render(!!out.mailReview);
+   const review=!!(out.attachmentOpen||out.providerReview||out.mailReview);
+   return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,mailSelectionModal:mailSelectionModal.ref,detailFocus,composeFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
   };
  }
  {
@@ -55,7 +55,13 @@ export function installSubviewAccessibility(views:Bag){
   ['calendar',['detail','form'],(out:Bag)=>({listCovered:!!(out.detail||out.form),detailCovered:!!out.form})],
   ['browser',['tabs','library'],(out:Bag)=>({listCovered:!!(out.tabsOpen||out.lib),tabsCovered:!!out.lib,pageCovered:!!out.editing})],
   ['photos',['album','viewer','edit','empty'],(out:Bag)=>({listCovered:!!(out.album||out.viewing||out.editing||out.viewEmpty),albumCovered:!!(out.viewing||out.editing||out.viewEmpty),viewerCovered:!!out.editing})],
-  ['notes',['editor','voice','link','recorder','trash'],(out:Bag)=>({listCovered:!!(((out.isEdit||out.isVoice||out.isLink)&&!split())||out.noteRecorder||out.trashOpen),detailCovered:!!(out.noteRecorder||out.trashFullOpen),trashCovered:!!out.trashConfirmOpen})],
+  ['notes',['editor','voice','link','recorder','trash'],(out:Bag)=>({
+   listCovered:!!(((out.isEdit||out.isVoice||out.isLink)&&!split())||out.noteRecorder||out.trashOpen),
+   detailCovered:!!(out.noteRecorder||out.trashFullOpen),trashCovered:!!out.trashConfirmOpen,
+   trashAskLabel:out.trashAskOpen
+    ? `${out.trashCanErase?'Recover or delete':'Recover'} ${out.trashAskTitle?`“${out.trashAskTitle}”`:'this note'}?`
+    : '',
+  })],
   ['files',['folder','preview'],(out:Bag)=>({listCovered:!!(out.inFolder||(out.isPreview&&!split())),detailCovered:!!out.isPreview&&!split()})],
  ] as Array<[string,string[],(out:Bag)=>Bag]>){
   const render=views[name].render,focus=focusHistory(),refs=Object.fromEntries(keys.map(key=>[key+'Focus',subviewFocus(focus.read)]));
@@ -215,6 +221,7 @@ export function installReplyAnnouncer(Component: any) {
     if (!settled && !arrived) { if (!state.typing && !state.turnStatus) this.replyAnnounced = false; return; }
     const text = String(last.text || last.card?.title || '').trim();
     this.replyAnnouncedId = last.id; this.replyAnnounced = false;
-    if (text) say(bounded(text),this);
+    // A quiet local note ("Sent to Maya", AP-16) is logged in the chat, not read out as a reply.
+    if (text && !last.quiet) say(bounded(text),this);
   };
 }

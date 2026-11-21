@@ -65,7 +65,6 @@ public class PrototypeFlowInstrumentedTest {
   }
  }
  @Test public void walletRoutesAndNativePaymentActionsAreUnavailableInProduction() throws Exception {
-  Assume.assumeFalse("Qualify the packaged production policy",BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
   try(BoundedActivityScenario<MainActivity>s=BoundedActivityScenario.launch(MainActivity.class)){
    ready();
    String original=new org.json.JSONTokener(eval("location.href")).nextValue().toString();Throwable primary=null;

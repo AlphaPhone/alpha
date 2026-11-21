@@ -1,4 +1,15 @@
 import {test,expect,type Page} from '@playwright/test';
+import {preloadPageModules} from './helpers/page-modules';
+
+const connectionModule='/src/runtime/connection-ui.tsx';
+const googleModule='/src/runtime/google-connection-ui.tsx';
+async function reopenWalkthrough(page:Page){
+ await preloadPageModules(page,[connectionModule]);
+ await page.evaluate(path=>{
+  (window as any).__alphaModules[path].connectionController.close();
+  window.dispatchEvent(new Event('alpha:startup-permissions-reopen'));
+ },connectionModule);
+}
 async function open(page:Page,deny=false,theme='light'){
  await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());
  await page.addInitScript(({deny})=>{
@@ -11,7 +22,8 @@ async function open(page:Page,deny=false,theme='light'){
   Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition(_ok,fail){proof.requests.push({kind:'location'});proof.states.location='granted';persist();fail({code:2});}}});
   localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'none'}));
  },{deny});
- await page.goto('/?theme='+theme);await page.evaluate(async()=>{(await import('/src/runtime/connection-ui.tsx')).connectionController.close();window.dispatchEvent(new Event('alpha:startup-permissions-reopen'));});
+ await page.goto('/?theme='+theme);
+ await reopenWalkthrough(page);
  await expect(page.locator('dialog.alpha-startup-permissions')).toBeVisible();
 }
 for(const viewport of [{width:412,height:915,theme:'light'},{width:1280,height:800,theme:'light'},{width:842,height:390,theme:'dark'}])test(`recovered original required design/order and Ready ${viewport.width}`,async({page},info)=>{
@@ -24,20 +36,28 @@ for(const viewport of [{width:412,height:915,theme:'light'},{width:1280,height:8
  });
  expect(layout.offset).toBeLessThanOrEqual(1);
  expect(layout.overflow).toBe(0);
- await expect(panel.locator('[aria-current=step]',{hasText:'Notifications'})).toBeVisible();await expect(panel.getByRole('button')).toHaveCount(2);await expect(panel.locator('.alpha-permission-primary')).toHaveAttribute('aria-disabled','true');const contrast=await panel.locator('.alpha-permission-primary').evaluate(el=>{const style=getComputedStyle(el),rgb=(value:string)=>value.match(/[\d.]+/g)!.slice(0,3).map(Number),luma=(value:number[])=>value.map(x=>{const s=x/255;return s<=.04045?s/12.92:((s+.055)/1.055)**2.4;}).reduce((sum,x,i)=>sum+x*[.2126,.7152,.0722][i],0),a=luma(rgb(style.color)),b=luma(rgb(style.backgroundColor));return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});expect(contrast).toBeGreaterThanOrEqual(4.5);expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
- if(!process.env.REQUIRED_NO_SCREENSHOTS)await page.screenshot({path:info.outputPath(`original-notifications-${viewport.width}.png`),animations:'disabled'});
+ await expect(panel.locator('[aria-current=step]',{hasText:'Notifications'})).toBeVisible();await expect(panel.getByRole('button')).toHaveCount(3);await expect(panel.locator('.alpha-permission-primary')).toHaveAttribute('aria-disabled','true');const contrast=await panel.locator('.alpha-permission-primary').evaluate(el=>{const style=getComputedStyle(el),rgb=(value:string)=>value.match(/[\d.]+/g)!.slice(0,3).map(Number),luma=(value:number[])=>value.map(x=>{const s=x/255;return s<=.04045?s/12.92:((s+.055)/1.055)**2.4;}).reduce((sum,x,i)=>sum+x*[.2126,.7152,.0722][i],0),a=luma(rgb(style.color)),b=luma(rgb(style.backgroundColor));return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});expect(contrast).toBeGreaterThanOrEqual(4.5);expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
+ await page.screenshot({path:info.outputPath(`original-notifications-${viewport.width}.png`),animations:'disabled'});
  await page.keyboard.press('Escape');await expect(panel).toBeVisible();await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));await expect(panel.locator('[aria-current=step]',{hasText:'Notifications'})).toBeVisible();
- for(const name of ['Notifications','Microphone','Camera','Location']){await expect(panel.locator('[aria-current=step]',{hasText:name})).toBeVisible();await expect(panel.locator('.alpha-permission-rationale')).toHaveText(({Notifications:'Reminders and updates',Microphone:'Voice notes and talk',Camera:'Photos and text scans',Location:'Nearby places, directions'} as Record<string,string>)[name]);await expect(panel.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);await panel.getByRole('button',{name:'Allow',exact:true}).click();}
+ const permissions=[['Notifications','Reminders and updates'],['Microphone','Voice notes and talk'],['Camera','Photos and text scans'],['Location','Nearby places, directions']];
+ for(const [index,[name,rationale]] of permissions.entries()){
+  await expect(panel.getByRole('status').filter({hasText:/^Step /})).toHaveText(`Step ${index + 1} of ${permissions.length}`);
+  await expect(panel.locator('[aria-current=step]',{hasText:name})).toBeVisible();
+  await expect(panel.locator('.alpha-permission-rationale')).toHaveText(rationale);
+  await expect(panel.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
+  await panel.getByRole('button',{name:'Allow',exact:true}).click();
+ }
+ await expect(panel.getByRole('status').filter({hasText:/^Step /})).toHaveCount(0);
  await expect(panel.getByRole('heading',{name:'All set',exact:true})).toBeVisible();await page.evaluate(async()=>{const icon=new Image();icon.src='/icons/lucide/check.svg';await icon.decode();});expect(await page.evaluate(()=>(window as any).requiredProof.requests.map((x:any)=>x.kind))).toEqual(['notifications','microphone','camera','location']);expect(await page.evaluate(()=>(window as any).requiredProof.requests.find((x:any)=>x.kind==='camera').input)).toEqual({video:true,audio:false});expect(await page.evaluate(()=>(window as any).requiredProof.stops)).toBe(2);
- if(!process.env.REQUIRED_NO_SCREENSHOTS)await page.screenshot({path:info.outputPath(`original-ready-${viewport.width}.png`),animations:'disabled'});
+ await page.screenshot({path:info.outputPath(`original-ready-${viewport.width}.png`),animations:'disabled'});
  await panel.getByRole('button',{name:'Done'}).click();await expect(panel).toHaveCount(0);expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha:startup-permission-walkthrough:v1')!))).toEqual({version:1,status:'completed',step:4});await page.reload();await expect(panel).toHaveCount(0);
 });
 test('required browser denial and cold return expose Settings/check access without another prompt',async({page})=>{
- await open(page,true);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();await panel.getByRole('button',{name:'Check',exact:true}).click();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);await expect(panel.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);await page.reload();await page.evaluate(async()=>{(await import('/src/runtime/connection-ui.tsx')).connectionController.close();window.dispatchEvent(new Event('alpha:startup-permissions-reopen'));});await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
+ await open(page,true);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();await panel.getByRole('button',{name:'Check',exact:true}).click();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);await expect(panel.getByRole('button',{name:'Skip',exact:true})).toBeVisible();await page.reload();await reopenWalkthrough(page);await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
 });
 
 // Browser-rendered recovery with controlled permission APIs, not proof of an OS grant.
-test('a pending notification prompt releases Checking at its deadline while required setup stays gated',async({page})=>{
+test('a pending notification prompt releases Checking at its deadline without granting access',async({page})=>{
  await page.clock.install();
  await open(page);
  await page.evaluate(()=>{
@@ -53,7 +73,7 @@ test('a pending notification prompt releases Checking at its deadline while requ
  await page.clock.runFor(15000);
  await expect(panel.getByRole('button',{name:'Check',exact:true})).toBeEnabled();
  await expect(panel.locator('[aria-current=step]',{hasText:'Notifications'})).toBeVisible();
- await expect(panel.getByRole('button',{name:/Skip|Not now|Back|^Done$/})).toHaveCount(0);
+ await expect(panel.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha:startup-permission-walkthrough:v1')!))).toEqual({version:1,status:'pending',step:0});
  expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);
  // A late promise result is not permission authority; the fixture's actual status stays default.
@@ -66,5 +86,23 @@ test('a pending notification prompt releases Checking at its deadline while requ
 });
 
 test('existing Google panel owns the modal and returning resumes the same required permission',async({page})=>{
- await open(page);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();await page.evaluate(async()=>(await import('/src/runtime/google-connection-ui.tsx')).googleConnectionController.open());await expect(panel).toHaveCount(0);await page.evaluate(async()=>(await import('/src/runtime/google-connection-ui.tsx')).googleConnectionController.close());await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);
+ await open(page);const panel=page.locator('dialog.alpha-startup-permissions');await panel.getByRole('button',{name:'Allow',exact:true}).click();await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();
+ await preloadPageModules(page,[googleModule]);
+ await page.evaluate(path=>(window as any).__alphaModules[path].googleConnectionController.open(),googleModule);
+ await expect(panel).toHaveCount(0);
+ await page.evaluate(path=>(window as any).__alphaModules[path].googleConnectionController.close(),googleModule);
+ await expect(panel.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([{kind:'notifications'}]);
+});
+
+// A text-only start must not wait twenty seconds per permission or issue any OS prompt.
+test('known permission choices can be deferred immediately without granting access',async({page})=>{
+ await page.clock.install();
+ await open(page);
+ const panel=page.locator('dialog.alpha-startup-permissions');
+ for(const key of ['Notifications','Microphone','Camera','Location']){
+  await expect(panel.locator('[aria-current=step]',{hasText:key})).toBeVisible();
+  await panel.getByRole('button',{name:'Skip',exact:true}).click();
+ }
+ await expect(panel.getByRole('heading',{name:'All set',exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).requiredProof.requests)).toEqual([]);
 });

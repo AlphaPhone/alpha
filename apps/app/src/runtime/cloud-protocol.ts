@@ -1,14 +1,16 @@
 import {googleWorkspaceRedirectAllowed} from './google-workspace-return.ts';
-import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
+import {productionCloud, stagingCloud as stagingAuthority} from './cloud-deployment.generated.ts';
 import {browserCloudResidentEnabled,browserCloudResidentEnvironment} from './browser-cloud-resident.ts';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import { reviewMailAttachment } from './inbox-attachment.ts';
 import type { OpaqueMailAttachment } from './inbox-operation.ts';
 import { gmailCapabilitiesFor } from './gmail-grants.ts';
 import { ManagedGmailMailboxClient } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/managed-gmail-client.ts';
+import { withGmailAccountLabel } from '../ui/mailbox/grants.ts';
 import type { GmailAccount, GmailDraftContent, GmailDraftSummary, GmailInboxCapabilities, GmailInboxReceipt, GmailReadResult, GmailSearchPage, GmailThreadPage } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
 import type { CloudMapsRoute } from '../maps/cloud-provider.ts';
 import {mapsTilePath} from './managed-service-routes.ts';
+import {parseCheckout,parsePlans,parseReferral,parseSubscription,type CheckoutStart,type PlanKey,type PlanOffer,type ReferralState,type SubscriptionState} from './cloud-plans.ts';
 import { authenticated as signInAuthenticated, googleOutcome, type CloudSignInGoogleOutcome, CloudSignInError, emailStarted, verified as signInVerified, type CloudSignInAuthenticated, type CloudSignInEmailStarted, type CloudSignInMfaRequired } from './cloud-sign-in.ts';
 import type { AlphaCloudSignInPlugin } from '../native/alpha-cloud-sign-in.ts';
 import type { EntitlementSource, FallbackPlan, OrganizationCreditBalance, RedeemResult } from './subscription-entitlement.ts';
@@ -33,9 +35,13 @@ export type CloudAuthority = { readonly name: string; readonly api: string; read
 // Vite replaces import.meta.env at build time, so flag-off bundles fold the staging
 // authority away. Node contract tests import this source without Vite and keep both.
 const stagingAvailable: boolean = import.meta.env === undefined || import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === '1' || (browserCloudResidentEnabled && browserCloudResidentEnvironment === 'staging');
+// Staging exists only in test-mocks builds, development serving and Node contract tests (no Vite).
+// The condition is written out here, not imported: Vite replaces import.meta.env before the bundler
+// links modules, so a product build drops this module's staging import whichever chunk holds it.
+const stagingCloud = import.meta.env===undefined||import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||import.meta.env.DEV===true ? stagingAuthority : undefined;
 const authorities: Partial<Record<CloudEnvironment, CloudAuthority>> = {
   production: productionCloud,
-  ...(stagingAvailable ? { staging: stagingCloud } : {}),
+  ...(stagingAvailable && stagingCloud ? { staging: stagingCloud } : {}),
 };
 /**
  * Whether this build carries the Cloud sign-in hand-off (cli-session, the hosted cli-login page, then
@@ -229,6 +235,58 @@ export class CloudProtocol {
     signal.throwIfAborted();
     await this.openExternal(planManagementUrl(this.environment), signal);
     signal.throwIfAborted();
+  }
+  /** The paid plans, as Cloud offers them (public catalogue). */
+  async subscriptionPlans(signal: AbortSignal): Promise<PlanOffer[]> {
+    return parsePlans(await this.requestData("/api/v1/subscriptions/plans", signal));
+  }
+  /** The organization's subscription from the billing snapshot, read with this device's key. */
+  async subscriptionState(signal: AbortSignal): Promise<SubscriptionState | null> {
+    return parseSubscription(await this.requestData("/api/v1/billing/limits", signal, { authenticated: true }));
+  }
+  /**
+   * Starts (or, with the same idempotency key, resumes) a checkout for one plan with this device's
+   * key and opens Stripe's hosted page. The page returns to the app's registered
+   * `/billing/return` App Link; the caller then confirms with the answered `sessionId`.
+   */
+  async startSubscriptionCheckout(planKey: PlanKey, idempotencyKey: string, signal: AbortSignal): Promise<CheckoutStart> {
+    const started = parseCheckout(await this.requestData("/api/v1/subscriptions/checkout", signal, { authenticated: true, body: { planKey, idempotencyKey, presentation: "mobile" } }));
+    if (started.status === "open") { signal.throwIfAborted(); await this.openExternal(started.checkoutUrl, signal); }
+    return started;
+  }
+  /** Creates a balance checkout; payment remains on Stripe and account refresh confirms the result. */
+  async startFundsCheckout(amountUsd:number,idempotencyKey:string,signal:AbortSignal):Promise<void> {
+    if(!Number.isFinite(amountUsd)||amountUsd<5||amountUsd>1000||!Number.isInteger(amountUsd*100))throw Error('Enter an amount from $5 to $1,000.');
+    const target=this.authority.web+'/alphaphone/billing/return';
+    const result=object(await this.requestData('/api/v1/credits/checkout',signal,{authenticated:true,headers:{'Idempotency-Key':idempotencyKey},body:{amountUsd,success_url:target,cancel_url:target+'?cancelled=1'}}));
+    if(typeof result.url!=='string')throw new CloudProtocolError('invalid-response');
+    await this.openPaymentPage(result.url,signal);
+  }
+  /** Opens a Stripe payment page Cloud answered (checkout or an upgrade's hosted invoice), and nothing else. */
+  async openPaymentPage(url: string, signal: AbortSignal): Promise<void> {
+    const page = new URL(url);
+    if (page.protocol !== "https:" || page.username || page.password || page.port || !["checkout.stripe.com", "invoice.stripe.com"].includes(page.hostname)) throw new CloudProtocolError("invalid-response");
+    signal.throwIfAborted();
+    await this.openExternal(page.href, signal);
+  }
+  /** Confirms a checkout from Cloud's own payment evidence; the session id is not payment authority. */
+  async confirmSubscriptionCheckout(sessionId: string, signal: AbortSignal): Promise<{subscriptionId: string | null}> {
+    const body = object(await this.requestData("/api/v1/subscriptions/checkout/confirm", signal, { authenticated: true, body: { sessionId } }));
+    const data = object(body.data);
+    return { subscriptionId: typeof data.subscriptionId === "string" ? data.subscriptionId : null };
+  }
+  /** The owner's own referral code to share, and how many accounts used it. */
+  async referral(signal: AbortSignal): Promise<ReferralState> {
+    return parseReferral(await this.requestData("/api/v1/referrals", signal, { authenticated: true }));
+  }
+  /** Applies someone else's referral code to this account. Refusals come back as a message. */
+  async applyReferral(code: string, signal: AbortSignal): Promise<{applied: true} | {applied: false; reason: "invalid" | "used" | "refused"}> {
+    const response = object(await this.requestData("/api/v1/referrals/apply", signal, { authenticated: true, body: { code }, anyStatus: true }));
+    const status = typeof response.status === "number" ? response.status : 0;
+    if (status >= 200 && status < 300) return { applied: true };
+    if (status === 401 || status >= 500 || status === 0) throw new CloudProtocolError("http", status, response.data);
+    const error = response.data && typeof response.data === "object" ? String((response.data as {error?: unknown}).error ?? "") : "";
+    return { applied: false, reason: /already used/i.test(error) ? "used" : status === 404 || /invalid/i.test(error) ? "invalid" : "refused" };
   }
   /** Whether this build can sign in here. The production web build has no sign-in host. */
   get signInAvailable(): boolean { return this.options.signIn !== undefined; }
@@ -502,7 +560,10 @@ export class CloudProtocol {
   async mapsTile(z:number,x:number,y:number,signal:AbortSignal):Promise<ArrayBuffer> {
     const path=`/api/v1/maps/tiles/${z}/${x}/${y}`;
     if(!mapsTilePath(path))throw new CloudProtocolError('invalid-response');
-    const response=object(await this.accountRequest(path,signal,undefined,{headers:{'Idempotency-Key':crypto.randomUUID()}}));
+    // One credential read per tile, not the three of accountRequest: a map view asks for about 15 tiles at once
+    // and the phone's secure store answers one read at a time (10–25 ms each on a Pixel). A tile is the same public
+    // image for every account; the Maps session that asked for it checks its account before and after (cloud-maps.ts).
+    const response=object(await this.requestData(path,signal,{authenticated:true,headers:{'Idempotency-Key':crypto.randomUUID()}}));
     if(response.encoding!=='base64'||!['image/png','image/jpeg','image/webp'].includes(String(response.contentType))||typeof response.data!=='string'||!response.data.length||response.data.length>1398104||response.data.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(response.data))throw new CloudProtocolError('invalid-response');
     let binary:string;try{binary=atob(response.data);}catch{throw new CloudProtocolError('invalid-response');}if(binary.length>1024*1024||btoa(binary)!==response.data)throw new CloudProtocolError('invalid-response');
     return Uint8Array.from(binary,char=>char.charCodeAt(0)).buffer;
@@ -517,7 +578,8 @@ export class CloudProtocol {
     });
     return this.gmailClient;
   }
-  gmailAccounts(signal: AbortSignal): Promise<GmailAccount[]> { return this.gmail.gmailAccounts(signal); }
+  /** A connection with no email or name is labelled by Alpha, never by the shared client's fallback. */
+  async gmailAccounts(signal: AbortSignal): Promise<GmailAccount[]> { return (await this.gmail.gmailAccounts(signal)).map(withGmailAccountLabel); }
   /** One search page. `mailboxHistoryId` is the Gmail mailbox revision read before the page was listed;
    * two pages of one search with different values came from a changed mailbox.
    * Older Cloud servers omit it. */

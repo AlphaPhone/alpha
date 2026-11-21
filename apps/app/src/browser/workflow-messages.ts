@@ -1,6 +1,7 @@
+import {readWorkflowAppState} from './workflow-app-state';
 type Bag=Record<string,any>;
 export function readWorkflowMessages(api:Bag,unreadOnly:boolean):Record<string,Bag[]>{
- const state={...api.get('messages'),...JSON.parse(localStorage.getItem('alpha.dev.app.messages')||'{}')};
+ const state=readWorkflowAppState(api,'messages');
  if(!unreadOnly)return structuredClone(state.threads);
  const result:Record<string,Bag[]>=Object.create(null);
  for(const [pid,count] of Object.entries(state.unread||{})){

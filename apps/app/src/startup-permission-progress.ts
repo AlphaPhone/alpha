@@ -1,8 +1,8 @@
-import {walkthroughProgress, type WalkthroughProgress} from '../../../.eliza/client-features/packages/ui/src/components/permissions/permission-walkthrough.ts';
+import {walkthroughProgress, type WalkthroughProgress} from './ui/components/permissions/permission-walkthrough.ts';
 import {startupPermissionKeys, nativeStartupPermissionKeys} from './startup-permission-flow.ts';
 
 /**
- * Alpha's installed walkthrough progress (shared resumable progress, packages/ui permissions).
+ * Alpha's installed walkthrough progress (resumable progress, ui/components/permissions).
  * Versions: 1 the browser list, 4 the native list with Files (all-files access, decision F1).
  */
 export const startupPermissionProgressKey = 'alpha:startup-permission-walkthrough:v1';

@@ -1,15 +1,15 @@
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import {stripTypeScriptTypes} from 'node:module';
+import {stripTypeScriptTypes} from '../support/strip-types.mjs';
 
 export const reviewInputs = [
   'apps/app/src/prototype/use-in-email-review.ts',
-  '.eliza/client-features/plugins/plugin-inbox/src/mailbox/use-in-email.ts',
+  'apps/app/src/ui/mailbox/use-in-email.ts',
 ];
 const source = async () => {
   let text = await readFile(new URL('../../' + reviewInputs[0], import.meta.url), 'utf8');
   text = text.replace(/^import .*;\n/gm, '').replace(/^export (?=function |const )/gm, '');
-  // The review wording and limits are the shared @elizaos/plugin-inbox/mailbox module at the pin.
+  // The review wording and limits are Alpha's own module, which the review imports.
   let shared = await readFile(new URL('../../' + reviewInputs[1], import.meta.url), 'utf8');
   shared = shared.replace(/^import .*;\n/gm, '').replace(/^export (?=function |const )/gm, '');
   return '{' + stripTypeScriptTypes(shared, { mode: 'strip' }) + stripTypeScriptTypes(text, { mode: 'strip' }) + '\nglobalThis.installUseInEmailReview=installUseInEmailReview;globalThis.describeEmailTarget=describeEmailTarget;globalThis.USE_IN_EMAIL_ATTACHMENT_POLICY=USE_IN_EMAIL_ATTACHMENT_POLICY;}';

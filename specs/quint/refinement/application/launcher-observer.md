@@ -1,7 +1,8 @@
-# Shared launcher observer
+# Launcher observer
 
-`LauncherObserver` follows the prepared shared `observeLauncher` and system
-launcher bridge. Package notifications, document resume and visible
+`LauncherObserver` follows Alpha's `observeLauncher`
+(`apps/app/src/ui/mobile-shell/installed-launcher.ts`) and the prepared shared
+system launcher bridge. Package notifications, document resume and visible
 visibility changes share one 120 ms timeout. Retirement disarms that timeout
 and claims listener cleanup once, including when registration settles late.
 Late package notifications leave a retired observer idle.
@@ -17,5 +18,5 @@ Inventory loading and native launch have separate models. A rejected remove
 leaves the OS-level listener outcome unresolved.
 
 ```sh
-node --test test/quint-launcher-observer.test.mjs
+bun test test/quint-launcher-observer.test.mjs
 ```

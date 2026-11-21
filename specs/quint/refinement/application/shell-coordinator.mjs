@@ -8,16 +8,17 @@ import {sourcePaths, filesWithin, relativePath} from '../../../../scripts/quint-
 import {flagOffAndroid, fenceNetwork} from '../../../../test/browser/flag-off-android.ts';
 import {residentStub, setStub} from '../../../../test/browser/resident-stub.ts';
 import {captureInputs, checkTraces} from '../check-traces.mjs';
+import {scaledTimeout} from '../timeouts.mjs';
 
 const root = resolve(fileURLToPath(new URL('../../../..', import.meta.url)));
 const self = fileURLToPath(import.meta.url);
-const stepTimeout = 45_000;
+const stepTimeout = scaledTimeout(45_000);
 // Each fresh browser context loads the module graph before the shell can establish a session.
-const mountTimeout = 120_000;
+const mountTimeout = scaledTimeout(120_000);
 
-/** Mount the real application and observe its installed shell/agent coordinator. */
-export async function generateShellCoordinatorTraces(extraSources = []) {
-  const sources = [...sourcePaths(), 'vite.config.ts', 'package.json', 'package-lock.json',
+/** Mount the actual application with a fresh, network-fenced native fixture per schedule. */
+export async function withMountedShell(names, run, {extraSources = [], install} = {}) {
+  const sources = [...sourcePaths(), 'vite.config.ts', 'package.json', 'bun.lock',
     'scripts/quint-lib.ts', 'test/browser/flag-off-android.ts', 'test/browser/resident-stub.ts',
     'test/browser/helpers/native-navigation-protocol.ts', 'upstream.lock.json',
     ...filesWithin(resolve(root, '.eliza/client-features'), path => /\.(?:ts|tsx|js|json|css|html)$/.test(path)).map(relativePath),
@@ -29,7 +30,7 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
   let server, browser;
   try {
     process.env.ELIZA_DEV_ALLOW_TEST_MOCKS = '';
-    server = await createServer({root: resolve(root, 'apps/app'), configFile: resolve(root, 'vite.config.ts'), logLevel: 'error',
+    server = await createServer({configLoader: 'runner', root: resolve(root, 'apps/app'), configFile: resolve(root, 'vite.config.ts'), logLevel: 'error',
       cacheDir: resolve(root, 'test-results/quint-refinement/shell-cache'),
       server: {host: '127.0.0.1', port: 0, strictPort: false},
       define: {'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify('')},
@@ -57,7 +58,7 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
     await server.listen();
     const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
     browser = await chromium.launch({headless: true});
-    for (const name of ['navigation', 'back-keeps-reply', 'view-retires-reply', 'hidden-retires-reply', 'pagehide-retires-reply']) {
+    for (const name of names) {
       console.log(`Checking mounted shell ${name}`);
       const page = await browser.newPage();
       page.setDefaultTimeout(stepTimeout);
@@ -79,6 +80,7 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
           }
         }
       });
+      await install?.(fixturePage, name);
       await page.addInitScript('const __name=(value,name)=>Object.defineProperty(value,"name",{value:name,configurable:true});\n' + initializers.join('\n'));
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
@@ -125,6 +127,22 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
         page.off('requestfinished', requestEnded);
         page.off('requestfailed', requestEnded);
       }
+      scenarios.push(await run({name, page, errors}));
+      assert.deepEqual(foreign, [], 'All external network requests must be fenced');
+      await page.close();
+    }
+    return {scenarios, sources: [...new Set([...sources, ...transformed])], driverHashes};
+  } finally {
+    await browser?.close();
+    await server?.close();
+  }
+}
+
+/** Observe the installed shell and its agent coordinator. */
+export async function generateShellCoordinatorTraces(extraSources = []) {
+  return withMountedShell(
+    ['navigation', 'back-keeps-reply', 'view-retires-reply', 'hidden-retires-reply', 'pagehide-retires-reply'],
+    async ({name, page, errors}) => {
       // These schedules exercise the installed shell and reply coordinator independently of Notes storage.
       const observations = [];
       const observe = async label => {
@@ -196,15 +214,10 @@ export async function generateShellCoordinatorTraces(extraSources = []) {
         if (name === 'pagehide-retires-reply') await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
         await observe('visible again');
       }
-      assert.deepEqual(foreign, [], 'All external network requests must be fenced');
-      scenarios.push({name, observations, errors});
-      await page.close();
-    }
-    return {scenarios, sources: [...new Set([...sources, ...transformed])], driverHashes};
-  } finally {
-    await browser?.close();
-    await server?.close();
-  }
+      return {name, observations, errors};
+    },
+    {extraSources},
+  );
 }
 
 export async function checkShellCoordinator(extraSources = []) {

@@ -1,4 +1,4 @@
-import type {BrowserDocumentStore} from '../../../../.eliza/client-features/packages/ui/src/platform/browser-document-store';
+import type {BrowserDocumentStore} from '../ui/platform/browser-document-store';
 type Documents=Pick<BrowserDocumentStore,'read'|'readOrCreate'|'edit'>;
 type RecordingJournalOwner={ownerDigest:string;folderId:string|null};
 type PendingNoteSegment={segmentId:string;durationMs:number;text?:string;offsetMs?:number;clip?:{blob:Blob;durationMs:number}};

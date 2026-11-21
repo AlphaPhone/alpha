@@ -1,12 +1,13 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /** Disposable emulator probe of the actual PackageInstaller callback and receipt across a process kill. */
 import assert from 'node:assert/strict';
 import {execFileSync, type SpawnSyncReturns} from 'node:child_process';
-import {createHash} from 'node:crypto';
+import {sha256File as sha} from './sha256.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const option=(key:string)=>process.argv.slice(2).find(argument=>argument.startsWith(`--${key}=`))?.slice(key.length+3);
@@ -18,7 +19,7 @@ const sdk=process.env.ANDROID_HOME??path.join(os.homedir(),'Library/Android/sdk'
 const tools=path.join(sdk,'build-tools/36.0.0'),jar=path.join(sdk,'platforms/android-36/android.jar');
 const java=process.env.JAVA_HOME??'/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home';
 const env={...process.env,JAVA_HOME:java,PATH:`${java}/bin:${process.env.PATH}`};
-const run=(command:string,args:string[])=>execFileSync(command,args,{encoding:'utf8',env,timeout:120000,stdio:['ignore','pipe','pipe']}).trim();
+const run=(command:string,args:string[])=>execFileSync(command,args,{encoding:'utf8',env,timeout:scaledTimeout(120000),stdio:['ignore','pipe','pipe']}).trim();
 const adb=(...args:string[])=>run(path.join(sdk,'platform-tools/adb'),['-s',serial,...args]);
 const pkg='ai.alphacompute.alphaphone.pendingotafixture',host='ai.alphacompute.alphaphone',activity=`${pkg}/${host}.ContinuationActivity`;
 const pathOrEmpty=()=>{try{return adb('shell','pm','path','--user','0',pkg);}catch(error){const failure=error as Partial<SpawnSyncReturns<string>>;if(failure.status===1&&!String(failure.stdout??'').trim()&&!String(failure.stderr??'').trim())return '';throw error;}};
@@ -28,7 +29,6 @@ const start=(phase:string)=>adb('shell','am','start','--user','0','-W','-n',acti
 const work=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-ota-confirmation-'));
 const main='android/app/src/main/java/ai/alphacompute/alphaphone/';
 const sources=[main+'AlphaUpdateStatusReceiver.java',main+'UpdateConfirmationReceipt.java','test/fixtures/update-confirmation-android/ContinuationActivity.java','vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/updater/RuntimeUpdatePause.java'];
-const sha=(file:string)=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const record:Record<string,unknown>={scope:'API platform fixture with production callback receiver, confirmation receipt and pause journal',outcome:'failed',serial,api,sources:Object.fromEntries(sources.map(file=>[file,sha(path.join(root,file))]))};
 let installed=false;
 try{

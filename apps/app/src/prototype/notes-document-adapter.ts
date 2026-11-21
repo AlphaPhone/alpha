@@ -1,6 +1,7 @@
 import {noteShareText,type ShareableNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/note-share-text.ts';
 import { registerPlugin } from '../platform-plugins';
 import type { AlphaNoteDocumentsPlugin } from '../native/alpha-note-documents';
+import {noteDocumentText} from '../ui/notes/note-document-messages';
 import type {ViewApi,ViewOutput,ViewRegistry} from './shell-types';
 type NotesState={open?:unknown;list:Array<ShareableNote&{id:string}>};
 type NotesOutput=ViewOutput&{canExportText?:boolean;exportText?:()=>void};
@@ -21,7 +22,7 @@ export function installNotesDocumentAdapter(views:ViewRegistry){
   const perform=async<T>(task:()=>Promise<T>,apply:(value:T)=>void|Promise<void>)=>{if(busy){api.toast('Busy');return;}const token=epoch;busy=true;try{const value=await task();if(token!==epoch||!api.isActive())return;await apply(value);}catch{if(token===epoch)receipt('Import failed');}finally{busy=false;}};
   const selected=(state as Partial<NotesState>).list?.find(n=>n.id===state.open);
   view.canExportText=!!selected;
-  view.exportText=()=>{const current=api.get<NotesState>('notes'),note=current.list.find(n=>n.id===current.open);if(!note||!api.isActive()){api.toast('Open a note');return;}const snapshot=noteShareText(note);api.set({sheet:null});void perform(()=>documents.exportText(snapshot),value=>receipt(value.message));};
+  view.exportText=()=>{const current=api.get<NotesState>('notes'),note=current.list.find(n=>n.id===current.open);if(!note||!api.isActive()){api.toast('Open a note');return;}const snapshot=noteShareText(note);api.set({sheet:null});void perform(()=>documents.exportText(snapshot),value=>receipt(noteDocumentText('export-text',value.status,value.message)));};
   return view;
  };
 }

@@ -1,7 +1,8 @@
-# Shared launcher favorites
+# Launcher favorites
 
-`LauncherFavorites` follows the real mobile launcher, local favorites store
-and Alpha product registry. It distinguishes a missing setting, an explicit
+`LauncherFavorites` follows the real mobile launcher, Alpha's installed-app
+launcher and local favorites store
+(`apps/app/src/ui/mobile-shell/installed-launcher.ts`) and Alpha product registry. It distinguishes a missing setting, an explicit
 empty choice, malformed bytes and the two record versions. Legacy view IDs
 resolve to canonical Home views even if a migration write is refused.
 The old default inventory can be trimmed while its original order remains
@@ -22,5 +23,5 @@ storage durability, overlapping inventory reads, native package effects
 and pointer handling have separate scope.
 
 ```sh
-node --test test/quint-launcher-favorites.test.mjs
+bun test test/quint-launcher-favorites.test.mjs
 ```

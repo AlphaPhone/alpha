@@ -1,4 +1,5 @@
-import type {BrowserDocumentSnapshot as Snapshot,BrowserDocumentStore} from '../../../../.eliza/client-features/packages/ui/src/platform/browser-document-store';
+import type {BrowserDocumentStore} from '../ui/platform/browser-document-store';
+type Snapshot = NonNullable<Awaited<ReturnType<BrowserDocumentStore['read']>>>;
 /** Product recovery policy; the injected upstream store owns transactions. */
 type Documents = Pick<BrowserDocumentStore,'read'|'compareExchange'|'edit'>;
 /** The stored envelope. `legacy` is always written as null. */

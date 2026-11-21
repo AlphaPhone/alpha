@@ -4,7 +4,7 @@ import type { ReminderOperation, ReminderTarget, ReminderResult } from '../../..
 import type { Action, ClockRequest, ClockResult, NativeResult, Reminder } from '../daily';
 
 /** What this build's DailyApps supports; the version fields are absent on older builds. */
-export type DailySurfaceInfo = { developmentBuild: boolean; assistant: boolean; reminderCreationVersion?: 1; reminderTapVersion?: 1; reminderTimingVersion?: 2; clockRepeatDaysVersion?: number; bottomInset?: number; topInset?: number };
+export type DailySurfaceInfo = { assistant: boolean; reminderCreationVersion?: 1; reminderTapVersion?: 1; reminderTimingVersion?: 2; clockRepeatDaysVersion?: number; bottomInset?: number; topInset?: number };
 type ReminderAgentOperation = { operationId: string; bindingHash: string; operation: ReminderOperation | ReminderCreateOperation };
 type ReminderAgentReply = { status: string; result?: ReminderResult | ReminderCreateResult; message?: string };
 

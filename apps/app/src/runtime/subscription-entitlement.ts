@@ -1,29 +1,54 @@
 /**
- * Alpha binding of the shared Eliza Cloud subscription entitlement client (issue #410, P-26).
+ * Alpha binding of the Eliza Cloud subscription entitlement client (issue #410, P-26).
  *
  * Verification of the signed short-lived entitlement, account binding, admission, background
- * refresh, expiry/outage states, Cloud refusal parsing with retry times and the owner-facing copy
- * live upstream in `@elizaos/cloud-sdk/subscription-entitlement`, projected from the pinned
- * checkout. Alpha supplies its product names and subscription-first presentation. Nothing here
- * selects a price, quota, allowance or limit; turns never read billing.
+ * refresh, expiry/outage states and Cloud refusal parsing with retry times live upstream in
+ * `@elizaos/cloud-sdk/subscription-entitlement`, projected from the pinned checkout; this module
+ * re-exports only those. The owner-facing copy (plan description, allowance, refusal and
+ * redemption messages, retry times and the account summary) is Alpha's own, in
+ * `../ui/cloud/subscription-presentation.ts`, and Alpha supplies its product names and
+ * subscription-first presentation here. Nothing here selects a price, quota, allowance or limit;
+ * turns never read billing.
  */
 import {
   describeSubscription as sharedDescribeSubscription,
-  isEntitlementSignInFailure,
   redeemFailureMessage as sharedRedeemFailureMessage,
   retryDuration,
   serviceLimitMessage as sharedServiceLimitMessage,
   subscriptionSummary as sharedSubscriptionSummary,
-  type ServiceLimit,
   type SubscriptionCopy,
   type SubscriptionDescription,
   type SubscriptionSummary,
+} from '../ui/cloud/subscription-presentation.ts';
+import {
+  isEntitlementSignInFailure,
+  type ServiceLimit,
   type SubscriptionView,
 } from '../../../../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts';
 
 import { formatMonthDay, formatTime } from '../prototype/locale-time.ts';
 import { CloudResidentBindingError, type ResidentAdmission } from '../../../../.eliza/client-features/packages/auth/src/auth/cloud-resident-binding.ts';
-export * from '../../../../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts';
+// The shared client's non-presentation surface. Its owner-facing copy is not re-exported: Alpha's
+// presentation module owns it.
+export {
+  BILLING_LIMITS_PATH, CLOCK_SKEW_MS, CREDIT_BALANCE_MAX_AGE_MS, checkEntitlement, clearEntitlementKeyCache, decodeEntitlement,
+  ENTITLEMENT_AUDIENCE, ENTITLEMENT_FORMAT_VERSION, ENTITLEMENT_KEYS_PATH, ENTITLEMENT_PATH, ENTITLEMENT_TYPE, EntitlementError,
+  EntitlementRefresher, entitlementClaims, entitlementFromResponse, entitlementKeysFromResponse, FALLBACK_REFRESH_MS,
+  fallbackPlanFromLimits, isEntitlementSignInFailure, KEY_CACHE_MS, MAX_ENTITLEMENT_KEYS, MAX_ENTITLEMENT_LENGTH,
+  MAX_ENTITLEMENT_LIFETIME_MS, nextRefreshDelay, normalizeSubscriptionCode, organizationCreditFromLimits, planAdmission,
+  REDEEM_PATH, REFRESH_RETRY_MAX_MS, REFRESH_RETRY_MIN_MS, readServiceLimit, redeemedSubscriptionGrant, redeemFailureForStatus,
+  redeemResultFromResponse, SubscriptionRedeemError, subscriptionGrantFromSnapshot, verifyEntitlement,
+  type AllowancePeriod, type AllowanceUnit, type CountAllowance, type EntitlementCheck, type EntitlementErrorCode,
+  type EntitlementExpectation, type EntitlementRefresherOptions, type EntitlementSource, type FallbackPlan,
+  type OrganizationCreditBalance, type PeriodAllowance, type PlanAdmission, type PlanAllowance, type PlanStatus,
+  type RedeemedGrant, type RedeemFailureCode, type RedeemResult, type RefresherTimers, type ServiceLimit,
+  type SubscriptionEntitlement, type SubscriptionGrantAllowance, type SubscriptionGrantOptions, type SubscriptionGrantState,
+  type SubscriptionView,
+} from '../../../../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts';
+export {
+  CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, redeemSuccessMessage, retryDuration, serviceLimitNextChange,
+  type SubscriptionCopy, type SubscriptionDescription, type SubscriptionSummary,
+} from '../ui/cloud/subscription-presentation.ts';
 
 /** Alpha's names in shared copy; the service name is the configured deployment's. */
 export function alphaSubscriptionCopy(serviceName = 'Cloud'): SubscriptionCopy {

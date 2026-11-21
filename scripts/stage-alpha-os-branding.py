@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Guarded source-only Alpha OS policy, branding and first-run staging. No build or device operations."""
 from pathlib import Path
-import argparse, hashlib, json, os, subprocess, tempfile
+import argparse, hashlib, json, os, re, subprocess, tempfile, zipfile
 
 REPO = Path(__file__).resolve().parents[1]
 BRAND = REPO / 'android/aosp/branding'
@@ -47,6 +47,55 @@ def project_manifest(original):
         '    <application android:label="@string/alpha_name" android:icon="@drawable/alpha_mark" android:theme="@android:style/Theme.Material.NoActionBar">\n'
         '        <activity android:name="AlphaAppearance" android:exported="true" android:label="@string/alpha_name"/>',1)
 
+def project_role_controller(original):
+    field = '    private RoleManager mUserRoleManager;'
+    assert original.count(field) == 1, 'Role controller field changed'
+    candidate = original.replace(field, field + '\n    private boolean mAlphaRoleUpgradeRunning;', 1)
+    start = '        mUserRoleManager.setRoleNamesFromController(roleNames);'
+    assert candidate.count(start) == 1, 'Role initialization changed'
+    candidate = candidate.replace(start, start + '''
+
+        // The Alpha migration never blocks the default-role pass: a refusal or failure is
+        // retried on the next pass, and newly added roles still get their default holders now.
+        mAlphaRoleUpgradeRunning = true;
+        try {
+            if (!AlphaRoleUpgrade.run(new AlphaRoleUpgradeAndroid(
+                    mContext, mUser, mUserRoleManager, this))) {
+                Log.w(LOG_TAG, "Alpha role upgrade deferred; default roles continue");
+            }
+        } catch (RuntimeException e) {
+            Log.e(LOG_TAG, "Alpha role upgrade failed; default roles continue", e);
+        } finally {
+            mAlphaRoleUpgradeRunning = false;
+        }
+''', 1)
+    end = '\n    @Override\n    @WorkerThread\n    public boolean onAddRoleHolder'
+    assert candidate.count(end) == 1, 'Role default completion changed'
+    candidate = candidate.replace(end, '''
+
+    private boolean keepAlphaOwnerChoice(String roleName) {
+        if (mAlphaRoleUpgradeRunning) return true;
+        AlphaRoleUpgradeAndroid upgrade = new AlphaRoleUpgradeAndroid(
+                mContext, mUser, mUserRoleManager, this);
+        // Record the choice even while the migration is ineligible (setup open, app disabled or
+        // suspended): eligibility can return, and the choice must still retire the migration.
+        // Only an eligible device refuses the request when the marker cannot be written.
+        return upgrade.keepOwnerChoice(roleName) || !upgrade.eligible();
+    }
+    @Override
+    @WorkerThread
+    public boolean onAddRoleHolder''', 1)
+    # These three entry points share the same worker as default-role grants. Mark explicit
+    # requests before mutation so a retry cannot undo a later owner choice.
+    for start, anchor in [
+            ('public boolean onAddRoleHolder', '        boolean added = false;'),
+            ('public boolean onRemoveRoleHolder', '        boolean dontKillApp = hasFlag'),
+            ('public boolean onClearRoleHolders', '        boolean dontKillApp = hasFlag')]:
+        begin = candidate.index(start)
+        point = candidate.index(anchor, begin)
+        candidate = candidate[:point] + '        if (!keepAlphaOwnerChoice(roleName)) return false;\n\n' + candidate[point:]
+    return candidate
+
 def core_policy_plan(root, read_baseline=None):
     """Materialize the reviewed policy packet in scratch space, never in the build checkout."""
     packet = BRAND / 'core-launcher'
@@ -79,14 +128,79 @@ def core_policy_plan(root, read_baseline=None):
             output['frameworks/base/' + row['path']] = (data, row['beforeSha256'])
         return output
 
-def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None):
+def image_identity(image_stage, aapt, apksigner):
+    """Recheck the normal signed canonical launcher stage before its source packet is planned."""
+    admission = json.loads(safe(image_stage, 'image-policy-admission.json').read_text())
+    config = json.loads((REPO/'app.config.json').read_text())
+    # OS images are staged only for the canonical application identity.
+    assert admission['schema'] == 1 and admission['packageName'] == config['appId'], 'Image identity differs from the canonical application'
+    relative = 'provisioning/alpha-telephony-components.xml'
+    assert admission['handlerDefaultsSha256'] == digest(safe(image_stage,relative).read_bytes()), 'Image provisioning packet drift: '+relative
+    descriptor_bytes = safe(image_stage, 'launcher.json').read_bytes()
+    descriptor = json.loads(descriptor_bytes)
+    assert admission['launcherDescriptorSha256'] == digest(descriptor_bytes), 'Launcher descriptor hash drift'
+    apk = safe(image_stage, 'Launcher.apk')
+    hasher = hashlib.sha256()
+    with apk.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024*1024), b''): hasher.update(chunk)
+    assert admission['apkSha256'] == descriptor['apkSha256'] == hasher.hexdigest(), 'Staged APK hash drift'
+    assert descriptor['packageName'] == admission['packageName'] and descriptor['moduleName'] == config['moduleName'], 'Launcher descriptor identity drift'
+    assert descriptor.get('development') is False, 'A development launcher cannot select production image policy'
+    product = json.loads((REPO/'android/aosp/pixel10a-product.json').read_text())
+    assert admission['sourceLockSha256'] == product['sourceLock']['sha256'] == digest((REPO/product['sourceLock']['file']).read_bytes()), 'Image source lock drift'
+    assert admission['platformCertificateSha256'] == product['signer']['platformCertificateSha256'] and re.fullmatch('[0-9a-f]{64}', admission['platformCertificateSha256']), 'Image platform certificate drift'
+    signer = json.loads((REPO/product['signer']['apkDescriptor']).read_text())['signerSha256']
+    assert descriptor['certificateSha256'] == signer and re.fullmatch('[0-9a-f]{64}', signer), 'Launcher signer admission drift'
+    # Normal tools verify the APK itself again, not merely a self-reported success bit.
+    verified = subprocess.check_output([apksigner, 'verify', '--verbose', '--print-certs', str(apk)], text=True)
+    actual = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)$', verified, re.M)
+    assert [value.lower() for value in actual] == [signer], 'Staged APK signer differs from reviewed signer'
+    badging = subprocess.check_output([aapt, 'dump', 'badging', str(apk)], text=True)
+    assert 'application-debuggable' not in badging, 'A debuggable launcher cannot select production image policy'
+    package = re.search(r"^package: name='([^']+)'", badging, re.M)
+    assert package and package.group(1) == admission['packageName'], 'Staged APK package differs from the canonical identity'
+    # The standalone source stage must retain the same receiver and nine-handler qualification
+    # as stage-aosp. Reuse the actual product qualifiers rather than a second Python manifest model.
+    tree = subprocess.check_output([aapt, 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
+    with tempfile.TemporaryDirectory(prefix='alpha-image-manifest-') as temporary:
+        manifest=Path(temporary)/'manifest.txt';manifest.write_text(tree)
+        code="""const [file, appId, stage, roles] = process.argv.slice(-4);
+const tree = await Bun.file(file).text();
+(await import(stage)).assertImageLauncherManifest(tree, true, appId);
+(await import(roles)).aospTelephonyRoleComponents(tree, appId);"""
+        subprocess.check_output([os.environ.get('ALPHA_BUN','bun'), '-e', code, str(manifest),
+            admission['packageName'], str(REPO/'scripts/stage-aosp.ts'), str(REPO/'scripts/aosp-telephony-roles.ts')], text=True, cwd=REPO)
+    return admission
+
+BRANDING_INCLUDE = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
+BRANDING_SUFFIX = b'\n# Alpha OS visual identity.\n' + BRANDING_INCLUDE.encode() + b'\n'
+
+def stage_preimage(root, image_stage, name):
+    """A source packet publishes beside its admitted image stage, which becomes vendor/alphaphone.
+    Its vendor/alphaphone preimages are that stage, never an older install in the source tree."""
+    prefix = 'vendor/alphaphone/'
+    return safe(image_stage, name[len(prefix):]) if image_stage and name.startswith(prefix) else safe(root, name)
+
+def branding_product(current, product_mk_hash, image_stage):
+    """Return the new product.mk bytes to stage, or None when no change is planned."""
+    assert current.decode().count(BRANDING_INCLUDE) <= 1, 'Duplicate branding inclusion'
+    if image_stage:
+        # stage-aosp added exactly this include to the generated stage; bind it to that preimage.
+        assert current.endswith(BRANDING_SUFFIX) and product_mk_hash == digest(current[:-len(BRANDING_SUFFIX)]), 'Image stage product.mk differs from its pinned preimage'
+        return None
+    if BRANDING_INCLUDE in current.decode(): return None
+    assert product_mk_hash == digest(current), 'Explicit generated product.mk preimage pin required'
+    return current + BRANDING_SUFFIX
+
+def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_hash=None, core_baseline=None, image_stage=None):
+    existing = lambda name: stage_preimage(root, image_stage, name)
     check_revision(root, 'packages/apps/Provision')
     check_revision(root, 'frameworks/base')
     report_path = assets / 'branding-assets.json'
     assert digest(report_path.read_bytes()) == report_hash, 'Asset report pin mismatch'
     report = json.loads(report_path.read_text())
     assert report['sourceLogoSha256'] == digest((REPO / 'apps/app/public/logo-mark.svg').read_bytes())
-    assert (report['width'],report['height'],report['accent'],report['wallpaperBackground']) == (1080,2424,'#0000FF','#050505')
+    assert (report['width'],report['height'],report['accent'],report['wallpaperBackground']) == (1080,2424,'#0000FF','#000000')
     for name,key in [('bootanimation.zip','bootAnimationSha256'),('default_wallpaper.png','wallpaperSha256')]:
         assert digest((assets/name).read_bytes()) == report[key], 'Asset payload drift: ' + name
     target = json.loads((BRAND/'core-launcher/manifest.json').read_text()).get('targetAppId')
@@ -127,6 +241,17 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     for name in ['AlphaWelcome.java','AlphaAppearance.java','AlphaFreshPresets.java','AlphaFreshSetupPolicy.java']:
         target = project+'/src/com/android/provision/'+name
         put(target,(BRAND/'provision'/name).read_bytes(),previous.get(name,[]))
+    role_project = 'packages/modules/Permission'
+    role_path = 'PermissionController/role-controller/java/com/android/role/controller/service/'
+    role_file = role_path + 'RoleControllerServiceImpl.java'
+    role_input = pinned(role_project, role_file)
+    check_revision(root, role_project)
+    original = safe(source_inputs, role_project+'/'+role_file).read_bytes()
+    assert digest(original) == role_input['sha256'], 'Role controller preimage drift'
+    put(role_project+'/'+role_file, project_role_controller(original.decode()).encode(),
+        [role_input['sha256']])
+    for name in ['AlphaRoleUpgrade.java', 'AlphaRoleUpgradeAndroid.java']:
+        put(role_project+'/'+role_path+name, (BRAND/'provision'/name).read_bytes())
     put(project+'/res/values/alpha.xml',(BRAND/'provision/strings.xml').read_bytes(),previous.get('strings.xml',[]))
     # Reuse the already reviewed product icon, including its blue circle, inset and clipping.
     # Generating a bare logo vector here would silently change the installed setup identity.
@@ -136,16 +261,16 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
     assert digest((REPO / LOCK['productIcon']['logoSource']).read_bytes()) == LOCK['productIcon']['logoSourceSHA256'], 'Product icon identity source drift'
     put(project+'/res/drawable/alpha_mark.xml',icon)
     put(project+'/res/drawable-nodpi/alpha_wallpaper.png',(assets/'default_wallpaper.png').read_bytes())
-    product = safe(root,'vendor/alphaphone/product.mk'); current = product.read_bytes()
-    include = '$(call inherit-product, vendor/alphaphone/branding/branding.mk)'
-    assert current.decode().count(include) <= 1, 'Duplicate branding inclusion'
-    if include not in current.decode():
-        assert product_mk_hash == digest(current), 'Explicit generated product.mk preimage pin required'
-        put('vendor/alphaphone/product.mk',current+b'\n# Alpha OS visual identity.\n'+include.encode()+b'\n',[digest(current)])
+    # The production product copies this feature only after the matching Provision sources are staged.
+    put('vendor/alphaphone/branding/provision/fresh-telephony.xml',
+        (BRAND/'provision/fresh-telephony.xml').read_bytes())
+    current = existing('vendor/alphaphone/product.mk').read_bytes()
+    branded = branding_product(current, product_mk_hash, image_stage)
+    if branded is not None: put('vendor/alphaphone/product.mk',branded,[digest(current)])
     rows=[]
     prior_rows = {row['path']:row['sha256'] for row in (prior or {}).get('files',[])}
     for name,value in plan.items():
-        target=safe(root,name); actual=digest(target.read_bytes())if target.exists()else None
+        target=existing(name); actual=digest(target.read_bytes())if target.exists()else None
         after=digest(value)
         assert actual is None or actual==after or actual in allowed[name] or actual==prior_rows.get(name), 'Unreviewed existing stage file: '+name
         rows.append({'path':name,'beforeSha256':actual,'sha256':after,'changed':actual!=after})
@@ -172,7 +297,11 @@ def main():
     parser.add_argument('--aosp-root',type=Path,required=True)
     parser.add_argument('--assets-dir',type=Path,required=True)
     parser.add_argument('--assets-report-sha256',required=True)
-    parser.add_argument('--source-inputs',type=Path,required=True)
+    parser.add_argument('--source-inputs',type=Path)
+    parser.add_argument('--image-stage',type=Path)
+    parser.add_argument('--aapt',default='aapt')
+    parser.add_argument('--apksigner',default='apksigner')
+    parser.add_argument('--packet-output',type=Path)
     parser.add_argument('--receipt',type=Path,required=True)
     parser.add_argument('--product-mk-sha256')
     parser.add_argument('--prior-receipt',type=Path)
@@ -183,12 +312,40 @@ def main():
         assert args.prior_receipt_sha256==digest(args.prior_receipt.read_bytes()),'Prior receipt pin required'
         prior=json.loads(args.prior_receipt.read_text())
     root=args.aosp_root.resolve(strict=True)
-    plan,rows=build_plan(root,args.assets_dir.resolve(strict=True),args.assets_report_sha256,args.source_inputs.resolve(strict=True),prior,args.product_mk_sha256)
+    admission = image_identity(args.image_stage.resolve(strict=True), args.aapt, args.apksigner) if args.image_stage else None
+    assert not args.packet_output or admission, 'A source packet requires normal signed-image admission'
+    assert not (args.packet_output and args.apply), 'Packet generation does not apply source'
+    if args.packet_output:
+        assert args.packet_output.resolve().parent == args.image_stage.resolve(), 'Packet must publish with its admitted image stage'
+    with tempfile.TemporaryDirectory(prefix='alpha-provision-inputs-') as temporary:
+        inputs = args.source_inputs.resolve(strict=True) if args.source_inputs else Path(temporary)
+        if not args.source_inputs:
+            for project, filename in [
+                    ('packages/apps/Provision', 'src/com/android/provision/DefaultActivity.java'),
+                    ('packages/apps/Provision', 'AndroidManifest.xml'),
+                    ('packages/modules/Permission', 'PermissionController/role-controller/java/com/android/role/controller/service/RoleControllerServiceImpl.java')]:
+                row=pinned(project, filename)
+                data=subprocess.check_output(['git','-C',str(root/project),'show',row['revision']+':'+filename])
+                assert digest(data)==row['sha256'], 'Pinned Provision source drift'
+                output=safe(inputs, project+'/'+filename);output.parent.mkdir(parents=True,exist_ok=True);output.write_bytes(data)
+        plan,rows=build_plan(root,args.assets_dir.resolve(strict=True),args.assets_report_sha256,inputs,prior,args.product_mk_sha256,
+                          image_stage=args.image_stage.resolve(strict=True) if args.packet_output else None)
     args.receipt.parent.mkdir(parents=True,exist_ok=True)
     assert not args.receipt.exists(),'Preserve existing receipt; use a new path'
     backup=args.receipt.parent/(args.receipt.stem+'-source-preimages')
     if args.apply: apply_plan(root,plan,rows,backup)
+    if args.packet_output:
+        # An opaque source archive avoids duplicate Android.bp discovery when the vendor overlay
+        # is copied into an AOSP tree. It is review input, never another build module directory.
+        with zipfile.ZipFile(args.packet_output, 'x', compression=zipfile.ZIP_DEFLATED) as packet:
+            for row in rows: packet.writestr(row['path'], plan[row['path']])
     record={'schema':1,'state':'ALPHA_BRANDING_SOURCE_STAGED_NOT_BUILT'if args.apply else'ADMITTED_SOURCE_PLAN_NOT_APPLIED','applied':args.apply,'assetReportSha256':args.assets_report_sha256,'productIconSha256':LOCK['productIcon']['sha256'],'sourceLockSha256':digest((BRAND/'provision/source-inputs.json').read_bytes()),'corePolicyManifestSha256':digest((BRAND/'core-launcher/manifest.json').read_bytes()),'files':rows,'backup':str(backup)if args.apply else None,'userDataTouched':False,'settingsWrittenDuringStaging':False,'assistantOrPowerImplementationChanged':False,'coreLauncherTrayAndSharedFilesPolicyIncluded':True,'imageBuilt':False,'deviceQualified':False,'productionQualified':False}
+    if admission:
+        record['imageIdentityAdmission'] = admission
+    if args.packet_output:
+        record['state']='SIGNED_IMAGE_SOURCE_PACKET_NOT_APPLIED'
+        record['packetOutput']=args.packet_output.name
+        record['packetSha256']=digest(args.packet_output.read_bytes())
     args.receipt.write_text(json.dumps(record,indent=2)+'\n')
     print(json.dumps({'state':record['state'],'files':len(rows),'receipt':str(args.receipt)}))
 

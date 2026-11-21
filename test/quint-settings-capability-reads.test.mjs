@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -21,7 +32,7 @@ let capabilityAbort = null, inferenceAbort = null, scaleGeneration = 0, scaleVer
 const textScaleSettlement = () => null, changed = () => { changes++; };
 let changes = 0;
 ${slice('let licenses: {', '/** Native reset results that only echo')}
-${slice('  async function refreshCapabilities(enteringSettings=false) {', '  /** Explicit, confirmed disconnect')}
+${slice('  async function refreshCapabilities(enteringSettings=false) {', '  /** Android shows its own role dialog')}
 globalThis.page = {
   mount(instance) { owner = instance; void refreshCapabilities(); }, unmount(instance) { (function () { ${slice('if (owner === this) { capabilityAbort?.abort();', '\n')} }).call(instance); },
   refreshCapabilities, loadLicenses: () => loadLicenses(changed), shown: () => ({gmail, licenses: licenses.status}),
@@ -33,7 +44,7 @@ function fixture() {
   const reads = [], limits = new Map(), fetches = [];
   let session = 1, armed = 0, fetched = 0, instance;
   const context = vm.createContext({AbortController, Promise, Error, Array,
-    externalVoiceInvocationEnabled: false, browserLocalAgentEnabled: false, listenerReads: {}, gmailGrantLabel: () => 'verified',
+    imageSenseAvailable: () => false, browserLocalAgentEnabled: false, listenerReads: {}, gmailGrantLabel: () => 'verified',
     connectionController: {getCloudClient: () => session === 0 ? null : {sessionId: session, client: {
       gmailAccounts: signal => new Promise((settle, fail) => reads.push({session, settle, fail, signal}))}}},
     setTimeout(run, delay) { assert.equal(delay, 10000); limits.set(++armed, run); return armed; },
@@ -83,8 +94,8 @@ function fixture() {
   };
 }
 
-test('simulated SettingsCapabilityReads traces agree with the capability read and licence loader after every step', {timeout: 170000}, async () => {
-  const traces = modelTraces({module: 'SettingsCapabilityReads', traces: 200, steps: 40});
+test("partial source contract: simulated SettingsCapabilityReads traces agree with the capability read and licence loader after every step", {timeout: scaledTimeout(170000)}, async () => {
+  const traces = modelTraces({module: 'SettingsCapabilityReads', step: 'capabilityStep', traces: 200, steps: 40});
   const result = await replay(traces, {
     start: fixture,
     project: s => ({gmail: s.gmail, reads: s.reads.map(read => read.token).sort(), limits: [...s.limits].sort(), licenses: s.licenses,
@@ -92,4 +103,13 @@ test('simulated SettingsCapabilityReads traces agree with the capability read an
   });
   assert.deepEqual([...result.exercised].sort(), ['accountsSettle', 'leaveSettings', 'licensesSettle', 'limit', 'mount', 'openLicenses',
     'openSettings', 'refresh', 'sessionChanges', 'unmount']);
+});
+
+test('mounted Problem log keeps only the current resident diagnostics result', {timeout: scaledTimeout(240000)}, async () => {
+  const {checkSettingsResidentDiagnostics} = await import('../specs/quint/refinement/application/settings-resident-diagnostics.mjs');
+  const receipt = await checkSettingsResidentDiagnostics([partialContractFile(import.meta.url)]);
+  assert.equal(receipt.traces, 5);
+  assert.equal(receipt.checkpoints, 43);
+  assert.equal(receipt.inputsUnchanged, true);
+  assert.equal(receipt.driverInputsBound, true);
 });

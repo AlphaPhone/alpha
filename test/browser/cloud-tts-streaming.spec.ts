@@ -1,12 +1,15 @@
 import {test,expect,type Page} from '@playwright/test';
 import {createServer} from 'vite';
+import {scopedViteCacheDir} from './helpers/vite-cache';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createLocalAgentDevHandler} from '../../scripts/local-agent-dev-bridge';
+import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 
 // Closed fixture: the real development bridge and renderer against a fake paired agent whose Cloud
 // read-aloud body the test releases chunk by chunk. No Cloud account, provider or audio device.
+test.beforeEach(({},info)=>info.setTimeout(scaledTimeout(30_000)));
 const owner='11111111-1111-4111-8111-111111111111',paired='closed-owner-session';
 // MPEG-1 Layer III, 32 kbit/s, 32 kHz, mono: 144-byte frames, each 36 ms of silence.
 function mp3(frames:number){const out=new Uint8Array(frames*144);for(let i=0;i<frames;i++)out.set([0xff,0xfb,0x18,0xc0],i*144);return out;}
@@ -30,7 +33,9 @@ async function start(page:Page,options:{mediaSource:boolean}={mediaSource:true})
   return new Response(new ReadableStream<Uint8Array>({start(controller){host.upstream=controller;signal.addEventListener('abort',()=>controller.error(signal.reason),{once:true});}}),
    {headers:{'Content-Type':'audio/mpeg','X-Eliza-Speech-Provider':'cartesia','X-Eliza-Speech-Route':'cloud'}});
  }});
- const server=await createServer({configFile:resolve('vite.config.ts'),cacheDir:resolve('test-results/cloud-tts-streaming/vite-cache'),server:{host:'127.0.0.1',port:0,strictPort:false},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify(''),'import.meta.env.VITE_ALPHA_CLOUD_RESIDENT':JSON.stringify('1'),'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')},plugins:[{name:'closed-streamed-cloud-speech',enforce:'pre',configureServer(server){server.middlewares.use('/__alpha-local-agent',(req,res)=>{void handler(req,res);});server.middlewares.use('/__alpha-browser-cloud',async(req,res)=>{const parts=[];for await(const part of req)parts.push(part);const data=JSON.parse(Buffer.concat(parts).toString());res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data.operation==='secureRead'?{value:null}:{state:'host-managed'}));});}}]});
+ // The nested speech servers share dependencies with the suite. Load the config without creating
+ // bundled modules in the shared Vite temp directory while other workers are loading theirs.
+ const server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:scopedViteCacheDir('test-results/cloud-tts-streaming/vite-cache'),server:{host:'127.0.0.1',port:0,strictPort:false},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify(''),'import.meta.env.VITE_ALPHA_CLOUD_RESIDENT':JSON.stringify('1'),'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')},plugins:[{name:'closed-streamed-cloud-speech',enforce:'pre',configureServer(server){server.middlewares.use('/__alpha-local-agent',(req,res)=>{void handler(req,res);});server.middlewares.use('/__alpha-browser-cloud',async(req,res)=>{const parts=[];for await(const part of req)parts.push(part);const data=JSON.parse(Buffer.concat(parts).toString());res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data.operation==='secureRead'?{value:null}:{state:'host-managed'}));});}}]});
  const foreign:string[]=[];await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,async route=>{foreign.push(route.request().url());await route.abort();});
  if(!options.mediaSource)await page.addInitScript(()=>{Object.defineProperty(window,'MediaSource',{configurable:true,value:undefined});});
  const cleanup=async()=>{handler.closeVoice();await server.close();await rm(directory,{recursive:true,force:true});};
@@ -52,7 +57,7 @@ async function start(page:Page,options:{mediaSource:boolean}={mediaSource:true})
     state:()=>voice.state(),gate:()=>markers.isTtsEchoGateActive(performance.now(),-1)};
    const play=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.addEventListener('playing',()=>{proof.firstAudioMs??=Math.round(performance.now()-speakAt);},{once:true});return play.call(this);};
    for(const event of ['playbackEnded','playbackFailed','playbackStopped'])await voice.addListener(event,()=>proof.events.push(event));
-  },'/@fs'+resolve('.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts'));
+  },'/src/ui/voice/tts-playback-activity.ts');
  }catch(error){await cleanup();throw error;}
  const proof=<T,>(read:(value:Proof)=>T|Promise<T>)=>page.evaluate(`(${read.toString()})(window.ttsStream)`) as Promise<T>;
  const audible=()=>proof(async value=>{const state=await value.state();return state.playing&&state.positionMs>100;});

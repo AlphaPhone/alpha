@@ -14,13 +14,22 @@ async function openMail(page:Page){await page.getByRole('button',{name:'Inbox',e
 async function imageSetting(page:Page){await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await page.getByRole('button',{name:'Settings',exact:true}).click();const current=()=>page.locator('[data-settings-page]:not([inert])').last();await current().getByRole('button',{name:'Apps',exact:true}).click();await current().getByRole('button',{name:'Inbox',exact:true}).click();return current().getByRole('switch',{name:'Load images in email',exact:true});}
 test('HTML email loads images by default, keeps inline links isolated, and saved opt-out survives reload',async({page})=>{
  let imageRequests=0;
+ const browserDialogs:string[]=[],unapprovedRequests:string[]=[];
+ page.on('dialog',async dialog=>{browserDialogs.push(dialog.message());await dialog.dismiss();});
+ await page.route('https://example.invalid/**',route=>{unapprovedRequests.push(route.request().url());return route.abort();});
  await page.route('https://images.invalid/**',route=>{imageRequests++;return route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP4/x8AAwAB/2+Bq7YAAAAASUVORK5CYII=','base64')});});
  await setup(page);await openMail(page);
  const frame=page.frameLocator('iframe[title="Formatted email"]');
  await expect(frame.getByRole('img',{name:'Product'})).toBeVisible();await expect.poll(()=>imageRequests).toBeGreaterThan(0);
  await expect(page.getByRole('group',{name:'Links in this email'})).toHaveCount(0);
  await expect(frame.getByRole('link',{name:'Read more'})).toBeVisible();
- const review=page.waitForEvent('dialog').then(async dialog=>{expect(dialog.message()).toContain('Open example.invalid?');await dialog.dismiss();});await frame.getByRole('link',{name:'Read more'}).click();await review;
+ await frame.getByRole('link',{name:'Read more'}).click();
+ const review=page.getByRole('dialog',{name:'Open this link in Browser?',exact:true});
+ await expect(review).toContainText('https://example.invalid/read');
+ await expect(review.getByRole('button',{name:'Cancel',exact:true})).toBeFocused();
+ await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect(review).toHaveCount(0);
+ await expect(frame.getByRole('link',{name:'Read more'})).toBeVisible();
+ expect(browserDialogs).toEqual([]);expect(unapprovedRequests).toEqual([]);
  await expect(page.locator('iframe[title="Formatted email"]')).toHaveAttribute('sandbox','allow-same-origin');
  expect(await page.evaluate(()=>(window as any).mailInjected)).toBeUndefined();
  const toggle=await imageSetting(page);await expect(toggle).toBeChecked();await toggle.click();await expect(toggle).not.toBeChecked();
@@ -32,6 +41,32 @@ test('HTML email loads images by default, keeps inline links isolated, and saved
 });
 test('plain-text email retains its reviewed link controls',async({page})=>{
  await setup(page,false);await openMail(page);await expect(page.getByRole('group',{name:'Links in this email'})).toBeVisible();await expect(page.getByRole('button',{name:'Read more (example.invalid)',exact:true})).toBeVisible();await expect(page.locator('iframe[title="Formatted email"]')).toHaveCount(0);
+});
+
+test.describe('responsive formatted mail',()=>{
+ test.use({hasTouch:true,isMobile:true});
+ test('keeps table columns visible when the reader narrows and widens',async({page})=>{
+  await page.setViewportSize({width:1440,height:900});
+  await page.route('https://images.invalid/**',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90"><rect width="90" height="90" fill="teal"/></svg>'}));
+  await setup(page,'<table width="600" cellpadding="0" cellspacing="0"><tr><td><table width="394"><tr><td><img src="https://images.invalid/avatar.svg" alt="Profile image" style="width:90px;height:90px"></td><td width="100%"><strong>Suggested account</strong><p>A long account description that stays next to the profile image.</p></td></tr></table></td></tr></table>');
+  await openMail(page);
+  const frame=page.locator('iframe[title="Formatted email"]');
+  const document=page.frameLocator('iframe[title="Formatted email"]');
+  await expect(document.getByRole('img',{name:'Profile image',exact:true})).toBeVisible();
+  const geometry=()=>frame.evaluate((element:HTMLIFrameElement)=>{
+   const doc=element.contentDocument!,reader=element.closest('.inbox-message-content')!;
+   const image=doc.querySelector('img')!.getBoundingClientRect(),description=doc.querySelector('strong')!.getBoundingClientRect();
+   return {width:element.clientWidth,height:element.clientHeight,viewportOverflow:doc.documentElement.scrollWidth-element.clientWidth,readerOverflow:reader.scrollWidth-reader.clientWidth,imageWidth:image.width,ordered:image.right<=description.left};
+  });
+  const fitting=()=>expect.poll(async()=>{const g=await geometry();return g.viewportOverflow<=1&&g.readerOverflow<=1&&g.ordered&&g.imageWidth>30&&g.height>=120&&g.height<=32000;}).toBe(true);
+  await fitting();const desktop=await geometry();
+  await page.setViewportSize({width:360,height:800});
+  await expect.poll(async()=>(await geometry()).imageWidth).toBeLessThan(desktop.imageWidth);
+  await fitting();expect((await geometry()).width).toBeLessThan(desktop.width);
+  await page.setViewportSize({width:1440,height:900});
+  await expect.poll(async()=>(await geometry()).imageWidth).toBeCloseTo(desktop.imageWidth);
+  await fitting();
+ });
 });
 
 test('Show images applies only to the chosen message when paging a conversation',async({page})=>{

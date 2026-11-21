@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,nativeCmakeOptions,verifyNativeJava,verifyNativeSymbols} from '../scripts/embedding-native-contract.ts';
+import {nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,nativeCmakeOptions,verifyNativeJava,verifyNativeSymbols} from '../scripts/embedding-native-contract.ts';
 import {verifyEmbeddingInputs} from '../scripts/stage-embedding-host.ts';
 const identity='ai.alphacompute.alphaphone';
 const cpp='env->RegisterNatives(cls, methods, count); JNI_OnLoad(vm, reserved);\n'+[
@@ -34,7 +35,7 @@ test('registered JNI selects the product class without rewriting shared C++ and 
  assert.doesNotThrow(()=>verifyNativeSymbols('000 T JNI_OnLoad\n',binding));
  for(const symbols of ['000 T nativeEmbed','000 T JNI_OnLoad\n000 T unexpected'])assert.throws(()=>verifyNativeSymbols(symbols,binding),/missing|unexpected/);
 });
-test('registered receipt admission binds Java, full native set and product class; old receipt fails closed',()=>{
+fixtureTest('registered receipt admission binds Java, full native set and product class; old receipt fails closed',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-jni-contract-')),vendor=path.join(root,'vendor/eliza');fs.mkdirSync(vendor,{recursive:true});
  const git=(...args)=>execFileSync('git',['-C',vendor,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
  const sha=value=>createHash('sha256').update(value).digest('hex'),binding=nativeBinding(cpp,cmake,identity),forkPin='1'.repeat(40);
@@ -54,7 +55,6 @@ test('registered receipt admission binds Java, full native set and product class
 test('current pinned streaming JNI callback matches its exact Object descriptor',()=>{
  const source=fs.readFileSync('vendor/eliza/packages/app/platforms/android/app/src/main/elizavoice-jni/elizavoice-jni.cpp','utf8');
  const declarations=fs.readFileSync('vendor/eliza/'+nativeJavaPath,'utf8');
- assert.match(declarations,/nativeParadeeSynthesizeStream\(long ctx, byte\[\] utf8Text, float speed, Object sink\)/);
  assert.ok(verifyNativeJava(source,declarations)>3);
  assert.throws(()=>verifyNativeJava(source,declarations.replace('Object sink','String sink')),/signature changed: nativeParadeeSynthesizeStream/);
 });

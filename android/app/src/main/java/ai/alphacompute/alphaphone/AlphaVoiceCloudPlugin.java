@@ -39,9 +39,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  });}
  private static final Set<AlphaVoiceCloudPlugin> activeVoices=new java.util.concurrent.CopyOnWriteArraySet<>();
  private static final Set<Streaming> activeStreams=new java.util.concurrent.CopyOnWriteArraySet<>();
- private final ai.eliza.plugins.passwords.PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
- @Override protected void handleOnDestroy(){activeVoices.remove(this);ai.eliza.plugins.passwords.PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
- @Override protected boolean sensitiveSurfaceActive(){return ai.eliza.plugins.passwords.PasswordSurfaces.visible();}
+ private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
+ @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+ @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
  static void retireProviderAuthority(){
   for(AlphaVoiceCloudPlugin voice:activeVoices)voice.mainHandler().post(voice::retireSpeechAuthority);
   for(Streaming stream:activeStreams)stream.retireProvider();
@@ -53,9 +53,6 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   });
  }
 
- // Test APK sets this directly on the plugin instance. Never exposed as a Capacitor method.
- String instrumentationBaseUrl;
- String instrumentationCredentialSlot;
  private static final int AUDIO_LIMIT=8*1024*1024;
  private final CloudSpeechTimings cloudTimings=new CloudSpeechTimings();
  /** Numeric batch stages begin after worker admission; queue wait and audible playback are not claimed. */
@@ -87,7 +84,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private volatile boolean noteForeground=true;
  /** The shared bridge's refusal code for an active call, so the renderer shows its one call line. */
  private static final String CALL_ACTIVE_CODE="call-active";
- @Override public void load(){super.load();activeVoices.add(this);ai.eliza.plugins.passwords.PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
+ @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
  @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();}
  @Override protected void handleOnPause(){noteForeground=false;super.handleOnPause();}
  private boolean callActive(){android.media.AudioManager audio=(android.media.AudioManager)getContext().getSystemService(android.content.Context.AUDIO_SERVICE);int mode=audio==null?android.media.AudioManager.MODE_NORMAL:audio.getMode();return mode==android.media.AudioManager.MODE_IN_CALL||mode==android.media.AudioManager.MODE_IN_COMMUNICATION||mode==android.media.AudioManager.MODE_RINGTONE;}
@@ -191,10 +188,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private HttpURLConnection connect(PluginCall call,String route,SpeechRequestGate.Request request,long epoch) throws Exception {
   requireCloudSpeechAuthority(call,epoch);
   String environment=call.getString("environment");
-  String host=CloudSpeechPolicy.host(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS,environment);
+  String host=CloudSpeechPolicy.host(false,environment);
   AlphaConnectionPlugin store=(AlphaConnectionPlugin)getBridge().getPlugin("AlphaConnection").getInstance();
   String slot="cloud:"+environment;
-  if(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS && instrumentationCredentialSlot!=null){if(!instrumentationCredentialSlot.matches("instrumentation\\.[A-Za-z0-9_-]{1,100}"))throw new IllegalArgumentException();slot=instrumentationCredentialSlot;}
   JSONObject credential=new JSONObject(store.readCredentialSlot(slot));
   String generation=required(call.getString("credentialId"),128);
   if(!generation.equals(credential.optString("credentialId")))throw new IllegalStateException("Cloud account changed");
@@ -202,18 +198,13 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   if(token.contains("\r")||token.contains("\n"))throw new IllegalArgumentException();
   if(credential.has("expiresAt")&&credential.getLong("expiresAt")<=System.currentTimeMillis())throw new IllegalStateException();
   String base="https://"+host;
-  if(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS && instrumentationBaseUrl!=null){java.net.URI test=new java.net.URI(instrumentationBaseUrl);if(!"http".equals(test.getScheme())||!"127.0.0.1".equals(test.getHost())||test.getPort()<1024||test.getRawUserInfo()!=null||test.getRawQuery()!=null||test.getRawFragment()!=null||!"".equals(test.getRawPath()))throw new IllegalArgumentException();base=instrumentationBaseUrl;}
   HttpURLConnection c=(HttpURLConnection)new URL(base+"/api/v1/voice/"+route).openConnection();request.connection=c;
   c.setInstanceFollowRedirects(false);c.setConnectTimeout(20000);c.setReadTimeout(120000);c.setUseCaches(false);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Authorization","Bearer "+token);
   requireCloudSpeechAuthority(call,epoch);if(request.cancelled)throw new IOException();return c;
  }
- private RecordingWindow savedRecording(PluginCall call,SpeechRequestGate.Request request)throws Exception{
-  if(!call.getData().has("savedNoteId"))return null;
-  return RecordingWindow.open(AlphaNoteAudioPlugin.recordings(getContext()),getContext().getCacheDir(),"noteId",call.getString("recordingId"),call.getString("savedNoteId"),call.getLong("offsetMs"),call.getLong("savedDurationMs"),()->request.cancelled||destroyed());
- }
  @PluginMethod public void transcribeRecording(PluginCall call){final long epoch=AlphaLocalAgentPlugin.credentialAuthorityEpoch();submit(call,request->{
   requireCloudSpeechAuthority(call,epoch);
-  try(RecordingWindow saved=savedRecording(call,request)){
+  try(RecordingWindow saved=SavedNoteRecordingWindow.open(getContext(),call,()->request.cancelled||destroyed())){
   if(saved!=null&&saved.empty){saved.check();JSObject silence=new JSObject();silence.put("text","");silence.put("local",false);silence.put("emptyWindow",true);request.result=silence;return;}
   CloudSpeechTimings.Record timing=cloudTimings.begin("stt");boolean completed=false;try{
   request.failureCode="voice-stt-decode";cloudTimings.mark(timing,"decode-start");
@@ -255,7 +246,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   public void opened(HttpURLConnection connection)throws Exception{request.connection=connection;check();}
  }
  @PluginMethod public void transcribeOwnRecording(PluginCall call){submit(call,request->{
-  OwnSpeech own=new OwnSpeech(call,request);try(RecordingWindow saved=savedRecording(call,request)){
+  OwnSpeech own=new OwnSpeech(call,request);try(RecordingWindow saved=SavedNoteRecordingWindow.open(getContext(),call,()->request.cancelled||destroyed())){
   if(saved!=null&&saved.empty){saved.check();JSObject silence=new JSObject();silence.put("text","");silence.put("local",false);silence.put("emptyWindow",true);request.result=silence;return;}String recordingId=required(call.getString("recordingId"),256);File file=saved==null?recording().selected(recordingId):saved.file;if(file==null)throw new IOException("Recording unavailable");
   byte[] wav=RecordingPcm.decode(file,()->request.cancelled||destroyed());
   try{if(saved!=null)saved.check();String text=CartesiaSpeech.transcribe(own.key,wav,own,CartesiaSpeech.HTTPS);own.check();if(saved!=null)saved.check();JSObject result=new JSObject();result.put("text",text);result.put("local",false);result.put("provider","cartesia");result.put("route","direct");request.result=result;}finally{Arrays.fill(wav,(byte)0);}
@@ -267,20 +258,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
 
  // ---- Paired agent speech (development and hosted agents) -----------------------------------
 
- // Native secure-store lookup binds playback to the selected paired identity.
+ // Network speech to a paired agent is not enabled in Alpha's builds.
  private HttpURLConnection connectPaired(PluginCall call,boolean status,SpeechRequestGate.Request request,boolean asr)throws Exception{
-  if(!BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)throw new IOException("Network speech is not enabled");
-  String origin=required(call.getString("origin"),2048);java.net.URI uri=new java.net.URI(origin);
-  boolean local="http".equals(uri.getScheme())&&Set.of("127.0.0.1","10.0.2.2").contains(uri.getHost());
-  if(uri.getHost()==null||(!"https".equals(uri.getScheme())&&!local)||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||!"".equals(uri.getRawPath())||uri.getPort()==0||uri.getPort()>65535)throw new IllegalArgumentException();
-  AlphaConnectionPlugin store=(AlphaConnectionPlugin)getBridge().getPlugin("AlphaConnection").getInstance();
-  PairedAgentCredential pairedCredential=PairedAgentCredential.resolve(call,store);
-  if(pairedCredential.cloud&&asr)throw new IOException("Use on-device transcription for this Cloud connection");
-  String token=pairedCredential.token;
-  HttpURLConnection c=(HttpURLConnection)new URL(origin+(asr?PairedSpeechContract.ASR_PATH:PairedSpeechContract.TTS_PATH)+(status?"/status":"")).openConnection();request.connection=c;
-  c.setInstanceFollowRedirects(false);c.setConnectTimeout(20000);c.setReadTimeout(120000);c.setUseCaches(false);c.setRequestMethod(status?"GET":"POST");c.setDoOutput(!status);c.setRequestProperty("Authorization","Bearer "+token);
-  if(pairedCredential.cloud)c.setRequestProperty("X-Eliza-Phone-Protocol","1");
-  if(request.cancelled)throw new IOException();return c;
+  throw new IOException("Network speech is not enabled");
  }
  @PluginMethod public void pairedVoiceStatus(PluginCall call){submit(call,request->{
   HttpURLConnection c=connectPaired(call,true,request,false);answered(c);byte[] response;try(InputStream in=c.getInputStream()){response=read(in,16384,request);}
@@ -325,12 +305,12 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  @CapacitorPlugin(name="AlphaCloudSpeechStream",permissions={@Permission(alias="microphone",strings={android.Manifest.permission.RECORD_AUDIO})})
  public static final class Streaming extends SpeechStreamBridgePlugin {
   private void retireProvider(){new android.os.Handler(android.os.Looper.getMainLooper()).post(this::retireSpeechAuthority);}
-  private final ai.eliza.plugins.passwords.PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
-  @Override public void load(){super.load();activeStreams.add(this);ai.eliza.plugins.passwords.PasswordSurfaces.addListener(secretSurface);}
-  @Override protected void handleOnDestroy(){activeStreams.remove(this);ai.eliza.plugins.passwords.PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
-  @Override protected boolean sensitiveSurfaceActive(){return ai.eliza.plugins.passwords.PasswordSurfaces.visible();}
+  private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
+  @Override public void load(){super.load();activeStreams.add(this);PasswordSurfaces.addListener(secretSurface);}
+  @Override protected void handleOnDestroy(){activeStreams.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+  @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
   @Override protected long authorityEpoch(){return AlphaLocalAgentPlugin.credentialAuthorityEpoch();}
-  @Override protected String cloudOrigin(String environment)throws Exception{return "https://"+CloudSpeechPolicy.host(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS,environment);}
+  @Override protected String cloudOrigin(String environment)throws Exception{return "https://"+CloudSpeechPolicy.host(false,environment);}
   @Override protected String diagnosticFormat(){return "alpha-cloud-stream-timing-v1";}
   @Override protected Credential readCredential(String environment,String expectedId,long epoch)throws Exception{
    return AlphaLocalAgentPlugin.withCredentialAuthority(epoch,()->{

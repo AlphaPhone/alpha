@@ -1,4 +1,4 @@
-/** Evaluate only the authenticated prepared portable source closure in closed VM ports. */
+/** Evaluate Alpha's own voice UI (apps/app/src/ui) over only the authenticated prepared portable source closure, in closed VM ports. */
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -6,13 +6,13 @@ import vm from 'node:vm';
 import {buildSync} from 'esbuild';
 export function loadPreparedBatchVoice(box){
  const pin=JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit;
- const root=path.resolve('.eliza/client-features'),source=JSON.parse(fs.readFileSync(path.join(root,'.source.json'),'utf8'));
+ const root=path.resolve('.eliza/client-features'),ui=path.resolve('apps/app/src/ui'),source=JSON.parse(fs.readFileSync(path.join(root,'.source.json'),'utf8'));
  if(source.baseCommit!==pin)throw Error('Run the normal client feature producer for the current pin.');
- const paths=JSON.parse(fs.readFileSync('tsconfig.json','utf8')).compilerOptions.paths,names=['@elizaos/core/speech','@elizaos/voice/turn','@elizaos/ui/voice/batch-conversation'];
+ const paths=JSON.parse(fs.readFileSync('tsconfig.json','utf8')).compilerOptions.paths,names=['@elizaos/core/speech','@elizaos/voice/turn'];
  const alias=Object.fromEntries(names.map(name=>{const value=paths[name];if(!Array.isArray(value)||value.length!==1)throw Error('Missing exact public voice alias: '+name);return [name,path.resolve(value[0])];}));
- const bundle=buildSync({stdin:{contents:names.map(name=>`export * from '${name}';`).join('\n')+"\nexport * from './packages/ui/src/voice/tts-playback-activity.ts';\nexport * from './packages/ui/src/voice/voice-activity.ts';",resolveDir:root,loader:'ts'},alias,bundle:true,write:false,format:'iife',globalName:'__alphaPreparedVoice',platform:'browser',target:'es2022',metafile:true,logLevel:'silent'});
+ const bundle=buildSync({stdin:{contents:names.map(name=>`export * from '${name}';`).join('\n')+['batch-conversation','tts-playback-activity','voice-activity'].map(name=>`\nexport * from '${path.join(ui,'voice',name+'.ts')}';`).join(''),resolveDir:root,loader:'ts'},alias,bundle:true,write:false,format:'iife',globalName:'__alphaPreparedVoice',platform:'browser',target:'es2022',metafile:true,logLevel:'silent'});
  const inputs=Object.keys(bundle.metafile.inputs).filter(file=>file!=='<stdin>');
- for(const input of inputs){const relative=path.relative(root,path.resolve(input));if(relative.startsWith('..')||path.isAbsolute(relative)||source.files[relative]!==createHash('sha256').update(fs.readFileSync(input)).digest('hex'))throw Error('Prepared public voice source was not authenticated: '+input);}
+ for(const input of inputs){const local=path.relative(ui,path.resolve(input));if(!local.startsWith('..')&&!path.isAbsolute(local))continue;if(/(^|[\\/])packages[\\/]ui[\\/]/.test(path.resolve(input)))throw Error('Upstream UI reached the voice closure: '+input);const relative=path.relative(root,path.resolve(input));if(relative.startsWith('..')||path.isAbsolute(relative)||source.files[relative]!==createHash('sha256').update(fs.readFileSync(input)).digest('hex'))throw Error('Prepared public voice source was not authenticated: '+input);}
  vm.runInNewContext(bundle.outputFiles[0].text,box,{filename:'prepared-public-voice.js'});Object.assign(box,box.__alphaPreparedVoice);
  return {inputs:inputs.map(file=>path.relative(root,path.resolve(file))),exports:Object.keys(box.__alphaPreparedVoice)};
 }

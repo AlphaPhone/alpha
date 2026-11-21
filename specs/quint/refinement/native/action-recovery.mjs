@@ -1,3 +1,5 @@
+// Partial source-contract regression: authenticated extracted production members execute
+// with controlled ports; this is not whole-file implementation refinement.
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -72,7 +74,7 @@ export async function checkNativeActionRecovery(extraSources=[]) {
     const traces=javaTraceCampaign(harness,[...compiled,...fixture.paths],cases.map(argumentsFor));
     traces.forEach((trace,i)=>{trace.name+=` / ${cases[i][1]} / ${cases[i][2]}`;});
     const receipt=await checkTraces({model,sources,driverHashes,generatedSources:fixture.paths,traces,
-      scope:'bounded-orchestration',assumptions:[
+      scope: 'bounded-orchestration',assumptions:[
         'The exact three product recovery members and product journal policy run on the real pinned ActionJournalPlugin worker, journal and receipt classifiers. WorkflowNoticeDelivery and pinned NoticeDelivery are complete. Exact ReminderStore operationReceipt and canonical hash members use a synthetic envelope.',
         'One selected row, absent or foreign scope/proposal requests, selected result shapes and stored equality classes. The harness observes slot strings, exact bridge responses and both write boundaries. A postcommit refusal leaves the stored string durable in the synthetic port.',
         'Deletion receipt rows, notification active-list match and reminder storage input are synthetic. The poster throws if any admission, dispatch or cancellation effect is requested. The fixture executes no reminder operation, calendar/provider action or device launch.',

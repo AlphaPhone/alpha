@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 // ConnectionController traces replayed against the shipped connection step slot: work(),
 // releaseOperation, the provider key manager, the sign-in return and notice queue, the rebind
 // request and the shared rebind queue. The source is sliced from connection-ui.tsx and run with
@@ -23,14 +34,14 @@ const startup = /\.finally\(\(\)=>\{(update\(\{startupResolved:true,automaticRes
 assert.ok(startup, 'startup settles and then runs the sign-in queue');
 const code = stripTypeScriptTypes([
   between('let residentRebindQueue: ResidentRebindQueue | null = null;', '/**'),
-  between('async function work(message: string', '/** Only an explicitly failed native start'),
-  between("async function manageProviderKey(action:'reveal'", '/** P-43: a startup path'),
+  between('async function work(message: string', 'const RESIDENT_AUTO_RETRY_MS'),
+  between("async function saveProviderKeys(values:", '/** P-43: a startup path'),
   between('function queueResidentRebind(', '/** A native sign-in return that arrived while'),
   between('/** A native sign-in return that arrived while', 'async function remoteIdentity('),
   `const connectionController={async signInReturned(value){${between('    if (operation) { queuedSignInReturn = value; return; }', '    if (outcome.status ===')}
      returned.push(value);await work('Finishing sign-in…',()=>hold('return'));},
    ${between('  signInIncomplete(value: unknown) {', '  /**\n   * The Cloud sign-in hand-off')}};`,
-  `Object.assign(globalThis,{work,manageProviderKey,queueResidentRebind,connectionController,startupSettles(){${startup[1]}},
+  `Object.assign(globalThis,{work,saveProviderKeys,queueResidentRebind,connectionController,startupSettles(){${startup[1]}},
      queued:()=>({returned:queuedSignInReturn!==null,notice:queuedSignInIncomplete,rebind:!!residentRebindQueue?.pending})});`,
 ].join('\n'), {mode: 'strip'});
 const RESTARTED = 'Sign in again', UNVERIFIED = 'failure:app-link-unverified';
@@ -41,13 +52,13 @@ const project = s => ({operation: s.operation, startupResolved: s.startupResolve
 
 function create() {
   let held = null, notices = 0, rebinds = 0, returns = 0;
-  const box = {AbortController, DOMException, Error, Promise, setTimeout, ResidentRebindQueue,
+  const box = {AbortController, DOMException, Error, Promise, setTimeout, ResidentRebindQueue, cancelStoppedVoiceRead(){},
     operation: null, sending: null, epoch: 1, active: null, planRecheck: null, signInReadinessOwner: null, providerStatusGeneration: 0,
-    residentStartInBackground: false, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true, returned: [],
+    residentStartInBackground: false, homePresentationRevision: 0, residentStartFailure: 'The agent could not start.', testMocksEnabled: false, residentAlwaysPresent: true, returned: [],
     state: {open: false, signIn: null, message: '', error: '', busy: false, startupResolved: false},
-    // Only showSignInIncomplete writes the sign-in view together with one of the two notices; a rebind
-    // that keeps an error on screen writes the error alone.
-    update(patch) { if ('signIn' in patch && (patch.error === RESTARTED || patch.error === UNVERIFIED)) notices++; Object.assign(box.state, patch); },
+    // A notice opens its recovery message even when no sign-in form is active.
+    // A rebind preserving an earlier error writes the error alone.
+    update(patch) { if (patch.open === true && patch.message === '' && (patch.error === RESTARTED || patch.error === UNVERIFIED)) notices++; Object.assign(box.state, patch); },
     // One held port: the step, sign-in return, rebind or key request that owns the slot waits on it.
     hold(kind) { assert.equal(held, null, 'one step holds the slot'); return new Promise(resolve => { held = {kind, resolve}; }); },
     signInFailureMessage: value => `failure:${value}`, errorMessage: error => String(error?.message ?? error), errorKindOf: () => undefined,
@@ -56,7 +67,8 @@ function create() {
     retire() { box.epoch++; },
     connectResident() { rebinds++; return box.hold('rebind'); },
     anyAbortSignal: signals => AbortSignal.any(signals),
-    revealLocalProviderKey: () => box.hold('key-manager').then(() => ({key: 'text', revision: 'fixture', shown: true, hidesAfterMs: 30000})),
+    editLocalProviderKeys: () => box.hold('key-manager').then(() => ({mode:'cloud', revision:'next'})),
+    localProviderStatus: async () => ({mode:'cloud',revision:'next'}),
   };
   vm.createContext(box);
   vm.runInContext(code, box);
@@ -65,7 +77,7 @@ function create() {
     async startupSettles() { box.startupSettles(); await settle(); },
     async stepStarts() { void box.work('Working…', () => box.hold('step')); await settle(); },
     stepEnds: release,
-    async keyManagerStarts() { void box.manageProviderKey('reveal', 'text', 'fixture', new AbortController().signal); await settle(); },
+    async keyManagerStarts() { void box.saveProviderKeys({voiceKey:'replacement'}, 'fixture', new AbortController().signal); await settle(); },
     keyManagerEnds: release,
     async nativeReturn() { void box.connectionController.signInReturned({status: 'signed-in', sequence: ++returns}); await settle(); },
     async incompleteArrives() { box.connectionController.signInIncomplete({code: 'app-link-unverified'}); await settle(); },
@@ -83,7 +95,7 @@ function create() {
   };
 }
 
-test('the connection step slot follows ConnectionController scenarios, witnesses and random walks', {timeout: 240000}, async () => {
+test("partial source contract: the connection step slot follows ConnectionController scenarios, witnesses and random walks", {timeout: scaledTimeout(240000)}, async () => {
   assert.ok(SCENARIOS.length >= 8 && WITNESSES.length >= 6);
   const traces = modelTraces({...MODEL, scenarios: SCENARIOS, witnesses: WITNESSES, random: 80, steps: 30});
   const receipt = await replayTraces(traces, create, {project});

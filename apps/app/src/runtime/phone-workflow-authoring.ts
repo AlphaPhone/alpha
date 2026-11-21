@@ -1,4 +1,4 @@
-import {assertPhoneWorkflowCapabilities,phoneTriggerClockChangeNote as sharedClockChangeNote,parsePhoneWorkflowCatalog,validatePhoneWorkflowSpec,type PhoneTimeTrigger,type PhoneWorkflowCatalog,type PhoneWorkflowSaveReceipt,type PhoneWorkflowTrigger} from '../../../../.eliza/client-features/packages/contracts/src/phone-workflow.ts';
+import {assertPhoneWorkflowCapabilities,parsePhoneWorkflowCatalog,validatePhoneWorkflowSpec,type PhoneTimeTrigger,type PhoneWorkflowCatalog,type PhoneWorkflowSaveReceipt,type PhoneWorkflowTrigger} from '../../../../.eliza/client-features/packages/contracts/src/phone-workflow.ts';
 import {workflowCronLabel} from './workflow-local-time';
 import {asRecord} from '../lib/parse.ts';
 import {browserDevProfile} from '../browser/dev-profile';
@@ -25,5 +25,5 @@ export function normalizePhoneSpec(value:unknown):PhoneSpec{
 export const parsePhoneCatalog=(value:unknown):PhoneCatalog=>parsePhoneWorkflowCatalog(value);
 export function assertPhoneCapabilities(spec:PhoneSpec,catalog:PhoneCatalog){assertPhoneWorkflowCapabilities(spec as Parameters<typeof assertPhoneWorkflowCapabilities>[0],catalog);}
 export const describePhoneTrigger=(trigger:PhoneWorkflowTrigger):string=>trigger.kind==='manual'?'Only when you choose Run now':workflowCronLabel(`${Number(trigger.localTime.slice(3))} ${Number(trigger.localTime.slice(0,2))} * * ${trigger.days.length===7?'*':trigger.days.join(',')}`,trigger.timeZone);
-/** Review copy for a scheduled time a forward clock change skips: shared `@elizaos/contracts/phone-workflow`. */
-export const phoneTriggerClockChangeNote=(trigger:PhoneTimeTrigger,now?:number)=>sharedClockChangeNote(trigger,now).replace(' in '+trigger.timeZone,'');
+/** Review copy for a scheduled time a forward clock change skips: Alpha's (`../ui/workflows/phone-trigger-note.ts`). */
+export {phoneTriggerClockChangeNote} from '../ui/workflows/phone-trigger-note';

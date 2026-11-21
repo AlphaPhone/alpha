@@ -2,9 +2,8 @@ package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.browsersurface.BrowserPageReading;
 import ai.eliza.plugins.browsersurface.BrowserReadingWorld;
-import ai.eliza.plugins.browsersurface.BrowserReviewedReading;
+import ai.alphacompute.alphaphone.browser.AlphaReviewedReading;
 
-import android.net.Uri;
 import android.os.SystemClock;
 import android.webkit.*;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -15,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
-/** Real WebView/proxy, deterministic delayed delivery through the registered listener. */
+/** Real WebView/proxy through same-origin navigation and reload. */
 public final class BrowserReadingNavigationInstrumentedTest {
  private static Object field(Object target,String name)throws Exception {java.lang.reflect.Field f=target.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(target);}
  private static void ready(BrowserReadingWorld world)throws Exception {
@@ -86,11 +85,10 @@ public final class BrowserReadingNavigationInstrumentedTest {
      world.evaluate(BrowserPageReading.EXTRACT,value->extracted.set("RESULT:"+value),()->extracted.set("REFUSED"));
      assertEquals("Extraction is refused at once, without running any script","REFUSED",extracted.get());
      // The native review of this loaded, non-sensitive HTTPS document: refused as unavailable, nothing shown.
-     // The shared reviewed reading (plugin-native-browser-surface); reviewQuestion is package-private there.
-     BrowserReviewedReading reading=new BrowserReviewedReading(web.getContext() instanceof android.app.Activity?(android.app.Activity)web.getContext():null,id->{},BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
-     java.lang.reflect.Method review=BrowserReviewedReading.class.getDeclaredMethod("reviewQuestion",com.getcapacitor.PluginCall.class,WebView.class,BrowserReadingWorld.class,java.util.function.BooleanSupplier.class);review.setAccessible(true);
-     review.invoke(reading,call,web,world,(java.util.function.BooleanSupplier)()->true);
-     java.lang.reflect.Field dialog=BrowserReviewedReading.class.getDeclaredField("dialog");dialog.setAccessible(true);assertNull("No review dialog is shown",dialog.get(reading));
+     // Alpha's reviewed reading (browser/AlphaReviewedReading), the review the Browser opens.
+     AlphaReviewedReading reading=new AlphaReviewedReading(web.getContext() instanceof android.app.Activity?(android.app.Activity)web.getContext():null,id->{},false);
+     reading.reviewQuestion(call,"tab",web,world,()->true);
+     java.lang.reflect.Field dialog=AlphaReviewedReading.class.getDeclaredField("dialog");dialog.setAccessible(true);assertNull("No review dialog is shown",dialog.get(reading));
     }catch(Throwable failure){error.set(failure);}});
     if(error.get()!=null)throw new AssertionError(error.get());
     assertFalse("The review never resolves",call.resolved.get());
@@ -135,23 +133,30 @@ public final class BrowserReadingNavigationInstrumentedTest {
     WebView web=webRef.get();BrowserReadingWorld world=worldRef.get();ready(world);
     for(String next:new String[]{"https://reading.invalid/second","https://reading.invalid/second"}){
      AtomicReference<Throwable> error=new AtomicReference<>();
+     AtomicReference<String> retired=new AtomicReference<>(),oldDocument=new AtomicReference<>();
      BoundedActivityScenario.main(()->{try{
-      String oldNonce=(String)field(world,"nonce");JavaScriptReplyProxy oldProxy=(JavaScriptReplyProxy)field(world,"proxy");
-      WebViewCompat.WebMessageListener listener=(WebViewCompat.WebMessageListener)field(world,"listener");
-      // Replay a genuinely issued old-document message at the vulnerable boundary.
-      world.prepare(next);world.pageStarted(next);
-      listener.onPostMessage(web,new WebMessageCompat(oldNonce),Uri.parse("https://reading.invalid"),true,oldProxy);
-      assertFalse("Old document must not bind after invalidation",world.ready());
-      // Start a genuine new document, including an exact-URL reload on iteration two.
-      world.prepare(next);if(next.equals(web.getUrl()))web.reload();else web.loadUrl(next);
+      oldDocument.set((String)field(world,"documentId"));
+      assertNotNull("The old document was adopted",oldDocument.get());
+      // Schedule the old proxy's identity read before retiring it on this UI turn.
+      world.evaluate("document.body.innerText",value->retired.set("UNEXPECTED:"+value),()->retired.set("retired"));
+      assertNull("The proxy result has not arrived",retired.get());
+      world.prepare(next);
+      assertFalse("Old document loses readiness before loading the successor",world.ready());
+      if(next.equals(web.getUrl()))web.reload();else web.loadUrl(next);
      }catch(Throwable failure){error.set(failure);}});
      if(error.get()!=null)throw new AssertionError(error.get());ready(world);
+     for(int i=0;i<150&&retired.get()==null;i++)SystemClock.sleep(100);
+     assertEquals("The old evaluation cannot release text", "retired",retired.get());
      AtomicReference<String> extracted=new AtomicReference<>();
-     BoundedActivityScenario.main(()->world.evaluate("document.body.innerText",extracted::set,()->extracted.set("FAILED")));
+     BoundedActivityScenario.main(()->world.evaluate(
+      "[globalThis.__elizaReadingDocument,document.body.innerText]",extracted::set,()->extracted.set("FAILED")));
      for(int i=0;i<150&&extracted.get()==null;i++)SystemClock.sleep(100);
-     assertNotNull(extracted.get());assertTrue(extracted.get(),extracted.get().contains("Current synthetic page /second"));
+     assertNotNull(extracted.get());
+     org.json.JSONArray current=new org.json.JSONArray(extracted.get());
+     assertNotEquals("A same-URL reload still has a new document",oldDocument.get(),current.getString(0));
+     assertTrue(current.getString(1).contains("Current synthetic page /second"));
     }
-    // Unprepared page-initiated navigation is deliberately unavailable, never origin adopted.
+    // A start alone has no readiness. Its committed document still has to announce itself.
     BoundedActivityScenario.main(()->{world.pageStarted("https://reading.invalid/other");assertFalse(world.ready());});
    }finally{BoundedActivityScenario.main(()->{if(worldRef.get()!=null)worldRef.get().close();if(webRef.get()!=null)webRef.get().destroy();});}
   }

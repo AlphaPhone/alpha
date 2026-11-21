@@ -228,9 +228,9 @@ export class RemoteProtocol {
     const conversation = object(value.conversation);
     return { ...conversation, id: string(conversation.id) };
   }
-  async truncateMessages(id:string,messageId:string,signal:AbortSignal):Promise<void> {
-    const value=object(await this.authorized(`/api/conversations/${encodeURIComponent(string(id))}/messages/truncate`,'POST',{messageId,inclusive:true},signal));
-    if(value.ok!==true||!Number.isSafeInteger(value.deletedCount)||Number(value.deletedCount)<1)throw new RemoteProtocolError('message_replacement_unconfirmed');
+  async forkConversation(id:string,messageId:string,requestId:string,expectedText:string,signal:AbortSignal):Promise<RemoteConversation> {
+    const value=object((await this.authorized(`/api/conversations/${encodeURIComponent(string(id))}/fork`,'POST',{messageId,requestId,expectedText},signal) as {conversation:unknown}).conversation);
+    return {...value,id:string(value.id)};
   }
   /** One page. Without `page`, the agent's recent window; with it, messages strictly older than
    * the cursor (`?before=<createdAt>&beforeId=<id>`). Only the older-page read reports hasMore. */
@@ -238,6 +238,14 @@ export class RemoteProtocol {
     const value = object(await this.authorized(`/api/conversations/${encodeURIComponent(string(id))}/messages${messagePageQuery(page)}`, "GET", undefined, signal));
     if (!Array.isArray(value.messages)) throw new RemoteProtocolError("invalid_response");
     return { messages: value.messages.map(object), ...(typeof value.hasMore === "boolean" ? { hasMore: value.hasMore } : {}) };
+  }
+  async searchMessages(query: string, signal?: AbortSignal, offset=0) {
+    return parseConversationSearch(await this.authorized(`/api/conversations/messages/search?${new URLSearchParams({q:query,limit:'50',offset:String(offset)})}`, "GET", undefined, signal));
+  }
+  async messagesAround(id:string, messageId:string, signal?:AbortSignal):Promise<{messages:Record<string,unknown>[]}> {
+    const value=object(await this.authorized(`/api/conversations/${encodeURIComponent(string(id))}/messages?${new URLSearchParams({around:messageId})}`,"GET",undefined,signal));
+    if(!Array.isArray(value.messages))throw new RemoteProtocolError("invalid_response");
+    return {messages:value.messages.map(object)};
   }
   /** Revoke this phone's device enrollment and owner session on the agent, then forget them here.
    * Revocation failures are reported after the local credential is removed; the caller tells the
@@ -279,7 +287,7 @@ export class RemoteProtocol {
    * key instead of running a second turn. Cancellation is never retried. */
   async send(id: string, text: string, options: { images?:Array<{data:string;mimeType:string;name:string}>;metadata?: Record<string, unknown>; clientMessageId?: string; channelType?:ChatChannel; signal?: AbortSignal } = {}): Promise<RemoteChatReply> {
     const path = `/api/conversations/${encodeURIComponent(string(id))}/messages`;
-    const body = { text: string(text), images:options.images, channelType: options.channelType ?? "DM", ...(options.metadata ? { metadata: options.metadata } : {}), ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}) };
+    const body = { text: text===''&&(options.channelType??'DM')==='DM'&&options.images?.length?text:string(text), images:options.images, channelType: options.channelType ?? "DM", ...(options.metadata ? { metadata: options.metadata } : {}), ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}) };
     const headers = conversationViewHeaders(options.metadata);
     let raw: unknown;
     try { raw = await this.authorized(path, "POST", body, options.signal, headers); }
@@ -334,4 +342,14 @@ export function conversationViewHeaders(metadata?:Record<string,unknown>):Record
   const clientId=parseViewInteractionClientId(metadata.viewClientId);
   if(!clientId)throw new RemoteProtocolError("invalid_view_client_id");
   return {"X-ElizaOS-Client-Id":clientId};
+}
+
+export function parseConversationSearch(value: unknown) {
+  const body = object(value);
+  if (!Array.isArray(body.results)) throw new RemoteProtocolError("invalid_response");
+  return body.results.map(value => {
+    const row = object(value);
+    if ((row.role !== "user" && row.role !== "assistant") || typeof row.createdAt !== "number" || !Number.isFinite(row.createdAt)) throw new RemoteProtocolError("invalid_response");
+    return {messageId:string(row.messageId),conversationId:string(row.conversationId),roomId:string(row.roomId),role:row.role,text:string(row.text),snippet:typeof row.snippet==='string'?row.snippet:string(row.text),createdAt:row.createdAt,score:typeof row.score==='number'?row.score:0};
+  });
 }

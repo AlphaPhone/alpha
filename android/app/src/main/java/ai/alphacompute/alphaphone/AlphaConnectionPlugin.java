@@ -123,7 +123,9 @@ public final class AlphaConnectionPlugin extends Plugin {
   submitStorage(call,()->{try{workspaceFlow().cancel(call.getString("state"));call.resolve();}catch(Exception invalid){call.reject("Google return could not be cancelled");}});
  }
 
- private final ExecutorService workers = Executors.newFixedThreadPool(4);
+ /** A map view asks for about 15 tiles at once (MapLibre sends up to 16 in parallel); four workers queued
+  * them four deep behind one another, so a screen of one-second tile reads took over four seconds. */
+ private final ExecutorService workers = Executors.newFixedThreadPool(16);
  private final SerialStorageTasks storageTasks = new SerialStorageTasks();
  private volatile boolean destroyed;
  private final PendingRequests requests = new PendingRequests();
@@ -202,7 +204,7 @@ public final class AlphaConnectionPlugin extends Plugin {
   });
  }
  private static URI validatedUrl(String text, boolean allowDevelopment) throws Exception {
-  return ConnectionTransport.validatedUrl(text, allowDevelopment, BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
+  return ConnectionTransport.validatedUrl(text, allowDevelopment, false);
  }
  /** Native-owned read routes; URLs and credentials never come from Calendar renderer calls. */
  static JSONObject readCloudIdentity(String token)throws Exception {return readCloudIdentity(token,20000);}
@@ -254,7 +256,7 @@ public final class AlphaConnectionPlugin extends Plugin {
     if (pending.cancelled()) throw new IllegalStateException();
     URI url = validatedUrl(call.getString("url"), true);
     // Before any route, header or body handling: a flag-off build contacts only Eliza Cloud here.
-    if(!ConnectionRoutes.admittedOrigin(url.getScheme(),url.getHost(),url.getPort(),BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS))throw new IllegalArgumentException();
+    if(!ConnectionRoutes.admittedOrigin(url.getScheme(),url.getHost(),url.getPort()))throw new IllegalArgumentException();
     {
      String path=url.getPath();
      if("/api/auth/cli-session".equals(path))operation=RequestOperation.CLI_CREATE;
@@ -267,12 +269,12 @@ public final class AlphaConnectionPlugin extends Plugin {
     }
     int responseLimit=url.getPath().startsWith("/api/v1/eliza/google/gmail/inbox-v1/")?8*1024*1024:ConnectionTransport.RESPONSE_LIMIT;
     String method = call.getString("method", "GET");
-    if(!ConnectionRoutes.managedService(url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null,BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS))throw new IllegalArgumentException();
+    if(!ConnectionRoutes.managedService(url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null))throw new IllegalArgumentException();
     // Google Calendar writes need the native sync consent; the renderer's preference alone is not enough.
     if(CalendarSyncConsent.write(url.getRawPath(),method)&&!CalendarSyncConsent.admits(url.getRawPath(),url.getRawQuery(),method,call.getString("body"),calendarSyncConsent()))throw new IllegalArgumentException();
     String route=url.getRawPath()+(url.getRawQuery()==null?"":"?"+url.getRawQuery());
-    if(ConnectionRoutes.retiredPairing(url.getPath(),BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS))throw new IllegalArgumentException();
-    boolean selfRevocation=ConnectionRoutes.cloudSelfRevocation(url.getScheme(),url.getHost(),url.getPort(),url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null,BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
+    if(ConnectionRoutes.retiredPairing(url.getPath()))throw new IllegalArgumentException();
+    boolean selfRevocation=ConnectionRoutes.cloudSelfRevocation(url.getScheme(),url.getHost(),url.getPort(),url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null);
     OwnerRoutes routes=OwnerRoutes.shipped(getContext().getAssets()::open);
     if((routes.group(url.getPath(),"automations")!=null||routes.group(route,"automations")!=null)?!routes.allowed("automations",route,method):!(Set.of("GET","POST").contains(method)||selfRevocation||ConnectionRoutes.calendarSync(url.getPath(),url.getRawQuery(),method,call.getString("body")!=null)))throw new IllegalArgumentException();
     if(ConnectionRoutes.POLICY.cliSessionPoll(url.getHost(),url.getPath(),method)){
@@ -294,7 +296,7 @@ public final class AlphaConnectionPlugin extends Plugin {
      String name = names.next(), normalized = name.toLowerCase(Locale.ROOT);
      Object raw = headers.get(name); if (!(raw instanceof String)) throw new IllegalArgumentException();
      String value = (String) raw;
-     if (!ConnectionRoutes.admittedHeader(normalized, BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)&&!ConnectionRoutes.mapsRequestIdentity(normalized,value,url.getRawPath(),method)) throw new IllegalArgumentException();
+     if (!ConnectionRoutes.admittedHeader(normalized)&&!ConnectionRoutes.mapsRequestIdentity(normalized,value,url.getRawPath(),method)&&!ConnectionRoutes.billingRequestIdentity(normalized,value,url.getRawPath(),method)) throw new IllegalArgumentException();
      if (!ConnectionTransport.headerValue(value)) throw new IllegalArgumentException();
      if ("x-eliza-device-capabilities".equals(normalized) && !ConnectionRoutes.deviceCapabilities(value)) throw new IllegalArgumentException();
      if ("x-eliza-phone-protocol".equals(normalized) && !"1".equals(value)) throw new IllegalArgumentException();
@@ -347,9 +349,9 @@ public final class AlphaConnectionPlugin extends Plugin {
   try {
    URI url = validatedUrl(call.getString("url"), false);
    // Production hosts only in a flag-off build; staging and other *.eliza.app hosts need test mocks.
-   if (!ConnectionRoutes.externalHost(url.getScheme(), url.getHost(), url.getPort(), BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)) throw new IllegalArgumentException();
+   if (!ConnectionRoutes.externalHost(url.getScheme(), url.getHost(), url.getPort())) throw new IllegalArgumentException();
    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())); intent.addCategory(Intent.CATEGORY_BROWSABLE);
-   boolean cliLogin=ConnectionRoutes.externalCliLogin(url.getHost(),url.getPath(),BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
+   boolean cliLogin=ConnectionRoutes.externalCliLogin(url.getHost(),url.getPath());
    if(cliLogin){
     String id=ConnectionTransport.required(call.getString("requestId"),256);
     if(destroyed){call.reject("Connection closed");return;}

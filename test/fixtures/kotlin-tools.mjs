@@ -1,4 +1,5 @@
 /** Host-only Kotlin compiler, using the Android build's reviewed dependency pins. */
+import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
@@ -8,6 +9,11 @@ import {fileURLToPath} from 'node:url';
 import {javaBinary} from './jvm-tools.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const repositories = [
+  'https://repo.maven.apache.org/maven2',
+  'https://repo1.maven.org/maven2',
+  'https://maven-central.storage-download.googleapis.com/maven2',
+];
 const modules = [
   ['org.jetbrains.kotlin', 'kotlin-compiler-embeddable', '2.2.20'],
   ['org.jetbrains.kotlin', 'kotlin-stdlib', '2.2.20'],
@@ -20,7 +26,7 @@ const modules = [
 
 export function kotlinJars({prepare = false} = {}) {
   const metadata = readFileSync(join(root, 'android/gradle/verification-metadata.xml'), 'utf8');
-  const output = process.env.ALPHA_KOTLIN_HOME || join(process.env.RUNNER_TEMP || tmpdir(), 'alpha-host-kotlin');
+  const output = join(process.env.RUNNER_TEMP || tmpdir(), 'alpha-host-kotlin');
   return modules.map(([group, name, version]) => {
     const file = `${name}-${version}.jar`;
     const component = metadata.split(`<component group="${group}" name="${name}" version="${version}">`)[1]?.split('</component>')[0];
@@ -34,14 +40,25 @@ export function kotlinJars({prepare = false} = {}) {
       mkdirSync(output, {recursive: true});
       const temporary = join(output, `${file}.${process.pid}.part`);
       try {
-        execFileSync('curl', ['--fail', '--location', '--retry', '3', '--max-time', '90', '--output', temporary,
-          `https://repo.maven.apache.org/maven2/${group.replaceAll('.', '/')}/${name}/${version}/${file}`], {stdio: 'inherit', timeout: 300000});
-        if (!valid(temporary)) throw Error(`Kotlin compiler dependency checksum differs: ${file}`);
-        found = join(output, file);
-        renameSync(temporary, found);
+        const artifact = `${group.replaceAll('.', '/')}/${name}/${version}/${file}`;
+        let lastFailure;
+        for (const repository of repositories) {
+          try {
+            execFileSync('curl', ['--fail', '--location', '--connect-timeout', '5', '--retry', '1', '--max-time', '90', '--output', temporary,
+              `${repository}/${artifact}`], {stdio: 'inherit', timeout: scaledTimeout(200000)});
+          } catch (error) {
+            lastFailure = error;
+            continue;
+          }
+          if (!valid(temporary)) throw Error(`Kotlin compiler dependency checksum differs: ${file}`);
+          found = join(output, file);
+          renameSync(temporary, found);
+          break;
+        }
+        if (!found) throw Error(`Could not download the pinned Kotlin compiler dependency: ${file}`, {cause: lastFailure});
       } finally {rmSync(temporary, {force: true});}
     }
-    if (!found) throw Error(`Prepare the pinned host Kotlin compiler: node test/fixtures/kotlin-tools.mjs --prepare (${file})`);
+    if (!found) throw Error(`Prepare the pinned host Kotlin compiler: bun test/fixtures/kotlin-tools.mjs --prepare (${file})`);
     return found;
   });
 }
@@ -51,7 +68,7 @@ export function compileKotlin(sources, output) {
   const runtime = [jars[1], jars[6]].join(delimiter);
   execFileSync(javaBinary('java'), ['-cp', jars.join(delimiter), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
     '-no-stdlib', '-no-reflect', '-jvm-target', '11', '-classpath', runtime, '-d', output, ...sources],
-  {timeout: 120000, stdio: 'pipe'});
+  {timeout: scaledTimeout(120000), stdio: 'pipe'});
   return [output, runtime].join(delimiter);
 }
 

@@ -1,12 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { verifyCommittedWorkspace } from "../vendor/eliza/packages/app/scripts/lib/immutable-workspace-source.mjs";
+import { readUpstreamPin } from "./upstream-pin.ts";
 
 /** Authenticate vendor bytes before resolving or compiling consumer source. */
 export function verifyPinnedUpstream(root: string) {
-	const { commit }: {commit?: unknown} = JSON.parse(
-		fs.readFileSync(path.join(root, "upstream.lock.json"), "utf8"),
-	);
+	const { commit }: {commit?: unknown} = readUpstreamPin(root);
 	if (typeof commit !== "string") throw Error("Exact admitted runtime commit required");
 	const directory = path.join(root, "vendor/eliza");
 	verifyCommittedWorkspace(directory, commit, {
@@ -78,7 +77,7 @@ export function assessDevelopReachability(value: unknown, pin: string) {
 	if (head !== pin)
 		return {
 			ok: false, reachable: false, reason: "stale",
-			message: `Recorded ${base} compare is for ${head.slice(0, 12)}, not the pin ${pin.slice(0, 12)}; rerun node scripts/verify-upstream.ts --record-reachability.`,
+			message: `Recorded ${base} compare is for ${head.slice(0, 12)}, not the pin ${pin.slice(0, 12)}; rerun bun scripts/verify-upstream.ts --record-reachability.`,
 		};
 	if (aheadBy === 0)
 		return { ok: true, reachable: true, reason: "reachable", message: `${base} reaches the pin ${pin.slice(0, 12)} (${status}, recorded ${recordedAt ?? "unknown date"}).` };

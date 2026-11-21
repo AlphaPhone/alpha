@@ -5,10 +5,6 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import http from 'node:http';
 import type {RemoteCredential, RemoteCredentialStore, RemoteRequester} from '../apps/app/src/runtime/remote-protocol.ts';
-if (!process.execArgv.some(arg => arg === '--import=tsx' || arg === 'tsx')) {
-  const child = spawnSync(process.execPath, ['--import=tsx', process.argv[1]], { stdio: 'inherit' });
-  process.exit(child.status ?? 1);
-}
 const { RemoteProtocol, normalizeRemoteOrigin } = await import('../apps/app/src/runtime/remote-protocol.ts');
 let now = Date.now(), mode = 'ok', creates = 0, sends = 0, truncates = 0;
 interface FixtureMessage {
@@ -35,7 +31,7 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/auth/me') response = { identity: { id: mode === 'changed-owner' ? 'someone-else' : 'owner-fixture', displayName: 'Fixture owner', kind: 'owner' }, session: { id: token, kind: 'machine', expiresAt: now + 60000 }, access: { role: 'OWNER', mode: 'session' } };
     else if (req.url === '/api/conversations' && req.method === 'POST') { creates++; response = { conversation }; }
     else if (req.url === '/api/conversations') response = { conversations: [conversation] };
-    else if((req.url ?? '').endsWith('/messages/truncate')){truncates++;assert.equal(req.method,'POST');assert.deepEqual(body,{messageId:'11111111-1111-4111-8111-111111111111',inclusive:true});response={ok:true,deletedCount:2};}
+    else if((req.url ?? '').endsWith('/messages/truncate'))truncates++;
     else if ((req.url ?? '').endsWith('/messages') && req.method === 'POST') {
       sends++;
       routedRequests.push({clientId:req.headers['x-elizaos-client-id'],body});
@@ -81,7 +77,8 @@ try {
   await assert.rejects(client.send(created.id,'Invalid',{metadata:{viewClientId:'bad/header'}}),{code: 'invalid_view_client_id'});
   assert.equal(sends,beforeInvalid);
   assert.equal((await client.messages(created.id)).messages.length, 1);
-  await client.truncateMessages(created.id,'11111111-1111-4111-8111-111111111111',new AbortController().signal);assert.equal(truncates,1);
+  // Edit and resend forks; the client has no destructive history truncate request.
+  assert.equal('truncateMessages' in client,false);assert.equal(truncates,0);
   assert.equal((await make().restore())?.identityId, 'owner-fixture');
   mode = 'unavailable';
   await assert.rejects(make().restore(), {status: 503});

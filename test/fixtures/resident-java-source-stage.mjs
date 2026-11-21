@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -20,7 +21,7 @@ const generatedDirectory = 'android/app/build/generated/local-agent';
 const {residentHost} = JSON.parse(fs.readFileSync(join(root, descriptor), 'utf8'));
 const sources = [...RESIDENT_HOST_CLASSES, ...residentHost.classes].map(name => `${residentDirectory}/${name}.java`)
   .concat(residentHost.helpers);
-const productFiles = [stageScript, 'scripts/local-agent-source.ts', 'scripts/copy-file-clone.ts', descriptor, config];
+const productFiles = [stageScript, 'scripts/android-identity.ts', 'scripts/local-agent-source.ts', 'scripts/copy-file-clone.ts', 'scripts/upstream-pin.ts', descriptor, config];
 
 export const residentJavaStageInputs = [lock, ...productFiles, ...[...sdkScripts, ...sources].map(file => sdkPrefix+file)];
 
@@ -97,8 +98,8 @@ fs.writeFileSync = (file, ...args) => {
   return write(file, ...args);
 };
 `);
-    const result = spawnSync(process.execPath, [...(preload ? ['--import', preload] : []), stageScript], {
-      cwd: directory, encoding: 'utf8', timeout: 30000, env: {...gitEnv, ALPHA_LOCAL_AGENT_SOURCE_DIR: runtime},
+    const result = spawnSync(process.execPath, [...(preload ? ['--preload', preload] : []), stageScript], {
+      cwd: directory, encoding: 'utf8', timeout: scaledTimeout(30000), env: {...gitEnv, ALPHA_LOCAL_AGENT_SOURCE_DIR: runtime},
     });
     assert.ifError(result.error);
     assert.equal(result.signal, null);

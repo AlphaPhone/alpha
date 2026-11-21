@@ -5,7 +5,8 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {generateAlphaAndroidHost, HOST_DESCRIPTOR, readHostDescriptor} from '../../scripts/android-host.ts';
 import {NATIVE_SOURCE_MANIFEST, preparePatchedNative, verifyNativePatchReceipt} from '../../scripts/prepare-patched-native.ts';
-import {sha, upstreamNativeSource} from '../../scripts/upstream-native-source.ts';
+import {upstreamNativeSource} from '../../scripts/upstream-native-source.ts';
+import {sha256 as sha} from '../../scripts/sha256.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const nativeManifest = NATIVE_SOURCE_MANIFEST;
@@ -138,7 +139,7 @@ function fixture({directory, descriptor, browser, browserFiles, wrapperInputs, e
         {name: 'native-patches.json', source: join(destinations[hostGeneration-1], '.source.json')},
         {name: 'owner-routes.json', source: join(directory, ownerRoutes)},
       ]);
-      assert.deepEqual(profile.settingsAdmission, [{command: ['node', preparedScript], directory}]);
+      assert.deepEqual(profile.settingsAdmission, [{command: ['bun', 'scripts/android-host.ts', '--check-identity'], directory}, {command: ['bun', preparedScript], directory}]);
       assert.deepEqual(profile.generatedSources, base.generatedSources);
       fresh = profile.generationInputs.every(input => sha(fs.readFileSync(input.file)) === input.sha256);
     }

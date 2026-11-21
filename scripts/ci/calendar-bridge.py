@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Verify the pinned Calendar bridge in the owning Android CI build job."""
+"""Verify Alpha's Calendar bridge (AlphaCalendarPlugin over CalendarProviderPlugin) in the owning Android CI build job.
+
+The contract and its Android stand-ins are Alpha's (test/fixtures/calendar-bridge, ported from elizaOS
+plugin-native-calendar test/native-host at 1803ea88, MIT)."""
 import time
 SCRIPT_ENTRY = time.monotonic()
 CURRENT_DEADLINE = SCRIPT_ENTRY + 20
@@ -15,8 +18,8 @@ import subprocess
 import sys
 
 SDK = json.loads((Path(__file__).resolve().parents[2] / 'upstream.lock.json').read_text(encoding='utf-8'))['commit']
-NODE = '26.13.0'
-HOST = '670fa93edcee7cd02bc91164458b3f4322b3ca4d79eb06d5183d4195e7658cca'
+BUN = '1.4.2'
+HOST = 'f7a468ebb4ba87d2f985917f640ad5b4a43f2b96bc1ad5acf4acd478ebe8b5be'
 JSON_SHA = '3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796'
 ENTRY_SECONDS = 180  # <240s GHA timeout, leaving >=60s platform margin.
 PREFLIGHT_SECONDS = 20
@@ -25,7 +28,7 @@ CLEANUP_END_SECONDS = 170  # 20s cleanup +10s receipt reserve within180s.
 MAX_LOG = 131072
 MAX_RECEIPT = 1048576
 HASH_READ_BYTES = 0
-OWNING_SHA256 = {'plugins/plugin-native-calendar/test/native-host/bridge-check.mjs': 'cbea41bf08f6e716b66bc1f6d0846aa228b62f276d4d110e885608b6ef71a4f5', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/CalendarBridgeContract.java': '0ea39bee3624ce081330e17cba8f4ad4b02e49182f0282abc1a83f95a9d354a8', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/ContentResolver.java': 'b2c6ff0a6be6699c6a1dffe9552548cc3c84698893df6363a52e724040dce368', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/ContentUris.java': '4b693912eecd4fc44cf53d1f9e87faeb084e9569bc6c96fd819f26133164d303', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/ContentValues.java': '136557f2d3f5f87c7897eadb1f0c21d3250daa9abc7c8f4c3a8b1513e612f311', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/Context.java': '49464ad8498e0c4ea867530fa0233f958390529f4f7fb6c4af9d920626763624', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/Intent.java': 'e2f1e3fd69a28e5bfd5d2fc8ed3ff5c57930deeafc04246a9e064d5e23704305', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/SharedPreferences.java': 'a82e4836a6a794afb430f536bbcfe75f390aa6e6719966ee0b06241bec1f9434', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/pm/ActivityInfo.java': 'b3793d04c2ce1b5272f5e4ea664b2b9037a7be05ff54c20475152fdb8e3b9032', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/pm/PackageManager.java': 'c1f8cad6a8926f32caa0b2e6135860591f974f2780553777228326c01d5c4193', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/content/pm/ResolveInfo.java': '8af09a1d23095f8437915c465c480391ba295f028e03ad7cb323410439314c99', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/database/Cursor.java': '4b9bfb33c7f5c331cdab4735d22ca19176104acb1dec4111c86682b8a3eb9bd8', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/android/net/Uri.java': '8540fa9dedbf8ab64dbc3f29c97b6a149855c00af5ce94c7f85cfce4e27077d9', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/androidx/appcompat/app/AppCompatActivity.java': '5feb4ae0c648494826cba5a2d688deca1aa488d1e5d7ae9e8ebb6e10a73d8092', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/com/getcapacitor/Plugin.java': '81a319f86dc65d9d050896bb9d8f2e18f98f79e868e92cbcab9cfc781575e570', 'plugins/plugin-native-calendar/test/native-host/bridge-runtime/com/getcapacitor/PluginCall.java': '00a6bf9d8da5b21b7cbcb407ae113f0ac6ffa00c6bc2110191a5d5848c916460', 'plugins/plugin-native-calendar/test/native-host/read-window/android/provider/CalendarContract.java': '5ecedf08c9b7275cb7ee7d504fc82e64e64aa12ac4721556fd37d9464dcd851e'}
+OWNING_SHA256 = {'test/fixtures/calendar-bridge/bridge-check.mjs': 'd50eec84aaad0cadb5f1e438b18b3efb19b0479db26d22a10702c87922890e12', 'test/fixtures/calendar-bridge/bridge-runtime/CalendarBridgeContract.java': '6f6a45e9e38936c0fc1bc14068e2e5c62fe8bde441900918073bcb71dc2bb44a', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/ContentResolver.java': 'b2c6ff0a6be6699c6a1dffe9552548cc3c84698893df6363a52e724040dce368', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/ContentUris.java': '4b693912eecd4fc44cf53d1f9e87faeb084e9569bc6c96fd819f26133164d303', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/ContentValues.java': '136557f2d3f5f87c7897eadb1f0c21d3250daa9abc7c8f4c3a8b1513e612f311', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/Context.java': '49464ad8498e0c4ea867530fa0233f958390529f4f7fb6c4af9d920626763624', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/Intent.java': 'e2f1e3fd69a28e5bfd5d2fc8ed3ff5c57930deeafc04246a9e064d5e23704305', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/SharedPreferences.java': 'a82e4836a6a794afb430f536bbcfe75f390aa6e6719966ee0b06241bec1f9434', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/pm/ActivityInfo.java': 'b3793d04c2ce1b5272f5e4ea664b2b9037a7be05ff54c20475152fdb8e3b9032', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/pm/PackageManager.java': 'c1f8cad6a8926f32caa0b2e6135860591f974f2780553777228326c01d5c4193', 'test/fixtures/calendar-bridge/bridge-runtime/android/content/pm/ResolveInfo.java': '8af09a1d23095f8437915c465c480391ba295f028e03ad7cb323410439314c99', 'test/fixtures/calendar-bridge/bridge-runtime/android/database/Cursor.java': '4b9bfb33c7f5c331cdab4735d22ca19176104acb1dec4111c86682b8a3eb9bd8', 'test/fixtures/calendar-bridge/bridge-runtime/android/net/Uri.java': '8540fa9dedbf8ab64dbc3f29c97b6a149855c00af5ce94c7f85cfce4e27077d9', 'test/fixtures/calendar-bridge/bridge-runtime/androidx/appcompat/app/AppCompatActivity.java': '5feb4ae0c648494826cba5a2d688deca1aa488d1e5d7ae9e8ebb6e10a73d8092', 'test/fixtures/calendar-bridge/bridge-runtime/com/getcapacitor/Plugin.java': '81a319f86dc65d9d050896bb9d8f2e18f98f79e868e92cbcab9cfc781575e570', 'test/fixtures/calendar-bridge/bridge-runtime/com/getcapacitor/PluginCall.java': '00a6bf9d8da5b21b7cbcb407ae113f0ac6ffa00c6bc2110191a5d5848c916460', 'test/fixtures/calendar-bridge/read-window/android/provider/CalendarContract.java': '5ecedf08c9b7275cb7ee7d504fc82e64e64aa12ac4721556fd37d9464dcd851e'}
 
 
 def require(ok, message):
@@ -217,8 +220,8 @@ def main():
     require(safe_git(root / 'vendor/eliza', ['rev-parse', 'HEAD']) == SDK, 'Unexpected SDK checkout')
     host = root / 'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCalendarPlugin.java'
     require(digest(host) == HOST, 'Unexpected Alpha calendar host')
-    require((root / '.nvmrc').read_text().strip() == NODE, 'Unexpected Node declaration')
-    node = Path(shutil.which('node')).resolve(strict=True)
+    require(read_json(root / 'package.json', 65536).get('packageManager') == 'bun@' + BUN, 'Unexpected Bun declaration')
+    bun = Path(shutil.which('bun')).resolve(strict=True)
     java_home = Path(os.environ['JAVA_HOME']).resolve(strict=True)
     jar = Path(os.environ['ALPHA_JSON_JAR']).resolve(strict=True)
     require(digest(jar) == JSON_SHA, 'Normal host-test JSON jar differs')
@@ -227,15 +230,16 @@ def main():
     namespace.mkdir(mode=0o700)
     receipt = namespace / 'receipt'
     config = namespace / 'inputs.json'
-    driver = root / 'vendor/eliza/plugins/plugin-native-calendar/test/native-host/bridge-check.mjs'
-    fixed = [host, node, jar, driver, java_home / 'bin/java', java_home / 'bin/javac',
+    driver = root / 'test/fixtures/calendar-bridge/bridge-check.mjs'
+    provider = root / 'android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java'
+    fixed = [host, provider, bun, jar, driver, java_home / 'bin/java', java_home / 'bin/javac',
         java_home / 'release', root / 'scripts/ci/calendar-bridge.init.gradle',
-        root / 'scripts/ci/calendar-bridge.py', root / '.nvmrc',
+        root / 'scripts/ci/calendar-bridge.py', root / 'package.json',
         root / 'android/.eliza-consumer-profile.json', root / 'android/consumer-host.json',
         root / 'upstream.lock.json', root / 'android/upstream-native-sources.json']
     fixture = driver.parent / 'bridge-runtime'
     for relative, expected in OWNING_SHA256.items():
-        require(digest(root / 'vendor/eliza' / relative) == expected, 'Canonical owning source changed')
+        require(digest(root / relative) == expected, 'Owning bridge fixture changed')
     # This directory is the small tracked owning fixture; no dependency/cache traversal.
     seen, visited = set(), 0
     for directory, dirs, names in os.walk(fixture, followlinks=False):
@@ -246,7 +250,7 @@ def main():
         for name in sorted(names):
             if name.endswith('.java'):
                 file = Path(directory) / name
-                seen.add(str(file.relative_to(root / 'vendor/eliza')))
+                seen.add(str(file.relative_to(root)))
                 fixed.append(file)
                 require(len(fixed) <= 64, 'Fixed fixture count exceeds bound')
     expected_fixture = {name for name in OWNING_SHA256 if '/bridge-runtime/' in name and name.endswith('.java')}
@@ -255,9 +259,9 @@ def main():
     require(len(fixed) <= 64, 'Fixed input count exceeds bound')
     initial = {str(p): digest(p) for p in fixed}
     cfg = {'head': head, 'tree': tree, 'sdk': SDK, 'root': str(root),
-        'outputDirectory': str(receipt), 'node': str(node), 'driver': str(driver),
+        'outputDirectory': str(receipt), 'bun': str(bun), 'driver': str(driver),
         'json': str(jar), 'javaHome': str(java_home), 'fixedInputs': initial, 'sourceFrame': source_frame,
-        'readRoots': [str(root), str(java_home), str(node.parent), str(jar.parent),
+        'readRoots': [str(root), str(java_home), str(bun.parent), str(jar.parent),
             str(Path(os.environ['ANDROID_HOME']).resolve(strict=True)),
             str(Path(os.environ['GRADLE_USER_HOME']).resolve(strict=True))]}
     bounded_json(config, cfg, 65536)
@@ -265,8 +269,7 @@ def main():
         '--no-build-cache', '--no-configuration-cache',
         '--init-script', str(root / 'scripts/ci/calendar-bridge.init.gradle'),
         '-PcalendarBridgeInputs=' + str(config),
-        '-PELIZA_ALLOW_UNPACKAGED_RUNTIME=1',
-        '-PELIZA_DEV_ALLOW_TEST_MOCKS=0', ':app:qualifyCalendarPairedJournalBridge']
+        ':app:qualifyCalendarPairedJournalBridge']
     require(time.monotonic() - entry <= PREFLIGHT_SECONDS, 'Preflight budget exhausted')
     CURRENT_DEADLINE = entry + WORK_END_SECONDS
     free = shutil.disk_usage(root).free
@@ -278,7 +281,7 @@ def main():
     observations = 0
     process_roots = [root, namespace, java_home,
         Path(os.environ['ANDROID_HOME']).resolve(strict=True),
-        Path(os.environ['GRADLE_USER_HOME']).resolve(strict=True), node.parent]
+        Path(os.environ['GRADLE_USER_HOME']).resolve(strict=True), bun.parent]
     system_exes = {'/usr/bin/' + name for name in
         ['sh', 'dash', 'bash', 'env', 'git', 'patch', 'python3', 'uname', 'sed', 'xargs', 'dirname', 'readlink', 'tr']}
 

@@ -1,3 +1,4 @@
+import {androidIdentity} from './android-identity.ts';
 // Consumer-owned preparation of the pinned fused Android engine and relocated JNI host.
 // Produces isolated artifacts only; does not alter vendor, package an APK or select runtime providers.
 import fs from 'node:fs';
@@ -7,13 +8,14 @@ import {execFileSync} from 'node:child_process';
 import {embeddingProducerInputPaths as producerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,nativeCmakeOptions,verifyNativeJava,nativeRequiredSymbols,verifyNativeSymbols} from './embedding-native-contract.ts';
 import type { EmbeddingInput, EmbeddingProducerInput, PreparedEmbeddingLibrary } from "./stage-embedding-host.ts";
 import {embeddingBuildRemap} from './embedding-build-remap.ts';
+import {isAndroidAbi} from './android-abis.ts';
 // Full producer module closure and repository-shape metadata; no dependency install.
 
 const root=path.resolve(import.meta.dirname,'..'),upstream=path.join(root,'vendor/eliza');
 const args=process.argv.slice(2),option=(name: string)=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
-for(let i=0;i<args.length;i++){if(args[i]==='--build'||args[i]==='--remap-build-path')continue;if(['--fork','--output','--abi'].includes(args[i])){if(!args[++i]||args[i].startsWith('--'))throw Error('Missing option value');}else throw Error('Unknown option');}
+for(let i=0;i<args.length;i++){if(args[i]==='--build'||args[i]==='--remap-build-path')continue;if(['--fork','--output','--abi','--engine'].includes(args[i])){if(!args[++i]||args[i].startsWith('--'))throw Error('Missing option value');}else throw Error('Unknown option');}
 const abi=option('--abi')||'arm64-v8a',forkInput=option('--fork'),outputInput=option('--output');
-if(!['arm64-v8a','x86_64'].includes(abi)||!forkInput||!outputInput)throw Error('Usage: node scripts/prepare-embedding-host.ts --fork <existing pinned checkout> --output <new isolated directory> [--abi arm64-v8a|x86_64] [--build] [--remap-build-path]');
+if(!isAndroidAbi(abi)||!forkInput||!outputInput)throw Error('Usage: bun scripts/prepare-embedding-host.ts --fork <existing pinned checkout> --output <new isolated directory> [--abi arm64-v8a|x86_64] [--build] [--remap-build-path]');
 const fork=fs.realpathSync(forkInput),output=path.resolve(outputInput);
 const within=(parent: string,child: string)=>{const relative=path.relative(parent,child);return relative===''||!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);};
 for(let p=output;p!==path.dirname(p);p=path.dirname(p))if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())throw Error('Output must not traverse a symlink');
@@ -27,7 +29,7 @@ const forkPin=git(upstream,'ls-tree',pin,forkPath).match(/^160000 commit ([a-f0-
 if(!forkPin||git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact Eliza gitlink');
 if(git(fork,'submodule','status','--recursive').split('\n').some(line=>line&&/^[-+U]/.test(line)))throw Error('Engine nested submodules must already be initialized at their pins; no downloads are performed');
 for(const file of ['tools/omnivoice/CMakeLists.txt','tools/omnivoice/include/eliza-inference-ffi.h'])if(!fs.existsSync(path.join(fork,file)))throw Error('Pinned fused engine source is incomplete');
-const identity=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8')).appId;
+const identity=androidIdentity(root).appId;
 if(!/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(identity))throw Error('Invalid product identity');
 const sdk=process.env.ANDROID_HOME||process.env.ANDROID_SDK_ROOT;
 if(!sdk)throw Error('Set ANDROID_HOME to the existing SDK');
@@ -59,8 +61,10 @@ for(const relative of producerInputPaths){
 }
 fs.mkdirSync(path.dirname(path.join(staging,forkPath)),{recursive:true});fs.symlinkSync(fork,path.join(staging,forkPath),'dir');
 const nativeSource=path.join(staging,'packages/app/platforms/android/app/src/main/elizavoice-jni');
+const suppliedEngine=option('--engine');
+if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(staging,'packages/app/platforms/android/app/src/main/jniLibs',abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
 const commands=[
- [process.execPath,path.join(staging,'packages/app/scripts/stage-elizavoice-lib.ts'),'--abi',abi,'--variant','cpu'],
+ ...(!suppliedEngine?[[process.execPath,path.join(staging,'packages/app/scripts/stage-elizavoice-lib.ts'),'--abi',abi,'--variant','cpu']]:[]),
  ['cmake','-S',nativeSource,'-B',path.join(output,'jni-build'),'-G','Ninja',`-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DANDROID_ABI=${abi}`,'-DANDROID_PLATFORM=android-23','-DCMAKE_BUILD_TYPE=Release',...nativeCmakeOptions(jniBinding),`-DELIZAVOICE_FFI_INCLUDE_DIR=${path.join(fork,'tools/omnivoice/include')}`],
  ['cmake','--build',path.join(output,'jni-build'),'--target','elizavoicejni','-j','2'],
 ];

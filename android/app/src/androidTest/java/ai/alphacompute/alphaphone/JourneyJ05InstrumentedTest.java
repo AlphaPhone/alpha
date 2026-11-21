@@ -23,12 +23,11 @@ import org.junit.Test;
  * dismissed and withdraws the native page. On a signed-in phone with a packaged resident agent, Send
  * reaches that agent, so the "nothing is dispatched" step needs re-scoping before that run.
  *
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN --classes JourneyJ05
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN --classes JourneyJ05
  */
 public final class JourneyJ05InstrumentedTest {
  @Test public void pageQuestionReachesSendAndItsSourceNoteReopensThePage() throws Exception {
   Assume.assumeTrue("Explicit J05 journey campaign", "1".equals(InstrumentationRegistry.getArguments().getString("journeyJ05")));
-  Assume.assumeTrue("J05 runs on the flag-off pair: a test-mocks build has a mock connection", !BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
   BrowserPageQuestionInstrumentedTest.assumeIsolatedReading();
   AppNavigation.assumeNoRequiredSignIn("J05 (page question to note)");
   BrowserPageQuestionInstrumentedTest steps = new BrowserPageQuestionInstrumentedTest();

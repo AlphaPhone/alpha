@@ -1,23 +1,24 @@
 {
   "schema": 1,
-  "description": "Alpha's Android host descriptor. The upstream generator (vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs) owns the Gradle setup, toolchain, variants, signing and version policy and writes the build files into android/ (node scripts/android-host.ts). This file supplies only Alpha's identity inputs, modules, dependencies, admission and installed-data compatibility names. References use the consumer, upstream (vendor/eliza) and dependencies (node_modules) roots; patchedNative names the authenticated staging of android/upstream-native-sources.json.",
+  "installedIdentities": [
+    {
+      "appId": "ai.elizaresearch.alphaphone",
+      "updateManifestUrl": "https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-update-stable.json"
+    }
+  ],
+  "description": "Alpha's Android host descriptor. The upstream generator (vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs) owns the Gradle setup, toolchain, variants, signing and version policy and writes the build files into android/ (bun scripts/android-host.ts). This file supplies only Alpha's identity inputs, modules, dependencies, admission and installed-data compatibility names. References use the consumer, upstream (vendor/eliza) and dependencies (node_modules) roots; patchedNative names the authenticated staging of android/upstream-native-sources.json.",
   "profile": {
     "schema": 1,
     "sdk": { "min": 29, "target": 36, "compile": 36 },
     "releaseMinify": true,
     "kotlin": false,
     "preserveRuntimeBytes": true,
+    "nativeLibraries": "extract-16k",
     "manifest": { "root": "consumer", "path": "android/app/src/main/AndroidManifest.xml" },
     "flavors": [
       {
-        "name": "standalone",
-        "manifest": { "root": "consumer", "path": "android/app/src/standalone/AndroidManifest.xml" },
-        "buildConfigFields": [{ "name": "IS_LAUNCHER", "type": "boolean", "value": false }]
-      },
-      {
         "name": "launcher",
-        "manifest": { "root": "consumer", "path": "android/app/src/launcher/AndroidManifest.xml" },
-        "buildConfigFields": [{ "name": "IS_LAUNCHER", "type": "boolean", "value": true }]
+        "manifest": { "root": "consumer", "path": "android/app/src/launcher/AndroidManifest.xml" }
       }
     ],
     "modules": [
@@ -43,8 +44,7 @@
       { "name": "sense", "source": { "root": "consumer", "path": "android/sense" }, "appDependency": false },
       { "name": "sense-speech", "source": { "root": "consumer", "path": "android/sense-speech" }, "appDependency": false },
       { "name": "notification-fixture", "source": { "root": "consumer", "path": "android/notification-fixture" }, "appDependency": false },
-      { "name": "video-fixture", "source": { "root": "consumer", "path": "android/video-fixture" }, "appDependency": false },
-      { "name": "private-peer-fixture", "source": { "root": "consumer", "path": "android/private-peer-fixture" }, "appDependency": false }
+      { "name": "video-fixture", "source": { "root": "consumer", "path": "android/video-fixture" }, "appDependency": false }
     ],
     "dependencies": [
       { "configuration": "implementation", "coordinate": "androidx.credentials:credentials:1.6.0" },
@@ -62,7 +62,9 @@
       { "configuration": "androidTestImplementation", "coordinate": "androidx.test.ext:junit:1.3.0" },
       { "configuration": "androidTestImplementation", "coordinate": "androidx.test.espresso:espresso-core:3.7.0" },
       { "configuration": "androidTestImplementation", "coordinate": "androidx.test.espresso:espresso-accessibility:3.7.0" },
-      { "configuration": "androidTestImplementation", "coordinate": "androidx.test.uiautomator:uiautomator:2.3.0" }
+      { "configuration": "androidTestImplementation", "coordinate": "androidx.test.uiautomator:uiautomator:2.3.0" },
+      { "configuration": "testImplementation", "coordinate": "junit:junit:4.13.2" },
+      { "configuration": "testImplementation", "coordinate": "org.robolectric:robolectric:4.16.1" }
     ],
     "androidResources": { "noCompress": ["gguf", "lex"] },
     "buildConfigFields": [
@@ -84,22 +86,13 @@
       "keyPassword": "ELIZAOS_KEY_PASSWORD"
     },
     "versionOverride": { "versionCode": "ELIZAOS_VERSION_CODE", "versionName": "ELIZAOS_VERSION_NAME" },
-    "testMocks": {
-      "property": "ELIZA_DEV_ALLOW_TEST_MOCKS",
-      "buildConfigField": "ELIZA_DEV_ALLOW_TEST_MOCKS",
-      "debug": {
-        "java": [{ "root": "consumer", "path": "android/app/src/testMocks/java" }],
-        "res": [{ "root": "consumer", "path": "android/app/src/testMocks/res" }],
-        "manifest": { "root": "consumer", "path": "android/app/src/testMocks/AndroidManifest.xml" }
-      },
-      "androidTest": { "java": [{ "root": "consumer", "path": "android/app/src/testMocks/androidTest/java" }] }
-    },
     "settingsAdmission": [
-      { "command": ["node", "scripts/prepare-patched-native.ts"], "directory": { "root": "consumer", "path": "." } }
+      { "command": ["bun", "scripts/android-host.ts", "--check-identity"], "directory": { "root": "consumer", "path": "." } },
+      { "command": ["bun", "scripts/prepare-patched-native.ts"], "directory": { "root": "consumer", "path": "." } }
     ],
     "admission": [
-      { "name": "stageLocalAgentSources", "command": ["node", "scripts/stage-local-agent-sources.ts"], "directory": { "root": "consumer", "path": "." } },
-      { "name": "verifyCloudDeployment", "command": ["node", "scripts/cloud-deployment.ts", "--check"], "directory": { "root": "consumer", "path": "." } }
+      { "name": "stageLocalAgentSources", "command": ["bun", "scripts/stage-local-agent-sources.ts"], "directory": { "root": "consumer", "path": "." } },
+      { "name": "verifyCloudDeployment", "command": ["bun", "scripts/cloud-deployment.ts", "--check"], "directory": { "root": "consumer", "path": "." } }
     ],
     "sourceSets": {
       "main": {
@@ -119,6 +112,7 @@
       { "root": "consumer", "path": "android/upstream-native-sources.json" },
       { "root": "consumer", "path": "scripts/prepare-patched-native.ts" },
       { "root": "consumer", "path": "scripts/android-host.ts" },
+      { "root": "consumer", "path": "scripts/android-identity.ts" },
       { "root": "consumer", "path": "apps/app/src/product/owner-route-table.ts" },
       { "root": "consumer", "path": ".eliza/generated-android/owner-routes.json" }
     ]
@@ -138,7 +132,7 @@
     ],
     "notification": {
       "smallIcon": "notification_icon",
-      "primaryAction": "stop",
+      "primaryAction": "none",
       "color": "0xff0000ff",
       "channelLabel": "Alpha",
       "strings": {
@@ -155,7 +149,6 @@
         "runningDetail": "alpha_runtime_running_detail",
         "startingDetail": "alpha_runtime_starting_detail",
         "bootstrapDetail": "alpha_runtime_bootstrap_detail",
-        "crashedDetail": "alpha_runtime_crashed_detail",
         "extractFailedDetail": "alpha_runtime_extract_failed_detail",
         "spawnFailedDetail": "alpha_runtime_spawn_failed_detail",
         "stopFailedDetail": "alpha_runtime_stop_failed_detail",

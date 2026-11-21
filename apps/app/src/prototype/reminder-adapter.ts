@@ -3,7 +3,7 @@ import {reviewOwnNoticeQuestion} from './own-notice-question';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
 import { alphaClient } from '../runtime/alpha-client';
 import { connectionController } from '../runtime/connection-ui';
-import {reminderCreations,retainReminderCreation,discardUndispatchedCreation,checkReminderCreation,reconcileReminderCreations,retireRefusedCreation,isReminderRefusal,reminderWallTime,reminderEvents,overdueReminders,undatedTodos,reminderRefusalMessage,reopenSchedule,isUndatedReminder,reminderDueAt as dueOf,type ReminderCreation,type ReminderRefusal} from '../runtime/reminder-creations';
+import {reminderUnsavedFields,reminderCreations,retainReminderCreation,discardUndispatchedCreation,checkReminderCreation,reconcileReminderCreations,retireRefusedCreation,isReminderRefusal,reminderWallTime,reminderEvents,overdueReminders,undatedTodos,reminderRefusalMessage,reopenSchedule,isUndatedReminder,reminderDueAt as dueOf,type ReminderCreation,type ReminderRefusal} from '../runtime/reminder-creations';
 import { DailyApps, type Reminder } from '../daily';
 import { pendingReminderDeletions,retainReminderDeletion,acknowledgeReminderDeletion,reconcileReminderDeletions,discardUndispatchedReminderDeletion } from '../runtime/reminder-deletions';
 import { Capacitor } from '@capacitor/core';
@@ -221,7 +221,9 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
     if(out.f) {
       const f=state.form;
       if(f.cal==='alpha-reminders'&&owner?.reminderSaving)out.f.saveOff=true;
-      out.f.cals.push({domain:'reminders',name:'Reminders',dot:'var(--acc)',on:f.cal==='alpha-reminders',css:f.cal==='alpha-reminders'?'background:var(--fg);color:var(--bg)':'background:var(--bg)',pick:()=>{const original=api.get('calendar').form;const {canonicalOwnerKey,canonicalEventKey,expectedProviderVersion,canonicalTiming,canonicalAllDay,...kept}=original;const next={...kept,cal:'alpha-reminders',repeat:'none',alert:0};api.set({form:owner?.calendarFormDestinationChanged?.(original,next)??next});}});
+      out.f.cals.push({domain:'reminders',name:'Reminders',dot:'var(--acc)',on:f.cal==='alpha-reminders',css:f.cal==='alpha-reminders'?'background:var(--fg);color:var(--bg)':'background:var(--bg)',pick:()=>{const original=api.get('calendar').form;const {canonicalOwnerKey,canonicalEventKey,expectedProviderVersion,canonicalTiming,canonicalAllDay,...kept}=original;const next={...kept,cal:'alpha-reminders',repeat:'none',alert:0,allDay:false};api.set({form:owner?.calendarFormDestinationChanged?.(original,next)??next});
+        // A reminder keeps a title, a time and notes. Say so when the event draft already holds more.
+        const dropped=reminderUnsavedFields(original);if(dropped)api.toast(dropped);}});
       if(f.cal==='alpha-reminders') out.f.save=async()=>{
         if(owner?.reminderSaving)return;
         const current=api.get('calendar').form;
@@ -481,6 +483,9 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
           if(stillSelected())api.set({open:null});
           if(owner===deleteOwner&&deleteOwner.live){await deleteOwner.refreshReminders();api.toast('Reminder deleted');}
         }catch{
+          // A lost admission response may still have staged the deletion: re-read now so its
+          // Undo appears at once, not at the notice's next idle poll inside the 10 s window.
+          refreshDeletionViews();
           if(owner===deleteOwner&&deleteOwner.live)api.toast('Unconfirmed');
         }finally{
           if(owner===deleteOwner&&deleteOwner.live)try{deleteOwner.reminderDeleteUnknown=Object.keys(await pendingReminderDeletions()).length;api.set({reminderDeleteUnknown:deleteOwner.reminderDeleteUnknown});}catch{}

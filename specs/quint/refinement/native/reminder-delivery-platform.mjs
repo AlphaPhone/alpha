@@ -31,6 +31,7 @@ public final class Intent {
  private final Map<String,String> extras=new HashMap<>();
  private String action;
  private Uri data;
+ public Intent(){this((String)null);}
  public Intent(Context context,Class<?> component){this.component=component;}
  public Intent(String action){this.component=null;this.action=action;}
  public Intent(Intent from){component=from.component;action=from.action;data=from.data;extras.putAll(from.extras);}
@@ -140,6 +141,7 @@ public final class PendingIntent {
  public final Intent intent;
  private final String identity;
  private PendingIntent(String identity,Intent intent){this.identity=identity;this.intent=new Intent(intent);}
+ public void cancel(){registry.remove(identity,this);}
  public static void reboot(){registry.clear();}
  private static PendingIntent get(String kind,Context context,int code,Intent intent,int flags){
   if((flags&FLAG_IMMUTABLE)==0)throw new AssertionError("Reminder routes are immutable");
@@ -158,12 +160,19 @@ import java.util.Map;
 public final class AlarmManager {
  public static final int RTC_WAKEUP=0;
  public final Map<PendingIntent,Long> live=new LinkedHashMap<>();
- public boolean refuse;
+ public boolean refuse,exactAllowed,revokeExact;
  public java.util.function.Consumer<PendingIntent> beforeArm=unused->{};
- public int attempts;
+ public int attempts,exactCalls,inexactCalls;
+ public int exactType,inexactType;public long exactWhen,inexactWhen;public PendingIntent exactIntent,inexactIntent;
+ public boolean canScheduleExactAlarms(){return exactAllowed;}
+ public void setExactAndAllowWhileIdle(int type,long when,PendingIntent intent){exactCalls++;exactType=type;exactWhen=when;exactIntent=intent;arm(true,type,when,intent);}
  public void setAndAllowWhileIdle(int type,long when,PendingIntent intent){
-  if(type!=RTC_WAKEUP)throw new AssertionError("Expected inexact RTC_WAKEUP");
+  inexactCalls++;inexactType=type;inexactWhen=when;inexactIntent=intent;arm(false,type,when,intent);
+ }
+ private void arm(boolean exact,int type,long when,PendingIntent intent){
+  if(type!=RTC_WAKEUP)throw new AssertionError("Expected RTC_WAKEUP");
   attempts++;
+  if(exact&&revokeExact)throw new SecurityException("Synthetic exact-alarm capability revocation");
   beforeArm.accept(intent);
   if(refuse)throw new IllegalStateException("Synthetic AlarmManager refusal");
   live.put(intent,when);
@@ -195,9 +204,10 @@ import android.content.Context;
 import java.util.*;
 public final class Notification {
  public static final int VISIBILITY_PRIVATE=0;
- public static final String CATEGORY_REMINDER="reminder";
+ public static final String CATEGORY_REMINDER="reminder",CATEGORY_EMAIL="email";
  public final String channel;
- public String title,text,category;
+ public String title,text,category,group;
+ public long timeout;
  public int visibility;
  public boolean autoCancel,onlyAlertOnce;
  public Notification publicVersion;
@@ -231,6 +241,8 @@ public final class Notification {
   public Builder setOnlyAlertOnce(boolean value){notice.onlyAlertOnce=value;return this;}
   public Builder setAutoCancel(boolean value){notice.autoCancel=value;return this;}
   public Builder setCategory(String value){notice.category=value;return this;}
+  public Builder setTimeoutAfter(long ms){notice.timeout=ms;return this;}
+  public Builder setGroup(String value){notice.group=value;return this;}
   public Builder addAction(Action action){actions.add(action);return this;}
   public Notification build(){notice.actions=actions.toArray(Action[]::new);return notice;}
  }

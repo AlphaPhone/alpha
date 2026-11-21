@@ -1,5 +1,5 @@
 import type {NotesTarget} from '../runtime/notes-contract';
-import type {NotesOrganizeOperation} from '../runtime/notes-organize-contract';
+import type {NotesOrganizeOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {addNotesFolder,findNotesFolderByName,newNotesFolderId,withNoteFolder,type NotesFoldersDocument} from '../runtime/notes-folders-model.ts';
 import type {NotesFilter} from '../runtime/notes-view';
 import {notesRecorderControl,type NotesRecordStart,type NotesRecordStop} from './notes-recorder-control.ts';
@@ -29,12 +29,13 @@ export interface NotesOrganizeHost {
 export interface NotesOrganizeReceipt {status:'succeeded'|'failed'|'unknown';summary:string}
 
 /**
- * Executes an approved Notes organisation proposal (runtime/notes-organize-contract). The
+ * Executes an approved Previous notes organisation proposal of the shared Notes organisation
+ * contract; the canonical list filter (`notes_list_filter`) runs in the Notes view instead. The
  * filter is read-only and returns no note content. A move applies only to the note revision the
  * owner reviewed (specs/notes-view AgentMoveOnlyReviewed): a note edited since then is refused.
  * Folders are addressed by name and must exist when the move runs.
  */
-export async function executeNotesOrganize(host:NotesOrganizeHost,operation:NotesOrganizeOperation,current:()=>void):Promise<NotesOrganizeReceipt>{
+export async function executeNotesOrganize(host:NotesOrganizeHost,operation:Exclude<NotesOrganizeOperation,{type:'notes_list_filter'}>,current:()=>void):Promise<NotesOrganizeReceipt>{
  current();
  if(operation.type==='notes_filter'){
   let folder:string|undefined;

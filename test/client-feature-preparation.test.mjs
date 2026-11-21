@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
 import {buildSync} from 'esbuild';
@@ -48,7 +49,7 @@ test('concurrent preparers after a source change all succeed and leave one authe
  git(['add','.']);git(['-c','user.name=Source fixture','-c','user.email=fixture@example.invalid','commit','-qm','Change']);
  const commit=git(['rev-parse','HEAD']);fs.writeFileSync(path.join(root,'upstream.lock.json'),JSON.stringify({commit}));
  const script=`import {prepareClientFeatures} from ${JSON.stringify(path.resolve('scripts/prepare-client-features.ts'))};prepareClientFeatures({root:${JSON.stringify(root)},projectVoice:false});`;
- const run=()=>new Promise(resolve=>{const child=spawn(process.execPath,['--input-type=module','-e',script],{stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});child.on('close',status=>resolve({status,stderr}));});
+ const run=()=>new Promise(resolve=>{const child=spawn(process.execPath,['-e',script],{stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});child.on('close',status=>resolve({status,stderr}));});
  for(const result of await Promise.all(Array.from({length:12},run))) assert.equal(result.status,0,result.stderr);
  const source=path.join(root,'.eliza/client-features'),stamp=JSON.parse(fs.readFileSync(path.join(source,'.source.json')));
  assert.equal(stamp.baseCommit,commit);assert.match(fs.readFileSync(path.join(source,fixtureLeaf),'utf8'),/changed = 2/);
@@ -99,22 +100,25 @@ test('client feature publication retires once while a peer moves the winner',()=
   catch(error){writeControl('complete',{status:1,retire,publish,read,error:error.stack});process.exitCode=1;}
  `;
  const children=actors.map(actor=>{
-  const child=spawn(process.execPath,['--input-type=module','-e',worker,actor,root,control,pathToFileURL(path.resolve('scripts/prepare-client-features.ts')).href],{stdio:['ignore','ignore','pipe']});
+  const child=spawn(process.execPath,['-e',worker,actor,root,control,pathToFileURL(path.resolve('scripts/prepare-client-features.ts')).href],{stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr.on('data',chunk=>{stderr+=chunk;});
   const closed=new Promise(resolve=>child.on('close',status=>resolve({actor,status,stderr})));
   return {actor,child,closed,diagnostic:()=>({status:child.exitCode,signal:child.signalCode,stderr})};
  });
  const marker=(actor,key)=>path.join(control,actor+'-'+key);
  async function ready(actor,key,timeout=20000){
-  const until=Date.now()+timeout;
-  while(!fs.existsSync(marker(actor,key+'.json'))){
+  const until=Date.now()+timeout,target=marker(actor,key+'.json');
+  while(!fs.existsSync(target)){
    const running=children.find(row=>row.actor===actor),state=running.diagnostic(),complete=marker(actor,'complete.json');
-   if(fs.existsSync(complete))throw Error('Worker completed before fixture event: '+actor+' '+key+'; '+fs.readFileSync(complete,'utf8')+'; '+JSON.stringify(state));
+   const finished=fs.existsSync(complete),expired=Date.now()>until;
+   // The child can publish the requested event between the first poll and the completion check.
+   if(fs.existsSync(target))break;
+   if(finished)throw Error('Worker completed before fixture event: '+actor+' '+key+'; '+fs.readFileSync(complete,'utf8')+'; '+JSON.stringify(state));
    if(state.status!==null||state.signal!==null)throw Error('Worker exited before fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
-   if(Date.now()>until)throw Error('Missing fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
+   if(expired)throw Error('Missing fixture event: '+actor+' '+key+'; '+JSON.stringify(state));
    await new Promise(resolve=>setTimeout(resolve,5));
   }
-  const event=JSON.parse(fs.readFileSync(marker(actor,key+'.json')));locations[actor]={stage:event.stage,aside:event.aside};return event;
+  const event=JSON.parse(fs.readFileSync(target));locations[actor]={stage:event.stage,aside:event.aside};return event;
  }
  const allow=(actor,key)=>fs.writeFileSync(marker(actor,key+'.allow'),'');
  function inventoryAt(directory){
@@ -200,11 +204,11 @@ test('client source rejects committed symlinks and missing source groups',()=>fi
  fs.writeFileSync(path.join(root,'upstream.lock.json'),JSON.stringify({commit:git(['rev-parse','HEAD'])}));assert.throws(()=>prepareClientFeatures({root,projectVoice:false}),/Missing upstream source/);
 }));
 test('direct local development launcher prepares a clean client tree before starting services',()=>fixture(({root,commit})=>{
- for(const file of ['scripts/dev-local.ts','scripts/dev-speech-settings.ts','scripts/speech-env.ts','scripts/local-agent-source.ts','scripts/copy-file-clone.ts','scripts/prepare-client-features.ts','scripts/upstream-native-source.ts']){const target=path.join(root,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);}
+ for(const file of ['scripts/dev-local.ts','scripts/dev-speech-settings.ts','scripts/speech-env.ts','scripts/local-agent-source.ts','scripts/copy-file-clone.ts','scripts/prepare-client-features.ts','scripts/upstream-native-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts']){const target=path.join(root,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);}
  // The generic copier fixture explicitly tests the non-voice projection path.
  const prep=path.join(root,'scripts/prepare-client-features.ts');fs.writeFileSync(prep,fs.readFileSync(prep,'utf8').replace('projectVoice = true','projectVoice = false'));
  // Source hashing and materialization can exceed 20 seconds on a loaded build host.
- const result=spawnSync(process.execPath,[path.join(root,'scripts/dev-local.ts')],{cwd:root,env:{...process.env,ALPHA_REMOTE_PORT:'0',ALPHA_REMOTE_PROFILE:path.join(root,'empty-profile')},encoding:'utf8',timeout:120000});
+ const result=spawnSync(process.execPath,[path.join(root,'scripts/dev-local.ts')],{cwd:root,env:{...process.env,ALPHA_REMOTE_PORT:'0',ALPHA_REMOTE_PROFILE:path.join(root,'empty-profile')},encoding:'utf8',timeout:scaledTimeout(120000)});
  assert.equal(result.status,1);assert.match(result.stderr,/Invalid local agent port/);
  assert.equal(JSON.parse(fs.readFileSync(path.join(root,'.eliza/client-features/.source.json'))).baseCommit,commit);
  // Development uses authenticated upstream source without a patch cache.
@@ -216,7 +220,7 @@ test('actual pinned client features retain shared voice source unchanged and exc
  const scan='plugins/plugin-native-camera/src/scan-document.ts';
  assert.equal(stamp.sourceFiles[scan],stamp.files[scan],'Scan state is copied from the pinned shared owner without a product patch');
  assert.deepEqual(fs.readFileSync(path.join(source,scan)),fs.readFileSync(path.join('vendor/eliza',scan)));
-assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,14);
+assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,16);
  // The browser parser stays byte-exact except its one Node-compatible value import.
  const browserCommand='plugins/plugin-browser/src/native-client-command.ts';
  const browserOriginal=fs.readFileSync(path.join('vendor/eliza',browserCommand),'utf8');
@@ -227,7 +231,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.notEqual(stamp.sourceFiles[browserCommand],stamp.files[browserCommand]);
  // Run plain Node without tsx, aliases or a custom loader and exercise the imported
  // observation parser, rather than only checking the spelling of its specifier.
- const browserImport=spawnSync(process.execPath,['--input-type=module','-e',`
+ const browserImport=spawnSync(process.execPath,['-e',`
   import assert from 'node:assert/strict';
   import {observedNativeHistorySelection} from ${JSON.stringify(pathToFileURL(path.join(source,browserCommand)).href)};
   const message={content:{metadata:{clientDevice:{context:{view:'browser',revision:3,selectedObject:{kind:'browser-tab',id:'tab:7',revision:'document:2'}}}}}};
@@ -235,7 +239,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(observedNativeHistorySelection(message,'open'),undefined);
   message.content.metadata.clientDevice.context.view='notes';
   assert.equal(observedNativeHistorySelection(message,'back'),undefined);
- `],{encoding:'utf8',timeout:30000});
+ `],{encoding:'utf8',timeout:scaledTimeout(30000)});
  assert.equal(browserImport.status,0,browserImport.stderr);
  // Node consumers (the Vite config bundle and backend hosts) load linked-sync through cloud-protocol.
  for(const file of ['google-sync-port.ts','sync-controller.ts','linked-store.ts']){
@@ -247,60 +251,101 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  // Upstream runs its own notes tests; Alpha copies none of them.
  assert.equal(fs.existsSync(path.join(source,'plugins/plugin-notes/test')),false);
  for(const name of ['alpha-voice-core-types.ts','alpha-client-fetch-types.ts']) assert.equal(fs.existsSync(path.join(source,name)),false,name+' is no longer projected');
- for(const file of ['packages/core/src/schema-types.ts','packages/core/src/types/json.ts','packages/core/src/types/schema.ts','packages/core/src/types/surface-manifest.ts','packages/core/src/types/view-capability.ts','packages/core/src/types/view-kind.ts','packages/ui/src/api/transport.ts','plugins/plugin-calendar/src/meetings/auto-join-types.ts','plugins/plugin-calendar/src/api/calendar-api.ts','plugins/plugin-notes/src/types.ts','plugins/plugin-notes/src/capabilities.ts','plugins/plugin-notes/src/client/notes-api.ts']){
+ for(const file of ['packages/core/src/schema-types.ts','packages/core/src/types/json.ts','packages/core/src/types/schema.ts','packages/core/src/types/surface-manifest.ts','packages/core/src/types/view-capability.ts','packages/core/src/types/view-kind.ts','plugins/plugin-calendar/src/meetings/auto-join-types.ts','plugins/plugin-calendar/src/api/calendar-api.ts','plugins/plugin-notes/src/types.ts','plugins/plugin-notes/src/capabilities.ts','plugins/plugin-notes/src/client/notes-api.ts']){
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is not projected');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
  }
  for(const file of ['packages/core/src/types/plugin.ts','packages/core/src/types/components.ts','packages/core/src/types/model.ts','packages/core/src/types/primitives.ts','packages/ui/src/api/client-base.ts','plugins/plugin-calendar/src/meetings/auto-join-settings.ts']){
   assert.equal(stamp.files[file],undefined,file+' (runtime or class module) is not shipped to the browser');
  }
- const leafBundle=buildSync({entryPoints:[path.join(source,'plugins/plugin-notes/src/client/notes-api.ts')],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/ui/api/transport':path.join(source,'packages/ui/src/api/transport.ts')}});
+ const leafBundle=buildSync({entryPoints:[path.join(source,'plugins/plugin-notes/src/client/notes-api.ts')],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/ui/api/transport':path.resolve('apps/app/src/ui/api/transport.ts')}});
  assert.equal(Object.keys(leafBundle.metafile.inputs).some(file=>/client-base|core\/src\/types\/(plugin|components|model)\.ts/.test(file)),false,'Notes client loads no root core or ElizaClient module');
- // The shared mobile entry adds only the page registry, its store host, the application catalog
- // and MobileApplication (elizaOS/eliza#38276), copied exactly; it never reaches the app-shell barrel.
- const shellBundle=buildSync({entryPoints:[path.join(source,'packages/ui/src/mobile-shell/index.ts')],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,external:['react','react/jsx-runtime'],alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/capacitor-system/launcher':path.join(source,'plugins/plugin-native-system/src/client/launcher.ts'),'@elizaos/contracts':path.join(source,'client-contracts.ts')}});
- const shellInputs=Object.keys(shellBundle.metafile.inputs).map(file=>path.relative(source,path.resolve(file)));
- assert.deepEqual(shellInputs.filter(file=>!stamp.files[file]),[],'the mobile entry loads only projected files');
- assert.deepEqual(shellInputs.filter(file=>file.startsWith('packages/ui/src/')&&!file.startsWith('packages/ui/src/mobile-shell/')).sort(),['packages/ui/src/app-shell-pages.ts','packages/ui/src/components/pages/InstalledAppsLauncher.tsx','packages/ui/src/config/theme.ts','packages/ui/src/registry-host.ts'],'the mobile entry reaches no other shared UI module');
- for(const file of ['packages/ui/src/app-shell-pages.ts','packages/ui/src/registry-host.ts','packages/ui/src/mobile-shell/application-catalog.ts','packages/ui/src/mobile-shell/MobileApplication.tsx','packages/ui/src/mobile-shell/view-policy.ts']){
-  assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is not projected');
-  assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
+ assert.equal(Object.keys(leafBundle.metafile.inputs).some(file=>/packages\/ui\//.test(file)),false,'Notes client types its fetch with Alpha\'s transport module, not upstream UI');
+ // Alpha owns its renderer UI (apps/app/src/ui): no packages/ui source or plugin component is staged.
+ assert.deepEqual(Object.keys(stamp.files).filter(file=>file.startsWith('packages/ui/')||/^plugins\/[^/]+\/src\/components\//.test(file)),[]);
+ assert.equal(fs.existsSync(path.join(source,'packages/ui')),false,'no upstream UI package is staged');
+ for(const dir of ['plugin-notes','plugin-calendar','plugin-inbox'])assert.equal(fs.existsSync(path.join(source,'plugins',dir,'src/components')),false,dir+' components are not staged');
+ for(const file of ['plugins/plugin-calendar/src/api/client-calendar.ts','plugins/plugin-calendar/src/browser.ts','plugins/plugin-calendar/src/index.ts','plugins/plugin-notes/src/workspace.ts']){
+  assert.equal(stamp.files[file],undefined,file+' (an upstream UI entry) is not staged');
  }
+ // Nor is any other upstream UI entry: no JSX module, no React import, no upstream UI import
+ // (only the transport type, aliased to Alpha's module), and no relative import left dangling.
+ const stagedCode=Object.keys(stamp.files).filter(file=>/\.(?:[cm]?[jt]sx?)$/.test(file));
+ assert.deepEqual(stagedCode.filter(file=>/\.[jt]sx$/.test(file)),[],'no JSX module is staged');
+ const importsOf=text=>[...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+|\bexport\s+\*\s+from\s*)(['"])([^'"\n]+)\1/gm)].map(match=>match[2]);
+ const uiImports=[],dangling=[];
+ for(const file of stagedCode){
+  for(const spec of importsOf(fs.readFileSync(path.join(source,file),'utf8'))){
+   if(/^(?:react(?:-dom)?|maplibre-gl)(?:\/|$)/.test(spec)||(/^@elizaos\/ui(?:\/|$)/.test(spec)&&spec!=='@elizaos/ui/api/transport')||/(?:^|\/)components\//.test(spec))uiImports.push(file+': '+spec);
+   // Upstream's own non-source helpers (e.g. a plugin's quint/ checks) may reference its monorepo tooling.
+   if(spec.startsWith('.')&&/(?:^|\/)src\//.test(file)){
+    const base=path.join(path.dirname(file),spec.split('?')[0]).replace(/\.js$/,'');
+    if(!['','.ts','.tsx','.js','.mjs','.d.ts','.d.mts','/index.ts','/index.js'].some(suffix=>stamp.files[base+suffix]!==undefined||stamp.files[path.join(path.dirname(file),spec.split('?')[0])]!==undefined))dangling.push(file+': '+spec);
+   }
+  }
+ }
+ assert.deepEqual(uiImports,[],'no staged module imports React or upstream UI');
+ assert.deepEqual(dangling,[],'every relative import in a staged source module resolves to a staged file');
+ // Alpha's own mobile shell (registration, page registry, launcher, Home and app grid) loads only
+ // its local UI tree and staged non-UI upstream modules; it never reaches upstream UI.
+ const shellDir=path.resolve('apps/app/src/ui/mobile-shell');
+ const shellBundle=buildSync({entryPoints:fs.readdirSync(shellDir).filter(name=>/\.tsx?$/.test(name)).map(name=>path.join(shellDir,name)),bundle:true,write:false,outdir:path.join(os.tmpdir(),'alpha-shell-bundle'),platform:'browser',format:'esm',metafile:true,external:['react','react-dom','react/jsx-runtime'],alias:{'@elizaos/core/schema-types':path.join(source,'packages/core/src/schema-types.ts'),'@elizaos/capacitor-system/launcher':path.join(source,'plugins/plugin-native-system/src/client/launcher.ts'),'@elizaos/contracts':path.join(source,'client-contracts.ts')}});
+ const shellInputs=Object.keys(shellBundle.metafile.inputs).map(file=>path.resolve(file));
+ const localUi=path.resolve('apps/app/src/ui')+path.sep;
+ assert.ok(shellInputs.some(file=>file.startsWith(shellDir+path.sep)),'the local mobile shell is bundled');
+ assert.deepEqual(shellInputs.filter(file=>!file.startsWith(localUi)&&!stamp.files[path.relative(source,file)]).map(file=>path.relative('.',file)),[],'the mobile shell loads only Alpha UI and staged non-UI modules');
+ assert.deepEqual(shellInputs.filter(file=>/packages\/ui\/|\/src\/components\//.test(path.relative(source,file))&&!file.startsWith(localUi)),[],'the mobile shell reaches no upstream UI module');
  const relayPath='plugins/plugin-maps/src/client/navigation-relay.ts';
  // The WebView signal shim is upstream (elizaOS/eliza#37315); the relay is carried unchanged.
  assert.equal(stamp.sourceFiles[relayPath],stamp.files[relayPath]);
  assert.match(fs.readFileSync(path.join(source,relayPath),'utf8'),/host\.anySignal \? host\.anySignal\(signals\)/);
- const mapPath='plugins/plugin-maps/src/client/map-plane.ts';
- assert.equal(stamp.sourceFiles[mapPath],stamp.files[mapPath]);
- assert.match(fs.readFileSync(path.join(source,mapPath),'utf8'),/export interface GlobalBasemap/);
+ // Alpha owns every screen controller and its view-model; the upstream ones are not staged, and
+ // neither is a staged index that would re-export them.
+ const alphaScreens={
+  'plugins/plugin-maps/src/client/maps-screen.ts':'maps/maps-screen.ts','plugins/plugin-maps/src/client/map-plane.ts':'maps/map-plane.ts',
+  'plugins/plugin-maps/src/client/share.ts':'maps/share.ts','plugins/plugin-maps/src/client/map-layout.ts':null,'plugins/plugin-maps/src/client/index.ts':null,
+  'plugins/plugin-files/src/browser/files-browser-adapter.ts':'files/files-browser-adapter.ts','plugins/plugin-files/src/documents/scan-event.ts':'documents/scan-event.ts','plugins/plugin-files/src/index.ts':null,
+  'plugins/plugin-inbox/src/mailbox/review-controller.ts':'mailbox/review-controller.ts','plugins/plugin-inbox/src/mailbox/drafts-controller.ts':'mailbox/drafts-controller.ts',
+  'plugins/plugin-inbox/src/mailbox/use-in-email.ts':'mailbox/use-in-email.ts','plugins/plugin-inbox/src/mailbox/preview.ts':'mailbox/preview.ts','plugins/plugin-inbox/src/mailbox/index.ts':null,
+  'plugins/plugin-notes/src/client/notes-controller.ts':'notes/notes-controller.ts','plugins/plugin-notes/src/client/notes-editor.ts':'notes/notes-editor.ts',
+  'plugins/plugin-notes/src/client/notes-snapshot-state.ts':'notes/notes-snapshot-state.ts','plugins/plugin-notes/src/client/index.ts':null,
+  'plugins/plugin-native-system/src/client/shade.ts':'shell/notification-shade.ts','packages/core/src/views/completed-action-navigation.ts':'shell/completed-action-navigation.ts',
+  'packages/contracts/src/native-telephony-session.ts':'messages/sms-session.ts','plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts':'device-actions/device-record-presentation.ts',
+ };
+ for(const [file,alpha]of Object.entries(alphaScreens)){
+  assert.equal(stamp.files[file],undefined,file+' is not staged');
+  if(alpha)assert.ok(fs.existsSync(path.join('apps/app/src/ui',alpha)),alpha+' is Alpha-owned');
+ }
+ // The shared device-action module is staged without upstream's review screen (Alpha's
+ // ui/device-actions/client-coordinator.ts): the queue protocol is the upstream text, unchanged.
+ const coordinatorPath='plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
+ const coordinator=fs.readFileSync(path.join(source,coordinatorPath),'utf8'),upstreamCoordinator=fs.readFileSync(path.join('vendor/eliza',coordinatorPath),'utf8');
+ assert.notEqual(stamp.files[coordinatorPath],stamp.sourceFiles[coordinatorPath],'the staged coordinator is projected');
+ assert.doesNotMatch(coordinator,/class DeviceActionCoordinator|ContextNotice|describeForegroundReview|device-record-presentation/);
+ for(const name of ['actionScope','smsAgentHash','validateReviewableDeviceOperation','DeviceActionNotStarted','publishCommittedDeviceChanges','deviceJournalContext','DeviceActionCoordinatorPorts'])assert.match(coordinator,new RegExp('^export (?:async )?(?:function|class|interface) '+name+'\\b','m'),name+' is kept');
+ // Apart from the import bindings only the screen used, each kept block is upstream text.
+ const statements=/^import (type )?\{[^}]*\} from "[^"]+";\n/gm,bindings=text=>new Set([...text.matchAll(/^import (?:type )?\{([^}]*)\} from "([^"]+)";$/gm)].flatMap(([,names,from])=>names.split(',').map(name=>name.trim()).filter(Boolean).map(name=>from+' '+name)));
+ const upstreamBindings=bindings(upstreamCoordinator);
+ assert.deepEqual([...bindings(coordinator)].filter(binding=>!upstreamBindings.has(binding)),[],'every kept import binding is upstream');
+ for(const block of coordinator.replace(statements,'').split(/\n(?=\/\*\*\n \* Thrown by a device executor|\/\/ ── Committed-change publication)/))assert.ok(upstreamCoordinator.replace(statements,'').includes(block.trimEnd()),'each kept block is upstream text');
  const calendarPath='packages/contracts/src/calendar-linked-sync.ts';
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
  assert.equal(stamp.managedGoogleBodyLimitPatch,undefined);
- assert.equal(stamp.files[googlePath],'45f81315269621657a84d1a67a4769405c3ef5cee8cfda44ee911bb4fa36d2a2');
+ assert.equal(stamp.files[googlePath],'e848c0e814caebd58eac087684a6020825aeda81e8af7c2cc66530c584003214');
  for(const name of Object.keys(stamp.sourceFiles).filter(name=>name.startsWith('packages/app/src/runtime/managed-google-agent/'))){
   assert.equal(stamp.sourceFiles[name],stamp.files[name],name+' is copied directly from upstream');
   assert.deepEqual(fs.readFileSync(path.join(source,name)),fs.readFileSync(path.join('vendor/eliza',name)),name+' has exact raw upstream bytes');
  }
- const updatePath='packages/ui/src/state/app-update-gate.ts';
+ // The update scheduler is Alpha's own module; no upstream copy or resume patch is staged.
  assert.equal(stamp.appUpdateResumePatch,undefined);
- assert.equal(stamp.sourceFiles[updatePath],stamp.files[updatePath],'final reviewed update source is copied directly');
- assert.equal(stamp.files[updatePath],'89dc78042b8808e4bd264732ac06bb4fb43a3da35d397a5f126c73896f23eca5');
- assert.deepEqual(fs.readFileSync(path.join(source,updatePath)),fs.readFileSync(path.join('vendor/eliza',updatePath)));
- assert.match(fs.readFileSync(path.join(source,updatePath),'utf8'),/export function createAppUpdateScheduler/);
+ assert.equal(stamp.files['packages/ui/src/state/app-update-gate.ts'],undefined);
+ assert.match(fs.readFileSync('apps/app/src/ui/state/app-update-gate.ts','utf8'),/export function createAppUpdateScheduler/);
  for(const file of [
   calendarPath,
-  'plugins/plugin-inbox/src/mailbox/review-controller.ts',
-  'plugins/plugin-inbox/src/mailbox/drafts-controller.ts',
   'plugins/plugin-native-system/src/crash-log.ts',
   'plugins/plugin-native-system/src/client/launcher.ts',
-  'packages/ui/src/mobile-shell/view-registry.ts',
-  'packages/ui/src/accessibility/screen-focus.ts',
-  'packages/ui/src/mobile-shell/InstalledAppsGridDrawer.tsx',
-  'plugins/plugin-files/src/browser/files-browser-adapter.ts',
   'plugins/plugin-files/src/browser/storage-volume.ts',
-  'plugins/plugin-files/src/browser/files.ts',
-  'packages/ui/src/mobile-shell/photos-view.ts',
   'plugins/plugin-assistant/src/services/device-actions/photo-library-contract.ts',
   'packages/voice/src/native-cloud-speech.ts',
   'packages/voice/src/cloud-speech-chunks.ts',
@@ -308,9 +353,31 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is staged directly');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
  }
+ // Browser downloads, file inputs and the voice-entry focus policy are Alpha's: the staged Files
+ // backend takes the download as a host option, the Notes document module keeps no browser code
+ // and the Sense module keeps no invocation controller. Everything kept is upstream text.
+ const staged=file=>fs.readFileSync(path.join(source,file),'utf8'),pinned=file=>fs.readFileSync(path.join('vendor/eliza',file),'utf8');
+ const filesPath='plugins/plugin-files/src/browser/files.ts',filesText=staged(filesPath);
+ assert.notEqual(stamp.files[filesPath],stamp.sourceFiles[filesPath],'the staged Files backend is projected');
+ assert.doesNotMatch(filesText,/document\.createElement\("a"\)/);
+ assert.equal(filesText.split('this.options.download(').length,3,'both downloads use the host option');
+ assert.match(filesText,/\n  download\(url: string, name: string\): void;\n\}/);
+ const notesDocumentsPath='plugins/plugin-notes/src/client/note-documents.ts',notesDocuments=staged(notesDocumentsPath);
+ assert.notEqual(stamp.files[notesDocumentsPath],stamp.sourceFiles[notesDocumentsPath],'the staged Notes document module is projected');
+ assert.doesNotMatch(notesDocuments,/document\.|createElement|createBrowserNoteDocuments/);
+ assert.ok(pinned(notesDocumentsPath).includes(notesDocuments.slice(notesDocuments.indexOf('\nexport interface NoteDocumentResult'))),'the kept Notes document rules are upstream text');
+ const sensePath='plugins/plugin-native-system/src/sense.ts',sense=staged(sensePath);
+ assert.notEqual(stamp.files[sensePath],stamp.sourceFiles[sensePath],'the staged Sense module is projected');
+ assert.doesNotMatch(sense,/\bdocument\.|\bwindow\.|SENSE_MODAL_SELECTOR|createSenseInvocationController/);
+ for(const kept of ['export function listenerStartsVoice(','export const SENSE_INVOCATION_EVENT','export interface SenseInvocationHost','export const SENSE_BRIDGE_TIMEOUT_MS','export function mobileVoiceEntryPolicy(','export async function stopSenseListenerForChatOnly('])assert.ok(sense.includes(kept),kept);
+ // Their shell consumers are Alpha's own modules, never staged from upstream.
+ for(const file of ['mobile-shell/view-registry.ts','accessibility/screen-focus.ts','mobile-shell/InstalledAppsGridDrawer.tsx','mobile-shell/photos-view.ts']){
+  assert.ok(fs.existsSync(path.join('apps/app/src/ui',file)),file+' is Alpha-owned');
+  assert.equal(stamp.files['packages/ui/src/'+file],undefined,file+' is not staged from upstream');
+ }
  const calendarBundle=buildSync({entryPoints:[path.join(source,calendarPath)],bundle:true,write:false,platform:'browser',format:'esm',metafile:true});
  assert.equal(Object.keys(calendarBundle.metafile.inputs).length,1,'shared Calendar reconciliation has no Node, SQL, or runtime dependency');
- const voiceFiles=['packages/ui/src/voice/voice-session-client-core.ts','packages/ui/src/voice/voice-session-status.ts','packages/core/src/logging.ts','packages/core/src/view-interaction.ts','packages/host/src/voice/ui-context.ts'];
+ const voiceFiles=['packages/core/src/logging.ts','packages/core/src/view-interaction.ts','packages/host/src/voice/ui-context.ts'];
  for(const file of voiceFiles){
   assert.equal(stamp.sourceFiles[file],stamp.files[file],file+' is not projected');
   assert.deepEqual(fs.readFileSync(path.join(source,file)),fs.readFileSync(path.join('vendor/eliza',file)),file+' is copied exactly');
@@ -322,14 +389,15 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
   assert.equal(projected,upstream.replace('import { randomId } from "./random-id.js";','import { randomId } from "./random-id.ts";'));
  }
  assert.deepEqual(fs.readFileSync(path.join(source,'packages/voice/src/random-id.ts')),fs.readFileSync('vendor/eliza/packages/voice/src/random-id.ts'));
- const client=voiceFiles[0],text=fs.readFileSync(path.join(source,client),'utf8');
+ // The voice session client is Alpha's own module over the staged shared voice contracts.
+ const client=path.resolve('apps/app/src/ui/voice/voice-session-client-core.ts'),text=fs.readFileSync(client,'utf8');
  assert.doesNotMatch(text,/import\("\.\/voice-session-fetch"\)/);
- for(const file of ['packages/core/src/logger.ts','packages/host/src/voice.ts','packages/ui/src/voice/voice-chat-types.ts','packages/ui/src/voice/voice-session-client.ts','packages/ui/src/voice/voice-session-fetch.ts']){
+ for(const file of ['packages/core/src/logger.ts','packages/host/src/voice.ts','packages/ui/src/voice/voice-chat-types.ts','packages/ui/src/voice/voice-session-client.ts','packages/ui/src/voice/voice-session-fetch.ts','packages/ui/src/voice/voice-session-client-core.ts','packages/ui/src/voice/voice-session-status.ts']){
   assert.equal(stamp.sourceFiles[file],undefined);assert.equal(stamp.files[file],undefined);
   assert.equal(fs.existsSync(path.join(source,file)),false,file+' is not staged');
  }
 
- const bundle=buildSync({entryPoints:[path.join(source,client)],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{
+ const bundle=buildSync({entryPoints:[client],bundle:true,write:false,platform:'browser',format:'esm',metafile:true,alias:{
   '@elizaos/host/voice/ui-context':path.join(source,'packages/host/src/voice/ui-context.ts'),
   '@elizaos/core/view-interaction':path.join(source,'packages/core/src/view-interaction.ts'),
   '@elizaos/core/logging':path.join(source,'packages/core/src/logging.ts'),
@@ -341,27 +409,18 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
 
 });
 
-test('retired client patch files and receipt slots cannot replace an admitted raw-source cache',()=>fixture(({root,vendor,commit})=>{
+test('a receipt with an unknown slot cannot replace an admitted raw-source cache',()=>fixture(({root,vendor})=>{
  const file='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
  const before='export const value = 1;\n';
  const projected=prepareClientFeatures({root,projectVoice:false});
  const stampFile=path.join(projected,'.source.json'),stamp=fs.readFileSync(stampFile);
  const unchanged=()=>{
-  assert.deepEqual(fs.readFileSync(stampFile),stamp,'retired slots preserve the admitted cache');
+  assert.deepEqual(fs.readFileSync(stampFile),stamp,'a rebuilt receipt is the admitted one');
   assert.equal(fs.readFileSync(path.join(projected,file),'utf8'),before);
  };
  assert.equal(fs.readFileSync(path.join(vendor,file),'utf8'),before);
- const patchRoot=path.join(root,'patches/eliza');fs.mkdirSync(patchRoot,{recursive:true});
- for(const prefix of ['managed-google-body-limit-client','app-update-resume-client']){
-  for(const suffix of ['.patch','-manifest.json']){
-   const retired=path.join(patchRoot,prefix+suffix);
-   fs.writeFileSync(retired,suffix==='.patch'?'unreviewed behavior':JSON.stringify({schema:1,baseCommit:commit,path:file}));
-   for(const check of [false,true]) assert.throws(()=>prepareClientFeatures({root,projectVoice:false,check}),/Retired client patch slot/);
-   unchanged();fs.unlinkSync(retired);
-  }
- }
- for(const key of ['managedGoogleBodyLimitPatch','appUpdateResumePatch','unknownPatch']){
-  const obsolete={...JSON.parse(stamp),[key]:{manifestSha256:'0'.repeat(64)}};
+ {
+  const obsolete={...JSON.parse(stamp),unknownPatch:{manifestSha256:'0'.repeat(64)}};
   fs.writeFileSync(stampFile,JSON.stringify(obsolete));
   assert.throws(()=>prepareClientFeatures({root,projectVoice:false,check:true}),/missing or stale/);
   assert.deepEqual(JSON.parse(fs.readFileSync(stampFile)),obsolete,'check mode never rewrites a stale receipt');

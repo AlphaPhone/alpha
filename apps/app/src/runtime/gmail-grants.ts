@@ -9,11 +9,10 @@ export {
   gmailActionGrant,
   gmailCapabilitiesFor,
   gmailGrantChange,
-  gmailGrantLabel,
   gmailGrantTier,
   gmailInboxAllows,
   gmailModifyIncomplete,
   gmailReadCacheKey,
-  googleAccountAccessLabel,
   requiredGmailCapability,
 } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/grants.ts';
+export { gmailGrantLabel, googleAccountAccessLabel } from '../ui/mailbox/grants';

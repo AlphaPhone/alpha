@@ -28,8 +28,8 @@ import static org.junit.Assert.*;
  * Android's HOME key returns to Alpha Home each time, and Android Settings and the default-Home
  * chooser (the way back to the stock launcher) stay reachable. Never changes the HOME role: it runs
  * only where Alpha already holds it. On an owned emulator the runner selects and restores it:
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN \
- *     --variants launcher --home-role --classes SettingsRoles,LauncherHome
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --serial emulator-NNNN \
+ *     --home-role --classes SettingsRoles,LauncherHome
  * (SettingsRoles covers the role being removed, declined and accepted in Android's own dialog.)
  * Emulator evidence, not device or user acceptance; boot-time HOME, the recovery partition and
  * emergency calling need a phone. */
@@ -41,7 +41,6 @@ public class LauncherHomeInstrumentedTest {
  private static final Pattern TOP = Pattern.compile("(?:topResumedActivity|mResumedActivity)[=:][^\\n]*?\\s([A-Za-z0-9_.]+)/");
 
  private static void assumeAlphaIsHome() {
-  Assume.assumeTrue("HOME qualification exists only in the launcher variant", BuildConfig.IS_LAUNCHER);
   // RoleManager, not the HOME resolver: package visibility hides the stock launcher from Alpha, so
   // the resolver names Alpha even while the stock launcher holds the role (ChatContinuityInstrumentedTest.alphaIsHome).
   Assume.assumeTrue("Alpha must already be the selected HOME app; this test never changes roles",
@@ -249,7 +248,7 @@ public class LauncherHomeInstrumentedTest {
 
  /** A lost renderer while Alpha is HOME: the recreated activity is the only MainActivity, and the
   * HOME key still lands on Alpha Home in that instance (RendererRecoveryInstrumentedTest covers
-  * both variants without the role). */
+  * the launcher without the role). */
  @Test public void killedRendererWhileHomeRecoversOneMainActivityAndHomeStillReturns() throws Exception {
   assumeAlphaIsHome();
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();

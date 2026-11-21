@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -15,7 +26,7 @@ const slice = (from, to) => { const a = source.indexOf(from), b = source.indexOf
 const unmount = slice('if (owner === this) { capabilityAbort?.abort();', '\n');
 const code = stripTypeScriptTypes(`
 let owner = null, facts = {}, controls = {}, delivery = {}, generation = 0, scaleGeneration = 0, scaleVersion = 0, scalePending = false, updateBusy = '', updateResult = '', cross = {}, choices = null, history = null;
-let roles = null, crashLog = null, photoAccess = null, launcher = false, recovery = [], resumedUnread = false, capabilityAbort = null, inferenceAbort = null;
+let roles = null, crashLog = null, crashLogVersion = 0, photoAccess = null, launcher = false, recovery = [], resumedUnread = false, capabilityAbort = null, inferenceAbort = null;
 ${slice('export function textScaleSettlement(', '/** Keep the reference settings components').replace(/export function/g, 'function')}
 let scaleResults = textScaleSettlement();
 ${slice('  const showTextScale=', '  async function refresh() {')}
@@ -76,7 +87,7 @@ function fixture() {
   };
 }
 
-test('simulated SettingsSession traces agree with the Settings read and text-size code after every step', {timeout: 170000}, async () => {
+test("partial source contract: simulated SettingsSession traces agree with the Settings read and text-size code after every step", {timeout: scaledTimeout(170000)}, async () => {
   const traces = [
     ...modelTraces({module: 'SettingsSession', traces: 200, steps: 40}),
     ...settingsScenarioTraces(),

@@ -26,7 +26,7 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
           if(method==='addListener')return {callbackId:'fixture-listener'};if(method==='removeListener')return {};
           if(plugin==='AlphaNotifications'&&method==='status')return {permissionGranted:true,appEnabled:true};
           if(plugin==='AlphaVoiceCloud'){if(method==='checkPermissions')return {microphone:'granted'};if(method==='localSpeechStatus'){fixture.localProbes++;throw Error('Local speech forbidden in Cloud fixture');}if(method==='getRecordingMetrics')return {recordingId:input.recordingId,peak:fixture.voicePeak};if(method==='transcribeRecording'){if(input.environment!=='production'||input.credentialId!=='synthetic-cloud-credential')throw Error('Wrong Cloud binding');fixture.cloudUploads++;return {text:'Set an alarm for 07:00; await my review.',local:false};}if(method==='startRecording')return {recordingId:'clock-voice-fixture',maxDurationMs:29000};if(method==='stopRecording')return {recordingId:'clock-voice-fixture',durationMs:1000};if(method==='transcribeLocalRecording')throw Error('Local transcript forbidden');return {};}
-          if(plugin==='DailyApps'){if(method==='surfaceInfo')return {developmentBuild:true,assistant:false};if(method==='perform')return {status:'selected',transcript:'Set an alarm for 07:00; await my review.'};if(method==='clockHandoff'){fixture.effects++;localStorage.setItem('fixture-effects',String(fixture.effects));if(mode==='unknown')throw Error('Lost native bridge response');return {action:input.action,status:mode==='unavailable'?'unavailable':mode==='denied'?'denied':mode==='failed'?'failed':'opened',message:'Clock request sent'};}throw Error('Unexpected DailyApps method');}
+          if(plugin==='DailyApps'){if(method==='surfaceInfo')return {assistant:false};if(method==='perform')return {status:'selected',transcript:'Set an alarm for 07:00; await my review.'};if(method==='clockHandoff'){fixture.effects++;localStorage.setItem('fixture-effects',String(fixture.effects));if(mode==='unknown')throw Error('Lost native bridge response');return {action:input.action,status:mode==='unavailable'?'unavailable':mode==='denied'?'denied':mode==='failed'?'failed':'opened',message:'Clock request sent'};}throw Error('Unexpected DailyApps method');}
           if (plugin === 'AlphaActionJournal') {
             fixture.journal.push(method);
             if(method==='reviewClock'){
@@ -128,7 +128,10 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     if(mode!=='transcribed')await expect(page.getByText(/Review the action below\./)).toBeVisible();
     await expect(page.getByText('clock handoff',{exact:true})).toBeVisible();
     expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);
-    if(mode==='zone')await page.evaluate(()=>{const original=Intl.DateTimeFormat.prototype.resolvedOptions;Intl.DateTimeFormat.prototype.resolvedOptions=function(){return {...original.call(this),timeZone:'Pacific/Honolulu'};};});
+    // The zone moves at the tap itself, so only the approval-time recheck can see it. Changed any
+    // earlier, the next render (the composer blurring as focus moves to the review) republishes the
+    // phone context and recovery retires the card first; that path ends disabled, asserted below.
+    if(mode==='zone')await page.evaluate(()=>document.addEventListener('keydown',event=>{if(event.key!=='Enter')return;const original=Intl.DateTimeFormat.prototype.resolvedOptions;Intl.DateTimeFormat.prototype.resolvedOptions=function(){return {...original.call(this),timeZone:'Pacific/Honolulu'};};},{capture:true,once:true}));
     if(mode==='modal'){
       await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
       await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByRole('button',{name:'New automation',exact:true}).click();await page.getByRole('button',{name:'Clock alarms',exact:true}).click();
@@ -145,7 +148,7 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     // Activate the actual review button through its keyboard path. The chat sheet
     // can still be settling after voice closes; nested text is not a stable click target.
     await page.getByRole('button',{name:/^clock handoff /}).press('Enter');
-    if(mode==='zone'){await expect(page.getByText('No longer pending',{exact:true}).first()).toBeVisible();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;}
+    if(mode==='zone'){await expect(page.getByText('No longer pending',{exact:true}).first()).toBeVisible();await expect(page.getByRole('button',{name:/^Review unavailable /})).toBeDisabled();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;}
 
     if(mode==='review-cancel'){
       await expect.poll(()=>page.evaluate(()=>(window as any).recoveryFixture.receipts)).toBe(1);

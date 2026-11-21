@@ -5,7 +5,8 @@ import { browserDevProfile } from '../browser/dev-profile';
 // Flag-off builds resolve this to an inert stub (vite.config.ts disabledModuleSource).
 import { createDevelopmentVault } from './dev-vault';
 import { createPasswordsClient, passwordsError, type PasswordsClient } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/client.ts';
-import { filterEntries, normalizeWebsite } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts';
+import { normalizeWebsite } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts';
+import { filterEntries, generatedPasswordText, passwordsFailureText, websiteInputText } from '../ui/passwords/passwords-presentation';
 import type { ElizaPasswordsPlugin, PasswordBinding, PasswordEntrySummary, PasswordsStatus } from '../../../../vendor/eliza/plugins/plugin-native-passwords/src/definitions.ts';
 import type { BrowserTabHostPlugin } from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts';
 
@@ -98,7 +99,7 @@ async function refresh() {
     if (!current()) return;
     const failure = passwordsError(error);
     if (failure.code === 'locked') expired('Locked.');
-    else { if (failure.code === 'key-invalidated') { damaged = true; locked(); } notice = failure.message; }
+    else { if (failure.code === 'key-invalidated') { damaged = true; locked(); } notice = passwordsFailureText(failure); }
   }
   notify();
 }
@@ -116,10 +117,10 @@ async function run(name: string, task: (vault: PasswordsClient, current: () => b
     confirmReset = null;
     const failure = passwordsError(error);
     if (failure.code === 'locked') expired('Locked.');
-    else if (failure.code === 'key-invalidated') { damaged = true; locked(failure.message); }
-    else if (draft && (name === 'save' || name === 'remove')) draft.error = failure.message;
-    else if (fail) fail(failure.message);
-    else notice = failure.message;
+    else if (failure.code === 'key-invalidated') { damaged = true; locked(passwordsFailureText(failure)); }
+    else if (draft && (name === 'save' || name === 'remove')) draft.error = passwordsFailureText(failure);
+    else if (fail) fail(passwordsFailureText(failure));
+    else notice = passwordsFailureText(failure);
   } finally { if (ticket === operation) { busy = ''; if (active && !document.hidden) notify(); } }
 }
 
@@ -168,21 +169,25 @@ function save(helpers: Helpers) {
   current.error = '';
   let websites: string[];
   try { websites = current.website.split(/[\s,]+/).filter(Boolean).map(normalizeWebsite); }
-  catch (error) { current.error = (error as Error).message; notify(); return; }
+  catch (error) { current.error = websiteInputText(error); notify(); return; }
   if (!current.label.trim()) { current.error = 'Enter a name.'; notify(); return; }
   if (!websites.length && !current.keep.length) { current.error = 'Add a website'; notify(); return; }
   // An empty field after expiry dropped a typed password must not quietly keep the old one.
   if (current.passwordDropped && !current.generate && !current.password) { current.error = 'Type the new password again.'; notify(); return; }
   if (!current.id && !current.generate && !current.password) { current.error = 'Password needed'; notify(); return; }
+  // The generator's range is checked here: its own refusal does not reach the form intact.
+  const generate = current.generate ? { length: current.length } : undefined;
+  const refused = generate ? generatedPasswordText(generate) : '';
+  if (refused) { current.error = refused; notify(); return; }
   const secret = current.generate ? undefined : current.password || undefined;
   // The typed password stays in the draft until the vault accepts it, so a retry sends it again.
   void run('save', async (vault, currentRun) => {
-    await vault.save({ ...(current.id ? { id: current.id } : {}), label: current.label.trim(), username: current.username, websites, keepBindings: current.keep.map(binding => binding.facet), ...(current.generate ? { generate: { length: current.length } } : secret ? { password: secret } : {}) });
+    await vault.save({ ...(current.id ? { id: current.id } : {}), label: current.label.trim(), username: current.username, websites, keepBindings: current.keep.map(binding => binding.facet), ...(generate ? { generate } : secret ? { password: secret } : {}) });
     current.password = '';
-    if (!currentRun() || draft !== current) return;
-    draft = null;
+    if (!currentRun()) return;
+    // The vault holds the entry whether or not its form is still open, so the list is read again either way.
+    if (draft === current) { draft = null; helpers.set({ page: 'password-provider' }); }
     notice = 'Saved';
-    helpers.set({ page: 'password-provider' });
     await refresh();
   });
 }

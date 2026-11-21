@@ -1,4 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
+import {seedCompletedAccessSetup} from './flag-off-android';
 // MVP-14: "Use in email" from the assistant conversation into the exact email selected in Inbox.
 // Closed fixture: a synthetic Cloud client and agent session, no account, network or mail. Any
 // provider write (prepare or dispatch) fails the test.
@@ -8,6 +9,7 @@ const review=(page:Page)=>page.getByRole('dialog',{name:'Review email suggestion
 const reply=(page:Page,text:string)=>page.locator('[data-alpha-message-text]').filter({hasText:text});
 const body=(page:Page)=>page.getByRole('textbox',{name:'Message',exact:true});
 async function setup(page:Page,theme='light',own=false,launcher=false){
+ await seedCompletedAccessSetup(page);
  // The launcher shell reserves the status bar above a full-height conversation, as the phone does.
  await page.goto('/?theme='+theme+(launcher?'&shell=launcher':''));
  await page.evaluate(async own=>{
@@ -89,8 +91,20 @@ test('system Back cancels the review, and a message from the account itself name
  expect(await page.evaluate(()=>(window as any).useInEmail.writes)).toBe(0);
 });
 
-test('a full-height conversation keeps the review below the status bar, and a set-aside draft is named as off screen',async({page})=>{
+test('a full-height conversation keeps the review below the status bar, and a reply saved on Back is named as off screen',async({page})=>{
  await setup(page,'light',false,true);await say(page,first);await expect(reply(page,first)).toBeVisible();
+ await page.evaluate(async()=>{
+  const {inboxLocalStore}=await import('/src/runtime/inbox-local-store.ts');
+  const save=inboxLocalStore.compareExchange.bind(inboxLocalStore);
+  inboxLocalStore.compareExchange=async(key,prior,value)=>{
+   const result=await save(key,prior,value);
+   if(result.status==='saved'&&key.startsWith('inbox-drafts:v1:shelf:')){
+    const shelf=value as {items:Array<{draft:{body:string}}> }|null;
+    (window as any).useInEmail.savedBodies=shelf?.items.map(row=>row.draft.body)??[];
+   }
+   return result;
+  };
+ });
  await page.getByRole('button',{name:'Expand chat',exact:true}).click();await expect(page.getByRole('button',{name:'Shrink chat',exact:true})).toBeVisible();
  const tops=()=>page.evaluate(()=>{const top=(selector:string)=>Math.round(document.querySelector(selector)!.getBoundingClientRect().top);return {panel:top('[data-alpha-layer="conversation"]'),header:top('[data-alpha-chat-header]'),cancel:document.querySelector('[aria-label="Review email suggestion"] button')?Math.round(document.querySelector('[aria-label="Review email suggestion"] button')!.getBoundingClientRect().top):-1};});
  // The full-height conversation reserves the status bar above its header.
@@ -100,9 +114,10 @@ test('a full-height conversation keeps the review below the status bar, and a se
  expect(measured.cancel).toBeGreaterThanOrEqual(measured.header);
  expect(await dialog.evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
  await dialog.getByRole('button',{name:'Insert into draft',exact:true}).click();await expect(body(page)).toHaveValue(first);
- // System Back closes the composer; the one draft for this account stays, off screen.
+ // System Back saves the reply to Drafts; it stays the thread's unfinished reply, off screen.
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
  await expect(body(page)).toHaveCount(0);await expect(page.getByText('Can you do Tuesday at 10?',{exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>(window as any).useInEmail.savedBodies as string[]|undefined)).toEqual([first]);
  await say(page,second);await expect(reply(page,second)).toBeVisible();await openReview(page,second);
  await expect(dialog.locator('[data-alpha-email-use-destination]')).toHaveText('Your unfinished reply draft (not on screen) · Re: Planning session · to sender@example.invalid');
  await expect(dialog.locator('[data-alpha-email-use-effect]')).toHaveText('This draft already has text. The suggestion is added below it; nothing is replaced.');

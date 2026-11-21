@@ -4,10 +4,10 @@ import android.os.SystemClock;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import static org.junit.Assert.*;
-/** Notes import is refused: no import control, no document activity, saved Notes unchanged. */
+/** Notes has no product import or export through documents: both refuse and saved Notes stay unchanged. */
 public final class NotesDocumentInstrumentedTest {
  private void until(String expression)throws Exception{long end=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<end){if("true".equals(WebViewTestDriver.evaluate("Boolean("+expression+")")))return;SystemClock.sleep(100);}fail("Notes document flow timed out: "+expression+"; state="+WebViewTestDriver.evaluate("JSON.stringify({view:document.documentElement.dataset.activeView,storage:document.documentElement.dataset.notesStorageState,documentHidden:document.hidden})"));}
- @Test public void importIsRefusedAndNotesAreUnchanged()throws Exception{
+ @Test public void productRefusesImportAndExport()throws Exception{
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();WebViewTestDriver.evaluate(AppNavigation.request("Notes"));until("window.__alphaTestNavigation?.status==='complete'");
    String before=NotesSecureFixture.evaluate("JSON.stringify(__notesEnvelope)");

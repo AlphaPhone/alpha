@@ -1,19 +1,19 @@
+import {readWorkflowAppState} from './workflow-app-state';
 import {layoutBrowserDialog} from './dialog-layout';
 import {noticeActionBlocked} from './notice-action';
 import {abortError} from '../lib/abort';
 import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
 type Bag=Record<string,any>;
 export type ReceiptInput={mailId:string;sent:boolean;index:number;name:string;mimeType:string;sha256:string};
-const state=(api:Bag,name:string)=>({...api.get(name),...JSON.parse(localStorage.getItem('alpha.dev.app.'+name)||'{}')});
 export async function receiptAttachment(input:ReceiptInput,api:Bag,signal:AbortSignal):Promise<MailAttachment>{
- signal.throwIfAborted();const get=()=>{const rows=state(api,'inbox')[input.sent?'sent':'mails']||[],matches=rows.filter((mail:Bag)=>String(mail.id)===input.mailId&&!mail.del);if(matches.length!==1)return;return matches[0].atts?.[input.index];};
+ signal.throwIfAborted();const get=()=>{const rows=readWorkflowAppState(api,'inbox')[input.sent?'sent':'mails']||[],matches=rows.filter((mail:Bag)=>String(mail.id)===input.mailId&&!mail.del);if(matches.length!==1)return;return matches[0].atts?.[input.index];};
  const file=structuredClone(get());if(!file?.browserAttachment)throw Error('The selected receipt is no longer in Inbox. Choose it again.');
  const checked=await reviewMailAttachment(file);signal.throwIfAborted();if(JSON.stringify(get())!==JSON.stringify(file)||checked.sha256!==input.sha256||file.name!==input.name||file.mimeType!==input.mimeType)throw Error('The receipt attachment changed. Choose it again.');
  return {name:file.name,mimeType:file.mimeType,dataBase64:file.dataBase64};
 }
 export function requestWorkflowReceipt(api:Bag,signal:AbortSignal,mailId?:string|number):Promise<ReceiptInput>{
  signal.throwIfAborted();return new Promise((resolve,reject)=>{
- const inbox=state(api,'inbox'),choices:({file:MailAttachment;mail:Bag;sent:boolean;index:number})[]=[];
+ const inbox=readWorkflowAppState(api,'inbox'),choices:({file:MailAttachment;mail:Bag;sent:boolean;index:number})[]=[];
  for(const sent of [false,true])for(const mail of inbox[sent?'sent':'mails']||[])for(const [index,file] of (mail.atts||[]).entries())if(!mail.del&&file.browserAttachment&&(mailId===undefined||!sent&&String(mail.id)===String(mailId)))choices.push({file,mail,sent,index});
  const previous=document.activeElement as HTMLElement|null,dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Workflow receipt');dialog.style.cssText='box-sizing:border-box;width:min(380px,92vw);max-height:85dvh;overflow:auto;border:0;border-radius:20px;padding:24px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.5 system-ui';
  const shell=document.querySelector('.os');if(shell){const theme=getComputedStyle(shell);for(const name of ['--bg','--fg','--s2'])dialog.style.setProperty(name,theme.getPropertyValue(name));}

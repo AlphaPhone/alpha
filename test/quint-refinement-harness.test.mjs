@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {randomUUID, createHash} from 'node:crypto';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {captureInputs, checkTraces, literal, qmap, qset, verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
+
+const preloadEnvironment = process.versions.bun ? 'BUN_OPTIONS' : 'NODE_OPTIONS';
+const preloadOption = path => process.versions.bun
+  ? `--preload=${path}` : `--import=${pathToFileURL(path).href}`;
 
 test('refinement literals preserve collection identity and reject unsupported values', () => {
   assert.equal(literal(qset([1, 2])), 'Set(1, 2)');
@@ -51,6 +55,36 @@ test('collection observations are evaluated with the actual Quint value construc
   } finally { rmSync(directory, {recursive: true, force: true}); }
 });
 
+test('application source capture retains initial model and source inputs across repeated observations', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'alpha-application-capture-'));
+  const source = join(directory, 'source.mjs');
+  // Isolate the temporary source from the shared application driver's capture map.
+  const support = await import(new URL('../specs/quint/refinement/application/support.mjs?capture='+randomUUID(), import.meta.url));
+  try {
+    writeFileSync(source, 'initial implementation bytes');
+    support.captureSources([source]);
+    const options = support.boundInputs({model: 'DevelopmentHost', sources: [source], scope: 'bounded-component',
+      assumptions: ['Synthetic application input-integrity canary.'], out: join(directory, 'result.json'),
+      traces: [{name: 'empty-runtime', expect: {'s.active': qset([])}, steps: []}]});
+    const modelInputs = captureInputs([]);
+    for (const [path, hash] of Object.entries(modelInputs)) assert.equal(options.driverHashes[path], hash);
+    const originalHash = options.driverHashes[source];
+    writeFileSync(source, 'changed implementation bytes');
+    support.captureSources([source, source]);
+    const repeated = support.boundInputs(options);
+    assert.equal(repeated.driverHashes[source], originalHash, 'Repeated observation cannot replace the original source snapshot');
+    await assert.rejects(checkTraces(repeated), /changed during observation generation/);
+    writeFileSync(source, 'initial implementation bytes');
+    const manifest = Object.keys(modelInputs).find(path => path.endsWith('/application/manifest.json'));
+    const model = Object.keys(modelInputs).find(path => path.endsWith('/DevelopmentHost.qnt'));
+    assert.ok(manifest && model);
+    for (const path of [manifest, model]) {
+      await assert.rejects(checkTraces({...options, driverHashes: {...options.driverHashes, [path]: 'changed-before-checking'}}),
+        /changed during observation generation/);
+    }
+  } finally {rmSync(directory, {recursive: true, force: true});}
+});
+
 test('Quint checks every source checkpoint and rejects a divergent observation', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'alpha-refinement-harness-'));
   const options = {model: 'VadSegmentation', sources: ['test/quint-refinement-harness.test.mjs'],
@@ -93,10 +127,10 @@ test('checker exit preserves the tool failure separately from a model mismatch',
   const directory = mkdtempSync(join(tmpdir(), 'alpha-refinement-checker-exit-'));
   const preload = join(directory, 'exit.mjs');
   const output = join(directory, 'result.json');
-  const prior = process.env.NODE_OPTIONS;
+  const prior = process.env[preloadEnvironment];
   try {
     writeFileSync(preload, 'process.exit(27);\n');
-    process.env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
+    process.env[preloadEnvironment] = preloadOption(preload);
     await assert.rejects(checkTraces({model: 'DevelopmentHost', sources: [fileURLToPath(import.meta.url)],
       scope: 'bounded-component', out: output,
       traces: [{name: 'tool-exit', expect: {'s.active': qset([])}}]}), /Quint checker failed.*exit 27/);
@@ -105,8 +139,8 @@ test('checker exit preserves the tool failure separately from a model mismatch',
     assert.equal(result.exitCode, 27);
     assert.equal(result.signal, null);
   } finally {
-    if (prior === undefined) delete process.env.NODE_OPTIONS;
-    else process.env.NODE_OPTIONS = prior;
+    if (prior === undefined) delete process.env[preloadEnvironment];
+    else process.env[preloadEnvironment] = prior;
     rmSync(directory, {recursive: true, force: true});
   }
 });
@@ -167,4 +201,40 @@ test('canonical temporary inputs survive fixture cleanup while live source remai
     if (snapshot) rmSync(snapshot, {force: true});
     rmSync(directory, {recursive: true, force: true});
   }
+});
+
+const definitionPartitionTrace={name:'definition-partition-canary',init:{name:'init'},expect:{'s.speaking':false},steps:[
+ {action:{name:'accept',args:[500]},expect:{'s.speaking':false,'s.above':1}},
+ {action:{name:'accept',args:[500]},expect:{'s.speaking':true,'s.edge':'SPEECH_START'}},
+ {action:{name:'accept',args:[777],reject:true},expect:{'s.speaking':true}},
+]};
+const partitionBodyDefinitions=text=>{const header=text.indexOf('\n',text.indexOf('\n')+1)+1;return text.slice(header,text.lastIndexOf('\n}\n')).split(/\n(?=  run trace[0-9]+Reject[0-9]+Test)/);};
+const partitionDefinitionHash=value=>createHash('sha256').update(value).digest('hex');
+test('definition partitions preserve the original positive and rejection programs and execute both',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'alpha-definition-partition-')),log=join(directory,'programs.jsonl'),preload=join(directory,'capture.mjs'),prior=process.env[preloadEnvironment];
+ writeFileSync(preload,`import fs from 'node:fs';const p=process.argv.find(v=>v.endsWith('.qnt'));if(p)fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(fs.readFileSync(p,'utf8'))+'\\n');\n`);
+ const sources=[fileURLToPath(import.meta.url),preload],options={model:'VadSegmentation',sources,driverHashes:captureInputs(sources),scope:'bounded-component',assumptions:['Synthetic checker partition guard, not product refinement.'],traces:[definitionPartitionTrace]};
+ try{
+  process.env[preloadEnvironment]=preloadOption(preload);
+  const baseline=await checkTraces({...options,out:join(directory,'default.json')});
+  const original=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);assert.equal(original.length,1);const definitions=partitionBodyDefinitions(original[0]);assert.equal(definitions.length,2);assert.equal(baseline.results[0].definitionPartitions,undefined);
+  writeFileSync(log,'');
+  const partitioned=await checkTraces({...options,definitionBatchSize:1,out:join(directory,'partitioned.json')});
+  const programs=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);assert.equal(programs.length,2);assert.deepEqual(programs.flatMap(partitionBodyDefinitions),definitions);
+  assert.equal(partitioned.passed,true);assert.equal(partitioned.traces,1);assert.equal(partitioned.checkpoints,4);assert.equal(partitioned.results[0].generatedCases,2);assert.equal(partitioned.results[0].checked,2);assert.deepEqual(partitioned.results[0].definitionPartitions.flatMap(x=>x.definitionHashes),definitions.map(partitionDefinitionHash));assert.ok(partitioned.results[0].definitionPartitions.every(x=>x.kind==='passed'&&x.checked===1));
+  const invalid=structuredClone(definitionPartitionTrace);invalid.steps[2].action.args=[500];
+  await assert.rejects(checkTraces({...options,traces:[invalid],definitionBatchSize:1,out:join(directory,'enabled-rejection.json')}),/trace mismatch|Quint checker failed/);
+  const failed=JSON.parse(readFileSync(join(directory,'enabled-rejection.json')));assert.equal(failed.passed,false);assert.equal(failed.results[0].definitionPartitions[0].kind,'passed');assert.notEqual(failed.results[0].definitionPartitions[1].kind,'passed');
+ }finally{if(prior===undefined)delete process.env[preloadEnvironment];else process.env[preloadEnvironment]=prior;rmSync(directory,{recursive:true,force:true});}
+});
+test('a checker that omits the rejection definition cannot make a partitioned trace pass',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'alpha-definition-missing-')),preload=join(directory,'omit.mjs'),prior=process.env[preloadEnvironment];
+ writeFileSync(preload,`import fs from 'node:fs';const p=process.argv.find(v=>v.endsWith('.qnt'));if(p&&fs.readFileSync(p,'utf8').includes('run trace0Reject0Test')){console.log('0 passing');process.exit(0);}\n`);
+ const sources=[fileURLToPath(import.meta.url),preload],options={model:'VadSegmentation',sources,driverHashes:captureInputs(sources),scope:'bounded-component',assumptions:['Synthetic missing-check guard; negative child simulates an incomplete checker.'],traces:[definitionPartitionTrace],definitionBatchSize:1,out:join(directory,'missing.json')};
+ try{
+  await assert.rejects(checkTraces({...options,definitionBatchSize:0}),/Invalid definition batch size/);
+  process.env[preloadEnvironment]=preloadOption(preload);
+  await assert.rejects(checkTraces(options),/Quint checker failed.*checked 1 of 2/s);
+  const failed=JSON.parse(readFileSync(options.out));assert.equal(failed.passed,false);assert.equal(failed.inputsUnchanged,true);assert.equal(failed.driverInputsBound,true);assert.equal(failed.results[0].kind,'tool-failure');assert.equal(failed.results[0].checked,1);assert.equal(failed.results[0].generatedCases,2);assert.equal(failed.results[0].definitionPartitions[0].kind,'passed');assert.equal(failed.results[0].definitionPartitions[1].checked,0);
+ }finally{if(prior===undefined)delete process.env[preloadEnvironment];else process.env[preloadEnvironment]=prior;rmSync(directory,{recursive:true,force:true});}
 });

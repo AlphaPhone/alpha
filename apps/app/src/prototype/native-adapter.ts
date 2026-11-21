@@ -4,11 +4,9 @@ import { testMocksEnabled } from '../build-flags';
 import { speechRoute, type SpeechRoute } from '../runtime/voice-selection';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type Action, type NativeResult } from '../daily';
-import { agent } from '../native/agent';
 import { connectionController, agentAvailabilityNotice, agentPendingText, type ConnectionSnapshot } from '../runtime/connection-ui';
-import { modelLabel } from '../runtime/local-agent';
 import { askAboutCapture } from './camera-adapter';
-import { broaderPageNotice, handoffGate, switchValue, SYSTEM_TILE_SETTINGS_PAGES, tileAccessibleName, tileFactsFromSystemFacts, tileStateText, type SystemTileFacts, type SystemTileKey } from '@elizaos/capacitor-system/settings';
+import { broaderPageNotice, handoffGate, switchValue, SYSTEM_TILE_SETTINGS_PAGES, tileAccessibleName, tileFactsFromSystemFacts, tileStateText, type SystemTileFacts, type SystemTileKey } from '../ui/settings/system-settings.ts';
 import { captureQuestion, locationMimeTypes } from './context-selection';
 
 type Bag = Record<string, any>;
@@ -18,9 +16,6 @@ type PrototypeNativeOptions = {
   onSelection?: (module: string, result: NativeResult, api: Bag) => void;
 };
 const systemPages = new Set(['wifi', 'bluetooth', 'mobile', 'sound', 'notifications', 'battery', 'models', 'developer', 'privacy']);
-const providerModelPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
-type ProviderStatus = { sessionId: string; label: string | null };
-let providerStatus: ProviderStatus | null = null, providerReading: string | null = null;
 /** Session whose phone action history this view read successfully; an unread history is never shown as empty. */
 let actionHistoryRead: string | null = null;
 
@@ -58,34 +53,13 @@ export function egressPrivacy(connection: EgressConnection, native = Capacitor.i
   // Only a build without the resident (the production web preview, test mocks) gets here.
   return { big: 'Offline', sub: 'AI off' };
 }
-/** Only a verified resident session on Android reports its configured hosted model, for the
- * Settings rows that show it (About and Models). */
-function residentModelLabel(connection: ConnectionSnapshot, refresh: () => void): string | null {
-  const sessionId = connection.session?.sessionId;
-  if (!sessionId || connection.kind !== 'resident' || !Capacitor.isNativePlatform()) return null;
-  if (providerStatus?.sessionId === sessionId) return providerStatus.label;
-  if (providerReading !== sessionId) {
-    providerReading = sessionId;
-    // Non-secret resident provider identity. The native method never returns the stored key.
-    void agent.providerStatus().then(status => {
-      const provider = status?.provider, model = status?.model;
-      // Copy only the two identity fields; ignore anything else a bridge might return.
-      const providerLabel = provider === 'elizacloud' ? cloudServiceName(connection.cloudAccount?.environment ?? 'production') : provider === 'cerebras' ? 'Cerebras' : null;
-      const label = status?.configured === true && providerLabel && typeof model === 'string' && providerModelPattern.test(model) ? modelLabel(providerLabel, model) : null;
-      if (providerReading === sessionId) providerStatus = { sessionId, label };
-    }).catch(() => { if (providerReading === sessionId) providerStatus = { sessionId, label: null }; })
-      .finally(() => { if (providerReading === sessionId) { providerReading = null; refresh(); } });
-  }
-  return null;
-}
 const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'workflows']);
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
-// tile-facts:begin (Alpha's tile labels and theme over the shared truthful presentation; test/shade-tile-facts.test.mjs)
 /** Only directly observed native facts. A missing key means unknown: no on/off is shown. */
 export type TileKey = SystemTileKey;
 export type TileFacts = SystemTileFacts;
-/** Alpha's tile labels; state, wording and handoff pages are the shared @elizaos/capacitor-system/settings. */
+/** Alpha's tile labels; state, wording and handoff pages are ui/settings/system-settings.ts. */
 export const tileKeys: Record<string, TileKey> = { 'Wi-Fi': 'wifi', 'Bluetooth': 'bt', 'Do not disturb': 'dnd', 'Agent can listen': 'mic', 'Location': 'loc', 'Airplane mode': 'plane', 'Flashlight': 'torch' };
 /** Settings page each tile hands off to (AlphaDevice.openSettings). The flashlight is a direct control. */
 export const tileSettingsPages: Partial<Record<TileKey, string>> = SYSTEM_TILE_SETTINGS_PAGES;
@@ -103,25 +77,30 @@ export function honestTiles(tiles: ShadeTile[], facts: TileFacts, options: { fla
     return { ...tile, on, aria: tileAccessibleName(tile.label, key, on), pressed: key === 'torch' ? on : undefined, stateText: tileStateText(key, on), css: (on ? 'background:var(--acc);color:#fff' : 'background:var(--s2);color:var(--fg)') + ';flex-direction:column;gap:3px', toggle: () => options.act(key, tile) };
   });
 }
-// tile-facts:end
-// return-gate:begin (dependency-free; test/comms-settings.test.mjs)
 /** One run per return to the app. Android reports a single return as visibilitychange, focus and
  * appResumed together, so triggers inside the window after a run are ignored until the app is left. */
-export function returnGate(windowMs = 250, now: () => number = () => Date.now()) {
+export function returnGate(windowMs = 250, now: () => number = () => performance.now()) {
   let last = -Infinity;
   return {
     returned(): boolean { const at = now(); if (at - last < windowMs) return false; last = at; return true; },
     left() { last = -Infinity; },
   };
 }
-// return-gate:end
 /** Run each time the owner comes back to the app or its window regains focus (returning from an
  * Android page, or closing Android's own quick settings), so a changed switch is read again. */
 export function watchReturnToApp(run: () => void): () => void {
-  const gate = returnGate(), check = () => { if (document.hidden) gate.left(); else if (gate.returned()) run(); };
+  const gate = returnGate();
+  let watching = true;
+  const check = () => { if (!watching) return; if (document.hidden) gate.left(); else if (gate.returned()) run(); };
   document.addEventListener('visibilitychange', check); window.addEventListener('focus', check);
   const handle = DailyApps.addListener('appResumed', check).catch(() => null);
-  return () => { document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); void handle.then(listener => listener?.remove()); };
+  return () => {
+    if (!watching) return;
+    watching = false;
+    document.removeEventListener('visibilitychange', check);
+    window.removeEventListener('focus', check);
+    void handle.then(listener => listener?.remove()).catch(() => {});
+  };
 }
 /** Keep the prototype's render tree and local navigation; replace simulated effects.
  * Install once before mounting. Component is accepted for the extraction seam but
@@ -135,6 +114,19 @@ export function installPrototypeNativeAdapters(
   const busy = new Set<string>();
   const notify = (api: Bag, message: string) => api.toast(message);
   const unavailable = (api: Bag, message = 'Unavailable') => () => notify(api, message);
+  /** Every control of a bar spec only says Unavailable; absent controls stay absent. */
+  const unavailableBar = (spec: Bag | null, api: Bag): Bag | null => {
+    if (!spec) return spec;
+    const off = (fn: unknown) => typeof fn === 'function' ? unavailable(api) : fn ?? null;
+    return {
+      ...spec,
+      closed: spec.closed && { ...spec.closed, onText: off(spec.closed.onText), submit: off(spec.closed.submit), acceptSuggestion: off(spec.closed.acceptSuggestion) },
+      left: spec.left && { ...spec.left, run: off(spec.left.run) },
+      strip: spec.strip && { ...spec.strip, actions: (spec.strip.actions || []).map((action: Bag) => ({ ...action, run: unavailable(api) })) },
+      end: off(spec.end),
+      incoming: spec.incoming && { id: spec.incoming.id, answer: unavailable(api), decline: unavailable(api), screen: off(spec.incoming.screen) },
+    };
+  };
   async function perform(module: string, api: Bag, action: Action, payload: Bag = {}) {
     if (busy.has(module)) return;
     busy.add(module);
@@ -202,7 +194,7 @@ export function installPrototypeNativeAdapters(
     if (module === 'phone') {
       if (key === 'dialCall') return () => perform(module, api, 'phone', { query: text(api.get('phone').dial) });
       if (key === 'call' || key === 'play') return native('phone');
-      if (['accept', 'decline', 'endCall', 'endScreen', 'alphaAnswer', 'del'].includes(key) || path.includes('controls.') || path.includes('dkeys.')) return unavailable(api, 'Use Phone app');
+      if (['accept', 'decline', 'endCall', 'endScreen', 'alphaAnswer', 'toggleNotes', 'del'].includes(key) || path.includes('controls.') || path.includes('dkeys.')) return unavailable(api, 'Use Phone app');
       if (key === 'send') return native('messages', { body: text(row.text) });
     }
     if (module === 'messages') {
@@ -324,11 +316,8 @@ export function installPrototypeNativeAdapters(
     const info = (label: string, val: string): Bag => ({ kInfo: true, label, val, hasVal: !!val, noAB: true });
     const nav = (label: string, go: () => void, aria = label, lucide = ''): Bag => ({ kNav: true, label, lbl: aria, chev: true, noAB: true, go, ...(lucide ? { lucide } : {}) });
     const repaint = (patch: Bag) => { try { api.set(patch); } catch { /* view closed */ } };
-    const model = residentModelLabel(connection, () => repaint({ providerReadAt: Date.now() }));
     for (const page of out.stack) {
       if (!page || !Array.isArray(page.groups)) continue;
-      if ((page.title === 'Models' || page.title === 'About') && model)
-        for (const group of page.groups) for (const row of group.rows || []) if (row.label === 'Inference model' || row.label === 'AI model') { row.val = model; row.hasVal = true; }
       if (st.page === 'privacy' && st.log && page.title === 'Activity') {
         const sessionId = connection.session?.sessionId ?? null;
         // Reading history is an explicit step; its progress and errors appear in the connection panel.
@@ -376,7 +365,7 @@ export function installPrototypeNativeAdapters(
   }
   for (const [module, definition] of Object.entries(views)) {
     if (!externalModules.has(module) || typeof definition.render !== 'function') continue;
-    const render = definition.render, actions = definition.actions, leave = definition.onLeave;
+    const render = definition.render, actions = definition.actions, leave = definition.onLeave, bar = definition.bar, callBar = definition.callBar;
     definition.render = (state: Bag, api: Bag) => {
       // Rendering cannot start a fake phone call, navigation timer, capture or booking.
       const renderingApi = ['phone', 'browser', 'camera', 'maps'].includes(module)
@@ -384,7 +373,12 @@ export function installPrototypeNativeAdapters(
       return walk(render(state, renderingApi), module, state, api);
     };
     if (actions) definition.actions = Object.fromEntries(Object.keys(actions).map(key => [key, (_card: Bag, api: Bag) => notify(api, 'Unavailable')]));
+    // AP-16: a reference view's bar (runtime/comms-bar.ts) keeps its shape, but every control it
+    // offers only says it is unavailable. fit() only measures, so it stays.
+    if (typeof bar === 'function') definition.bar = (state: Bag, api: Bag) => unavailableBar(bar(state, api), api);
     if (['phone', 'camera', 'maps', 'workflows'].includes(module)) definition.ongoing = () => null;
+    // The reference phone never has a call here; the image's calls come from Telecom (runtime/ongoing-call.ts).
+    if (callBar) definition.callBar = () => null;
     if (leave && ['phone', 'camera', 'maps'].includes(module)) definition.onLeave = () => {};
   }
   const settings = views.settings;

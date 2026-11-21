@@ -2,6 +2,7 @@ import {createInlineModal} from '../runtime/inline-modal';
 import {currentClockTimeZone,buildClockRequest,describeClockDays,CLOCK_DAY_NAMES,type ClockDay} from '../runtime/clock-contract';
 import { DailyApps, type ClockRequest, type ClockResult } from '../daily';
 import { testMocksEnabled } from '../build-flags';
+import {clockResultText} from '../ui/clock/clock-handoff-presentation';
 import {createClockHandoffHistory,type ClockHandoffSnapshot} from '../runtime/clock-handoff-history';
 import {secureConnectionStore} from '../runtime/native-connection';
 import {deviceTimeZone} from '../lib/civil-date';
@@ -82,7 +83,7 @@ export function installClockAdapter(Component:{prototype:ShellPrototype},views:V
   try {snapshot=await history.save(retained,{id,action:request.action,status:result.status,at:new Date().toISOString()});}
   catch {snapshot=null;}
   busy=false;
-  if(token===generation){message=result.message;publish();}
+  if(token===generation){message=clockResultText(result);publish();}
   else if(open&&!document.hidden)void restore();
  };
  views.workflows.render=(state,api)=>{

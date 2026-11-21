@@ -4,6 +4,7 @@ import {registerPlugin} from '../platform-plugins';
 import type {AlphaNoteDocumentsPlugin} from '../native/alpha-note-documents';
 import {filesIndex} from './files-index';
 import {DailyApps} from '../daily';
+import {scanPdfErrorText} from '../ui/documents/scan-pdf-messages';
 const documents=registerPlugin<Pick<AlphaNoteDocumentsPlugin,'exportPdf'>>('AlphaNoteDocuments',{
  web:()=>import('../runtime/browser-note-documents').then(module=>new module.BrowserNoteDocuments()),
 });
@@ -15,13 +16,13 @@ export function createScanPdf(input:Blob|Blob[],signal:AbortSignal,textLayers?:S
  return createPdf({title:'Alpha scan',creator:'Alpha Phone'},input,signal,textLayers);
 }
 export class ScanPdfExportError extends Error {}
-/** Conversion failures happened before any export request, so the real reason is
- * shown and retry stays available. Only a failed or unknown export call is
+/** Conversion failures happened before any export request, so the reason (in Alpha's words,
+ * or 'PDF failed' for an unknown one) is shown and retry stays available. Only a failed or unknown export call is
  * uncertain: a document may already exist, so retry stays locked. */
 export function scanPdfFailure(error:unknown):{message:string;retry:boolean}{
  if(error instanceof ScanPdfExportError)return {message:'Export unconfirmed',retry:false};
  if(error instanceof DOMException&&error.name==='AbortError')return {message:'Cancelled',retry:true};
- return {message:error instanceof Error&&error.message.trim()?error.message.trim().slice(0,300):'PDF failed',retry:true};
+ return {message:scanPdfErrorText(error),retry:true};
 }
 let systemPickers=0;
 /** Android covers the WebView while a system picker or document chooser is open,

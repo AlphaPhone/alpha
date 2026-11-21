@@ -2,6 +2,8 @@ import type {DomainRecovery} from '../browser/domain-document';
 import {captureDevicePreferences,cachedDevicePreferences,editDevicePreferences,initializeDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import {Capacitor} from '@capacitor/core';
 import {browserLocalAgentEnabled,saveNativeGoogleAgentAccess} from './local-agent';
+import {BROWSER_RESIDENT_LAUNCHED,browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall} from './browser-cloud-resident';
+import {cloudCredentialStore} from './native-connection';
 
 /** Owner switches for agent writes through Google. Off never disconnects or revokes Google; reads keep working. */
 export type GoogleAgentAccess={gmailChanges:boolean;calendarEdits:boolean};
@@ -29,11 +31,20 @@ async function publishSavedGoogleAgentAccess(){
  const saved=await readDevicePreferences();
  const access={gmailChanges:saved.agentGmailChanges,calendarEdits:saved.agentCalendarEdits};
  if(native){await saveNativeGoogleAgentAccess(access);return;}
+ if(browserCloudResidentEnabled){
+  const credential=await cloudCredentialStore.read(browserCloudResidentEnvironment);
+  if(!credential?.credentialId)return;
+  const applied=await browserResidentCall('residentGoogleGmailAccess',credential.credentialId,access.gmailChanges);
+  if(applied?.gmailChanges!==access.gmailChanges)throw Error('Gmail access was not confirmed.');
+  return;
+ }
  await fetch(GOOGLE_AGENT_ACCESS_PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(access)}).catch(()=>{});
 }
 export function publishGoogleAgentAccess(){
  return withGoogleAccessLock(publishSavedGoogleAgentAccess);
 }
+// A relaunched development resident forgets the owner's Gmail switch; hand it the saved one again.
+if(browserCloudResidentEnabled&&typeof window!=='undefined')window.addEventListener(BROWSER_RESIDENT_LAUNCHED,()=>{void publishGoogleAgentAccess().catch(()=>{});});
 export async function setGoogleAgentAccess(change:Partial<GoogleAgentAccess>,guard?:{current():boolean;expectedCalendarEdits:boolean;receipt:DomainRecovery}){
  return withGoogleAccessLock(async()=>{
   let before:GoogleAgentAccess|undefined;

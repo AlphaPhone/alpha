@@ -4,7 +4,6 @@ import android.content.Context;
 import ai.eliza.voice.RecordingPcm;
 import ai.eliza.voice.CartesiaSpeech;
 import ai.eliza.plugins.agent.runtime.NativeProviderSlot;
-import ai.eliza.plugins.passwords.PasswordSurfaces;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;

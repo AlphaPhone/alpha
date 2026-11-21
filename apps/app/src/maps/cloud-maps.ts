@@ -37,7 +37,19 @@ const maps = createCloudMaps(() => captureMapsSession(mapsSession), configureMap
   return async(z,x,y,signal)=>{const bytes=await sameAccount(owner).client.mapsTile(z,x,y,signal);sameAccount(owner);signal.throwIfAborted();return bytes;};
  },
 });
-export const { initializeCloudMaps, cloudMapsCoverage, cloudMapsDiagnostics } = maps;
+export const { cloudMapsCoverage, cloudMapsDiagnostics } = maps;
+let initializing: Promise<void> | undefined;
+/** Background setup, opening Maps and retry share one coverage request for the current account. */
+export function initializeCloudMaps(): Promise<void> {
+ if (initializing) return initializing;
+ const attempt: Promise<void> = Promise.resolve().then(() => {
+  if (initializing === attempt) return maps.initializeCloudMaps();
+ }).finally(() => {
+  if (initializing === attempt) initializing = undefined;
+ });
+ initializing = attempt;
+ return attempt;
+}
 let basemapCoverage:CloudMapsCoverage|undefined,basemap:CloudMapsBasemap|undefined;
 /** Keep one plane identity for the current coverage/account, retiring it when coverage changes. */
 export function cloudMapsBasemap():CloudMapsBasemap|undefined {
@@ -51,6 +63,9 @@ connectionController.subscribe(() => {
  const changed = previous?.sessionId !== next?.sessionId || previous?.credentialId !== next?.credentialId;
  previous = next;
  // A rebuilt client for the same session and credential keeps the provider and its guidance; requests resolve the client per call.
- // Retry requires an explicit search; a new account never inherits automatic rerouting.
- if (changed && maps.cloudMapsDiagnostics().configured) maps.retireCloudMaps();
+ if (changed) {
+  initializing = undefined;
+  // Retry requires an explicit search; a new account never inherits automatic rerouting.
+  if (maps.cloudMapsDiagnostics().configured) maps.retireCloudMaps();
+ }
 });

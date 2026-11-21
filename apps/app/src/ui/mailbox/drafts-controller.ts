@@ -1,0 +1,2406 @@
+/**
+ * Headless controller for account-bound local email drafts: compose, reply,
+ * reply-all and forward, recipients, attachments, a shelf of set-aside drafts,
+ * reviewed assistant suggestions, moving a new email to another From account,
+ * provider-draft editing and cleanup after a provider-confirmed send.
+ *
+ * Drafts stay on the device in the host's compare-and-exchange storage
+ * (encrypted on a phone), keyed by the owner and the exact Gmail grant, and are
+ * never sent by this controller: Send and provider-draft saves go to the
+ * reviewed effect controller. A stale or conflicting copy is never overwritten.
+ *
+ * Slot names (`inbox-drafts:v1:<owner>` and `inbox-drafts:v1:shelf:<sha256>`)
+ * and record layouts are installed-data identifiers.
+ *
+ * Alpha owns this controller and its composer text, including the wording of
+ * every attachment refusal (`attachmentRefusalText`, `outgoingAttachmentRefusal`).
+ * The attachment limits and checks, the refusal type, the digest, the
+ * retained-copy record and the mailbox types stay upstream
+ * (`@elizaos/plugin-inbox/mailbox/*`).
+ */
+import {
+  attachmentBytes,
+  checkOutgoingAttachments,
+  type MailAttachmentReviewer,
+  type OutgoingMailAttachment,
+  outgoingAttachmentLimits,
+} from "@elizaos/plugin-inbox/mailbox/attachments";
+import { sha256Hex } from "@elizaos/plugin-inbox/mailbox/digest";
+import { attachmentRefused } from "@elizaos/plugin-inbox/mailbox/failures";
+import type { InboxUnsaved } from "@elizaos/plugin-inbox/mailbox/retained-draft";
+import type { GmailMessage } from "@elizaos/plugin-inbox/mailbox/types";
+import { readFileAsBase64 } from "../utils/image-attachment";
+
+// biome-ignore lint/suspicious/noExplicitAny: proposals and composer events are host data validated here.
+type Bag = Record<string, any>;
+
+/** Content handed to a new composer: shared from another app or moved to another From account. */
+export type ComposePrefill = {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+  attachments?: OutgoingMailAttachment[];
+  status?: string;
+  /** Set for an email moved by the From switcher: a refusal is reported by the caller, which returns it. */
+  moved?: boolean;
+};
+
+/** Source attachments a forward carries, bound to the selected message and its historyId. */
+export type ForwardSource = {
+  messageId: string;
+  historyId: string;
+  parts: { partId: string; name: string; mimeType: string; size: number }[];
+};
+
+export type LocalMailDraft = {
+  version: 1;
+  id: string;
+  revision: string;
+  owner: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  attachments?: OutgoingMailAttachment[];
+  forward?: ForwardSource;
+  provider?: { draftId: string; providerDigest: string };
+  subject: string;
+  body: string;
+  mode?: "compose" | "reply" | "reply-all" | "forward";
+  reply?: { messageId: string; threadId: string };
+  /**
+   * Set on a saved draft whose local draft was later sent with different text:
+   * an earlier version of a sent email. It is kept, labelled, and reused only
+   * after a confirmation.
+   */
+  earlierThanSent?: true;
+};
+
+/** The destination of a reviewed assistant suggestion, as shown to the user before inserting it. */
+export type SuggestionTarget =
+  | { ready: false; reason: string; token: string }
+  | {
+      ready: true;
+      kind: "draft" | "reply" | "new";
+      append: boolean;
+      reply: boolean;
+      subject: string;
+      to: string[];
+      from?: string;
+      /** A draft that was set aside: it exists but its composer is not on screen. */
+      aside?: boolean;
+      /** A set-aside draft that is not a reply to the message on screen. */
+      elsewhere?: boolean;
+      /** Characters of suggestion text this destination can still take. */
+      room: number;
+      token: string;
+    };
+
+type Policy = { maximumOutgoing: number; maximumTotalBytes: number };
+
+/**
+ * A refusal Alpha words itself; attach() and attachReviewed() show its message as is, and so does
+ * `attachmentRefusalText` (a Files read that checks the selection itself throws one too).
+ * Anything else that stops an attachment is worded by `attachmentRefusalText`.
+ */
+export class AttachmentNotice extends Error {}
+
+const MIB = 1024 * 1024;
+const ATTACHMENT_TOO_LARGE =
+  "This file is larger than 5 MiB. Choose a file up to 5 MiB.";
+const ATTACHMENT_TYPES =
+  "Attach a PDF, PNG, JPEG, WebP or UTF-8 TXT file up to 5 MiB. Its content must match its type.";
+const ATTACHMENT_REFUSED = `This file can't be attached. ${ATTACHMENT_TYPES}`;
+const ATTACHMENT_UNAVAILABLE = "Attachment unavailable";
+
+/**
+ * Alpha's sentence for each known refusal from the file pickers and the shared attachment review,
+ * keyed by the reviewed text they raise. That text is never shown itself.
+ */
+const ATTACHMENT_REFUSALS: ReadonlyMap<string, string> = new Map([
+  // plugin-files `reviewMailAttachment` (typed as a refusal by runtime/inbox-attachment.ts).
+  [
+    "Invalid attachment name or encoding",
+    "This file's name or encoding can't be attached. Rename it or choose another file.",
+  ],
+  ["Attachment exceeds 5 MiB", ATTACHMENT_TOO_LARGE],
+  [
+    "Supported attachments: PDF, PNG, JPEG, WebP and UTF-8 TXT up to 5 MiB. File content must match its type.",
+    ATTACHMENT_TYPES,
+  ],
+  // plugin-files `BrowserFiles.attachment`, read by the web picker (browser/mail-attachments.ts).
+  ["Choose a file up to 5 MiB.", ATTACHMENT_TOO_LARGE],
+  [
+    "Select this file again.",
+    "The selected file is no longer available. Select it again.",
+  ],
+  // Android `AlphaMailAttachmentsPlugin.readSelected`.
+  [
+    "Select a valid PDF, PNG, JPEG, WebP or UTF-8 TXT file up to 5 MiB. Selection cancelled or unavailable.",
+    "Select a PDF, PNG, JPEG, WebP or UTF-8 TXT file up to 5 MiB. The selection was cancelled or is no longer available.",
+  ],
+  [
+    "Attachment service closed.",
+    "Attaching stopped before the file was read. Attach it again.",
+  ],
+]);
+
+/**
+ * What the composer shows when a file cannot be attached: the controller's own notice, a file
+ * larger than allowed (`too-large` from either picker), a known picker or review refusal, any other
+ * refusal of the file itself, a cancelled read, and otherwise "Attachment unavailable".
+ */
+export function attachmentRefusalText(error: unknown): string {
+  if (error instanceof AttachmentNotice) return error.message;
+  const value = (error ?? {}) as {
+    code?: unknown;
+    message?: unknown;
+    name?: unknown;
+  };
+  if (value.code === "too-large") return ATTACHMENT_TOO_LARGE;
+  const known =
+    typeof value.message === "string" &&
+    ATTACHMENT_REFUSALS.get(value.message);
+  if (known) return known;
+  if (attachmentRefused(error)) return ATTACHMENT_REFUSED;
+  if (value.name === "AbortError")
+    return "Attaching was cancelled. Nothing was added.";
+  return ATTACHMENT_UNAVAILABLE;
+}
+
+/** Carry the composer-safe refusal text across a file reader or reviewer rejection. */
+export function rethrowAttachmentRefusal(error: unknown): never {
+  throw new Error(attachmentRefusalText(error));
+}
+
+/**
+ * Alpha's sentence when an outgoing list breaks the shared limits (`checkOutgoingAttachments`):
+ * the file count, two names that match (forwarded originals included), the combined size, or
+ * the file count with the forwarded originals. Null when the list is within them.
+ */
+export function outgoingAttachmentRefusal(
+  files: readonly { name: string; dataBase64: string }[],
+  policy: Policy,
+  forwarded: readonly { name: string; size: number }[] = [],
+): string | null {
+  const maximum = Math.min(
+    policy.maximumOutgoing,
+    outgoingAttachmentLimits.maximumFiles,
+  );
+  if (files.length > maximum)
+    return maximum === 1
+      ? "This account accepts one attachment per email. Remove it to choose another."
+      : `Attach at most ${maximum} files.`;
+  const names = [...files, ...forwarded].map((file) =>
+    file.name.toLowerCase(),
+  );
+  if (new Set(names).size !== names.length)
+    return "Two attachments have the same name. Rename one to attach both.";
+  const total =
+    files.reduce((sum, file) => sum + attachmentBytes(file), 0) +
+    forwarded.reduce((sum, file) => sum + file.size, 0);
+  const cap = Math.min(
+    policy.maximumTotalBytes,
+    outgoingAttachmentLimits.maximumTotalBytes,
+  );
+  if (total > cap)
+    return `Attachments exceed ${Math.round(cap / MIB)} MiB in total. Remove one or choose a smaller file.`;
+  if (files.length + forwarded.length > outgoingAttachmentLimits.maximumFiles)
+    return `Attach at most ${outgoingAttachmentLimits.maximumFiles} files including forwarded ones.`;
+  return null;
+}
+
+/** Admits an outgoing list in Alpha's words, then confirms it with the shared rule. */
+function admitOutgoingAttachments(
+  files: readonly { name: string; dataBase64: string }[],
+  policy: Policy,
+  forwarded: readonly { name: string; size: number }[] = [],
+) {
+  const refusal = outgoingAttachmentRefusal(files, policy, forwarded);
+  if (refusal) throw new AttachmentNotice(refusal);
+  try {
+    checkOutgoingAttachments(files, policy, forwarded);
+  } catch {
+    throw new AttachmentNotice(
+      "These attachments can't be sent together. Remove one and try again.",
+    );
+  }
+}
+
+/** The account-scoped recovery copy of the email being edited (host-owned, durable). */
+interface RetainedMailEdits {
+  readonly ready: Promise<unknown>;
+  readonly available: boolean;
+  /** The retained copy as stored, or null when there is none or it cannot be read. */
+  peek(): InboxUnsaved | null;
+  readonly conflict: boolean;
+  /** The exact host conflict version, when available. */
+  readonly conflictVersion?: string;
+  readonly error: boolean;
+  readonly status: string;
+  edit(value: InboxUnsaved): void;
+  resume(): void;
+  replace(): void;
+  retry(): unknown;
+  /** A review may retire while the host waits to clear the copy. */
+  clear(current?: () => boolean): Promise<void>;
+  recover(current: unknown): void;
+  retire(): void;
+}
+
+/** The signed-in managed-service identity the drafts belong to. */
+interface MailDraftsIdentity {
+  /** The current Cloud session; absent when signed out. */
+  sessionId?: string | null;
+  account: {
+    environment: string;
+    userId: string;
+    organizationId?: string | null;
+    sessionId?: string | null;
+  } | null;
+}
+
+/** Host file selection for an outgoing attachment. The bytes are reviewed before they join a draft. */
+interface MailAttachmentPicker {
+  select(): Promise<{ status: string; selectionId?: string; name?: string }>;
+  read(
+    selectionId: string,
+  ): Promise<OutgoingMailAttachment & { size: number; sha256: string }>;
+  forget(selectionId: string): Promise<unknown>;
+}
+
+export interface MailDraftsProvider {
+  prepare(
+    proposal: Bag,
+    source?: {
+      draftId: string;
+      savedRevision?: string;
+      providerDraft?: { draftId: string; providerDigest: string };
+    },
+    mode?: "send-from-composer",
+  ): Promise<void>;
+  capabilities(): {
+    send: boolean;
+    providerDrafts: boolean;
+    from?: string;
+    forwardAttachments?: boolean;
+    attachmentPolicy?: Policy;
+  } | null;
+}
+
+interface MailDraftConfirmation {
+  title: string;
+  confirmLabel: string;
+  signal: AbortSignal;
+  current(): boolean;
+}
+
+interface MailDraftsControllerOptions {
+  publish(): void;
+  toast(text: string): void;
+  provider?: MailDraftsProvider;
+  identity(): MailDraftsIdentity;
+  store: {
+    read<T>(slot: string): Promise<T | null>;
+    compareExchange(
+      slot: string,
+      expected: unknown,
+      value: unknown,
+    ): Promise<{ status: string }>;
+  };
+  /** Opens the recovery copy for one owner. `restore` applies a resumed copy. */
+  retained(
+    owner: string,
+    publish: () => void,
+    restore: (value: InboxUnsaved) => void,
+  ): RetainedMailEdits;
+  /** An explicit yes/no question, cancelled when its draft or owner retires. */
+  confirm(
+    message: string,
+    review: MailDraftConfirmation,
+  ): boolean | Promise<boolean>;
+  /** Whether the host is still showing the mailbox that can admit the review. */
+  reviewActive?(): boolean;
+  attachments?: MailAttachmentPicker;
+  chooseAttachment?(current: () => boolean): Promise<File | undefined>;
+  reviewAttachment: MailAttachmentReviewer;
+}
+
+const DRAFT_BYTES = 8 * 1024 * 1024;
+const BODY_LIMIT = 64000;
+
+const forwardValid = (f: unknown) => {
+  if (f === undefined) return true;
+  const value = f as ForwardSource | null;
+  return (
+    !!value &&
+    typeof value.messageId === "string" &&
+    typeof value.historyId === "string" &&
+    Array.isArray(value.parts) &&
+    value.parts.length <= outgoingAttachmentLimits.maximumFiles &&
+    value.parts.every(
+      (p) =>
+        p &&
+        typeof p.partId === "string" &&
+        typeof p.name === "string" &&
+        typeof p.mimeType === "string" &&
+        typeof p.size === "number",
+    )
+  );
+};
+
+/** A send never deletes the Gmail draft the email was opened from. */
+const GMAIL_DRAFT_KEPT = "Sent. The Gmail draft you opened is still in Drafts.";
+
+/** One literal address: no display names, lists or whitespace. */
+export const literalMailAddress = (v: string): boolean =>
+  v.length <= 254 && /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(v);
+
+/** A saved local draft of this owner, within the composer bounds. */
+function validLocalMailDraft(
+  v: unknown,
+  owner: string,
+): v is LocalMailDraft {
+  const d = v as Bag | null;
+  return (
+    !!d &&
+    d.version === 1 &&
+    d.owner === owner &&
+    typeof d.id === "string" &&
+    typeof d.revision === "string" &&
+    Array.isArray(d.to) &&
+    d.to.length <= 20 &&
+    d.to.every(
+      (a: unknown) => typeof a === "string" && literalMailAddress(a),
+    ) &&
+    [d.cc || [], d.bcc || []].every(
+      (list: unknown) =>
+        Array.isArray(list) &&
+        list.length <= 20 &&
+        list.every((a) => typeof a === "string" && literalMailAddress(a)),
+    ) &&
+    typeof d.subject === "string" &&
+    d.subject.length <= 998 &&
+    !/[\r\n]/.test(d.subject) &&
+    typeof d.body === "string" &&
+    d.body.length <= BODY_LIMIT &&
+    (!d.reply ||
+      (typeof d.reply.messageId === "string" &&
+        typeof d.reply.threadId === "string")) &&
+    (d.attachments === undefined ||
+      (Array.isArray(d.attachments) &&
+        d.attachments.length <= outgoingAttachmentLimits.maximumFiles)) &&
+    forwardValid(d.forward) &&
+    (d.earlierThanSent === undefined || d.earlierThanSent === true)
+  );
+}
+
+/** Local encrypted drafts remain separate from explicitly reviewed provider operations. */
+/** Autosave progress the composer does not show; any other status is news to the owner. */
+const ROUTINE_DRAFT_STATUS = new Set([
+  "",
+  "Unsaved local draft",
+  "Saved locally on this device",
+  "Draft saved",
+  "Draft on this device",
+  "Checking local draft…",
+]);
+
+export function createMailDraftsController(
+  options: MailDraftsControllerOptions,
+) {
+  const { publish, toast, provider, store } = options;
+  /** Servers without the multi-attachment policy accept one file. */
+  const policy = (): Policy =>
+    provider?.capabilities()?.attachmentPolicy || {
+      maximumOutgoing: 1,
+      maximumTotalBytes: outgoingAttachmentLimits.maximumTotalBytes,
+    };
+  const forwardProposal = (d: LocalMailDraft) =>
+    d.forward?.parts.length
+      ? {
+          forwardAttachments: {
+            messageId: d.forward.messageId,
+            historyId: d.forward.historyId,
+            partIds: d.forward.parts.map((p) => p.partId),
+          },
+        }
+      : {};
+  let reviewRevision = 0;
+  let reviewVisit = 0;
+  let pendingReview: AbortController | undefined;
+  let owner = "",
+    account = "",
+    session = "",
+    epoch = 0,
+    saved: LocalMailDraft | null = null,
+    draft: LocalMailDraft | null = null;
+  type Shelved = { draft: LocalMailDraft; toQ: string };
+  type Shelf = { version: 1; owner: string; items: Shelved[] };
+  let shelf: Shelf | null = null,
+    shelfKey = "";
+  const shelfSlot = () => `inbox-drafts:v1:shelf:${shelfKey}`;
+  const shelfDraft = (d: LocalMailDraft) =>
+    validLocalMailDraft({ ...d, to: [], cc: [], bcc: [] }, owner) &&
+    [d.to, d.cc || [], d.bcc || []].every(
+      (list) =>
+        Array.isArray(list) &&
+        list.length <= 20 &&
+        list.every((a) => typeof a === "string" && a.length <= 254),
+    );
+  const shelfValid = (v: unknown): v is Shelf => {
+    const value = v as Shelf | null;
+    return (
+      !!value &&
+      value.version === 1 &&
+      value.owner === owner &&
+      Array.isArray(value.items) &&
+      value.items.length <= 50 &&
+      new Set(value.items.map((row: Shelved) => row?.draft?.id)).size ===
+        value.items.length &&
+      value.items.every(
+        (row: Shelved) =>
+          row &&
+          shelfDraft(row.draft) &&
+          typeof row.toQ === "string" &&
+          row.toQ.length <= 4096,
+      )
+    );
+  };
+
+  async function saveShelf(next: Shelf) {
+    const token = epoch,
+      expected = shelf;
+    const value = next.items.length ? next : null;
+    const receipt = await store.compareExchange(shelfSlot(), expected, value);
+    if (token !== epoch) throw Error("Draft account changed");
+    if (receipt.status !== "saved")
+      throw Error(
+        "Drafts changed in another window. Reload before continuing.",
+      );
+    shelf = value;
+  }
+
+  const pendingEdits = new Map<
+    string,
+    {
+      draft: LocalMailDraft;
+      toQ: string;
+      baseRevision: string | null;
+      persist?: boolean;
+    }
+  >();
+  let retained: RetainedMailEdits | null = null,
+    baseRevision: string | null = null,
+    staleBase = false;
+  let loading = false,
+    ready = false,
+    busy = false,
+    open = false,
+    toQ = "",
+    label = "",
+    status = "",
+    recipientDetails = false;
+  let fromSwitch: { count(): number; cycle(): void } | null = null;
+  /**
+   * Cc and Bcc as typed, for the draft they were typed in. The draft holds the
+   * parsed lists; the typed text is shown while it still parses to them, so a
+   * comma or space being typed is not removed.
+   */
+  let typed: { id: string; cc: string; bcc: string } | null = null;
+  const addressList = (value: string) =>
+    value
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  const typedList = (current: LocalMailDraft, key: "cc" | "bcc") =>
+    typed?.id === current.id &&
+    same(addressList(typed[key]), current[key] || [])
+      ? typed[key]
+      : (current[key] || []).join(", ");
+  function typeList(key: "cc" | "bcc", value: string) {
+    if (busy || !draft) return;
+    typed = {
+      id: draft.id,
+      cc: typedList(draft, "cc"),
+      bcc: typedList(draft, "bcc"),
+      [key]: value,
+    };
+    draft[key] = addressList(value);
+    status = "Unsaved local draft";
+    persist();
+    publish();
+  }
+  /** A provider-confirmed send waiting for this account's local copies to load. */
+  let sent: {
+      draftId: string;
+      proposal: Bag;
+      account: string;
+      savedRevision?: string;
+      gmailDraft?: true;
+    } | null = null,
+    earlier = "";
+
+  function liveOwner(grant: string) {
+    const { account: identity, sessionId } = options.identity();
+    const key =
+      identity && sessionId === identity.sessionId && grant
+        ? JSON.stringify([
+            identity.environment,
+            identity.userId,
+            identity.organizationId || "",
+            grant,
+          ])
+        : "";
+    return { key, sessionId };
+  }
+
+  function retireReview() {
+    const pending = pendingReview;
+    pendingReview = undefined;
+    pending?.abort();
+  }
+
+  function captureVisit() {
+    const token = epoch;
+    const visit = reviewVisit;
+    return () => {
+      if (
+        epoch !== token ||
+        reviewVisit !== visit ||
+        !ready ||
+        !owner ||
+        !session ||
+        options.reviewActive?.() === false
+      )
+        return false;
+      const live = liveOwner(account);
+      return live.key === owner && live.sessionId === session;
+    };
+  }
+
+  async function reviewDraft(
+    message: string,
+    title: string,
+    confirmLabel: string,
+    current: () => boolean,
+  ) {
+    if (pendingReview || !current()) return false;
+    const pending = new AbortController();
+    pendingReview = pending;
+    const admitted = () =>
+      pendingReview === pending && !pending.signal.aborted && current();
+    try {
+      const approved = await options.confirm(message, {
+        title,
+        confirmLabel,
+        signal: pending.signal,
+        current: admitted,
+      });
+      return approved === true && admitted();
+    } catch {
+      return false;
+    } finally {
+      if (pendingReview === pending) pendingReview = undefined;
+    }
+  }
+
+  const slot = () => `inbox-drafts:v1:${owner}`;
+  const same = (a: unknown, b: unknown) =>
+    JSON.stringify(a) === JSON.stringify(b);
+  /** True only when a local copy holds exactly the content the provider confirmed as sent. */
+  const sentContent = (d: Bag, p: Bag, withForward: boolean) =>
+    (d.mode || (d.reply ? "reply" : "compose")) === p.mode &&
+    same(d.to, p.to) &&
+    same(d.cc || [], p.cc || []) &&
+    same(d.bcc || [], p.bcc || []) &&
+    d.subject === p.subject &&
+    d.body === p.bodyText &&
+    same(d.attachments || [], p.attachments || []) &&
+    d.reply?.messageId === p.replyMessageId &&
+    (!withForward ||
+      same(
+        forwardProposal(d as LocalMailDraft),
+        p.forwardAttachments
+          ? { forwardAttachments: p.forwardAttachments }
+          : {},
+      ));
+  /**
+   * The saved draft is an earlier version of a sent email (marked in storage,
+   * or in this session when the mark could not be written).
+   */
+  const earlierVersion = () =>
+    !!saved && (saved.earlierThanSent === true || saved.id === earlier);
+  /** The saved draft as an editable copy; the earlier-version mark stays with the saved copy. */
+  const fromSaved = () => {
+    const { earlierThanSent: _earlier, ...copy } = structuredClone(
+      saved as LocalMailDraft,
+    );
+    return copy as LocalMailDraft;
+  };
+
+  // The retained recovery record does not yet admit forwarded source
+  // attachments, so its copy omits them; the explicitly saved local draft keeps them.
+  function persist() {
+    reviewRevision++;
+    retireReview();
+    if (draft) {
+      const { forward: _forward, ...copy } = structuredClone(draft);
+      // Legacy saved references can include readback-only fields such as messageId.
+      // The retained format keeps only the stable provider replacement identity.
+      if (copy.provider) {
+        copy.provider = {
+          draftId: copy.provider.draftId,
+          providerDigest: copy.provider.providerDigest,
+        };
+      }
+      retained?.edit({ version: 1, owner, baseRevision, draft: copy, toQ });
+    }
+  }
+
+  function restoreRetained(value: InboxUnsaved) {
+    retireReview();
+    draft = structuredClone(value.draft) as LocalMailDraft;
+    toQ = value.toQ;
+    baseRevision = value.baseRevision;
+    staleBase = baseRevision !== (saved?.revision || null);
+    open = true;
+    status = staleBase
+      ? "The saved local draft changed. Review the latest saved copy before saving these edits."
+      : draft?.mode === "forward"
+        ? "Retained forward edits restored without any original attachments; forward the message again to include them. Review before sending or saving to Gmail."
+        : "Retained email edits restored. Review before sending or saving to Gmail.";
+    publish();
+  }
+
+  /**
+   * Removes the local copies of the draft a confirmed send came from: the open
+   * composer, the retained unsaved copy and the saved local draft. Each is
+   * removed only when it is that draft (same id) and still holds exactly the
+   * sent content; an edited or different copy is left alone. When any copy of
+   * that draft was edited after the send, or a copy cannot be removed, the
+   * remaining copies stay too, so the edits keep the saved draft they are based
+   * on. Only the account the send came from is touched.
+   */
+  async function settleSent() {
+    const target = sent;
+    if (!target || !ready || busy) return;
+    sent = null;
+    if (target.account !== account) return;
+    const { draftId, proposal, savedRevision, gmailDraft } = target,
+      token = epoch,
+      key = slot();
+    // An open or retained copy that was edited after the send is in use: nothing of it is removed.
+    if (
+      draft?.id === draftId &&
+      (toQ.trim() || !sentContent(draft, proposal, true))
+    )
+      return;
+    const kept = retained?.peek();
+    if (
+      kept &&
+      kept.draft.id === draftId &&
+      (kept.toQ.trim() || !sentContent(kept.draft, proposal, false))
+    )
+      return;
+    // Retained edits that cannot be read are not known to be the sent content.
+    if (retained?.available && !kept) return;
+    busy = true;
+    publish();
+    let removed = false;
+    try {
+      if (draft?.id === draftId) {
+        pendingEdits.delete(owner);
+        draft = null;
+        open = false;
+        toQ = "";
+        baseRevision = saved?.revision || null;
+        staleBase = false;
+        removed = true;
+      }
+      if (kept && kept.draft.id === draftId) {
+        let cleared = false;
+        try {
+          await retained?.clear();
+          cleared = true;
+        } catch {}
+        if (token !== epoch) return;
+        if (!cleared) {
+          status =
+            "Sent. A retained copy of this email could not be removed from this device.";
+          return;
+        }
+        removed = true;
+      }
+      if (shelf?.items.some((row) => row.draft.id === draftId)) {
+        await saveShelf({
+          ...shelf,
+          items: shelf.items.flatMap((row) =>
+            row.draft.id !== draftId
+              ? [row]
+              : !row.toQ.trim() && sentContent(row.draft, proposal, true)
+                ? []
+                : [{ ...row, draft: { ...row.draft, earlierThanSent: true } }],
+          ),
+        });
+        if (token !== epoch) return;
+      }
+      const expected = saved;
+      if (
+        expected &&
+        expected.id === draftId &&
+        sentContent(expected, proposal, true)
+      ) {
+        try {
+          const receipt = await store.compareExchange(key, expected, null);
+          if (token !== epoch) return;
+          if (receipt.status === "saved") {
+            saved = null;
+            baseRevision = null;
+            removed = true;
+          }
+        } catch {}
+        if (token !== epoch) return;
+      } else if (
+        expected &&
+        expected.id === draftId &&
+        savedRevision &&
+        expected.revision === savedRevision
+      ) {
+        // The saved copy of the sent draft is the one that existed when Send
+        // was reviewed and holds other text: an earlier version. It is never
+        // removed automatically; it is labelled (in storage, so the label
+        // survives a reload) and reusing it takes an explicit, confirmed
+        // choice. A copy saved after that, here or in another window, is not
+        // called an earlier version.
+        earlier = draftId;
+        if (!expected.earlierThanSent) {
+          const marked: LocalMailDraft = { ...expected, earlierThanSent: true };
+          try {
+            const receipt = await store.compareExchange(key, expected, marked);
+            if (token !== epoch) return;
+            if (receipt.status === "saved") saved = marked;
+          } catch {}
+          if (token !== epoch) return;
+        }
+      }
+      if (removed)
+        status =
+          saved?.id === draftId
+            ? "Sent. The sent copy was removed from this device; an earlier saved version of this email is kept."
+            : "Sent. The local copy of this email was removed from this device.";
+    } catch {
+      // The send succeeded. Keep remaining copies if a cleanup write fails or loses its reply.
+      if (token === epoch)
+        status =
+          "Sent. A local copy of this email could not be removed from this device.";
+    } finally {
+      if (token === epoch) {
+        busy = false;
+        publish();
+      }
+    }
+  }
+
+  function reset() {
+    retireReview();
+    sent = null;
+    earlier = "";
+    account = "";
+    retained?.retire();
+    retained = null;
+    baseRevision = null;
+    staleBase = false;
+    pendingEdits.clear();
+    shelf = null;
+    shelfKey = "";
+    epoch++;
+    owner = "";
+    session = "";
+    saved = draft = null;
+    loading = ready = busy = open = recipientDetails = false;
+    toQ = "";
+    status = "";
+  }
+
+  async function bind(account_: string, accountLabel: string) {
+    const { key: next, sessionId } = liveOwner(account_);
+    if (next === owner && sessionId === session && ready) return;
+    retireReview();
+    if (draft)
+      pendingEdits.set(owner, {
+        draft: structuredClone(draft),
+        toQ,
+        baseRevision,
+      });
+    if (next !== owner) {
+      sent = null;
+      earlier = "";
+    }
+    retained?.retire();
+    retained = null;
+    baseRevision = null;
+    staleBase = false;
+    epoch++;
+    saved = draft = null;
+    loading = ready = busy = open = recipientDetails = false;
+    toQ = "";
+    status = "";
+    owner = next;
+    account = next ? account_ : "";
+    session = sessionId || "";
+    label = accountLabel;
+    if (!owner) return;
+    const token = epoch,
+      key = slot();
+    shelf = null;
+    shelfKey = "";
+    loading = true;
+    status = "Checking local draft…";
+    publish();
+    try {
+      const value = await store.read<LocalMailDraft>(key);
+      if (token !== epoch) return;
+      const hash = await sha256Hex(owner);
+      if (token !== epoch) return;
+      shelfKey = hash;
+      const storedShelf = await store.read<Shelf>(shelfSlot());
+      if (token !== epoch) return;
+      if (storedShelf !== null && !shelfValid(storedShelf))
+        throw Error("Saved drafts need recovery");
+      shelf = storedShelf;
+      if (value !== null && !validLocalMailDraft(value, owner)) throw Error();
+      saved = value;
+      const pending = pendingEdits.get(owner);
+      draft = pending?.draft || null;
+      toQ = pending?.toQ || "";
+      baseRevision = pending ? pending.baseRevision : value?.revision || null;
+      staleBase = !!pending && baseRevision !== (saved?.revision || null);
+      const recovery = options.retained(owner, publish, (restored) => {
+        if (token === epoch) restoreRetained(restored);
+      });
+      retained = recovery;
+      await recovery.ready;
+      if (token !== epoch) return;
+      ready = true;
+      if (pending?.persist) {
+        pendingEdits.set(owner, { ...pending, persist: false });
+        persist();
+      }
+      status = draft
+        ? "Edits retained for this account"
+        : value
+          ? "Saved draft on this device"
+          : "No saved local draft";
+    } catch {
+      if (token === epoch)
+        status = "Local draft storage unavailable. Retry connection to reload.";
+    }
+    if (token === epoch) {
+      loading = false;
+      publish();
+      void settleSent();
+    }
+  }
+
+  /** Persist the current email before replacing its composer; no provider operation runs. */
+  async function setAside(): Promise<boolean> {
+    if (!ready || busy) return false;
+    if (retained?.error || retained?.conflict || staleBase) {
+      toast(
+        "Reload the saved draft before starting another email. Your edits are retained.",
+      );
+      return false;
+    }
+    const kept = retained?.peek();
+    if (retained?.available && !kept) {
+      toast("Recover the retained draft before starting another email.");
+      return false;
+    }
+    const meaningful = (row: Shelved) =>
+      !!(
+        row.toQ.trim() ||
+        row.draft.to.length ||
+        row.draft.cc?.length ||
+        row.draft.bcc?.length ||
+        row.draft.subject.trim() ||
+        row.draft.body.trim() ||
+        row.draft.attachments?.length ||
+        row.draft.forward?.parts.length
+      );
+    const copies = new Map<string, Shelved>();
+    for (const row of shelf?.items || []) copies.set(row.draft.id, row);
+    if (saved) copies.set(saved.id, { draft: structuredClone(saved), toQ: "" });
+    const savedIds = new Set(copies.keys());
+    if (kept)
+      copies.set(kept.draft.id, {
+        draft: structuredClone(kept.draft) as LocalMailDraft,
+        toQ: kept.toQ,
+      });
+    if (draft) copies.set(draft.id, { draft: structuredClone(draft), toQ });
+    if (!saved && !kept && !draft) return true;
+    const next: Shelf = {
+      version: 1,
+      owner,
+      items: [...copies.values()].filter(
+        (row) => savedIds.has(row.draft.id) || meaningful(row),
+      ),
+    };
+    if (
+      !shelfValid(next) ||
+      new TextEncoder().encode(JSON.stringify(next)).length > DRAFT_BYTES
+    ) {
+      toast("Draft storage is full. Your current email is still here.");
+      return false;
+    }
+    const token = epoch;
+    busy = true;
+    publish();
+    try {
+      await saveShelf(next);
+      if (token !== epoch) return false;
+      if (saved) {
+        const receipt = await store.compareExchange(slot(), saved, null);
+        if (token !== epoch) return false;
+        if (receipt.status !== "saved")
+          throw Error("The saved draft changed. Reload before continuing.");
+        saved = null;
+      }
+      await retained?.clear();
+      if (token !== epoch) return false;
+      pendingEdits.delete(owner);
+      draft = null;
+      open = false;
+      baseRevision = null;
+      staleBase = false;
+      toQ = "";
+      status = "Draft saved";
+      return true;
+    } catch (error) {
+      if (token === epoch)
+        toast(
+          error instanceof Error
+            ? error.message
+            : "The draft could not be saved. Your edits remain here.",
+        );
+      return false;
+    } finally {
+      if (token === epoch) {
+        busy = false;
+        publish();
+      }
+    }
+  }
+
+  function begin(
+    reply?: GmailMessage,
+    mode: "reply" | "reply-all" | "forward" = "reply",
+    forwardedBody = "",
+    prefill?: ComposePrefill,
+    extra: { body?: string; forward?: ForwardSource | null } = {},
+  ): boolean {
+    if (!ready || busy) {
+      toast(status || "Connect a Gmail account first.");
+      return false;
+    }
+    const refuse = (text: string) => {
+      if (!prefill?.moved) toast(text);
+      return false;
+    };
+    if (draft) {
+      if (prefill)
+        return refuse(
+          "Finish, save or discard the open email draft first. The shared content was not added.",
+        );
+      open = true;
+      publish();
+      return true;
+    }
+    if (retained?.available)
+      return refuse(
+        prefill
+          ? "Resume the retained email edits first. The shared content was not added."
+          : "Open Drafts to continue or discard your unfinished email before creating another.",
+      );
+    if (saved)
+      return refuse(
+        prefill
+          ? "Restore or discard the saved local draft first. The shared content was not added."
+          : "Open Drafts to continue or discard your saved draft before creating another.",
+      );
+    if (prefill && !reply) {
+      const clean = (list: unknown) =>
+        Array.isArray(list)
+          ? [
+              ...new Set(
+                list
+                  .filter(
+                    (a): a is string =>
+                      typeof a === "string" && literalMailAddress(a.trim()),
+                  )
+                  .map((a) => a.trim()),
+              ),
+            ].slice(0, 20)
+          : [];
+      draft = {
+        version: 1,
+        id: crypto.randomUUID(),
+        revision: crypto.randomUUID(),
+        owner,
+        mode: "compose",
+        to: clean(prefill.to),
+        cc: clean(prefill.cc),
+        bcc: clean(prefill.bcc),
+        subject: String(prefill.subject || "")
+          .replace(/[\r\n]+/g, " ")
+          .slice(0, 998),
+        body: String(prefill.body || "").slice(0, BODY_LIMIT),
+        ...(prefill.attachments?.length
+          ? {
+              attachments: structuredClone(
+                prefill.attachments.slice(
+                  0,
+                  outgoingAttachmentLimits.maximumFiles,
+                ),
+              ),
+            }
+          : {}),
+      };
+      baseRevision = null;
+      staleBase = false;
+      open = true;
+      toQ = "";
+      persist();
+      status =
+        prefill.status ||
+        "Unsaved local draft. Review before sending; nothing has been sent.";
+      publish();
+      return true;
+    }
+    if (
+      reply &&
+      mode !== "forward" &&
+      !literalMailAddress(reply.replyTo || reply.fromEmail || "")
+    ) {
+      toast("This message has no reply address.");
+      return false;
+    }
+    const self = provider?.capabilities()?.from?.toLowerCase(),
+      primary = reply ? reply.replyTo || reply.fromEmail || "" : "";
+    const to =
+      reply && mode !== "forward"
+        ? [
+            ...new Set([primary, ...(mode === "reply-all" ? reply.to : [])]),
+          ].filter((a) => a.toLowerCase() !== self)
+        : [];
+    const cc =
+      mode === "reply-all"
+        ? [...new Set(reply?.cc || [])].filter(
+            (a) =>
+              a.toLowerCase() !== self &&
+              !to.some((t) => t.toLowerCase() === a.toLowerCase()),
+          )
+        : [];
+    if ([...to, ...cc].some((a) => !literalMailAddress(a))) {
+      toast(
+        "A reply recipient is unclear. Start a new email and enter the addresses yourself.",
+      );
+      return false;
+    }
+    // Source attachments are forwarded only when the server binds them to this message's historyId.
+    const source =
+      reply &&
+      mode === "forward" &&
+      extra.forward &&
+      extra.forward.messageId === reply.id &&
+      extra.forward.parts.length &&
+      provider?.capabilities()?.forwardAttachments
+        ? {
+            messageId: extra.forward.messageId,
+            historyId: extra.forward.historyId,
+            parts: extra.forward.parts
+              .slice(0, outgoingAttachmentLimits.maximumFiles)
+              .map((p) => ({
+                partId: p.partId,
+                name: p.name,
+                mimeType: p.mimeType,
+                size: p.size,
+              })),
+          }
+        : null;
+    const initial =
+      typeof extra.body === "string" ? extra.body.slice(0, BODY_LIMIT) : "";
+    draft = {
+      version: 1,
+      id: crypto.randomUUID(),
+      revision: crypto.randomUUID(),
+      owner,
+      mode: reply ? mode : "compose",
+      to,
+      cc,
+      bcc: [],
+      subject:
+        reply && mode === "forward"
+          ? `Fwd: ${reply.subject}`.slice(0, 998)
+          : reply
+            ? (/^re:/i.test(reply.subject)
+                ? reply.subject
+                : `Re: ${reply.subject}`
+              ).slice(0, 998)
+            : "",
+      body:
+        reply && mode === "forward"
+          ? `${initial}\n\nForwarded message from ${reply.from}\nSubject: ${reply.subject}\n\n${forwardedBody}`
+          : initial,
+      ...(reply && mode !== "forward"
+        ? { reply: { messageId: reply.id, threadId: reply.threadId } }
+        : {}),
+      ...(source ? { forward: source } : {}),
+    };
+    baseRevision = null;
+    staleBase = false;
+    open = true;
+    toQ = "";
+    persist();
+    status =
+      mode === "forward" && reply
+        ? source
+          ? `Forwarding ${source.parts.length} original attachment${source.parts.length === 1 ? "" : "s"} from the selected message. Remove any you do not want to send; nothing has been sent.`
+          : extra.forward?.parts.length
+            ? "Forwarded text only. This account cannot forward the original attachments here; add a supported file explicitly."
+            : "Forwarded text only. The original message has no attachments."
+        : initial
+          ? "Agent suggestion placed in a local draft. Review and edit before sending; nothing has been sent."
+          : "Unsaved local draft";
+    publish();
+    return true;
+  }
+
+  async function newEmail(
+    reply?: GmailMessage,
+    mode: "reply" | "reply-all" | "forward" = "reply",
+    forwardedBody = "",
+    extra: { body?: string; forward?: ForwardSource | null } = {},
+  ) {
+    if (!owner) {
+      toast("Connect a Gmail account first.");
+      return false;
+    }
+    if (!ready || busy) {
+      toast(status || "Wait for drafts to load.");
+      return false;
+    }
+    if (
+      reply &&
+      mode !== "forward" &&
+      draft?.reply?.messageId === reply.id &&
+      draft.reply.threadId === reply.threadId &&
+      (draft.mode || "reply") === mode
+    )
+      return begin();
+    const token = epoch,
+      target = reply ? structuredClone(reply) : undefined,
+      copied = structuredClone(extra);
+    if (!(await setAside()) || token !== epoch) return false;
+    return begin(target, mode, forwardedBody, undefined, copied);
+  }
+
+  /** A share starts a separate email after preserving the previous local work. */
+  async function newSharedEmail(
+    prefill: ComposePrefill,
+    current: () => boolean,
+  ) {
+    if (!current()) return false;
+    if (!owner) {
+      toast("Connect a Gmail account first.");
+      return false;
+    }
+    if (!ready || busy) {
+      toast(status || "Wait for drafts to load.");
+      return false;
+    }
+    const token = epoch,
+      target = structuredClone(prefill);
+    if (!(await setAside()) || token !== epoch || !current()) return false;
+    return begin(undefined, undefined, "", target);
+  }
+
+  /** A Drafts row becomes the composer's draft; its row is replaced when the draft is set aside again. */
+  function adoptShelved(row: Shelved) {
+    // The earlier-version mark stays on the shelved row, as with fromSaved().
+    const { earlierThanSent: _earlier, ...copy } = structuredClone(row.draft);
+    draft = copy as LocalMailDraft;
+    toQ = row.toQ;
+    baseRevision = null;
+    staleBase = false;
+  }
+
+  /**
+   * The reply to this exact message that Back saved to Drafts, the latest when
+   * there are several. It is the thread's unfinished reply, so a suggestion for
+   * the message goes there instead of into a second reply. Earlier versions of
+   * a sent email are never reused without their own confirmation.
+   */
+  function shelvedReply(reply?: GmailMessage): Shelved | undefined {
+    if (!reply || draft || saved || retained?.available) return undefined;
+    const rows = shelf?.items || [];
+    for (let index = rows.length - 1; index >= 0; index--) {
+      const row = rows[index];
+      const mode = row.draft.mode || "reply";
+      if (
+        !row.draft.earlierThanSent &&
+        (mode === "reply" || mode === "reply-all") &&
+        row.draft.reply?.messageId === reply.id &&
+        row.draft.reply.threadId === reply.threadId
+      )
+        return row;
+    }
+    return undefined;
+  }
+
+  async function openShelved(row: Shelved) {
+    const visit = captureVisit();
+    const rowCurrent = () =>
+      visit() && !busy && shelf?.items.includes(row) === true;
+    if (!rowCurrent()) return;
+    if (row.draft.earlierThanSent) {
+      const expected = draft;
+      const revision = reviewRevision;
+      const savedBefore = saved;
+      const current = () =>
+        rowCurrent() &&
+        draft === expected &&
+        saved === savedBefore &&
+        reviewRevision === revision;
+      if (
+        !(await reviewDraft(
+          "This is an earlier version of a sent email. Open it for editing? Sending it creates another message.",
+          "Open an earlier sent version?",
+          "Open draft",
+          current,
+        )) ||
+        !current()
+      )
+        return;
+    }
+    if (!(await setAside()) || !rowCurrent() || draft || saved) return;
+    adoptShelved(row);
+    open = true;
+    status = "Draft on this device";
+    persist();
+    publish();
+  }
+
+  async function openSaved(expected: LocalMailDraft) {
+    const visit = captureVisit();
+    const reuse = earlierVersion();
+    const current = () =>
+      visit() &&
+      !busy &&
+      !draft &&
+      !retained?.available &&
+      saved === expected &&
+      earlierVersion() === reuse;
+    if (!current()) return;
+    if (
+      reuse &&
+      (!(await reviewDraft(
+        "This saved draft is an earlier version of an email that was already sent.\n\nOpen it to edit or send? Sending it creates another message.",
+        "Open an earlier sent version?",
+        "Open draft",
+        current,
+      )) ||
+        !current())
+    )
+      return;
+    draft = fromSaved();
+    baseRevision = expected.revision;
+    staleBase = false;
+    open = true;
+    toQ = "";
+    if (reuse)
+      status =
+        "Earlier version of a sent email. Sending it creates another message; nothing has been sent.";
+    publish();
+  }
+
+  async function replaceEdits(expected: LocalMailDraft) {
+    const visit = captureVisit();
+    const revision = reviewRevision;
+    const copy = retained;
+    const conflict = copy?.conflictVersion;
+    const current = () =>
+      visit() &&
+      open &&
+      !busy &&
+      draft === expected &&
+      reviewRevision === revision &&
+      retained === copy &&
+      copy?.conflict === true &&
+      copy.conflictVersion === conflict;
+    if (
+      !(await reviewDraft(
+        "Replace the retained email edits with this composer?",
+        "Replace retained email edits?",
+        "Replace edits",
+        current,
+      )) ||
+      !current()
+    )
+      return;
+    copy?.replace();
+  }
+
+  async function useLatest(expected: LocalMailDraft) {
+    const visit = captureVisit();
+    const revision = reviewRevision;
+    const copy = retained;
+    const latest = saved;
+    const current = () =>
+      visit() &&
+      open &&
+      staleBase &&
+      draft === expected &&
+      reviewRevision === revision &&
+      retained === copy &&
+      saved === latest;
+    if (
+      busy ||
+      !(await reviewDraft(
+        "Discard these edits and review the latest saved local draft?",
+        "Discard these email edits?",
+        "Discard edits",
+        () => !busy && current(),
+      )) ||
+      busy ||
+      !current()
+    )
+      return;
+    const token = epoch;
+    busy = true;
+    try {
+      await copy?.clear(current);
+      if (!current()) return;
+      draft = latest ? fromSaved() : null;
+      toQ = "";
+      baseRevision = latest?.revision || null;
+      staleBase = false;
+      open = !!draft;
+      status = "Review the latest saved local draft.";
+    } catch {
+      if (current())
+        toast(
+          "Retained edits changed. Review recovery before discarding them.",
+        );
+    } finally {
+      if (token === epoch) {
+        busy = false;
+        publish();
+      }
+    }
+  }
+
+  /**
+   * Moves an open new email out of this account so it can continue under
+   * another From account. Replies and provider drafts belong to their mailbox
+   * and are never moved.
+   */
+  async function transfer(): Promise<
+    (ComposePrefill & { savedRemains: boolean; restore: () => void }) | null
+  > {
+    if (!draft || busy) return null;
+    if (
+      draft.reply ||
+      draft.provider ||
+      (draft.mode && draft.mode !== "compose")
+    ) {
+      toast(
+        "Replies, forwards and Gmail drafts stay with the account they came from.",
+      );
+      return null;
+    }
+    if (toQ.trim()) {
+      toast(
+        "Add or clear the address you are typing before changing the From account.",
+      );
+      return null;
+    }
+    const from = owner,
+      kept = { draft: structuredClone(draft), toQ: "", baseRevision };
+    // If the other account cannot take it, the email goes back here: rebinding
+    // this owner reopens it from memory and writes a fresh recovery copy, so it
+    // is never silently lost.
+    const restore = () => {
+      pendingEdits.set(from, { ...structuredClone(kept), persist: true });
+    };
+    const content = {
+      to: [...draft.to],
+      cc: [...(draft.cc || [])],
+      bcc: [...(draft.bcc || [])],
+      subject: draft.subject,
+      body: draft.body,
+      attachments: structuredClone(draft.attachments || []),
+      savedRemains: !!saved,
+      restore,
+    };
+    const token = epoch;
+    try {
+      await retained?.clear();
+    } catch {
+      if (token === epoch)
+        toast(
+          "Retained email edits changed. Review recovery before changing the From account.",
+        );
+      return null;
+    }
+    if (token !== epoch) return null;
+    pendingEdits.delete(owner);
+    draft = null;
+    open = false;
+    baseRevision = null;
+    staleBase = false;
+    toQ = "";
+    publish();
+    return content;
+  }
+
+  function add() {
+    if (!draft || busy) return;
+    const value = toQ.trim();
+    if (!literalMailAddress(value) || draft.to.length >= 20) {
+      toast("Enter one email address at a time, up to 20 recipients.");
+      return;
+    }
+    if (!draft.to.includes(value)) draft.to.push(value);
+    toQ = "";
+    status = "Unsaved local draft";
+    persist();
+    publish();
+  }
+
+  async function update() {
+    if (!draft || !ready || busy) return;
+    if (staleBase) {
+      toast(
+        "The saved local draft changed. Review the latest saved copy before saving these edits.",
+      );
+      return;
+    }
+    if (toQ.trim()) {
+      add();
+      if (toQ.trim()) return;
+    }
+    const value = { ...draft, revision: crypto.randomUUID(), to: [...draft.to] };
+    if (
+      !validLocalMailDraft(value, owner) ||
+      new TextEncoder().encode(JSON.stringify(value)).length > DRAFT_BYTES
+    ) {
+      toast(
+        [value.cc || [], value.bcc || []].some(
+          (list) => list.length > 20 || !list.every(literalMailAddress),
+        )
+          ? "Cc or Bcc contains an invalid address or more than 20 addresses."
+          : "Draft is too large or contains an invalid subject.",
+      );
+      return;
+    }
+    const token = epoch,
+      key = slot(),
+      expected = saved;
+    busy = true;
+    publish();
+    try {
+      const receipt = await store.compareExchange(key, expected, value);
+      if (token !== epoch) return;
+      if (receipt.status !== "saved") {
+        status =
+          "Draft changed in another window. Close this composer and reload before replacing it.";
+        ready = false;
+        toast(status);
+        return;
+      }
+      pendingEdits.delete(owner);
+      saved = value;
+      earlier = "";
+      let cleared = true;
+      // The composer email at this point (busy blocks edits; a resumed copy may have replaced it).
+      const currentId = (draft as LocalMailDraft).id;
+      if (shelf?.items.some((row) => row.draft.id === currentId)) {
+        try {
+          await saveShelf({
+            ...shelf,
+            items: shelf.items.filter((row) => row.draft.id !== currentId),
+          });
+        } catch {
+          cleared = false;
+        }
+        if (token !== epoch) return;
+      }
+      try {
+        await retained?.clear();
+      } catch {
+        cleared = false;
+      }
+      if (token !== epoch) return;
+      baseRevision = value.revision;
+      staleBase = false;
+      draft = structuredClone(value);
+      status = cleared
+        ? "Saved locally on this device"
+        : "Saved locally; retained edits could not be cleared. Review recovery before closing.";
+      toast(status);
+    } catch {
+      if (token === epoch) {
+        status = "Local draft update failed. Your edits remain here.";
+        toast(status);
+      }
+    } finally {
+      if (token === epoch) {
+        busy = false;
+        publish();
+        void settleSent();
+      }
+    }
+  }
+
+  async function attach() {
+    if (!draft || busy) return;
+    if (
+      (draft.attachments?.length || 0) >=
+      Math.min(policy().maximumOutgoing, outgoingAttachmentLimits.maximumFiles)
+    ) {
+      toast(
+        policy().maximumOutgoing === 1
+          ? "This account accepts one attachment per email. Remove it to choose another."
+          : `Attach at most ${outgoingAttachmentLimits.maximumFiles} files.`,
+      );
+      return;
+    }
+    const token = epoch, draftId = draft.id;
+    const current = () =>
+      token === epoch && open && draft?.id === draftId &&
+      options.reviewActive?.() !== false;
+    const picker = options.attachments;
+    let selectionId: string | undefined;
+    busy = true;
+    publish();
+    try {
+      let file: OutgoingMailAttachment & { size: number; sha256?: string };
+      if (options.chooseAttachment) {
+        const selected = await options.chooseAttachment(current);
+        if (!selected || !current()) return;
+        if (selected.size > 5 * MIB) throw new AttachmentNotice(ATTACHMENT_TOO_LARGE);
+        file = {
+          name: selected.name,
+          mimeType: selected.type,
+          size: selected.size,
+          dataBase64: await readFileAsBase64(selected),
+        };
+      } else {
+        if (!picker) return;
+        const selected = await picker.select();
+        selectionId = selected.selectionId;
+        if (!current() || selected.status === "cancelled") return;
+        if (selected.status !== "selected" || !selectionId || !selected.name)
+          throw new AttachmentNotice("Select one supported document or image.");
+        file = await picker.read(selectionId);
+      }
+      const checked = await options.reviewAttachment(file);
+      if ((file.sha256 && checked.sha256 !== file.sha256) || checked.size !== file.size)
+        throw new AttachmentNotice(
+          "The selected file changed while it was checked. Select it again.",
+        );
+      if (!current() || !draft) return;
+      const next = [
+        ...(draft.attachments || []),
+        {
+          name: file.name,
+          mimeType: file.mimeType,
+          dataBase64: file.dataBase64,
+        },
+      ];
+      admitOutgoingAttachments(next, policy(), draft.forward?.parts);
+      draft.attachments = next;
+      status = `${next.length} attachment${next.length === 1 ? "" : "s"} selected locally. Nothing is uploaded until you tap Send.`;
+      persist();
+    } catch (error) {
+      if (token === epoch) toast(attachmentRefusalText(error));
+    } finally {
+      if (selectionId && picker)
+        await picker.forget(selectionId).catch(() => {});
+      if (token === epoch) {
+        busy = false;
+        publish();
+        void settleSent();
+      }
+    }
+  }
+
+  /** Gmail threads a reply on its subject, so a reply keeps the subject it was given. */
+  const fixedSubject = (d: LocalMailDraft) =>
+    d.mode === "reply" || d.mode === "reply-all" || (!d.mode && !!d.reply);
+
+  function edit(key: "subject" | "body", value: string) {
+    if (draft && !busy && !(key === "subject" && fixedSubject(draft))) {
+      draft[key] = value;
+      status = "Unsaved local draft";
+      persist();
+      publish();
+    }
+  }
+
+  /**
+   * Where a suggestion would land right now, for review before anything is
+   * inserted. The token identifies the account owner and the exact draft
+   * content or message; it never leaves the host.
+   */
+  function suggestionTarget(reply?: GmailMessage): SuggestionTarget {
+    const blocked = (reason: string): SuggestionTarget => ({
+      ready: false,
+      reason,
+      token: JSON.stringify([owner, "blocked", reason]),
+    });
+    if (options.identity().sessionId !== session)
+      return blocked(
+        "Open Inbox to refresh the selected account first. Nothing was added.",
+      );
+    if (!owner || !ready || busy)
+      return blocked(
+        loading || busy
+          ? "The local email draft is still loading. Try again in a moment."
+          : status || "Connect a Gmail account first.",
+      );
+    // A reply to this message that Back saved to Drafts is the thread's
+    // unfinished reply: the suggestion goes there, named as not on screen.
+    const shelved = shelvedReply(reply);
+    const target = draft || shelved?.draft;
+    if (target) {
+      const recipients = [
+        ...target.to,
+        ...(target.cc || []),
+        ...(target.bcc || []),
+      ];
+      const append = !!target.body.trim();
+      // When the composer is closed the user may be looking at another
+      // message, so the review says that this draft is not on screen and, for
+      // a set-aside draft, whether it is a reply to that message.
+      const aside = !draft || !open,
+        elsewhere = aside && !!reply && target.reply?.messageId !== reply.id;
+      return {
+        ready: true,
+        kind: "draft",
+        append,
+        aside,
+        elsewhere,
+        reply:
+          !!target.reply ||
+          target.mode === "reply" ||
+          target.mode === "reply-all",
+        subject: target.subject,
+        to: recipients,
+        room: append
+          ? Math.max(0, BODY_LIMIT - target.body.replace(/\s+$/, "").length - 2)
+          : BODY_LIMIT,
+        token: JSON.stringify([
+          owner,
+          shelved ? "drafts" : "draft",
+          target.id,
+          target.mode || "",
+          target.reply?.messageId || "",
+          target.provider?.draftId || "",
+          target.subject,
+          target.to,
+          target.cc || [],
+          target.bcc || [],
+          target.body,
+          target.revision,
+          reviewRevision,
+          target.forward || null,
+          shelved ? shelved.toQ : toQ,
+          aside,
+          elsewhere,
+        ]),
+      };
+    }
+    if (retained?.available)
+      return blocked(
+        "Resume the retained email edits in Inbox first. The suggestion was not added.",
+      );
+    if (saved)
+      return blocked(
+        "Restore or discard the saved local draft in Inbox first. The suggestion was not added.",
+      );
+    if (reply) {
+      const primary = reply.replyTo || reply.fromEmail || "";
+      if (!literalMailAddress(primary))
+        return blocked("This message has no reply address.");
+      // The recipients `begin` gives a reply: the literal reply address, never the account's own address.
+      const self = provider?.capabilities()?.from?.toLowerCase(),
+        to = [primary].filter((a) => a.toLowerCase() !== self);
+      return {
+        ready: true,
+        kind: "reply",
+        append: false,
+        reply: true,
+        subject: (/^re:/i.test(reply.subject)
+          ? reply.subject
+          : `Re: ${reply.subject}`
+        ).slice(0, 998),
+        to,
+        from: reply.from,
+        room: BODY_LIMIT,
+        token: JSON.stringify([
+          owner,
+          "reply",
+          reply.id,
+          reply.threadId,
+          to,
+          reply.subject,
+        ]),
+      };
+    }
+    return {
+      ready: true,
+      kind: "new",
+      append: false,
+      reply: false,
+      subject: "",
+      to: [],
+      room: BODY_LIMIT,
+      token: JSON.stringify([owner, "new"]),
+    };
+  }
+
+  const composeProposal = (d: LocalMailDraft) => ({
+    mode: d.mode || (d.reply ? "reply" : "compose"),
+    to: [...d.to],
+    cc: [...(d.cc || [])],
+    bcc: [...(d.bcc || [])],
+    subject: d.subject,
+    bodyText: d.body,
+    attachments: [...(d.attachments || [])],
+    ...forwardProposal(d),
+    ...(d.reply ? { replyMessageId: d.reply.messageId } : {}),
+  });
+
+  const controller = {
+    bind,
+    reset,
+    begin,
+    newEmail,
+    newSharedEmail,
+    transfer,
+    /** An explicit Files review adds exact bytes to this account's draft, never a provider operation. */
+    attachReviewed(file: OutgoingMailAttachment, expected: string): boolean {
+      const target = suggestionTarget();
+      if (!target.ready || target.token !== expected) return false;
+      const existing = draft?.attachments || [];
+      if (existing.some((item) => item.dataBase64 === file.dataBase64)) {
+        toast("This file is already attached. Nothing was added.");
+        return false;
+      }
+      const next = [
+        ...existing,
+        {
+          name: file.name,
+          mimeType: file.mimeType,
+          dataBase64: file.dataBase64,
+        },
+      ];
+      try {
+        admitOutgoingAttachments(next, policy(), draft?.forward?.parts);
+      } catch (error) {
+        toast(attachmentRefusalText(error));
+        return false;
+      }
+      if (!draft && !begin()) return false;
+      (draft as LocalMailDraft).attachments = next;
+      open = true;
+      status =
+        "Selected file added to this local draft. Review recipients, text and attachments before sending; nothing has been sent.";
+      persist();
+      publish();
+      return true;
+    },
+    /**
+     * "Use in email": agent text becomes a local draft for the selected message
+     * (a reply) or a new email, under the selected account. It is never sent;
+     * the composer and provider review still apply. With `expected` (the
+     * assistant review), the destination must still be the one that was
+     * reviewed, and `append` adds the text below what the open draft already
+     * holds. Existing text is never replaced.
+     */
+    useSuggestion(
+      text: string,
+      reply?: GmailMessage,
+      expected?: { token: string; append?: boolean },
+    ): boolean {
+      const body = String(text || "").slice(0, BODY_LIMIT);
+      if (!body.trim()) {
+        toast("The suggestion is empty.");
+        return false;
+      }
+      if (!ready || busy) {
+        toast(status || "Connect a Gmail account first.");
+        return false;
+      }
+      // A reviewed suggestion is inserted whole or not at all; only the legacy call shortens it.
+      if (
+        expected &&
+        (String(text).length > BODY_LIMIT ||
+          suggestionTarget(reply).token !== expected.token)
+      )
+        return false;
+      // The reviewed destination is the reply Back saved to Drafts: reopen it.
+      const shelved = expected ? shelvedReply(reply) : undefined;
+      if (shelved) adoptShelved(shelved);
+      const release = () => {
+        if (!shelved) return;
+        draft = null;
+        toQ = "";
+      };
+      if (draft) {
+        if (draft.body.trim()) {
+          if (!expected?.append) {
+            release();
+            toast(
+              "Finish, save or discard the open email draft first. The suggestion was not added.",
+            );
+            return false;
+          }
+          const joined = `${draft.body.replace(/\s+$/, "")}\n\n${body}`;
+          if (joined.length > BODY_LIMIT) {
+            release();
+            toast(
+              "The draft would be too long with this suggestion. Nothing was added.",
+            );
+            return false;
+          }
+          draft.body = joined;
+          open = true;
+          status =
+            "Agent suggestion added below your text. Review and edit before sending; nothing has been sent.";
+          persist();
+          publish();
+          return true;
+        }
+        draft.body = body;
+        open = true;
+        status =
+          "Agent suggestion placed in the open draft. Review and edit before sending; nothing has been sent.";
+        persist();
+        publish();
+        return true;
+      }
+      if (reply) return begin(reply, "reply", "", undefined, { body });
+      return begin(undefined, "reply", "", {
+        to: [],
+        subject: "",
+        body,
+        status:
+          "Agent suggestion placed in a local draft. Review and edit before sending; nothing has been sent.",
+      });
+    },
+    suggestionTarget,
+    setFromSwitch(value: typeof fromSwitch) {
+      fromSwitch = value;
+    },
+    get ready() {
+      return ready && !busy;
+    },
+    get hasDraft() {
+      return !!draft;
+    },
+    async editProvider(
+      proposal: Bag,
+      reference: { draftId: string; providerDigest: string },
+      review?: Bag | null,
+    ) {
+      if (retained?.available && !draft) {
+        toast(
+          "Resume retained email edits before editing another Gmail draft.",
+        );
+        return false;
+      }
+      if (!ready || busy) {
+        toast("Local draft storage unavailable");
+        return false;
+      }
+      const mode =
+        proposal.mode || (proposal.replyMessageId ? "reply" : "compose");
+      if (draft && !sentContent(draft, { ...proposal, mode }, true))
+        return false;
+      let forward: ForwardSource | undefined;
+      if (proposal.forwardAttachments) {
+        const source = proposal.forwardAttachments;
+        const parts = review?.forwardedAttachments;
+        if (
+          mode !== "forward" ||
+          !Array.isArray(source.partIds) ||
+          !Array.isArray(parts) ||
+          !same(review?.forwardSource, {
+            messageId: source.messageId,
+            historyId: source.historyId,
+          }) ||
+          !same(
+            parts.map((part: Bag) => part?.partId),
+            source.partIds,
+          )
+        ) {
+          throw Error(
+            "Forwarded attachment review is unavailable. Review the original message again.",
+          );
+        }
+        forward = {
+          messageId: source.messageId,
+          historyId: source.historyId,
+          parts: parts.map((part: Bag) => ({
+            partId: part.partId,
+            name: part.name,
+            mimeType: part.mimeType,
+            size: part.size,
+          })),
+        };
+        if (
+          !forwardValid(forward) ||
+          !forward.parts.length ||
+          forward.parts.some(
+            (part) =>
+              !Number.isSafeInteger(part.size) ||
+              part.size < 0 ||
+              part.size > outgoingAttachmentLimits.maximumTotalBytes,
+          )
+        ) {
+          throw Error(
+            "Forwarded attachment review is unavailable. Review the original message again.",
+          );
+        }
+      }
+      const token = epoch;
+      if (
+        !draft &&
+        saved?.provider?.draftId === reference.draftId &&
+        saved.provider.providerDigest === reference.providerDigest
+      ) {
+        draft = fromSaved();
+        baseRevision = saved.revision;
+        staleBase = false;
+        open = true;
+        toQ = "";
+        status = earlierVersion()
+          ? "Earlier version of a sent email. Sending it creates another message; nothing has been sent."
+          : "Editing the copy of this Gmail draft saved on this device.";
+        publish();
+        return true;
+      }
+
+      // Capture the selected provider draft before shelving an unrelated local
+      // copy. Shelving must succeed under the same account before replacement.
+      const next: LocalMailDraft = {
+        version: 1,
+        id: crypto.randomUUID(),
+        revision: crypto.randomUUID(),
+        owner,
+        to: [...proposal.to],
+        cc: [...(proposal.cc || [])],
+        bcc: [...(proposal.bcc || [])],
+        subject: proposal.subject,
+        body: proposal.bodyText,
+        mode,
+        attachments: structuredClone(proposal.attachments || []),
+        provider: {
+          draftId: reference.draftId,
+          providerDigest: reference.providerDigest,
+        },
+        ...(forward ? { forward } : {}),
+        ...(proposal.replyMessageId
+          ? { reply: { messageId: proposal.replyMessageId, threadId: "" } }
+          : {}),
+      };
+      if (!draft && saved) {
+        if (!(await setAside()) || token !== epoch) return false;
+        // The shelf readback publishes before this call resumes. Another
+        // composer may now own the slot in the same account.
+        if (draft || saved || busy || !ready) return false;
+      }
+      draft = next;
+      baseRevision = saved?.revision || null;
+      staleBase = false;
+      open = true;
+      status =
+        "Editing a Gmail draft. Save locally to keep your edits. This draft may have changed in Gmail, and saving replaces it.";
+      publish();
+      await update();
+      return token === epoch && saved?.id === next.id;
+    },
+    close() {
+      reviewVisit++;
+      retireReview();
+      if (!open) return false;
+      if (busy) {
+        toast("Wait for the local draft update.");
+        return true;
+      }
+      open = false;
+      publish();
+      return true;
+    },
+    back() {
+      if (!open) return false;
+      reviewVisit++;
+      retireReview();
+      if (busy) {
+        toast("Wait for the local draft update.");
+        return true;
+      }
+      void setAside();
+      return true;
+    },
+    /** The email now in the composer, in the shape Send reviews. A review of anything else is stale. */
+    proposal(): Bag | null {
+      return draft ? composeProposal(draft) : null;
+    },
+    /**
+     * That email with the identity of its local draft. A moved email is a new
+     * draft under the other From account, so the identity also names the account.
+     */
+    email(): { draftId: string; proposal: Bag } | null {
+      const proposal = controller.proposal();
+      return draft && proposal ? { draftId: draft.id, proposal } : null;
+    },
+    prepareSelection: setAside,
+    async removeSelection(
+      selected: ReadonlyMap<string, string>,
+      current: () => boolean,
+    ): Promise<boolean> {
+      if (!current() || !ready || busy || !shelf || draft || saved || retained?.available)
+        return false;
+      if (!selected.size || [...selected].some(([id, revision]) =>
+        !shelf?.items.some(row => row.draft.id === id && row.draft.revision === revision)
+      )) return false;
+      const token = epoch;
+      const next = {
+        ...shelf,
+        items: shelf.items.filter(row => !selected.has(row.draft.id)),
+      };
+      busy = true;
+      publish();
+      try {
+        try {
+          await saveShelf(next);
+        } catch {
+          if (token !== epoch) return false;
+          const readback = await store.read<Shelf>(shelfSlot());
+          if (token !== epoch || (readback !== null && !shelfValid(readback))) return false;
+          shelf = readback;
+          // A peer can edit another draft after our write. Only the selected IDs need to be absent.
+          if (readback?.items.some(row => selected.has(row.draft.id))) return false;
+        }
+        return current();
+      } finally {
+        if (token === epoch) {
+          busy = false;
+          publish();
+        }
+      }
+    },
+    chips<T extends Bag>(
+      chip: (label: string, action: () => void) => T,
+    ): Bag[] {
+      const savedCopy = saved;
+      const local = draft || retained?.peek?.()?.draft || savedCopy;
+      return ready
+        ? [
+            ...(draft
+              ? [
+                  chip("Continue draft", () => {
+                    open = true;
+                    publish();
+                  }),
+                ]
+              : retained?.available
+                ? [chip("Resume unsaved email", () => retained?.resume())]
+                : savedCopy
+                  ? [
+                      chip(
+                        earlierVersion()
+                          ? "Earlier version of a sent email"
+                          : "Restore local draft",
+                        () => void openSaved(savedCopy),
+                      ),
+                    ]
+                  : []),
+            ...(shelf?.items
+              .filter((row) => row.draft.id !== local?.id)
+              .map((row) => ({
+                ...chip(
+                  row.draft.earlierThanSent
+                    ? "Earlier version of a sent email"
+                    : "Open local draft",
+                  () => void openShelved(row),
+                ),
+                subject: row.draft.subject || "(No subject)",
+                snippet: row.draft.body.slice(0, 160),
+                selection: {id: row.draft.id, revision: row.draft.revision},
+              })) || []),
+            ...(retained?.error
+              ? [chip("Recover email edits", () => retained?.recover(draft))]
+              : []),
+          ].map((row: Bag) => ({
+            ...row,
+            subject: row.subject || local?.subject || "(No subject)",
+            snippet: row.snippet ?? local?.body?.slice(0, 160) ?? "",
+            recovery: row.label === "Recover email edits",
+          }))
+        : [];
+    },
+    /**
+     * Called for a provider-confirmed send that recorded its source draft; safe
+     * to repeat. `gmailDraft` is true when that draft was opened from a Gmail
+     * draft, which the send leaves in Gmail.
+     */
+    settleSent(
+      draftId: string,
+      proposal: Bag,
+      grant: string,
+      savedRevision?: string,
+      gmailDraft = false,
+    ) {
+      if (!grant || grant !== account) return Promise.resolve();
+      sent = {
+        draftId,
+        proposal: structuredClone(proposal),
+        account: grant,
+        ...(savedRevision ? { savedRevision } : {}),
+        ...(gmailDraft ? { gmailDraft: true as const } : {}),
+      };
+      return settleSent();
+    },
+    /** What the receipt may say about local copies of the sent draft (and its Gmail draft). */
+    sentNote(draftId: string, gmailDraft = false) {
+      if (!ready || busy || sent)
+        return "Checking the local copy of this email on this device.";
+      if (
+        shelf?.items.some(
+          (row) => row.draft.id === draftId && row.draft.earlierThanSent,
+        ) ||
+        (draft?.id !== draftId &&
+          retained?.peek()?.draft.id !== draftId &&
+          saved?.id === draftId &&
+          earlierVersion())
+      )
+        return "An earlier saved version of this email is still on this device. It is kept until you discard it; sending it creates another message.";
+      return draft?.id === draftId ||
+        retained?.peek()?.draft.id === draftId ||
+        saved?.id === draftId ||
+        shelf?.items.some((row) => row.draft.id === draftId)
+        ? "A local copy of this email is still on this device because it was edited after sending or could not be removed. Sending it creates another message."
+        : gmailDraft
+          ? GMAIL_DRAFT_KEPT
+          : "Sent.";
+    },
+    render() {
+      const current = draft;
+      const caps = provider?.capabilities();
+      return {
+        composeDisabled: !ready || loading || busy,
+        composing: open && !!current,
+        c: current
+          ? {
+              local: true,
+              status,
+              showDraftStatus: staleBase || !ROUTINE_DRAFT_STATUS.has(status),
+              busy,
+              recoveryVisible: !!retained?.error || !!retained?.conflict,
+              sendDisabled: busy || !caps?.send,
+              showSendHint: !!caps && !caps.send,
+              heading:
+                current.mode === "reply-all"
+                  ? "Reply all"
+                  : current.mode === "reply"
+                    ? "Reply"
+                    : current.mode === "forward"
+                      ? "Forward"
+                      : "New email",
+              showRecipientDetails:
+                recipientDetails ||
+                !!current.cc?.length ||
+                !!current.bcc?.length,
+              toggleRecipientDetails: () => {
+                recipientDetails = !recipientDetails;
+                publish();
+              },
+              retainedStatus: retained?.status,
+              retainedConflict: retained?.conflict,
+              retainedError: retained?.error,
+              restoreEdits: () => retained?.resume(),
+              replaceEdits: () => void replaceEdits(current),
+              retryEdits: () => void retained?.retry(),
+              recoverEdits: () => retained?.recover({ draft, toQ }),
+              staleBase,
+              useLatest: () => useLatest(current),
+              save: () => void update(),
+              send: () => {
+                if (!provider?.capabilities()?.send) {
+                  toast(
+                    "Sending is unavailable for this account. Save locally; no email has been sent.",
+                  );
+                  return;
+                }
+                if (toQ.trim()) {
+                  add();
+                  if (toQ.trim()) return;
+                }
+                const sending = draft as LocalMailDraft;
+                // A reply to yourself has no recipient left once your own address is removed.
+                if (
+                  !sending.to.length &&
+                  !sending.cc?.length &&
+                  !sending.bcc?.length
+                ) {
+                  toast("Add a recipient before sending.");
+                  return;
+                }
+                void provider.prepare(
+                  { kind: "send", ...composeProposal(sending) },
+                  {
+                    draftId: sending.id,
+                    ...(saved?.id === sending.id
+                      ? { savedRevision: saved.revision }
+                      : {}),
+                    ...(sending.provider
+                      ? { providerDraft: { ...sending.provider } }
+                      : {}),
+                  },
+                  "send-from-composer",
+                );
+              },
+              canSaveProvider: !!caps?.providerDrafts,
+              saveProvider: () => {
+                if (toQ.trim()) {
+                  add();
+                  if (toQ.trim()) return;
+                }
+                const saving = draft as LocalMailDraft;
+                void provider?.prepare(
+                  {
+                    kind: saving.provider ? "draft-replace" : "draft-create",
+                    ...(saving.provider
+                      ? {
+                          draftId: saving.provider.draftId,
+                          expectedDigest: saving.provider.providerDigest,
+                          acceptNonAtomicReplacement: true,
+                        }
+                      : {}),
+                    ...composeProposal(saving),
+                  },
+                  { draftId: saving.id },
+                );
+              },
+              singleFrom: (fromSwitch?.count() || 0) <= 1,
+              multi: (fromSwitch?.count() || 0) > 1,
+              from: label ? `From ${label}` : "",
+              cycleFrom: () => {
+                if (busy) return;
+                if (fromSwitch && fromSwitch.count() > 1) fromSwitch.cycle();
+                else toast("Only one Gmail account is connected.");
+              },
+              chips: current.to.map((name) => ({
+                name,
+                rm: () => {
+                  if (!busy && draft) {
+                    draft.to = draft.to.filter((a) => a !== name);
+                    status = "Unsaved local draft";
+                    persist();
+                    publish();
+                  }
+                },
+              })),
+              toQ,
+              toPh: "Email address",
+              onTo: (e: Bag) => {
+                if (!busy) {
+                  toQ = String(e.target.value);
+                  status = "Unsaved local draft";
+                  persist();
+                  publish();
+                }
+              },
+              toKey: (e: Bag) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  add();
+                }
+              },
+              hasRaw: !!toQ.trim(),
+              rawAddr: toQ.trim(),
+              addRaw: add,
+              hasSugg: false,
+              sugg: [],
+              cc: typedList(current, "cc"),
+              bcc: typedList(current, "bcc"),
+              onCc: (e: Bag) => typeList("cc", String(e.target.value)),
+              onBcc: (e: Bag) => typeList("bcc", String(e.target.value)),
+              // Leaving the field shows the parsed list.
+              onRecipientsBlur: () => {
+                if (typed) {
+                  typed = null;
+                  publish();
+                }
+              },
+              subject: current.subject,
+              subjectReadOnly: fixedSubject(current),
+              body: current.body,
+              onSubj: (e: Bag) => edit("subject", String(e.target.value)),
+              onBody: (e: Bag) => edit("body", String(e.target.value)),
+              hasAtts:
+                !!current.attachments?.length ||
+                !!current.forward?.parts.length,
+              // Each file is removed on its own; forwarded originals are listed and removable the same way.
+              atts: [
+                ...(current.attachments || []).map((a, index) => ({
+                  name: a.name,
+                  size: `${a.mimeType} · ${attachmentBytes(a).toLocaleString()} bytes`,
+                  forwarded: false,
+                  rm: () => {
+                    if (busy || !draft) return;
+                    const list = draft.attachments || [];
+                    if (list[index] !== a) return;
+                    draft.attachments = list.filter((_, i) => i !== index);
+                    status = "Unsaved local draft";
+                    persist();
+                    publish();
+                  },
+                })),
+                ...(current.forward?.parts || []).map((part) => ({
+                  name: `${part.name} (original)`,
+                  forwarded: true,
+                  rm: () => {
+                    if (busy || !draft?.forward) return;
+                    draft.forward = {
+                      ...draft.forward,
+                      parts: draft.forward.parts.filter(
+                        (p) => p.partId !== part.partId,
+                      ),
+                    };
+                    status = "Unsaved local draft";
+                    persist();
+                    publish();
+                  },
+                })),
+              ],
+              attachLabel: "Attach file",
+              attachmentHint: `PDF, images or text · up to ${policy().maximumOutgoing} file${policy().maximumOutgoing === 1 ? "" : "s"}, ${Math.floor(policy().maximumTotalBytes / (1024 * 1024))} MiB total`,
+              attach: () => void attach(),
+            }
+          : null,
+      };
+    },
+  };
+  return controller;
+}
+
+export type MailDraftsController = ReturnType<
+  typeof createMailDraftsController
+>;

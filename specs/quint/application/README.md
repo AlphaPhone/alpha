@@ -6,7 +6,13 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | Module | Source symbols | Modeled state and abstraction |
 | --- | --- | --- |
 | `Application` | `AlphaClient.attachVerifiedTransport`, `disconnect`, `setViewContext`, native startup/reset gates | Two owners, three non-reused epochs, lifecycle, sensitive observation, pending work, reviewed dispatch, voice and owner-scoped visible cache |
-| `DeviceActionReview` | Current `DeviceActions` binding and shared `DeviceActionCoordinator.pendingReview`, `performRequested`, `approve` | One parsed proposal, exact context, current-request preference, consumed card, durable reservation identity, server decision/claim, applying marker, one effect, terminal journal and receipt |
+| `DeviceActionReview` | Current `DeviceActions` binding and shared `DeviceActionCoordinator.pendingReview`, `performRequested`, `approve` | One focused proposal at a time with its operation class (direct, reviewed, workflow step, outside the contract), request-message binding, typed-address grounding for Browser, the Review-first preference (off, on, unreadable), one direct pass of at most four approvals that stops on the first non-success, exact context, expiry, consumed card, durable reservation identity, server decision/claim, applying marker, one effect per proposal, terminal journal and receipt. `UnknownOnlyAfterDispatch` is a registered expected violation (the public call answers `unknown` for a failure before any dispatch) |
+| `BrowserAgentOpen` | `BrowserAdapter.browserNavigateApproved`, `browserCommand`, `ViewNavigationClient.receiveInteraction`, shared `browserAllowed`/`consumeBrowserRequest` | Typed-address admission, one automatic open per message, a receipt for the created tab, presentation after the receipt attempt, and one unjournaled command bound to the exact tab navigation. Replayed through the installed Browser and device-action coordinator. |
+| `CameraAgentCapture` | camera adapter `takeRequestedPhoto`, `active`, phone executor camera branch | One agent photo request: visible Camera required, chat closed on admission and its closing panel awaited, preview hold, queued start, second check before the shutter that refuses an open chat or a painted panel, unknown only after the shutter. The mounted Chromium replay (`test/quint-camera-agent-capture.test.mjs`) observes coverage at dispatch for ready and starting previews, owner reopen, a request admitted during the owner's chat close, a panel reopened and closed before the shutter, and abort during chat close |
+| `FilesAgentActions` | phone executor Files branch, shared Files runner `run`/`reviewedIdentities`, `filesContextAllowed` | Direct filter/open (may bring Files forward) versus reviewed share, new folder, move and trash; move/trash bound to the identity read when the card was built. Model-only |
+| `NotesAgentSource` | phone executor `create_note`, Notes query and selected-note branches | Phone-side Notes operations act only on Previous notes; selected-note binding, trash copy before tombstone, reviewed reads. The canonical Notes write outside the Review-first preference is an explicit assumption and a registered expected violation. Model-only |
+| `CalendarAgentWrites` | phone executor Calendar branch | No direct Calendar operation, native review after the card, selected-record binding, queued delete reported unknown until its Undo window settles. `UnknownOnlyAfterNativeCall` is a registered expected violation. Model-only |
+| `MapsSelectedRead` | `readMapsSelection`, `validateMapsSelectedObject`, shared `assertMapsContext` | Selected place/route read bound on the card, in the executor and before the receipt; search results are not readable. `UnknownOnlyAfterRead` is a registered expected violation. Model-only |
 | `CalendarApprovalReview` | `CalendarApprovalClient.read`, `resolve`, exact Calendar DTO and finite result parsers | One authenticated read object and revision, captured owner/context, consumed admission before typed POST, cancellation and late-result fencing |
 | `ShellNavigation` | `ViewNavigationClient.capture`, `deliver`, `cancel`, shell `back`, `goHome`, `openView` | All 19 `AlphaView` values, modal/shade/composer ordering, focus, draft and one completed-action claim. View-specific record bodies use their domain models |
 | `StartupPermissions` | `createStartupPermissionFlow`, `readStartupPermissionMemory`, `readStartupPermissionProgress`, `writeStartupPermissionProgress` | One representative permission transaction, seven ordered native setup steps, durable prompt attempt and progress, legacy completed installation |
@@ -26,11 +32,11 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `DraftDispatch` | `AssistantDraftController.hold`, `release`, `commit`, `open` | Text retained through dispatch, newer typing, per-conversation queues, reopened pending drafts and failed durable clears. `A+B` represents the ordered newline concatenation |
 | `FilesTree` | Current volume browser, `files-storage`, `files-agent-contract`, `StorageBrowser` and `StorageCatalog` | Categories query storage, collisions keep both files, Trash retains origins, refresh prunes missing selections, agent moves check reviewed identity and permanent deletion requires review |
 | `FilesBrowserController` | Prepared shared Files browser installed by the Alpha host | Folder read generations, access and volume readback, agent share admission and stale completion |
-| `FilesFilter` | Prepared Files browser agent runner and shared matching | Filter admission, access readback, query ownership, result counts and cancellation |
+| `FilesFilter` | Prepared Files browser agent runner and shared matching | Filter admission, access readback, query ownership, result counts, cancellation and retirement on leaving Files |
 | `PhotosWindow` | Native catalog reads in the Alpha Photos adapter and shared window helper | Paginated window merge, reload coalescing and hidden/disposed read fencing |
 | `PhotosTrash` | Native Trash reads in the Alpha Photos adapter | Coalesced pagination, resume reload and stale completion fencing |
 | `CalendarPresentation` | `calendar-adapter` `refresh(request, force)`, `generation`, `calendarReturnDay`, `calendarFormCommitted`, `calendar-month-focus`, Google Calendar selection | Selected month/day, views and menu/delete/search Back order, query-range generations with forced reads where the newest wins, visible calendars, owner-scoped rows, creation draft identity and a confirmed save closing the form |
-| `CanonicalCalendarDraft` | Canonical Calendar editor and shared durable draft | Bound slot ownership, stale reads/writes, held clears, same-account replacement and recovery |
+| `CanonicalCalendarDraft` | Canonical Calendar editor and Alpha's durable draft | Bound slot ownership, stale reads/writes, held clears, same-account replacement and recovery |
 | `AgentCalendarRefresh` | Current Agent Calendar read controller | Range and session fencing, coalesced readback, legacy gate and next-event freshness |
 | `AgentCalendarMutation` | Current Agent Calendar write controller | Edit admission, preservation and owner checks, exact dispatch and deferred refresh |
 | `AgentCalendarSyncControl` | Current Agent Calendar linked control client | Captured review, selected source version, current draft and owner fence, exact control dispatch and linked-event read |
@@ -44,19 +50,19 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `NotificationCollection` | `notification-store`, `notifications-adapter`, `AlphaNotificationListener`, `BrowserNotifications.dismiss`, `clear`, `external`, `noticeRoute`, `NotificationAccess.pause` | Opt-in external collection, package/signature/preview consent, lock privacy, history expiry, policy epoch and independent app/channel delivery settings; own-row dismissal checked against the lock inside its edit, batch clear, and pause on the native collector only |
 | `FilesAndSharing` | `reviewFileEmail`, `reviewMailAttachment`, `mediaCopyIntent`, share adapters | One exact source, owner and draft identity, initially unchecked selection, reread before local insertion, cancellation and revoked grant. Send has its own Inbox model |
 | `PreferencesAndPresentation` | `keyboardFreeHeight`, `canvasGeometry`, `surfaceLayout`, `publishSurfaceLayout`, shell preferences | Representative portrait/wide geometry, keyboard exclusion, large-text result predicates and preference readback. Deliberately broken result canaries reject bad Calendar, split and agenda publications; this layout model makes no draft/selection or native-shade claim |
-| `HomeFailureNotice` | Home host and the shared installed launcher | Launch and inventory failure notices, surface ownership and duplicate suppression |
-| `LauncherOwnership` | Shared launcher and system bridge | Inventory and default read generations, exact component/profile handoff and retired launch fencing |
-| `LauncherObserver` | Shared launcher watcher and system bridge | Package and document events, refresh debounce, late listener settlement and idempotent retirement |
-| `LauncherFavorites` | Shared mobile launcher and Alpha view registry | Ordered favorites, legacy migration, storage refusal, external choice ownership and visible reordering |
-| `HomeGesture` | Alpha Home adapter and shared launcher | Pointer ownership, held and dragged activation, keyboard focus and edit-layer retirement |
+| `HomeFailureNotice` | Home host and Alpha's installed launcher | Launch and inventory failure notices, surface ownership and duplicate suppression |
+| `LauncherOwnership` | Alpha installed launcher and shared system bridge | Inventory and default read generations, exact component/profile handoff and retired launch fencing |
+| `LauncherObserver` | Alpha launcher watcher and shared system bridge | Package and document events, refresh debounce, late listener settlement and idempotent retirement |
+| `LauncherFavorites` | Alpha mobile-shell launcher, installed launcher and favorites store, and Alpha view registry | Ordered favorites, legacy migration, storage refusal, external choice ownership and visible reordering |
+| `HomeGesture` | Alpha Home adapter and installed launcher | Pointer ownership, held and dragged activation, keyboard focus and edit-layer retirement |
 | `DrawerInteraction` | Mounted Alpha Apps drawer | Current press, query and menu identity, focus restoration and exact App Info handoff |
 | `CallbackLanding` | Static delegation-return page | Query multiplicity, state shape, result exclusivity, size/description limits, early URL scrubbing and exact app-link exposure |
 | `ListFocus` | `createKeyedListFocus`, current Notes/Photos bindings | Two captures and roots, semantic identity, focus movement, discarded renders and current visibility |
 | `RendererFailureUI` | `RootErrorBoundary`, global startup recovery and shared crash classification | One recovery surface, fixed diagnostic classes, modal retirement and explicit reload |
 | `ComposerSend` | `p.send`, `SendAttempt`, `trackDispatch`, `transportSettled`, `dispatched` | Two overlapping send attempts, composer sends and prompts sent from elsewhere, the bounded wait for the transport result, restored versus unconfirmed text, and typing-indicator ownership across a session change |
 | `RecorderStage` | voice-adapter `stage`, `generation`, `busy`, `transcribeClip`; `createNativeLiveDictation` | Recorder stages closed to review, generation-fenced tasks, the dictation driver recording, failed stop and lost capture, maximum-duration stop |
-| `StoppedReplyReconciliation` | `scheduleStoppedReply`, `cancelStoppedReply`, `findStoppedUserTurn` | One later read per stopped reply, the cancel attempt, busy deferral, the reply notice, the confirmed-stop message and a refused new request after a retired check |
-| `ApprovalRoutes` | `cardAct`, `AlphaClient.approve`, `approvePendingAction`, `recoverPendingActions` | Client and recovered approval routes for one proposal, consumption kept across a same-session reload, one tap in flight, lost responses, and one execution under the agent-journal assumption |
+| `StoppedReplyReconciliation` | `connectionController.send`, `scheduleStoppedReply`, `cancelStoppedReply`, `findStoppedUserTurn` | One later read per stopped reply, the cancel attempt, busy send refusal and history deferral, and late cancel/read results after retirement |
+| `ApprovalRoutes` | `cardAct`, `AlphaClient.approve`, `approvePendingAction`, `recoverPendingActions` | Mounted live and recovered approval routes for one proposal, refetch retirement, one tap in flight, and reuse of an unconfirmed result across a same-session history restore. One execution assumes the agent journal. |
 | `ReadReplyLease` | `retainReadReply`, `completeReadReply`, `cancelReadReplyCompletions` | One read-reply lease through pending, completing, done, cancelled and unconfirmed; at most one answer and one voice resume |
 | `PendingActionRecovery` | `recoverPendingActions`, `scheduleExpiry`, `pendingActionRecoveryKey`, `pendingActionRecoveryFailedKey` | One pending-action read per session, history revision and screen context, stale results, a remembered failed read that is not retried, blocked states and the expiry timer |
 | `OwnNoticeQuestion` | `reviewOwnNoticeQuestion` | Review sheet, recheck and consumption of one notification tap, dismissal and release, Home or blur during each step, one closed callback |
@@ -67,7 +73,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `BookmarksHydration` | adapter `loadBookmarks`, `refreshBookmarks`, `saveBookmark`, `checkBookmarkRecovery`, `openBookmarkRecovery` | Serial queue of refreshes and writes, one waiting refresh, read-before-write, damaged-list recovery offer reported once per episode, disposal. The list is a version number |
 | `FindInPage` | adapter `openFind`, `closeFind`, `findQuery`, `findStep`, `findResult` listener, native `clearFind` | Find bar and its tab, debounced native search fenced by selected tab, native clearing on navigation and un-presenting, delayed events, closed tabs. Two tabs |
 | `BrowserReviews` | `BrowserReviews.confirm`, `cancel`, `browserScreenLocked` | Two review identities, refusal of a duplicate or hidden request, approval rechecked at the click, one settlement per request, listener cleanup |
-| `AddressInput` | adapter `navigate`, shared `parseBrowserAddressInput`, `browserNavigateApproved` | The shared parser verdict and the product's corrections to it: time-like, scheme-like, email and short-decimal text searched, credentials refused, approved destinations never reread. Text is a record of tested properties |
+| `AddressInput` | adapter `navigate`, shared `parseBrowserAddressInput`, `browserNavigateApproved` | The shared parser verdict and Alpha's corrections for time-like, scheme-like and short-decimal text and simple @ text. Searches require typed input, and unsafe @ text is refused when parsed as a search. Text is a record of tested properties |
 | `PasswordProviderDialog` | `openPasswordProvider`, `passwordProviderStatus`, `browserDevProfile`, `passwordProviderDocument` | Development-only provider dialog: profile admission, abortable opening, one dialog bound to its settings revision, compare-and-set edits, sample sign-in only after unlock for the selected provider |
 | `BrowserSurfaceNavigation` | web `BrowserSurface.load`, `navigate`, `command`, frame `load` listener | One web-build tab: a fresh frame per host navigation, commit only from the current loading frame, stop, inner navigation, close and re-create. Three history entries, six frames |
 | `BrowserSurfacePresentation` | adapter `update`, `presentBrowser`, `hide`, `blockPageInput`, `surfacePollIdle` | Show and withdraw requests sent only when changed, answers applied only for the latest request, acknowledged geometry dropped on withdrawal, one failure report per episode with resend, hidden app left alone. Two geometries, one covering-layer flag |
@@ -80,14 +86,14 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `DayAnchor` | `msToLocalMidnight`, `calendarMidnight`, `calendarFormDayShift`, `calendarDraftAnchor`, `calendarEditDraftAnchor` | local-midnight tick against row offsets, the midnight read, re-anchoring of retained and plain forms |
 | `ReminderTodoAttempt` | `addTodo`, `todoDecision`, `todoAttempt`, `reminderSaving` | one reminder write at a time, readback-decided to-do save, attempt id reused by an identical retry |
 | `SignInChooser` | `connectionController.signInGoogle`, `signInEmail`, `signInPhone`, `resendSignInCode`, `verifySignInCode`, `cancelSignIn`, `signInFailed`, `showGoogleMfa`, `CloudSignInPanel` | Sign-in step machine with one step in flight, the stale code step that only Resend continues, a failed resend keeping the earlier attempt, and Back during Google with and without a commit boundary so a stored key is never left behind the chooser |
-| `ConnectionController` | `work`, `releaseOperation`, `manageProviderKey`, `runQueuedSignInReturn`, `runQueuedResidentRebind`, `signInReturned`, `signInIncomplete`, `showSignInIncomplete` | The single operation slot, the one queued native sign-in return, the queued sign-in-incomplete notice fenced by connection and view, the wanted rebind, and the order in which a release runs them |
+| `ConnectionController` | `work`, `releaseOperation`, `saveProviderKeys`, `runQueuedSignInReturn`, `runQueuedResidentRebind`, `signInReturned`, `signInIncomplete`, `showSignInIncomplete` | The single operation slot, the one queued native sign-in return, the queued sign-in-incomplete notice fenced by connection and view, the wanted rebind, and the order in which a release runs them |
 | `DelegationReceiver` | `CloudDelegationPanel` (`run`, `callback`, `recover`, `cancelPending`), `delegationCancelStep`, `AlphaConnectionPlugin.captureDelegationCallback`, `readDelegationCallback`, `clearDelegationCallback` | Retained native return read under a one-step gate or deferred behind it, pending authorization moved to finishing by a code, one completion per code or status check, and Cancel that adopts, clears or cancels by Cloud state |
 | `ViewAdmission` | `applyImageContacts`, `admitImageContacts`, `ENABLED_MVP_VIEWS`, `DEFERRED_MVP_VIEWS`, `refreshImage` | Runtime Contacts admission against the stored shell view: an open view leaves before it is deferred, the view order follows admission, and re-admission never restores a masked view |
 | `SettingsListenerReads` | `listenerReadGate` (`beginAction`, `endAction`, `beginRead`, `readApplies`), `listenerAction`, `refreshCapabilities` | Listener status reads ordered against Pause and Turn off: none starts during an action, an older read is dropped, and the action result is always applied |
 | `MediaCopyIntent` | `admitMediaCopyIntent`, `acknowledgeMediaCopyIntent`, `readMediaCopyIntent` | One pending saved-copy request: compare-and-swap admission from empty, exact acknowledgement, recovery after restart, browser revision identity versus Android token-only identity |
 | `FilesRecentIndex` | `createFilesIndex().record`, `revokeTree`, `recentKey`, selection adapter `accept` and `clear`, `exportScanPdf` | Bounded Recent rows, replacement by key and by revoked folder name, grant release on eviction and Forget, grants kept for Recent on close, and the grant an exported scan leaves held |
-| `PhotoLibraryAgentReview` | `createDeviceLibrary().agent.run`, `confirmReview`, `validCurrent`, `reviewCard`, `leave` | One pending assistant review over the visible library, provider validation fenced by the visit epoch, re-validation at confirm, single dispatch under repeated confirms, Android refusal of a changed item |
-| `AgentPhotoRequest` | `takeRequestedPhoto`, `untilSettled`, `agentRequest` | Assistant photo request joining a preview start in flight, refusal when a recording starts first, exclusive shutter, failed only without dispatch, unknown only after dispatch |
+| `PhotoLibraryAgentReview` | `createDeviceLibrary().agent.run`, `confirmReview`, `validCurrent`, `reviewCard`, `leave` | One pending assistant review over the visible library, provider validation fenced by the visit epoch, re-validation at confirm, single dispatch under repeated confirms, pending review retirement on document hide, and Android settlement of an already dispatched change |
+| `AgentPhotoRequest` | `takeRequestedPhoto`, `untilSettled`, `agentRequest` | Mounted Chromium replay checks preview ownership, owner photo/recording exclusions, stale request and abort, exact IndexedDB photo receipts, and post-dispatch uncertainty with and without a committed row |
 | `CameraFocusWrites` | `BrowserCameraFocus.select`, `clear` | Per-track serialized focus writes, taps retired while waiting never reaching the driver, applied target only for the latest tap |
 | `NotesDocumentTransfer` | `installNotesDocumentAdapter`, `perform`, `receipt`, `whenVisible` | One document import or export at a time, results dropped after Notes is left, receipts held until the page is visible and shown only in their own visit |
 | `BackDispatch` | `updateBackAvailability`, `alphaCanGoBack`, `backHandler`, `modalPanels`, `p.back`, `closeEdit`, `openAllApps`, `back()`, `shellNavigate`, `closeAssistant`, `stopVoice`, `handleOnBackPressed`, `showsHome`, `moveTaskToBack` | host, popover/dialog/panel/inert, view/inner/stack/chat/drawer/shade/voice, menu/homeEdit/homeAdd, outcome/closed/removed/lostLayer |
@@ -95,7 +101,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `KeyboardGeometry` | `canvasGeometry`, `keyboardFreeHeight`, `WIDE_CANVAS`, `isEditing` | portrait/keyboard/focused, baseWidth/baseHeight, free/landscape/wide/canvasWidth, primed |
 | `ShellScreen` | `runBoot`, `unlock()`, `power()`, P-23 lock-frame Camera control absence, `openView(k, patch, chat, opts)`, `keepState`, `keepStack`, `goHome(chat)`, `startVoice()`, `stopVoice()`, `leave()` | screen/bootPending, view/viewTimers, secure stays false, kept, voice/voiceTimers |
 | `SettingsSession` | `mergeDeviceFacts`, `scaleGeneration`, `generation !== token`, `setTextScale`, `async function refresh()` | owner/mounts, generation/scaleGeneration, queue/results, shownScale/shownOther/shownToken, writeFailed/keptSize/regressed |
-| `HomeSurface` | `createHomeAgenda`, `homeAgendaCandidates`, `createStorageAccessCheck`, `selectHomeAgenda` | now/input, built/memoInput/at/until/agenda/following, storageWorks/available/probeAt/probed, rendered/checked/changedSince/selections/probes |
+| `HomeSurface` | `createHomeAgenda`, `homeAgendaCandidates`, `createStorageAccessCheck`, `selectOverviewAgenda` | now/input, built/memoInput/at/until/agenda/following, storageWorks/available/probeAt/probed, rendered/checked/changedSince/selections/probes |
 | `PhoneCall` | `function pnStart`, `function pnEnd`, `function pnRingEnd`, `function pnDecline`, `function pnCallId`, `function pnWant`, `PN.live`, `PN.boot`, `callWho` | live/want/callWho, boot/active, connected/min/kp/hold/ret, connectFor/tickFor, started/ended/rings/ringRows/accepted/dropped/orphaned |
 | `PhoneRecents` | `installPhoneAdapter`, `available`, `clear`, `sync`, `async function refresh`, `async function dial`, `epoch`, `needsAccess`, `createAospTelephony`, `normalizePhoneNumber` | mounted/phoneView/hidden/active, epoch/busy/rows/needsAccess/notice, access/reads/dials, requests/prompts/discarded/handoffs |
 | `InertHold` | `holdPhoneInert`, `released`, `previous`, `createInlineModal` | inert/previous/count, holding/released, outside |
@@ -139,18 +145,59 @@ remains unproved.
 ## Bounds and exclusions
 
 `DeviceActionReview` replays the real coordinator with recording transport,
-journal and executor ports. Twenty-five schedules include exact-screen changes,
-foreign owners, expiration, double taps, failed reservation/decision/claim,
-changed digest or journal identity, cancellation before and after dispatch,
-unsynced receipts, a terminal journal refusing replay after coordinator recreation, and direct-request versus
-ask-first admission. Port calls and public-method settlement are observation
-boundaries. Context changes before approval are compared exactly; host retirement
-during approval is supplied through its AbortSignal. Crypto hashing is real and
-time is held constant across each synchronous port observation. Domain-specific
-result validators, Files identities, browser direct-request proofs, multi-proposal
-batch limits and native persistence remain separate obligations. The historical
-`Application.ReviewedDispatch` describes its explicit-review variant; it must not
-be used to infer that current-request execution requires a second user tap.
+journal, preference and executor ports. Thirty-six schedules include exact-screen
+changes (also for the direct pass), foreign owners, expiration before approval and
+after the claim, double taps, failed reservation/decision/claim, changed digest or
+journal identity, cancellation before and after dispatch, unsynced receipts, a
+terminal journal refusing replay after coordinator recreation, and the direct
+pass: ask-first, an unreadable preference, an old request, a reviewed type, a
+workflow-bound step that is never listed, `open_view` to Settings beside an
+operation outside the contract, five current-request notes of which four run, a
+failure that ends the pass, a mixed listing with one automatic Browser open, a
+Browser proposal without a matching typed address or without request proof, and
+a second pass for the same message. Port calls, each `allowed` call and
+public-method settlement are observation boundaries; the pass counters are
+inferred from those and asserted against the returned receipts. Context changes
+before approval are compared exactly; host retirement during approval is supplied
+through its AbortSignal. Crypto hashing is real and time is held constant across
+each synchronous port observation.
+
+Known divergence, kept visible rather than weakened: the intended rule
+`UnknownOnlyAfterDispatch` is false of the pinned coordinator. A reservation,
+decision or claim failure returns `unknown` from the public call although nothing
+was dispatched (app review AGENT-06; the journal itself records `failed` or stays
+reserved, so `UnknownJournalOnlyAfterDispatch` holds). The manifest lists it under
+`expectedViolations`, requires the witness `UnknownWithoutDispatch`, and six
+replayed schedules reproduce it. A product executor that throws for a pre-effect
+guard after it was entered is likewise journaled `unknown`; that is executor
+behaviour outside this model's ports. Remove the registration when the shared
+coordinator answers `failed` for a not-dispatched attempt.
+
+Camera, Files, Photos, Notes-organise and SMS-reply direct types, workflow-run
+review, navigation-only review destinations, domain-specific result validators,
+Files identities, capability negotiation and native persistence remain separate
+obligations. `Application.ReviewedDispatch` is scoped to the review-first path;
+it must not be used to infer that current-request execution requires a second
+user tap.
+
+The per-view agent modules `FilesAgentActions`,
+`NotesAgentSource`, `CalendarAgentWrites` and
+`MapsSelectedRead` are model-only: their rules were read from the listed
+sources at the pinned revision and no refinement adapter drives that source.
+They add the view-specific admission each operation needs on top of the
+proposal custody that `DeviceActionReview` replays against the real coordinator.
+Each known divergence between an intended rule and the code is kept as a named
+property outside `safety`, listed under `expectedViolations` in the manifest,
+with its counterexample required as a witness by the default gate:
+`NotesAgentSource.ReviewFirstCoversCanonicalNotes`,
+`CalendarAgentWrites.UnknownOnlyAfterNativeCall` and
+`MapsSelectedRead.UnknownOnlyAfterRead`. `CameraAgentCapture` is replayed
+against the mounted Camera adapter instead: `ShutterNeverCovered` is in its
+`safety` and follows from the shutter gate's chat and painted-panel checks,
+while the replay shows each check is needed. Photos agent operations are not modeled:
+the Photos view capability is not negotiated by `phone-context.ts`, and the
+pinned server device-action contract, action, service and tools files name no
+`photo_library_*` operation, so no such proposal can reach the phone.
 
 `CalendarApprovalReview` executes the actual typed client and parsers over
 controlled authenticated transport. Twenty-nine schedules cover exact-object

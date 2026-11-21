@@ -146,6 +146,16 @@ public final class ResidentWorkflowCrashInstrumentedTest {
  private JSONObject ownedChild()throws Exception {return ResidentTestFixture.ownedChild(context,fixture.getString("processExecutableSha256"));}
  private JSONObject owner()throws Exception {return ResidentTestFixture.owner(request("/api/auth/me",null),ownerBearer);}
  private JSONObject agent()throws Exception {return ResidentTestFixture.agent(request("/api/agents",null));}
+ /** Points the synthetic provider the test stored at the held loopback model; refuses any other provider. */
+ private static java.util.function.Function<JSONObject,java.util.Map<String,String>> recoveryEndpoint(java.net.ServerSocket server){
+  return provider->{
+   if(server.isClosed()||!server.isBound()||!"127.0.0.1".equals(server.getInetAddress().getHostAddress())||server.getLocalPort()<=0
+      ||provider==null||!"synthetic-resident-recovery-only".equals(provider.optString("key")))
+    throw new IllegalStateException("Invalid resident recovery fixture endpoint");
+   String endpoint="http://127.0.0.1:"+server.getLocalPort()+"/v1";
+   return java.util.Map.of("CEREBRAS_BASE_URL",endpoint,"OPENAI_BASE_URL",endpoint,"OPENAI_API_KEY","synthetic-resident-recovery-only","ELIZA_PROVIDER","cerebras");
+  };
+ }
  private static final class HeldModel implements AutoCloseable {
   final java.net.ServerSocket server=new java.net.ServerSocket(0,4,java.net.InetAddress.getByName("127.0.0.1"));
   final java.util.concurrent.CountDownLatch received=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
@@ -296,9 +306,9 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   String run=admit("Explicit resident crash fixture");
   control=null;
   JSONObject proof=new JSONObject().put("passed",false).put("runId",run).put("case","lost-rpc");Throwable failure=null;JSONObject resident=null;WorkflowSurvivorInventory.Identity worker=null;boolean submitted=false;
-  java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationRecoveryEndpoint");hook.setAccessible(true);assertNull(hook.get(null));
+  java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationLaunchEnvironment");hook.setAccessible(true);assertNull(hook.get(null));
   try(HeldModel model=new HeldModel(false)) {
-   hook.set(null,model.server);
+   hook.set(null,recoveryEndpoint(model.server));
    try {
     new AlphaCredentialStore(context).writeCredentialSlot("local-agent-provider:v1",new JSONObject().put("key","synthetic-resident-recovery-only").put("model","qwen-3.8-27b").toString());
     startAndEnroll();resident=ownedChild();String ownerId=owner().getJSONObject("identity").getString("id"),agentId=agent().getString("id");
@@ -335,9 +345,9 @@ public final class ResidentWorkflowCrashInstrumentedTest {
  @Test public void trustedPackagedWorkerSurvivesResidentRestart()throws Throwable {
   String run=admit("Explicit trusted worker fixture");
   JSONObject proof=new JSONObject().put("passed",false).put("runId",run).put("case","trusted-survivor").put("scope","instrumentation-created worker; no resident-created ancestry or authored parent-RPC survival claim");Throwable failure=null;JSONObject resident=null,replacement=null;TrustedPackagedWorker trusted=null;
-  java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationRecoveryEndpoint");hook.setAccessible(true);assertNull(hook.get(null));
+  java.lang.reflect.Field hook=AlphaLocalAgentPlugin.class.getDeclaredField("instrumentationLaunchEnvironment");hook.setAccessible(true);assertNull(hook.get(null));
   try(HeldModel model=new HeldModel(true)){
-   hook.set(null,model.server);
+   hook.set(null,recoveryEndpoint(model.server));
    try{
     new AlphaCredentialStore(context).writeCredentialSlot("local-agent-provider:v1",new JSONObject().put("key","synthetic-resident-recovery-only").put("model","qwen-3.8-27b").toString());startAndEnroll();resident=ownedChild();String ownerId=owner().getJSONObject("identity").getString("id"),agentId=agent().getString("id");
     String module=source();JSONObject workflow=request("/api/workflow/workflows",new JSONObject().put("name","Trusted survivor source "+run).put("source",module).put("language","tsx").put("steps",new JSONArray()).put("widgets",new JSONArray()).put("activate",false));

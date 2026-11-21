@@ -1,19 +1,21 @@
 """Controlled receipts, archives and transports; no keys, accounts or publication."""
 import base64
 import copy
-import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tarfile
-import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts/ci"))
 
 
 def load(name, file):
@@ -36,7 +38,7 @@ def encoded(record, name, value):
 
 class QualifiedUpdateTest(unittest.TestCase):
     def setUp(self):
-        self.producer = FIXTURES.CloudSigningInputTest(methodName="test_admits_both_exact_unsigned_cloud_variants")
+        self.producer = FIXTURES.CloudSigningInputTest(methodName="test_admits_the_exact_unsigned_launcher")
         self.producer.setUp()
         self.addCleanup(self.producer.doCleanups)
         self.directory = Path(self.producer.temporary.name)
@@ -46,7 +48,7 @@ class QualifiedUpdateTest(unittest.TestCase):
                    "project": "alpha-aosp-lab-20261024", "instanceId": "8999310923263914877",
                    "alphaCommit": self.plan["alphaCommit"], "sdkCommit": self.plan["sdkCommit"],
                    "versionCode": self.plan["versionCode"], "unsignedApkSHA256": self.plan["unsignedApkSHA256"],
-                   "runtimeProfile": "cloud", "updateChannel": self.plan["updateChannel"],
+                   "runtimeProfile": "native", "updateChannel": self.plan["updateChannel"],
                    "checks": {name: "passed" for name in ("productSourceGuard", "sdkSourceGuard", "normalPreparation",
                                                          "combinedVerification", "apkArchive")}}
         private_bytes = json.dumps(private).encode()
@@ -76,10 +78,19 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.signed_tar = self.directory / "signed-original.tar"
         self.write_signed()
         self.receipt_zip = self.directory / "delivery-original.zip"
+        self.write_delivery_receipt()
+
+    def write_delivery_receipt(self):
         with zipfile.ZipFile(self.receipt_zip, "w") as archive:
             archive.writestr("private-storage-receipt.json", json.dumps(self.record["signedBundle"]))
         self.record["deliveryArtifactBytes"] = self.receipt_zip.stat().st_size
         self.record["deliveryArtifactSHA256"] = BRIDGE.file_sha(self.receipt_zip)
+
+    def use_main_candidate(self, debug=None):
+        self.producer.write_candidate(debug)
+        self.signed_entries["signing-plan.json"] = encoded(self.record, "signingPlan", self.plan)
+        self.write_signed()
+        self.write_delivery_receipt()
 
     def write_signed(self, extra=None):
         entries = {**self.signed_entries, **(extra or {})}
@@ -92,16 +103,110 @@ class QualifiedUpdateTest(unittest.TestCase):
                                        "object": self.plan["privateStorage"]["outputObject"], "generation": "456",
                                        "bytes": self.signed_tar.stat().st_size, "sha256": BRIDGE.file_sha(self.signed_tar), "public": False}
 
+    def set_signed_launcher(self, payload):
+        self.signed_apks["launcher"] = self.signed_entries["launcher-release.apk"] = payload
+        self.record["signedApkSHA256"]["launcher"] = BRIDGE.sha(payload)
+        self.signed_entries["signed.sha256"] = "".join(
+            f"{digest}  {variant}-release.apk\n" for variant, digest in self.record["signedApkSHA256"].items()).encode()
+        voice = BRIDGE.decode(base64.b64decode(self.record["cloudVoiceEvidenceBase64"]))
+        for row, digest in zip(voice["results"], self.record["signedApkSHA256"].values()):
+            row["apkSha256"] = digest
+        encoded(self.record, "cloudVoiceEvidence", voice)
+        self.write_signed()
+        self.write_delivery_receipt()
+
+    def stage_fixture(self, product):
+        product.mkdir()
+        work = self.directory / "size-stage"
+        plan = BRIDGE.preflight(self.record, "f" * 40, work, self.api, self.download)
+        BRIDGE.stage(self.record, plan, work, product,
+                     lambda _plan, target: shutil.copyfile(self.producer.archive, target),
+                     lambda _plan, _receipt, target: shutil.copyfile(self.signed_tar, target),
+                     source_root=os.environ.get("ALPHA_NATIVE_SOURCE_ROOT"))
+
+    def test_a_signed_standalone_member_is_never_admitted(self):
+        self.write_signed({"standalone-release.apk": b"must not be a release output"})
+        self.write_delivery_receipt()
+        with self.assertRaisesRegex(ValueError, "Unexpected signed bundle members"):
+            self.stage_fixture(self.directory / "standalone-member")
+
+    def test_native_exact_debug_and_signed_members_can_exceed_the_cloud_limit(self):
+        payload = bytes(4097)
+        self.use_main_candidate({"launcher-debug.apk": payload})
+        self.set_signed_launcher(payload)
+        product = self.directory / "native-large"
+        with patch.object(FIXTURES.PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            with zipfile.ZipFile(self.producer.archive) as archive:
+                with self.assertRaisesRegex(ValueError, "Invalid debug archive member"):
+                    BRIDGE.PRODUCER.debug_apk_members(archive, self.producer.verification, FIXTURES.PRODUCER.PRIVATE_RUNNER)
+            self.stage_fixture(product)
+        for mode in ("debug", "release"):
+            self.assertEqual((product / f"artifacts/launcher-{mode}.apk").read_bytes(), payload)
+
+    def test_native_stage_restores_the_exact_generated_native_receipt(self):
+        self.use_main_candidate()
+        product = self.directory / "native-receipt-stage"
+        self.stage_fixture(product)
+        with zipfile.ZipFile(self.producer.archive) as archive:
+            expected = archive.read("native-input-admission.json")
+        self.assertEqual((product / ".eliza/native-inputs/receipt.json").read_bytes(), expected)
+        self.assertFalse(json.loads(expected)["qualification"]["deviceExecuted"])
+
+    def test_canonical_private_native_uses_the_bounded_native_member_limit(self):
+        with zipfile.ZipFile(self.producer.archive) as archive:
+            extra = {name: archive.read(name) for name in archive.namelist()
+                     if name == "private-producer.json" or name.endswith("-debug.apk")}
+        private = json.loads(extra["private-producer.json"])
+        self.producer.unsigned_pair(4097)
+        private["unsignedApkSHA256"] = self.plan["unsignedApkSHA256"]
+        extra["private-producer.json"] = json.dumps(private).encode()
+        self.plan["privateProducerReceiptSHA256"] = BRIDGE.sha(extra["private-producer.json"])
+        self.producer.write_archive(extra)
+        self.plan["archiveBytes"] = self.producer.archive.stat().st_size
+        digest = self.plan["archiveSHA256"]
+        self.plan["privateStorage"].update(inputObject=f"unsigned/{digest}.zip",
+                                          outputObject=f"signed/{digest}/{'d' * 32}/signed-apks.tar")
+        self.signed_entries["signing-plan.json"] = encoded(self.record, "signingPlan", self.plan)
+        self.set_signed_launcher(bytes(4097))
+        with patch.object(FIXTURES.PRODUCER, "LEGACY_APK_MEMBER_BYTES", 4096):
+            contract = FIXTURES.PRODUCER.input_contract(self.plan)
+            self.assertEqual(FIXTURES.PRODUCER.apk_member_limit(FIXTURES.PRODUCER.PRIVATE_RUNNER, contract),
+                             FIXTURES.PRODUCER.MAX_ARCHIVE_BYTES)
+            for supplied in (None, {**contract, "runtimeProfile": "cloud"},
+                             {**contract, "packageName": "another.application"}):
+                self.assertEqual(FIXTURES.PRODUCER.apk_member_limit(FIXTURES.PRODUCER.PRIVATE_RUNNER, supplied), 4096)
+            product = self.directory / "private-native-large"
+            self.stage_fixture(product)
+            self.assertEqual((product / "artifacts/launcher-release.apk").read_bytes(), bytes(4097))
+
+    def test_canonical_private_native_still_rejects_an_oversized_signed_member(self):
+        ceiling = 64_000
+        self.set_signed_launcher(bytes(ceiling + 1))
+        self.assertLess(self.producer.archive.stat().st_size, ceiling)
+        with patch.object(FIXTURES.PRODUCER, "MAX_ARCHIVE_BYTES", ceiling):
+            with self.assertRaisesRegex(ValueError, "Unexpected signed bundle members"):
+                self.stage_fixture(self.directory / "private-native-oversized")
+
     def api(self, endpoint):
+        if endpoint == f"repos/{BRIDGE.REPOSITORY}/git/ref/heads/main":
+            return {"ref": "refs/heads/main", "object": {"type": "commit", "sha": "f" * 40}}
         if "/compare/" in endpoint:
             source = endpoint.split("/compare/")[1].split("...")[0]
             return {"status": "ahead", "merge_base_commit": {"sha": source}}
-        if endpoint.endswith("/actions/runs/100"):
-            return {"status": "completed", "conclusion": "success", "event": "workflow_dispatch",
+        if endpoint == f"repos/{BRIDGE.REPOSITORY}/actions/workflows/release.yml":
+            return {"id": 500, "path": BRIDGE.SIGNING_WORKFLOW}
+        if endpoint.endswith("/actions/runs/100/attempts/1"):
+            repository = {"id": BRIDGE.REPOSITORY_ID, "full_name": BRIDGE.REPOSITORY}
+            return {"id": 100, "workflow_id": 500, "status": "completed",
+                    "display_title": f"Release sign on {self.record['signingWorkflowCommit']}",
+                    "conclusion": "success", "event": "workflow_dispatch",
                     "head_sha": self.record["signingWorkflowCommit"], "head_branch": "main", "run_attempt": 1,
-                    "head_repository": {"full_name": BRIDGE.REPOSITORY}, "path": ".github/workflows/release-cloud-app-signing.yml"}
+                    "repository": repository, "head_repository": repository,
+                    "path": BRIDGE.SIGNING_WORKFLOW}
         if endpoint.endswith("/actions/artifacts/200"):
-            return {"expired": False, "workflow_run": {"id": 100, "head_sha": self.record["signingWorkflowCommit"]},
+            return {"id": 200, "expired": False, "workflow_run": {
+                        "id": 100, "head_sha": self.record["signingWorkflowCommit"], "head_branch": "main",
+                        "repository_id": BRIDGE.REPOSITORY_ID, "head_repository_id": BRIDGE.REPOSITORY_ID},
                     "name": "private-cloud-apk-delivery-100-1", "size_in_bytes": self.record["deliveryArtifactBytes"],
                     "digest": "sha256:" + self.record["deliveryArtifactSHA256"]}
         self.fail("Unexpected endpoint")
@@ -111,6 +216,128 @@ class QualifiedUpdateTest(unittest.TestCase):
         self.assertEqual(size, self.receipt_zip.stat().st_size)
         self.assertEqual(digest, BRIDGE.file_sha(self.receipt_zip))
         shutil.copyfile(self.receipt_zip, destination)
+
+    def prepare_fixture(self, *, api=None, workflow_commit="f" * 40, voice_bytes=None):
+        plan = self.directory / "reviewed-plan.json"
+        voice = self.directory / "reviewed-voice.json"
+        plan.write_bytes(base64.b64decode(self.record["signingPlanBase64"]))
+        voice.write_bytes(voice_bytes if voice_bytes is not None else
+                          base64.b64decode(self.record["cloudVoiceEvidenceBase64"]))
+        before = set(self.directory.iterdir())
+        result = BRIDGE.prepare_qualification(plan, voice, self.signed_tar, self.receipt_zip, "200",
+                                              workflow_commit, api=api if api is not None else self.api)
+        self.assertEqual(set(self.directory.iterdir()), before)
+        return result
+
+    def test_prepare_qualification_reuses_native_admission_and_preserves_reviewed_bytes(self):
+        self.use_main_candidate()
+        # Retain formatting from the submitted plan and from the owner's receipt.
+        plan_bytes = (json.dumps(self.plan, indent=2) + "\n").encode()
+        self.signed_entries["signing-plan.json"] = plan_bytes
+        self.record["signingPlanBase64"] = base64.b64encode(plan_bytes).decode("ascii")
+        self.record["signingPlanSHA256"] = BRIDGE.sha(plan_bytes)
+        voice = BRIDGE.decode(base64.b64decode(self.record["cloudVoiceEvidenceBase64"]))
+        voice_bytes = (json.dumps(voice, indent=2) + "\n").encode()
+        self.write_signed()
+        self.write_delivery_receipt()
+        with patch.object(BRIDGE.STORAGE, "connection", side_effect=AssertionError("private API accessed")):
+            actual = self.prepare_fixture(voice_bytes=voice_bytes)
+        plan, reviewed_plan, reviewed_voice = BRIDGE.validate(actual)
+        self.assertEqual((plan, reviewed_plan, reviewed_voice), (self.plan, plan_bytes, voice_bytes))
+        self.assertEqual(actual["signedApkSHA256"], self.record["signedApkSHA256"])
+        self.assertEqual(actual["signedBundle"], self.record["signedBundle"])
+        self.assertEqual(BRIDGE.preflight(actual, "f" * 40, self.directory / "prepared", self.api, self.download),
+                         self.plan)
+
+    def test_prepare_qualification_cli_emits_only_the_reviewable_record(self):
+        self.use_main_candidate()
+        expected = self.prepare_fixture()
+        commit = "f" * 40
+        endpoints = (
+            "git/ref/heads/main", "actions/artifacts/200", "actions/workflows/release.yml", "actions/runs/100/attempts/1",
+            f"compare/{self.plan['alphaCommit']}...{commit}",
+            f"compare/{self.record['signingWorkflowCommit']}...{commit}",
+        )
+        responses = {f"repos/{BRIDGE.REPOSITORY}/{path}": self.api(f"repos/{BRIDGE.REPOSITORY}/{path}")
+                     for path in endpoints}
+        cli = self.directory / "gh"
+        cli.write_text("#!/usr/bin/env python3\nimport json, sys\n"
+                       f"responses = {responses!r}\n"
+                       "assert sys.argv[1] == 'api'\nprint(json.dumps(responses[sys.argv[2]]))\n")
+        cli.chmod(0o700)
+        env = {**os.environ, "PATH": str(self.directory) + os.pathsep + os.environ["PATH"]}
+        result = subprocess.run([
+            sys.executable, "-B", str(ROOT / "scripts/ci/qualified-app-update.py"), "prepare-qualification",
+            "--signing-plan", str(self.directory / "reviewed-plan.json"),
+            "--voice-evidence", str(self.directory / "reviewed-voice.json"),
+            "--signed-tar", str(self.signed_tar), "--delivery-zip", str(self.receipt_zip),
+            "--delivery-artifact-id", "200", "--workflow-commit", commit,
+        ], env=env, capture_output=True, timeout=15, check=True)
+        self.assertEqual(BRIDGE.decode(result.stdout), expected)
+        self.assertEqual(result.stderr, b"")
+
+    def test_prepared_qualification_must_fit_workflow_dispatch(self):
+        self.use_main_candidate()
+        plan_bytes = base64.b64decode(self.record["signingPlanBase64"]).ljust(BRIDGE.PLAN_LIMIT)
+        voice_bytes = base64.b64decode(self.record["cloudVoiceEvidenceBase64"]).ljust(BRIDGE.VOICE_LIMIT)
+        self.record["signingPlanBase64"] = base64.b64encode(plan_bytes).decode("ascii")
+        self.signed_entries["signing-plan.json"] = plan_bytes
+        self.write_signed()
+        self.write_delivery_receipt()
+        record = self.prepare_fixture(voice_bytes=voice_bytes)
+        with self.assertRaisesRegex(ValueError, "exceeds GitHub Actions input size"):
+            BRIDGE.qualification_input(record, "f" * 40)
+
+    def test_prepare_qualification_refuses_stale_main_or_wrong_signing_origin(self):
+        self.use_main_candidate()
+        with self.assertRaisesRegex(ValueError, "not current Alpha main"):
+            self.prepare_fixture(workflow_commit="0" * 40)
+        for endpoint_suffix, changes in (
+            ("/actions/artifacts/200", {"expired": True}),
+            ("/actions/artifacts/200", {"name": "private-cloud-apk-delivery-101-1"}),
+            ("/actions/runs/100/attempts/1", {"run_attempt": 2}),
+            ("/actions/runs/100/attempts/1", {"conclusion": "failure"}),
+        ):
+            def wrong(endpoint):
+                record = self.api(endpoint)
+                if endpoint.endswith(endpoint_suffix):
+                    record.update(changes)
+                return record
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.prepare_fixture(api=wrong)
+
+    def test_prepare_qualification_refuses_substituted_zip_tar_apk_plan_or_voice(self):
+        self.use_main_candidate()
+        original_zip = self.receipt_zip.read_bytes()
+        self.receipt_zip.write_bytes(original_zip[:-1] + bytes([original_zip[-1] ^ 1]))
+        with self.assertRaisesRegex(ValueError, "Delivery ZIP differs"):
+            self.prepare_fixture()
+        self.receipt_zip.write_bytes(original_zip)
+
+        original_tar = self.signed_tar.read_bytes()
+        self.signed_tar.write_bytes(original_tar[:-1] + bytes([original_tar[-1] ^ 1]))
+        with self.assertRaisesRegex(ValueError, "Signed bundle bytes differ"):
+            self.prepare_fixture()
+
+        for change, error in (
+            ({"signing-plan.json": b"{}"}, "Signed bundle plan differs"),
+            ({"launcher-release.apk": b"changed"}, "Signed APK bytes differ"),
+        ):
+            self.write_signed(change)
+            self.write_delivery_receipt()
+            with self.assertRaisesRegex(ValueError, error):
+                self.prepare_fixture()
+
+        self.write_signed()
+        self.write_delivery_receipt()
+        voice = BRIDGE.decode(base64.b64decode(self.record["cloudVoiceEvidenceBase64"]))
+        voice["results"][0]["checks"]["mute"] = False
+        with self.assertRaisesRegex(ValueError, "Voice qualification incomplete"):
+            self.prepare_fixture(voice_bytes=json.dumps(voice).encode())
+        voice["results"][0]["checks"]["mute"] = True
+        voice["results"][0]["apkSha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "does not name exact signed APKs"):
+            self.prepare_fixture(voice_bytes=json.dumps(voice).encode())
 
     def test_exact_reviewed_record_restores_inputs_and_signed_bytes(self):
         work, product = self.directory / "admitted", self.directory / "product"
@@ -122,7 +349,7 @@ class QualifiedUpdateTest(unittest.TestCase):
         for variant in BRIDGE.VARIANTS:
             self.assertEqual((product / f"artifacts/{variant}-release.apk").read_bytes(), self.signed_apks[variant])
             self.assertTrue((product / f"artifacts/{variant}-debug.apk").exists())
-        self.assertEqual(json.loads((product / "artifacts/build-config.json").read_text())["runtimeProfile"], "cloud")
+        self.assertEqual(json.loads((product / "artifacts/build-config.json").read_text())["runtimeProfile"], "native")
         self.assertEqual(BRIDGE.sha((work / "cloud-voice.json").read_bytes()), self.record["cloudVoiceEvidenceSHA256"])
 
     def test_voice_receipt_cannot_be_substituted_failed_duplicated_or_carry_content(self):
@@ -135,7 +362,7 @@ class QualifiedUpdateTest(unittest.TestCase):
             elif change == "failed":
                 voice["results"][0]["checks"]["mute"] = False
             elif change == "duplicate":
-                voice["results"][1] = voice["results"][0]
+                voice["results"].append(copy.deepcopy(voice["results"][0]))
             elif change == "wrong-apk":
                 voice["results"][0]["apkSha256"] = "0" * 64
             else:
@@ -149,15 +376,15 @@ class QualifiedUpdateTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 BRIDGE.validate(record)
 
-    def test_cms_private_qa_and_wrong_output_generation_are_not_publication_inputs(self):
-        for change in ("cms", "private", "object", "generation", "extra"):
+    def test_cms_non_public_channel_and_wrong_output_generation_are_not_publication_inputs(self):
+        for change in ("cms", "channel", "object", "generation", "extra"):
             record = copy.deepcopy(self.record)
-            if change in ("cms", "private"):
+            if change in ("cms", "channel"):
                 plan = copy.deepcopy(self.plan)
                 if change == "cms":
                     del plan["privateStorage"]
                 else:
-                    plan["updateChannel"]["kind"] = "private-qa"
+                    plan["updateChannel"]["kind"] = "other"
                 encoded(record, "signingPlan", plan)
             elif change == "object":
                 record["signedBundle"]["object"] += "-different"
@@ -170,17 +397,26 @@ class QualifiedUpdateTest(unittest.TestCase):
 
     def test_wrong_workflow_fork_attempt_artifact_and_main_history_fail_before_private_access(self):
         mutations = [lambda value: value.update(path=".github/workflows/other.yml"),
+                     lambda value: value.update(workflow_id=501),
+                     lambda value: value.update(display_title=f"Release publish on {self.record['signingWorkflowCommit']}"),
                      lambda value: value.update(run_attempt=2), lambda value: value.update(event="pull_request"),
                      lambda value: value.update(head_branch="feature"),
-                     lambda value: value.update(head_repository={"full_name": "other/repository"})]
+                     lambda value: value.update(head_repository={**value["head_repository"], "id": 42})]
         for index, mutate in enumerate(mutations):
             def api(endpoint):
                 value = self.api(endpoint)
-                if endpoint.endswith("/actions/runs/100"):
+                if endpoint.endswith("/actions/runs/100/attempts/1"):
                     mutate(value)
                 return value
             with self.assertRaises(ValueError):
                 BRIDGE.preflight(self.record, "f" * 40, self.directory / f"wrong-{index}", api, self.download)
+        def moved_workflow(endpoint):
+            value = self.api(endpoint)
+            if endpoint.endswith("/actions/workflows/release.yml"):
+                value["path"] = ".github/workflows/other.yml"
+            return value
+        with self.assertRaisesRegex(ValueError, "Release workflow identity differs"):
+            BRIDGE.preflight(self.record, "f" * 40, self.directory / "moved-workflow", moved_workflow, self.download)
         def wrong_artifact(endpoint):
             value = self.api(endpoint)
             if endpoint.endswith("/actions/artifacts/200"):
@@ -219,6 +455,16 @@ class QualifiedUpdateTest(unittest.TestCase):
                 else:
                     with self.assertRaises(ValueError):
                         BRIDGE.preflight(self.record, "f" * 40, work, isolated_source, self.download)
+            # A record that carries a rotation names the edit instead of being ignored.
+            descriptor.write_text(json.dumps({"privateProducerApproval": approval, "apkSigningRotation": {"approval": "approved"}}))
+            with self.assertRaisesRegex(BRIDGE.RetiredSignerRecord, "Delete the apkSigningRotation object"):
+                BRIDGE.preflight(self.record, "f" * 40, self.directory / "retired-rotation", isolated_source, self.download)
+            # A leftover standalone pin makes the approval match no launcher-only plan: refused as unreviewed.
+            standalone = copy.deepcopy(approval)
+            standalone["unsignedApkSHA256"]["standalone"] = "1" * 64
+            descriptor.write_text(json.dumps({"privateProducerApproval": standalone}))
+            with self.assertRaises(ValueError):
+                BRIDGE.preflight(self.record, "f" * 40, self.directory / "leftover-standalone", isolated_source, self.download)
             descriptor.write_text(json.dumps({"privateProducerApproval": approval}))
             with self.assertRaises(ValueError):
                 BRIDGE.preflight(self.record, "f" * 40, self.directory / "unreviewed-signer",

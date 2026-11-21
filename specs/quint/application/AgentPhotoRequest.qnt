@@ -36,8 +36,10 @@ module AgentPhotoRequest {
       else { ...asked, request: "queued", holds: s.holds + 1,
         phase: "starting", startsByAgent: if (s.phase == "starting") s.startsByAgent else s.startsByAgent + 1 }
   }
-  /// The conversation or screen the request came from changed.
+  /// A stale context is detected when the queued request rechecks its authority.
   action requestChanges = all { s.request == "queued", s' = { ...s, aborted: true } }
+  /// An abort signal actively releases the wait without waiting for a sensor result.
+  action cancelWaiting = all { s.request == "queued", s' = finished(s, "failed") }
   /// The start settled: the queued request is checked again right before the shutter.
   action agentResumes = all { s.request == "queued", s.phase != "starting",
     s' = if (s.aborted or s.refused or not(s.view) or s.phase != "ready" or s.busyBy != "none") finished(s, "failed")
@@ -54,7 +56,7 @@ module AgentPhotoRequest {
     nondet flag = Bool.oneOf()
     nondet outcome = Set("saved", "unidentified", "threw").oneOf()
     any { startPreview, startSettles(flag), leaveView, enterView, recordingStarts, ownerShutter, cameraIdle,
-      agentAsks, requestChanges, agentResumes, shutterSettles(outcome, flag), s' = s }
+      agentAsks, requestChanges, cancelWaiting, agentResumes, shutterSettles(outcome, flag), s' = s }
   }
   val FailedImpliesNoRow = s.result == "failed" implies (s.agentRows == s.rowsAtRequest and not(s.dispatched))
   val SucceededImpliesOneRow = s.result == "succeeded" implies s.agentRows == s.rowsAtRequest + 1
@@ -87,6 +89,9 @@ module AgentPhotoRequest {
   run unconfirmedShutterIsUnknownTest = init.then(startPreview).then(startSettles(true)).then(agentAsks)
     .then(shutterSettles("threw", false))
     .expect(s.result == "unknown" and s.dispatched and s.agentRows == 0 and safety)
+  run abortReleasesWaitingRequestTest = init.then(startPreview).then(agentAsks).then(cancelWaiting)
+    .expect(s.result == "failed" and s.phase == "starting" and s.holds == 0 and safety)
+    .then(startSettles(true)).expect(s.result == "failed" and not(s.dispatched) and safety)
   run changedRequestTakesNoPhotoTest = init.then(agentAsks).then(requestChanges).then(startSettles(true))
     .then(agentResumes).expect(s.result == "failed" and not(s.dispatched) and s.phase == "ready" and safety)
 }

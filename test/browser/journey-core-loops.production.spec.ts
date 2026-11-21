@@ -18,7 +18,7 @@ import {seedCompletedAccessSetup} from './flag-off-android';
 // says the shipped renderer takes the real path or shows an honest unavailable state; it never
 // says the native side of that path works.
 import { test, expect, type Page } from '@playwright/test';
-import {completeAccessSetup,expectNoDevelopmentSurface,fenceNetwork,openYourAgent} from './flag-off-android';
+import {completeAccessSetup,expectNoDevelopmentSurface,fenceNetwork} from './flag-off-android';
 test.beforeEach(async({page})=>installNoteScheduleContract(page));
 
 const SELECTION = 'alpha.connection.selection.v1';
@@ -140,7 +140,7 @@ async function android(page: Page, options: { clock?: 'opened' | 'unavailable' |
         }
         if (plugin === 'AlphaActionJournal') return method === 'list' ? { entries: [] } : { entry: null };
         if (plugin === 'DailyApps') {
-          if (method === 'surfaceInfo') return { developmentBuild: false, assistant: false, ...(options.voice ? { reminderTimingVersion: 2 } : {}) };
+          if (method === 'surfaceInfo') return { assistant: false, ...(options.voice ? { reminderTimingVersion: 2 } : {}) };
           if (method === 'listReminders') return { reminders: structuredClone(device.reminders) };
           if (method === 'pendingReminderTap') return {};
           // Android keeps the reminder and schedules its alert inexactly; one with no alert stays pending.
@@ -301,12 +301,14 @@ test('loop A on Android: the resident agent answers, the conversation follows ac
   for (const text of [...shown, 'Flag-off stopped request', 'Resident reply 4']) await expect(bubble(page, text)).toHaveCount(1, { timeout: 30_000 });
   // Restoring reads history; it posts nothing.
   expect(await native(page, f => f.streams)).toBe(0);
-  // The connection names the agent and where it runs, and no credential is rendered anywhere.
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  const account = await openYourAgent(page);
-  await expect(account).toContainText('Running');
-  await expect(account.getByText('Eliza Cloud',{exact:true})).toBeVisible();
-  await account.getByRole('button',{name:'Back to About',exact:true}).click();
+  // Chat search stays reachable after restoring the conversation.
+  await button(page, 'Chat actions').click();
+  await expect(button(page, 'Search chat')).toBeVisible();
+  await button(page, 'Search chat').click();
+  const search = page.getByRole('dialog', { name: 'Search chats', exact: true });
+  await expect(search.getByRole('textbox', { name: 'Search messages', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(search).toHaveCount(0);
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await button(page, 'Settings').click();
   await openCloudPlanFromSettings(page);
@@ -338,7 +340,7 @@ for (const outcome of ['opened', 'unavailable'] as const) {
     const confirm = clock.getByRole('button', { name: 'Confirm Clock request', exact: true });
     await expect(confirm).toHaveText('Open Clock');
     await confirm.click();
-    await expect(clock).toContainText(outcome === 'opened' ? 'Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.' : 'No Clock app can handle this request.');
+    await expect(clock).toContainText(outcome === 'opened' ? 'Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.' : 'Clock isn’t available for this.');
     const sent = await native(page, f => f.clock) as Array<Record<string, unknown>>;
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ action: 'set', hour: 7, minute: 15, label: 'Flag-off alarm', reviewed: true });
@@ -367,7 +369,7 @@ test('loop C on Android: snooze and dismiss are reviewed Clock requests, one han
   await expect(clock).toContainText('affect all ringing alarms');
   expect(await native(page, f => f.clock)).toEqual([]);
   await confirm.dblclick();
-  await expect(clock).toContainText('Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.');
+  await expect(clock).toContainText('Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.');
   expect(await native(page, f => f.clock)).toEqual([{ action: 'snooze', snoozeMinutes: 7, reviewed: true }]);
 
   await clock.getByRole('button', { name: 'Dismiss', exact: true }).click();
@@ -380,7 +382,7 @@ test('loop C on Android: snooze and dismiss are reviewed Clock requests, one han
   await confirm.click();
   await expect.poll(() => native(page, f => f.clock.length)).toBe(2);
   expect(await native(page, f => f.clock)).toEqual([{ action: 'snooze', snoozeMinutes: 7, reviewed: true }, { action: 'dismiss', reviewed: true }]);
-  await expect(clock).toContainText('Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.');
+  await expect(clock).toContainText('Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.');
   await expect(clock).not.toContainText(/Alarm saved|snoozed for|was dismissed|Ringing/i);
   await expectNoDevelopmentSurface(page);
 });
@@ -398,7 +400,7 @@ test('loop C on Android: a cancelled review sends nothing, and an unknown result
   expect(await native(page, f => f.clock)).toEqual([]);
   await clock.getByRole('button', { name: 'Review Clock request', exact: true }).click();
   await clock.getByRole('button', { name: 'Confirm Clock request', exact: true }).click();
-  await expect(clock).toContainText('Clock result is unknown. Check Clock before repeating the request.');
+  await expect(clock).toContainText('Alpha can’t tell whether Clock got the request. Check Clock before trying again.');
   expect(await native(page, f => f.clock.length)).toBe(1);
   // Restart: the unknown outcome is still stated before another request can be reviewed, and nothing is replayed.
   await page.reload();
@@ -436,12 +438,19 @@ test('loops B, C and J04 in the web build: Agent Calendar requires a connection,
   await page.addInitScript(offline);
   await page.goto('/');
   await button(page, 'Calendar').click();
-  await expect(page.getByRole('region', {name: 'Calendar', exact: true})).toContainText('Connect');
+  const calendar = page.getByRole('region', {name: 'Calendar', exact: true});
+  // No dead Connect or Retry control: the empty grid says Not connected and offers the way to Settings.
+  await expect(calendar.getByRole('region', {name: 'Calendar timeline', exact: true})).toContainText('Not connected');
+  await expect(calendar.getByRole('button', {name: 'Retry calendar and reminders', exact: true})).toHaveCount(0);
+  await expect(calendar.getByText('Connect', {exact: true})).toHaveCount(0);
+  await expect(calendar.getByRole('button', {name: 'Open Calendar settings', exact: true})).toBeVisible();
   await button(page, 'New event').click();
   await expect(page.getByRole('textbox', {name: 'Title', exact: true})).toHaveCount(0);
   await expect(button(page, 'Save event')).toHaveCount(0);
   expect(await storedEvents(page)).toEqual([]);
   // An unavailable Agent Calendar must not silently create a local event.
+  await calendar.getByRole('button', {name: 'Open Calendar settings', exact: true}).click();
+  await expect(page.getByRole('region', {name: 'Settings', exact: true}).getByRole('button', {name: 'Google Calendar', exact: true})).toBeVisible();
   await page.goto('/');
   await button(page, 'Maps').click();
   await expect(page.getByRole('region', {name: 'Map', exact: true})).toBeVisible();
@@ -699,12 +708,10 @@ test('loop J05 on Android: a page navigation closes the open review, and an agen
   await button(page, 'Send').click();
   await expect(bubble(page, 'The ferry leaves at nine.')).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^Review summary note/ })).toHaveCount(1);
-  // The resident agent is reconnected (a new verified session) before the answer is saved.
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  const account = await openYourAgent(page);
-  await account.getByRole('button', { name: 'Reconnect agent', exact: true }).click();
+  // Reloading opens a new verified session before the answer is saved.
+  await page.reload();
+  await expect.poll(() => native(page, f => f.calls.filter((call: string) => call === 'Agent.start').length)).toBe(1);
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
-  expect(await native(page, f => f.calls.filter((call: string) => call === 'Agent.start').length)).toBe(2);
   await button(page, 'Open conversation').click();
   const card = page.getByRole('button', { name: /^Review summary note/ });
   // The restored conversation keeps the answer, but the review bound to the previous session is

@@ -3,9 +3,9 @@ import {button} from './flag-off-android';
 import {setupLiveAssistant} from './voice-assistant-fixture';
 // Source-served synthetic native ports: the Stop speaking control of the voice assistant, NOT
 // production-bundle UI or phone acceptance (audio focus and echo need a device).
-test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;'}));});
-async function setupLive(page:Page){
- const foreign=await setupLiveAssistant(page,{echoCancelled:false});
+test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;export const updateChannelCheckEnabled=false;'}));});
+async function setupLive(page:Page,speakerGain=false){
+ const foreign=await setupLiveAssistant(page,{echoCancelled:false,speakerGain});
  // Count calls on the actual shared controller.
  await page.evaluate(async()=>{const {VoiceAssistantSession}=await import('/src/runtime/voice-assistant.ts');const start=VoiceAssistantSession.prototype.start;VoiceAssistantSession.prototype.start=function(){const w=window as any;w.live.interrupts=0;const interrupt=this.interruptSpeech.bind(this);this.interruptSpeech=()=>{w.live.interrupts++;return interrupt();};return start.call(this);};});
  return foreign;
@@ -50,5 +50,35 @@ test('Stop speaking is absent when voice fails',async({page})=>{
  await expect(voice(page)).toHaveAttribute('data-voice-state','error');
  await expect(stopSpeaking(page)).toHaveCount(0);
  expect(await live(page,f=>f.interrupts??0)).toBe(0);
+ expect(await live(page,f=>f.forbidden)).toEqual([]);expect(foreign).toEqual([]);
+});
+
+// A native build with speaker gain offers Mute speaker in place of Stop speaking.
+test('Mute speaker silences output without interrupting, and the conversation end restores gain',async({page})=>{
+ const foreign=await setupLive(page,true);
+ await page.evaluate(()=>{(window as any).flagOff.replies.push('Here is a long answer about the weather this week.');});
+ await button(page,'Talk').click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ const mute=voice(page).getByRole('button',{name:'Mute speaker',exact:true}),unmute=voice(page).getByRole('button',{name:'Unmute speaker',exact:true});
+ await expect(mute).toBeVisible();await expect(mute).toHaveAttribute('aria-pressed','false');
+ await say(page,'How is the weather');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await expect(stopSpeaking(page)).toHaveCount(0);
+ await mute.click();
+ await expect(unmute).toHaveAttribute('aria-pressed','true');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ expect(await live(page,f=>f.interrupts)).toBe(0);
+ expect(await live(page,f=>f.speaker)).toEqual([false,true]);
+ // A refused change leaves the control where it was and says so.
+ await unmute.click();await expect(mute).toBeVisible();
+ await live(page,f=>{f.speakerFails=true;});
+ await mute.click();
+ await expect(page.getByText('Could not change the speaker volume.')).toBeVisible();
+ await expect(mute).toHaveAttribute('aria-pressed','false');
+ await live(page,f=>{f.speakerFails=false;});
+ await mute.click();await expect(unmute).toBeVisible();
+ await button(page,'Stop voice conversation').click();
+ await expect.poll(()=>live(page,f=>f.speaker.at(-1))).toBe(false);
+ await expect(page.getByText('(Interrupted before this reply was played.)')).toHaveCount(0);
  expect(await live(page,f=>f.forbidden)).toEqual([]);expect(foreign).toEqual([]);
 });

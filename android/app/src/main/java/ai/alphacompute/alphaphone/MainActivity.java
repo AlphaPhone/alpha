@@ -18,6 +18,26 @@ import com.getcapacitor.WebViewListener;
 
 /** Product shell: local assets, Eliza's system bridge, no cloud-auth or implicit kiosk policy. */
 public class MainActivity extends BridgeActivity {
+ private volatile String rendererStartupFailure;
+ @Override public void setContentView(int layout){
+  try{super.setContentView(layout);}
+  catch(RuntimeException failure){
+   if(layout==com.getcapacitor.android.R.layout.capacitor_bridge_layout_main){
+    try{rendererStartupFailure=RendererRecoveryBudget.startupFailure(layout,failure,id->getResources().getResourceName(id));}
+    catch(RuntimeException unavailable){rendererStartupFailure="layout=0x"+Integer.toHexString(layout)+"; cause="+failure.getClass().getName();}
+    android.util.Log.e("AlphaRendererStartup",rendererStartupFailure);
+   }
+   throw failure;
+  }
+ }
+ /** Android's existing DUMP permission protects this content-free startup diagnostic. */
+ @Override public void dump(String prefix,java.io.FileDescriptor descriptor,java.io.PrintWriter out,String[] args){
+  if(args!=null&&java.util.Arrays.asList(args).contains("--alpha-renderer-startup")){
+   out.println(prefix+"AlphaRendererStartup version="+BuildConfig.VERSION_CODE+" "+(rendererStartupFailure==null?"none observed":rendererStartupFailure));
+   return;
+  }
+  super.dump(prefix,descriptor,out,args);
+ }
  private volatile int bottomInsetDp = 0;
  private volatile int topInsetDp = 0;
  private boolean keyboardReturnPending;
@@ -38,6 +58,15 @@ public class MainActivity extends BridgeActivity {
  private void signalNavigationOpen() {
   if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface())
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
+ }
+ private boolean captureSmsNoticeOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
+  if (SmsNoticeOpenRequest.ACTION.equals(intent.getAction())) {
+   intent.setAction(Intent.ACTION_MAIN);
+   return SmsNoticeOpenRequest.current() != null;
+  }
+  if (isHomeIntent(intent)) SmsNoticeOpenRequest.clear();
+  return false;
  }
  public int getTopInsetDp() { return topInsetDp; }
  public int getBottomInsetDp() { return bottomInsetDp; }
@@ -68,7 +97,7 @@ public class MainActivity extends BridgeActivity {
   * Alpha is the HOME app now, whichever way this task started: a renderer crash loop must not leave
   * a blank, inescapable HOME, and root Back stays on Home. startedAsHome still routes hand-offs.
   */
- private boolean showsHome() { return BuildConfig.IS_LAUNCHER && !isAssistantSurface() && isCurrentHome(); }
+ private boolean showsHome() { return !isAssistantSurface() && isCurrentHome(); }
  /**
   * The HOME role on API 29+. Resolving the HOME intent is not that answer there: package visibility
   * hides other launchers from Alpha, so the resolver can name Alpha while another app is HOME.
@@ -233,7 +262,18 @@ public class MainActivity extends BridgeActivity {
   try { return FRONT_START_TOKEN.equals(intent.getStringExtra(EXTRA_FRONT_START)); }
   catch (RuntimeException foreign) { return false; }
  }
- @Override protected void load() { if (!handedOff) super.load(); }
+ private boolean telephonyAdmitted;
+ @Override protected void load() {
+  if (handedOff) return;
+  if (telephonyAdmitted && !isAssistantSurface()) {
+   WebView webView = findViewById(com.getcapacitor.android.R.id.webview);
+   if (webView != null) {
+    webView.setFilterTouchesWhenObscured(true);
+    AlphaMessagesComposerPort.install(this, webView);
+   }
+  }
+  super.load();
+ }
  private void handOff(MainActivity live) {
   boolean home = isHomeIntent(getIntent());
   boolean sameTask = live.getTaskId() == getTaskId();
@@ -292,7 +332,7 @@ public class MainActivity extends BridgeActivity {
  }
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
-  MainActivity live = BuildConfig.IS_LAUNCHER && !isAssistantSurface() ? liveInstance() : null;
+  MainActivity live = !isAssistantSurface() ? liveInstance() : null;
   // An instance our own front start made always finishes. Any other start is handed to the live
   // instance, unless the front start has already been seen to miss it in this process.
   if (live != null && live != this && (!handOffUnreliable || hasFrontMarker(getIntent()))) {
@@ -308,7 +348,7 @@ public class MainActivity extends BridgeActivity {
    handOff(live);
    return;
   }
-  if (BuildConfig.IS_LAUNCHER && !isAssistantSurface()) {
+  if (!isAssistantSurface()) {
    liveInstance = new java.lang.ref.WeakReference<>(this);
    // First instance in this task: its start intent says which kind of task Android made. A relaunch
    // in the same task keeps that answer whatever intent it was handed (see "One live MainActivity").
@@ -337,8 +377,12 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaMailAttachmentsPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
+  // AP-16 AC-19: Telecom's call state, read-only.
+  registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);
   registerPlugin(AlphaCloudSignInPlugin.class);
+  // In-app plan changes need its in-memory account session, on whichever Cloud this build uses.
+  registerPlugin(AlphaBillingAuthorityPlugin.class);
   registerPlugin(AlphaLocalAgentPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaVoiceCloudPlugin.class);
@@ -349,12 +393,16 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaHostedResultsPlugin.class);
   registerPlugin(AlphaGmailPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
-  registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
+  registerPlugin(AlphaPasswordsPlugin.class);
   // The native image gate is checked again by every telephony operation.
-  // Dialer-role components follow the verified image; Android's role dialog stays the owner's choice.
+  // Reconcile the role components with the verified image before registering telephony.
   AlphaTelephonyRoles.sync(this);
-  if (AlphaImageCapability.verified(this)) registerPlugin(AlphaTelephonyPlugin.class);
+  telephonyAdmitted = AlphaImageCapability.verified(this);
+  if (telephonyAdmitted) registerPlugin(AlphaTelephonyPlugin.class);
+  // Owner issue 4: the live calls Alpha's InCallService holds, for the WebView's ongoing-call bar.
+  if (telephonyAdmitted) registerPlugin(AlphaOngoingCallPlugin.class);
   captureNavigationOpen(getIntent());
+  captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());
   rendererDeathsAtCreate = recoveryBudget.deaths();
   super.onCreate(state);
@@ -372,7 +420,7 @@ public class MainActivity extends BridgeActivity {
   // The privileged app host never participates in third-party browser sessions.
   android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(getBridge().getWebView(),false);
   AlphaDevicePlugin.applyTextScale(this);
-  // Launcher reference layouts include system-bar space. Standalone and assist
+  // Launcher reference layouts include system-bar space. Assist
   // content must fit inside the real bars/cutout, including enforced edge-to-edge.
   WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
   getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
@@ -388,7 +436,7 @@ public class MainActivity extends BridgeActivity {
    boolean handoff = !imeVisible && (voiceKeyboardSelected() || keyboardReturnPending);
    getBridge().getWebView().evaluateJavascript("(() => { const root = document.documentElement; if (!root) return; const visible = " + imeVisible
      + ", handoff = " + handoff + "; if (root.dataset.alphaKeyboardVisible === String(visible) && root.dataset.alphaKeyboardHandoff === String(handoff)) return; root.dataset.alphaKeyboardVisible = String(visible); root.dataset.alphaKeyboardHandoff = String(handoff); window.dispatchEvent(new CustomEvent('alpha-keyboard-visibility', { detail: { visible, handoff } })); })()", null);
-   boolean fitContent = !BuildConfig.IS_LAUNCHER || isAssistantSurface();
+   boolean fitContent = isAssistantSurface();
    Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
    Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
    int left = fitContent ? safe.left : 0, top = fitContent ? safe.top : 0, right = fitContent ? safe.right : 0;
@@ -408,21 +456,22 @@ public class MainActivity extends BridgeActivity {
    @Override public void handleOnBackPressed() {
     if (BuildConfig.DEBUG) android.util.Log.d("AlphaNavigation", "Back dispatched");
     // Test and consume renderer navigation in one evaluation. While Alpha is HOME, root Back
-    // stays on Home. Otherwise it uses normal Android task behavior; the launcher flavor moves its
-    // task back instead of finishing, so the one live instance and its page survive.
+    // stays on Home. Otherwise the launcher moves its task back instead of finishing, so the one
+    // live instance and its page survive.
     boolean home = showsHome();
     String script = "(() => { if (document.documentElement.dataset.alphaCanGoBack === 'true') { window.dispatchEvent(new Event('alpha-back')); return true; } "
      + (home ? "window.dispatchEvent(new Event('launcher-home')); return true;" : "return false;") + " })()";
     getBridge().getWebView().evaluateJavascript(script, handled -> {
      if (BuildConfig.DEBUG) android.util.Log.d("AlphaNavigation", "Back handled by renderer=" + handled);
      if (home || "true".equals(handled) || isFinishing() || isDestroyed()) return;
-     if (BuildConfig.IS_LAUNCHER && !isAssistantSurface()) moveTaskToBack(true); else finish();
+     if (!isAssistantSurface()) moveTaskToBack(true); else finish();
     });
    }
   });
  }
  @Override public void onNewIntent(Intent intent) {
   boolean showMaps = captureNavigationOpen(intent);
+  boolean showSmsNotice = captureSmsNoticeOpen(intent);
   AlphaCanonicalNotifications.captureTap(this,intent);
   super.onNewIntent(intent);
   // Our own bring-to-front start (see handOff) carries nothing: the real intent was delivered first.
@@ -433,6 +482,8 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (showMaps) signalNavigationOpen();
+  if (showSmsNotice && getBridge() != null && getBridge().getWebView() != null)
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:sms-notice-open'))", null);
   if (getBridge() != null && !isAssistantSurface() && isHomeIntent(intent))
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('launcher-home'))", null);
  }

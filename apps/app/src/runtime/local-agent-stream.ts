@@ -1,4 +1,4 @@
-import {SseEventFramer} from '../../../../.eliza/client-features/packages/ui/src/api/transport.ts';
+import {SseEventFramer} from '../ui/api/transport.ts';
 import {findViewActionHandoff} from '../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts';
 import type {RemoteChatReply} from './remote-protocol';
 import {isUuid} from '../lib/ids';

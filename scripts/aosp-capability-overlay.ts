@@ -16,7 +16,10 @@ export const ALPHA_IMAGE_PROVISIONING = Object.freeze({
   resource: "alpha_aosp_image_capability",
 });
 
-/** Production staging only: native admission also requires a system-installed release build. */
+/**
+ * Written for production, admitted Sense qualification and --owner-telephony development images:
+ * native admission also requires a system-installed release, non-test-mocks build (P-36).
+ */
 export function writeAospCapabilityOverlay(output: string, packageName: string) {
   return writeImageProvisioningOverlay(output, packageName, ALPHA_IMAGE_PROVISIONING);
 }

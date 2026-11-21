@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { distributionProblems } from '../scripts/apk.ts';
 
-function assess({name='.AlphaPowerVoiceActivity', permission='android.permission.STATUS_BAR_SERVICE', tag='activity', extra=''}={}) {
+function assess({appId="ai.alphacompute.alphaphone",policyAppId=appId,name='.AlphaPowerVoiceActivity', permission='android.permission.STATUS_BAR_SERVICE', tag='activity', extra=''}={}) {
   return distributionProblems({xml:`E: manifest
-  A: package="ai.alphacompute.alphaphone"
+  A: package="${appId}"
   E: application
     A: android:allowBackup=(type 0x12)0x0
     A: android:usesCleartextTraffic=(type 0x12)0x0
@@ -13,7 +13,7 @@ function assess({name='.AlphaPowerVoiceActivity', permission='android.permission
       A: android:name="${name}"
       A: android:exported=(type 0x12)0xffffffff
       ${permission ? `A: android:permission="${permission}"` : ''}
-${extra}`, badging:"package: name='ai.alphacompute.alphaphone' versionCode='15' versionName='15'", names:['assets/public/licenses/third-party-notices.json']}, {mode:'release'}).problems;
+${extra}`, badging:`package: name='${appId}' versionCode='15' versionName='15'`, names:['assets/public/licenses/third-party-notices.json']}, {mode:'release',appId:policyAppId}).problems;
 }
 
 test('release admits the exact platform-protected Power activity', () => {
@@ -34,4 +34,19 @@ test('platform permission does not admit an unexpected exported component', () =
       A: android:exported=(type 0x12)0xffffffff
       A: android:permission="android.permission.STATUS_BAR_SERVICE"
 `}).some(problem => problem.includes('Unexpected exported activity')));
+});
+
+test('retained Power policy admits only its selected product names and preserves shared service permissions', () => {
+  const appId='ai.elizaresearch.alphaphone';
+  assert.deepEqual(assess({appId}), []);
+  assert.match(assess({appId:'ai.alphacompute.alphaphone',policyAppId:appId,name:appId+'.AlphaPowerVoiceActivity'}).join(), /package differs from selected application identity/);
+  for (const change of [{name:'ai.alphacompute.alphaphone.AlphaPowerVoiceActivity'}, {permission:''}, {permission:'android.permission.INTERNET'}, {tag:'service'}])
+    assert.ok(assess({appId,...change}).length, JSON.stringify(change));
+  const shared=`    E: service
+      A: android:name="ai.eliza.plugins.passwords.ElizaPasswordAutofillService"
+      A: android:exported=(type 0x12)0xffffffff
+      A: android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+`;
+  assert.deepEqual(assess({appId,extra:shared}), []);
+  assert.ok(assess({appId,extra:shared.replace('BIND_AUTOFILL_SERVICE','INTERNET')}).length);
 });

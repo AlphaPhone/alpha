@@ -1,6 +1,6 @@
 import { createInlineModal } from '../runtime/inline-modal';
 import { connectionController } from '../runtime/connection-ui';
-import { describeEmailTarget, fitEmailTarget, USE_IN_EMAIL_ATTACHMENT_POLICY, type EmailTarget } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/use-in-email.ts';
+import { describeEmailTarget, fitEmailTarget, USE_IN_EMAIL_ATTACHMENT_POLICY, type EmailTarget } from '../ui/mailbox/use-in-email';
 import type { RenderValues, ShellHost, ShellMessage, ShellPrototype, ShellState, ViewDefinition } from './shell-types';
 
 /** `live` is attached by agent-adapter; `emailUseRevision` only forces a render. */
@@ -12,7 +12,7 @@ type RenderedMessage = { id: Message['id']; text?: string; messageActionsRole?: 
 type ReplySnapshot = { id: string; text: string };
 type Review = ReplySnapshot & { session: string; cloud: string; target: EmailTarget; notice: string; opener: HTMLElement | null };
 /**
- * "Use in email" in the assistant conversation (review wording and limits: @elizaos/plugin-inbox/mailbox). An agent reply is offered for the email the user
+ * "Use in email" in the assistant conversation (review wording and limits: ../ui/mailbox/use-in-email). An agent reply is offered for the email the user
  * has selected in Inbox; the review names the account and the exact draft or message, and the
  * insert is refused if any of them changed in the meantime. It only fills a local draft: sending
  * still requires the composer and the provider review.

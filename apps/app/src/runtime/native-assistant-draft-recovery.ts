@@ -1,5 +1,5 @@
 import type {DomainRecovery} from '../browser/domain-document';
-import {rawSlotDraftRecovery,type DurableDraftRawSlot} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft.ts';
+import {rawSlotDraftRecovery,type DurableDraftRawSlot} from '../ui/state/durable-draft.ts';
 /**
  * Recovery of a native draft slot whose JSON no longer reads as a draft, through Alpha's recovery
  * dialog. The shared recovery captures the exact bytes and resets only that capture; this adapter

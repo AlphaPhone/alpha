@@ -1,15 +1,15 @@
+import {readWorkflowAppState} from './workflow-app-state';
 type Bag=Record<string,any>;
 /** Local simulator destinations only; a saved message ID is its step receipt. */
 export function sendWorkflowLocal(step:Bag,text:string,operationId:string,api:Bag,signal:AbortSignal,messages?:Record<string,Bag[]>){
  const action=String(step.t).toLowerCase();
- const current=(name:string)=>({...api.get(name),...JSON.parse(localStorage.getItem('alpha.dev.app.'+name)||'{}')});
  const save=(name:string,patch:Bag)=>{signal.throwIfAborted();const prior=JSON.parse(localStorage.getItem('alpha.dev.app.'+name)||'{}');if(JSON.stringify({...prior,...patch}).length>12_000_000)throw Error('Local '+name+' storage is full. Remove older records before retrying.');api.setView(name,patch);};
  const saved=(kind:string)=>({output:text,detail:'Local '+kind+' saved ('+operationId+')'});
  if(!text.trim())throw Error('Read or write message content before sending.');
  if(action==='a message to maya'||action==='a reply to the sender'){
   const senders=Object.entries(messages||{}).filter(([,rows])=>rows.some(row=>!row.me));
   if(action==='a reply to the sender'&&senders.length!==1)throw Error('Read messages from one sender before replying.');
-  const state=current('messages'),pid=action==='a message to maya'?'maya':senders[0][0],rows=state.threads[pid]||[];
+  const state=readWorkflowAppState(api,'messages'),pid=action==='a message to maya'?'maya':senders[0][0],rows=state.threads[pid]||[];
   const receipts=Object.entries(state.threads as Record<string,Bag[]>).flatMap(([owner,thread])=>thread.filter(row=>row.id===operationId).map(row=>({owner,row})));
   if(receipts.some(receipt=>receipt.owner!==pid)||receipts.length>1)throw Error('Saved message receipt belongs to another recipient.');
   const existing=receipts[0]?.row;
@@ -20,7 +20,7 @@ export function sendWorkflowLocal(step:Bag,text:string,operationId:string,api:Ba
   return saved('message');
  }
  if(action==='an email to me'){
-  const state=current('inbox'),existing=state.sent.find((mail:Bag)=>mail.id===operationId);
+  const state=readWorkflowAppState(api,'inbox'),existing=state.sent.find((mail:Bag)=>mail.id===operationId);
   if(existing){if(existing.body!==text||existing.to?.[0]!=='you@alpha.local')throw Error('Saved email receipt does not match this step.');return saved('email');}
   save('inbox',{sent:[{id:operationId,sent:true,sentAt:Date.now(),to:['you@alpha.local'],cc:[],bcc:[],acct:'personal',subj:'Workflow output',body:text,time:'Now',k:Date.now(),atts:[],workflowStep:operationId},...state.sent]});
   return saved('email');

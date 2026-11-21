@@ -5,14 +5,14 @@ import {managedServiceRequest,mapsRequestIdentity} from './managed-service-route
 import {ownerRouteAllowed} from './owner-route-policy';
 import {BrowserCloudConnection,BrowserCloudSignIn,clearBrowserCloudCredentialIfCurrent} from '../browser/cloud-connection';
 import {Capacitor} from '@capacitor/core';
-import {devSurfacesEnabled,testMocksEnabled,privateLocalPreviewEnabled} from '../build-flags';
+import {devSurfacesEnabled,testMocksEnabled} from '../build-flags';
 import { registerPlugin } from '../platform-plugins';
 import type { CloudNativeRequest, CloudCredentialStore, CloudCredential, CloudEnvironment } from './cloud-protocol';
 import type { CloudSignInPort } from './cloud-sign-in';
 import type { RemoteRequester, RemoteCredentialStore } from './remote-protocol';
 
 const nativeConnectionHeader=(Capacitor as typeof Capacitor&{PluginHeaders?:{name:string}[]}).PluginHeaders?.some(header=>header.name==='AlphaConnection')??false;
-const browserCloudHost=(devSurfacesEnabled||browserCloudResidentEnabled||privateLocalPreviewEnabled)&&!Capacitor.isNativePlatform()&&!nativeConnectionHeader;
+const browserCloudHost=(devSurfacesEnabled||browserCloudResidentEnabled)&&!Capacitor.isNativePlatform()&&!nativeConnectionHeader;
 /** Exact current-key self-revocation is supported only by the owned Android/private browser hosts. */
 export const cloudSelfRevocationSupported=Capacitor.getPlatform()==='android'||browserCloudHost;
 const nativeSignInHeader=(Capacitor as typeof Capacitor&{PluginHeaders?:{name:string}[]}).PluginHeaders?.some(header=>header.name==='AlphaCloudSignIn')??false;
@@ -156,7 +156,7 @@ export function createBrowserConnection(options:{fetch?:typeof fetch;secrets?:Br
       if(input.credentialReference)throw new Error('This credential requires its native or development host.');
       if(input.method==='GET'&&input.body!==undefined)throw new Error('Connection request failed');
       const headers=new Headers();
-      for(const [name,value] of Object.entries(input.headers||{})){if(typeof value!=='string'||!allowedHeaders.has(name.toLowerCase())&&!mapsRequestIdentity(name,value,url.pathname,input.method)||value.length>16384||/[\r\n]/.test(value))throw new Error('Connection request failed');headers.set(name,value);}
+      for(const [name,value] of Object.entries(input.headers||{})){if(typeof value!=='string'||!allowedHeaders.has(name.toLowerCase())&&!mapsRequestIdentity(name,value,url.pathname,input.method)&&!(name.toLowerCase()==='idempotency-key'&&url.pathname==='/api/v1/credits/checkout'&&input.method==='POST'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(value))||value.length>16384||/[\r\n]/.test(value))throw new Error('Connection request failed');headers.set(name,value);}
       if(input.body!==undefined)JSON.parse(input.body);
       const controller=new AbortController();requests.set(input.requestId,controller);
       try{
@@ -215,17 +215,32 @@ let storageQueue:Promise<unknown>=Promise.resolve();
 function serial<T>(operation:()=>Promise<T>):Promise<T> {
   const result=storageQueue.then(operation,operation);storageQueue=result.catch(()=>{});return result;
 }
+// Browser-host reads cross an HTTP bridge. Concurrent consumers share only an
+// in-flight read; the result is never cached after settlement. Mutations retire
+// the shared read before joining the same storage queue.
+const pendingCredentialReads=new Map<CloudEnvironment,Promise<CloudCredential|null>>();
 export const cloudCredentialStore:CloudCredentialStore={
   acceptsReferences:browserCloudHost,
-  read:environment=>serial(()=>secureConnectionStore.read<CloudCredential>(`cloud:${environment}`)),
-  write:(environment,value,signal)=>serial(async()=>{
+  read:environment=>{
+    let pending=browserCloudHost?pendingCredentialReads.get(environment):undefined;
+    if(!pending){
+      pending=serial(()=>secureConnectionStore.read<CloudCredential>(`cloud:${environment}`));
+      if(browserCloudHost){
+        pendingCredentialReads.set(environment,pending);
+        const settled=()=>{if(pendingCredentialReads.get(environment)===pending)pendingCredentialReads.delete(environment);};
+        void pending.then(settled,settled);
+      }
+    }
+    return pending.then(value=>value?{...value}:null);
+  },
+  write:(environment,value,signal)=>{pendingCredentialReads.delete(environment);return serial(async()=>{
     signal.throwIfAborted();
     await secureConnectionStore.write(`cloud:${environment}`,{...value,credentialId:crypto.randomUUID()});
     if(signal.aborted){await secureConnectionStore.remove(`cloud:${environment}`);signal.throwIfAborted();}
-  }),
+  });},
   // Native credential CAS remains prohibited; only the private browser host admits this capability.
-  ...(browserCloudHost?{clearIfCurrent:(environment:CloudEnvironment,expected:CloudCredential|null)=>serial(()=>clearBrowserCloudCredentialIfCurrent(environment,expected))}:{}),
-  clear:environment=>serial(()=>secureConnectionStore.remove(`cloud:${environment}`)),
+  ...(browserCloudHost?{clearIfCurrent:(environment:CloudEnvironment,expected:CloudCredential|null)=>{pendingCredentialReads.delete(environment);return serial(()=>clearBrowserCloudCredentialIfCurrent(environment,expected));}}:{}),
+  clear:environment=>{pendingCredentialReads.delete(environment);return serial(()=>secureConnectionStore.remove(`cloud:${environment}`));},
 };
 export const remoteCredentialStore:RemoteCredentialStore={
   read:origin=>serial(()=>secureConnectionStore.read(`remote:${origin}`)),

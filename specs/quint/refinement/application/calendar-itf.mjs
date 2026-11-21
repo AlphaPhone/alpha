@@ -4,6 +4,7 @@ import {mkdtempSync, readFileSync, readdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {scaledTimeout} from '../timeouts.mjs';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const cli = join(root, 'node_modules/@informalsystems/quint/dist/src/cli.js');
@@ -33,7 +34,7 @@ function read(file, name, variable) {
 
 function quint(args) {
   return new Promise((resolve, reject) => execFile(process.execPath, [cli, ...args], {cwd: root, encoding: 'utf8',
-    timeout: 120000, maxBuffer: 16 * 1024 * 1024}, (error, stdout, stderr) => {
+    timeout: scaledTimeout(120000), maxBuffer: 16 * 1024 * 1024}, (error, stdout, stderr) => {
     if (error && typeof error.code !== 'number') reject(error);
     else resolve({status: error ? error.code : 0, stdout, stderr});
   }));
@@ -52,10 +53,10 @@ export function modelTraces(options) {
   return generated.get(key);
 }
 const generated = new Map();
-async function generate({path, module, variable = 's', witnesses = [], goals = {}, traces = 12, steps = 30,
+async function generate({path, module, variable = 's', step = 'step', witnesses = [], goals = {}, traces = 12, steps = 30,
   samples = 60, seed = 20261107}) {
   const directory = mkdtempSync(join(tmpdir(), 'alpha-quint-itf-'));
-  const common = [path, `--main=${module}`, '--backend=typescript', '--mbt', `--seed=${seed}`];
+  const common = [path, `--main=${module}`, `--step=${step}`, '--backend=typescript', '--mbt', `--seed=${seed}`];
   try {
     const walk = await quint(['run', ...common, `--max-samples=${samples}`, `--max-steps=${steps}`, `--n-traces=${traces}`,
       '--invariant=safety', `--out-itf=${join(directory, 'walk-{seq}.itf.json')}`]);

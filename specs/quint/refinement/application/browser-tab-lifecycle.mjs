@@ -32,6 +32,8 @@ const Cap = 3, Ids = Array.from({length: 10}, (_, index) => index + 1), limitMes
 const name = id => `t${id}`, number = id => Number(String(id).slice(1)), sorted = ids => [...ids].map(number).sort((a, b) => a - b);
 
 export async function browserTabLifecycleDriver() {
+  const load = async path => import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(readFileSync(join(repositoryRoot, path), 'utf8'))).toString('base64'));
+  const {BrowserOpenRefused, searchAddress, tabLimitRefusal} = await load('apps/app/src/browser/browser-poll.ts');
   const adapter = readFileSync(join(repositoryRoot, 'apps/app/src/prototype/browser-adapter.ts'), 'utf8');
   const slice = (from, to) => { const start = adapter.indexOf(from), end = adapter.indexOf(to, start); assert.ok(start >= 0 && end > start, `the adapter no longer has ${from}`); return stripTypeScriptTypes(adapter.slice(start, end)); };
   const region = [slice('  function ensure(', '  async function command('), slice('  function forgetTabs(ids', '  async function confirmBrowser('),
@@ -42,7 +44,7 @@ export async function browserTabLifecycleDriver() {
     const native = new Set(), messages = [], calls = [], listeners = {};
     let fresh, read;
     const call = (kind, id) => { const item = {kind, id}; item.promise = new Promise((resolve, reject) => { item.resolve = resolve; item.reject = reject; }); calls.push(item); return item.promise; };
-    const context = {URL, MAX_TABS: Cap, parseBrowserAddressInput, browsingSnapshot, restoreBrowsing, tabs, session, restored: new Map(), restoreAttempts: new Map(),
+    const context = {URL, MAX_TABS: Cap, agentTab: undefined, BrowserOpenRefused, searchAddress, tabLimitRefusal, parseBrowserAddressInput, browsingSnapshot, restoreBrowsing, tabs, session, restored: new Map(), restoreAttempts: new Map(),
       disposed: false, sessionRead: false, sessionHydrated: false, clearingData: false, profileUnsupportedTab: undefined, PROFILE_UNSUPPORTED_NATIVE_MESSAGE: 'unsupported',
       // This component never calls Clear; BrowserSessionPersistence exercises epoch changes.
       saveEpoch: 0, lastSaved: '', snapshotRevision: 0, snapshotInputs: undefined, snapshotValue: null, snapshotJson: '',

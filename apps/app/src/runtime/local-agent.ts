@@ -3,14 +3,16 @@ import {subscribeNativeViewEvents} from "./native-view-events";
 import {browserCloudResidentEnabled,browserResidentCall,browserProviderCall} from './browser-cloud-resident';
 import type {AppRecordMethod} from './app-record-route-policy';
 import {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
-import {parseRecoveryReview,parseRecoveryArchive} from './resident-recovery';
+import {isResidentRetryable,parseRecoveryReview,parseRecoveryArchive} from './resident-recovery';
 import {anyAbortSignal,runProviderConfiguration} from './abort-signal';
+import {providerKeyRefusalText} from '../ui/settings/provider-key-messages';
 import {developmentCloudVoiceEnabled} from './development-cloud-voice';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import {ownerRouteAllowed, ownerRouteGroup} from './owner-route-policy.ts';
+import { privateLocalPreviewEnabled } from '../build-flags';
 import { Capacitor } from '@capacitor/core';
 import type { VerifiedSession, ChatChannel } from './alpha-client';
-import { conversationViewHeaders, conversationRoomId, messagePageQuery, turnAbortOutcome, turnAbortPath, type MessagePage, type RemoteChatReply, type RemoteConversation, type TurnAbortOutcome } from './remote-protocol';
+import { parseConversationSearch, conversationViewHeaders, conversationRoomId, messagePageQuery, turnAbortOutcome, turnAbortPath, type MessagePage, type RemoteChatReply, type RemoteConversation, type TurnAbortOutcome } from './remote-protocol';
 import { readLocalAgentStream, type StreamTextListener } from './local-agent-stream';
 import { streamNativeAgent } from './local-agent-native-stream';
 import { subscribeNativeVoiceEvents } from './local-agent-native-events';
@@ -51,7 +53,7 @@ export interface LocalAgentBridge {
   clearProvider?(input?:{onlyIfPresent?:true;requestId?:string}):Promise<{configured?:unknown}>;
   clearProviderIfCurrent?(input:{bindingGuard:string}):Promise<{outcome?:unknown}>;
   /** Read-only native query; see residentAttachable. */
-  residentAttachment?(input:{credentialId?:string}):Promise<{attachable?:unknown;reason?:unknown;bindingGuard?:unknown}>;
+  residentAttachment?(input:{credentialId?:string}):Promise<{attachable?:unknown;bindingRetained?:unknown;reason?:unknown;bindingGuard?:unknown}>;
   configureCloudProvider?(input:{credentialId:string;model:string}):Promise<unknown>;
   /** Owner switches enforced by the native Google host before agent writes. */
   setGoogleAgentAccess?(input:{gmailChanges:boolean;calendarEdits:boolean}):Promise<void>;
@@ -66,12 +68,13 @@ const nativeBridge:LocalAgentBridge={subscribeVoiceEvents:(ownerId,listener)=>su
 // The host bridge at /__alpha-local-agent exists only on the development server
 // with test mocks or the explicit real Cloud resident mode. This
 // module is also imported by Node contract tests, where import.meta.env is absent.
-const developmentBridgeAllowed: boolean = browserCloudResidentEnabled || (import.meta.env !== undefined && import.meta.env.DEV === true && (import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === '1' || (import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW === '1' && import.meta.env.VITE_LOCAL_AGENT === '1')));
+const developmentBridgeAllowed: boolean = browserCloudResidentEnabled || (import.meta.env !== undefined && import.meta.env.DEV === true && import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === '1');
 export const browserLocalAgentEnabled: boolean = developmentBridgeAllowed && import.meta.env.VITE_LOCAL_AGENT === '1';
 const localAgentAvailable = () => Capacitor.isNativePlatform()
   ? Capacitor.isPluginAvailable('Agent') : browserLocalAgentEnabled;
 /** Packaging availability only; it does not prove startup or inference readiness. */
 export async function localAgentPackaged():Promise<boolean> {
+  if(privateLocalPreviewEnabled)return browserLocalAgentEnabled;
   if(!localAgentAvailable())return false;
   if(!Capacitor.isNativePlatform())return browserLocalAgentEnabled;
   try{return (await native.getStatus?.())?.packaged===true;}catch{return false;}
@@ -108,7 +111,15 @@ const browserBridge: LocalAgentBridge | null = developmentBridgeAllowed ? {
       method:'POST', headers:{'Content-Type':'application/json','X-Alpha-Local-Agent':'1'},
       body:JSON.stringify(input), signal:signal ? anyAbortSignal([signal,AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs), redirect:'error',
     });
-    if (!response.ok) throw Object.assign(new Error('Local agent development bridge unavailable. Check the development server.'),{status:response.status});
+    if (!response.ok) {
+      let message='Local agent development bridge unavailable. Check the development server.';
+      if (privateLocalPreviewEnabled&&response.status===409) {
+        const refusal=await response.json().catch(()=>null);
+        if (refusal?.code==='local-owner-unconfirmed')
+          message='Alpha couldn’t confirm the local owner. Restart the local agent, then try again.';
+      }
+      throw Object.assign(new Error(message),{status:response.status});
+    }
     return response.json();
   },
   async speechAudio(input,signal){
@@ -148,7 +159,7 @@ function subscribeBrowserConversationEvents(bridge:LocalAgentBridge,ownerId:stri
       if(retired){next.close();return;}
       const previous=current,gap=!previous||previous.readyState!==WebSocket.OPEN;current=next;pending=undefined;backoff=1000;
       const socket=next;
-      socket.onmessage=event=>{if(retired||current!==socket||typeof event.data!=='string'||event.data.length>2*1048576)return;let value;try{value=JSON.parse(event.data);}catch{return;}if(value&&typeof value==='object'&&!Array.isArray(value)&&value.type==='proactive-message')listener(value);};
+      socket.onmessage=event=>{if(retired||current!==socket||typeof event.data!=='string'||event.data.length>2*1048576)return;let value;try{value=JSON.parse(event.data);}catch{return;}if(value&&typeof value==='object'&&!Array.isArray(value)&&(value.type==='proactive-message'||value.type==='conversation-updated'))listener(value);};
       socket.onclose=event=>{if(retired||current!==socket)return;current=undefined;if(event.code===1008){onState('unavailable',false);stop();return;}failed();};
       socket.onerror=()=>{if(!retired&&current===socket)socket.close();};
       previous?.close();onState('connected',gap);schedule(expiresAt-Date.now()-10000);
@@ -167,6 +178,10 @@ function record(value:unknown):Record<string,unknown> {
 // ordinary stop → bind → start path, so a listening but unusable runtime is still restarted by a
 // retry. Cleared by the next verified connection.
 let attachDistrusted=false;
+/** Whether an HTTP refusal was answered by the on-device agent itself (its errors carry
+ * `source: 'local-agent'`). Its status says nothing about the Eliza Cloud sign-in: a 401 here is
+ * the agent's own owner session, never an expired Cloud key. */
+export const localAgentRefusal=(error:unknown):boolean=>!!error&&typeof error==='object'&&(error as {source?:unknown}).source==='local-agent';
 function identifier(value:unknown):string {
   if (typeof value !== 'string' || !value || value.length>512) throw new Error('Invalid local agent identity.');
   return value;
@@ -212,7 +227,7 @@ export class LocalAgentProtocol {
     return subscribeNativeViewEvents(native,session.ownerId,clientId,frame=>{if(session===this.session&&generation===this.generation)listener(frame);},ended);
   }
   deviceHeaders:Record<string,string>={};
-  constructor(private bridge:LocalAgentBridge = Capacitor.isNativePlatform() ? nativeBridge : browserBridge ?? unavailableBridge) {}
+  constructor(private bridge:LocalAgentBridge = privateLocalPreviewEnabled&&browserBridge ? browserBridge : Capacitor.isNativePlatform() ? nativeBridge : browserBridge ?? unavailableBridge) {}
   async request(path:string, body:unknown|undefined, signal:AbortSignal, headers:Record<string,string> = {}, method:LocalAgentMethod = body===undefined?'GET':'POST'):Promise<any> {
     signal.throwIfAborted();
     const group=ownerRouteGroup(path);
@@ -274,7 +289,7 @@ export class LocalAgentProtocol {
     signal.throwIfAborted();
     const generation=this.generation,requestId=crypto.randomUUID();
     let cancel:()=>void=()=>{};
-    let dispatched=false,cancellationSent=false,attached=false;
+    let dispatched=false,cancellationSent=false,startupResolved=false,attached=false;
     const cancelOwned=()=>{if(dispatched&&!cancellationSent){cancellationSent=true;void this.bridge.cancelStart?.({requestId}).catch(()=>{});}};
     const cancelled=new Promise<never>((_,reject)=>{cancel=()=>{cancelOwned();reject(signal.reason||new DOMException('Cancelled','AbortError'));};});
     signal.addEventListener('abort',cancel,{once:true});
@@ -283,6 +298,7 @@ export class LocalAgentProtocol {
     const started=this.bridge.start({requestId});
     if(signal.aborted)cancel();
     const startup=await Promise.race([started,cancelled]);
+    startupResolved=true;
     // Native reports when it attached this surface to the already admitted running resident
     // instead of starting it: no epoch change, no new enrollment, other surfaces' work untouched.
     attached=Boolean(startup)&&typeof startup==='object'&&(startup as {attached?:unknown}).attached===true;
@@ -297,17 +313,22 @@ export class LocalAgentProtocol {
     signal.throwIfAborted();
     if(!Array.isArray(result.agents)||result.agents.length!==1)throw new Error('The local runtime must expose exactly one agent.');
     const agent=record(result.agents[0]);
-    if(agent.status!=='running')throw Error('The local agent is still starting. Try again when it is ready.');
+    if (agent.status !== 'running')
+      throw Object.assign(Error('The local agent is still starting.'), {code: 'LOCAL_AGENT_NOT_READY'});
     if(generation!==this.generation)throw Error('Local agent connection changed.');
     this.session={ownerId:identifier(identity.id),agentId:identifier(agent.id),sessionId:crypto.randomUUID(),origin:this.origin};
     attachDistrusted=false;
     return {session:this.session,name:typeof agent.name==='string'?agent.name:'Local agent',attached};
     }catch(error){
       // The runtime answered the attach but not as a usable owner session. A cancelled or
-      // superseded connect says nothing about the runtime and changes nothing; neither does a
-      // lifecycle change made by another surface, which native reports on the next attach query.
-      if(attached&&!signal.aborted&&generation===this.generation&&(error as {code?:unknown}|null)?.code!=='LOCAL_AGENT_EPOCH_CHANGED')attachDistrusted=true;
-      cancelOwned();throw error;
+      // superseded connect says nothing about the runtime. Leave supervised process recovery
+      // alone when the runtime is still starting or native reports a replaced process.
+      if(!isResidentRetryable(error)){
+        if(attached&&!signal.aborted&&generation===this.generation)attachDistrusted=true;
+        // Native already settled rejected starts. Cancelling them would leave a pre-start tombstone.
+        if(startupResolved)cancelOwned();
+      }
+      throw error;
     }
     finally{signal.removeEventListener('abort',cancel);}
   }
@@ -425,14 +446,22 @@ export class LocalAgentProtocol {
     const value=record((await this.json('/api/conversations',{title},signal)).conversation);
     return {...value,id:identifier(value.id)};
   }
-  async truncateMessages(id:string,messageId:string,signal:AbortSignal):Promise<void> {
-    const value=await this.json(`/api/conversations/${encodeURIComponent(identifier(id))}/messages/truncate`,{messageId,inclusive:true},signal);
-    if(value.ok!==true||!Number.isSafeInteger(value.deletedCount)||Number(value.deletedCount)<1)throw Error('Message replacement was not confirmed. Reload conversation history before trying again.');
+  async forkConversation(id:string,messageId:string,requestId:string,expectedText:string,signal:AbortSignal):Promise<RemoteConversation> {
+    const value=record((await this.json(`/api/conversations/${encodeURIComponent(identifier(id))}/fork`,{messageId,requestId,expectedText},signal)).conversation);
+    return {...value,id:identifier(value.id)};
   }
   async messages(id:string,signal?:AbortSignal,page?:MessagePage):Promise<{messages:Record<string,unknown>[];hasMore?:boolean}> {
     const value=await this.json(`/api/conversations/${encodeURIComponent(identifier(id))}/messages${messagePageQuery(page)}`,undefined,signal);
     if(!Array.isArray(value.messages))throw new Error('Invalid local conversation history.');
     return {messages:value.messages.map(record),...(typeof value.hasMore==='boolean'?{hasMore:value.hasMore}:{})};
+  }
+  async searchMessages(query:string,signal?:AbortSignal,offset=0) {
+    return parseConversationSearch(await this.json(`/api/conversations/messages/search?${new URLSearchParams({q:query,limit:'50',offset:String(offset)})}`,undefined,signal));
+  }
+  async messagesAround(id:string,messageId:string,signal?:AbortSignal):Promise<{messages:Record<string,unknown>[]}> {
+    const value=await this.json(`/api/conversations/${encodeURIComponent(identifier(id))}/messages?${new URLSearchParams({around:messageId})}`,undefined,signal);
+    if(!Array.isArray(value.messages))throw Error('Invalid conversation window.');
+    return {messages:value.messages.map(record)};
   }
   /** Streams render progress. If the stream drops before its terminal frame, the same request is
    * repeated once without streaming under the same clientMessageId: the agent returns the durable
@@ -553,7 +582,14 @@ export async function configureLocalProvider(apiKey:string,model:string=LOCAL_PR
   signal.throwIfAborted();
   if(!native.prepareProviderConfiguration||!native.configureProvider||!native.cancelProviderConfiguration)throw Error('Update Alpha');
   if(model!==LOCAL_PROVIDER_MODEL)throw Error(`${LOCAL_PROVIDER_MODEL} · Cerebras`);
-  return runProviderConfiguration(signal,{prepare:()=>native.prepareProviderConfiguration!(),configure:requestId=>native.configureProvider!({apiKey,model,requestId,...(cartesiaKey?{cartesiaKey}:{})}),cancel:requestId=>native.cancelProviderConfiguration!({requestId})});
+  try{
+    return await runProviderConfiguration(signal,{prepare:()=>native.prepareProviderConfiguration!(),configure:requestId=>native.configureProvider!({apiKey,model,requestId,...(cartesiaKey?{cartesiaKey}:{})}),cancel:requestId=>native.cancelProviderConfiguration!({requestId})});
+  }catch(error){
+    // The shared provider slot refuses a key check or save in its own English; Alpha words it.
+    const refusal=providerKeyRefusalText(error);
+    if(refusal!==undefined)throw new Error(refusal);
+    throw error;
+  }
 }
 /** Publish the saved owner switches to the on-device Google host. */
 export async function saveNativeGoogleAgentAccess(access:{gmailChanges:boolean;calendarEdits:boolean}):Promise<void> {
@@ -667,17 +703,14 @@ export async function clearLocalProvider(onlyIfPresent=false,signal?:AbortSignal
   return status;
 }
 
-/** True only when native confirms an admitted, running, enrolled resident whose stored provider
- * admission is this Cloud credential and is the one the running process launched with. Read-only:
- * it never starts, stops, pairs or rebinds. Any error or doubt reports false, which keeps the
- * ordinary stop → bind → start path; so does an earlier attach by this surface that failed its
- * owner-session verification. */
-async function residentAttachmentStatus(credentialId:string,bridge:Pick<LocalAgentBridge,'residentAttachment'>=native,nativePlatform:boolean=Capacitor.isNativePlatform()):Promise<{attachable:boolean;bindingGuard?:string}> {
+/** Read-only native admission for this Cloud credential. A matching provider can stay
+ * bound while the watchdog starts the process or a surface completes owner enrollment. */
+async function residentAttachmentStatus(credentialId:string,bridge:Pick<LocalAgentBridge,'residentAttachment'>=native,nativePlatform:boolean=Capacitor.isNativePlatform()):Promise<{attachable:boolean;bindingRetained?:boolean;bindingGuard?:string}> {
   if(attachDistrusted||!nativePlatform&&!browserCloudResidentEnabled||typeof credentialId!=='string'||!credentialId)return {attachable:false};
   try{
     const result=browserCloudResidentEnabled?await browserResidentCall('residentStatus',credentialId):await bridge.residentAttachment?.({credentialId});
     const guard=isSha256Hex(result?.bindingGuard)?result.bindingGuard:undefined;
-    return {attachable:result?.attachable===true,...(guard?{bindingGuard:guard}:{})};
+    return {attachable:result?.attachable===true,...(guard?{bindingGuard:guard,bindingRetained:result?.bindingRetained===true}:{})};
   }catch{return {attachable:false};}
 }
 export async function residentAttachable(credentialId:string,bridge:Pick<LocalAgentBridge,'residentAttachment'>=native,nativePlatform:boolean=Capacitor.isNativePlatform()):Promise<boolean> {
@@ -686,7 +719,7 @@ export async function residentAttachable(credentialId:string,bridge:Pick<LocalAg
 /** A returned guard identifies this call's exact attachment or newly applied binding. */
 export async function bindResidentCloudProvider(credentialId:string,ports?:{attachable:(credentialId:string)=>Promise<boolean>;configure:(credentialId:string)=>Promise<void|string>}):Promise<string|undefined> {
   const attachment=ports?{attachable:await ports.attachable(credentialId)}:await residentAttachmentStatus(credentialId);
-  if(attachment.attachable)return 'bindingGuard' in attachment?attachment.bindingGuard:undefined;
+  if(attachment.attachable||'bindingRetained' in attachment&&attachment.bindingRetained)return 'bindingGuard' in attachment?attachment.bindingGuard:undefined;
   const bindingGuard=await (ports?.configure??configureLocalCloudProvider)(credentialId);
   return typeof bindingGuard==='string'?bindingGuard:undefined;
 }

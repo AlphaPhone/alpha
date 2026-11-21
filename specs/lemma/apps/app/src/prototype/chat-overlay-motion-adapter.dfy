@@ -25,7 +25,9 @@ datatype Mode = hidden | input | sheet | full
 
 datatype Sample = Sample(y: int, t: int)
 
-datatype ReleaseOptions = ReleaseOptions(mode: Mode, direction: string, height: int, floor: int, full: int, flick: bool)
+datatype SheetFit = SheetFit(viewport: int, low: int, high: int, full: int, content: int, floor: int, draft: bool, stageNeed: int, stageMin: int)
+
+datatype ReleaseOptions = ReleaseOptions(mode: Mode, direction: string, height: int, floor: int, full: int, flick: bool, home: bool)
 
 datatype FlickSpanResult = FlickSpanResult(rise: int, run: int)
 
@@ -85,6 +87,36 @@ lemma clampSheetHeight_ensures(rounded: int, full: int, half: int)
 {
 }
 
+function fitSheetHeight(o: SheetFit): int
+  requires (o.viewport > 0)
+  requires (o.full > 0)
+  requires (o.floor >= 0)
+  requires (o.stageMin >= 0)
+  requires (o.stageNeed >= 0)
+  requires (o.low <= o.high)
+  requires (o.high <= o.full)
+{
+  var sheetMin := MathMin(o.floor, o.full);
+  var fitted := MathMin(o.high, MathMax(o.low, o.content));
+  var wanted := (if o.draft then MathMin(fitted, (o.viewport - o.stageNeed)) else fitted);
+  MathMax(sheetMin, MathMin(MathMin(wanted, (o.viewport - o.stageMin)), o.full))
+}
+
+lemma fitSheetHeight_ensures(o: SheetFit)
+  requires (o.viewport > 0)
+  requires (o.full > 0)
+  requires (o.floor >= 0)
+  requires (o.stageMin >= 0)
+  requires (o.stageNeed >= 0)
+  requires (o.low <= o.high)
+  requires (o.high <= o.full)
+  ensures (fitSheetHeight(o) <= o.full)
+  ensures ((o.floor <= o.full) ==> (fitSheetHeight(o) >= o.floor))
+  ensures ((o.floor > o.full) ==> (fitSheetHeight(o) >= o.full))
+  ensures (!(o.draft) ==> (o.floor <= o.low) ==> (o.stageMin <= (o.viewport - o.high)) ==> ((o.low <= fitSheetHeight(o)) && (fitSheetHeight(o) <= o.high)))
+{
+}
+
 function chatRelease(options: ReleaseOptions): ChatReleaseResult
   requires (options.floor <= options.full)
 {
@@ -94,16 +126,18 @@ function chatRelease(options: ReleaseOptions): ChatReleaseResult
   var floor := options.floor;
   var full := options.full;
   var flick := options.flick;
+  var home := options.home;
+  var collapsed := (if home then "input" else "hidden");
   var third := (((full - floor) as real) / (3 as real));
   var roomy := ((CHAT_SNAP_ZONE as real) < third);
   var nearTop := (if roomy then (height >= (full - CHAT_SNAP_ZONE)) else ((height as real) >= ((full as real) - third)));
   var nearFloor := (if roomy then (height <= (floor + CHAT_SNAP_ZONE)) else ((height as real) <= ((floor as real) + third)));
   if (mode.sheet? || mode.full?) then
     if flick then
-      ChatReleaseResult((if (direction == "up") then "full" else "hidden"), None)
+      ChatReleaseResult((if (direction == "up") then "full" else collapsed), None)
     else
       if nearFloor then
-        ChatReleaseResult("hidden", None)
+        ChatReleaseResult(collapsed, None)
       else
         if nearTop then
           ChatReleaseResult("full", None)
@@ -111,7 +145,7 @@ function chatRelease(options: ReleaseOptions): ChatReleaseResult
           ChatReleaseResult("sheet", Some(height))
   else
     if (direction == "down") then
-      ChatReleaseResult("hidden", None)
+      ChatReleaseResult(collapsed, None)
     else
       if nearTop then
         ChatReleaseResult("full", None)
@@ -124,11 +158,15 @@ function chatRelease(options: ReleaseOptions): ChatReleaseResult
 
 lemma chatRelease_ensures(options: ReleaseOptions)
   requires (options.floor <= options.full)
-  ensures (((chatRelease(options).chat == "hidden") || (chatRelease(options).chat == "sheet")) || (chatRelease(options).chat == "full"))
-  ensures ((options.mode.input? || options.mode.hidden?) ==> (options.direction == "down") ==> (chatRelease(options).chat == "hidden"))
+  ensures ((((chatRelease(options).chat == "hidden") || (chatRelease(options).chat == "input")) || (chatRelease(options).chat == "sheet")) || (chatRelease(options).chat == "full"))
+  ensures (options.home ==> (chatRelease(options).chat != "hidden"))
+  ensures ((chatRelease(options).chat == "input") ==> options.home)
+  ensures ((options.mode.input? || options.mode.hidden?) ==> (options.direction == "down") ==> !(options.home) ==> (chatRelease(options).chat == "hidden"))
+  ensures ((options.mode.input? || options.mode.hidden?) ==> (options.direction == "down") ==> options.home ==> (chatRelease(options).chat == "input"))
   ensures ((options.mode.input? || options.mode.hidden?) ==> (options.direction == "up") ==> (chatRelease(options).chat != "hidden"))
   ensures ((options.mode.sheet? || options.mode.full?) ==> options.flick ==> (options.direction == "up") ==> (chatRelease(options).chat == "full"))
-  ensures ((options.mode.sheet? || options.mode.full?) ==> options.flick ==> (options.direction == "down") ==> (chatRelease(options).chat == "hidden"))
+  ensures ((options.mode.sheet? || options.mode.full?) ==> options.flick ==> (options.direction == "down") ==> !(options.home) ==> (chatRelease(options).chat == "hidden"))
+  ensures ((options.mode.sheet? || options.mode.full?) ==> options.flick ==> (options.direction == "down") ==> options.home ==> (chatRelease(options).chat == "input"))
   ensures (match chatRelease(options).height { case Some(i_result_height_val) => ((chatRelease(options).chat == "sheet") && (i_result_height_val == options.height)) case None => true })
   ensures (match chatRelease(options).height { case Some(i_result_height_val) => ((options.floor < options.height) && (options.height < options.full)) case None => true })
   ensures (match chatRelease(options).height { case Some(i_result_height_val) => ((options.height > (options.floor + 120)) || ((options.height as real) > ((options.floor as real) + (((options.full - options.floor) as real) / (3 as real))))) case None => true })

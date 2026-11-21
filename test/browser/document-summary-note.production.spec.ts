@@ -17,7 +17,7 @@ import {returnToApps} from './app-navigation';
 // runtime, a model answer, Eliza Cloud or a device, and no document, account or note is real.
 import { test, expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, openYourAgent, type FlagOffDocument } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, type FlagOffDocument } from './flag-off-android';
 
 const contents = 'Public fact: twelve raised beds.\nPRIVATE OMIT: do not send this line.';
 const excerpt = 'Public fact: twelve raised beds.';
@@ -125,11 +125,9 @@ test('J03 on Android: a resident session that changes before Save withdraws the 
   await returnToApps(page);
   await askAboutDocument(page);
   await expect(page.getByRole('button', { name: /^Review summary note/ })).toHaveCount(1);
-  // The resident agent is reconnected from Settings: a new verified session.
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  const connection = await openYourAgent(page);
-  await connection.getByRole('button', { name: 'Reconnect agent', exact: true }).click();
-  await expect.poll(() => harness(page, f => f.calls.filter((call: string) => call === 'Agent.start').length), { timeout: 30_000 }).toBe(2);
+  // Reloading opens a new verified session against the retained conversation.
+  await page.reload();
+  await expect.poll(() => harness(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await button(page, 'Open conversation').click();
   // The restored conversation keeps the answer; the review bound to the earlier session is gone.

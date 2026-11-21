@@ -1,8 +1,10 @@
+import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 import {confirmCloudSignOut} from './helpers/cloud-plan-settings';
 import {seedCompletedAccessSetup} from './flag-off-android';
 import {test,expect} from '@playwright/test';
 import {completeAccessSetup} from './flag-off-android';
 import {createServer} from 'vite';
+import {scopedViteCacheDir} from './helpers/vite-cache';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -13,7 +15,7 @@ import {createLocalAgentDevHandler} from '../../scripts/local-agent-dev-bridge';
 
 // Closed Cloud/media fixture: normal production adapters, no external request or media device.
 test('browser restores an existing host Cloud account, uses canonical voice and preserves explicit logout',async({page},info)=>{
- test.setTimeout(45000);
+ test.setTimeout(scaledTimeout(45000));
  const profile=await mkdtemp(join(tmpdir(),'alpha-browser-cloud-ui-')),secret='synthetic-cloud-ui-credential',owner='11111111-1111-4111-8111-111111111111',organizationId='22222222-2222-4222-8222-222222222222',credentialId='33333333-3333-4333-8333-333333333333',reference='browser-cloud-reference:44444444-4444-4444-8444-444444444444',session=randomUUID(),calls:string[]=[];
  const deploymentProfile=join(profile,cloudStorageNamespace.replaceAll(':','-'));
  await mkdir(deploymentProfile,{recursive:true,mode:0o700});
@@ -31,7 +33,7 @@ test('browser restores an existing host Cloud account, uses canonical voice and 
   if(path==='/api/v1/voice/tts'){expect(JSON.parse(String(input.body))).toEqual({text:'Closed fixture text',format:'mp3'});return new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'audio/mpeg'}});}
   throw Error('Unexpected closed fixture Cloud route');
  }});
- const server=await createServer({configFile:resolve('vite.config.ts'),cacheDir:resolve('test-results/browser-cloud-dev/vite-cache'),server:{host:'127.0.0.1',port:0,strictPort:false},plugins:[{name:'owned-closed-cloud-fixture',enforce:'pre',configureServer(server){server.middlewares.use('/__alpha-browser-cloud',(req,res)=>{void handler(req,res);});}}]});
+ const server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:scopedViteCacheDir('test-results/browser-cloud-dev/vite-cache'),server:{host:'127.0.0.1',port:0,strictPort:false},plugins:[{name:'owned-closed-cloud-fixture',enforce:'pre',configureServer(server){server.middlewares.use('/__alpha-browser-cloud',(req,res)=>{void handler(req,res);});}}]});
  try{
   await server.listen();const address=server.httpServer!.address()as {port:number};
   await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'none'}));(window as any).openedCloudURLs=[];window.open=((url:string)=>{(window as any).openedCloudURLs.push(url);return {opener:null};})as typeof window.open;});
@@ -77,9 +79,8 @@ test('browser restores an existing host Cloud account, uses canonical voice and 
   await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.beginSignIn('production'));
   const signIn=page.getByRole('dialog',{name:'Alpha',exact:true});
   await expect(signIn.getByRole('form',{name:'Sign in with email'})).toBeVisible();
-  // Google is not configured here: no dead Google button, only a quiet retry.
-  await expect(signIn.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
-  await expect(signIn.getByRole('button',{name:'Retry Google sign-in',exact:true})).toBeVisible();
+  await expect(signIn.getByRole('button',{name:'Continue with Google',exact:true})).toBeDisabled();
+  await expect(signIn.getByRole('button',{name:'Check sign-in options',exact:true})).toBeVisible();
   await signIn.getByRole('button',{name:'Browser sign-in (diagnostic)',exact:true}).click();
   await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().cloudAccount?.userId)).toBe(owner);
   await expect(page.getByRole('dialog',{name:'Eliza Cloud',exact:true})).toHaveCount(0);
@@ -117,7 +118,7 @@ test('flag-off real resident reads Notes through its owner-bound verified Cloud 
   expect(path).toBe('/api/tts/cloud');expect(JSON.parse(String(input.body))).toEqual({text:'QA test note. The recovery test phrase is silver maple.'});
   return new Response(new Uint8Array([73,68,51,1]),{headers:{'Content-Type':'audio/mpeg','X-Eliza-Speech-Provider':provider,'X-Eliza-Speech-Route':'cloud'}});
  }});
- const server=await createServer({configFile:resolve('vite.config.ts'),cacheDir:resolve('test-results/resident-speech/vite-cache'),server:{host:'127.0.0.1',port:0,strictPort:false},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify(''),'import.meta.env.VITE_ALPHA_CLOUD_RESIDENT':JSON.stringify('1'),'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')},plugins:[{name:'closed-owned-resident-speech',enforce:'pre',configureServer(server){server.middlewares.use('/__alpha-local-agent',(req,res)=>{void handler(req,res);});server.middlewares.use('/__alpha-browser-cloud',async(req,res)=>{const parts=[];for await(const part of req)parts.push(part);const data=JSON.parse(Buffer.concat(parts).toString());res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data.operation==='secureRead'?{value:null}:{state:'host-managed'}));});}}]});
+ const server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:scopedViteCacheDir('test-results/resident-speech/vite-cache'),server:{host:'127.0.0.1',port:0,strictPort:false},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify(''),'import.meta.env.VITE_ALPHA_CLOUD_RESIDENT':JSON.stringify('1'),'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')},plugins:[{name:'closed-owned-resident-speech',enforce:'pre',configureServer(server){server.middlewares.use('/__alpha-local-agent',(req,res)=>{void handler(req,res);});server.middlewares.use('/__alpha-browser-cloud',async(req,res)=>{const parts=[];for await(const part of req)parts.push(part);const data=JSON.parse(Buffer.concat(parts).toString());res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data.operation==='secureRead'?{value:null}:{state:'host-managed'}));});}}]});
  const foreign:string[]=[];await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,async route=>{foreign.push(route.request().url());await route.abort();});
  try{
   await server.listen();const address=server.httpServer!.address()as {port:number};await page.goto(`http://127.0.0.1:${address.port}/`);

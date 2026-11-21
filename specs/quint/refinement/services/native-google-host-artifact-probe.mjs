@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {registerHooks} from 'node:module';
+import {registerHooks} from '../../../../test/support/module-hooks.mjs';
 import {pathToFileURL} from 'node:url';
 import {policySource, writeCoreStateFixture} from '../../../../test/fixtures/core-state-root.mjs';
-import {workerHash, verifyWorkerArtifact} from '../../../../scripts/workflow-worker-artifact.ts';
+import {verifyWorkerArtifact} from '../../../../scripts/workflow-worker-artifact.ts';
+import {sha256 as workerHash} from '../../../../scripts/sha256.ts';
 import {parseBuildPolicy} from '../../../../scripts/build-policy-source.ts';
 import {CORE_STATE_MANIFEST, PLUGIN_CONNECTOR_TARGET} from '../../../../scripts/core-state-patch.ts';
 import {controlName, digest, eventsName, fixtureModule, fixtureSource, productInput}
@@ -37,7 +38,7 @@ const productFiles = [
   'scripts/build-native-google-host.ts', 'scripts/local-agent-source.ts', 'scripts/native-google-host-artifact.ts',
   'scripts/prepare-client-features.ts', 'package.json', 'tsconfig.json',
   'vendor/eliza/tsconfig.json',
-  'scripts/upstream-native-source.ts', 'vendor/eliza/packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts',
+  'scripts/upstream-native-source.ts', 'scripts/upstream-pin.ts', 'scripts/sha256.ts', 'vendor/eliza/packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts',
 ];
 const workerFiles = ['node_modules/smthrs/package.json', 'node_modules/zod/package.json',
   'node_modules/effect/package.json', 'node_modules/@smthrs/engine/package.json', 'dependencies.json', 'lib/worker.js'];
@@ -73,7 +74,7 @@ function setup(number, simpleCore = false) {
   const googleHost='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
   const googleBytes=fs.readFileSync(path.join(root,'vendor/eliza',googleHost)),googleHash=digest(googleBytes);
   write(path.join(root,'.eliza/client-features',googleHost),googleBytes);
-  json(path.join(root,'.eliza/client-features/.source.json'),{baseCommit:pin,projectionVersion:14,
+  json(path.join(root,'.eliza/client-features/.source.json'),{baseCommit:pin,projectionVersion:15,
     sourceFiles:{[googleHost]:googleHash},files:{[googleHost]:googleHash}});
   json(path.join(sdk, '.alpha-runtime-source.json'), {base: pin, patches: []});
   write(source, fixtureSource(1));
@@ -144,7 +145,8 @@ function setup(number, simpleCore = false) {
     };
   }
   function result(error) {
-    const detail = error.stderr?.toString() ?? error.message;
+    // Bun prefixes an uncaught error with numbered source lines, which quote other refusals' text.
+    const detail = error.stderr?.toString().replace(/^ *\d+ \| .*$/gm, '') ?? error.message;
     const rules = [
       [/Fixture projection refused/, 'projection'], [/requires pinned Bun/, 'bun'],
       [/Unexpected runtime source change/, 'sdk'],

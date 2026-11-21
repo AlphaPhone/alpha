@@ -6,7 +6,6 @@ import {join} from 'node:path';
 import {createServer,request as httpRequest} from 'node:http';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-if(!process.execArgv.some(arg=>arg==='--import=tsx'||arg==='tsx')){const child=spawnSync(process.execPath,['--import','tsx',process.argv[1]],{stdio:'inherit',timeout:60000});process.exit(child.status??1);}
 const {createLocalAgentDevHandler,localAgentPathAllowed,LOCAL_VOICE_WS_PATH}=await import('../scripts/local-agent-dev-bridge.ts');
 const owner=randomUUID(),agent=randomUUID(),conversation=randomUUID(),nonce='a'.repeat(43),voiceToken='b'.repeat(43),root='1'.repeat(64),paired='synthetic-owner-bearer';
 const BASE='/api/v1/voice/session';
@@ -14,17 +13,21 @@ function requestJson(url,headers,body){return new Promise((resolve,reject)=>{con
 
 async function fixture(enabled=true,cloudRealtime=false,attestation={}){
  const directory=await mkdtemp(join(tmpdir(),'alpha-voice-bridge-')),tokenFile=join(directory,'token');await writeFile(tokenFile,root,{mode:0o600});
- const calls=[];let mode='ok',upgrades=0,mintExtras=()=>({});const rendererHeaders=[];
+ const calls=[];let mode='ok',instanceId='fixture',upgrades=0,mintExtras=()=>({}),notesReply;const rendererHeaders=[];
  const runtimeSockets=new Set();const runtime=createServer();runtime.on('upgrade',(req,socket)=>{runtimeSockets.add(socket);socket.once('close',()=>runtimeSockets.delete(socket));upgrades++;if(req.url.startsWith('/ws?'))rendererHeaders.push({url:req.url,authorization:req.headers.authorization});assert.equal(req.headers.origin,runtimeOrigin);const accept=createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);socket.on('error',()=>{});socket.on('data',data=>socket.write(data));});
  await new Promise(r=>runtime.listen(0,'127.0.0.1',r));const runtimeOrigin=`http://127.0.0.1:${runtime.address().port}`;
  const request=async(url,input)=>{const path=new URL(url).pathname;calls.push({url,input});
-  if(path==='/api/auth/status')return Response.json({instanceId:'fixture'});
+  if(path==='/api/auth/status')return Response.json({instanceId});
   if(path==='/api/auth/pair-code')return Response.json({code:'fixture'});
-  if(path==='/api/auth/pair')return Response.json({access:'owner',token:paired,instanceId:'fixture',identityId:owner});
+  if(path==='/api/auth/pair'){
+   if(mode==='pair-response-lost')throw new Error('Connection reset after the runtime received the POST');
+   return Response.json({access:'owner',token:paired,instanceId,identityId:owner});
+  }
   assert.equal(input.headers.Authorization,'Bearer '+paired);
   if(path==='/api/auth/me')return Response.json({identity:{id:owner},access:{role:'OWNER'},session:{id:paired,expiresAt:Date.now()+600000}});
   if(mode==='error')return Response.json({code:'voice_owner_session_required'},{status:403});
   if(path.endsWith('/health'))return Response.json({ready:true,agentId:agent,conversationId:mode==='wrong-health'?randomUUID():conversation,...attestation});
+  if(path==='/api/notes/state'&&notesReply)return notesReply();
   if(path.endsWith('/consent'))return Response.json({consentNonce:nonce,expiresAt:Date.now()+120000});
   if(path.endsWith('/revoke'))return Response.json({revoked:true});
   const sessionId=randomUUID();return Response.json({sessionId,token:voiceToken,expiresAt:mode==='expired'?Date.now()-1:Date.now()+120000,wsUrl:`${mode==='foreign'?'ws://other.invalid':runtimeOrigin.replace('http:','ws:')}${BASE}/ws?sessionId=${sessionId}`,uplink:{codecs:['pcm16']},downlink:{codecs:['pcm16']},iceServers:null,...mintExtras(sessionId),...(mode==='secret'?{apiKey:'never-return'}:{})});
@@ -32,9 +35,58 @@ async function fixture(enabled=true,cloudRealtime=false,attestation={}){
  const handler=createLocalAgentDevHandler({origin:runtimeOrigin,tokenFile,request,cartesiaEnabled:enabled,cloudRealtimeEnabled:cloudRealtime}),server=createServer(handler);server.on('upgrade',(req,socket,head)=>void handler.upgrade(req,socket,head));
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
  const call=async (input,hostOverride)=>{if(hostOverride)return requestJson(origin,{Host:hostOverride,Origin:'http://'+hostOverride,'Content-Type':'application/json','X-Alpha-Local-Agent':'1'},JSON.stringify({ownerId:owner,headers:{Accept:'application/json'},...input}));const response=await fetch(origin,{method:'POST',headers:{Origin:hostOverride?`http://${hostOverride}`:origin,...(hostOverride?{Host:hostOverride}:{}),'Content-Type':'application/json','X-Alpha-Local-Agent':'1'},body:JSON.stringify({ownerId:owner,headers:{Accept:'application/json'},...input})});return {status:response.status,data:await response.json()};};
- return {call,calls,origin,tokenFile,mintMetadata:value=>{mintExtras=value;},mode:value=>{mode=value;},rendererHeaders,upgrades:()=>upgrades,close:async()=>{handler.closeVoice();for(const socket of runtimeSockets)socket.destroy();server.closeAllConnections();runtime.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),new Promise(r=>runtime.close(r))]);await rm(directory,{recursive:true,force:true});}};
+ return {call,calls,origin,tokenFile,mintMetadata:value=>{mintExtras=value;},mode:value=>{mode=value;},restart:value=>{instanceId=value;},notesReply:value=>{notesReply=value;},rendererHeaders,upgrades:()=>upgrades,close:async()=>{handler.closeVoice();for(const socket of runtimeSockets)socket.destroy();server.closeAllConnections();runtime.closeAllConnections();await Promise.all([new Promise(r=>server.close(r)),new Promise(r=>runtime.close(r))]);await rm(directory,{recursive:true,force:true});}};
 }
 const mint=()=>({path:BASE,method:'POST',body:JSON.stringify({agentId:agent,conversationId:conversation,consentNonce:nonce,transport:'websocket'})});
+test('an uncertain owner enrollment never repeats on the same resident boot',async()=>{
+ const f=await fixture();
+ const attach=()=>f.call({path:'/api/auth/me',method:'GET'});
+ const pairs=()=>f.calls.filter(c=>new URL(c.url).pathname==='/api/auth/pair').length;
+ try{
+  f.mode('pair-response-lost');
+  const initial=await attach();
+  f.mode('ok');
+  const sameBoot=await attach();
+  assert.equal(pairs(),1);
+  for(const result of [initial,sameBoot]){
+   assert.equal(result.status,409);
+   assert.equal(result.data.code,'local-owner-unconfirmed');
+  }
+
+  // The development profile keeps its root token. Only a verified new process admits another POST.
+  f.restart('successor');
+  const recovered=await attach();
+  assert.equal(recovered.status,200);
+  assert.equal(recovered.data.status,200);
+  assert.equal(pairs(),2);
+ }finally{await f.close();}
+});
+test('a late authorization failure leaves the replacement owner enrollment intact',async()=>{
+ const f=await fixture();
+ const readNotes=()=>f.call({path:'/api/notes/state',method:'GET'});
+ const rejected=()=>Response.json({code:'session-expired'},{status:401});
+ const started=Promise.withResolvers();
+ const late=Promise.withResolvers();
+ const pairs=()=>f.calls.filter(call=>new URL(call.url).pathname==='/api/auth/pair').length;
+ try{
+  f.notesReply(()=>{started.resolve();return late.promise;});
+  const staleRequest=readNotes();
+  void staleRequest.catch(()=>{});
+  await started.promise;
+  f.notesReply(rejected);
+  assert.equal((await readNotes()).data.status,401);
+
+  f.restart('successor');
+  f.notesReply(()=>Response.json({notes:[]}));
+  assert.equal((await readNotes()).data.status,200);
+  assert.equal(pairs(),2);
+  late.resolve(rejected());
+  assert.equal((await staleRequest).data.status,401);
+
+  assert.equal((await readNotes()).data.status,200);
+  assert.equal(pairs(),2);
+ }finally{late.resolve(rejected());await f.close();}
+});
 test('canonical developer voice controls reuse private owner and project only minted socket ticket',async()=>{
  const f=await fixture();try{
   const health=await f.call({path:`${BASE}/health?conversationId=${conversation}`,method:'GET'});assert.equal(health.data.status,200);
@@ -235,5 +287,16 @@ test('current terminal protocol attestation passes the paired bridge without wea
   f.mintMetadata(()=>({}));assert.equal((await f.call(request)).status,503,'an explicitly negotiated terminal protocol cannot silently fall back');
   f.mintMetadata(()=>({turnTerminal:false}));assert.equal((await f.call(request)).status,503);
   attestation.turnTerminal=false;assert.equal((await f.call({path:BASE+'/health?conversationId='+conversation,method:'GET'})).status,503);
+ }finally{await f.close();}
+});
+
+
+test('Cloud lease renewal remains bound to canonical stop and rotation proof',async()=>{
+ const f=await fixture(false,true,{speechRoute:'cloud',speechProvider:'cartesia',providerAdmission:'at-session-start'});
+ try{
+  f.mintMetadata(id=>({stopIntentVersion:1,stopIntentGeneration:id,rotationPreparation:'retire-before-open-v1',leaseRenewal:true}));
+  const response=await f.call(mint());assert.equal(response.status,200);assert.equal(JSON.parse(response.data.body).leaseRenewal,true);
+  for(const leaseRenewal of [false,'true',1]){f.mintMetadata(id=>({stopIntentVersion:1,stopIntentGeneration:id,rotationPreparation:'retire-before-open-v1',leaseRenewal}));assert.equal((await f.call(mint())).status,503);}
+  f.mintMetadata(()=>({leaseRenewal:true}));assert.equal((await f.call(mint())).status,503);
  }finally{await f.close();}
 });

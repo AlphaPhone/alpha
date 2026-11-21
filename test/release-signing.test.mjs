@@ -8,7 +8,9 @@ import { spawnSync } from "node:child_process";
 import { auditWebBundle } from "../scripts/audit-production-bundle.ts";
 import { appLinkFilters, assetLinksProblems, fingerprint, PLACEHOLDER, renderAssetLinks, TEMPLATE } from "../scripts/render-assetlinks.ts";
 import { buildEnv, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
-import { releaseDistributable } from "../scripts/release-distributable.ts";
+import { releaseBlockers } from "../scripts/release-blockers.ts";
+import { fontCheckFailedItem, fontLicenceLine } from "../scripts/font-license-blockers.ts";
+import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
 
 const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZAOS_KEY_ALIAS: "a", ELIZAOS_KEY_PASSWORD: "q" };
 const SIGNER = "a".repeat(64);
@@ -23,15 +25,10 @@ test("a partial ELIZAOS_ signing set is refused by name, never by value", () => 
   assert.ok(!problem.includes("/k") && !problem.includes("\"p\""));
   assert.match(partialSigningProblem({ ...ALL, ELIZAOS_KEY_ALIAS: "  " }), /missing ELIZAOS_KEY_ALIAS/, "blank counts as missing, as in Gradle");
   assert.equal(signingRequested({ ...ALL, ELIZAOS_KEY_ALIAS: " " }), false);
-  // The generated host reads the names android/consumer-host.json declares; the pinned upstream
-  // template refuses a partial set by name and signs only when all four are present.
+  // The generated host reads the names android/consumer-host.json declares.
   const { signing } = JSON.parse(fs.readFileSync("android/consumer-host.json", "utf8")).profile;
   assert.deepEqual(signing, { storeFile: "ELIZAOS_KEYSTORE_PATH", storePassword: "ELIZAOS_KEYSTORE_PASSWORD", keyAlias: "ELIZAOS_KEY_ALIAS", keyPassword: "ELIZAOS_KEY_PASSWORD" });
   assert.deepEqual(SIGNING_ENV, Object.keys(ALL));
-  const gradle = fs.readFileSync("vendor/eliza/packages/app/scripts/mobile/android/consumer-host/app.gradle", "utf8");
-  assert.match(gradle, /if \(!missing\.isEmpty\(\) && missing\.size\(\) < names\.size\(\)\)\n  throw new GradleException\("\[release-signing\] incomplete signing environment/);
-  assert.match(gradle, /if \(hostSigning\) signingConfig signingConfigs\.release/);
-  assert.doesNotMatch(gradle, /producing unsigned release APKs|println|logger/);
 });
 
 test("the committed descriptor is valid and unset fixtures remain supported", () => {
@@ -62,63 +59,77 @@ test("only a release signed by the recorded signer with an advancing versionCode
   assert.match(staleUnsigned.blockers.join(), /not greater/);
 });
 
-test("a test-mocks build never receives the release-signing variables", () => {
-  const base = { ...ALL, PATH: "/bin" };
-  const mocks = buildEnv(base, { testMocks: true });
-  for (const name of SIGNING_ENV) assert.equal(name in mocks, false, name);
-  assert.equal(signingRequested(mocks), false);
-  assert.equal(mocks.PATH, "/bin");
-  assert.equal(mocks.ELIZA_DEV_ALLOW_TEST_MOCKS, "1");
-  assert.equal(signingRequested(buildEnv(base, { testMocks: false })), true);
-});
-
-test("a test-mocks release signed with the release key fails admission; other test-mocks problems only block", () => {
-  const signedByRelease = releaseAdmission({ signed: true, signerSha256: SIGNER, versionCode: 3 }, descriptor(SIGNER, 2), { testMocks: true });
-  assert.deepEqual(signedByRelease.failures, ["test-mocks APK signed with the release key"]);
-  const otherKey = releaseAdmission({ signed: true, signerSha256: "b".repeat(64), versionCode: 1 }, descriptor(SIGNER, 2), { testMocks: true });
-  assert.deepEqual(otherKey.failures, []);
-  assert.match(otherKey.blockers.join(), /does not match.*not greater/);
-  assert.deepEqual(releaseAdmission({ signed: false, signerSha256: null, versionCode: 3 }, descriptor(), { testMocks: true }).failures, []);
-});
-
-// Every fact a distributable release row carries; each test below breaks exactly one.
+// Every fact verify-apks records on a distributable native release row; each case below breaks one.
+// verify-apks records distributable = releaseBlockers(row) is empty (scripts/release-blockers.ts).
+const SHA = "b".repeat(64);
+// verify-apks copies `qualified` from the committed voice-host record, which is still pending device
+// qualification; the fixture carries the same value so the gate is exercised as real rows reach it.
+const COMMITTED_VOICE_QUALIFIED = JSON.parse(fs.readFileSync(new URL("../android/voice-host/qualified-voice-host.json", import.meta.url), "utf8")).qualified;
 const DISTRIBUTABLE = {
-  testMocks: false, signed: true, releaseAdmission: { signerMatches: true, blockers: [], failures: [] },
-  runtime: { distributable: true }, runtimeNotices: true, voiceHost: { packaged: true, asr: true, qualified: true }, licenceBlockers: [],
+  mode: "release", sha256: SHA, runtimeProfile: "native", distributable: true, testMocks: false, bundleAudit: "passed", signed: true,
+  releaseAdmission: { signerMatches: true, blockers: [], failures: [] }, runtime: "PACKAGED", runtimeNotices: true,
+  voiceHost: { packaged: true, asr: true, differences: [], qualified: COMMITTED_VOICE_QUALIFIED }, licenceBlockers: [],
 };
 
-test("a release is distributable only when every term holds", () => {
-  assert.equal(releaseDistributable(DISTRIBUTABLE), true);
-  assert.equal(releaseDistributable({...DISTRIBUTABLE, voiceHost: {...DISTRIBUTABLE.voiceHost, qualified: false}}), true, "device approval flags are separate from build integrity");
+test("a release is distributable only when releaseBlockers names nothing", () => {
+  assert.deepEqual(releaseBlockers(DISTRIBUTABLE), []);
+  for (const qualified of [true, false])
+    assert.deepEqual(releaseBlockers({...DISTRIBUTABLE, voiceHost: {...DISTRIBUTABLE.voiceHost, qualified}}), [], "device approval flags are separate from build integrity");
   const broken = {
-    "test-mocks build": { testMocks: true },
-    "unsigned": { signed: false },
-    "signed is not exactly true": { signed: "true" },
-    "signer does not match the descriptor": { releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, signerMatches: false } },
-    "admission blocker": { releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, blockers: ["versionCode not greater"] } },
-    "admission failure": { releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, failures: ["test-mocks APK signed with the release key"] } },
-    "no packaged runtime": { runtime: { distributable: false } },
+    "unsigned": [{ signed: false }, /unsigned release/],
+    "signed is not exactly true": [{ signed: "true" }, /unsigned release/],
+    "signer does not match the descriptor": [{ releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, signerMatches: false } }, /does not match android\/release-signer\.json/],
+    "admission blocker": [{ releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, blockers: ["versionCode not greater"] } }, /versionCode not greater/],
+    "admission failure": [{ releaseAdmission: { ...DISTRIBUTABLE.releaseAdmission, failures: ["test-mocks APK signed with the release key"] } }, /test-mocks APK signed/],
+    "no packaged runtime": [{ runtime: "UNPACKAGED" }, /unpackaged runtime/],
     // A PACKAGED distribution must ship the regenerated runtime notices (Bun and bundled packages).
-    "notices lack the runtime": { runtimeNotices: false },
-    "no on-device voice": { voiceHost: { ...DISTRIBUTABLE.voiceHost, packaged: false } },
-    "no on-device ASR": { voiceHost: { ...DISTRIBUTABLE.voiceHost, asr: false } },
-    "licence blocker": { licenceBlockers: ["unresolved-font-licence: x"] },
+    "notices lack the runtime": [{ runtimeNotices: false }, /notices lack the packaged runtime/],
+    "no on-device voice": [{ voiceHost: { ...DISTRIBUTABLE.voiceHost, packaged: false } }, /no on-device voice packaged/],
+    "no on-device ASR": [{ voiceHost: { ...DISTRIBUTABLE.voiceHost, asr: false } }, /^on-device voice has no ASR$/],
+    "voice bytes differ from the record": [{ voiceHost: { ...DISTRIBUTABLE.voiceHost, differences: ["x"] } }, /bytes differ from the voice-host record/],
+    "test mocks": [{ testMocks: true }, /test-mocks build/],
+    "bundle audit failed": [{ bundleAudit: "failed" }, /flag-off bundle audit/],
+    "licence check not recorded": [{ licenceBlockers: undefined }, /font licence check was not recorded/],
+    // verify-apks records a font check that threw as this item; an unknown result never admits a release.
+    "licence check failed to run": [{ licenceBlockers: [fontCheckFailedItem("EIO")] }, /^font licence check failed: EIO$/],
   };
-  for (const [name, change] of Object.entries(broken))
-    assert.equal(releaseDistributable({ ...DISTRIBUTABLE, ...change }), false, name);
+  for (const [name, [change, expected]] of Object.entries(broken))
+    assert.match(releaseBlockers({ ...DISTRIBUTABLE, ...change }).join("\n"), expected, name);
+  // A recorded row that verify-apks did not mark distributable is never admitted, whether or not the
+  // voice host's device qualification (not a build gate) is still pending.
+  for (const qualified of [true, false]) {
+    const voiceHost = { ...DISTRIBUTABLE.voiceHost, qualified };
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, voiceHost, distributable: false }), ["verify-apks did not record this release as distributable"], `qualified ${qualified}`);
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, distributable: false, voiceHost: { ...voiceHost, asr: false } }), ["on-device voice has no ASR"]);
+  }
+  // A failed font check blocks under either licence policy; an unresolved font only under the blocking one.
+  // verify-apks records the failure with the same fontCheckFailedItem and blocksDistribution true,
+  // so it also prints as a release blocker.
+  const failed = fontCheckFailedItem("EIO");
+  assert.match(fontLicenceLine(failed, true), /^RELEASE BLOCKER /);
+  // verify-apks builds that item only through the shared helper, recorded as blocking.
+  const verifier = fs.readFileSync(new URL("../scripts/verify-apks.ts", import.meta.url), "utf8");
+  assert.match(verifier, /catch \(error\) \{ const items = \[fontCheckFailedItem\(message\(error\)\)\]; fontCheck = \{[^}]*blocksDistribution: true, items, blockers: items \}/);
+  assert.doesNotMatch(verifier, /font licence check failed/, "the failure text lives only in font-license-blockers.ts");
+  for (const fontLicenceBlocks of [true, false]) {
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: [failed] }, { fontLicenceBlocks }), [failed]);
+    assert.deepEqual(releaseBlockers({ ...DISTRIBUTABLE, licenceBlockers: ["unresolved-font-licence: x"] }, { fontLicenceBlocks }), fontLicenceBlocks ? ["unresolved-font-licence: x"] : []);
+  }
+  // The image path also requires a reviewed platform certificate.
+  assert.match(releaseBlockers(DISTRIBUTABLE, { image: { platformCertificateSha256: "unset" } }).join(), /not a reviewed release certificate/);
 });
 
-test("verify-apks gates every release on public distribution and releaseDistributable; there is one runtime profile", () => {
-  const source = fs.readFileSync("scripts/verify-apks.ts", "utf8");
-  // One assignment, so a later overwrite of the row is caught here.
-  assert.deepEqual(source.match(/\.distributable\s*=[^=]/g), [".distributable = "]);
-  assert.match(source, /const releaseReady = releaseDistributable\(\{testMocks, signed: row\.signed, releaseAdmission: row\.releaseAdmission,\s+runtime, runtimeNotices: row\.runtimeNotices, voiceHost: row\.voiceHost, licenceBlockers: row\.licenceBlockers\}\)\s+&& \(!cloudEvidence \|\| cloudVoiceBlockers\(row,'cartesia'\)\.length===0\);/);
-  // No profile branch can admit a release without packaged on-device voice.
-  assert.doesNotMatch(source, /runtimeProfile\s*===\s*['"]cloud['"]|--runtime-profile=cloud|speechQualified/);
-  assert.match(source, /const runtimeProfile="native";/);
-  assert.match(source, /row\.distributable = releaseReady && updateChannel\.kind === 'public';/);
-  assert.match(source, /Release signing admission failed/);
-  assert.match(source, /entry\?\.name === BUN_ENTRY/);
+test("supplied Cartesia evidence is recorded on a native release but does not decide distributable", () => {
+  const checks = Object.fromEntries(CLOUD_VOICE_CHECKS.map(name => [name, true]));
+  const evidence = {format: "alpha-cloud-voice-qualification-v1", results: [{ apkSha256: SHA, provider: "cartesia", outcome: "passed", checks }]};
+  const withVoice = input => ({ ...DISTRIBUTABLE, cloudVoice: cloudVoiceAdmission(SHA, input, "d".repeat(64)) });
+  assert.deepEqual(releaseBlockers(withVoice(evidence)), []);
+  // release.yml admits the receipt itself (scripts/ci/qualified-app-update.py) before verify-apks runs.
+  assert.deepEqual(releaseBlockers(withVoice({ ...evidence, results: [{ ...evidence.results[0], outcome: "failed" }] })), []);
+  assert.deepEqual(releaseBlockers(withVoice(null)), []);
+  // On-device voice with ASR is still required of the same row.
+  assert.match(releaseBlockers({ ...withVoice(evidence), voiceHost: { packaged: false, asr: false, differences: [] } }).join(), /no on-device voice packaged/);
+  assert.match(releaseBlockers({ ...withVoice(evidence), voiceHost: { packaged: true, asr: false, differences: [], qualified: true } }).join(), /on-device voice has no ASR/);
 });
 
 test("assetlinks.json is rendered only from the recorded release signer, never unset, a placeholder or a debug key", () => {
@@ -174,18 +185,6 @@ test("the bundle audit fails an assetlinks.json with a placeholder or debug fing
 });
 
 test("the https autoVerify filters are the two returns on the configured host and are read back from the APK manifest", () => {
-  const gradle = fs.readFileSync("android/app/product.gradle", "utf8");
-  const manifest = fs.readFileSync("android/app/src/main/AndroidManifest.xml", "utf8").replace(/<!--[\s\S]*?-->/g, "");
-  // MainActivity declares the HTTPS filters for the ${appLinkHost} placeholder, which is the configured Cloud host.
-  const main = manifest.slice(manifest.indexOf('<activity android:name=".MainActivity"'), manifest.indexOf("</activity>", manifest.indexOf('<activity android:name=".MainActivity"')));
-  const https = [...manifest.matchAll(/<intent-filter android:autoVerify="true">.*?<data android:scheme="https" android:host="\$\{appLinkHost\}" android:(path|pathPrefix)="([^"]+)"\/><\/intent-filter>/g)];
-  assert.deepEqual(https.map(match => `${match[1]}=${match[2]}`), ["path=/alphaphone/auth/callback", "path=/alphaphone/gmail/callback"]);
-  for (const match of https) assert.ok(main.includes(match[0]), "the returns belong to MainActivity");
-  assert.equal(manifest.match(/autoVerify/g).length, 2);
-  assert.doesNotMatch(manifest, /scheme="https"[^>]*cloud-delegation/, "no https Cloud delegation filter: only the custom scheme has a handler");
-  assert.match(gradle, /manifestPlaceholders\.put\('appLinkHost', appLinkHost\)/);
-  assert.doesNotMatch(gradle, /app-links|addStaticManifestFile|autoVerify/, "no configuration-time manifest overlay");
-  assert.doesNotMatch(gradle, /ALPHA_APP_LINK/);
   // verify-apks records the filter from `aapt dump xmltree` of the packaged manifest.
   const filter = scheme => [
     "      E: intent-filter (line=40)",
@@ -202,5 +201,4 @@ test("the https autoVerify filters are the two returns on the configured host an
   assert.deepEqual(appLinkFilters([...custom, ...filter("https"), "    E: activity (line=50)"].join("\n")), { present: true, hosts: ["links.example.com"] });
   assert.deepEqual(appLinkFilters(custom.join("\n")), { present: false, hosts: [] }, "a custom scheme alone is no App Link");
   assert.deepEqual(appLinkFilters(filter("http").join("\n")), { present: false, hosts: [] });
-  assert.match(fs.readFileSync("scripts/verify-apks.ts", "utf8"), /appLinks: appLinkFilters\(xml\),/);
 });

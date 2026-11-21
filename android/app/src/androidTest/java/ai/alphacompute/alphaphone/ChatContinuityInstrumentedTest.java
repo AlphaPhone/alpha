@@ -21,7 +21,7 @@ import static org.junit.Assert.*;
  * (launcher variant while Alpha is HOME) or backgrounding and resuming (otherwise), and an activity
  * recreation, which reads it back from the persisted draft. The composer stays within innerHeight
  * after each step and nothing is posted. Back and HOME are injected through UiAutomation.
- *   npm run test:android:instrumentation -- --owned-emulator --avd NAME --classes ChatContinuity
+ *   bun run test:android:instrumentation -- --owned-emulator --avd NAME --classes ChatContinuity
  * Emulator evidence only; a phone's own keyboard and gesture navigation are device acceptance. */
 @RunWith(AndroidJUnit4.class)
 public class ChatContinuityInstrumentedTest {
@@ -95,7 +95,6 @@ public class ChatContinuityInstrumentedTest {
   * the resolver can name Alpha while the stock launcher holds the role.
   */
  static boolean alphaIsHome(Context context) {
-  if (!BuildConfig.IS_LAUNCHER) return false;
   android.app.role.RoleManager roles = context.getSystemService(android.app.role.RoleManager.class);
   return roles != null && roles.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME) && roles.isRoleHeld(android.app.role.RoleManager.ROLE_HOME);
  }

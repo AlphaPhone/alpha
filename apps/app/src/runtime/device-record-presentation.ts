@@ -1,5 +1,5 @@
-/** Alpha review and receipt copy. Canonical contracts and exact date formatting stay shared. */
-import { formatDeviceRecordDateTime } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts";
+/** Alpha review and receipt copy. Canonical contracts stay shared; exact date formatting is ui/device-actions/device-record-presentation.ts. */
+import { formatDeviceRecordDateTime } from "../ui/device-actions/device-record-presentation";
 import type { CalendarOperation } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts";
 import type { NotesOperation } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts";
 import type {
@@ -16,21 +16,21 @@ const formatReviewDateTime = (value: string | number, timeZone: string) =>
 function presentReminderTiming(
   schedule: ReminderSchedule,
   timeZone: string,
-): { description: string; summary: string } {
+): { description: string; due: string } {
   const zone = schedule.recurrence?.zone ?? timeZone;
-  const timing = (format: typeof formatReviewDateTime) => [
-    `Due ${format(schedule.dueAt ?? schedule.at, zone)} (${zone}).`,
+  const lines = [
+    `Due ${formatReviewDateTime(schedule.dueAt ?? schedule.at, zone)} (${zone}).`,
     ...(schedule.alertMinutes === null
       ? ["No alert; saved task only."]
-      : [`Alert ${format(schedule.at, zone)}. Notification delivery may be approximate.`]),
+      : [`Alert ${formatReviewDateTime(schedule.at, zone)}. Notification delivery may be approximate.`]),
   ];
-  const lines = timing(formatReviewDateTime);
   lines.push(
     schedule.recurrence
       ? `Repeats ${schedule.recurrence.rule === "weekdays" ? "on weekdays" : schedule.recurrence.rule} at ${schedule.recurrence.time} (${zone}).`
       : "Does not repeat.",
   );
-  return { description: lines.join("\n"), summary: timing(formatDeviceRecordDateTime).join(" ") };
+  // The receipt is one confirming sentence: the exact due instant; alert and repeat stay on the card.
+  return { description: lines.join("\n"), due: `${formatDeviceRecordDateTime(schedule.dueAt ?? schedule.at, zone)} (${zone})` };
 }
 
 /** Review and receipt copy for operations whose wording does not depend on their fields. */
@@ -127,14 +127,14 @@ export function presentDeviceRecordOperation(
         ...(body && body.toLowerCase() !== fields.title.trim().toLowerCase() ? [fields.body] : []),
         timing?.description ?? "Timing unchanged.",
       ].join("\n");
-      summaryDetails = `“${fields.title}”. ${timing?.summary ?? "Timing unchanged."}`;
+      summaryDetails = timing ? `“${fields.title}”, due ${timing.due}.` : `“${fields.title}”.`;
       break;
     }
     case "create_reminder":
       title = "Create reminder";
       applied = "Created reminder";
       details = `“${operation.title}”\nDue ${formatReviewDateTime(operation.dueAt, timeZone)} (${timeZone}).\nNotification delivery may be approximate.`;
-      summaryDetails = `“${operation.title}”. Due ${formatDeviceRecordDateTime(operation.dueAt, timeZone)} (${timeZone}). Alert requested; notification delivery may be approximate.`;
+      summaryDetails = `“${operation.title}”, due ${formatDeviceRecordDateTime(operation.dueAt, timeZone)} (${timeZone}).`;
       break;
   }
   return {

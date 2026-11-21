@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Alpha Phone's Eliza Cloud registration values and a credential-free readiness probe.
  *
- *   node scripts/cloud-readiness.ts registration [--environment production|staging] [--json]
- *   node scripts/cloud-readiness.ts probe [--environment production|staging] [--signer SHA256] [--json]
+ *   bun scripts/cloud-readiness.ts registration [--environment production|staging] [--json]
+ *   bun scripts/cloud-readiness.ts probe [--environment production|staging] [--signer SHA256] [--json]
  *
  * `registration` prints the values an Eliza Cloud operator enters for Alpha
  * derived from committed product configuration:
@@ -17,6 +17,7 @@
  *   registration      GET  {api}/api/v1/app-auth/mobile/config for this client, environment and return URL (H-11)
  *   sign-in methods   GET  {api}/steward/auth/providers?tenantId=..., and POST {api}/steward/auth/email/code/send
  *                     with an empty body, which Steward refuses as invalid without sending any email (H-12)
+ *   phone sign-in     sms in that providers answer, without an SMS captcha (H-12; never sends an SMS)
  *   native Google     googleNative in that providers answer (H-12)
  *   browser return    GET  {api}/steward/auth/oauth/google/authorize with a fresh state and S256 challenge;
  *                     the tenant allowlist admits the return URL when it redirects to Google (H-12; nothing is followed)
@@ -44,9 +45,9 @@ import { assetLinksGrants, publishedAssetLinksCheck, readAssetLinksSource } from
 
 /** The return path and Steward app client Alpha's native sign-in registers (AlphaCloudSignInPlugin). */
 export const CALLBACK_PATH = CLOUD_SIGN_IN_REGISTRATION.callbackPath;
-export const STEWARD_APP_CLIENT = "alpha-phone";
+export const STEWARD_APP_CLIENT = CLOUD_SIGN_IN_REGISTRATION.stewardAppClient;
 const TIMEOUT_MS = 15_000;
-const USAGE = "Usage: node scripts/cloud-readiness.ts registration [--environment production|staging] [--json]\n       node scripts/cloud-readiness.ts probe [--environment production|staging] [--signer SHA256] [--json]";
+const USAGE = "Usage: bun scripts/cloud-readiness.ts registration [--environment production|staging] [--json]\n       bun scripts/cloud-readiness.ts probe [--environment production|staging] [--signer SHA256] [--json]";
 const readJson = <T>(root: string, file: string): T => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 type Environment = keyof ReturnType<typeof validateCloudDeployment>;
 interface ProbeRow { gate: string; step: string; passed: boolean | null; detail: string }
@@ -90,8 +91,8 @@ export function registrationValues(registration: Registration) {
       value: { [stewardAppClient]: [`<Android OAuth client ID for package ${packageName} and the release certificate SHA-1>`] },
       then: `Keep the other app clients' entries. The tenant app client ${stewardAppClient} must allow Google. Create the Android OAuth client in the project that owns Steward's Google web audience. Use apksigner verify --print-certs on the admitted signed APK to read its certificate SHA-1.` },
     { step: "H-13", where: "ELIZA_ANDROID_ASSET_LINKS_JSON (GitHub variable of the Cloud environment)",
-      value: `node scripts/render-assetlinks.ts --cloud-config --published ${web}/.well-known/assetlinks.json`,
-      then: `Set the printed value, deploy, then node scripts/render-assetlinks.ts --check ${web}/.well-known/assetlinks.json.` },
+      value: `bun scripts/render-assetlinks.ts --cloud-config --published ${web}/.well-known/assetlinks.json`,
+      then: `Set the printed value, deploy, then bun scripts/render-assetlinks.ts --check ${web}/.well-known/assetlinks.json.` },
     { step: "H-13", where: `ELIZA_NATIVE_AUTH_CALLBACKS_JSON (Cloud release GitHub Environment variable "${environment}" for ${new URL(web).host}), Alpha's entry`,
       value: { redirectUri: callback, androidPackage: packageName, appName, browserSignIn },
       then: "Update the existing entry for this callback URI in the protected Cloud release environment. Preserve the other app entries and deploy the Pages configuration." },
@@ -145,10 +146,15 @@ export async function probe(registration: Registration, { fetchImpl = globalThis
   const offered = object(providers.body), captcha = object(offered.captcha);
   const captchaFor = Array.isArray(captcha.requiredFor) ? captcha.requiredFor : [];
   const emailOffered = providers.status === 200 && offered.email === true && !(captcha.enabled === true && (captchaFor.includes("email_otp") || captchaFor.includes("email")));
+  // Match the pinned Android client's CloudSmsCode.offered: unknown captcha scope is not safe to offer.
+  const smsCaptcha = captcha.enabled === true && (!Array.isArray(captcha.requiredFor) || captchaFor.includes("sms_otp") || captchaFor.includes("sms"));
+  const phoneOffered = providers.status === 200 && offered.sms === true && !smsCaptcha;
   const emailRoute = await request(fetchImpl, `${api}/steward/auth/email/code/send`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const routePresent = emailRoute.status >= 400 && emailRoute.status < 500 && ![404, 405].includes(emailRoute.status);
   gate("email sign-in", "H-12", registered && emailOffered && routePresent,
     `${providers.status === 200 ? `email ${emailOffered ? "offered without a captcha" : "not offered (or behind a captcha)"}` : `providers ${reached(providers)}`}; code route ${routePresent ? "present" : reached(emailRoute)}${registered ? "" : "; needs the registration gate"}`);
+  gate("phone sign-in", "H-12", registered && phoneOffered,
+    `${providers.status !== 200 ? `providers ${reached(providers)}` : offered.sms !== true ? "SMS not offered" : smsCaptcha ? "SMS requires a captcha Alpha cannot complete" : "SMS offered without a captcha; delivery not tested"}${registered ? "" : "; needs the registration gate"}`);
   gate("native Google", "H-12", providers.status === 200 && offered.googleNative === true,
     providers.status === 200 ? `google ${offered.google === true ? "offered" : "not offered"}, googleNative ${offered.googleNative === true ? "advertised" : "not advertised (STEWARD_GOOGLE_NATIVE_CLIENT_IDS has no Android client for an app client of this tenant)"}` : `providers ${reached(providers)}`);
 

@@ -3,7 +3,7 @@ import { registerPlugin } from '../platform-plugins';
 /** Alpha's product-only native reads (AlphaDeviceAppsPlugin). Installed apps, default handlers and
  * the build, launch and locale facts are the shared ElizaSystem plugin. */
 export interface DeviceAppsPlugin {
-  platformCapabilities(): Promise<{ aospImage: boolean; phone: boolean; contacts: boolean; sms: boolean }>;
+  platformCapabilities(): Promise<{ aospImage: boolean; phone: boolean; contacts: boolean; sms: boolean; sense?: boolean; startupPermissionDefaults?: boolean }>;
   /** Launcher builds only: opens Android's Home chooser. */
   openHomeChooser(): Promise<void>;
 }

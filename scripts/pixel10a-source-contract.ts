@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import {sha256 as digest} from './sha256.ts';
 import {fileURLToPath} from 'node:url';
 import {verifyDeviceSource} from '../vendor/eliza/packages/os/scripts/android/verify-device-source.mjs';
 import {soongAppNativePatch} from '../vendor/eliza/packages/os/scripts/android/soong-app-native.mjs';
@@ -8,7 +8,6 @@ import {loadProfile, verifyProfileSource} from '../vendor/eliza/packages/os/scri
 
 export const defaultLockPath = fileURLToPath(new URL('../vendor/eliza/packages/os/android/sources/pixel10a-stallion.json', import.meta.url));
 const profileLockPath = fileURLToPath(new URL('../vendor/eliza/packages/os/android/aosp.lock.json', import.meta.url));
-const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 /** Alpha adapter for upstream's shared Pixel 10a source admission. Fixture locks may
  * be supplied explicitly; production defaults authenticate the shared profile and inventory. */
@@ -45,12 +44,22 @@ export async function verifyPixel10aSource({source, factory, lock = defaultLockP
 /** A reviewed SystemUI bundle ('ops', 'chip' or 'assist') in the form verifyPixel10aSource accepts. */
 export {senseSystemuiPatch as listenerSystemuiPatch} from '../vendor/eliza/packages/os/scripts/android/sense-systemui.mjs';
 
+/** Alpha's protected Power route, independent of the optional SystemUI branding patch. */
+export function alphaProtectedPowerPatch(): ReviewedSourcePatch {
+  return readAlphaSourcePatch('alpha-protected-power', new URL('../android/aosp/branding/power-voice/', import.meta.url));
+}
+
 /** Explicit host-build patches; defaults and device source remain unchanged. */
 export function aospBuildPatch(bundle: string): ReviewedSourcePatch {
   if (bundle === 'soong-app-native') return soongAppNativePatch();
+  if (bundle === 'alpha-sense-policy') return readAlphaSourcePatch(bundle, new URL('../android/aosp/branding/sense-policy/', import.meta.url));
   if (bundle !== 'soong-memory') throw Error(`Unknown AOSP build patch: ${bundle}`);
-  const directory = fileURLToPath(new URL('../android/aosp/build-host/', import.meta.url));
+  return readAlphaSourcePatch(bundle, new URL('../android/aosp/build-host/', import.meta.url));
+}
+
+function readAlphaSourcePatch(bundle: string, location: URL): ReviewedSourcePatch {
+  const directory = fileURLToPath(location);
   const bytes = fs.readFileSync(path.join(directory, 'manifest.json')), manifest = JSON.parse(bytes.toString('utf8'));
-  if (digest(fs.readFileSync(path.join(directory, manifest.patch))) !== manifest.patchSha256) throw Error(`AOSP build patch ${bundle} hash mismatch`);
+  if (digest(fs.readFileSync(path.join(directory, manifest.patch))) !== manifest.patchSha256) throw Error(`AOSP patch ${bundle} hash mismatch`);
   return {name:bundle, manifest, manifestSha256:digest(bytes)};
 }

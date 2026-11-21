@@ -1,9 +1,4 @@
-// Settings → Password manager (password-manager.ts) against a recording vault bridge in Node.
-// No Keystore, WebView or Settings template is involved: this proves the renderer's draft,
-// lock and message handling, not a device unlock.
-import {stripTypeScriptTypes} from './support/strip-types.mjs';
-import test, {mock} from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
-const stubs={
+import test, {mock} from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';const stubs={
  '@capacitor/core':'export const Capacitor={isNativePlatform:()=>false,isPluginAvailable:()=>false};',
  '../platform-plugins':'export function registerPlugin(){return {};}',
  '../build-flags':'export const devSurfacesEnabled=true,testMocksEnabled=false;',
@@ -38,7 +33,8 @@ async function mount({selected='none',damaged=false}={}){
   async reveal(input){calls.push(['reveal',input]);reject('reveal');return {shown:true,hidesAfterMs:30_000};},
   async openAutofillSettings(){calls.push(['openAutofillSettings']);return {status:'opened',destination:'autofill-picker'};},
  };
- const pm=mounted=await import(pathToFileURL(file).href+'?load='+(++loads));
+ // A path specifier: Bun returns the cached module for a file: URL that differs only in its query.
+ const pm=mounted=await import(file+'?load='+(++loads));
  const toasts=[],pages=[];
  const helpers={info:(label,val)=>({kInfo:true,label,val}),group:rows=>({rows}),toast:m=>toasts.push(m),set:p=>pages.push(p.page),ic:{}};
  const rows=groups=>groups.flatMap(g=>g.rows||[]);
@@ -62,7 +58,7 @@ test('a rejected save keeps the typed password, so the retry sends it',async()=>
  t.type('Password','new-secret-1');
  t.fail.save=Object.assign(new Error('Use an HTTPS website address'),{code:'invalid'});
  await t.press(t.rows(t.entryPage().groups),'Save');
- assert.deepEqual(t.find(t.rows(t.entryPage().groups),'Not saved').val,'Use an HTTPS website address');
+ assert.deepEqual(t.find(t.rows(t.entryPage().groups),'Not saved').val,'Use an HTTPS website address.');
  assert.equal(t.find(t.rows(t.entryPage().groups),'Password').value,'new-secret-1');
  await t.press(t.rows(t.entryPage().groups),'Save');
  const saves=t.calls.filter(([m])=>m==='save');
@@ -131,6 +127,18 @@ test('a completed removal cannot navigate or refresh after leaving Passwords',as
  assert.equal(t.pm.passwordManagerHoldsEntries(),false);
 });
 
+test('a save that completes after its form was left is read back into the open list',async()=>{
+ const t=await mount();await t.openShop();const held=t.hold('save');
+ t.type('Password','typed-then-left');
+ t.find(t.rows(t.entryPage().groups),'Save').go();await held.waiting;
+ t.entryPage().back();assert.equal(t.entryPage(),null,'the form is closed while the vault still holds the save');
+ const pages=t.pages.length,listReads=t.calls.filter(([method])=>method==='list').length;
+ held.release();await settle();
+ assert.equal(t.calls.filter(([method])=>method==='list').length,listReads+1,'the unlocked list is read again');
+ assert.equal(t.pages.length,pages,'a form that is already closed is not navigated away from again');
+ assert.equal(t.pm.passwordManagerHoldsEntries(),true);
+});
+
 test('leaving during reset authentication never calls reset from the retired page',async()=>{
  const t=await mount({damaged:true});t.manager();await settle();await t.press(t.manager(),'Unlock');
  await t.press(t.manager(),'Reset vault');
@@ -168,16 +176,81 @@ test('a refused reset authentication needs a fresh review',async()=>{
  assert.equal(t.calls.filter(([method])=>method==='reset').length,0);
 });
 
+test('each fixed vault refusal is shown in Alpha wording, and only unknown text falls back',async()=>{
+ const t=await mount();await t.openShop();
+ t.type('Password','new-secret-2');
+ // Every fixed `invalid` sentence the passwords bridge can deliver, with what the form shows. The
+ // generator's length refusals carry digits, which the shared client's pass-through drops, so they
+ // reach the form as the generic sentence (as before) and are not listed here.
+ const shown=[
+  ['Enter a name','Enter a name.'],
+  ['Enter a shorter username','Enter a shorter username.'],
+  ['Enter a password','Enter a password.'],
+  ['Add at least one website or app','Add at least one website or app.'],
+  ['Password no longer exists','This password no longer exists.'],
+  ['Password vault is full','The password vault is full.'],
+  ['Use an HTTPS website address without a path','Use an HTTPS website address without a path.'],
+  ['Invalid binding','That website or app link is not valid.'],
+  ['Invalid app package','That app package is not valid.'],
+  ['Invalid app signing certificate',"That app's signing certificate is not valid."],
+  ['Saved passwords are not damaged','Saved passwords are not damaged.'],
+  ['Editor does not accept draft fields','The password editor does not accept draft fields.'],
+  ['Enter a website address.','Enter a website address.'],
+  ['Use an HTTPS website address.','Use an HTTPS website address.'],
+  ['Remove the user name from the address.','Remove the user name from the website address.'],
+  ['Choose at least one character type','Choose at least one character type.'],
+  ['Choose a typed or generated password.','Type a password or generate one.'],
+  ['Choose a saved password.','Choose a saved password.'],
+  ['Passwords are entered only in the protected form','Enter passwords only in the protected form.'],
+  ['Something the vault never says','Check the entry and try again.'],
+ ];
+ for(const [native,sentence] of shown){
+  t.fail.save=Object.assign(new Error(native),{code:'invalid'});
+  await t.press(t.rows(t.entryPage().groups),'Save');
+  assert.equal(t.find(t.rows(t.entryPage().groups),'Not saved').val,sentence,native);
+  assert.equal(t.find(t.rows(t.entryPage().groups),'Password').value,'new-secret-2','the draft is kept');
+ }
+});
 
-test('the outer Settings Back handler retires the password draft before routing to the unlocked list',async()=>{
- const t=await mount();await t.openShop();t.type('Password','unsaved-synthetic-password');
- const source=readFileSync('apps/app/src/prototype/settings-adapter.ts','utf8');
- const code=source.slice(source.indexOf('  const settingsBack = definition.back;'),source.indexOf('  definition.render = (state: Bag, api: Bag) => {',source.indexOf('  const settingsBack = definition.back;')));
- const definition={back:()=>{throw Error('The inner Back handler is bypassed by this parent route');}};
- const install=new Function('definition','leavePasswordEntry','leavePasswordManager','PASSWORD_PAGES','categoryNames','let activeSettingsCategory=null;'+stripTypeScriptTypes(code,{mode:'strip'}));
- install(definition,t.pm.leavePasswordEntry,t.pm.leavePasswordManager,['password-provider','password-entry'],{});
- const pages=[];assert.equal(definition.back({page:'password-entry'}, {set:next=>pages.push(next.page)}),true);
- assert.deepEqual(pages,['password-provider']);assert.equal(t.entryPage(),null);
- assert.ok(t.manager().some(row=>row.label==='Shop'),'the list remains unlocked');
- assert.equal(t.calls.filter(([method])=>method==='save').length,0);
+test('the generator length is checked in Alpha before the vault is asked, with the native rules',async()=>{
+ const {generatedPasswordText,GENERATED_PASSWORD_LENGTH}=await import('../apps/app/src/ui/passwords/passwords-presentation.ts');
+ const {readFileSync}=await import('node:fs');
+ const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
+ const generator=read('vendor/eliza/plugins/plugin-native-passwords/android/src/main/java/ai/eliza/plugins/passwords/PasswordGenerator.java');
+ const plugin=read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaPasswordsPlugin.java');
+ const client=read('vendor/eliza/plugins/plugin-native-passwords/src/client.ts');
+ // Alpha's range is the generator's own.
+ const [,min,max]=/MIN_LENGTH = (\d+), MAX_LENGTH = (\d+)/.exec(generator);
+ assert.deepEqual({...GENERATED_PASSWORD_LENGTH},{min:Number(min),max:Number(max)});
+ // The native refusals name the range in digits, which the shared client's pass-through drops:
+ // that is why the form cannot rely on them.
+ const refusal=/call\.reject\("(Choose a length from[^"]*)", "invalid"\)/.exec(plugin)[1];
+ assert.equal(refusal,'Choose a length from 8 to 128 with at least one character type');
+ assert.match(generator,/"Choose a length from 8 to 128"/);
+ assert.match(generator,/"Choose at least one character type"/);
+ const passThrough=new RegExp(/\/(\^\[A-Za-z ,.'-\]\{1,80\}\$)\//.exec(client)[1]);
+ assert.ok(!passThrough.test(refusal),'the client drops the length refusal');
+ // Alpha's sentences carry the same information.
+ for(const length of [7,0,-1,129,1000,20.5,Number.NaN,Number.POSITIVE_INFINITY,'20',undefined,null])
+  assert.equal(generatedPasswordText({length}),'Choose a length from 8 to 128 characters.',String(length));
+ for(const length of [8,16,20,32,128])assert.equal(generatedPasswordText({length}),'',String(length));
+ assert.equal(generatedPasswordText({length:20,lowercase:false,uppercase:false,digits:false,symbols:false}),'Choose at least one character type.');
+ assert.equal(generatedPasswordText({length:20,lowercase:false,uppercase:false,digits:false}),'','a type left out is on');
+ assert.equal(generatedPasswordText({length:200,lowercase:false,uppercase:false,digits:false,symbols:false}),'Choose a length from 8 to 128 characters.');
+ // The form runs the check before it calls the vault, and sends the checked options.
+ const manager=read('apps/app/src/passwords/password-manager.ts');
+ const save=manager.slice(manager.indexOf('function save('),manager.indexOf('export function passwordManagerGroups('));
+ assert.ok(save.indexOf('generatedPasswordText(generate)')>0&&save.indexOf('generatedPasswordText(generate)')<save.indexOf('vault.save('));
+ assert.match(save,/\.\.\.\(generate \? \{ generate \} :/);
+});
+
+test('a generated password is saved with the length the owner picked',async()=>{
+ const t=await mount();await t.openShop();
+ await t.press(t.rows(t.entryPage().groups),'Generate');
+ t.find(t.rows(t.entryPage().groups),'Length').opts.find(option=>option.label==='32').pick();
+ await t.press(t.rows(t.entryPage().groups),'Save');
+ const saves=t.calls.filter(([method])=>method==='save');
+ assert.equal(saves.length,1);
+ assert.deepEqual(saves[0][1].generate,{length:32});
+ assert.equal(saves[0][1].password,undefined);
 });

@@ -7,13 +7,15 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import YAML from 'yaml';
 import {deliver} from '../../../../scripts/deliver-app-update.ts';
-import {APP_UPDATE_MANIFEST, APP_UPDATE_TAG, LEGACY_APP_UPDATE_TAG, appUpdateManifestUrl} from '../../../../scripts/update-channel.ts';
+import {
+  APP_UPDATE_MANIFEST, APP_UPDATE_REPOSITORY, APP_UPDATE_REPOSITORY_ID,
+  APP_UPDATE_TAG, LEGACY_APP_UPDATE_TAG, appUpdateManifestUrl,
+} from '../../../../scripts/update-channel.ts';
 import {captureInputs, checkTraces} from '../check-traces.mjs';
+import {scaledTimeout} from '../timeouts.mjs';
 
 const workflow = name => '.github/workflows/' + name + '.yml';
-const signer = workflow('release-cloud-app-signing');
-const verifier = workflow('verify-cloud-signing-input');
-const publisher = workflow('publish-qualified-app-update');
+const release = workflow('release');
 const producer = workflow('resident-android');
 const python = 'specs/quint/refinement/services/protected-app-update-promotion.py';
 const manifestName = APP_UPDATE_MANIFEST;
@@ -37,45 +39,44 @@ function checkWorkflows() {
   const producerJob = Object.values(YAML.parse(read(producer)).jobs)
     .find(job => job.env?.ALPHA_APP_UPDATE_CANDIDATE);
   assert.match(producerJob.env.ALPHA_APP_UPDATE_CANDIDATE, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
-  ordered(producerJob.steps, runs('app-update-candidate.ts version'), runs('app-update-candidate.ts receipt'),
+  ordered(producerJob.steps, runs('app-update-candidate.ts version'),
+    runs('build-archive.ts test-results/resident-ci-distribution'), runs('Captured APK verification differs'),
+    runs('app-update-candidate.ts receipt'),
     step => step.with?.name?.startsWith('app-native-candidate-'));
-  const signing = YAML.parse(read(signer)).jobs;
-  assert.equal(signing.admit.uses, './' + verifier);
-  assert.match(signing.admit.if, /inputs\.workflow_commit == github\.sha/);
-  assert.equal(signing.sign.needs, 'admit');
-  assert.equal(signing.sign.environment, 'release');
-  assert.match(signing.sign.if, /needs\.admit\.result == 'success'.*needs\.admit\.outputs\.plan_sha256 != ''/);
-  const verify = YAML.parse(read(verifier)).jobs.admit;
-  assert.equal(verify.outputs.plan_sha256, '$' + '{{ steps.verify.outputs.plan_sha256 }}');
-  assert.ok(verify.steps.some(runs('bash scripts/ci/verify-cloud-signing-input.sh')));
-  ordered(signing.sign.steps, runs('verify-cloud-signing-input.sh --stage'), runs('node scripts/sign-release-apks.ts --keystore'),
+  const jobs = YAML.parse(read(release)).jobs;
+  assert.match(jobs['admit-signing'].if, /inputs\.operation == 'sign' && inputs\.workflow_commit == github\.sha/);
+  assert.equal(jobs.sign.needs, 'admit-signing');
+  assert.equal(jobs.sign.environment, 'release');
+  assert.match(jobs.sign.if, /needs\.admit-signing\.result == 'success'.*needs\.admit-signing\.outputs\.plan_sha256 != ''/);
+  assert.equal(jobs['admit-signing'].outputs.plan_sha256, '$' + '{{ steps.verify.outputs.plan_sha256 }}');
+  assert.ok(jobs['admit-signing'].steps.some(step => step.run === 'bash scripts/ci/verify-cloud-signing-input.sh'));
+  ordered(jobs.sign.steps, runs('verify-cloud-signing-input.sh --stage'), runs('bun scripts/sign-release-apks.ts --keystore'),
     runs('apksigner" verify'), step => step.with?.name?.startsWith('private-cloud-apk-delivery-'));
-  const staged = signing.sign.steps.find(runs('verify-cloud-signing-input.sh --stage'));
-  assert.equal(staged.env.EXPECTED_PLAN, '$' + '{{ needs.admit.outputs.plan_sha256 }}');
+  const staged = jobs.sign.steps.find(runs('verify-cloud-signing-input.sh --stage'));
+  assert.equal(staged.env.EXPECTED_PLAN, '$' + '{{ needs.admit-signing.outputs.plan_sha256 }}');
   assert.match(staged.run, /\$EXPECTED_PLAN/);
-  const secretSteps = signing.sign.steps.filter(step => Object.values(step.env ?? {}).some(value => String(value).includes('secrets.')));
+  const secretSteps = jobs.sign.steps.filter(step => Object.values(step.env ?? {}).some(value => String(value).includes('secrets.')));
   assert.equal(secretSteps.length, 1);
   const [signingKeyStep] = secretSteps;
   assert.match(signingKeyStep.run, /sha256sum --check --strict[\s\S]+keytool -exportcert[\s\S]+test "\$actual" = "\$expected"[\s\S]+sign-release-apks\.ts/);
-  assert.ok(signing.sign.steps.find(runs('apksigner" verify')).run.includes('private-apk-storage.py upload'));
+  assert.ok(jobs.sign.steps.find(runs('apksigner" verify')).run.includes('private-apk-storage.py upload'));
 
-  const publishing = YAML.parse(read(publisher)).jobs;
-  assert.equal(publishing.publish.needs, 'admit');
-  assert.equal(publishing.publish.environment, 'release');
-  assert.match(publishing.admit.if, /inputs\.workflow_commit == github\.sha/);
-  assert.match(publishing.publish.if, /needs\.admit\.result == 'success'.*needs\.admit\.outputs\.qualification_sha256 != ''/);
-  const restored = publishing.publish.steps.find(runs('--product "$GITHUB_WORKSPACE/qualified-product"'));
-  assert.equal(restored.env.EXPECTED_QUALIFICATION, '$' + '{{ needs.admit.outputs.qualification_sha256 }}');
-  assert.match(restored.run, /\$EXPECTED_QUALIFICATION/);
-  assert.equal(publishing.publish.steps.find(step => step.with?.path === 'qualified-product').with.ref,
-    '$' + '{{ needs.admit.outputs.source_commit }}');
-  const reverify = publishing.publish.steps.find(runs('npm run android:verify -- --cloud-voice-evidence='));
-  assert.equal(reverify?.['working-directory'], 'qualified-product');
-  assert.equal(reverify.run, 'npm run android:verify -- --cloud-voice-evidence="$RUNNER_TEMP/qualified-stage/cloud-voice.json"');
-  assert.equal(JSON.parse(read('package.json')).scripts['android:verify'], 'node scripts/verify-apks.ts');
-  ordered(publishing.publish.steps, runs('--product "$GITHUB_WORKSPACE/qualified-product"'),
-    step => step === reverify, runs("row['cloudVoice']['evidenceSha256']"),
-    runs('scripts/deliver-app-update.ts --variant launcher'));
+  assert.equal(jobs.publish.needs, 'admit-publication');
+  assert.equal(jobs.publish.environment, 'release');
+  assert.match(jobs['admit-publication'].if, /inputs\.operation == 'publish' && inputs\.workflow_commit == github\.sha/);
+  assert.match(jobs.publish.if, /needs\.admit-publication\.result == 'success'.*needs\.admit-publication\.outputs\.qualification_sha256 != ''/);
+  const restored = jobs.publish.steps.find(runs('--product "$GITHUB_WORKSPACE/qualified-product"'));
+  assert.equal(restored.env.EXPECTED_QUALIFICATION, '$' + '{{ needs.admit-publication.outputs.qualification_sha256 }}');
+  assert.equal(jobs.publish.steps.find(step => step.with?.path === 'qualified-product').with.ref,
+    '$' + '{{ needs.admit-publication.outputs.source_commit }}');
+  const reverify = jobs.publish.steps.find(runs('run android:verify --'));
+  assert.match(reverify?.run ?? '', /application_id=\$\(jq -er '\.packageName'[\s\S]*export ALPHA_ANDROID_APPLICATION_ID="\$application_id"[\s\S]*cd qualified-product[\s\S]*bun scripts\/android-host\.ts[\s\S]*bun run android:verify --/);
+  assert.equal(reverify?.run.includes('verify-qualified-cloud-launcher'), false, 'every publication reverifies with android:verify');
+  assert.equal(JSON.parse(read('package.json')).scripts['android:verify'], 'bun scripts/verify-apks.ts');
+  const qualifiedRow = jobs.publish.steps.find(step => step.name === 'Require the qualified launcher release row before publication');
+  const publication = jobs.publish.steps.find(step => step.name === 'Publish launcher APK first and anonymously verify the stable pointer');
+  ordered(jobs.publish.steps, runs('--product "$GITHUB_WORKSPACE/qualified-product"'),
+    step => step === reverify, step => step === qualifiedRow, step => step === publication);
 }
 
 const initial = {release: false, apk: 'missing', pointer: 'missing', floor: 1, apkVerified: false,
@@ -92,6 +93,9 @@ function publicFixture(directory, launcherBytes, version) {
   fs.writeFileSync(path.join(directory, manifestName), manifest);
   let release = false, apk = null, pointer = null, floor = 1;
   let apkVerified = false, pointerWrite = false, receipt = null;
+  // An interrupted replacement can leave inventory metadata without a public pointer.
+  const emptyStarter = {name: manifestName, id: 'RA_manifest_starter', state: 'starter', size: 0, digest: null};
+  let starter = null;
   return {
     observe() {
       return {release, apk: !apk ? 'missing' : apk.sha256 === sha(bytes) ? 'exact' : 'partial',
@@ -120,7 +124,11 @@ function publicFixture(directory, launcherBytes, version) {
         receipt = await deliver({directory, manifestUrl, source: '1'.repeat(40)}, {
           wait: async () => {},
           run(args) {
-            if (args[0] === 'repo' && args[1] === 'view') return '{"isPrivate":false}';
+            if (args[0] === 'api') {
+              assert.deepEqual(args, ['api', 'repos/alphacompute/alpha']);
+              return JSON.stringify({id: 1396333361,
+                full_name: 'alphacompute/alpha', private: false});
+            }
             if (args[0] !== 'release') assert.fail('Unexpected command: ' + args.join(' '));
             if (args[1] === 'view' && args[2] === LEGACY_APP_UPDATE_TAG) {
               legacyChecks++;
@@ -135,7 +143,9 @@ function publicFixture(directory, launcherBytes, version) {
               if (apkVerified && fault === 'late-stable-floor') floor = 3;
               if (apkVerified && fault === 'lost-apk') apk = null;
               const names = [apk && apkName, pointer && manifestName, floor === 3 && ('alpha-phone-' + (version + 1) + '.apk')];
-              return release ? JSON.stringify({isDraft: false, assets: names.filter(Boolean).map(name => ({name}))}) : null;
+              const assets = names.filter(Boolean).map(name => ({name}));
+              if (starter) assets.push(starter);
+              return release ? JSON.stringify({isDraft: false, assets}) : null;
             }
             effects.push(args[1] === 'upload' ? path.basename(args[3]) : args[1]);
             if (args[1] === 'create') {
@@ -157,7 +167,8 @@ function publicFixture(directory, launcherBytes, version) {
               assert.equal(apk?.sha256, offer.sha256, 'Final inventory must still contain the verified APK');
               pointerWrite = true;
               fail('manifest-before');
-              pointer = fault === 'manifest-partial' ? null : object(fs.readFileSync(args[3]));
+              starter = fault === 'manifest-partial' ? emptyStarter : null;
+              pointer = starter ? null : object(fs.readFileSync(args[3]));
               fail('manifest-partial');
               fail('manifest-after');
             }
@@ -198,27 +209,26 @@ const faults = ['create-before', 'create-after', 'apk-before', 'apk-partial', 'a
 
 export async function checkProtectedAppUpdatePromotion(extraSources = []) {
   const sources = [
-    fileURLToPath(import.meta.url), python, signer, verifier, publisher, producer, 'package.json',
+    fileURLToPath(import.meta.url), python, release, producer, 'package.json',
     'scripts/app-update-candidate.ts', 'scripts/ci/verify-cloud-signing-input.sh',
-    'scripts/ci/admit-cloud-signing-input.py', 'scripts/ci/private-apk-storage.py',
+    'scripts/ci/admit-cloud-signing-input.py', 'scripts/ci/app_update_producer.py', 'scripts/ci/private-apk-storage.py',
     'scripts/ci/qualified-app-update.py', 'scripts/verify-apks.ts', 'scripts/sign-release-apks.ts',
     'scripts/deliver-app-update.ts', 'scripts/update-artifact.ts', 'scripts/update-channel.ts', 'scripts/publish-update-manifest.ts',
     'test/cloud-signing-input.test.py', 'test/qualified-app-update.test.py', ...extraSources,
   ];
   const driverHashes = captureInputs(sources);
   checkWorkflows();
-  const {traces, launcherBytes, versionCode} = JSON.parse(execFileSync('python3', ['-B', python], {
-    encoding: 'utf8', timeout: 120_000,
+  const pythonArgs = ['-B', python, '--signing-timeout-ms', String(scaledTimeout(30_000))];
+  const {traces, launcherBytes, mainCandidate, versionCode} = JSON.parse(execFileSync('python3', pythonArgs, {
+    encoding: 'utf8', timeout: scaledTimeout(120000),
   }));
   for (const trace of traces) {
     trace.expect.s.public = initial;
     for (const step of trace.steps) step.expect.s.public = initial;
   }
-  const admitted = traces[0];
-  const restored = admitted.steps.at(-1).expect.s;
-  assert.equal(restored.restored, true);
-  assert.equal(admitted.concreteSourceObservations.at(-1).stagedSignedSHA256.launcher, sha(launcherBytes));
   const cases = [
+    ['first delivery of the exact reviewed main candidate', ['ok'],
+      {trace: traces[mainCandidate.index], launcherBytes: mainCandidate.launcherBytes}],
     ['raised retained version floor blocks otherwise exact bytes', ['advanceFloor', 'ok']],
     ['equal retained legacy floor blocks the current channel write', ['advanceLegacyFloor', 'ok']],
     ['changed stable pointer prevents moving it after APK readback', ['pointer-race', 'ok']],
@@ -230,10 +240,14 @@ export async function checkProtectedAppUpdatePromotion(extraSources = []) {
     ...faults.map(fault => ['before/after public effect: ' + fault,
       [...(fault.startsWith('manifest-') ? ['existingRelease'] : []), fault, 'ok']]),
   ];
-  for (const [name, schedule] of cases) {
+  for (const [name, schedule, source = {trace: traces[0], launcherBytes}] of cases) {
+    const admitted = source.trace;
+    const restored = admitted.steps.at(-1).expect.s;
+    assert.equal(restored.restored, true);
+    assert.equal(admitted.concreteSourceObservations.at(-1).stagedSignedSHA256.launcher, sha(source.launcherBytes));
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-promotion-public-'));
     try {
-      const fixture = publicFixture(directory, launcherBytes, versionCode);
+      const fixture = publicFixture(directory, source.launcherBytes, versionCode);
       const trace = {name, expect: admitted.expect, steps: [...admitted.steps], concreteSourceObservations: [...admitted.concreteSourceObservations]};
       for (const fault of schedule) {
         const effect = fault === 'advanceFloor' || fault === 'advanceLegacyFloor' || fault === 'existingRelease';
@@ -249,10 +263,10 @@ export async function checkProtectedAppUpdatePromotion(extraSources = []) {
   }
   return checkTraces({model: 'ProtectedAppUpdatePromotion', sources, driverHashes, traces, scope: 'bounded-orchestration',
     assumptions: [
-      'The adjacent AppUpdateCandidate campaign exercises the live version and unsigned-receipt helper. The release workflow structures are parsed and their exact admission, verification and write order checked without executing jobs.',
+      'The adjacent AppUpdateCandidate campaign exercises the live version and unsigned-receipt helper. The release workflow structures are parsed for admission/dependency/environment identity and restore, reverify, qualified-release-row and publication step order without executing jobs. Shell command spelling is not behavioral evidence.',
       'The current signing admission shell runs against scratch Git and a closed gh command. Private object media, receipt staging and signed byte restoration run actual Python implementations against controlled transports. Signed APKs, signer facts and reviewed voice receipts are synthetic inputs.',
       'The actual publication helper runs with closed release and anonymous read ports using the restored launcher bytes. The ports choose possible failures before effects, after committed effects, and during a partial upload. They do not predict GitHub or object-storage durability or concurrency.',
-      'The main-push receipt has no current signer route. The dispatched archive path does not pin its producer attempt. The publication reader does pin the protected signing attempt and exact private object generation. No live credentials, approvals, signed APKs, rollout, voice qualification or device acceptance are exercised.',
+      'The main-push route checks the same exact successful attempt at preflight and before protected restore. The legacy dispatched archive path keeps its prior run-level identity. The publication reader pins the protected signing attempt and exact private object generation. No live credentials, approvals, signed APKs, rollout, voice qualification or device acceptance are exercised.',
     ],
   });
 }

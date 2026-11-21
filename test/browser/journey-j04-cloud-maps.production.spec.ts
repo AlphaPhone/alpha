@@ -109,9 +109,9 @@ test('an event location is searched once in Cloud Maps, routed from an explicit 
   });
 
   await test.step('an explicit destination, an explicit origin and an explicit mode choice', async () => {
-    await page.getByRole('button', { name: /^Port Hercule fuel dock/ }).first().click();
+    await page.locator('[data-alpha-maps-sheet="results"]').getByRole('button', { name: /^Port Hercule fuel dock/ }).first().click();
     await button(page, 'Directions').click();
-    await expect(page.getByText('Choose a real origin to calculate a route.')).toBeVisible();
+    await expect(page.getByText('Choose a starting point to see a route.')).toBeVisible();
     expect((await mapsRequests(page)).filter(row => row.route === 'routes')).toEqual([]);
     const origin = page.getByRole('textbox', { name: 'Starting point' });
     await origin.fill(`${ORIGIN.latitude}, ${ORIGIN.longitude}`);
@@ -190,12 +190,14 @@ test('a cancelled search shows nothing late, a place outside coverage is named, 
   await test.step('a place Cloud found outside every coverage region is named, not routed', async () => {
     await search.fill('Nice harbour');
     await search.press('Enter');
-    await page.getByRole('button', { name: /^Port of Nice/ }).first().click();
+    await page.locator('[data-alpha-maps-sheet="results"]').getByRole('button', { name: /^Port of Nice/ }).first().click();
     await expect(maps).toContainText('This location is outside Monaco search and route coverage. Its coordinates are retained.');
     expect((await mapsRequests(page)).filter(row => row.route === 'routes')).toEqual([]);
   });
 
   await test.step('a 429 with Retry-After is worded with its wait and nothing is retried automatically', async () => {
+    const cooldownStart = new Date();
+    await page.clock.setFixedTime(cooldownStart);
     await page.evaluate(() => { (window as any).residentStub.maps.limit = '30'; });
     await search.fill(LOCATION);
     await search.press('Enter');
@@ -203,7 +205,13 @@ test('a cancelled search shows nothing late, a place outside coverage is named, 
     const searches = (await mapsRequests(page)).filter(row => row.route === 'places/search').length;
     await page.waitForTimeout(1_000);
     expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(searches);
-    // An explicit retry by the user is a new request, and it succeeds.
+    // A user retry also honors Cloud's account-wide pause.
+    await search.press('Enter');
+    await expect(maps).toContainText('Maps request limit reached. Try again in about 30 seconds.');
+    expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(searches);
+    // Expiry alone does not replay the search. The next explicit retry succeeds.
+    await page.clock.setFixedTime(new Date(cooldownStart.getTime() + 30_001));
+    expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(searches);
     await search.press('Enter');
     await expect(page.getByRole('button', { name: /^Port Hercule fuel dock/ }).first()).toBeVisible();
   });
@@ -225,7 +233,7 @@ test('Cloud route alternatives are offered in order; choosing one requests nothi
   const search = page.getByRole('searchbox', { name: 'Search places', exact: true });
   await search.fill(LOCATION);
   await search.press('Enter');
-  await page.getByRole('button', { name: /^Port Hercule fuel dock/ }).first().click();
+  await page.locator('[data-alpha-maps-sheet="results"]').getByRole('button', { name: /^Port Hercule fuel dock/ }).first().click();
   await button(page, 'Directions').click();
   const origin = page.getByRole('textbox', { name: 'Starting point' });
   await origin.fill(`${ORIGIN.latitude}, ${ORIGIN.longitude}`);

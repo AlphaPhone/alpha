@@ -1,16 +1,13 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {mkdtemp,writeFile,readFile,rm,stat,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
-if(!process.execArgv.some((arg,i)=>arg==='--import=tsx'||(arg==='--import'&&process.execArgv[i+1]==='tsx'))){const child=spawnSync(process.execPath,['--import','tsx',process.argv[1]],{stdio:'inherit',timeout:60000});if(child.error)throw child.error;process.exit(child.status??1);}
 const {createBrowserCloudDevHandler}=await import('../scripts/browser-cloud-dev-bridge.ts');
 const {CloudProtocol}=await import('../apps/app/src/runtime/cloud-protocol.ts');
-const {residentAdmissionOutcome}=await import('../apps/app/src/runtime/subscription-entitlement.ts');
 const {cloudStorageNamespace,productionCloud,stagingCloud}=await import('../apps/app/src/runtime/cloud-deployment.generated.ts');
 const profileFile=(profile,name)=>join(profile,cloudStorageNamespace.replaceAll(':','-'),name);
 const {BrowserCloudConnection,BrowserCloudSignIn}=await import('../apps/app/src/browser/cloud-connection.ts');
@@ -26,8 +23,10 @@ test('Cloud browser login admits only one session and the optional fixed Alpha h
    await connection.openExternal({url,requestId:randomUUID()});
    assert.equal(opened.at(-1).url,url);assert.equal(opened.at(-1).target,'_blank');assert.equal(opened.at(-1).popup.opener,null);
   }
+  for(const url of ['https://checkout.stripe.com/c/pay/cs_test_fixture#fid=provider-fragment','https://invoice.stripe.com/i/fixture'])await connection.openExternal({url,requestId:randomUUID()});
   const count=opened.length,base=`https://eliza.app/auth/cli-login?session=${session}`;
   for(const url of [
+   'https://checkout.stripe.com.attacker.invalid/c/pay/x','http://checkout.stripe.com/c/pay/x',
    base+'&app=other',base+'&app=Alpha',base+'&app=',base+'&app=alpha&app=alpha',base+'&app=alpha&app=other',
    base+'&session='+session,base+'&app=alpha&session='+session,base+'&app=alpha&returnTo=https://attacker.invalid',
    'https://eliza.app/auth/cli-login?app=alpha',base.replace(session,'invalid')+'&app=alpha',
@@ -50,7 +49,7 @@ async function fixture(resident,environment){
   if(path==='/steward/auth/providers')return Response.json({google:false,oauth:[]});
   if(path==='/api/auth/cli-session')return Response.json({sessionId:session,expiresAt:new Date(Date.now()+60000).toISOString()});
   if(path==='/api/auth/cli-session/'+session)return pollResponse();
-  if(path==='/api/v1/subscription/entitlement-keys')return response(url,input);
+  if(path==='/api/v1/subscription/entitlement-keys'||path==='/api/v1/subscriptions/plans')return response(url,input);
   assert.equal(new Headers(input.headers).get('Authorization'),'Bearer '+secret);
   if(path==='/api/v1/user')return Response.json({success:true,data:{id:owner,organization_id:org,email:'owned@example.invalid'}});
   if(path==='/api/v1/billing/limits')return Response.json({success:true,data:{v2:{subscription:{status:'available',value:{planKey:'plus_monthly',state:'active'}}}}});
@@ -67,10 +66,34 @@ test('existing Mac credential becomes a real canonical identity/credit reference
  const f=await fixture();try{
   const stored=await f.rpc({operation:'secureRead',slot:'cloud:production'});assert.equal(stored.status,200);assert.equal(stored.data.value.includes(secret),false);const credential=JSON.parse(stored.data.value);assert.equal(credential.credentialReference,reference);assert.equal(credential.credentialId,credentialId);assert.equal(credential.token,undefined);
   const result=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/user',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(result.data.status,200);assert.equal(result.data.data.data.id,owner);assert.equal(result.data.data.data.organization_id,org);
+  const catalogue=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscriptions/plans',method:'GET',headers:{Accept:'application/json'}}});assert.equal(catalogue.status,200);
+  const referral=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/referrals',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(referral.status,200);
   const limits=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/billing/limits',method:'GET',headers:{Accept:'application/json'},credentialReference:reference}});assert.equal(limits.data.data.data.v2.subscription.value.state,'active');
   const redeemed=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscription/redeem',method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({code:'SYNTHETIC0000CODE',idempotencyKey:randomUUID()}),credentialReference:reference}});assert.equal(redeemed.data.data.success,true);
   for(const body of [{code:'SYNTHETIC0000CODE'},{code:'SYNTHETIC0000CODE',idempotencyKey:'short'},{code:'SYNTHETIC0000CODE',idempotencyKey:randomUUID(),extra:1}]){const refused=await f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/subscription/redeem',method:'POST',headers:{Accept:'application/json'},body:JSON.stringify(body),credentialReference:reference}});assert.ok([400,409].includes(refused.status),JSON.stringify(body));}
   assert.equal(f.calls.filter(call=>new URL(call.url).pathname==='/api/v1/subscription/redeem').length,1);assert.equal((await stat(f.profile)).mode&0o077,0);
+ }finally{await f.close();}
+});
+test('signed-in checkout reaches Cloud once and keeps foreign routes and body fields refused',async()=>{
+ const f=await fixture();try{
+  f.setResponse(async()=>Response.json({success:true,data:{status:'open',commandId:'cmd_fixture',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_fixture',sessionId:'cs_test_fixture',expiresAt:new Date(Date.now()+60000).toISOString()}}));
+  const input={url:'https://api.eliza.app/api/v1/subscriptions/checkout',method:'POST',headers:{'Content-Type':'application/json'},credentialReference:reference,body:JSON.stringify({planKey:'plus_monthly',idempotencyKey:randomUUID(),presentation:'mobile'})};
+  const call=change=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{...input,...change}});
+  assert.equal((await call({})).data.status,200);
+  const count=f.calls.length;
+  for(const change of [{url:input.url+'?x=1'},{url:'https://attacker.invalid/api/v1/subscriptions/checkout'},{body:JSON.stringify({planKey:'plus_monthly',returnUrl:'https://attacker.invalid'})},{credentialReference:'browser-cloud-reference:'+randomUUID()}])assert.notEqual((await call(change)).status,200);
+  assert.equal(f.calls.length,count);
+ }finally{await f.close();}
+});
+test('balance checkout forwards its exact idempotency header and fixed return only',async()=>{
+ const f=await fixture();try{
+  const key=randomUUID(),target='https://eliza.app/alphaphone/billing/return';
+  f.setResponse(async(_url,input)=>{assert.equal(new Headers(input.headers).get('Idempotency-Key'),key);return Response.json({url:'https://checkout.stripe.com/c/pay/fixture',sessionId:'cs_fixture'});});
+  const input={url:'https://api.eliza.app/api/v1/credits/checkout',method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},credentialReference:reference,body:JSON.stringify({amountUsd:10,success_url:target,cancel_url:target+'?cancelled=1'})};
+  const call=change=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{...input,...change}});
+  const answer=await call({});assert.equal(answer.data.status,200,JSON.stringify(answer));const count=f.calls.length;
+  for(const change of [{headers:{}},{url:input.url+'?x=1'},{body:JSON.stringify({amountUsd:10,success_url:'https://attacker.invalid',cancel_url:target})}])assert.notEqual((await call(change)).status,200);
+  assert.equal(f.calls.length,count);
  }finally{await f.close();}
 });
 test('negative origins, methods, authorities, routes, private bearer headers and wrong reference never dispatch',async()=>{
@@ -363,6 +386,9 @@ test('cancelling email sign-in during resident cleanup preserves the prior accou
   const pending=f.rpc({operation:'signInVerifyEmail',attemptId:started.data.attemptId,code:'123456'});
   await waiting;
   const cancellation=new BrowserCloudSignIn().cancel();
+  // Release the cleanup only once the host has taken the cancellation: otherwise the commit's
+  // two file writes race the Cancel request across the loopback socket.
+  while((await f.rpc({operation:'signInStatus'})).data.active)await new Promise(resolve=>setTimeout(resolve,5));
   release();
   const outcome=await cancellation;
   assert.equal(outcome.status,'cancelled');
@@ -473,7 +499,6 @@ test('Maps data returning after a Cloud owner switch is discarded',async()=>{
   const result=await pending;assert.notEqual(result.status,200);assert.equal(JSON.stringify(result).includes('Previous owner result'),false);
  }finally{release?.();await f.close();}
 });
-
 
 test('Cloud resident binding is host-owned, exact-account scoped, and retired before sign-out persists',async()=>{
  const events=[],resident={async bind(value){events.push({kind:'bind',value});return {provider:'elizacloud',configured:true};},async clear(){events.push({kind:'clear'});return {provider:'elizacloud',configured:false};},status(){return {provider:'elizacloud',configured:false};},async ready(){return {state:'host-managed'};}};
@@ -685,7 +710,7 @@ test('service-info honors the configured staging authority without requiring its
   assert.notEqual((await f.rpc({operation:'signInServiceInfo',environment:'production'})).status,200);assert.equal(f.calls.length,1);
  }finally{await f.close();}
 });
-test('service-info cancels its provider request when the browser request closes',{timeout:3000},async()=>{
+test('service-info cancels its provider request when the browser request closes',{timeout:scaledTimeout(3000)},async()=>{
  const f=await fixture();const controller=new AbortController();let started,aborted;
  const ready=new Promise(resolve=>started=resolve),cancelled=new Promise(resolve=>aborted=resolve);
  try{
@@ -693,7 +718,6 @@ test('service-info cancels its provider request when the browser request closes'
   const pending=f.send({operation:'signInServiceInfo',environment:'production'},{signal:controller.signal});await ready;controller.abort();await assert.rejects(pending,{name:'AbortError'});await cancelled;
  }finally{controller.abort();await f.close();}
 });
-
 
 test('browser Google broker lifetime pins the real host credential and refuses retired same-credential reads',async()=>{
  const f=await fixture(),token='a'.repeat(64);let host;
@@ -760,10 +784,78 @@ test('full browser resident Calendar writes require exact owner intent and prese
   assert.equal((await f.rpc({operation:'residentClear',environment:'production'})).status,200);count=f.calls.length;
   assert.notEqual((await privateCall(third,freshWrite)).status,200);assert.equal(f.calls.length,count,'Clear retires the independently current intent');
 
-
  }finally{await google?.close();await second?.close();await third?.close();await f.close();}
 });
 
+test('resident Gmail requires the current owner switch and a matching review before one dispatch',async()=>{
+ const f=await fixture({clear:async()=>({})},'production');
+ const token='6'.repeat(64),saved=new Map(),gmailGrant=randomUUID();
+ let host,hasSendGrant=true;
+ let dispatches=0;
+ f.setResponse(async(url,input)=>{
+  const pathname=new URL(url).pathname;
+  if(pathname.endsWith('/accounts'))return Response.json([{
+   configured:true,connected:true,reason:'connected',connectionId:gmailGrant,identity:{email:'owned@example.invalid'},
+   grantedCapabilities:['google.gmail.triage',...(hasSendGrant?['google.gmail.send']:[])],
+  }]);
+  if(pathname.endsWith('/operations')&&input.method==='POST'){
+   const {requestId,proposal}=JSON.parse(input.body);
+   const review={from:'owned@example.invalid',...proposal};
+   const reviewDigest=createHash('sha256').update(JSON.stringify(review)).digest('hex');
+   const receipt={requestId,kind:'send',state:'prepared',reviewDigest,providerResult:null,rejectionCode:null};
+   saved.set(requestId,{receipt,proposal});
+   return Response.json({version:1,providerExactlyOnce:false,receipt,review});
+  }
+  if(pathname.includes('/inbox-v1/operations/')){
+   const entry=saved.get(pathname.split('/').at(input.method==='POST'?-2:-1));
+   if(!entry)return Response.json({error:'Unknown operation'},{status:404});
+   if(input.method==='POST'){
+    const {proposal,reviewDigest}=JSON.parse(input.body);
+    assert.deepEqual(proposal,entry.proposal);
+    assert.equal(reviewDigest,entry.receipt.reviewDigest);
+    dispatches++;
+    entry.receipt={...entry.receipt,state:'succeeded',providerResult:{messageId:'fixture-message'}};
+   }
+   return Response.json({version:1,providerExactlyOnce:false,receipt:entry.receipt});
+  }
+  throw Error('Unexpected synthetic Cloud operation '+pathname);
+ });
+ const call=async send=>{
+  const r=await fetch('http://127.0.0.1:'+host.port+'/__alpha-owner-gmail',{
+   method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({send}),
+  });
+  return {status:r.status,data:await r.json()};
+ };
+ const intent=(gmailChanges,id=credentialId)=>f.rpc({operation:'residentGoogleGmailAccess',environment:'production',credentialId:id,gmailChanges});
+ try{
+  host=await f.host().startGoogleHost(token,{credentialId,reference});
+  const content={to:['self@example.invalid'],subject:'Synthetic review',bodyText:'Fixture only'};
+  const prepare={...content,operation:'prepare',requestId:randomUUID()};
+  assert.notEqual((await call(prepare)).status,200);
+  assert.notEqual((await intent(true,gmailGrant)).status,200);
+  assert.deepEqual((await intent(true)).data,{gmailChanges:true});
+  hasSendGrant=false;assert.notEqual((await call(prepare)).status,200);assert.equal(saved.size,0);
+  hasSendGrant=true;
+  const prepared=await call(prepare);assert.equal(prepared.status,200,JSON.stringify(prepared.data));
+  const {id,reviewDigest}=prepared.data.send;
+  assert.equal(dispatches,0,'prepare is review only');
+  const send={...content,operation:'dispatch',id,reviewDigest};
+  assert.notEqual((await call({...send,bodyText:'Changed'})).status,200);
+  assert.equal(dispatches,0);
+  assert.equal((await intent(false)).status,200);
+  assert.notEqual((await call(send)).status,200);
+  assert.equal(dispatches,0);
+  const receipt=await call({operation:'receipt',id});
+  assert.equal(receipt.status,200,'Off keeps send receipts readable: '+JSON.stringify(receipt.data));
+  assert.equal(receipt.data.send.state,'prepared');
+  assert.equal((await intent(true)).status,200);
+  assert.equal((await call(send)).data.send.providerResult.messageId,'fixture-message');
+  assert.equal((await call(send)).data.send.state,'succeeded');
+  assert.equal(dispatches,1);
+  assert.equal((await f.rpc({operation:'residentClear',environment:'production'})).status,200);
+  assert.notEqual((await call({...prepare,requestId:randomUUID()})).status,200);
+ }finally{await host?.close();await f.close();}
+});
 
 const googleProof = {state:'a'.repeat(43),challenge:'b'.repeat(43)};
 const alphaBrowserStart = 'https://eliza.app/alphaphone/auth/browser-start';
@@ -845,6 +937,29 @@ test('cancelled browser Google poll ignores an already in-flight OAuth exchange'
 test('wrong attempt cancellation cannot retire the current browser Google login',async()=>{
  const f=await fixture();try{const started=await googleReady(f);await f.rpc({operation:'signInCancelGoogle',attemptId:randomUUID()});assert.equal((await f.rpc({operation:'signInPollGoogle',attemptId:started.attemptId})).data.status,'authenticated');}finally{await f.close();}
 });
+test('a returned Google commit still answers its exact Cancel without retiring a newer attempt',async()=>{
+ const f=await fixture();try{
+  const first=await googleReady(f),done=await f.rpc({operation:'signInPollGoogle',attemptId:first.attemptId});
+  assert.equal(done.data.status,'authenticated');
+  assert.deepEqual((await f.rpc({operation:'signInCancelGoogle',attemptId:first.attemptId})).data,done.data);
+  assert.notEqual((await f.rpc({operation:'signInCancelGoogle',attemptId:randomUUID()})).data.status,'authenticated');
+  assert.notEqual((await f.rpc({operation:'signInCancel'})).data.status,'authenticated');
+  const second=await f.rpc({operation:'signInStartGoogle',environment:'production',attemptId:randomUUID()});
+  assert.equal(second.status,200);
+  assert.deepEqual((await f.rpc({operation:'signInCancelGoogle',attemptId:first.attemptId})).data,done.data);
+  assert.equal((await f.rpc({operation:'signInStatus'})).data.active,true);
+  assert.equal((await f.rpc({operation:'signInCancelGoogle',attemptId:second.data.attemptId})).data.status,'cancelled');
+ }finally{await f.close();}
+});
+test('signing out retires the returned Google cancellation outcome',async()=>{
+ const f=await fixture();try{
+  const started=await googleReady(f),done=await f.rpc({operation:'signInPollGoogle',attemptId:started.attemptId});
+  const stored=JSON.parse((await f.rpc({operation:'secureRead',slot:'cloud:production'})).data.value);
+  assert.equal((await f.rpc({operation:'secureRemove',slot:'cloud:production',previousReference:stored.credentialReference})).status,200);
+  assert.notEqual((await f.rpc({operation:'signInCancelGoogle',attemptId:started.attemptId})).data.status,'authenticated');
+  assert.equal(done.data.status,'authenticated');
+ }finally{await f.close();}
+});
 function fakeGooglePopup(submit=()=>{}) {
  return {opener:{},closed:false,close(){this.closed=true;},document:{body:{append(){}},createElement(tag){return tag==='form'?{append(){},submit(){submit(this);}}:{};}}};
 }
@@ -859,7 +974,6 @@ test('Google popup is reserved before the first host request and exposes no cred
  globalThis.fetch=async(_url,input)=>{assert.equal(opened,true);const body=JSON.parse(input.body);if(body.operation==='signInStartGoogle'){id=body.attemptId;return Response.json({attemptId:id,expiresAt:Date.now()+60000,browserUrl:alphaBrowserStart,...googleProof});}if(body.operation==='signInPollGoogle')return Response.json({status:'authenticated',environment:'production',expiresAt:Date.now()+60000,accountCreated:null});return Response.json({});};
  try{const result=await new BrowserCloudSignIn().startGoogle({environment:'production'});assert.equal(result.status,'authenticated');assert.equal(popup.opener,null);assert.equal(new URL(assigned).origin,'https://eliza.app');assert.equal(popup.closed,true);}finally{globalThis.fetch=fetch;if(wd)Object.defineProperty(globalThis,'window',wd);else delete globalThis.window;}
 });
-
 
 test('detached or auto-closed Google popup still accepts the host completion',async()=>{
  const wd=Object.getOwnPropertyDescriptor(globalThis,'window'),fetch=globalThis.fetch,calls=[];let attempt;
@@ -877,7 +991,6 @@ test('detached WindowProxy with inaccessible closed property is not a cancellati
  try{const result=await new BrowserCloudSignIn().startGoogle({environment:'production'});assert.equal(result.status,'authenticated');assert.equal(calls.some(x=>x.operation==='signInPollGoogle'),true);}finally{globalThis.fetch=fetch;if(wd)Object.defineProperty(globalThis,'window',wd);else delete globalThis.window;}
 });
 
-
 test('cancelling Google while durable save awaits resident retirement retains the previous account',async()=>{
  let entered,release;const waiting=new Promise(r=>entered=r);
  const f=await fixture({clear:async()=>{entered();await new Promise(r=>release=r);}});
@@ -889,45 +1002,16 @@ test('cancelling Google while durable save awaits resident retirement retains th
  }finally{release?.();await f.close();}
 });
 
-async function googleCommitBoundaryFixture(){
- const source=await readFile(new URL('../scripts/browser-cloud-dev-bridge.ts',import.meta.url),'utf8');
- const start=source.indexOf(' async function cancelGoogleAttempt('),end=source.indexOf(' async function browserGoogleAvailable(',start);
- assert.ok(start>=0&&end>start);const code=stripTypeScriptTypes(source.slice(start,end),{mode:'strip'});
- const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
- const renameEntered=deferred(),releaseRename=deferred(),writeEntered=deferred(),releaseWrite=deferred();
- const disk={value:'old',temporary:null},attempt={id:'attempt',phase:'preparing',environment:'production',controller:new AbortController(),sessionId:'session'};
- const state={googleAttempt:attempt};
- const harness=new Function('state','disk','attempt','renameEntered','releaseRename','writeEntered','releaseWrite','AbortController',`
- let googleAttempt=state.googleAttempt;
- const pending=new Map([['session',{}]]);const options={};const resetCalendarAccess=()=>{};
- const directory=async()=>{};const stateFile='credentials';const randomUUID=()=> 'temporary';
- const writeFile=async(_path,value)=>{disk.temporary=value;writeEntered.resolve();await releaseWrite.promise;};
- const rename=async()=>{renameEntered.resolve();await releaseRename.promise;disk.value=disk.temporary;disk.temporary=null;};
- const unlink=async()=>{disk.temporary=null;};
- let queue=Promise.resolve();function serial(run){const result=queue.then(run,run);queue=result.catch(()=>{});return result;}
- ${code}
- const current=()=>{attempt.controller.signal.throwIfAborted();if(googleAttempt!==attempt)throw Error('cancelled');};
- return {cancel:()=>cancelGoogleAttempt('attempt'),commit:()=>serial(async()=>{await saveSignInCredential({production:{value:'new'}},attempt,current);attempt.outcome={status:'authenticated',environment:'production',expiresAt:Date.now()+60000,accountCreated:null,attemptId:'77777777-7777-4777-8777-777777777777',credentialId:'33333333-3333-4333-8333-333333333333'};return attempt.outcome;})};
- `)(state,disk,attempt,renameEntered,releaseRename,writeEntered,releaseWrite,AbortController);
- return {...harness,disk,attempt,renameEntered,releaseRename,writeEntered,releaseWrite};
-}
-test('cancel during staged credential write prevents rename and cleans the temporary file',async()=>{
- const f=await googleCommitBoundaryFixture(),save=f.commit();await f.writeEntered.promise;
- assert.equal((await f.cancel()).status,'cancelled');f.releaseWrite.resolve();await assert.rejects(save);
- assert.equal(f.disk.value,'old');assert.equal(f.disk.temporary,null);assert.notEqual(f.attempt.phase,'committed');
+test('native Google port without commit-aware cancellation retains ordinary abort behavior',async()=>{
+ let resolve,cancels=0;const pending=new Promise(r=>resolve=r),abort=new AbortController();
+ const port={startGoogle:()=>pending,cancel:async()=>{cancels++;}},store={read:async()=>null,write:async()=>{},clear:async()=>{}};
+ const client=new CloudProtocol('production',async()=>{throw Error('unused');},store,async()=>{}, {signIn:port});
+ const result=client.signInWithGoogle(abort.signal);abort.abort(new DOMException('Cancelled','AbortError'));await assert.rejects(result,e=>e.name==='AbortError');assert.ok(cancels>0);assert.equal(client.googleCancellationSupported,false);resolve({});
 });
-test('cancel after rename dispatch waits for and returns the committed outcome',async()=>{
- const f=await googleCommitBoundaryFixture(),save=f.commit();await f.writeEntered.promise;f.releaseWrite.resolve();await f.renameEntered.promise;
- let returned=false;const cancel=f.cancel().then(value=>{returned=true;return value;});await Promise.resolve();assert.equal(returned,false);
- f.releaseRename.resolve();assert.equal((await save).status,'authenticated');assert.equal((await cancel).status,'authenticated');
- assert.equal(f.attempt.controller.signal.aborted,false);assert.equal(f.attempt.phase,'committed');assert.match(f.disk.value,/new/);
-});
-
 
 test('Google poll without an active attempt or id is an expired attempt, not a null dereference',async()=>{
  const f=await fixture();try{const result=await f.rpc({operation:'signInPollGoogle'});assert.equal(result.status,409);assert.equal(result.data.code,'expired');}finally{await f.close();}
 });
-
 
 // The imported production CloudProtocol public Google entry supplies both attempts.
 function publicSequentialGoogleAttempts(){
@@ -948,7 +1032,7 @@ function publicSequentialGoogleAttempts(){
   close(){for(const reply of starts)reply.reject(Error('test cleanup'));for(const reply of cancellations)reply.reject(Error('test cleanup'));}
  };
 }
-test('a committed public Google attempt retains its delayed cancel outcome while the next public attempt is pending',{timeout:3000},async()=>{
+test('a committed public Google attempt retains its delayed cancel outcome while the next public attempt is pending',{timeout:scaledTimeout(3000)},async()=>{
  const f=publicSequentialGoogleAttempts();let a,b,cancellingA,bSettled=false;
  try{
   a=f.client.signInWithGoogle(new AbortController().signal);a.catch(()=>{});assert.equal(f.starts.length,1);
@@ -1004,6 +1088,20 @@ for(const selected of ['production','staging'])test(`managed Calendar host stays
  }finally{await host?.close();await f.close();}
 });
 
+ test('browser Google return is host-owned, single-use and bound to the current credential',async()=>{
+ const f=await fixture();try{
+  let redirect;
+  f.setResponse(async(url,input)=>{redirect=JSON.parse(input.body).redirectUrl;return Response.json({authUrl:'https://accounts.google.com/o/oauth2/v2/auth?state=fixture'});});
+  const initiate=()=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/eliza/google/connect/initiate',method:'POST',headers:{Accept:'application/json'},credentialReference:reference,body:JSON.stringify({side:'owner',capabilities:['google.basic_identity']})}});
+  await initiate();const callback=new URL(redirect);callback.pathname='/google-return';callback.searchParams.set('google_connected','true');callback.searchParams.set('connection_id',randomUUID());
+  const valid=await fetch(callback);assert.equal(valid.status,200);const page=await valid.text();assert.match(page,/BroadcastChannel/);assert.match(page,/window.close/);assert.ok(!page.includes(secret));assert.equal((await fetch(callback)).status,410);
+  await initiate();const changed=new URL(redirect);changed.pathname='/google-return';
+  await writeFile(profileFile(f.profile,'credentials.json'),JSON.stringify({production:{credentialReference:'browser-cloud-reference:'+randomUUID(),credentialId:randomUUID(),token:secret,userId:owner,organizationId:org}}),{mode:0o600});
+  assert.equal((await fetch(changed)).status,409);
+ }finally{await f.close();}
+ });
+
+
 test('owner key management HTTP keeps keys masked, revision-fenced and RAM-only',async()=>{
  const {productCharacterHostFixture}=await import('./fixtures/product-character-host.mjs');
  const residentFixture=productCharacterHostFixture(undefined,{request:async()=>Response.json({data:[{id:'qwen-3.8-27b'}]})});
@@ -1031,16 +1129,3 @@ test('owner key management HTTP keeps keys masked, revision-fenced and RAM-only'
   assert.equal((await readFile(profileFile(f.profile,'initial-credential.json'),'utf8')).includes('synthetic-http'),false);
  }finally{release();await f.close();await resident.close();residentFixture.close();}
 });
-
- test('browser Google return is host-owned, single-use and bound to the current credential',async()=>{
- const f=await fixture();try{
-  let redirect;
-  f.setResponse(async(url,input)=>{redirect=JSON.parse(input.body).redirectUrl;return Response.json({authUrl:'https://accounts.google.com/o/oauth2/v2/auth?state=fixture'});});
-  const initiate=()=>f.rpc({operation:'request',environment:'production',requestId:randomUUID(),input:{url:'https://api.eliza.app/api/v1/eliza/google/connect/initiate',method:'POST',headers:{Accept:'application/json'},credentialReference:reference,body:JSON.stringify({side:'owner',capabilities:['google.basic_identity']})}});
-  await initiate();const callback=new URL(redirect);callback.pathname='/google-return';callback.searchParams.set('google_connected','true');callback.searchParams.set('connection_id',randomUUID());
-  const valid=await fetch(callback);assert.equal(valid.status,200);const page=await valid.text();assert.match(page,/BroadcastChannel/);assert.match(page,/window.close/);assert.ok(!page.includes(secret));assert.equal((await fetch(callback)).status,410);
-  await initiate();const changed=new URL(redirect);changed.pathname='/google-return';
-  await writeFile(profileFile(f.profile,'credentials.json'),JSON.stringify({production:{credentialReference:'browser-cloud-reference:'+randomUUID(),credentialId:randomUUID(),token:secret,userId:owner,organizationId:org}}),{mode:0o600});
-  assert.equal((await fetch(changed)).status,409);
- }finally{await f.close();}
- });

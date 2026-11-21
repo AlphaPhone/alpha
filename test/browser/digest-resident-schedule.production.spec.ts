@@ -18,8 +18,9 @@ const SNAPSHOT = 'Pick up the parcel\nCall the plumber about the sink';
 const panel = (page: Page) => page.getByRole('dialog', { name: 'Scheduled digests', exact: true });
 const posts = (page: Page) => harness(page, f => f.digests.posts) as Promise<{ path: string; body: any }[]>;
 const schedules = (page: Page) => panel(page).getByRole('region', { name: 'Digest schedules' }).getByRole('listitem');
+const reviewSection = (page: Page) => panel(page).locator('section', { has: page.getByRole('heading', { name: 'Review', exact: true }) });
 async function confirmReview(page: Page, summary: string | RegExp) {
-  const review = panel(page).locator('section', { has: page.getByRole('heading', { name: 'Review', exact: true }) });
+  const review = reviewSection(page);
   await expect(review).toContainText(summary);
   await review.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(panel(page).getByRole('heading', { name: 'Review', exact: true })).toHaveCount(0);
@@ -56,6 +57,7 @@ test('loop D on Android: a reviewed snapshot, morning and evening schedules, a l
   await digests.getByRole('combobox', { name: 'Reviewed source', exact: true }).selectOption(source.id);
   await digests.getByLabel('Morning', { exact: true }).fill('07:30');
   await button(page, 'Review morning schedule').click();
+  await expect(reviewSection(page).getByRole('note')).toHaveText('Keep this phone on. Android may delay scheduled runs. Runs more than 30 minutes late are marked missed.');
   await confirmReview(page, /Turn on morning digest at 07:30\?\s*Sends Errands to agent AI/);
   await expect(digests.getByRole('status')).toHaveText('Save not confirmed. Retry.');
   const pendingSection = digests.locator('section', { has: page.getByRole('heading', { name: 'Not saved', exact: true }) });
@@ -126,7 +128,7 @@ test('loop D on Android: a schedule edit made against an older version is refuse
   await button(page, 'Pause').click();
   await page.evaluate(() => { const loop = (window as any).flagOff.digests.loops[0]; loop.versionId = 'changed-elsewhere'; });
   await digests.locator('section', { has: page.getByRole('heading', { name: 'Review', exact: true }) }).getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(digests.getByRole('status')).toHaveText('Save not confirmed. Retry.');
+  await expect(digests.getByRole('status')).toHaveText('Schedule changed before saving. Review it again.');
   expect(await harness(page, f => [f.digests.loops[0].spec.enabled, f.digests.loops[0].versionId])).toEqual([true, 'changed-elsewhere']);
   expect(Object.keys(await harness(page, f => f.digests.receipts))).toHaveLength(1);
   // The refused edit was sent once and applied nothing.

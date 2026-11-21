@@ -1,14 +1,48 @@
 # Fresh Alpha device presets
 
-The first-run provisioner completes only after Alpha is confirmed as Home and eligible
-presets have been checked. A rejected grant, timeout, unavailable role service, or failed
-readback leaves retry and failure-specific native Settings recovery:
-Home settings for a Home failure, input-method settings for a
-keyboard failure, and ordinary Settings for appearance or eligibility failures. The latter
-recovery buttons say “Open settings.” Callbacks and timers are bound
-to an attempt generation. The existing enterprise workflow and upstream setup completion
-methods remain unchanged. Completed, managed, profile and secondary-user installations
-do not receive first-run setting writes.
+The first-run provisioner confirms Alpha as Home and checks eligible presets before completing.
+On telephony hardware, a production image's `ai.alphacompute.alphaphone.fresh_telephony_setup`
+system feature also requires Alpha to hold the Phone and Messages roles. Provision first
+sends an explicit ordered request to the launcher. The receiver requires the sender's
+`MANAGE_ROLE_HOLDERS` permission and verifies that the launcher is running on an admitted
+Alpha image before enabling and reading back its telephony components. Provision assigns
+the roles through Android's RoleManager and reads back every required holder before
+completing, including a final readback after applying the eligible presets.
+Production image staging checks the privately staged APK for the protected receiver
+and all nine role and routing components, including their intent filters, permissions,
+and private MMS provider. Before building, apply this Provision source
+packet to the generated product. The production product copies its feature XML from
+the packet, so skipping the source stage leaves a required build input missing.
+Development images and devices without
+telephony require Home only. Completed, managed, profile and secondary-user setups are
+ineligible for the first-run assignments.
+
+An existing primary-user setup uses the Permission Controller's serialized default-role
+pass in the Android system process for the package identity transition. Its pending and
+completion markers use Permission's device-protected APEX data directory. The image must
+advertise the canonical features, preinstall the enabled release app and pass Android's normal
+role qualification. Only a role held solely by the former Alpha package is moved. Each role
+records a durable pending
+intent before the grant and a completion marker after readback. A failed grant attempts to restore
+the old holder when Android left the role empty. A later explicit role request retires
+that role's migration before it changes the holder, including a request made while the
+migration is ineligible (setup open, app disabled or suspended), so the choice still holds
+when eligibility returns. Custom choices, managed users and
+secondary users retain their assignments. No credential or application data is copied.
+
+`python3 test/aosp-role-upgrade.test.py` (also run by `bun run test`) compiles the policy
+cases, and the real staging projection, policy and Android adapter over a synthetic controller
+that carries the projection anchors, with Android boundary doubles. That synthetic controller
+test drives owner add, remove and clear requests through the injected hook. The test that
+compiles the pinned AOSP `RoleControllerServiceImpl` runs only when its hash-checked input is in
+`.cache/` (or `ALPHA_FRESH_PRESET_INPUTS`); CI does not fetch it and skips that test. A real
+signed image upgrade remains the device gate.
+
+A rejected request, timeout, unavailable role, or failed readback leaves setup open for
+retry. The recovery button opens Home, Default apps, Input method, or ordinary Settings
+according to the failure. Each callback and timeout belongs to one attempt and one step.
+Retry reads the actual role holders because a role request already sent to Android may
+finish after its timeout.
 
 `AlphaFreshSetupPolicy` is the decision engine used by privileged `AlphaFreshPresets`.
 Keyboard selection is explicit only when the selected-IME setting is empty: resolve the
@@ -72,7 +106,19 @@ ALPHA_BRANDING_ASSETS=/path/to/generated-alpha-assets \
 python3 test/aosp-fresh-presets.test.py
 ```
 
-These execute the policy on the JVM and stage/apply disposable source fixtures. They do
-not prove factory boot, role-manager/IME runtime behavior, component/resource build,
-simulator or physical acceptance. Those remain gates before the combined preserving Pixel
-update; no wipe is part of this work.
+These execute the setup control flow on the JVM and stage/apply disposable source fixtures.
+For device acceptance, boot a locked signed Pixel from a fresh image, complete setup,
+and record the production feature and all three holders before launching the individual
+Phone or Messages surfaces.
+
+```sh
+adb -s "$SERIAL" shell pm has-feature ai.alphacompute.alphaphone.fresh_telephony_setup
+for role in HOME DIALER SMS; do
+  adb -s "$SERIAL" shell cmd role get-role-holders --user 0 "android.app.role.$role"
+done
+```
+
+Expect `true` and `ai.alphacompute.alphaphone` as the sole holder for each role. Verify actual
+call and SMS routing on the lab Pixel with an operator-controlled SIM and peer. Repeat the
+role readback after a launcher OTA and verify that existing owner choices survive the
+preserving update.

@@ -1,6 +1,8 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {ROOT, VOICE_HOST, collectNotices, voiceHostProblems} from '../scripts/generate-licenses.ts';
@@ -8,12 +10,16 @@ import {buildSbom as generateSbom} from '../scripts/generate-sbom.ts';
 import {readVoiceHost, verifyVoiceHost, VOICE_ASR_SLOT} from '../scripts/voice-host.ts';
 import {stageVoiceModels} from '../scripts/android-stage-voice-models.ts';
 import {fixtureProduct} from './fixtures/voice-host-product.mjs';
+import {readNativeBuildReceipt, validateNativeBuildReceipt, verifyNativeFileBytes} from '../scripts/native-build-inputs.ts';
 
 // The on-device speech engine is libelizainference with the shared paradee-voice library. Its
 // record (android/voice-host/qualified-voice-host.json) drives staging,
-// the notices and the SBOM. Fixture bytes only: no real binary or model is read here.
+// the notices and the SBOM. Staging tests use fixture bytes; when a generated native
+// receipt exists, its integrity test copies one recorded STL library into a temporary root.
 const sha = value => createHash('sha256').update(value).digest('hex');
 const committed = JSON.parse(fs.readFileSync(path.join(ROOT, VOICE_HOST), 'utf8'));
+const generated = readNativeBuildReceipt(ROOT);
+const admitted = generated?.voice ?? committed;
 
 test('the committed record satisfies the schema, model inventory and ASR slot', () => {
   assert.deepEqual(voiceHostProblems(committed), []);
@@ -39,7 +45,12 @@ test('the committed record satisfies the schema, model inventory and ASR slot', 
 
 test('only a voice record for the current SDK can admit the native profile', () => {
   const {commit}=JSON.parse(fs.readFileSync(path.join(ROOT,'upstream.lock.json'),'utf8'));
-  if (committed.pin===commit) {
+  if (generated) {
+    const current = readVoiceHost(ROOT);
+    assert.equal(current.pin, commit);
+    assert.equal(current.producerPin, generated.producer.sdkCommit);
+    assert.equal(current.qualified, false);
+  } else if (committed.pin===commit) {
     readVoiceHost(ROOT);
   } else {
     assert.equal(committed.qualified,false,'a historical artifact cannot claim current qualification');
@@ -87,18 +98,35 @@ test('notices list the engine components and every voice model, flagging eSpeak 
 test('the SBOM lists each recorded engine library per ABI and every bundle file with its hash and size', () => {
   const sbom = generateSbom(ROOT);
   const byRef = new Map(sbom.components.map(component => [component['bom-ref'], component]));
-  for (const abi of committed.abis) for (const library of abi.libraries) assert.equal(byRef.get(`voice-host:${abi.abi}/${library.name}`).hashes[0].content, library.sha256);
-  for (const model of committed.models) {
+  for (const abi of admitted.abis) for (const library of abi.libraries) assert.equal(byRef.get(`voice-host:${abi.abi}/${library.name}`).hashes[0].content, library.sha256);
+  for (const model of admitted.models) {
     const component = byRef.get(`voice-model:${model.path}`);
     assert.equal(component.hashes[0].content, model.sha256, model.path);
     assert.equal(component.properties.find(row => row.name === 'alphaphone:bytes')?.value ?? component.properties.find(row => row.name.endsWith('bytes')).value, String(model.bytes));
   }
 });
 
-test('staging copies exactly the recorded bytes into the shared paradee-voice layout, ASR slot included', t => {
+test('generated native admission refuses a wrong consumer pin and changed output bytes', {
+  skip: generated ? false : 'No generated native build receipt exists in this checkout',
+}, t => {
+  const changed = structuredClone(generated);
+  changed.consumerSdkCommit = '0'.repeat(40);
+  assert.throws(() => validateNativeBuildReceipt(ROOT, changed), /source binding differs/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-generated-native-byte-refusal-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const row = generated.files.find(file => file.path.endsWith('/libc++_shared.so'));
+  assert.ok(row, 'the native receipt records the actual packaged STL');
+  const target = path.join(dir, row.path);
+  fs.mkdirSync(path.dirname(target), {recursive: true});
+  fs.copyFileSync(path.join(ROOT, row.path), target);
+  verifyNativeFileBytes(dir, [row]);
+  fs.appendFileSync(target, 'changed');
+  assert.throws(() => verifyNativeFileBytes(dir, [row]), /Native output changed/);
+});
+
+fixtureTest('staging copies exactly the recorded bytes into the shared paradee-voice layout, ASR slot included', t => {
   const {dir, from, record} = fixtureProduct(t);
-  assert.deepEqual(verifyVoiceHost(dir, {allowAbsentRuntime: true}), {status: 'not-packaged', qualified: false});
-  assert.throws(() => verifyVoiceHost(dir), /not staged/, 'a distribution build needs the voice outputs');
+  assert.throws(() => verifyVoiceHost(dir), /not staged/, 'a build needs the voice outputs');
   const result = stageVoiceModels(dir, {from: [from]});
   assert.equal(result.asr, true);
   const native = path.join(dir, '.eliza/paradee-voice/native');
@@ -121,7 +149,7 @@ test('staging copies exactly the recorded bytes into the shared paradee-voice la
   assert.throws(() => stageVoiceModels(dir, {from: [from]}), /already exists with other bytes/);
 });
 
-test('voice host conflicts and linked destinations are refused before staging outputs', t => {
+fixtureTest('voice host conflicts and linked destinations are refused before staging outputs', t => {
   const {dir, from, record} = fixtureProduct(t);
   const target = path.join(dir, 'android/app/src/main/jniLibs/arm64-v8a/libelizainference.so');
   fs.mkdirSync(path.dirname(target), {recursive: true});
@@ -138,7 +166,7 @@ test('voice host conflicts and linked destinations are refused before staging ou
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, VOICE_HOST))), record);
 });
 
-test('failed host publication retains verified libraries and a retry completes', t => {
+fixtureTest('failed host publication retains verified libraries and a retry completes', t => {
   const {dir, from, record} = fixtureProduct(t);
   const host = path.join(dir, 'android/app/src/main/jniLibs');
   const existing = path.join(host, 'arm64-v8a/libelizainference.so');
@@ -164,7 +192,7 @@ test('failed host publication retains verified libraries and a retry completes',
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, VOICE_HOST))).qualified, false);
 });
 
-test('a failing stager preserves libraries adopted by a completed concurrent stager', t => {
+fixtureTest('a failing stager preserves libraries adopted by a completed concurrent stager', t => {
   const {dir, from, record} = fixtureProduct(t);
   const link = fs.linkSync;
   let publications = 0;
@@ -189,7 +217,7 @@ test('a failing stager preserves libraries adopted by a completed concurrent sta
   stageVoiceModels(dir, {from: [from]});
 });
 
-test('a vanished concurrent host publication cannot report successful staging', t => {
+fixtureTest('a vanished concurrent host publication cannot report successful staging', t => {
   const {dir, from} = fixtureProduct(t);
   const link = fs.linkSync;
   try {
@@ -200,66 +228,11 @@ test('a vanished concurrent host publication cannot report successful staging', 
   }
 });
 
-test('staging refuses source bytes that differ from the record and missing rows', t => {
+fixtureTest('staging refuses source bytes that differ from the record and missing rows', t => {
   const {dir, from} = fixtureProduct(t);
   fs.writeFileSync(path.join(from, 'tts/paradee/misaki-en-us.lex'), 'tampered');
   assert.throws(() => stageVoiceModels(dir, {from: [from]}), /does not match the pinned tts\/paradee\/misaki-en-us\.lex/);
   fs.rmSync(path.join(from, 'tts/paradee/misaki-en-us.lex'));
   assert.throws(() => stageVoiceModels(dir, {from: [from]}), /Missing tts\/paradee\/misaki-en-us\.lex/);
   assert.equal(fs.existsSync(path.join(dir, '.eliza/paradee-voice/native')), false, 'nothing is staged on refusal');
-});
-
-test('an unrecorded hosted engine rebuild is staged only with the explicit flag and keeps the record unqualified', t => {
-  const {dir, from} = fixtureProduct(t);
-  fs.writeFileSync(path.join(from, 'jniLibs/x86_64/libelizainference.so'), 'rebuilt engine');
-  assert.throws(() => stageVoiceModels(dir, {from: [from]}), /does not match the pinned libelizainference\.so/);
-  const expected = readVoiceHost(dir);
-  const files = expected.abis.map(abi => {
-    const relative = `jniLibs/${abi.abi}/libelizainference.so`, bytes = fs.readFileSync(path.join(from, relative));
-    return {path: relative, sha256: sha(bytes), bytes: bytes.length};
-  });
-  fs.writeFileSync(path.join(from, 'build-record.json'), JSON.stringify({sourceCommit: expected.pin, nativeCommit: expected.forkPin, files}));
-  stageVoiceModels(dir, {from: [from], unrecordedEngine: true});
-  const record = JSON.parse(fs.readFileSync(path.join(dir, VOICE_HOST), 'utf8'));
-  const row = record.abis.find(abi => abi.abi === 'x86_64');
-  assert.equal(row.libraries[0].sha256, sha('rebuilt engine'));
-  assert.match(row.engineAdmission, /unreviewed workspace build/);
-  assert.equal(record.qualified, false);
-});
-
-
-test('unrecorded engines cannot be relabeled with the current source pins', t => {
-  const {dir, from, record} = fixtureProduct(t);
-  const source = path.join(from, 'jniLibs/x86_64/libelizainference.so');
-  fs.writeFileSync(source, 'old-source engine');
-  const build = {sourceCommit: '0'.repeat(40), nativeCommit: record.forkPin, files: record.abis.map(abi => {
-    const relative = `jniLibs/${abi.abi}/libelizainference.so`, bytes = fs.readFileSync(path.join(from, relative));
-    return {path: relative, sha256: sha(bytes), bytes: bytes.length};
-  })};
-  fs.writeFileSync(path.join(from, 'build-record.json'), JSON.stringify(build));
-  assert.throws(() => stageVoiceModels(dir, {from: [from], unrecordedEngine: true}), /source revisions/);
-  build.sourceCommit = record.pin; build.nativeCommit = '0'.repeat(40);
-  fs.writeFileSync(path.join(from, 'build-record.json'), JSON.stringify(build));
-  assert.throws(() => stageVoiceModels(dir, {from: [from], unrecordedEngine: true}), /source revisions/);
-  build.nativeCommit = record.forkPin; build.files[0].sha256 = '0'.repeat(64);
-  fs.writeFileSync(path.join(from, 'build-record.json'), JSON.stringify(build));
-  assert.throws(() => stageVoiceModels(dir, {from: [from], unrecordedEngine: true}), /bytes do not match/);
-  fs.unlinkSync(path.join(from, 'build-record.json'));
-  assert.throws(() => stageVoiceModels(dir, {from: [from], unrecordedEngine: true}), /record is missing/);
-  assert.equal(fs.existsSync(path.join(dir, '.eliza/paradee-voice/native')), false);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, VOICE_HOST))), record, 'refusal does not rewrite the checked-in record');
-});
-
-test('an unrecorded engine refused at a conflicting destination leaves the tracked record byte-identical', t => {
-  const {dir, from} = fixtureProduct(t);
-  stageVoiceModels(dir, {from: [from]});
-  const before = fs.readFileSync(path.join(dir, VOICE_HOST));
-  fs.writeFileSync(path.join(from, 'jniLibs/x86_64/libelizainference.so'), 'rebuilt engine');
-  const expected = readVoiceHost(dir);
-  fs.writeFileSync(path.join(from, 'build-record.json'), JSON.stringify({sourceCommit: expected.pin, nativeCommit: expected.forkPin, files: expected.abis.map(abi => {
-    const relative = `jniLibs/${abi.abi}/libelizainference.so`, bytes = fs.readFileSync(path.join(from, relative));
-    return {path: relative, sha256: sha(bytes), bytes: bytes.length};
-  })}));
-  assert.throws(() => stageVoiceModels(dir, {from: [from], unrecordedEngine: true}), /already exists with other bytes/);
-  assert.deepEqual(fs.readFileSync(path.join(dir, VOICE_HOST)), before);
 });

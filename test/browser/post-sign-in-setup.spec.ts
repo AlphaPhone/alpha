@@ -1,5 +1,6 @@
 import {test,expect,type Page,type TestInfo} from '@playwright/test';
 import {createServer,type ViteDevServer} from 'vite';
+import {scopedViteCacheDir} from './helpers/vite-cache';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {recordStartupFrames,expectNoHomeBeforePrompt,startupLoading} from './helpers/startup-frames';
@@ -12,7 +13,7 @@ import {recordStartupFrames,expectNoHomeBeforePrompt,startupLoading} from './hel
 let server:ViteDevServer,origin:string;
 test.beforeAll(async()=>{
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
- try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:resolve('test-results/post-sign-in-setup/vite-cache'),server:{host:'127.0.0.1',port:0},define:{
+ try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:scopedViteCacheDir('test-results/post-sign-in-setup/vite-cache'),server:{host:'127.0.0.1',port:0},define:{
   'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify(''),'import.meta.env.VITE_ALPHA_CLOUD_RESIDENT':JSON.stringify('1'),
   'import.meta.env.VITE_ALPHA_CLOUD_ENVIRONMENT':JSON.stringify('production'),'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')}});}
  finally{if(previous===undefined)delete process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;else process.env.ELIZA_DEV_ALLOW_TEST_MOCKS=previous;}
@@ -89,14 +90,14 @@ test('a verified email code goes straight to access setup while the agent restar
  await page.goto(origin+'/');
  // Settled browser guests go straight to the approved Cloud sign-in: the same full page Android
  // shows while signed out, with no Back, never a dialog over Home (owner report 2026-11-01).
- const agentSheet=page.getByRole('dialog',{name:'Status',exact:true});
+ const accountSheet=page.getByRole('dialog',{name:'Account',exact:true});
  const signIn=page.getByRole('main',{name:'Alpha',exact:true});
  await expect(signIn).toBeVisible({timeout:60_000});
  await expect(signIn.getByRole('button',{name:'Send code',exact:true})).toBeEnabled();
  await expect(page.locator('.alpha-auth-page')).toHaveCount(1);await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
  await expect(signIn.getByRole('button',{name:'Back',exact:true})).toHaveCount(0);
  await page.keyboard.press('Escape');await expect(signIn).toBeVisible();
- await expect(agentSheet).toHaveCount(0);
+ await expect(accountSheet).toHaveCount(0);
  expect(host.starts).toBe(1);
  await shot(page,info,'01-signed-out');
  await signIn.getByRole('textbox',{name:'Email',exact:true}).fill('new-owner@example.invalid');
@@ -138,20 +139,19 @@ test('a verified email code goes straight to access setup while the agent restar
  for(const text of STARTING_SLOP)expect(await setup.innerText()).not.toContain(text);
  await setup.getByRole('button',{name:'Done',exact:true}).click();
  await expect(setup).toHaveCount(0);
- // The owner may open the agent panel while it starts: a calm starting state, no AI or billing claim.
+ // The owner may open Account while the agent starts. It has no AI or billing claim yet.
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
- await expect(agentSheet.getByRole('region',{name:'Agent status'}).getByText('Starting',{exact:true})).toBeVisible();
- await shot(page,info,'05-your-agent-while-starting');
- for(const text of STARTING_SLOP)expect(await agentSheet.innerText()).not.toContain(text);
+ await expect(accountSheet.getByRole('region',{name:'AI inference',exact:true}).getByText('Starting',{exact:true})).toBeVisible();
+ await shot(page,info,'05-account-while-agent-starts');
+ for(const text of STARTING_SLOP)expect(await accountSheet.innerText()).not.toContain(text);
  host.release!();
  // Connecting closes the panel (nothing opens by itself); reopened, it shows the running agent and its plan.
  await expect.poll(async()=>(await snapshot(page)).session,{timeout:30_000}).toBe(true);
- await expect(agentSheet).toHaveCount(0);
+ await expect(accountSheet).toHaveCount(0);
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
- await expect(agentSheet.getByRole('region',{name:'Agent status',exact:true}).getByText('Running',{exact:true})).toBeVisible();
- await expect(agentSheet.getByRole('region',{name:'AI inference'}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
- await expect(agentSheet.getByText('No plan',{exact:true})).toBeVisible();
- await shot(page,info,'06-your-agent-running');
+ await expect(accountSheet.getByRole('region',{name:'AI inference',exact:true}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
+ await expect(accountSheet.getByText('No plan',{exact:true})).toBeVisible();
+ await shot(page,info,'06-account-with-agent-ready');
  expect(host.bound).toBe(true);expect(host.starts).toBe(2);
  expect(await snapshot(page)).toMatchObject({session:true,inference:'cloud',account:USER});
 });
@@ -186,15 +186,18 @@ test('a signed-in start opens access setup directly, with no Home while the acco
  await expectNoHomeBeforePrompt(page);
 });
 
-test('a start that has not decided in 60 s shows Home as before, and the sign-in still follows',async({page})=>{
- const host=await hosts(page);host.hold=true;await page.clock.install();
+test('a start that has not decided in 60 s keeps Home unavailable until sign-in',async({page})=>{
+ const host=await hosts(page);host.hold=true;
+ const time=new Date('2026-10-06T12:00:00Z');await page.clock.install({time});
+ // Count from the mounted guard, not from elapsed module loading on the test host.
+ await page.clock.pauseAt(new Date(time.getTime()+1000));
  await page.goto(origin+'/');
  await expect.poll(()=>!!host.release,{timeout:60_000}).toBe(true);
  await page.clock.fastForward(59_000);
  await expect(startupLoading(page)).toBeVisible();
  await page.clock.fastForward(2_000);
- await expect(page.getByRole('region',{name:'Home',exact:true})).toBeVisible();
- await expect(startupLoading(page)).toHaveCount(0);await expect(page.locator('.alpha-connection')).toHaveCount(0);
+ await expect(page.getByRole('region',{name:'Home',exact:true})).toHaveCount(0);
+ await expect(startupLoading(page)).toBeVisible();await expect(page.locator('.alpha-connection')).toHaveCount(0);
  host.release!();
  await expect(page.getByRole('main',{name:'Alpha',exact:true})).toBeVisible({timeout:30_000});
 });

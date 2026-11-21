@@ -12,11 +12,11 @@ import android.content.Context;
 import java.util.Set;
 
 /**
- * Alpha's persisted identifiers for the shared browser tab host and stores in
- * plugin-native-browser-surface: the WebView profiles, preferences files, activity-result keys and
- * Android Keystore aliases that hold website sign-ins, saved bookmarks, tabs, history, downloads
- * and site-permission decisions; never rename them. The host, the stores, their formats and their
- * rules are upstream.
+ * Alpha's persisted identifiers for its Browser tab host (AlphaBrowserPlugin) and the shared
+ * stores in plugin-native-browser-surface: the WebView profiles, preferences files, activity-result
+ * keys and Android Keystore aliases that hold website sign-ins, saved bookmarks, tabs, history,
+ * downloads and site-permission decisions; never rename them. The stores, their formats and the
+ * profile rules are upstream; the tab host and its native windows are Alpha's.
  */
 final class AlphaBrowserStores {
  /** Alpha's own URL scheme: an intent: link may never carry it as data. */
@@ -34,7 +34,6 @@ final class AlphaBrowserStores {
   .hostScheme("alphaphone")
   // The integrated vault's per-field and top-level origin extras for engine-bound login fields.
   .autofillExtras(new BrowserAutofillExtras(PasswordAutofillPolicy.FIELD_ORIGIN,PasswordFormPolicy.TOP_ORIGIN_EXTRA))
-  .allowLoopback(BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS)
   .debugLogging(BuildConfig.DEBUG)
   .logTag("AlphaBrowser")
   .build();

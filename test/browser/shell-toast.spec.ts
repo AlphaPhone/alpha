@@ -15,28 +15,36 @@ const raise = (page: Page, message: string, undo = false) => page.evaluate(({ me
 const pill = (page: Page) => page.locator('[data-alpha-toast] .drop');
 
 test.beforeEach(async ({ page }) => {
+  await page.clock.install();
   await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' })));
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible({timeout:15_000});
+  // The page's fake clock ran in real time through startup; it now stops, so a toast deadline moves
+  // only when a test advances it with runFor. A 1.9 s toast cannot run out while a loaded machine is
+  // still delivering the tap or key press, and each lifetime is checked just before and after its end.
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(now + 2_000);
 });
 
 test('a long toast stays up for its reading time and a short one for 1.9 s', async ({ page }) => {
-  test.setTimeout(60_000);
   await raise(page, 'A'.repeat(191));
-  await page.waitForTimeout(9500);
+  await page.clock.runFor(9_500);
   await expect(pill(page)).toBeVisible();
-  await expect(pill(page)).toHaveCount(0, { timeout: 2500 });
+  await page.clock.runFor(2_500);
+  await expect(pill(page)).toHaveCount(0);
   await raise(page, 'Saved');
-  await page.waitForTimeout(1500);
+  await page.clock.runFor(1_500);
   await expect(pill(page)).toBeVisible();
-  await expect(pill(page)).toHaveCount(0, { timeout: 1500 });
+  await page.clock.runFor(1_500);
+  await expect(pill(page)).toHaveCount(0);
 });
 
-test('a toast with Undo stays at least 5 s', async ({ page }) => {
+test('a toast with Undo stays 10 s, the same window as the reviewed-deletion notice', async ({ page }) => {
   await raise(page, 'Deleted', true);
-  await page.waitForTimeout(4700);
+  await page.clock.runFor(9_500);
   await expect(pill(page).getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
-  await expect(pill(page)).toHaveCount(0, { timeout: 2000 });
+  await page.clock.runFor(2_000);
+  await expect(pill(page)).toHaveCount(0);
 });
 
 test('passive notices keep the current Undo and show the latest notice afterward', async ({page}) => {
@@ -62,13 +70,12 @@ test('consecutive deletion notices retain both exact Undo callbacks', async ({pa
 });
 
 test('keyboard focus on Undo holds the toast, and focus returns when it ends', async ({ page }) => {
-  test.setTimeout(60_000);
   const origin = page.getByRole('button', { name: 'Settings', exact: true });
   await origin.focus();
   await raise(page, 'Deleted', true);
   const undo = pill(page).getByRole('button', { name: 'Undo', exact: true });
   await undo.focus();
-  await page.waitForTimeout(6500);
+  await page.clock.runFor(11_500);
   await expect(undo).toBeVisible();
   await expect(undo).toBeFocused();
   await page.keyboard.press('Enter');
@@ -78,10 +85,11 @@ test('keyboard focus on Undo holds the toast, and focus returns when it ends', a
   // Focus leaving the toast lets it run out again.
   await raise(page, 'Deleted', true);
   await undo.focus();
-  await page.waitForTimeout(5500);
+  await page.clock.runFor(10_500);
   await expect(undo).toBeVisible();
   await origin.focus();
-  await expect(pill(page)).toHaveCount(0, { timeout: 7000 });
+  await page.clock.runFor(12_000);
+  await expect(pill(page)).toHaveCount(0);
 });
 
 test('tapping a plain toast dismisses it', async ({ page }) => {
@@ -89,6 +97,23 @@ test('tapping a plain toast dismisses it', async ({ page }) => {
   await expect(pill(page)).toBeVisible();
   await pill(page).click();
   await expect(pill(page)).toHaveCount(0);
+});
+
+test('a failure is announced assertively and a routine notice politely', async ({ page }) => {
+  const region = page.locator('[data-alpha-toast]');
+  await expect(region).toHaveAttribute('aria-live', 'polite');
+  await page.evaluate(() => {
+    const screen = document.querySelector('[data-screen]') as any;
+    let fiber = screen[Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!];
+    while (fiber && !(fiber.stateNode && typeof fiber.stateNode.toast === 'function')) fiber = fiber.return;
+    fiber.stateNode.toast('Couldn’t save. Try again.', { kind: 'error' });
+  });
+  await expect(pill(page)).toContainText('Couldn’t save. Try again.');
+  await expect(region).toHaveAttribute('aria-live', 'assertive');
+  await pill(page).click();
+  await expect(region).toHaveAttribute('aria-live', 'polite');
+  await raise(page, 'Saved');
+  await expect(region).toHaveAttribute('aria-live', 'polite');
 });
 
 for (const key of ['Enter', 'Space']) {

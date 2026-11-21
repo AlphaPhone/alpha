@@ -1,6 +1,8 @@
 package ai.alphacompute.alphaphone;
 
+import android.app.AppOpsManager;
 import android.content.Context;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.SystemClock;
 import androidx.lifecycle.Lifecycle;
@@ -39,10 +41,11 @@ public final class UpdateStagingHarness {
  private static Gate heldRead;
 
  private static final class Gate implements Runnable {
+  private static final long WAIT_SECONDS=30;
   final CountDownLatch entered = new CountDownLatch(1), released = new CountDownLatch(1);
   @Override public void run() {
    entered.countDown();
-   long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+   long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(WAIT_SECONDS);
    boolean interrupted=false;
    while(released.getCount()>0 && System.nanoTime()<deadline) try {
     released.await(10,TimeUnit.MILLISECONDS);
@@ -50,7 +53,7 @@ public final class UpdateStagingHarness {
    if(interrupted)Thread.currentThread().interrupt();
    require(released.getCount()==0,"fixture gate was not released");
   }
-  void await() throws Exception {require(entered.await(10,TimeUnit.SECONDS),"source did not reach gate");}
+  void await() throws Exception {require(entered.await(WAIT_SECONDS,TimeUnit.SECONDS),"source did not reach gate");}
   void open(){released.countDown();}
  }
 
@@ -174,7 +177,7 @@ public final class UpdateStagingHarness {
  private void deferred(String status)throws Exception{
   // A shut-down worker proves this refusal occurs before executor admission.
   ((java.util.concurrent.ExecutorService)Trace.read(bridges.get(1),"updateWorker")).shutdownNow();
-  calls[1]=payload();calls[1].getData().put("automatic",true);bridges.get(1).installUpdate(calls[1]);answer(1,true);
+  calls[1]=payload();bindAutomatic(calls[1]);bridges.get(1).installUpdate(calls[1]);answer(1,true);
   require(status.equals(calls[1].result.optString("status")),"exact automatic refusal status");
   require(bridges.get(1).activity.started.isEmpty()&&installerEmpty()&&bridges.get(1).events.isEmpty(),"refusal has no settings, session or barrier effect");
   outcome=status;trace.step("automaticTap",observe(),1);
@@ -189,6 +192,9 @@ public final class UpdateStagingHarness {
   return new PluginCall(new JSObject().put("apkUrl",offer.getString("apkUrl")).put("sha256",offer.getString("sha256"))
     .put("sizeBytes",offer.getLong("sizeBytes")).put("versionCode",offer.getLong("versionCode")));
  }
+ private void bindAutomatic(PluginCall call)throws Exception{
+  call.getData().put("automatic",true).put("manifestSha256",offer.getString("manifestSha256"));
+ }
  private void tap(int id){calls[id]=payload();bridges.get(id).installUpdate(calls[id]);}
  private void answer(int id,boolean success)throws Exception{
   calls[id].awaitAnswer();
@@ -198,7 +204,7 @@ public final class UpdateStagingHarness {
  private void start(int bridge)throws Exception{start(bridge,false);}
  private void start(int bridge,boolean automatic)throws Exception{
   int previous=connections.size();
-  heldRead=new Gate();calls[bridge]=payload();if(automatic)calls[bridge].getData().put("automatic",true);
+  heldRead=new Gate();calls[bridge]=payload();if(automatic)bindAutomatic(calls[bridge]);
   bridges.get(bridge).installUpdate(calls[bridge]);heldRead.await();
   require(connections.size()==previous+1&&connections.get(previous).getURL().toString().equals(offer.getString("apkUrl")),"exact renderer URL used");
   owner=bridge;phase="copying";outcome="none";
@@ -226,27 +232,41 @@ public final class UpdateStagingHarness {
   require(AlphaDevicePlugin.appSigner(context).equals(offer.getString("signer")),"renderer fixture used actual synthetic signing lineage");
   switch(mode){
    case "verified-cache-reuse":
+   case "verified-cache-stock-call":
+   case "verified-cache-image-call-access":
    case "verified-cache-corrupt-refetch":
    case "verified-cache-restart-sweep":
+    boolean imageCallAccess=mode.equals("verified-cache-image-call-access");
+    boolean corrupt=mode.equals("verified-cache-corrupt-refetch");
+    boolean restarted=mode.equals("verified-cache-restart-sweep");
+    context.imageAdmitted=imageCallAccess;
     start(1,true);verified();staged();
-    bridges.get(1).activity.focused=false;stage.open();settled("deferred",false,true);
+    if(mode.equals("verified-cache-stock-call"))context.audio.mode=AudioManager.MODE_IN_CALL;
+    else if(imageCallAccess){
+     context.calls.defaultDialer=null;
+     context.phoneStateGranted=true;
+     context.appOps.phoneStateMode=AppOpsManager.MODE_IGNORED;
+    }else bridges.get(1).activity.focused=false;
+    stage.open();settled("deferred",false,true);
     register(2);trace.step("loadBridge",observe(),true);
-    calls[1]=payload();calls[1].getData().put("automatic",true);bridges.get(1).installUpdate(calls[1]);answer(1,false);
+    calls[1]=payload();bindAutomatic(calls[1]);bridges.get(1).installUpdate(calls[1]);answer(1,false);
     outcome="deferred";trace.step("deferBeforeWork",observe());
     bridges.get(1).activity.focused=true;
-    if(mode.equals("verified-cache-corrupt-refetch")){
+    context.audio.mode=AudioManager.MODE_NORMAL;
+    context.appOps.phoneStateMode=AppOpsManager.MODE_ALLOWED;
+    if(corrupt){
      Files.write(apk,new byte[]{1,2,3,5});trace.step("cacheChanged",observe());
     }
-    if(mode.equals("verified-cache-restart-sweep"))restart();
-    heldRead=new Gate();heldRead.open();calls[1]=payload();calls[1].getData().put("automatic",true);
+    if(restarted)restart();
+    heldRead=new Gate();heldRead.open();calls[1]=payload();bindAutomatic(calls[1]);
     bridges.get(1).installUpdate(calls[1]);answer(1,false);owner=0;phase="idle";outcome="barrier";
     java.util.List<JSONObject> actions=new java.util.ArrayList<>();
     actions.add(Trace.action("automaticTap",1));
-    if(mode.equals("verified-cache-corrupt-refetch"))actions.add(Trace.action("cacheMismatch"));
-    if(!mode.equals("verified-cache-reuse"))actions.add(Trace.action("chunk",4));
+    if(corrupt)actions.add(Trace.action("cacheMismatch"));
+    if(corrupt||restarted)actions.add(Trace.action("chunk",4));
     actions.add(Trace.action("verify",true,false));actions.add(Trace.action("stage",true));actions.add(Trace.action("settle","barrier",true,true));
     trace.macro("actual retry revalidates bytes/archive then refuses renderer activation",observe(),actions.toArray(new JSONObject[0]));
-    require(connections.size()==(mode.equals("verified-cache-reuse")?1:2),"only an intact same-process exact cache avoids another transport call");
+    require(connections.size()==(corrupt||restarted?2:1),"only an intact same-process exact cache avoids another transport call");
     break;
    case "boot-inclusive-boundary-and-process":
     reboot(31,true);deferred("starting");clock(26681);deferred("starting");clock(29999);restart();deferred("starting");
@@ -350,29 +370,38 @@ public final class UpdateStagingHarness {
    require(connections.get(0).disconnected.await(10,TimeUnit.SECONDS),"native check closes its own connection");
    require(connections.get(0).getURL().toString().equals(BuildConfig.ALPHA_UPDATE_MANIFEST_URL),"native check used configured manifest");
    return new JSONObject().put("resolved",call.resolved.get()==1)
-    .put("manifest",call.result==null?JSONObject.NULL:java.util.Objects.requireNonNullElse(call.result.opt("manifest"),JSONObject.NULL));
+    .put("manifest",call.result==null?JSONObject.NULL:java.util.Objects.requireNonNullElse(call.result.opt("manifest"),JSONObject.NULL))
+    .put("manifestSha256",call.result==null?JSONObject.NULL:java.util.Objects.requireNonNullElse(call.result.opt("manifestSha256"),JSONObject.NULL));
   }finally{UpdateFlowTest.retireFixtureWorkers();erase(context.data.toPath());}
+ }
+
+ private static final ThreadLocal<Long> deadlineClock=new ThreadLocal<>();
+ static long downloadNanoTime(){
+  Long now=deadlineClock.get();
+  return now==null?System.nanoTime():now;
  }
 
  private static JSONObject deadline()throws Exception{
   boolean[] lateEof={false,true};
   var result=new JSONObject();
   for(boolean eof:lateEof){
-   long limit=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(500);
+   long limit=1;
    InputStream in=new InputStream(){
     int reads;
     @Override public int read(){throw new AssertionError("whole buffer expected");}
     @Override public int read(byte[] bytes,int offset,int length)throws IOException{
      if(reads++==0){System.arraycopy(APK,0,bytes,offset,eof?4:2);return eof?4:2;}
-     while(System.nanoTime()<limit)java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L);
+     deadlineClock.set(limit);
      if(eof)return -1;
      System.arraycopy(APK,2,bytes,offset,2);return 2;
     }
    };
    var copied=new ByteArrayOutputStream();
    boolean verified;
+   deadlineClock.set(0L);
    try{AlphaDevicePlugin.copyVerified(in,copied,APK.length,sha(APK),limit);verified=true;}
    catch(IOException expired){require("Update took too long".equals(expired.getMessage()),"exact expiry outcome");verified=false;}
+   finally{deadlineClock.remove();}
    result.put(eof?"lateEof":"lateBody",new JSONObject().put("verified",verified).put("bytes",copied.size()));
   }
   return result;
@@ -389,12 +418,14 @@ public final class UpdateStagingHarness {
  }
  public static void main(String[] args)throws Exception{
   if(args[0].equals("deadline")){System.out.println(deadline());return;}
+  if(args[0].equals("index")){System.out.println(UpdateFlowTest.mixedIndexSelections());return;}
   URL.setURLStreamHandlerFactory(protocol->!protocol.equals("https")?null:new URLStreamHandler(){
    @Override protected URLConnection openConnection(URL url){return new Response(url);}
   });
   Path cache=Files.createTempDirectory("quint-update-staging");
   try{
-   if(args[0].equals("manifest"))System.out.println(manifest(cache,Integer.parseInt(args[1]),args[2]));
+   if(args[0].equals("selfUpdateGrant")){System.out.println(UpdateFlowTest.selfUpdateGrantStatuses(cache.toFile()));UpdateFlowTest.retireFixtureWorkers();}
+   else if(args[0].equals("manifest"))System.out.println(manifest(cache,Integer.parseInt(args[1]),args[2]));
    else{
     var fixture=new UpdateStagingHarness(args[0],cache,new JSONObject(args[1]));
     try{System.out.println(fixture.run(args[0]));}finally{fixture.close();}

@@ -1,12 +1,12 @@
 import {nativeAssistantDraftRecovery} from './native-assistant-draft-recovery';
 import {Capacitor} from '@capacitor/core';
 import {secureConnectionStore} from './native-connection';
-import {compareExchangeDraftStore,emptyDurableDraft,transactionalDraftStore} from '../../../../.eliza/client-features/packages/ui/src/state/durable-draft.ts';
+import {compareExchangeDraftStore,emptyDurableDraft,transactionalDraftStore} from '../ui/state/durable-draft.ts';
 import type {DomainRecovery} from '../browser/domain-document';
 import {sha256Hex} from '../lib/hash.ts';
 
 /**
- * Alpha's installed draft storage over the shared durable draft stores. The slot name
+ * Alpha's installed draft storage over Alpha's durable draft stores (ui/state/durable-draft.ts). The slot name
  * (`assistant-draft:v1:` + SHA-256 of the binding), the Android secure slot and the browser
  * document key under `alpha.browser.` are installed-data identifiers and stay unchanged.
  */

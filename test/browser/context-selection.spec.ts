@@ -1,5 +1,6 @@
 import {choosePhotoAction} from './helpers/owned-photo';
 import {chooseMailAction} from './helpers/mail-actions';
+import {preloadPageModules} from './helpers/page-modules';
 import {test,expect,type Page} from '@playwright/test';
 // Each test loads the app and drives Files, Inbox or the shade; under four workers on a loaded machine
 // one load has taken 10-30s, so the timeout is explicit. No step, wait or assertion changes.
@@ -112,6 +113,8 @@ test.describe('mail',()=>{
   // review), so it is recorded as finished before the page loads, as a returning phone has it.
   await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
   await page.goto('/');
+  await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
+  await page.waitForFunction(()=>{const state=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.getSnapshot();return state.startupResolved&&!state.busy;});
   await page.evaluate(async()=>{
    const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
    const {secureConnectionStore:s}=await import('/src/runtime/native-connection.ts');
@@ -135,6 +138,8 @@ test.describe('mail',()=>{
    // Anything that would reach the agent is recorded here instead.
    const {alphaClient}=await import('/src/runtime/alpha-client.ts');
    (alphaClient as any).send=async(text:string)=>{f.sent.push(text);throw Error("Fixture agent");};
+   // Publish the synthetic owner before opening Inbox; a later update must not first adopt it and clear the reader.
+   c.close();
   });
   await page.getByRole('button',{name:'Inbox',exact:true}).click();
   await page.getByText('Reviewed message',{exact:true}).first().click();
@@ -189,7 +194,7 @@ test.describe('mail',()=>{
   await expect.poll(()=>page.evaluate(()=>document.body.textContent?.includes('NEIGHBOR_BODY_CANARY'))).toBe(true);
   await expect(page.getByLabel('Attached email',{exact:true})).toContainText('Reviewed message');
   await sharing.press('Enter');
-  await expect(page.getByText('Message or destination changed. Review again; nothing was sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The email or your agent changed. Review it again; nothing was sent.',{exact:true})).toBeVisible();
   expect(await sent(page)).toEqual([]);
   await expect(page.getByText(/Summarize the following user-selected email/)).toHaveCount(0);
  });
@@ -197,7 +202,7 @@ test.describe('mail',()=>{
   const sharing=await setup(page);
   await page.evaluate(()=>{(window as any).mailSnapshot.session={sessionId:'other-session',agentId:'agent-2',ownerId:'fixture-owner',origin:'https://agent.example.invalid'};});
   await sharing.press('Enter');
-  await expect(page.getByText('Message or destination changed. Review again; nothing was sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The email or your agent changed. Review it again; nothing was sent.',{exact:true})).toBeVisible();
   expect(await sent(page)).toEqual([]);
  });
  test('an attached email left for two minutes is refused before Send',async({page})=>{
@@ -205,7 +210,7 @@ test.describe('mail',()=>{
   const sharing=await setup(page);
   await page.clock.fastForward(121_000);
   await sharing.press('Enter');
-  await expect(page.getByText('Message or destination changed. Review again; nothing was sent.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The email or your agent changed. Review it again; nothing was sent.',{exact:true})).toBeVisible();
   expect(await sent(page)).toEqual([]);
  });
 });

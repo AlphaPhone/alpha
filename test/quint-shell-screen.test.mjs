@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -27,7 +38,7 @@ function tryLockedCamera(shell) {
   assert.deepEqual(structuredClone(shell.S()), before, 'an absent locked control dispatches nothing');
 }
 
-test('simulated ShellScreen traces agree with the reference shell after every step', {timeout: 120000}, async () => {
+test("partial source contract: simulated ShellScreen traces agree with the reference shell after every step", {timeout: scaledTimeout(120000)}, async () => {
   const traces = modelTraces({module: 'ShellScreen', traces: 120, steps: 30});
   const result = await replay(traces, {
     start() {
@@ -69,7 +80,7 @@ test('simulated ShellScreen traces agree with the reference shell after every st
     'power', 'startVoice', 'stopVoice', 'tryLockedCamera', 'unlock', 'voiceAdvance']);
 });
 
-test('the locked frame refuses Camera, then Unlock permits Camera and kept app navigation', () => {
+test("partial source contract: the locked frame refuses Camera, then Unlock permits Camera and kept app navigation", () => {
   const core = shellCore({views: {camera: {}, photos: {}, notes: {}}});
   const shell = new core.Shell({nativeSystemChrome: false});
   shell.setState({screen: 'lock'});
@@ -83,7 +94,7 @@ test('the locked frame refuses Camera, then Unlock permits Camera and kept app n
   assert.deepEqual([...shell.toasts], []);
 });
 
-test('lock-entry negative canaries reject a restored handler, product shortcut or development Camera control', () => {
+test("partial source contract: lock-entry negative canaries reject a restored handler, product shortcut or development Camera control", () => {
   assertNoLockCameraEntry();
   assert.throws(() => assertNoLockCameraEntry(model + '\nlockCamera: function () {}'), /no renderer Camera entry/);
   assert.throws(() => assertNoLockCameraEntry(model, template + '\n<button onClick="{{lockCamera}}">Camera</button>'), /no product Camera shortcut/);

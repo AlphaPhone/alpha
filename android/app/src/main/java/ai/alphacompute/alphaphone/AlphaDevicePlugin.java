@@ -96,7 +96,7 @@ public final class AlphaDevicePlugin extends Plugin {
   for(java.util.Map.Entry<String,Object> fact:facts.entrySet())out.put(fact.getKey(),fact.getValue());
  }
  /** As HOME, an outside screen gets its own task, as stock launchers do, so HOME does not clear it. Never for a result start. */
- private static Intent handOff(Intent intent){return BuildConfig.IS_LAUNCHER?intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK):intent;}
+ private static Intent handOff(Intent intent){return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
  @PluginMethod public void openPasswordProvider(PluginCall call) {
   String action=call.getString("action","");
   getActivity().runOnUiThread(()->{
@@ -114,9 +114,9 @@ public final class AlphaDevicePlugin extends Plugin {
   });
  }
  /**
-  * Asks Android to open its own notification shade (#416, #417). Launcher flavor only, and only
+  * Asks Android to open its own notification shade (#416, #417), only
   * while Alpha's window has focus, so a pull or button on visible Home is the only way to reach it.
-  * Resolves with {status}: opened, standalone, permission-missing, unsupported or not-in-front.
+  * Resolves with {status}: opened, permission-missing, unsupported or not-in-front.
   * Any status but opened leaves the renderer's truthful fallback to show.
   */
  @PluginMethod public void openNotificationShade(PluginCall call){
@@ -125,7 +125,7 @@ public final class AlphaDevicePlugin extends Plugin {
   activity.runOnUiThread(()->{
    JSObject out=new JSObject();
    if(activity.isFinishing()||activity.isDestroyed()||!activity.hasWindowFocus())out.put("status",SystemShade.NOT_IN_FRONT);
-   else out.put("status",SystemShade.expand(getContext(),BuildConfig.IS_LAUNCHER));
+   else out.put("status",SystemShade.expand(getContext(),true));
    call.resolve(out);
   });
  }
@@ -188,8 +188,8 @@ public final class AlphaDevicePlugin extends Plugin {
    try{
     JSObject out=new JSObject();
     out.put("appVersion",BuildConfig.VERSION_NAME);out.put("versionCode",BuildConfig.VERSION_CODE);
-    out.put("variant",BuildConfig.IS_LAUNCHER?"launcher":"standalone");out.put("buildType",BuildConfig.BUILD_TYPE);
-    out.put("testMocks",BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);out.put("sdkInt",Build.VERSION.SDK_INT);
+    out.put("variant","launcher");out.put("buildType",BuildConfig.BUILD_TYPE);
+    out.put("testMocks",false);out.put("sdkInt",Build.VERSION.SDK_INT);
     out.put("androidRelease",Build.VERSION.RELEASE);out.put("securityPatch",Build.VERSION.SECURITY_PATCH);
     JSObject hashes=new JSObject();
     for(String asset:new String[]{"agent/alpha-source.json","agent/agent-bundle.js","agent/workflow-worker/manifest.json","agent/workflow-worker/files.sha256"}){String hash=assetSha256(asset);if(hash!=null)hashes.put(asset,hash);}
@@ -245,25 +245,67 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  static final String UPDATE_STATUS="ai.alphacompute.alphaphone.UPDATE_STATUS";
- /** Self-update without a system dialog is supported from Android 12. Android still decides at commit. */
+ /** The image's INSTALL_SELF_UPDATES grant, or the owner's install-unknown-apps consent. Every install read uses this. */
+ static boolean selfUpdateAdmitted(Context context){
+  return context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==PackageManager.PERMISSION_GRANTED
+   ||context.getPackageManager().canRequestPackageInstalls();
+ }
+ /**
+  * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
+  * An image may allow-list INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher. Android then admits
+  * Alpha's update of itself, and only that, without the owner's install-unknown-apps choice. Android grants it to an
+  * update only when the image's own launcher also declares it. The launcher does not declare it yet: the shared image
+  * stager must first admit it to its reviewed privileged set. Until then every install needs that choice once.
+  */
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";
-  if(!context.getPackageManager().canRequestPackageInstalls())return "permission-required";
+  if(!selfUpdateAdmitted(context))return "permission-required";
   // Android's default silent-update policy also throttles a first attempt during early boot.
   return android.os.SystemClock.uptimeMillis()<=30_000L?"starting":"supported";
+ }
+ /** Opens the permission page on an explicit request. Android owns consent and a later snapshot reads it. */
+ @PluginMethod public void openUpdatePermissionSettings(PluginCall call){
+  if(Build.VERSION.SDK_INT<31){call.resolve(new JSObject().put("status","unsupported"));return;}
+  openInstallSourceSettings(call,new JSObject().put("status","opened"));
+ }
+ private void openInstallSourceSettings(PluginCall call,JSObject result){
+  android.app.Activity activity=getActivity();
+  if(activity==null){call.reject("Update unavailable");return;}
+  activity.runOnUiThread(()->{
+   if(activity.isFinishing()||activity.isDestroyed()){call.reject("Update unavailable");return;}
+   try{
+    activity.startActivity(handOff(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:"+getContext().getPackageName()))));
+   }catch(RuntimeException unavailable){call.reject("Update unavailable");return;}
+   if(result==null)call.resolve();else call.resolve(result);
+  });
  }
  /** A downloaded automatic update may only replace idle, unlocked Home. The image also hosts calls. */
  private boolean automaticUpdateReady(){
   android.app.Activity activity=getActivity();
   if(!(activity instanceof MainActivity)||((MainActivity)activity).isAssistantSurface()||!shareForeground(activity))return false;
   try{
-   if(AlphaImageCapability.verified(getContext())){
-    android.telecom.TelecomManager calls=getContext().getSystemService(android.telecom.TelecomManager.class);
-    if(calls==null||calls.isInCall())return false;
-   }
-   return true;
+   Context context=getContext();
+   android.media.AudioManager audio=context.getSystemService(android.media.AudioManager.class);
+   if(audio==null||audio.getMode()!=android.media.AudioManager.MODE_NORMAL)return false;
+   if(!AlphaImageCapability.verified(context))return true;
+   android.telecom.TelecomManager calls=context.getSystemService(android.telecom.TelecomManager.class);
+   // A grant arriving after Telecom returned false cannot authenticate that read.
+   if(calls==null||!canReadUpdateCallState(context,calls))return false;
+   // Lint cannot infer the privileged, default-dialer and AppOps checks in the helper.
+   @android.annotation.SuppressLint("MissingPermission") boolean inCall=calls.isInCall();
+   return !inCall&&canReadUpdateCallState(context,calls);
   }catch(SecurityException denied){return false;}
   catch(RuntimeException unknown){return false;}
+ }
+ /** Telecom can report false when phone-state access is denied. Only use a negative with known access. */
+ private static boolean canReadUpdateCallState(Context context,android.telecom.TelecomManager calls){
+  String packageName=context.getPackageName();
+  if(context.checkSelfPermission("android.permission.READ_PRIVILEGED_PHONE_STATE")==PackageManager.PERMISSION_GRANTED||
+     packageName.equals(calls.getDefaultDialerPackage()))return true;
+  if(context.checkSelfPermission("android.permission.READ_PHONE_STATE")!=PackageManager.PERMISSION_GRANTED)return false;
+  android.app.AppOpsManager ops=context.getSystemService(android.app.AppOpsManager.class);
+  return ops!=null&&ops.noteOpNoThrow(android.app.AppOpsManager.OPSTR_READ_PHONE_STATE,context.getApplicationInfo().uid,packageName)
+    ==android.app.AppOpsManager.MODE_ALLOWED;
  }
  /** SHA-256 of the original certificate of Alpha's one signer (apksigner's digest), which key rotation never changes: an update manifest offers an APK only to installs of that signing lineage. */
  static String appSigner(Context context)throws Exception{
@@ -644,35 +686,139 @@ public final class AlphaDevicePlugin extends Plugin {
  /** The connection updateWorker opened last, for handleOnDestroy: interrupting a worker does not stop its socket I/O. */
  private volatile javax.net.ssl.HttpsURLConnection updateActive;
  /** HTTPS only: a redirect never changes protocol, and the network security config refuses cleartext. */
- private javax.net.ssl.HttpsURLConnection updateConnection(String url)throws java.io.IOException{
+ private static javax.net.ssl.HttpsURLConnection openUpdateConnection(String url,int connectMillis,int readMillis)throws java.io.IOException{
   javax.net.ssl.HttpsURLConnection connection=(javax.net.ssl.HttpsURLConnection)new java.net.URL(url).openConnection();
-  connection.setConnectTimeout(20000);connection.setReadTimeout(60000);connection.setUseCaches(false);
+  connection.setConnectTimeout(connectMillis);connection.setReadTimeout(readMillis);connection.setUseCaches(false);
+  return connection;
+ }
+ private javax.net.ssl.HttpsURLConnection updateConnection(String url)throws java.io.IOException{
+  javax.net.ssl.HttpsURLConnection connection=openUpdateConnection(url,20000,60000);
   updateActive=connection;
   return connection;
  }
- /**
-  * Software update (Settings; policy in settings-adapter.ts): the one configured manifest, app.config.json
-  * updateManifestUrl as BuildConfig. Resolves {manifest} for 200 and {} for 404, which means nothing is
-  * published or the release was withdrawn. Anything else rejects; the next start, resume or tap checks again.
-  */
+ private static final int UPDATE_MANIFEST_LIMIT=64*1024;
+ private static final int UPDATE_MANIFEST_RECHECK_MILLIS=10000;
+ /** One read-only transport slot, with no queue. An Android DNS or TLS call can outlive interruption. */
+ private static final java.util.concurrent.ExecutorService updateOfferReader=new java.util.concurrent.ThreadPoolExecutor(
+  0,1,15,java.util.concurrent.TimeUnit.SECONDS,new java.util.concurrent.SynchronousQueue<>(),work->{
+   Thread thread=new Thread(work,"AlphaUpdateOffer");thread.setDaemon(true);return thread;
+  });
+ private static String manifestDigest(byte[] manifest)throws Exception{
+  return hex(java.security.MessageDigest.getInstance("SHA-256").digest(manifest));
+ }
+ /** Both discovery and automatic commit read the configured feed. A 404 withdraws the offer. */
+ private static byte[] readUpdateManifest(javax.net.ssl.HttpsURLConnection connection,long deadline)throws Exception{
+  try{
+   connection.setRequestProperty("Cache-Control","no-cache");
+   checkOfferDeadline(deadline);
+   int status=connection.getResponseCode();
+   checkOfferDeadline(deadline);
+   if(status==404)return null;
+   if(status!=200)throw new java.io.IOException("Update unavailable");
+   try(java.io.InputStream in=connection.getInputStream()){
+    java.io.InputStream bounded=deadline!=0?new java.io.FilterInputStream(in){
+     @Override public int read(byte[] buffer,int offset,int length)throws java.io.IOException{
+      checkOfferDeadline(deadline);
+      int count=super.read(buffer,offset,length);
+      checkOfferDeadline(deadline);
+      return count;
+     }
+    }:in;
+    byte[] manifest=ai.eliza.plugins.agent.connection.ConnectionTransport.readBounded(bounded,UPDATE_MANIFEST_LIMIT);
+    long length=connection.getContentLengthLong();
+    String encoding=connection.getContentEncoding();
+    if(length>=0&&(encoding==null||"identity".equalsIgnoreCase(encoding))&&manifest.length!=length)
+     throw new java.io.IOException("Incomplete update manifest");
+    return manifest;
+   }
+  }finally{connection.disconnect();}
+ }
+ private static void checkOfferDeadline(long deadline)throws java.io.IOException{
+  if(deadline!=0&&(deadline-System.nanoTime()<=0||Thread.currentThread().isInterrupted()))
+   throw new java.io.IOException("Update offer timed out");
+ }
+ /** The installer stops waiting even if opening, redirecting or closing the connection is blocked. */
+ private static byte[] readFinalUpdateManifest()throws Exception{
+  long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(UPDATE_MANIFEST_RECHECK_MILLIS);
+  var result=new java.util.concurrent.FutureTask<>(()->{
+   checkOfferDeadline(deadline);
+   return readUpdateManifest(openUpdateConnection(BuildConfig.ALPHA_UPDATE_MANIFEST_URL,
+    UPDATE_MANIFEST_RECHECK_MILLIS,UPDATE_MANIFEST_RECHECK_MILLIS),deadline);
+  });
+  if(!PluginWorkers.submit(updateOfferReader,result,()->result.cancel(false)))
+   throw new java.io.IOException("Update offer reader unavailable");
+  try{
+   byte[] manifest=result.get(Math.max(0,deadline-System.nanoTime()),java.util.concurrent.TimeUnit.NANOSECONDS);
+   checkOfferDeadline(deadline);
+   return manifest;
+  }catch(InterruptedException interrupted){
+   Thread.currentThread().interrupt();throw interrupted;
+  }finally{result.cancel(true);}
+ }
+ /** Resolves the exact received manifest and its raw byte digest, or an empty result for a withdrawal. */
  @PluginMethod public void checkForUpdate(PluginCall call){
   PluginWorkers.submit(updateWorker,()->{
    try{
     reconcileUpdate();
-    javax.net.ssl.HttpsURLConnection connection=updateConnection(BuildConfig.ALPHA_UPDATE_MANIFEST_URL);
-    try{
-     int status=connection.getResponseCode();
-     if(status==404){call.resolve(new JSObject());return;}
-     if(status!=200)throw new java.io.IOException("Update unavailable");
-     try(java.io.InputStream in=connection.getInputStream()){call.resolve(new JSObject().put("manifest",new String(ai.eliza.plugins.agent.connection.ConnectionTransport.readBounded(in,64*1024),java.nio.charset.StandardCharsets.UTF_8)));}
-    }finally{connection.disconnect();}
+    byte[] manifest=readUpdateManifest(updateConnection(BuildConfig.ALPHA_UPDATE_MANIFEST_URL),0);
+    call.resolve(manifest==null?new JSObject():new JSObject()
+      .put("manifest",new String(manifest,java.nio.charset.StandardCharsets.UTF_8))
+      .put("manifestSha256",manifestDigest(manifest)));
    }catch(Exception unavailable){call.reject("Update unavailable");}
   },()->call.reject("Update unavailable"));
  }
+ private static final class UpdateOfferUnavailable extends java.io.IOException {
+  final String status,manifest;
+  UpdateOfferUnavailable(String status,String manifest){this.status=status;this.manifest=manifest;}
+ }
+ private static final class UpdateInstallPermissionRequired extends java.io.IOException {}
+ private static boolean manifestNumberEquals(Object value,long expected){
+  return value instanceof Number&&((Number)value).doubleValue()==expected;
+ }
+ private static org.json.JSONObject selectUpdateOffer(org.json.JSONObject document,String variant,String signer)throws Exception{
+  if("alpha-update/v1".equals(document.opt("schema")))return document;
+  org.json.JSONArray releases=document.optJSONArray("releases");
+  if(!"alpha-update/index-v1".equals(document.opt("schema"))||releases==null||releases.length()<1||releases.length()>16)return null;
+  java.util.Set<String> pairs=new java.util.HashSet<>();
+  org.json.JSONObject selected=null;
+  for(int i=0;i<releases.length();i++){
+   org.json.JSONObject row=releases.getJSONObject(i);
+   String flavor=row.optString("variant"),root=row.optString("signerSha256");
+   if(!"alpha-update/v1".equals(row.opt("schema"))||
+      !"launcher".equals(flavor)||
+      !root.matches("[0-9a-f]{64}")||!pairs.add(flavor+":"+root))return null;
+   if(variant.equals(flavor)&&signer.equals(root))selected=row;
+  }
+  return selected;
+ }
+ /** The fresh bytes must still be the discovery response and offer this exact update. */
+ private void requireCurrentUpdateOffer(String manifestSha256,String apkUrl,String sha256,long size,long versionCode,String signer)throws UpdateOfferUnavailable{
+  try{
+   byte[] manifest=readFinalUpdateManifest();
+   if(manifest==null)throw new UpdateOfferUnavailable("offer-withdrawn",null);
+   if(!manifestSha256.equals(manifestDigest(manifest))){
+    // The renderer can distinguish a valid replacement from malformed bytes using its strict parser.
+    String decoded=java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(manifest)).toString();
+    throw new UpdateOfferUnavailable("offer-response-changed",decoded);
+   }
+   org.json.JSONTokener parser=new org.json.JSONTokener(new String(manifest,java.nio.charset.StandardCharsets.UTF_8));
+   Object document=parser.nextValue();
+   if(document instanceof org.json.JSONObject&&parser.nextClean()==0){
+    String variant="launcher";
+    org.json.JSONObject offer=selectUpdateOffer((org.json.JSONObject)document,variant,signer);
+    if(offer!=null&&
+       variant.equals(offer.opt("variant"))&&signer.equals(offer.opt("signerSha256"))&&
+       apkUrl.equals(offer.opt("apkUrl"))&&sha256.equals(offer.opt("sha256"))&&
+       manifestNumberEquals(offer.opt("sizeBytes"),size)&&manifestNumberEquals(offer.opt("versionCode"),versionCode))return;
+   }
+  }catch(UpdateOfferUnavailable changed){throw changed;}
+  catch(Exception unavailable){/* A failed read cannot confirm the offer. */}
+  throw new UpdateOfferUnavailable("offer-unavailable",null);
+ }
  /**
-  * Manual Install update or an automatic idle-Home attempt. An automatic attempt requires API 31+ and existing
-  * install-unknown-apps consent; it never opens the settings page. A manual tap without that consent opens
-  * only Android's page. Otherwise the HTTPS APK is downloaded to the cache and admitted by size and
+  * Manual Install update or an automatic idle-Home attempt. An automatic attempt requires API 31+ and either the
+  * image's INSTALL_SELF_UPDATES grant or existing install-unknown-apps consent (selfUpdateAdmitted); it never opens
+  * the settings page. A manual tap with neither opens only Android's page. Otherwise the HTTPS APK is downloaded to the cache and admitted by size and
   * SHA-256 (copyVerified), then by Android's reading of the archive: this package at exactly the offered
   * versionCode, above the installed one. API 31+ automatic sessions request USER_ACTION_NOT_REQUIRED through
   * Android's nonprivileged self-update API. Android may still require confirmation; for an automatic session
@@ -693,15 +839,15 @@ public final class AlphaDevicePlugin extends Plugin {
    String status=automaticUpdateStatus(getContext());
    if(!"supported".equals(status)){call.resolve(new JSObject().put("status",status));return;}
   }
-  if(!getContext().getPackageManager().canRequestPackageInstalls()){
+  if(!selfUpdateAdmitted(getContext())){
    // Consent can be revoked between the automatic capability read and this read.
-   // Only an explicit manual request may open Android's settings page.
    if(automatic){call.resolve(new JSObject().put("status","permission-required"));return;}
-   getActivity().runOnUiThread(()->{
-    try{getActivity().startActivity(handOff(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:"+getContext().getPackageName()))));call.resolve();}
-    catch(RuntimeException unavailable){call.reject("Update unavailable");}
-   });
+   openInstallSourceSettings(call,null);
    return;
+  }
+  final String manifestSha256=call.getString("manifestSha256");
+  if(automatic&&(manifestSha256==null||!manifestSha256.matches("[0-9a-f]{64}"))){
+   call.resolve(new JSObject().put("status","offer-unavailable"));return;
   }
   final String apkUrl=call.getString("apkUrl"),sha256=call.getString("sha256");final long size=call.getData().optLong("sizeBytes"),versionCode=call.getData().optLong("versionCode");
   final int seen=updatesCommitted.get();
@@ -763,7 +909,7 @@ public final class AlphaDevicePlugin extends Plugin {
       // The release verifier requires READ_CONTACTS only in the launcher manifest.
       // Read that existing flavor marker from the APK, independent of the offer.
       if(archive.requestedPermissions==null||
-       BuildConfig.IS_LAUNCHER!=java.util.Arrays.asList(archive.requestedPermissions).contains("android.permission.READ_CONTACTS")||
+       !java.util.Arrays.asList(archive.requestedPermissions).contains("android.permission.READ_CONTACTS")||
        signer==null||!signer.equals(signingRoot(archive.signingInfo)))
        throw new java.io.IOException("Update does not match this installation");
       throwIfDestroyed();
@@ -792,7 +938,13 @@ public final class AlphaDevicePlugin extends Plugin {
        pauseOwned=true;UpdatePause.acquire(preparation.id,id,versionCode,sha256,updateBoot());
        UpdatePause.stop();
        throwIfDestroyed();
-       if(automatic&&!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
+       if(automatic){
+        if(!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
+        requireCurrentUpdateOffer(manifestSha256,apkUrl,sha256,size,versionCode,signer);
+        throwIfDestroyed();
+        if(!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
+        if(!selfUpdateAdmitted(getContext()))throw new UpdateInstallPermissionRequired();
+       }
        UpdatePause.committing(preparation.id);
        android.content.IntentSender status=AlphaUpdateStatusReceiver.sender(getContext(),preparation.id,id);
        // The commit intent. Android holds this before the call returns, so on a level that orders a later read after it (above), a
@@ -825,7 +977,13 @@ public final class AlphaDevicePlugin extends Plugin {
      if(!keepApk){updateVerified=null;apk.delete();}updating.set(false);
     }
     call.resolve();
-   }catch(Exception unavailable){call.reject("Update unavailable");}
+   }catch(UpdateOfferUnavailable unavailable){
+    JSObject result=new JSObject().put("status",unavailable.status);
+    if(unavailable.manifest!=null)result.put("manifest",unavailable.manifest);
+    call.resolve(result);
+   }
+   catch(UpdateInstallPermissionRequired revoked){call.resolve(new JSObject().put("status","permission-required"));}
+   catch(Exception unavailable){call.reject("Update unavailable");}
   },()->call.reject("Update unavailable"));
  }
  /** Stops an update download too: disconnect only closes the raw socket, which Android allows on this main thread. A session outlives its owner, for a later tap on any bridge. */

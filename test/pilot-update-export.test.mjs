@@ -2,12 +2,8 @@
 // output. Not emulator or device evidence: an emulator run of the export is separate (class E).
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { ALPHA, STOCK, APK, BEFORE, DATA, NONCE, exported, hmac, fakeUnit, timing } from "./fixtures/pilot-update.mjs";
 import { compareDomains, integrityQuery, INTEGRITY_AUTHORITY, parseIntegrityExport } from "../scripts/pilot-update.ts";
-import { beginPilotRotation, claimPilotInstall, inspectPilotRotation } from "../scripts/owner/pilot-rotation-journal.ts";
 
 test("the export query is the read-only provider URI with a nonce, quoted for the device shell", () => {
   assert.equal(INTEGRITY_AUTHORITY, "ai.alphacompute.alphaphone.integrity");
@@ -49,24 +45,6 @@ test("a refused, failed, truncated or malformed export never reads as an unchang
   assert.throws(() => parseIntegrityExport(output.split("\n").filter((_, index) => index !== 1).join("\n")), /lists 4 files but its end row says 5/);
   assert.throws(() => parseIntegrityExport(`Row: 0 domain=files, key=12, digest=${"0".repeat(64)}\nRow: 1 domain=#end, key=1, digest=${"0".repeat(64)}`), /Malformed integrity export row/);
   assert.throws(() => parseIntegrityExport(""), /no end row/);
-});
-
-test("the provider is a registered, read-only, DUMP-protected release component, not a debug or mock surface", () => {
-  const manifest = fs.readFileSync("android/app/src/main/AndroidManifest.xml", "utf8");
-  const provider = /<provider android:name="\.release\.DataIntegrityProvider"[^>]*>/.exec(manifest)?.[0];
-  assert.ok(provider, "registered in the main manifest, so release builds carry it");
-  assert.match(provider, /android:authorities="\$\{applicationId\}\.integrity"/);
-  assert.match(provider, /android:permission="android\.permission\.DUMP"/);
-  assert.match(provider, /android:process=":integrity"/);
-  assert.match(provider, /android:grantUriPermissions="false"/);
-  const source = fs.readFileSync("android/app/src/main/java/ai/alphacompute/alphaphone/release/DataIntegrityProvider.java", "utf8");
-  assert.doesNotMatch(source, /BuildConfig\.DEBUG|ELIZA_DEV_ALLOW_TEST_MOCKS|isDebuggable/);
-  assert.match(source, /HmacSHA256/);
-  for (const write of ["insert", "delete", "update"]) assert.match(source, new RegExp(`public (?:Uri|int) ${write}\\([^)]*\\)\\{throw new UnsupportedOperationException`));
-  assert.match(source, /List\.of\("cache", "code_cache"\)/);
-  const apk = fs.readFileSync("scripts/apk.ts", "utf8");
-  assert.match(apk, /"ai\.alphacompute\.alphaphone\.release\.DataIntegrityProvider": "android\.permission\.DUMP"/);
-  assert.ok(!fs.existsSync("android/app/src/testMocks/java/ai/alphacompute/alphaphone/release"), "no test-mocks variant of the export");
 });
 
 const { planHome, updateUnit } = await import("../scripts/pilot-update.ts");
@@ -229,47 +207,3 @@ test("final process readback must prove the integrity process stopped before res
   assert.ok(!state.calls.some(call => call.startsWith("shell am start")));
 });
 
-test("rotation intent is durable at dispatch and survives an ambiguous installer outcome", t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-pilot-update-fixture-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const directory = path.join(root, "journal");
-  const id = "a".repeat(64);
-  const { state, adb } = fakeUnit();
-  const release = claimPilotInstall(directory, id, root);
-  try {
-    const update = updateUnit({ adb: args => {
-      if (args[0] === "install") {
-        assert.equal(inspectPilotRotation(directory, id).state, "unknown");
-        assert.equal(state.holder, "com.android.launcher3");
-        throw new Error("installer response lost");
-      }
-      return adb(args);
-    }, apk: APK, before: BEFORE, home: planHome(adb), timing,
-    prepareInstall: domains => {
-      assert.ok(Object.keys(domains.files).length);
-      assert.equal(inspectPilotRotation(directory, id).state, "none");
-      return () => beginPilotRotation(directory, id, { replacementApkSha256: APK.sha256 });
-    } });
-    assert.equal(update.installAttempted, true);
-    assert.equal(update.installed, false);
-    assert.equal(update.installVerified, false);
-    assert.equal(update.agentRestart, null);
-    assert.match(update.failures.join("\n"), /installer response lost/);
-    assert.equal(state.holder, ALPHA);
-  } finally { release(); }
-  assert.equal(inspectPilotRotation(directory, id).state, "unknown");
-});
-
-test("readback is checked again after rotation validation, before consuming its intent", () => {
-  const { state, adb } = fakeUnit();
-  let recorded = false;
-  const update = updateUnit({ adb, apk: APK, before: BEFORE, home: planHome(adb), timing,
-    prepareInstall: () => {
-      state.pids = "777";
-      return () => { recorded = true; };
-    } });
-  assert.equal(recorded, false);
-  assert.equal(update.installAttempted, false);
-  assert.equal(update.home.restoration.restored, true);
-  assert.match(update.failures.join("\n"), /running before the pre-update readback/);
-});

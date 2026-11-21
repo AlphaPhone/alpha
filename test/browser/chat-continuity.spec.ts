@@ -53,7 +53,7 @@ async function remoteAgent(page: Page, options: Options = {}) {
         if (plugin === 'AlphaNotifications') return { permissionGranted: true, appEnabled: true };
         if (plugin === 'AlphaVoiceCloud') return { microphone: 'granted' };
         if (plugin === 'ElizaSystem' && method === 'getBuildInfo') return { launcher: false, version: 'continuity-fixture' };
-        if (plugin === 'DailyApps' && method === 'surfaceInfo') return { developmentBuild: true, assistant: sessionStorage.getItem('continuity-assistant') === '1' };
+        if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: sessionStorage.getItem('continuity-assistant') === '1' };
         if (plugin === 'DailyApps' && method === 'closeAssistant') { f.assistantClosed++; return {}; }
         if (plugin === 'AlphaActionJournal') return method === 'list' ? { entries: [] } : { entry: null };
         if (plugin !== 'AlphaConnection') throw Error('Unexpected native operation');
@@ -129,6 +129,10 @@ async function typeDraft(page: Page, text: string) {
   await expect.poll(() => savedDraft(page), { timeout: 15_000 }).toBe(text);
 }
 const MAY_FINISH = 'May still finish';
+// STOPPED_REPLY_CHECK_MS in runtime/connection-ui.tsx: the single reconciliation read after Stop. Tests
+// that wait for it install page.clock before load (it runs in real time) and advance it this far, so
+// the check runs at once instead of after 15 real seconds.
+const STOPPED_REPLY_CHECK = 15_000;
 // The pending notice (may still finish, or cancelled) until the single check settles it.
 const CHECK_PENDING = /^(May still finish|Cancelled)$/;
 const UNKNOWN = 'Your message may have reached the agent. Check before sending it again.';
@@ -292,6 +296,7 @@ test('Stop before the message is posted returns the text and never contacts the 
 
 test('Stop says the agent may still finish, discards the late reply and reconciles once without resending', async ({ page }) => {
   test.setTimeout(120_000);
+  await page.clock.install();
   await connected(page);
   await typeDraft(page, 'Please finish anyway');
   const key = await bindingKey(page);
@@ -309,8 +314,9 @@ test('Stop says the agent may still finish, discards the late reply and reconcil
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(conversation(page).getByText('Finished after Stop', { exact: true })).toHaveCount(0);
   expect(await fixture(page, f => f.historyReads)).toBe(0);
-  // One reconciliation read later shows it exactly once.
-  await expect(conversation(page).getByText('Finished after Stop', { exact: true })).toHaveCount(1, { timeout: 40_000 });
+  // One reconciliation read 15 s after Stop shows it exactly once.
+  await page.clock.runFor(STOPPED_REPLY_CHECK);
+  await expect(conversation(page).getByText('Finished after Stop', { exact: true })).toHaveCount(1);
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toHaveCount(0);
   await expect(conversation(page).getByText('Please finish anyway', { exact: true })).toHaveCount(1);
   await page.waitForTimeout(1_000);
@@ -319,13 +325,15 @@ test('Stop says the agent may still finish, discards the late reply and reconcil
 
 test('Stop asks the agent to cancel exactly once and reports a confirmed cancel in the chat', async ({ page }) => {
   test.setTimeout(120_000);
+  await page.clock.install();
   await connected(page, { abortRoute: true, abortResult: true });
   await typeDraft(page, 'Please stop this one');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(1);
   await stop(page).click();
   await expect(conversation(page).getByText('Cancelled', { exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(conversation(page).getByText('The agent stopped this reply.', { exact: true })).toBeVisible({ timeout: 40_000 });
+  await page.clock.runFor(STOPPED_REPLY_CHECK);
+  await expect(conversation(page).getByText('The agent stopped this reply.', { exact: true })).toBeVisible();
   await expect(conversation(page).getByText(CHECK_PENDING)).toHaveCount(0);
   await expect(conversation(page).getByText('Please stop this one', { exact: true })).toHaveCount(1);
   expect(await fixture(page, f => ({ posts: f.posts, aborts: f.aborts, reads: f.historyReads }))).toEqual({ posts: 1, aborts: 1, reads: 1 });
@@ -353,6 +361,8 @@ test('a new message after Stop retires the pending check and stale notice; nothi
 
 test('a new conversation after Stop retires the check; the stopped reply never replaces the new chat', async ({ page }) => {
   test.setTimeout(120_000);
+  // The page's fake clock runs in real time until the test moves it past the stopped-reply check.
+  await page.clock.install();
   await connected(page);
   await typeDraft(page, 'Asked in the first conversation');
   await composer(page).press('Enter');
@@ -367,9 +377,13 @@ test('a new conversation after Stop retires the check; the stopped reply never r
   await page.evaluate(async () => { const { connectionController } = await import('/src/runtime/connection-ui.tsx'); await connectionController.newConversation(); });
   await expect.poll(selected, { timeout: 15_000 }).toEqual({ conversation: 'fixture-chat-2', messages: 0, replyNotice: '' });
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toHaveCount(0);
-  // The first conversation's reply lands on the agent; the pending check would have fired by now.
+  // The first conversation's reply lands on the agent. Past the stopped-reply check, every timer due
+  // by then (the check included, had it survived) has run.
   await fixture(page, f => { f.release('Reply for the first conversation'); f.finish('Reply for the first conversation'); });
-  await page.waitForTimeout(17_000);
+  await page.clock.runFor(STOPPED_REPLY_CHECK + 2_000);
+  // runFor only starts what those timers do: a surviving check's read, and the released reply's
+  // delivery, finish on real I/O. Give them a real moment to land before asserting that nothing did.
+  await page.waitForTimeout(1_000);
   await expect(conversation(page).getByText('Reply for the first conversation', { exact: true })).toHaveCount(0);
   await expect(conversation(page).getByText('Asked in the first conversation', { exact: true })).toHaveCount(0);
   expect(await selected()).toEqual({ conversation: 'fixture-chat-2', messages: 0, replyNotice: '' });
@@ -475,7 +489,7 @@ test('a restored conversation longer than the chat window scrolls up to its firs
 });
 
 // One notice for every stop the single check could not settle (not run, not finished, overtaken).
-const UNCHECKED = 'Stopped';
+const UNCHECKED = 'Outcome unknown';
 
 test('a rate limit before the message is posted keeps the text instead of reporting an unknown outcome', async ({ page }) => {
   test.setTimeout(90_000);
@@ -509,12 +523,15 @@ test('Stop is offered before the first reply chunk of a later message in the sam
 
 test('a confirmed stop of one turn is never repeated as the outcome of a later stopped turn', async ({ page }) => {
   test.setTimeout(150_000);
+  await page.clock.install();
   await connected(page, { abortRoute: true, abortResult: true });
   await typeDraft(page, 'Stop the first');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(1);
   await stop(page).click();
-  await expect(conversation(page).getByText('The agent stopped this reply.', { exact: true })).toHaveCount(1, { timeout: 40_000 });
+  await expect(conversation(page).getByText(CHECK_PENDING)).toHaveCount(1, { timeout: 15_000 });
+  await page.clock.runFor(STOPPED_REPLY_CHECK);
+  await expect(conversation(page).getByText('The agent stopped this reply.', { exact: true })).toHaveCount(1);
   await typeDraft(page, 'Stop the second');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(2);
@@ -531,12 +548,15 @@ test('a confirmed stop of one turn is never repeated as the outcome of a later s
 
 test('a check that reported its result keeps that statement, with no Check saved conversation card, when another message is sent', async ({ page }) => {
   test.setTimeout(120_000);
+  await page.clock.install();
   await connected(page);
   await typeDraft(page, 'Still thinking');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(1);
   await stop(page).click();
-  await expect(conversation(page).getByText(UNCHECKED, { exact: true })).toHaveCount(1, { timeout: 40_000 });
+  await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toBeVisible();
+  await page.clock.runFor(STOPPED_REPLY_CHECK);
+  await expect(conversation(page).getByText(UNCHECKED, { exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
   await typeDraft(page, 'Another message');
   await composer(page).press('Enter');
@@ -549,6 +569,7 @@ test('a check that reported its result keeps that statement, with no Check saved
 
 test('a check overtaken by another connection operation says so instead of promising a check forever', async ({ page }) => {
   test.setTimeout(120_000);
+  await page.clock.install();
   await connected(page);
   await typeDraft(page, 'Overtaken check');
   await composer(page).press('Enter');
@@ -556,7 +577,8 @@ test('a check overtaken by another connection operation says so instead of promi
   await stop(page).click();
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toBeVisible();
   await fixture(page, f => { f.holdReads = true; });
-  await expect.poll(() => fixture(page, f => f.historyReads), { timeout: 40_000 }).toBe(1);
+  await page.clock.runFor(STOPPED_REPLY_CHECK);
+  await expect.poll(() => fixture(page, f => f.historyReads)).toBe(1);
   // The person opens the conversation list while the single read is still in flight.
   await page.evaluate(async () => { const { connectionController } = await import('/src/runtime/connection-ui.tsx'); void connectionController.listHistory(); });
   await expect.poll(() => fixture(page, f => f.lists), { timeout: 15_000 }).toBe(1);
@@ -635,6 +657,7 @@ for (const step of ['Back from full to sheet', 'HOME on Home'] as const) {
 
 test('HOME from another app during a reply is a Stop: one cancel, the reconciliation statement, and no resend', async ({ page }) => {
   test.setTimeout(120_000);
+  await page.clock.install();
   await connected(page, { abortRoute: true });
   await page.getByRole('button', { name: 'Notes', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
@@ -650,7 +673,8 @@ test('HOME from another app during a reply is a Stop: one cancel, the reconcilia
   await expect.poll(() => fixture(page, f => f.aborts)).toBe(1);
   // The agent finishes anyway; the late transport reply is discarded and the one check shows it once.
   await fixture(page, f => { f.release('Finished after HOME'); f.finish('Finished after HOME'); });
-  await expect(conversation(page).getByText('Finished after HOME', { exact: true })).toHaveCount(1, { timeout: 40_000 });
+  await page.clock.runFor(STOPPED_REPLY_CHECK);
+  await expect(conversation(page).getByText('Finished after HOME', { exact: true })).toHaveCount(1);
   await expect(conversation(page).getByText('Asked from Notes', { exact: true })).toHaveCount(1);
   await page.waitForTimeout(1_000);
   expect(await fixture(page, f => ({ posts: f.posts, aborts: f.aborts, reads: f.historyReads }))).toEqual({ posts: 1, aborts: 1, reads: 1 });

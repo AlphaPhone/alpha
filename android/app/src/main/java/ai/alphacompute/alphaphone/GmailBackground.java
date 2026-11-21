@@ -1,18 +1,16 @@
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.notifications.MailBackgroundDelivery;
-import ai.eliza.plugins.notifications.MailNoticePoster;
 import android.content.Context;
 import org.json.JSONObject;
 
 /** Alpha's installed binding for the shared background new-mail check (plugin-native-notifications):
- * the encrypted 'gmail-background:v1' slot, the production Cloud key, reset fence and notice identifiers. */
+ * the encrypted 'gmail-background:v1' slot, the production Cloud key and reset fence. Its notices are Alpha's
+ * GmailNoticePoster. */
 final class GmailBackground {
  static final String SLOT="gmail-background:v1";
- static final MailNoticePoster.Config NOTICES=new MailNoticePoster.Config("alpha-gmail","New Gmail messages","New unread Inbox messages. Android may delay checks.",
-  "ai.alphacompute.alphaphone.OPEN_GMAIL_NOTICE","alpha-gmail:","alpha-gmail-ask:","alpha-gmail-",R.drawable.notification_icon,"New mail in Gmail","Tap to open Inbox.","Alpha Phone","Tap to open.","Ask Alpha",MainActivity.class);
- private static MailBackgroundDelivery delivery;private static MailNoticePoster poster;
- static synchronized MailNoticePoster poster(Context context){if(poster==null)poster=new MailNoticePoster(context.getApplicationContext(),NOTICES);return poster;}
+ private static MailBackgroundDelivery delivery;private static GmailNoticePoster poster;
+ static synchronized GmailNoticePoster poster(Context context){if(poster==null)poster=new GmailNoticePoster(context);return poster;}
  static synchronized MailBackgroundDelivery get(Context context){
   if(delivery!=null)return delivery;
   Context app=context.getApplicationContext();AlphaCredentialStore store=new AlphaCredentialStore(app);

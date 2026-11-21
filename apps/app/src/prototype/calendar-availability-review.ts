@@ -1,4 +1,4 @@
-import {formatDeviceRecordDateTime} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts';
+import {formatDeviceRecordDateTime} from '../ui/device-actions/device-record-presentation';
 import {CALENDAR_AVAILABILITY_MAX_CALENDARS,type CalendarAvailabilityOperation,type CalendarAvailabilityResult} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import type {AvailabilityReview,AvailabilitySource} from '../runtime/calendar-availability';
 import {openReview} from './source-review-dialog';

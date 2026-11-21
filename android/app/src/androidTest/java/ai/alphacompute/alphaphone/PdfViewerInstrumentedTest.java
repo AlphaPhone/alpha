@@ -27,7 +27,7 @@ public final class PdfViewerInstrumentedTest {
   do{if(find(text,description)!=null)return;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
   fail("PDF accessibility text missing: "+text);
  }
- private void page(int number){awaitText("Page "+number+" of 2",false,15000);awaitText("PDF page "+number+" of 2",true,15000);}
+ private void page(int number){awaitText(AlphaMediaCopy.pdfPage(number,2),false,15000);awaitText(AlphaMediaCopy.pdfPageImage(number,2),true,15000);}
  private void click(String text){
   long end=SystemClock.elapsedRealtime()+15000;
   do{AccessibilityNodeInfo node=find(text,false);if(node!=null&&node.isEnabled()&&node.isClickable()&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK))return;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
@@ -41,11 +41,11 @@ public final class PdfViewerInstrumentedTest {
    try(InputStream input=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("inbox-fixtures/two-page.pdf")){Files.write(file.toPath(),input.readAllBytes());}
    Intent intent=new Intent(context,AlphaMailPdfActivity.class).setData(FileProvider.getUriForFile(context,context.getPackageName()+".mailattachments",file));
    try(BoundedActivityScenario<AlphaMailPdfActivity> scenario=BoundedActivityScenario.launch(intent)){
-    page(1);click("Next page");page(2);scenario.recreate();page(2);click("Previous page");page(1);click("Close PDF");
+    page(1);click(AlphaMediaCopy.PDF_NEXT);page(2);scenario.recreate();page(2);click(AlphaMediaCopy.PDF_PREVIOUS);page(1);click(AlphaMediaCopy.PDF_CLOSE);
     long closedBy=SystemClock.elapsedRealtime()+5000;
     while(scenario.getState()!=Lifecycle.State.DESTROYED&&SystemClock.elapsedRealtime()<closedBy)SystemClock.sleep(100);
-    assertEquals("Close PDF destroys its Activity",Lifecycle.State.DESTROYED,scenario.getState());
-    assertNull("Closed PDF control is gone",find("Close PDF",false));
+    assertEquals("Close destroys the viewer Activity",Lifecycle.State.DESTROYED,scenario.getState());
+    assertNull("Closed PDF control is gone",find(AlphaMediaCopy.PDF_CLOSE,false));
    }
   }finally{assertTrue(!file.exists()||file.delete());}
  }

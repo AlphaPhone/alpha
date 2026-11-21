@@ -3,7 +3,7 @@
  * Product code, evaluated from source: `p.send`, `p.agentSay`, the dispatch helpers
  * (`dispatched`, `trackDispatch`, `transportSettled`, `releaseComposerSend`) and the connection
  * subscription that clears the chat on a session change (apps/app/src/prototype/agent-adapter.ts);
- * the real AlphaClient (apps/app/src/runtime/alpha-client.ts); and the shared durable draft
+ * the real AlphaClient (apps/app/src/runtime/alpha-client.ts); and Alpha's durable draft
  * controller the composer is bound to.
  *
  * Controlled ports: the connection (session, connect step), the transport under AlphaClient, the
@@ -14,9 +14,11 @@
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {randomUUID} from 'node:crypto';
-import {tsImport} from 'tsx/esm/api';
+import {tsImport} from '../../../../test/support/ts-import.mjs';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {systemNoticeKind, systemNoticeDisplayText, collapseSystemNotices} from '../../../../apps/app/src/runtime/action-message-presentation.ts';
+import {residentDraftOwner,residentRestartDraftScope} from '../../../../apps/app/src/prototype/assistant-draft-controller.ts';
+import {workflowChanges, workflowViewRefusal} from '../../../../apps/app/src/runtime/automation-completion.ts';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 
 export const model = {path: 'specs/quint/application/ComposerSend.qnt', module: 'ComposerSend'};
@@ -37,7 +39,7 @@ export async function compile() {
   const send = between('  p.send = async function', '  p.agentSay = function'), say = between('  p.agentSay = function', '  p.reply = function');
   const subscription = between('this.connectionUnsubscribe = connectionController.subscribe(() => {', '    // Canonical is the default;');
   const code = ts(`${helpers}\n${plan}\n${notices}\nfunction methods(){const p={};\n${send}\n${say}\nreturn p;}\nglobalThis.methods=methods();`);
-  const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/.eliza/client-features/packages/ui/src/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
+  const controller = stripTypeScriptTypes(readFileSync(`${repositoryRoot}/apps/app/src/ui/state/durable-draft-controller.ts`, 'utf8'), {mode: 'strip'});
   const {DurableDraftController} = await import('data:text/javascript;base64,' + Buffer.from(controller).toString('base64'));
   const {AlphaClient, AlphaClientError} = await tsImport('../../../../apps/app/src/runtime/alpha-client.ts', import.meta.url);
   return {code, subscription: stripTypeScriptTypes(subscription, {mode: 'transform'}), DurableDraftController, AlphaClient, AlphaClientError};
@@ -46,7 +48,7 @@ export async function compile() {
 export async function createDriver({code, subscription, DurableDraftController, AlphaClient, AlphaClientError}) {
   let sessionNumber = 0, changed = () => {};
   const session = () => ({sessionId: `session-${sessionNumber}`, agentId: 'agent-a', ownerId: 'owner-a', origin: 'https://agent.invalid'});
-  let snapshot = {session: session(), history: null, busy: false, open: false, startupResolved: true};
+  let snapshot = {kind:'resident',session: session(), history: null, busy: false, open: false, startupResolved: true};
   const timers = [], stores = new Map(), attempts = new Map(), decisions = new Map();
   const alphaClient = new AlphaClient();
   class NotDispatched extends Error {}
@@ -72,7 +74,7 @@ export async function createDriver({code, subscription, DurableDraftController, 
   const connectionController = {
     getSnapshot: () => snapshot, subscribe(callback) { changed = callback; return () => {}; },
     getSelectedConversationId: () => ROOM, getCloudEnvironment: () => undefined, getCloudClient: () => undefined,
-    captureViewNavigation: () => ({}), continueRequestedCamera: async () => [],
+    captureViewNavigation: () => ({}), continueRequestedCamera: async () => [], requestedCameraNeedsOpening: () => false,
   };
   const box = {
     systemNoticeKind, systemNoticeDisplayText, collapseSystemNotices,
@@ -84,14 +86,18 @@ export async function createDriver({code, subscription, DurableDraftController, 
     sourceOf: () => undefined, NotDispatched, AlphaClientError, cloudServiceName: () => 'Eliza Cloud',
     privateLocalPreviewEnabled: false, residentAlwaysPresent: false, pageLeaving: false,
     NO_AGENT_SEND: 'No agent', RESIDENT_STARTING_NOTICE: 'Starting', RESIDENT_RECOVERING_NOTICE: 'Recovering', CAMERA_CONTEXT_NOTICE: 'camera',
+    workflowChanges, workflowViewRefusal,
     deliverChatNavigation: async () => false, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
     retainReadReply() {}, completeReadReply: async () => {}, proposalCard: () => undefined, publishCommittedDeviceChanges() {},
     cameraScanRequested: () => false, cameraFrameQuestionRequested: () => false,
   };
-  vm.runInNewContext(code, box);
-  // The shell's own decision, recorded as it is made.
+  vm.createContext(box);
+  vm.runInContext(code, box);
+  // The shell's own decision, recorded as it is made. The binding is replaced from inside the context: on Bun an
+  // assignment on the sandbox object does not replace a function the script itself declared.
   const decide = box.dispatched;
-  box.dispatched = (attempt, error) => { const result = decide(attempt, error); decisions.set(attempt, result); return result; };
+  box.recordDispatched = (attempt, error) => { const result = decide(attempt, error); decisions.set(attempt, result); return result; };
+  vm.runInContext('dispatched = recordDispatched', box);
   Object.assign(shell, box.methods);
   const attach = () => alphaClient.attachVerifiedTransport({
     session: snapshot.session,
@@ -101,7 +107,7 @@ export async function createDriver({code, subscription, DurableDraftController, 
   });
   alphaClient.setViewContext({view: 'calendar'});
   attach();
-  const ports = {connectionController, alphaClient, cancelMessageContext() {}, clearMapsSelection() {}, syncStoppedReplyNotice() {}, syncCanonicalNotes() {},
+  const ports = {connectionController, alphaClient, residentDraftOwner, residentRestartDraftScope, cancelMessageContext() {}, clearMapsSelection() {}, syncStoppedReplyNotice() {}, syncCanonicalNotes() {},
     context() {}, restoreAttachments: async messages => messages, collapseSystemNotices, mergeConversationDelivery: messages => messages};
   new Function(...Object.keys(ports), subscription).call(shell, ...Object.values(ports));
   shell.refreshDraftBinding();

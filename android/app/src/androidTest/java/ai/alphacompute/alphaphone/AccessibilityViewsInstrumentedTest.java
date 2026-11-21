@@ -29,7 +29,7 @@ import org.junit.runner.RunWith;
  * reading-order check in Chromium for every state. Emulator evidence only, not TalkBack itself or
  * a device.
  *
- * The views need the test-mocks pair or a phone its owner signed in: a flag-off build signed out
+ * The views need a phone its owner signed in: a flag-off build signed out
  * of Eliza Cloud shows only the required sign-in page (P-43), which AccessibilityInstrumentedTest
  * checks on its own.
  */
@@ -104,7 +104,7 @@ public final class AccessibilityViewsInstrumentedTest {
  }
 
  private void auditViews(int appPercent, int effectiveScale) throws Exception {
-  // P-43: the views need the test-mocks pair (BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS) or a phone its owner signed in.
+  // P-43: the views need a phone its owner signed in.
   AppNavigation.assumeNoRequiredSignIn("Every view at " + effectiveScale * 100 + "% font");
   String savedSystemScale = fontScale(null);
   String previous = savedSystemScale.isEmpty() || "null".equals(savedSystemScale) ? "1.0" : savedSystemScale;

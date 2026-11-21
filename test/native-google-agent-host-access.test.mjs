@@ -1,6 +1,7 @@
 // The phone's Google host enforces the owner's Settings switches from the file AlphaLocalAgentPlugin writes,
 // read before every agent write, and fails closed. Synthetic Cloud transport only; the file writer runs on the
 // host JVM, not Android, so this is not device or Settings evidence.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync,spawnSync} from 'node:child_process';
@@ -8,7 +9,6 @@ import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,mkdtempSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-if(!process.execArgv.includes('tsx')){const child=spawnSync(process.execPath,['--import','tsx',process.argv[1]],{stdio:'inherit',timeout:120000});if(child.error)throw child.error;process.exit(child.status??1);}
 const {nativeSource,fixture,runJvm}=await import('./fixtures/jvm-tools.mjs');
 const {startNativeGoogleAgentHost,savedGoogleAgentAccess}=await import('./support/managed-google-agent.mjs');
 const {createNativeGoogleCloudPort}=await import('./support/managed-google-agent.mjs');
@@ -86,9 +86,9 @@ test('linked and nonregular access files are refused without a blocking read',()
   for(const suffix of ['.tmp','.bak'])writeFileSync(absent+suffix,enabled);
   assert.deepEqual(savedGoogleAgentAccess(absent),off,'only the canonical record can admit access');
   const pipe=join(dir,'pipe');execFileSync('mkfifo',[pipe]);
-  const read=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',
+  const read=spawnSync(process.execPath,['-e',
    'import {savedGoogleAgentAccess} from "./test/support/managed-google-agent.mjs"; console.log(JSON.stringify(savedGoogleAgentAccess()));'],
-   {env:{...process.env,ALPHA_GOOGLE_AGENT_ACCESS_FILE:pipe},encoding:'utf8',timeout:10000});
+   {env:{...process.env,ALPHA_GOOGLE_AGENT_ACCESS_FILE:pipe},encoding:'utf8',timeout:scaledTimeout(10000)});
   assert.ifError(read.error);
   assert.equal(read.status,0,read.stderr);
   assert.deepEqual(JSON.parse(read.stdout),off);

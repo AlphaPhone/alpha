@@ -5,9 +5,9 @@ import type {ActionJournal} from './device-actions';
 import {browserCloudResidentEnabled} from './browser-cloud-resident';
 import {isRecord} from '../lib/parse';
 // The host storage bridge exists only on the development server with
-// test mocks or an explicit private local/Cloud resident preview, matching local-agent.ts. Node
+// test mocks or the explicit Cloud resident mode, matching local-agent.ts. Node
 // contract tests import this module without Vite and pass their own request.
-const developmentBridgeAllowed:boolean=browserCloudResidentEnabled||(import.meta.env!==undefined&&import.meta.env.DEV===true&&(import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||(import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW==='1'&&import.meta.env.VITE_LOCAL_AGENT==='1')));
+const developmentBridgeAllowed:boolean=browserCloudResidentEnabled||(import.meta.env!==undefined&&import.meta.env.DEV===true&&import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1');
 /** The journal entry's binding and effect must still be the reviewed ones before a recovery reads a receipt. */
 async function checkRecoveryBinding(input:{scope:string;proposalId:string;bindingHash:string},entry:any,effect:unknown,message:string){
  const binding=await actionScope(JSON.stringify([input.scope,entry.record.ownerId,entry.record.agentId,entry.record.sessionId,entry.record.origin,entry.record.installationId,entry.record.enrollmentId,input.proposalId,entry.record.digest,entry.operationId]));

@@ -1,9 +1,12 @@
+import {androidIdentity} from './android-identity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,verifyNativeJava} from './embedding-native-contract.ts';
+import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,verifyNativeJava} from './embedding-native-contract.ts';
+import {readNativeBuildReceipt} from './native-build-inputs.ts';
+import {ANDROID_ABIS} from './android-abis.ts';
 const root=path.resolve(import.meta.dirname,'..');
 const sha=(value: string | Buffer)=>createHash('sha256').update(value).digest('hex');
 const hash=(file: string)=>sha(fs.readFileSync(file));
@@ -29,6 +32,7 @@ type EmbeddingReceipt = EmbeddingInputs & {
 };
 export type EmbeddingManifest = EmbeddingInputs & {
  libraries: Library[];
+ additionalAbis?: {abi:string;libraries:Library[]}[];
  model?: { path: string; sha256: string; dimensions: number };
  qualificationReceiptSha256: string;
  jniIdentityRelocated: boolean;
@@ -51,7 +55,7 @@ const isCommit=(value: unknown)=>typeof value==='string'&&/^[a-f0-9]{40}$/.test(
 /** A new runtime pin may reuse reviewed binaries only when every native build input is exact. */
 export function verifyEmbeddingInputs(productRoot: string,qualification: EmbeddingInputs,{requireProducerInputs=false}={}) {
  const pin=JSON.parse(fs.readFileSync(path.join(productRoot,'upstream.lock.json'),'utf8')).commit;
- const identity=JSON.parse(fs.readFileSync(path.join(productRoot,'app.config.json'),'utf8')).appId;
+ const identity=androidIdentity(productRoot).appId;
  if(!isCommit(pin)||!isCommit(qualification.pin)||!isCommit(qualification.forkPin)||qualification.identity!==identity||qualification.abi!=='arm64-v8a')throw Error('Embedding host source or identity admission changed');
  const inputs=qualification.inputs;
 
@@ -87,52 +91,64 @@ export function verifyEmbeddingInputs(productRoot: string,qualification: Embeddi
 }
 const embeddingRecord='android/embedding-host/qualified-host.json',voiceRecord='android/voice-host/qualified-voice-host.json';
 /** Both hosts stage jniLibs/arm64-v8a/libelizainference.so, so their records must name the same engine bytes. */
-export function verifyEmbeddingEngine(productRoot: string,manifest: Pick<EmbeddingManifest, "libraries">){
+export function verifyEmbeddingEngine(productRoot: string,manifest: Pick<EmbeddingManifest, "libraries"> & Partial<Pick<EmbeddingManifest,'abi'|'additionalAbis'>>){
  const file=path.join(productRoot,voiceRecord);
  if(!fs.existsSync(file))throw Error(voiceRecord+' is missing; '+embeddingRecord+' cannot be checked against it');
  const engine=(row: { libraries?: Library[] } | undefined)=>row?.libraries?.find(library=>library.name==='libelizainference.so');
- const voiceManifest: { abis?: { abi: string; libraries?: Library[] }[] } = JSON.parse(fs.readFileSync(file,'utf8'));
- const embedding=engine(manifest),voice=engine(voiceManifest.abis?.find(row=>row.abi==='arm64-v8a'));
+ const voiceManifest: { abis?: { abi: string; libraries?: Library[] }[] } = readNativeBuildReceipt(productRoot)?.voice ?? JSON.parse(fs.readFileSync(file,'utf8'));
  const label=(row: Library | undefined)=>row?String(row.sha256).slice(0,8)+'/'+row.bytes+' bytes':'none';
- if(!embedding||!voice||embedding.sha256!==voice.sha256||embedding.bytes!==voice.bytes)throw Error('arm64-v8a libelizainference.so differs: '+embeddingRecord+' records '+label(embedding)+', '+voiceRecord+' records '+label(voice)+'; both ship as jniLibs/arm64-v8a/libelizainference.so');
+ for(const abi of embeddingAbiLibraries({...manifest,abi:manifest.abi??'arm64-v8a'})) {
+ const embedding=engine(abi),voice=engine(voiceManifest.abis?.find(row=>row.abi===abi.abi));
+ if(!embedding||!voice||embedding.sha256!==voice.sha256||embedding.bytes!==voice.bytes)throw Error(abi.abi+' libelizainference.so differs: '+embeddingRecord+' records '+label(embedding)+', '+voiceRecord+' records '+label(voice)+'; both ship as jniLibs/'+abi.abi+'/libelizainference.so');
+ }
 }
 /** Build admission reads exact staged bytes; it never downloads or repairs a missing artifact. */
-export function verifyEmbeddingHost(productRoot: string,{allowAbsentRuntime=false,requireProducerInputs=false}={}) {
- // The explicit unpackaged developer build has no agent to use this host. Never
- // admit a partial resident payload or a partially staged native host this way.
- if(allowAbsentRuntime){
-  const runtime=['alpha-source.json','agent-bundle.js','workflow-worker/manifest.json'];
-  const native=names.flatMap(name=>['arm64-v8a','x86_64'].map(abi=>'android/app/src/main/jniLibs/'+abi+'/'+name));
-  const files=[...runtime.map(name=>'android/app/src/main/assets/agent/'+name),...native];
-  if(files.every(file=>!fs.existsSync(path.join(productRoot,file))))return {status:'not-packaged',distributable:false};
- }
-
- const manifest: EmbeddingManifest=JSON.parse(fs.readFileSync(path.join(productRoot,embeddingRecord),'utf8'));
+export function verifyEmbeddingHost(productRoot: string,{requireProducerInputs=false}={}) {
+ const manifest: EmbeddingManifest=readNativeBuildReceipt(productRoot)?.embedding as EmbeddingManifest ?? JSON.parse(fs.readFileSync(path.join(productRoot,embeddingRecord),'utf8'));
  if(manifest.jniIdentityRelocated!==true)throw Error('Embedding host JNI identity missing or changed');
  verifyEmbeddingEngine(productRoot,manifest);
  verifyEmbeddingInputs(productRoot,manifest,{requireProducerInputs});
  if(manifest.model?.sha256!==model.sha256||manifest.model?.path!==model.path||manifest.model?.dimensions!==384)throw Error('Embedding host model admission changed');
- if(!Array.isArray(manifest.libraries)||manifest.libraries.length!==names.length||new Set(manifest.libraries.map(row=>row.name)).size!==names.length)throw Error('Incomplete embedding host library set');
- for(const row of manifest.libraries){
+ const abis=embeddingAbiLibraries(manifest);
+ if(abis.some((row,index)=>row.abi!==ANDROID_ABIS[index])||abis.length>2)throw Error('Invalid embedding ABI inventory');
+ for(const abi of abis){
+ if(!Array.isArray(abi.libraries)||abi.libraries.length!==names.length||new Set(abi.libraries.map(row=>row.name)).size!==names.length)throw Error('Incomplete embedding host library set');
+ for(const row of abi.libraries){
   if(!names.includes(row.name)||!/^[a-f0-9]{64}$/.test(row.sha256)||!Number.isSafeInteger(row.bytes)||row.bytes<=0||row.alignment16KiB!==true)throw Error('Invalid qualified embedding library');
-  const file=path.join(productRoot,'android/app/src/main/jniLibs',manifest.abi,row.name);
+  const file=path.join(productRoot,'android/app/src/main/jniLibs',abi.abi,row.name);
   if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size!==row.bytes||hash(file)!==row.sha256)throw Error('Qualified embedding host library missing or changed: '+row.name);
+ }
  }
  const file=path.join(productRoot,model.path);
  if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||hash(file)!==model.sha256)throw Error('Pinned BGE384 model missing or changed');
  return manifest;
 }
+/** Every packaged resident ABI needs its own exact engine, STL and product JNI bridge. */
+export function embeddingApkProblems(bundle:{names:readonly string[];read:(name:string)=>Buffer},manifest:Pick<EmbeddingManifest,'abi'|'libraries'|'additionalAbis'>) {
+ const problems:string[]=[],abis=embeddingAbiLibraries(manifest);
+ const residentAbis=[...new Set(bundle.names.flatMap(name=>/^lib\/([^/]+)\/libeliza_bun\.so$/.exec(name)?.[1]??[]))];
+ for(const abi of residentAbis){
+  const record=abis.find(row=>row.abi===abi);
+  if(!record){problems.push('Resident embedding ABI is not admitted: '+abi);continue;}
+  for(const name of names){
+   const row=record.libraries.find(library=>library.name===name),entry=`lib/${abi}/${name}`;
+   if(!row||!bundle.names.includes(entry)){problems.push('Resident embedding library missing: '+entry);continue;}
+   const bytes=bundle.read(entry);
+   if(bytes.length!==row.bytes||sha(bytes)!==row.sha256)problems.push('Resident embedding library differs: '+entry);
+  }
+ }
+ return problems;
+}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const args=process.argv.slice(2);
- if(args[0]==='--verify'&&(args.length===1||args.length===2&&args[1]==='--allow-unpackaged-runtime')){
-  const result=verifyEmbeddingHost(root,{allowAbsentRuntime:args.includes('--allow-unpackaged-runtime')});
-  if('status' in result && result.status==='not-packaged')console.log('No resident embedding host packaged; developer APK only.');
-  else console.log('ARM64 embedding host source, JNI and BGE384 bytes verified.');
+ if(args[0]==='--verify'&&args.length===1){
+  const result=verifyEmbeddingHost(root);
+  console.log(embeddingAbiLibraries(result).map(row=>row.abi).join(', ')+' embedding host source, JNI and BGE384 bytes verified.');
  }
  else if(args[0]==='--receipt'&&(args.length===2||args.length===4&&args[2]==='--library-root')){
   const libraryRoot=args.length===4?args[3]:undefined;
   const receipt: EmbeddingReceipt = JSON.parse(fs.readFileSync(args[1],'utf8'));
-  const identity=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8')).appId;
+  const identity=androidIdentity(root).appId;
   if(receipt.built!==true||!Array.isArray(receipt.libraries)||receipt.libraries.length!==3)throw Error('Complete ARM64 build receipt required');
   verifyEmbeddingInputs(root,receipt,{requireProducerInputs:true});
   const libraries=names.map(name=>{
@@ -144,7 +160,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
    return {name,sha256:row.sha256,bytes:row.bytes,alignment16KiB:true,source:sourcePath,target};
   });
   // agent:stage-android stages the model with the runtime payload; this command only checks it.
-  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run npm run agent:prepare, npm run agent:build-workflow-worker and npm run agent:stage-android first');
+  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run bun run agent:prepare, bun run agent:build-workflow-worker and bun run agent:stage-android first');
   if(hash(path.join(root,model.path))!==model.sha256)throw Error('Pinned BGE model bytes changed');
   const manifest={pin:receipt.pin,forkPin:receipt.forkPin,identity,abi:receipt.abi,model,libraries:libraries.map(({source,target,...row})=>row),jniIdentityRelocated:true,inputs:receipt.inputs,producerInputs:receipt.producerInputs,...(receipt.jniBinding?{jniBinding:receipt.jniBinding}:{})};
   // Refuse before copying anything: the voice host stages the same arm64 engine file.
@@ -153,5 +169,5 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   for(const row of libraries){fs.mkdirSync(path.dirname(row.target),{recursive:true});if(!fs.existsSync(row.target))fs.copyFileSync(row.source,row.target,fs.constants.COPYFILE_EXCL);}
   fs.mkdirSync(path.dirname(manifestFile),{recursive:true});fs.writeFileSync(manifestFile,JSON.stringify(manifest,null,2)+'\n');
   verifyEmbeddingHost(root,{requireProducerInputs:true});console.log('ARM64 embedding host staged with verified build inputs and library hashes.');
- }else throw Error('Usage: node scripts/stage-embedding-host.ts --receipt <PREPARATION.json> [--library-root <directory>] | --verify');
+ }else throw Error('Usage: bun scripts/stage-embedding-host.ts --receipt <PREPARATION.json> [--library-root <directory>] | --verify');
 }

@@ -52,7 +52,7 @@ async function nativeStub(page: Page, apps: App[], refusals: Record<string, Refu
         if (method === 'getLocaleInfo') return { locale: 'en-US', hour24: false };
         return {};
       }
-      if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: false, developmentBuild: true, topInset: 0, bottomInset: 0 };
+      if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: false, topInset: 0, bottomInset: 0 };
       if (plugin === 'AlphaNotifications' && method === 'status') return { permissionGranted: true, appEnabled: true };
       if (plugin === 'AlphaVoiceCloud' && method === 'checkPermissions') return { microphone: 'granted' };
       return {};
@@ -119,6 +119,98 @@ test('fresh Alpha Home shows core apps and loads installed apps only in Apps', a
   expect((await calls(page, 'launch'))[1]).toEqual({packageName: SETTINGS.packageName, activityName: SETTINGS.activityName});
 });
 
+test('Home and Apps icons fade on pointer press while keyboard focus stays visible', async ({page}) => {
+  const time=new Date('2026-11-15T00:00:00Z');
+  await page.clock.install({time});
+  await page.clock.pauseAt(new Date(time.getTime()+1000));
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await nativeStub(page, ALL, {}, false);
+  await page.goto('/');
+
+  async function pressIcon(tile: ReturnType<Page['locator']>, face: ReturnType<Page['locator']>) {
+    const icon=face.locator(':scope > :first-child');
+    await expect(tile).toBeVisible();
+    await expect(icon).toHaveCSS('opacity', '1');
+    // Alpha's shared reduced-motion rule leaves a negligible 0.01 ms transition.
+    expect(await icon.evaluate(node=>Number.parseFloat(getComputedStyle(node).transitionDuration))).toBeLessThan(0.001);
+    const background=await face.evaluate(node=>getComputedStyle(node).backgroundColor);
+    const bounds=(await icon.boundingBox())!;
+    await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+    await page.mouse.down();
+    try {
+      await expect(icon).toHaveCSS('opacity', '0.55');
+      await expect(face).toHaveCSS('background-color', background);
+      await expect(face).toHaveCSS('opacity', '1');
+      await expect(tile).toHaveCSS('outline-style', 'none');
+    } finally {
+      await page.mouse.move(0, 0);
+      await page.mouse.up();
+    }
+    await expect(icon).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Tab');
+    await tile.focus();
+    await expect(tile).toBeFocused();
+    await expect(tile).not.toHaveCSS('outline-style', 'none');
+  }
+
+  const homeTile=page.getByRole('region',{name:'Home',exact:true}).getByRole('button',{name:'Notes',exact:true});
+  await pressIcon(homeTile,homeTile.locator('[data-mobile-shell-tile-face]'));
+  const drawer=await openDrawer(page);
+  const drawerTile=drawer.getByRole('button',{name:'Open Clock',exact:true});
+  await pressIcon(drawerTile,drawerTile.locator(':scope > :first-child'));
+  expect(await calls(page, 'launch')).toEqual([]);
+});
+
+test('Home reuses its launcher projection during composer edits and refreshes changed apps', async ({ page }, info) => {
+  const inventory: App[] = Array.from({ length: 60 }, (_, index) => ({
+    packageName: `org.example.app${index}`, label: `Installed app ${index}`,
+  }));
+  await nativeStub(page, inventory, {}, false);
+  await page.goto('/');
+  const home = page.locator('[data-mobile-shell-home]');
+  const drawer = await openDrawer(page);
+  await expect(drawer.getByRole('button', { name: 'Open Installed app 59', exact: true })).toBeVisible();
+  await drawer.getByRole('button', { name: 'Close apps', exact: true }).click();
+  await expect(home.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).deviceListening())).toBe(true);
+
+  await page.evaluate(async () => {
+    const {alphaViews} = await import('/src/product/alpha-product.ts');
+    const counts = (window as any).homeProjectionCounts = { renders: 0, builtinKeys: 0, favoriteKeys: 0 };
+    const {available, launcherKey, fromLauncherKey} = alphaViews;
+    alphaViews.available = () => { counts.renders++; return available(); };
+    alphaViews.launcherKey = view => { counts.builtinKeys++; return launcherKey(view); };
+    alphaViews.fromLauncherKey = key => { counts.favoriteKeys++; return fromLauncherKey(key); };
+  });
+  const counts = () => page.evaluate(() => ({ ...(window as any).homeProjectionCounts }));
+  const ask = page.getByRole('textbox', { name: 'Ask Alpha', exact: true });
+  for (const text of ['a', 'ab', 'abc', 'abcd']) {
+    const before = await counts();
+    await ask.fill(text);
+    await expect(ask).toHaveValue(text);
+    await expect.poll(() => counts().then(value => value.renders)).toBeGreaterThan(before.renders);
+  }
+  const measured = await counts();
+  await info.attach('stable Home projection counts', { body: JSON.stringify(measured), contentType: 'application/json' });
+  expect(measured).toMatchObject({ builtinKeys: 0, favoriteKeys: 0 });
+
+  await page.locator('[data-alpha-dock-scrim="true"]').click({ position: { x: 12, y: 12 } });
+  const reopened = await openDrawer(page);
+  await longPress(reopened.getByRole('button', { name: 'Open Installed app 0', exact: true }));
+  await reopened.getByRole('menuitem', { name: 'Add to Home', exact: true }).click();
+  const added = home.getByRole('button', { name: 'Installed app 0', exact: true });
+  await expect(added).toBeVisible();
+  const renamed = { ...inventory[0], label: 'Renamed app' };
+  await page.evaluate(apps => (window as any).deviceChange(apps, true), [renamed, ...inventory.slice(1)]);
+  await expect(added).toHaveCount(0);
+  const current = home.getByRole('button', { name: 'Renamed app', exact: true });
+  await expect(current).toBeVisible();
+  await current.click();
+  expect(await calls(page, 'launch')).toEqual([{ packageName: renamed.packageName }]);
+  await page.evaluate(apps => (window as any).deviceChange(apps, true), inventory.slice(1));
+  await expect(current).toHaveCount(0);
+});
+
 test('same-label apps are separate tiles and each opens exactly its own component and profile', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await nativeStub(page, ALL, { 'com.vendor.notes/com.vendor.notes.Launch#10': { message: 'Work apps are paused or locked. Turn on work apps in Android, then try again.', code: 'profile-locked' } });
@@ -145,7 +237,7 @@ test('same-label apps are separate tiles and each opens exactly its own componen
 
   // The locked work copy is asked for by profile and its refusal is shown; the personal copy is not opened instead.
   await drawer.getByRole('button', { name: 'Open Notes (Work · locked)', exact: true }).click();
-  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. Work apps are paused or locked. Turn on work apps in Android, then try again.');
+  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. Work apps are paused or locked. Turn them on in Android, then try again.');
   expect((await calls(page, 'launch')).slice(2)).toEqual([{ packageName: 'com.vendor.notes', activityName: 'com.vendor.notes.Launch', user: '10' }]);
   expect(errors).toEqual([]);
 });
@@ -352,11 +444,11 @@ test('an app removed or disabled behind a stale tile reports why and leaves the 
   await page.goto('/');
   const drawer = await openDrawer(page);
   await drawer.getByRole('button', { name: 'Open Notes', exact: true }).click();
-  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. This app is no longer installed.');
+  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. It’s no longer installed.');
   // The stale tile is gone after the refusal; the reason stays visible and nothing else was opened.
   await expect(drawer.getByRole('button', { name: 'Open Notes', exact: true })).toHaveCount(0);
   await drawer.getByRole('button', { name: 'Open Clock', exact: true }).click();
-  await expect(drawer.getByRole('alert')).toHaveText('Clock could not be opened. This app is disabled. Enable it in Android settings to open it.');
+  await expect(drawer.getByRole('alert')).toHaveText('Clock could not be opened. It’s turned off. Turn it on in Android Settings to open it.');
   await expect(drawer.getByRole('button', { name: 'Open Clock', exact: true })).toHaveCount(0);
   expect(await calls(page, 'launch')).toHaveLength(2);
   await expect.poll(() => tiles(drawer)).toEqual(['Open Settings']);

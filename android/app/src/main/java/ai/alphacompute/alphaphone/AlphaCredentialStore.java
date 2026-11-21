@@ -36,6 +36,8 @@ final class AlphaCredentialStore {
  }
  static int slotLimit(String name){
   if(Slots.SMS_SEND_LEDGER.equals(name))return 1024*1024;
+  // Up to five individually valid pictures with base64 overhead before the owner's MMS review.
+  if(name!=null&&name.matches("sms-draft:v1:(new|thread:[1-9][0-9]{0,18})"))return 8*1024*1024;
   if(Slots.GMAIL_BACKGROUND.equals(name))return 2*1024*1024;
   if(Slots.NATIVE_DELETE_JOURNAL.equals(name)||Slots.NATIVE_CALENDAR_SYNC.equals(name))return 4*1024*1024;
   if(Slots.NOTES_AUDIO_DELETIONS.equals(name))return 1024*1024;
@@ -121,7 +123,7 @@ final class AlphaCredentialStore {
   });
  }
  /** Reads and commits use the SAME lifecycle→vault order as all credential mutations. */
- private <T>T recoveryStep(java.util.concurrent.Callable<T> step)throws Exception{
+ private <T>T lockedStep(java.util.concurrent.Callable<T> step)throws Exception{
   return AlphaLocalAgentPlugin.mutateCredentials(context,assertOwner,new AlphaLocalAgentPlugin.CredentialMutation<T>(){
    public boolean requiresShutdown(){return false;}
    public T commit()throws Exception{return step.call();}
@@ -130,7 +132,7 @@ final class AlphaCredentialStore {
  /** Automatic startup unbind is a no-op when native confirms there is no provider.
   * Explicit clear still uses removeCredentialSlot. */
  void removeProviderIfPresent()throws Exception{
-  String before=recoveryStep(()->slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT)));
+  String before=lockedStep(()->slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT)));
   if(before==null||new org.json.JSONObject(before).optBoolean("unbound"))return;
   if(!compareExchangeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,before,null))throw new IllegalStateException("Provider changed");
  }

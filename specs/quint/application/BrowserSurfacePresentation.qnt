@@ -1,6 +1,6 @@
 /// How the renderer shows and withdraws the native browser page: the poll's request, sent only
 /// when it differs from the last one, answers applied only for the latest request, and a
-/// presentation failure reported once and retried.
+/// visible presentation failure reported once and retried.
 module BrowserSurfacePresentation {
   // 0 withdraws the page; 1 and 2 are two page geometries. -1 forgets the last request so the
   // next poll sends again.
@@ -46,7 +46,7 @@ module BrowserSurfacePresentation {
   action withdraw = all { not(s.disposed), s.overlay or not(s.inBrowser), s.unanswered.length() < 3,
     s' = requested(s, Hidden) }
   // The native side answers in order. Only the answer to the latest request counts; a failure
-  // forgets the request so the next poll sends it again, and is reported once until a success.
+  // forgets the request so the next poll sends it again. Only visible failures are reported.
   action answer(ok: bool): bool = all {
     s.unanswered.length() > 0,
     val payload = s.unanswered.head()
@@ -56,7 +56,8 @@ module BrowserSurfacePresentation {
         recoveries: if (s.failed) s.recoveries + 1 else s.recoveries,
         acknowledged: if (payload != Hidden) payload else s.acknowledged }
       else { ...s, unanswered: s.unanswered.tail(), native: native, lastRequest: Forgotten, acknowledged: 0,
-        failed: true, reports: if (s.failed) s.reports else s.reports + 1 }
+        failed: s.failed or payload != Hidden,
+        reports: if (s.failed or payload == Hidden) s.reports else s.reports + 1 }
   }
   // A visibility change, a resumed page surface, or a dialog closing: the next poll sends again.
   action forget = all { not(s.disposed), s' = { ...s, lastRequest: Forgotten } }
@@ -94,6 +95,10 @@ module BrowserSurfacePresentation {
   run overlayWithdrawsTest = init.then(enterBrowser).then(tabCreated).then(poll(1)).then(answer(true))
     .then(setOverlay(true)).then(withdraw).expect(s.acknowledged == 0 and s.lastRequest == Hidden)
     .then(answer(true)).expect(s.native == Hidden).then(poll(1)).expect(s.unanswered.length() == 0 and safety)
+  run failedWithdrawalRetriesQuietlyTest = init.then(enterBrowser).then(tabCreated).then(poll(1)).then(answer(true))
+    .then(setOverlay(true)).then(withdraw).then(answer(false))
+    .expect(s.lastRequest == Forgotten and s.native == 1 and s.reports == 0 and not(s.failed) and safety)
+    .then(poll(1)).then(answer(true)).expect(s.native == Hidden and s.reports == 0 and safety)
   run failureReportedOnceTest = init.then(enterBrowser).then(tabCreated).then(poll(1)).then(answer(false))
     .expect(s.failed and s.reports == 1 and s.lastRequest == Forgotten).then(poll(1)).then(answer(false))
     .expect(s.reports == 1 and safety).then(poll(1)).then(answer(true))

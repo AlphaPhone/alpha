@@ -1,0 +1,134 @@
+import {parseXmlTree, type ManifestNode} from './apk.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import appConfig from '../app.config.json' with {type: 'json'};
+
+type RoleFilter = {
+  action: string;
+  scheme?: string;
+  mimeType?: string;
+  defaultCategory?: boolean;
+};
+type RoleComponent = {
+  name: string;
+  tag: 'activity' | 'service' | 'receiver' | 'provider';
+  exported: boolean;
+  permission?: string;
+  filters?: readonly RoleFilter[];
+};
+
+// The pinned PermissionController qualifies DIALER and SMS against these intent
+// handlers. Include their private call UI and MMS components for the actual role traffic.
+const roleComponents: readonly RoleComponent[] = [
+  {name: 'AlphaInCallService', tag: 'service', exported: true,
+    permission: 'android.permission.BIND_INCALL_SERVICE',
+    filters: [{action: 'android.telecom.InCallService'}]},
+  {name: 'AlphaCallActivity', tag: 'activity', exported: false},
+  {name: 'AlphaDialPadActivity', tag: 'activity', exported: true, filters: [
+    {action: 'android.intent.action.DIAL', defaultCategory: true},
+    {action: 'android.intent.action.DIAL', scheme: 'tel', defaultCategory: true},
+  ]},
+  {name: 'AlphaSmsDeliverReceiver', tag: 'receiver', exported: true,
+    permission: 'android.permission.BROADCAST_SMS',
+    filters: [{action: 'android.provider.Telephony.SMS_DELIVER'}]},
+  {name: 'AlphaMmsWapPushReceiver', tag: 'receiver', exported: true,
+    permission: 'android.permission.BROADCAST_WAP_PUSH',
+    filters: [{action: 'android.provider.Telephony.WAP_PUSH_DELIVER', mimeType: 'application/vnd.wap.mms-message'}]},
+  {name: 'AlphaMmsResultReceiver', tag: 'receiver', exported: false},
+  {name: 'AlphaRespondViaMessageService', tag: 'service', exported: true,
+    permission: 'android.permission.SEND_RESPOND_VIA_MESSAGE',
+    filters: [{action: 'android.intent.action.RESPOND_VIA_MESSAGE', scheme: 'smsto', defaultCategory: true}]},
+  {name: 'AlphaSmsComposeActivity', tag: 'activity', exported: true,
+    filters: [{action: 'android.intent.action.SENDTO', scheme: 'smsto', defaultCategory: true}]},
+  {name: 'ai.eliza.plugins.messages.MmsFileProvider', tag: 'provider', exported: false},
+];
+
+/** The staged add-on's provisioning directory, as the shared provisioning overlay defines it. */
+const LAUNCHER_PROVISIONING_DIR = 'launcher_provisioning_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/provisioning';
+
+const isTrue = (value: string | undefined) => value === 'true' || value === '0xffffffff';
+const isFalse = (value: string | undefined) => value === 'false' || value === '0x0';
+
+function matchesFilter(filter: ManifestNode, required: RoleFilter) {
+  if (filter.name !== 'intent-filter') return false;
+  const has = (tag: string, attribute: string, value: string) =>
+    filter.children.some(child => child.name === tag && child.attrs[attribute] === value);
+  const data = filter.children.filter(child => child.name === 'data');
+  // Android qualifies roles with generic intents, without host or path selectors.
+  const uriRestricted = filter.children.some(child => child.name === 'uri-relative-filter-group')
+    || data.some(child => Object.keys(child.attrs).some(attribute => attribute !== 'scheme' && attribute !== 'mimeType'));
+  return !uriRestricted && has('action', 'name', required.action)
+    && (!required.defaultCategory || has('category', 'name', 'android.intent.category.DEFAULT'))
+    && (required.scheme ? has('data', 'scheme', required.scheme) : data.every(child => !child.attrs.scheme))
+    && (required.mimeType ? has('data', 'mimeType', required.mimeType) : data.every(child => !child.attrs.mimeType));
+}
+
+/** Read the privately staged release APK's manifest before making the roles eligible at boot. */
+export function aospTelephonyRoleComponents(xmltree: string, packageName: string) {
+  // OS images enable default handlers only for the canonical application identity.
+  if (packageName !== appConfig.appId)
+    throw Error(`Alpha telephony roles are staged only for ${appConfig.appId}`);
+  const manifest = parseXmlTree(xmltree).children.find(node => node.name === 'manifest');
+  const application = manifest?.children.find(node => node.name === 'application');
+  if (manifest?.attrs.package !== packageName || !application ||
+      !/^[A-Za-z][\w]*(?:\.[A-Za-z][\w]*)+$/.test(packageName))
+    throw Error('Alpha telephony roles require the staged launcher package manifest');
+  const qualify = (name: string) => {
+    if (name.startsWith('.')) return packageName + name;
+    return name.includes('.') ? name : `${packageName}.${name}`;
+  };
+  return roleComponents.map(required => {
+    const name = qualify(required.name);
+    const candidates = application.children.filter(node => node.attrs.name && qualify(node.attrs.name) === name);
+    const node = candidates[0];
+    if (candidates.length !== 1 || node.name !== required.tag || !isFalse(node.attrs.enabled)
+        || !(required.exported ? isTrue(node.attrs.exported) : isFalse(node.attrs.exported))
+        || node.attrs.permission !== required.permission)
+      throw Error(`Alpha telephony roles require exactly one disabled ${required.tag} with the expected protection: ${name}`);
+    if (required.filters?.some(filter => !node.children.some(child => matchesFilter(child, filter))))
+      throw Error(`Alpha telephony role intent filters are incomplete: ${name}`);
+    if (node.name === 'provider' &&
+        (node.attrs.authorities !== `${packageName}.mms` || !isTrue(node.attrs.grantUriPermissions)))
+      throw Error(`Alpha telephony roles require ${name} to grant URI access for ${packageName}.mms`);
+    if (required.name === 'AlphaInCallService') {
+      const metadata = node.children.filter(child => child.name === 'meta-data');
+      if (!metadata.some(child => child.attrs.name === 'android.telecom.IN_CALL_SERVICE_UI' && isTrue(child.attrs.value))
+          || metadata.some(child => child.attrs.name === 'android.telecom.IN_CALL_SERVICE_CAR_MODE_UI' && isTrue(child.attrs.value)))
+        throw Error('Alpha telephony roles require the dialer InCallService UI');
+    }
+    return name;
+  });
+}
+
+/**
+ * Image-owned component defaults are applied by PackageManager during package scans, before an
+ * Activity can enable its own handlers. They keep the admitted image eligible across APK updates;
+ * they neither assign a role nor replace an owner's chosen Phone or Messages app.
+ * Platform mechanism: ScanPackageUtils.configurePackageComponents (AOSP frameworks/base).
+ */
+export function writeAospTelephonyRoleOverrides(output: string, xmltree: string, packageName: string) {
+  const components = aospTelephonyRoleComponents(xmltree, packageName);
+  const name = 'alpha-telephony-components.xml';
+  const xml = '<?xml version="1.0" encoding="utf-8"?>\n<config>\n'
+    + `    <component-override package="${packageName}">\n`
+    + components.map(component => `        <component class="${component}" enabled="true" />\n`).join('')
+    + '    </component-override>\n</config>\n';
+  const productMakefile = path.join(output, 'product.mk');
+  if (!fs.existsSync(productMakefile)) throw Error('Alpha telephony role defaults require a staged product.mk');
+  // A product that already defines launcher_provisioning_dir (production and Sense images, through
+  // the provisioning overlay) keeps its makefile byte for byte. Only a definition that precedes every
+  // `include` resolves to this product's directory: an include (such as a staged listener's
+  // listener.mk) changes $(lastword $(MAKEFILE_LIST)). The production Pixel 10a stage with
+  // --listener-apk stages the listener before the provisioning overlay, so its definition follows
+  // the listener include; that existing ordering is tracked separately and is not changed here.
+  // An owner development image has no provisioning overlay, so the output-relative directory is
+  // defined here, as the first line of product.mk, ahead of any include.
+  const product = fs.readFileSync(productMakefile, 'utf8');
+  const definesDir = /^launcher_provisioning_dir\s*:=/m.test(product);
+  fs.mkdirSync(path.join(output, 'provisioning'), {recursive: true});
+  fs.writeFileSync(path.join(output, 'provisioning', name), xml, {flag: 'wx'});
+  if (!definesDir) fs.writeFileSync(productMakefile, `${LAUNCHER_PROVISIONING_DIR}\n${product}`);
+  fs.appendFileSync(productMakefile,
+    `\nPRODUCT_COPY_FILES += $(launcher_provisioning_dir)/${name}:$(TARGET_COPY_OUT_SYSTEM_EXT)/etc/sysconfig/${name}\n`);
+  return components;
+}

@@ -1,21 +1,28 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /** Read-only version admission and receipts for unsigned main-push candidates.
  * This does not sign, reserve release versions, or publish an update.
  */
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
+import {sha256 as hash} from './sha256.ts';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {publicObject} from './deliver-app-update.ts';
 import {updateArtifactDigest} from './update-artifact.ts';
-import {APP_UPDATE_MANIFEST, APP_UPDATE_REPOSITORY as REPOSITORY, APP_UPDATE_TAG, LEGACY_APP_UPDATE_TAG, appUpdateManifestUrl} from './update-channel.ts';
+import {readUpstreamPin} from './upstream-pin.ts';
+import {NATIVE_BUILD_RECEIPT, readNativeBuildReceipt, verifyNativeBuildFiles, type NativeBuildReceipt} from './native-build-inputs.ts';
+import {
+  APP_UPDATE_MANIFEST, APP_UPDATE_REPOSITORY as REPOSITORY, APP_UPDATE_REPOSITORY_ID as REPOSITORY_ID,
+  APP_UPDATE_TAG, LEGACY_APP_UPDATE_TAG,
+  appUpdateManifestUrl, isPublishedUpdateApkUrl,
+} from './update-channel.ts';
 
 type CandidateOptions = {root?: string; env?: NodeJS.ProcessEnv; api?: InventoryApi; read?: typeof publicObject};
 type InventoryApi = (args: string[], options?: {missing?: boolean}) => unknown;
 interface ProductConfig {appId: string; versionCode: number; updateManifestUrl: string}
-interface CandidateRun {id: number; workflow_id: number; path: string; event: string; head_branch: string; head_sha: string; head_repository?: {full_name: string}; run_number: number; run_attempt: number}
+interface RepositoryIdentity {id: number; full_name: string}
+interface CandidateRun {id: number; workflow_id: number; path: string; event: string; head_branch: string; head_sha: string; repository?: RepositoryIdentity; head_repository?: RepositoryIdentity; run_number: number; run_attempt: number}
 interface StableRelease {id: number; draft: boolean}
 interface StableAsset {name: string}
 interface UpdateOffer {schema: string; variant: string; signerSha256: string; sha256: string; sizeBytes: number; apkUrl: string; versionCode: number}
@@ -23,16 +30,9 @@ interface ArchiveRecord {testMocks: boolean; runtimeProfile: string; updateChann
 interface VerifiedApk extends ArchiveRecord {mode: string; variant: string; file: string; packageName: string; versionCode: number; signed: boolean; signerSha256: string | null; distributable: boolean; debuggable: boolean; runtime: string; home: boolean; launcher: boolean; sha256: string; releaseAdmission: {failures: unknown[]; blockers: string[]}}
 interface ArchiveVerification extends ArchiveRecord {upstream: {commit: string}; allowUnpackagedRuntime: boolean; results: VerifiedApk[]}
 interface InputFreeze {files: Record<string, string>; digest: string}
-interface NativeInputAdmission {
-  schema: string; source: string; sdkCommit: string; packageName: string; runId: string; attempt: string;
-  manifestSha256: string; voiceRecordSha256: string; embeddingRecordSha256: string;
-  artifacts: Record<string, {artifactId: number; sha256: string; source: string; run: number; archiveBytes: number; expandedBytes: number}>;
-  embedding: {compiledAlpha: string; compiledSDK: string; native: string; qualifiedAt: string; qualificationTransferred: boolean};
-}
-interface NativeInputPlan {artifacts: Record<string, {id: string; sha256: string}>}
 interface UploadedCandidate {
   id: number; name: string; digest: string; expired: boolean; size_in_bytes: number;
-  workflow_run?: {id: number; head_sha: string};
+  workflow_run?: {id: number; head_sha: string; head_branch: string; repository_id: number; head_repository_id: number};
 }
 type VersionAdmission = Awaited<ReturnType<typeof candidateVersion>>;
 type ApkDigest = {file: string; bytes: number; sha256: string};
@@ -43,24 +43,17 @@ const WORKFLOW = '.github/workflows/resident-android.yml';
 const WORKFLOW_ID = 373209004;
 const MAX_CODE = 2100000000;
 const NATIVE_INPUT_RECEIPT = 'native-input-admission.json';
-const GENERATED_NATIVE_INPUT_RECEIPT = 'test-results/resident-ci-native-inputs/admission.json';
-const NATIVE_ARTIFACTS = ['voice', 'embeddingComponent', 'embeddingQualification'];
-const NATIVE_INPUT_RECORDS = {
-  manifestSha256: 'android/hosted-native-inputs.json',
-  voiceRecordSha256: 'android/voice-host/qualified-voice-host.json',
-  embeddingRecordSha256: 'android/embedding-host/qualified-host.json',
-} as const;
-const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 function code(value: number) {
   assert.ok(Number.isSafeInteger(value) && value > 0 && value <= MAX_CODE, 'Invalid Android versionCode');
   return value;
 }
 function identity(root: string, env: NodeJS.ProcessEnv) {
-  assert.equal(env.GITHUB_REPOSITORY, REPOSITORY, 'Candidates require the product repository');
+  assert.equal(env.GITHUB_REPOSITORY?.toLowerCase(), REPOSITORY, 'Candidates require the product repository');
+  assert.equal(env.GITHUB_REPOSITORY_ID, String(REPOSITORY_ID), 'Candidate repository ID differs');
   assert.equal(env.GITHUB_EVENT_NAME, 'push', 'Candidates require a main push');
   assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Candidates require main');
-  assert.equal(env.GITHUB_WORKFLOW_REF, `${REPOSITORY}/${WORKFLOW}@refs/heads/main`, 'Candidate workflow changed; review its version epoch');
+  assert.equal(env.GITHUB_WORKFLOW_REF, `${env.GITHUB_REPOSITORY}/${WORKFLOW}@refs/heads/main`, 'Candidate workflow changed; review its version epoch');
   assert.match(env.GITHUB_SHA || '', /^[0-9a-f]{40}$/, 'Exact source commit required');
   for (const name of ['GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_RUN_ATTEMPT']) {
     assert.match(env[name] || '', /^[1-9][0-9]{0,15}$/, `Exact ${name} required`);
@@ -68,10 +61,10 @@ function identity(root: string, env: NodeJS.ProcessEnv) {
   }
   const git = (args: string[]) => execFileSync('git', args, {cwd: root, encoding: 'utf8'}).trim();
   assert.equal(git(['rev-parse', 'HEAD']), env.GITHUB_SHA, 'Candidate source changed');
-  const sdkCommit = readJson<{commit: string}>(path.join(root, 'upstream.lock.json')).commit;
+  const sdkCommit = readUpstreamPin(root).commit;
   assert.match(sdkCommit || '', /^[0-9a-f]{40}$/);
   assert.equal(git(['-C', 'vendor/eliza', 'rev-parse', 'HEAD']), sdkCommit, 'Candidate SDK changed');
-  return {sourceCommit: env.GITHUB_SHA, sdkCommit, workflow: env.GITHUB_WORKFLOW_REF, workflowId: WORKFLOW_ID,
+  return {sourceCommit: env.GITHUB_SHA, sdkCommit, workflow: `${REPOSITORY}/${WORKFLOW}@refs/heads/main`, workflowId: WORKFLOW_ID,
     runId: env.GITHUB_RUN_ID, runNumber: env.GITHUB_RUN_NUMBER, runAttempt: env.GITHUB_RUN_ATTEMPT,
     versionCode: code(Number(env.GITHUB_RUN_NUMBER))};
 }
@@ -82,6 +75,49 @@ function gh(args: string[], {missing = false}: {missing?: boolean} = {}): unknow
     throw Error('Candidate inventory read failed; do not guess a version floor');
   }
 }
+
+/** The upload is finalized before this read, but REST visibility can lag it.
+ * Fetch directly so a nested Bun/gh subprocess cannot lose the response. */
+export async function uploadedCandidateMetadata(id: string, token: string | undefined, {
+  request = fetch, wait = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds)),
+}: {request?: typeof fetch; wait?: (milliseconds: number) => Promise<void>} = {}): Promise<unknown> {
+  assert.ok(/^[1-9][0-9]{0,15}$/.test(id) && Number.isSafeInteger(Number(id)), 'Exact uploaded candidate artifact required');
+  assert.ok(token && !/[\r\n]/.test(token), 'Candidate metadata requires a GitHub token');
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let response: Response;
+    try {
+      response = await request('https://api.github.com/repos/' + REPOSITORY + '/actions/artifacts/' + id, {
+        headers: {Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'},
+        redirect: 'error', signal: AbortSignal.timeout(10000),
+      });
+    } catch {
+      if (attempt === 4) throw Error('Uploaded candidate metadata read failed after five attempts');
+      await wait(1000); continue;
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      if ([404, 429, 500, 502, 503, 504].includes(response.status) && attempt < 4) {await wait(1000); continue;}
+      throw Error('Uploaded candidate metadata read failed (HTTP ' + response.status + ')');
+    }
+    assert.ok(response.body, 'Uploaded candidate metadata body is missing');
+    const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {chunk = await reader.read();}
+        catch {throw Error('Uploaded candidate metadata stream failed');}
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > 16 * 1024 * 1024) {await reader.cancel(); throw Error('Uploaded candidate metadata exceeds 16 MiB');}
+        chunks.push(chunk.value);
+      }
+    } finally {reader.releaseLock();}
+    try {return JSON.parse(Buffer.concat(chunks).toString('utf8'));}
+    catch {throw Error('Uploaded candidate metadata is not JSON');}
+  }
+  throw Error('Uploaded candidate metadata was not available');
+}
 function archiveDirectory(root: string, archive: string) {
   const directory = path.resolve(root, archive);
   assert.ok(directory.startsWith(path.join(root, 'test-results') + path.sep), 'Candidate archive must be an owned test-results leaf');
@@ -89,9 +125,9 @@ function archiveDirectory(root: string, archive: string) {
 }
 function nativeInputReceipt(archive: string) {
   const file = path.join(archive, NATIVE_INPUT_RECEIPT), stat = fs.lstatSync(file);
-  assert.ok(stat.isFile() && stat.size > 0 && stat.size <= 65536, 'Candidate needs a bounded native input admission receipt');
+  assert.ok(stat.isFile() && stat.size > 0 && stat.size <= 2 * 1024 * 1024, 'Candidate needs a bounded native input admission receipt');
   const bytes = fs.readFileSync(file);
-  return {record: JSON.parse(bytes.toString('utf8')) as NativeInputAdmission, sha256: hash(bytes)};
+  return {record: JSON.parse(bytes.toString('utf8')) as NativeBuildReceipt, sha256: hash(bytes)};
 }
 
 /** Reuse delivery's stable APK names and anonymous manifest transport. Read all
@@ -102,7 +138,8 @@ export async function candidateVersion({root = process.cwd(), env = process.env,
   const run = api([`repos/${REPOSITORY}/actions/runs/${context.runId}`]) as CandidateRun;
   assert.ok(run.id === Number(context.runId) && run.workflow_id === WORKFLOW_ID &&
     run.path === WORKFLOW && run.event === 'push' && run.head_branch === 'main' &&
-    run.head_sha === context.sourceCommit && run.head_repository?.full_name === REPOSITORY &&
+    run.head_sha === context.sourceCommit && [run.repository, run.head_repository].every(repository =>
+      repository?.id === REPOSITORY_ID && repository.full_name?.toLowerCase() === REPOSITORY) &&
     run.run_number === context.versionCode && run.run_attempt === Number(context.runAttempt),
   'Candidate run identity or workflow version epoch changed');
   const config = readJson<ProductConfig>(path.join(root, 'app.config.json'));
@@ -110,8 +147,8 @@ export async function candidateVersion({root = process.cwd(), env = process.env,
   const descriptor = readJson<{lastRelease?: {versionCode: number | null}}>(path.join(root, 'android/release-signer.json'));
   const floors = [code(config.versionCode)];
   if (descriptor.lastRelease?.versionCode !== null) floors.push(code(descriptor.lastRelease?.versionCode as number));
-  const repository = api([`repos/${REPOSITORY}`]) as {private: boolean};
-  assert.equal(repository.private, false, 'Candidate inventory must be publicly readable');
+  const repository = api([`repos/${REPOSITORY}`]) as RepositoryIdentity & {private: boolean};
+  assert.ok(repository.id === REPOSITORY_ID && repository.full_name?.toLowerCase() === REPOSITORY && repository.private === false, 'Candidate inventory must be the public product repository');
   let manifestSha256: string | null = null;
   for (const tag of [LEGACY_APP_UPDATE_TAG, APP_UPDATE_TAG] as const) {
     const url = appUpdateManifestUrl(tag);
@@ -137,7 +174,7 @@ export async function candidateVersion({root = process.cwd(), env = process.env,
       assert.ok(offer.schema === 'alpha-update/v1' && offer.variant === 'launcher' &&
         /^[0-9a-f]{64}$/.test(offer.signerSha256 || '') && /^[0-9a-f]{64}$/.test(offer.sha256 || '') &&
         Number.isSafeInteger(offer.sizeBytes) && offer.sizeBytes > 0 && offer.sizeBytes <= 2**31 &&
-        offer.apkUrl === new URL(`alpha-phone-${code(offer.versionCode)}.apk`, url).href, 'Malformed stable pointer');
+        isPublishedUpdateApkUrl(offer.apkUrl, tag, code(offer.versionCode)), 'Malformed stable pointer');
       floors.push(offer.versionCode);
       if (tag === APP_UPDATE_TAG) manifestSha256 = pointer.sha256;
     } else {
@@ -179,42 +216,39 @@ export function candidateReceipt({root = process.cwd(), env = process.env, admis
   assert.equal(hash(JSON.stringify(before.files)), before.digest, 'Archive input fingerprint differs');
   assert.equal(before.files['upstream.lock.json'], hash(fs.readFileSync(path.join(root, 'upstream.lock.json'))), 'Archive source lock differs');
   const native = nativeInputReceipt(archive);
-  assert.equal(before.files[GENERATED_NATIVE_INPUT_RECEIPT], native.sha256, 'Generated native input receipt differs from the build freeze');
-  assert.ok(native.record.schema === 'alpha-hosted-native-input-admission/v1' &&
-    native.record.source === context.sourceCommit && native.record.sdkCommit === context.sdkCommit &&
-    native.record.packageName === config.appId && native.record.runId === context.runId && native.record.attempt === context.runAttempt,
-  'Native input admission does not bind the exact candidate source, package, SDK and run attempt');
-  for (const key of Object.keys(NATIVE_INPUT_RECORDS) as (keyof typeof NATIVE_INPUT_RECORDS)[]) {
-    const file = NATIVE_INPUT_RECORDS[key], digest = native.record[key];
-    assert.ok(/^[0-9a-f]{64}$/.test(digest) && before.files[file] === digest &&
-      hash(fs.readFileSync(path.join(root, file))) === digest, `Native input admission differs from frozen ${file}`);
+  assert.equal(before.files[NATIVE_BUILD_RECEIPT], native.sha256, 'Generated native input receipt differs from the build freeze');
+  const generated = readNativeBuildReceipt(root);
+  assert.ok(generated, 'Native input build receipt is missing');
+  assert.equal(hash(fs.readFileSync(path.join(root, NATIVE_BUILD_RECEIPT))), native.sha256,
+    'Native input receipt differs from the staged build');
+  verifyNativeBuildFiles(root, generated);
+  for (const file of generated.files) {
+    assert.equal(before.files[file.path], file.sha256, `Native output differs from frozen ${file.path}`);
   }
-  const plan = readJson<NativeInputPlan>(path.join(root, NATIVE_INPUT_RECORDS.manifestSha256));
-  assert.deepEqual(Object.keys(native.record.artifacts ?? {}).sort(), [...NATIVE_ARTIFACTS].sort(), 'Native input admission needs all three artifacts');
-  for (const name of NATIVE_ARTIFACTS) {
-    const actual = native.record.artifacts[name], expected = plan.artifacts[name];
-    assert.ok(expected && Number.isSafeInteger(actual.artifactId) && String(actual.artifactId) === expected.id &&
-      actual.sha256 === expected.sha256 && /^[0-9a-f]{64}$/.test(actual.sha256) && /^[0-9a-f]{40}$/.test(actual.source) &&
-      Number.isSafeInteger(actual.run) && actual.run > 0 &&
-      Number.isSafeInteger(actual.archiveBytes) && actual.archiveBytes > 0 &&
-      Number.isSafeInteger(actual.expandedBytes) && actual.expandedBytes > 0, `Native input artifact ${name} differs from its frozen plan`);
+  assert.ok(native.record.schema === 'alpha-native-build/v1' &&
+    native.record.consumerSdkCommit === admission.sdkCommit &&
+    /^[0-9a-f]{40}$/.test(native.record.producer.sdkCommit) &&
+    native.record.recipe.identity === config.appId &&
+    native.record.producer.ndk === native.record.recipe.toolchain.ndk &&
+    native.record.producer.cmake === native.record.recipe.toolchain.cmake &&
+    native.record.producer.python === native.record.recipe.python &&
+    ['linux', 'darwin'].includes(native.record.producer.platform) &&
+    ['x64', 'arm64'].includes(native.record.producer.arch),
+  'Native input build must bind its actual source, package and toolchain');
+  for (const [file, digest] of Object.entries(native.record.recipe.productInputs)) {
+    assert.equal(before.files[file], digest, `Native input recipe differs from frozen ${file}`);
   }
-  const component = native.record.embedding;
-  const engine = readJson<{forkPin: string}>(path.join(root, NATIVE_INPUT_RECORDS.embeddingRecordSha256)).forkPin;
-  assert.ok(component && /^[0-9a-f]{40}$/.test(component.compiledAlpha) && /^[0-9a-f]{40}$/.test(component.compiledSDK) &&
-    component.native === engine && typeof component.qualifiedAt === 'string' && Number.isFinite(Date.parse(component.qualifiedAt)) &&
-    component.qualificationTransferred === false, 'Native input embedding qualification is incomplete');
   const manifest = readJson<Record<string, string>>(path.join(archive, 'apk-manifest.json'));
   const releases = verified.results.filter(row => row.mode === 'release');
-  assert.equal(releases.length, 2, 'Exactly two release variants required');
+  assert.equal(releases.length, 1, 'Exactly one launcher release required');
   const apks: Record<string, ApkDigest> = {};
-  for (const variant of ['standalone', 'launcher']) {
+  for (const variant of ['launcher']) {
     const name = `${variant}-release-unsigned.apk`, file = path.join(archive, name);
     const row = releases.find(entry => entry.variant === variant);
     assert.ok(row && row.file === `artifacts/${name}` && row.packageName === config.appId &&
       row.versionCode === context.versionCode && row.signed === false && row.signerSha256 === null &&
       row.distributable === false && row.testMocks === false && row.debuggable === false &&
-      row.runtime === 'PACKAGED' && row.home === (variant === 'launcher') && row.launcher === true &&
+      row.runtime === 'PACKAGED' && row.home === true && row.launcher === true &&
       row.releaseAdmission.failures.length === 0 && row.releaseAdmission.blockers.includes('unsigned release'), 'Archive is not a genuine unsigned candidate');
     assert.deepEqual(row.updateChannel, channel);
     const stat = fs.lstatSync(file);
@@ -248,7 +282,7 @@ export function candidateArchiveSize({root = process.cwd(), env = process.env, a
   const rows = (JSON.parse(verification.toString('utf8')) as ArchiveVerification).results;
   const manifest = readJson<Record<string, string>>(path.join(archive, 'apk-manifest.json'));
   const debugApks: Record<string, ApkDigest> = {};
-  for (const variant of ['standalone', 'launcher']) {
+  for (const variant of ['launcher']) {
     for (const mode of ['debug', 'release']) {
       const name = `${variant}-${mode === 'debug' ? 'debug' : 'release-unsigned'}.apk`;
       const row = rows.find(item => item.variant === variant && item.mode === mode && item.file === 'artifacts/' + name);
@@ -265,6 +299,8 @@ export function candidateArchiveSize({root = process.cwd(), env = process.env, a
   const name = `app-native-candidate-${context.runNumber}-${context.sourceCommit}-${context.runId}-${context.runAttempt}`;
   assert.ok(metadata.id === Number(id) && metadata.name === name && metadata.digest === 'sha256:' + digest && metadata.expired === false &&
     metadata.workflow_run?.id === Number(context.runId) && metadata.workflow_run.head_sha === context.sourceCommit &&
+    metadata.workflow_run.head_branch === 'main' && metadata.workflow_run.repository_id === REPOSITORY_ID &&
+    metadata.workflow_run.head_repository_id === REPOSITORY_ID &&
     Number.isSafeInteger(metadata.size_in_bytes) && metadata.size_in_bytes > 0, 'Uploaded candidate artifact identity or size differs');
   let expandedBytes = 0, files = 0;
   function count(directory: string) {
@@ -294,7 +330,16 @@ export async function main(argv: string[], {root = process.cwd(), env = process.
   assert.ok(file.startsWith(path.join(root, 'test-results') + path.sep), 'Candidate output must be under test-results');
   let result;
   if (mode === 'version') result = await candidateVersion({root, env, api, read});
-  else if (mode === 'archive-size') result = candidateArchiveSize({root, env, api, archive});
+  else if (mode === 'archive-size') {
+    let artifactApi = api;
+    if (!artifactApi) {
+      identity(root, env);
+      assert.match(env.ALPHA_CANDIDATE_ARTIFACT_SHA256 ?? '', /^[0-9a-f]{64}$/, 'Exact uploaded candidate digest required');
+      const metadata = await uploadedCandidateMetadata(env.ALPHA_CANDIDATE_ARTIFACT_ID ?? '', env.GH_TOKEN);
+      artifactApi = () => metadata;
+    }
+    result = candidateArchiveSize({root, env, api: artifactApi, archive});
+  }
   else {
     const admission = readJson<VersionAdmission>(path.resolve(root, destination));
     // The published floor may advance while this unsigned build is running.

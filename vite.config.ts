@@ -1,4 +1,5 @@
 import {checkCloudDeployment} from './scripts/cloud-deployment.ts';
+import {CLOUD_DEPLOYMENT_IS_CANDIDATE} from './scripts/cloud-deployment-policy.ts';
 import {browserCloudDevBridge} from './scripts/browser-cloud-dev-bridge.ts';
 import {localOcrAssets} from './scripts/local-ocr-assets.ts';
 import { browserPdfAssets } from './scripts/browser-pdf-assets.ts';
@@ -15,7 +16,8 @@ import appConfig from './app.config.json' with { type: 'json' };
 // test-only mocks, fixtures and developer surfaces into a build. Anything else is off.
 // Only this single key is exposed; envPrefix stays VITE_ so ELIZA_* secrets never reach the bundle.
 checkCloudDeployment(fileURLToPath(new URL('.', import.meta.url)));
-const flagOn = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === '1' || process.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === '1';
+const flagOn = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === '1';
+const viteCacheScope = (process.env.ALPHA_VITE_CACHE_SCOPE ?? '').replace(/[^\w.-]/g, '');
 const appVersion = process.env.ELIZAOS_VERSION_NAME?.trim() || appConfig.version;
 const prototypeDirectory = fileURLToPath(new URL('./apps/app/src/prototype/', import.meta.url));
 const fixturesModule = path.join(prototypeDirectory, 'fixtures.js');
@@ -94,7 +96,7 @@ function productionSurface(): Plugin[] {
       name: 'alpha-build-flags',
       apply: 'build',
       generateBundle() {
-        this.emitFile({ type: 'asset', fileName: 'build-flags.json', source: JSON.stringify({ testMocks: flagOn }) + '\n' });
+        this.emitFile({ type: 'asset', fileName: 'build-flags.json', source: JSON.stringify({ testMocks: flagOn, ...(CLOUD_DEPLOYMENT_IS_CANDIDATE ? { candidateCloud: true } : {}) }) + '\n' });
       },
     },
   ];
@@ -102,9 +104,16 @@ function productionSurface(): Plugin[] {
 
 export default defineConfig({
   root: "apps/app",
+  // Worktrees may share node_modules; one preview must not replace another preview's optimized modules.
+  // Concurrent browser-test runs in one worktree must not share one either: playwright.config.ts
+  // scopes its servers' caches by port. Plain dev:ui and builds keep the unscoped directory.
+  cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}${viteCacheScope ? `-${viteCacheScope}` : ""}/`, import.meta.url)),
   plugins: [productionSurface(), localOcrAssets(), browserPdfAssets(), browserFullReload(), react(), localAgentDevBridge(), browserCloudDevBridge()],
   define: {
     'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify(flagOn ? '1' : ''),
+    // The local agent's product connection sheet: only bun run dev (scripts/dev-local.ts) passes '0'.
+    // Unset (dev:ui and its browser lanes) or '1' keeps the development sheet.
+    'import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW': JSON.stringify(flagOn && process.env.VITE_LOCAL_AGENT === '1' && process.env.ALPHA_DEV_CONNECTION_TOOLS === '0' ? '1' : ''),
     __APP_VERSION__: JSON.stringify(appVersion),
     'import.meta.env.VITE_ALPHA_DEV_CARTESIA':JSON.stringify(flagOn&&process.env.ALPHA_DEV_CARTESIA==='1'?'1':''),
   },
@@ -122,27 +131,73 @@ export default defineConfig({
       "@elizaos/contracts/telephony-actions": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/telephony-actions.ts", import.meta.url)),
       "@elizaos/contracts/device-action-execution": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/device-action-execution.ts", import.meta.url)),
       "@elizaos/contracts/client-turn-observation": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/client-turn-observation.ts", import.meta.url)),
-      "@elizaos/ui/view-primitives": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/view-primitives.ts",import.meta.url)),
-      "@elizaos/capacitor-system/shade": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-native-system/src/client/shade.ts",import.meta.url)),
       "@elizaos/capacitor-system/launcher": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts",import.meta.url)),
-      // The core entry precedes the shell entry: an alias also matches its own subpaths.
-      "@elizaos/ui/mobile-shell/core": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/mobile-shell/core.ts",import.meta.url)),
-      "@elizaos/ui/mobile-shell": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/mobile-shell/index.ts",import.meta.url)),
-      "@elizaos/ui/voice/voice-session-client": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/voice/voice-session-client-core.ts",import.meta.url)),
       "@elizaos/host/voice/ui-context": fileURLToPath(new URL("./.eliza/client-features/packages/host/src/voice/ui-context.ts",import.meta.url)),
+      // Upstream plugin-notes types its fetch with the UI transport; Alpha owns that UI module.
+      "@elizaos/ui/api/transport": fileURLToPath(new URL("./apps/app/src/ui/api/transport.ts",import.meta.url)),
       "@elizaos/core/read-memo": fileURLToPath(new URL("./.eliza/client-features/packages/core/src/read-memo.ts",import.meta.url)),
       "@elizaos/core/logging": fileURLToPath(new URL("./.eliza/client-features/packages/core/src/logging.ts",import.meta.url)),
       "@elizaos/core/view-interaction": fileURLToPath(new URL("./.eliza/client-features/packages/core/src/view-interaction.ts",import.meta.url)),
       "@elizaos/core/protocol": fileURLToPath(new URL("./.eliza/client-features/alpha-voice-core-protocol.ts",import.meta.url)),
       "@elizaos/voice/turn": fileURLToPath(new URL("./.eliza/client-features/packages/voice/src/turn.ts",import.meta.url)),
       "@elizaos/core/speech": fileURLToPath(new URL("./.eliza/client-features/packages/core/src/speech.ts",import.meta.url)),
-      "@elizaos/ui/voice/batch-conversation": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/voice/batch-conversation.ts",import.meta.url)),
-      "@elizaos/ui/accessibility/screen-focus": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/accessibility/screen-focus.ts",import.meta.url)),
-      "@elizaos/ui/voice/voice-chat-playback": fileURLToPath(new URL("./.eliza/client-features/packages/ui/src/voice/voice-chat-playback.ts",import.meta.url)),
       "@elizaos/cloud-sdk/subscription-entitlement": fileURLToPath(new URL("./.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts",import.meta.url)),
       "@elizaos/contracts/deletion-window": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/deletion-window.ts",import.meta.url)),
       "@elizaos/contracts/sms-send": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/sms-send.ts",import.meta.url)),
       "@elizaos/contracts/native-notes-query": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/native-notes-query.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/cloud-provider": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/cloud-provider.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/contracts": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/contracts.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/device-navigation": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/device-navigation.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/guidance": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/guidance.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/location": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/location.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/navigation-fix": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/route-distance": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/route-distance.ts",import.meta.url)),
+      "@elizaos/plugin-maps/client/saved-places": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts",import.meta.url)),
+      "@elizaos/plugin-files/browser/storage-model": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts",import.meta.url)),
+      "@elizaos/plugin-files/browser/files-agent-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-files/src/browser/files-agent-contract.ts",import.meta.url)),
+      "@elizaos/plugin-notes/types": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-notes/src/types.ts",import.meta.url)),
+      "@elizaos/plugin-notes/note-authored": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-notes/src/note-authored.ts",import.meta.url)),
+      "@elizaos/plugin-notes/note-format": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-notes/src/note-format.ts",import.meta.url)),
+      "@elizaos/plugin-notes/client/notes-api": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts",import.meta.url)),
+      "@elizaos/plugin-notes/client/note-origin": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-notes/src/client/note-origin.ts",import.meta.url)),
+      "@elizaos/plugin-notes/client/note-schedule-draft": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-notes/src/client/note-schedule-draft.ts",import.meta.url)),
+      "@elizaos/plugin-calendar/client/availability-review": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-calendar/src/client/availability-review.ts",import.meta.url)),
+      "@elizaos/plugin-calendar/linked-sync": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-calendar/src/linked-sync/index.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/attachments": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/attachments.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/background-notices": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/background-notices.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/digest": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/digest.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/failures": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/failures.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/grants": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/grants.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/mailbox-list": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/mailbox-list.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/operation-journal": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/operation-journal.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/read-state": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/read-state.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/retained-draft": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/retained-draft.ts",import.meta.url)),
+      "@elizaos/plugin-inbox/mailbox/types": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts",import.meta.url)),
+      "@elizaos/plugin-workflow/client/hosted-digests": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts",import.meta.url)),
+      "@elizaos/plugin-workflow/services/hosted-digest-policy": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-workflow/src/services/hosted-digest-policy.ts",import.meta.url)),
+      "@elizaos/capacitor-camera/host-ports": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-native-camera/src/host-ports.ts",import.meta.url)),
+      "@elizaos/capacitor-camera/scan-document": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-native-camera/src/scan-document.ts",import.meta.url)),
+      "@elizaos/core/events": fileURLToPath(new URL("./.eliza/client-features/packages/core/src/events.ts",import.meta.url)),
+      "@elizaos/contracts/native-telephony": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/native-telephony.ts",import.meta.url)),
+      "@elizaos/contracts/phone-workflow": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/phone-workflow.ts",import.meta.url)),
+      "@elizaos/contracts/workflow-client": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/workflow-client.ts",import.meta.url)),
+      "@elizaos/contracts/workflow-scope": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/workflow-scope.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/browser-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/camera-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/client-coordinator": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/clock-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/files-browser-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/maps-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/maps-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/notes-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/notes-organize-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/notes-query-result": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-query-result.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/photo-library-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photo-library-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/photos-view-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/reminder-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/reminder-create-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-create-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/reminder-journal": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/telephony-actions-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/workflow-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/workflow-contract.ts",import.meta.url)),
       "@elizaos/contracts": fileURLToPath(new URL("./.eliza/client-features/client-contracts.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-calendar-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-clock-review": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff.ts",import.meta.url)),
@@ -152,10 +207,10 @@ export default defineConfig({
   build: { outDir: "../../web-dist", emptyOutDir: true, sourcemap: false },
   server: { fs: { allow: [
     fileURLToPath(new URL('./apps/app', import.meta.url)),
-    // Vite emits worklet URLs using real paths when this prepared tree is shared by a worktree.
+    // Prepared upstream modules, by real path when a worktree shares this prepared tree.
     realpathSync(fileURLToPath(new URL('./.eliza/client-features', import.meta.url))),
-    fileURLToPath(new URL('./node_modules', import.meta.url)),
-    fileURLToPath(new URL('./vendor/eliza/plugins/plugin-native-system', import.meta.url)),
-    fileURLToPath(new URL('./vendor/eliza/plugins/plugin-assistant/src/services/device-actions', import.meta.url)),
+    // Vite resolves shared dependencies and the pinned password client to their real paths.
+    realpathSync(fileURLToPath(new URL('./node_modules', import.meta.url))),
+    realpathSync(fileURLToPath(new URL('./vendor/eliza/plugins/plugin-native-passwords/src', import.meta.url))),
   ] } },
 });

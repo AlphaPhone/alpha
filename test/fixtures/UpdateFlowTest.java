@@ -33,10 +33,10 @@ import java.util.function.Consumer;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Host-JVM run of AlphaDevicePlugin's update members, compiled from the plugin source by
- * test/app-update.test.mjs against the stubs in test/fixtures/app-update-jvm: one Context is one process whose
- * bridges all hear each broadcast. Most HTTPS responses are served in memory, with the plugin's deadline
- * shortened to three seconds (300 ms in the one scenario that waits it out). Not Android, PackageInstaller or network evidence: the stubs transcribe what AOSP's source
+ * Host-JVM run of AlphaDevicePlugin's update members, compiled from the plugin source by the update
+ * refinements under specs/quint/refinement/native against the stubs in test/fixtures/app-update-jvm: one Context is one process whose
+ * bridges all hear each broadcast. Most HTTPS responses are served in memory, with the download deadline
+ * shortened only in the trickle scenario. Not Android, PackageInstaller or network evidence: the stubs transcribe what AOSP's source
  * does, they do not prove it. One separate cache-retry scenario uses owned loopback TLS and real files;
  * its APK bytes and Android archive/installer ports are still synthetic.
  */
@@ -74,11 +74,14 @@ public final class UpdateFlowTest {
  private static final List<Served> connections=new CopyOnWriteArrayList<>();
  private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
  private static String sha256(byte[] bytes)throws Exception{return String.format("%064x",new BigInteger(1,MessageDigest.getInstance("SHA-256").digest(bytes)));}
+ private static volatile byte[] automaticManifest=new byte[0];
+ private static final java.util.concurrent.atomic.AtomicInteger syntheticManifestRequests=new java.util.concurrent.atomic.AtomicInteger();
  private static final class Served extends HttpsURLConnection {
   final CountDownLatch closed=new CountDownLatch(1);
-  Served(URL url){super(url);connections.add(this);}
-  @Override public int getResponseCode(){return 200;}
-  @Override public InputStream getInputStream(){return body.open(this);}
+  final boolean manifest;
+  Served(URL url){super(url);manifest=url.toString().equals(BuildConfig.ALPHA_UPDATE_MANIFEST_URL);if(!manifest)connections.add(this);}
+  @Override public int getResponseCode(){if(manifest)syntheticManifestRequests.incrementAndGet();return 200;}
+  @Override public InputStream getInputStream(){return manifest&&body==IN_MEMORY?new ByteArrayInputStream(automaticManifest):body.open(this);}
   @Override public void connect(){}
   @Override public void disconnect(){closed.countDown();}
   @Override public boolean usingProxy(){return false;}
@@ -135,7 +138,7 @@ public final class UpdateFlowTest {
  }
  private static PackageInfo archive(String packageName,long versionCode){
   PackageInfo info=new PackageInfo();info.packageName=packageName;info.versionCode=versionCode;
-  info.requestedPermissions=BuildConfig.IS_LAUNCHER?new String[]{"android.permission.INTERNET","android.permission.READ_CONTACTS"}:new String[]{"android.permission.INTERNET"};
+  info.requestedPermissions=new String[]{"android.permission.INTERNET","android.permission.READ_CONTACTS"};
   Signature signer=new Signature(new byte[]{7});
   info.signingInfo=new SigningInfo(new Signature[]{signer},new Signature[]{signer});
   return info;
@@ -224,7 +227,7 @@ public final class UpdateFlowTest {
  private static void settled()throws Exception{plugin("updateAsked",0L);}
  /** Alpha's last exchange with Android was this long ago, for the tests that measure the wait itself. */
  private static void aged(long millis)throws Exception{plugin("updateAsked",System.nanoTime()-TimeUnit.MILLISECONDS.toNanos(millis));}
- /** Every other scenario keeps three seconds, so a held download released after a few taps is still in time. */
+ /** Only the deadline scenarios shorten the production limits. */
  private static void deadline(long nanos)throws Exception{plugin("UPDATE_DEADLINE_NANOS",nanos);}
  private static void resume(AlphaDevicePlugin plugin){plugin.activity.state=Lifecycle.State.RESUMED;plugin.handleOnResume();}
  private static void stop(AlphaDevicePlugin plugin){plugin.activity.state=Lifecycle.State.CREATED;}
@@ -472,16 +475,17 @@ public final class UpdateFlowTest {
  private static void theDeadlineEndsATrickleNotADownloadThatFinishesInTime(File cache)throws Exception{
   Context context=installing(cache);
   AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
-  deadline(TimeUnit.MILLISECONDS.toNanos(300));
-  body=trickle(40);connections.clear();
-  PluginCall late;
-  try{late=tap(owner);}finally{deadline(TimeUnit.SECONDS.toNanos(3));}
-  check(late.rejected.get()==1&&late.resolved.get()==0,"a download still trickling at the deadline fails quietly");
-  check(connections.get(0).closed.getCount()==0&&context.packages.installer.sessions.isEmpty(),"its connection closes and nothing is staged");
-  deadline(TimeUnit.MILLISECONDS.toNanos(300));
-  body=trickle(2);
-  try{check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,"a slow download inside the deadline installs, and nothing held the failed attempt");}
-  finally{deadline(TimeUnit.SECONDS.toNanos(3));body=IN_MEMORY;}
+  long defaultDeadline=AlphaDevicePlugin.UPDATE_DEADLINE_NANOS;
+  try{
+   deadline(TimeUnit.MILLISECONDS.toNanos(300));
+   body=trickle(40);connections.clear();
+   PluginCall late=tap(owner);
+   check(late.rejected.get()==1&&late.resolved.get()==0,"a download still trickling at the deadline fails quietly");
+   check(connections.get(0).closed.getCount()==0&&context.packages.installer.sessions.isEmpty(),"its connection closes and nothing is staged");
+   deadline(TimeUnit.SECONDS.toNanos(3));
+   body=trickle(2);
+   check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,"a slow download inside the deadline installs, and nothing held the failed attempt");
+  }finally{deadline(defaultDeadline);body=IN_MEMORY;}
  }
  private static void destroyClosesADownloadInFlight(File cache)throws Exception{
   Context context=installing(cache);
@@ -1659,26 +1663,21 @@ public final class UpdateFlowTest {
   check(stays.activity.started.equals(List.of(answer)),"which hears Android's own status");
  }
  private static void onlyTheInstalledFlavorAndLineageReachAndroid(File cache)throws Exception{
-  for(boolean launcher:new boolean[]{true,false}){
-   Context context=installing(cache);
-   BuildConfig.IS_LAUNCHER=launcher;
-   context.packages.archive=archive(context.getPackageName(),8);
-   context.packages.archive.requestedPermissions=launcher?new String[]{"android.permission.INTERNET"}:
-     new String[]{"android.permission.INTERNET","android.permission.READ_CONTACTS"};
-   AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
-   AlphaLocalAgentPlugin.stops=0;
-   check(tap(owner).rejected.get()==1&&context.packages.installer.sessions.isEmpty()&&AlphaLocalAgentPlugin.stops==0,
-     "the opposite flavor is refused before staging or stopping the resident");
-   context.packages.archive=archive(context.getPackageName(),8);
-   Signature original=new Signature(new byte[]{7}),other=new Signature(new byte[]{8});
-   context.packages.archive.signingInfo=new SigningInfo(new Signature[]{other},new Signature[]{other});
-   check(tap(owner).rejected.get()==1&&context.packages.installer.sessions.isEmpty()&&AlphaLocalAgentPlugin.stops==0,
-     "a different signing lineage is refused before staging or stopping the resident");
-   context.packages.archive.signingInfo=new SigningInfo(new Signature[]{other},new Signature[]{original,other});
-   check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,
-     "a same-flavor successor with the original signing root reaches Android once");
-  }
-  BuildConfig.IS_LAUNCHER=true;
+  Context context=installing(cache);
+  context.packages.archive=archive(context.getPackageName(),8);
+  context.packages.archive.requestedPermissions=new String[]{"android.permission.INTERNET"};
+  AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
+  AlphaLocalAgentPlugin.stops=0;
+  check(tap(owner).rejected.get()==1&&context.packages.installer.sessions.isEmpty()&&AlphaLocalAgentPlugin.stops==0,
+    "an archive without the launcher marker is refused before staging or stopping the resident");
+  context.packages.archive=archive(context.getPackageName(),8);
+  Signature original=new Signature(new byte[]{7}),other=new Signature(new byte[]{8});
+  context.packages.archive.signingInfo=new SigningInfo(new Signature[]{other},new Signature[]{other});
+  check(tap(owner).rejected.get()==1&&context.packages.installer.sessions.isEmpty()&&AlphaLocalAgentPlugin.stops==0,
+    "a different signing lineage is refused before staging or stopping the resident");
+  context.packages.archive.signingInfo=new SigningInfo(new Signature[]{other},new Signature[]{original,other});
+  check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,
+    "a launcher successor with the original signing root reaches Android once");
  }
  private static void everyFailureSettlesQuietly(File cache)throws Exception{
   Context binder=installing(cache);
@@ -1710,6 +1709,53 @@ public final class UpdateFlowTest {
   check(tap(plugin).resolved.get()==1,"the tap settles");
   check(plugin.activity.started.size()==1&&plugin.activity.started.get(0).action.equals("android.settings.MANAGE_UNKNOWN_APP_SOURCES"),"Android's page opens");
   check(context.packages.installer.sessions.isEmpty(),"and nothing is downloaded or staged");
+ }
+ private static void assertInstallSourcePage(AlphaDevicePlugin plugin){
+  check(plugin.activity.started.size()==1,"exactly one Android activity opens");
+  Intent intent=plugin.activity.started.get(0);
+  check(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES.equals(intent.getAction()),"the Android install-source page opens");
+  check(("package:"+plugin.getContext().getPackageName()).equals(intent.getDataString()),"only Alpha's package is selected");
+  check(intent.getFlags()==Intent.FLAG_ACTIVITY_NEW_TASK,"the shared launcher handoff opens its own task");
+ }
+ private static void explicitUpdatePermissionOpensBeforeAnyOffer(File cache)throws Exception{
+  Context context=installing(cache);
+  Build.VERSION.SDK_INT=31;
+  context.packages.installsAllowed=false;
+  AlphaDevicePlugin permission=bridge(context,Lifecycle.State.RESUMED);
+  connections.clear();AlphaLocalAgentPlugin.stops=0;
+  int manifestReads=syntheticManifestRequests.get();
+  PluginCall request=new PluginCall(new JSObject());
+  permission.openUpdatePermissionSettings(request);request.awaitAnswer();
+  check(request.resolved.get()==1&&request.rejected.get()==0&&"opened".equals(request.result.optString("status")),"the handoff reports only that Android Settings opened");
+  assertInstallSourcePage(permission);
+  check("permission-required".equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"opening the page does not grant consent");
+  check(syntheticManifestRequests.get()==manifestReads&&connections.isEmpty()&&!download(context).exists(),"permission setup never checks the feed or downloads an APK");
+  check(context.packages.installer.internals.isEmpty()&&permission.events.isEmpty()&&AlphaLocalAgentPlugin.stops==0&&AlphaDevicePlugin.UpdatePause.store().read()==null,"permission setup never stages an install or pauses the resident");
+  Context older=installing(cache);
+  Build.VERSION.SDK_INT=30;
+  older.packages.installsAllowed=false;
+  AlphaDevicePlugin olderBridge=bridge(older,Lifecycle.State.RESUMED);
+  PluginCall unsupported=new PluginCall(new JSObject());
+  olderBridge.openUpdatePermissionSettings(unsupported);unsupported.awaitAnswer();
+  check(unsupported.resolved.get()==1&&"unsupported".equals(unsupported.result.optString("status"))&&olderBridge.activity.started.isEmpty(),"API 30 does not open automatic update setup");
+  PluginCall manual=tap(olderBridge);
+  check(manual.resolved.get()==1&&manual.result==null,"the manual handoff still resolves without a setup result");
+  assertInstallSourcePage(olderBridge);
+
+  Context unavailable=installing(cache);
+  AlphaDevicePlugin plugin=bridge(unavailable,Lifecycle.State.RESUMED);
+  plugin.activity.refuseStart=new SecurityException("settings unavailable");
+  PluginCall refused=new PluginCall(new JSObject());
+  plugin.openUpdatePermissionSettings(refused);refused.awaitAnswer();
+  check(refused.resolved.get()==0&&refused.rejected.get()==1&&plugin.activity.started.isEmpty(),"Android's refusal is reported as a rejection");
+
+  plugin.activity.deferUiWork=true;
+  PluginCall retired=new PluginCall(new JSObject());
+  plugin.openUpdatePermissionSettings(retired);
+  plugin.activity.destroyed=true;
+  plugin.activity.queuedUiWork.remove().run();retired.awaitAnswer();
+  check(retired.resolved.get()==0&&retired.rejected.get()==1&&plugin.activity.started.isEmpty(),"a retired activity cannot open Settings from queued work");
+  System.out.println("PASS explicit update permission opens only Alpha Android settings before an offer");
  }
  private static void appSignerIsTheOriginalCertificateOfOneSigner(File cache)throws Exception{
   Signature original=new Signature(new byte[]{1,2,3}),rotated=new Signature(new byte[]{4,5,6});
@@ -1839,8 +1885,18 @@ public final class UpdateFlowTest {
   }finally{com.getcapacitor.Plugin.ready=original;}
  }
  private static com.sun.net.httpserver.HttpsServer cacheTlsServer;
- private static URL cacheTlsTransport;
+ private static URL cacheTlsTransport,manifestTlsTransport;
  private static final java.util.concurrent.atomic.AtomicInteger cacheTlsRequests=new java.util.concurrent.atomic.AtomicInteger();
+ private static final java.util.concurrent.atomic.AtomicInteger manifestTlsRequests=new java.util.concurrent.atomic.AtomicInteger();
+ private static final java.util.concurrent.atomic.AtomicInteger uncachedManifestRequests=new java.util.concurrent.atomic.AtomicInteger();
+ private static final class ManifestReply {
+  final int status;final byte[] bytes;
+  ManifestReply(int status,byte[] bytes){this.status=status;this.bytes=bytes;}
+ }
+ private static volatile ManifestReply manifestTlsReply;
+ @FunctionalInterface private interface ManifestExchange {void send(com.sun.net.httpserver.HttpExchange exchange)throws IOException;}
+ private static volatile ManifestExchange manifestExchange;
+ private static volatile Runnable manifestOpenObserver=()->{};
  private static void prepareCacheTls(String file)throws Exception{
   var keys=java.security.KeyStore.getInstance("PKCS12");
   try(var input=Files.newInputStream(java.nio.file.Path.of(file))){keys.load(input,"fixture-pass".toCharArray());}
@@ -1850,21 +1906,103 @@ public final class UpdateFlowTest {
   HttpsURLConnection.setDefaultSSLSocketFactory(tls.getSocketFactory());
   cacheTlsServer=com.sun.net.httpserver.HttpsServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
   cacheTlsServer.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(tls));
+  cacheTlsServer.setExecutor(java.util.concurrent.Executors.newCachedThreadPool(work->{
+   Thread thread=new Thread(work,"UpdateFixtureTLS");thread.setDaemon(true);return thread;
+  }));
   cacheTlsServer.createContext("/cache",exchange->{cacheTlsRequests.incrementAndGet();exchange.sendResponseHeaders(200,APK.length);try(var output=exchange.getResponseBody()){output.write(APK);}finally{exchange.close();}});
+  cacheTlsServer.createContext("/manifest",exchange->{
+   manifestTlsRequests.incrementAndGet();
+   if("no-cache".equals(exchange.getRequestHeaders().getFirst("Cache-Control")))uncachedManifestRequests.incrementAndGet();
+   ManifestReply reply=manifestTlsReply;
+   exchange.getResponseHeaders().set("Cache-Control","public, max-age=86400");
+   try{
+    ManifestExchange override=manifestExchange;
+    if(override!=null){override.send(exchange);return;}
+    exchange.sendResponseHeaders(reply.status,reply.bytes.length==0?-1:reply.bytes.length);
+    if(reply.bytes.length>0)try(var output=exchange.getResponseBody()){output.write(reply.bytes);}
+   }finally{exchange.close();}
+  });
   // Capture the real JDK handler before this JVM's controlled URL route is installed.
   // Hostname/certificate verification stays on the owned TLS transport's IP SAN.
-  cacheTlsTransport=new URL("https://127.0.0.1:"+cacheTlsServer.getAddress().getPort()+"/cache");cacheTlsServer.start();
+  cacheTlsTransport=new URL("https://127.0.0.1:"+cacheTlsServer.getAddress().getPort()+"/cache");
+  manifestTlsTransport=new URL("https://127.0.0.1:"+cacheTlsServer.getAddress().getPort()+"/manifest");
+  cacheTlsServer.start();
  }
  static void serveFixtureHttps(){
-  URL.setURLStreamHandlerFactory(protocol->!"https".equals(protocol)?null:new URLStreamHandler(){@Override protected URLConnection openConnection(URL url)throws IOException{return cacheTlsTransport!=null&&url.getPath().equals("/tls-cache.apk")?cacheTlsTransport.openConnection():new Served(url);}});
+  URL.setURLStreamHandlerFactory(protocol->!"https".equals(protocol)?null:new URLStreamHandler(){
+   @Override protected URLConnection openConnection(URL url)throws IOException{
+    if(manifestTlsReply!=null&&url.toString().equals(BuildConfig.ALPHA_UPDATE_MANIFEST_URL)){
+     manifestOpenObserver.run();return manifestTlsTransport.openConnection();
+    }
+    return cacheTlsTransport!=null&&url.getPath().equals("/tls-cache.apk")?cacheTlsTransport.openConnection():new Served(url);
+   }
+  });
+ }
+ private static org.json.JSONObject manifestOffer(PluginCall offer)throws Exception{
+  return new org.json.JSONObject().put("schema","alpha-update/v1")
+   .put("variant","launcher").put("signerSha256",sha256(new byte[]{7}))
+   .put("apkUrl",offer.getString("apkUrl")).put("sha256",offer.getString("sha256"))
+   .put("sizeBytes",offer.getData().optLong("sizeBytes")).put("versionCode",offer.getData().optLong("versionCode"));
+ }
+ /** automaticUpdateStatus and selfUpdateAdmitted with and without the image's INSTALL_SELF_UPDATES grant. */
+ static org.json.JSONObject selfUpdateGrantStatuses(File cache)throws Exception{
+  org.json.JSONObject result=new org.json.JSONObject();
+  java.util.List<Context> contexts=new java.util.ArrayList<>();
+  try{
+  String[][] cases={{"granted30","1","0","30","35000"},{"granted","1","0","37","35000"},{"grantedEarlyBoot","1","0","37","30000"},
+   {"neither","0","0","37","35000"},{"consent","0","1","37","35000"}};
+  for(String[] c:cases){
+   Context context=installing(cache);contexts.add(context);context.selfUpdateGranted=c[1].equals("1");context.packages.installsAllowed=c[2].equals("1");
+   Build.VERSION.SDK_INT=Integer.parseInt(c[3]);android.os.SystemClock.uptime=Long.parseLong(c[4]);
+   result.put(c[0],new org.json.JSONObject().put("status",AlphaDevicePlugin.automaticUpdateStatus(context))
+    .put("admitted",AlphaDevicePlugin.selfUpdateAdmitted(context)));
+   Build.VERSION.SDK_INT=37;android.os.SystemClock.uptime=35_000L;
+  }
+  return result;
+  }finally{
+   // Each Context made its own data directory; leave none behind.
+   for(Context context:contexts)try(var files=java.nio.file.Files.walk(context.data.toPath())){
+    for(java.nio.file.Path child:files.sorted(java.util.Comparator.reverseOrder()).toArray(java.nio.file.Path[]::new))java.nio.file.Files.deleteIfExists(child);
+   }
+  }
+ }
+ /** Alpha ships only the launcher: an index feed carrying any other variant is malformed as a
+  * whole, so it offers nothing, not even its launcher row. Another signer's row is only skipped.
+  * Returns the versionCode selectUpdateOffer offers a launcher install for each mixed index (0: none). */
+ static org.json.JSONObject mixedIndexSelections()throws Exception{
+  java.lang.reflect.Method select=AlphaDevicePlugin.class.getDeclaredMethod("selectUpdateOffer",org.json.JSONObject.class,String.class,String.class);
+  select.setAccessible(true);
+  String signer=sha256(new byte[]{7});
+  org.json.JSONObject launcher=new org.json.JSONObject().put("schema","alpha-update/v1").put("variant","launcher")
+   .put("signerSha256",signer).put("apkUrl","https://updates.test/alpha-9.apk").put("sha256","ab".repeat(32)).put("sizeBytes",4).put("versionCode",9);
+  org.json.JSONObject result=new org.json.JSONObject();
+  for(String[] change:new String[][]{{"otherSigner","signerSha256","6d".repeat(32)},{"standalone","variant","standalone"}}){
+   org.json.JSONObject other=new org.json.JSONObject(launcher.toString()).put(change[1],change[2]);
+   org.json.JSONObject index=new org.json.JSONObject().put("schema","alpha-update/index-v1")
+    .put("releases",new org.json.JSONArray().put(other).put(new org.json.JSONObject(launcher.toString())));
+   org.json.JSONObject offered=(org.json.JSONObject)select.invoke(null,index,"launcher",signer);
+   result.put(change[0],offered==null?0:offered.getLong("versionCode"));
+  }
+  return result;
+ }
+ private static byte[] manifestBytes(org.json.JSONObject offer){
+  return (offer.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+ }
+ private static PluginCall bindAutomatic(PluginCall call,String digest){
+  call.getData().put("automatic",true).put("manifestSha256",digest);return call;
+ }
+ static PluginCall fixtureAutomatic(PluginCall call)throws Exception{
+  automaticManifest=manifestBytes(manifestOffer(call));
+  return bindAutomatic(call,sha256(automaticManifest));
  }
  private static PluginCall automatic(AlphaDevicePlugin owner)throws Exception{
-  PluginCall call=offered();call.getData().put("automatic",true);owner.installUpdate(call);call.awaitAnswer();return call;
+  PluginCall call=fixtureAutomatic(offered());owner.installUpdate(call);call.awaitAnswer();return call;
  }
  private static void automaticUpdatesRequireSupportedAndroidAndExistingConsent(File cache)throws Exception{
   for(int sdk:new int[]{29,30,31,37})for(boolean consent:new boolean[]{false,true})for(long uptime:new long[]{0,26681,29999,30000,30001,35000}){
    Context context=installing(cache);Build.VERSION.SDK_INT=sdk;context.packages.installsAllowed=consent;android.os.SystemClock.uptime=uptime;
    AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);connections.clear();AlphaLocalAgentPlugin.stops=0;AlphaLocalAgentPlugin.releases=0;
+   int manifestReads=syntheticManifestRequests.get();
    String expected=sdk<31?"unsupported":!consent?"permission-required":uptime<=30_000L?"starting":"supported";
    check(expected.equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"capability preserves API/consent precedence and cold-boot boundary: "+sdk+"/"+consent+"/"+uptime);
    if(!"supported".equals(expected)){
@@ -1875,9 +2013,9 @@ public final class UpdateFlowTest {
     }
     PluginCall result=automatic(owner);
     check(result.resolved.get()==1&&result.rejected.get()==0&&result.result!=null&&expected.equals(result.result.optString("status")),"automatic refusal is explicit before worker submission");
-    check(owner.activity.started.isEmpty()&&connections.isEmpty()&&context.packages.installer.sessions.isEmpty()&&context.packages.installer.internals.isEmpty()&&context.packages.installer.committed.isEmpty()&&context.packages.installer.abandoned.isEmpty()&&owner.events.isEmpty()&&AlphaLocalAgentPlugin.stops==0&&AlphaLocalAgentPlugin.releases==0&&AlphaDevicePlugin.UpdatePause.store().read()==null,"automatic admission has zero network/session/barrier/pause/stop/commit effects: "+expected+"/"+uptime);
+    check(syntheticManifestRequests.get()==manifestReads&&owner.activity.started.isEmpty()&&connections.isEmpty()&&context.packages.installer.sessions.isEmpty()&&context.packages.installer.internals.isEmpty()&&context.packages.installer.committed.isEmpty()&&context.packages.installer.abandoned.isEmpty()&&owner.events.isEmpty()&&AlphaLocalAgentPlugin.stops==0&&AlphaLocalAgentPlugin.releases==0&&AlphaDevicePlugin.UpdatePause.store().read()==null,"automatic admission has zero network/session/barrier/pause/stop/commit effects: "+expected+"/"+uptime);
    }else{
-    check(automatic(owner).resolved.get()==1,"supported automatic attempt stages once");
+    check(automatic(owner).resolved.get()==1&&syntheticManifestRequests.get()==manifestReads+1,"supported automatic attempt stages once after one final feed read");
     int session=committed(context);
     check(context.packages.installer.internals.get(session).requireUserAction==PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED,"automatic commit requests Android's self-update path");
     check(String.valueOf(context.packages.installer.getSessionInfo(session).getReferrerUri()).endsWith("/intent/automatic"),"quiet handling is bound to the exact Android session across restart");
@@ -1890,7 +2028,8 @@ public final class UpdateFlowTest {
   Context context=installing(cache);android.os.SystemClock.uptime=0;
   AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);connections.clear();
   check("starting".equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"cold capability is deferred");
-  check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,"an explicit manual update remains available during early boot");
+  int manifestReads=syntheticManifestRequests.get();
+  check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1&&syntheticManifestRequests.get()==manifestReads,"an explicit manual update remains available during early boot without a feed recheck");
   check(context.packages.installer.internals.get(committed(context)).requireUserAction!=PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED,"the manual path does not gain automatic installer authority");
  }
  private static void automaticPendingActionWaitsForAnExplicitContinue(File cache)throws Exception{
@@ -1901,8 +2040,9 @@ public final class UpdateFlowTest {
    if(restart)owner=restarted(context);
    Intent confirm=confirmation(context,session);settled();resume(owner);
    check(owner.activity.started.isEmpty(),"optional Android action is quiet, including after process restart and resume");
+   int manifestReads=syntheticManifestRequests.get();
    connections.clear();check(automatic(owner).resolved.get()==1,"an automatic retry reads the same pending session");
-   check(owner.activity.started.isEmpty()&&connections.isEmpty()&&context.packages.installer.committed.equals(List.of(session)),"automatic retry cannot open, download or commit the pending update again");
+   check(syntheticManifestRequests.get()==manifestReads&&owner.activity.started.isEmpty()&&connections.isEmpty()&&context.packages.installer.committed.equals(List.of(session)),"automatic retry cannot open, download or commit the pending update again");
    PluginCall read=new PluginCall(new JSObject());owner.updateState(read);read.awaitAnswer();
    check(Boolean.TRUE.equals(read.result.opt("pending"))&&Boolean.TRUE.equals(read.result.opt("canContinue")),"the existing update gate exposes the kept Android action");
    check(AlphaDevicePlugin.UpdatePause.store().read()!=null,"an automatic pending Android action retains durable resident ownership");
@@ -1913,6 +2053,16 @@ public final class UpdateFlowTest {
    check(proceed.resolved.get()==1&&owner.activity.started.equals(List.of(confirm)),"explicit Continue opens the existing confirmation exactly once");
    check(context.packages.installer.committed.equals(List.of(session))&&connections.isEmpty(),"Continue neither downloads nor commits again");
   }
+ }
+ private static void imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(File cache)throws Exception{
+  for(int sdk:new int[]{30,37}){
+   Context context=installing(cache);Build.VERSION.SDK_INT=sdk;context.packages.installsAllowed=false;context.selfUpdateGranted=true;android.os.SystemClock.uptime=35000;
+   String expected=sdk<31?"unsupported":"supported";
+   check(expected.equals(AlphaDevicePlugin.automaticUpdateStatus(context)),"the image self-update grant replaces only the consent read: "+sdk);
+   Build.VERSION.SDK_INT=37;
+  }
+  Context denied=installing(cache);denied.packages.installsAllowed=false;android.os.SystemClock.uptime=35000;
+  check("permission-required".equals(AlphaDevicePlugin.automaticUpdateStatus(denied)),"without the image grant the owner's consent is still required");
  }
  private static void consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(File cache)throws Exception{
   Context context=installing(cache);context.packages.installsAllowed=false;
@@ -1958,8 +2108,10 @@ public final class UpdateFlowTest {
   check(manual.resolved.get()==1&&context.packages.installer.internals.get(session).requireUserAction==0,"explicit false keeps the manual Android session policy");
   check(owner.activity.started.equals(List.of(confirm)),"a manual attempt still opens Android's requested confirmation");
  }
- private static void automaticUpdatesRequireForegroundUnlockedMainAndKnownImageCallState(File cache)throws Exception{
-  for(String condition:List.of("non-main","assistant","background","focus","locked","user-locked","image-call","image-call-unknown","image-call-missing")){
+ private static void automaticUpdatesRequireForegroundUnlockedMainAndIdleCallState(File cache)throws Exception{
+  for(String condition:List.of("non-main","assistant","background","focus","locked","user-locked","stock-ringing","stock-call","stock-voip","audio-missing",
+    "image-call","image-call-unknown","image-call-missing","image-call-unauthorized",
+    "image-call-op-denied","image-call-op-default")){
    Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);AlphaLocalAgentPlugin.stops=0;connections.clear();
    switch(condition){
     case "non-main":owner.activity=new Activity();break;
@@ -1968,29 +2120,72 @@ public final class UpdateFlowTest {
     case "focus":owner.activity.focused=false;break;
     case "locked":owner.activity.keyguard.locked=true;break;
     case "user-locked":owner.activity.users.unlocked=false;break;
+    case "stock-ringing":context.audio.mode=android.media.AudioManager.MODE_RINGTONE;break;
+    case "stock-call":context.audio.mode=android.media.AudioManager.MODE_IN_CALL;break;
+    case "stock-voip":context.audio.mode=android.media.AudioManager.MODE_IN_COMMUNICATION;break;
+    case "audio-missing":context.audio=null;break;
     case "image-call":context.imageAdmitted=true;context.calls.active=true;break;
     case "image-call-unknown":context.imageAdmitted=true;context.calls.unavailable=true;break;
     case "image-call-missing":context.imageAdmitted=true;context.calls=null;break;
+    case "image-call-unauthorized":
+     context.imageAdmitted=true;context.calls.defaultDialer=null;break;
+    case "image-call-op-denied":
+    case "image-call-op-default":
+     context.imageAdmitted=true;context.calls.defaultDialer=null;context.phoneStateGranted=true;
+     context.appOps.phoneStateMode=condition.equals("image-call-op-denied")
+      ?android.app.AppOpsManager.MODE_IGNORED:android.app.AppOpsManager.MODE_DEFAULT;
+     break;
    }
    if(condition.equals("assistant"))check(owner.activity instanceof MainActivity&&owner.activity.hasWindowFocus()&&owner.activity.getLifecycle().getCurrentState()==Lifecycle.State.RESUMED,"the assistant fixture is a focused, resumed MainActivity subclass, as the installed assistant surfaces are");
    check(automatic(owner).rejected.get()==1,"automatic admission defers active or unknown use: "+condition);
    check(connections.isEmpty()&&context.packages.installer.sessions.isEmpty()&&AlphaLocalAgentPlugin.stops==0&&AlphaDevicePlugin.UpdatePause.store().read()==null,"deferred automatic work cannot download, stage, pause or commit: "+condition);
    if(condition.equals("image-call"))check(tap(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,"the explicit manual path retains its existing behavior");
   }
-  for(boolean image:new boolean[]{false,true}){
-   Context context=installing(cache);context.imageAdmitted=image;if(!image)context.calls=null;
+  for(String authority:List.of("stock","default-dialer","privileged","allowed-app-op")){
+   Context context=installing(cache);
+   context.imageAdmitted=!authority.equals("stock");
+   if(!context.imageAdmitted)context.calls=null;
+   else if(!authority.equals("default-dialer")){
+    context.calls.defaultDialer=null;
+    context.privilegedPhoneStateGranted=authority.equals("privileged");
+    context.phoneStateGranted=authority.equals("allowed-app-op");
+   }
    AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
-   check(automatic(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,image?"a known idle image call state admits automatic replacement":"sideloaded apps need no telephony permission or service");
+   check(automatic(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,
+    "idle audio and the applicable call-state authority admit one automatic replacement: "+authority);
   }
  }
+ private static void automaticCallReadRequiresAuthorityBeforeAndAfter(File cache)throws Exception{
+  var ready=AlphaDevicePlugin.class.getDeclaredMethod("automaticUpdateReady");
+  ready.setAccessible(true);
+  Context context=installing(cache);context.imageAdmitted=true;context.calls.defaultDialer=null;
+  context.phoneStateGranted=true;context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_IGNORED;
+  context.calls.active=true;context.calls.readDenied=true;
+  context.calls.afterRead=()->context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_ALLOWED;
+  AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
+  check(!(Boolean)ready.invoke(owner),"a call-state grant observed only after a denied read cannot prove idle");
+  check(context.calls.reads==0,"an unauthorized call-state observation is skipped");
+
+  context.calls.active=false;context.calls.readDenied=false;
+  context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_ALLOWED;
+  context.calls.afterRead=()->context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_IGNORED;
+  check(!(Boolean)ready.invoke(owner),"losing the call-state grant during an idle read defers");
+  check(context.calls.reads==1,"the in-flight authorized read cannot outlive its grant");
+
+  context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_ALLOWED;
+  context.calls.afterRead=()->{};
+  check(automatic(owner).resolved.get()==1&&context.packages.installer.committed.size()==1,
+   "the next idle check with a stable call-state grant admits one automatic replacement");
+ }
  private static void automaticUpdatesRecheckUseAfterDownloadAndBeforeCommit(File cache)throws Exception{
-  for(String cut:List.of("download-focus","staging-background","stop-focus","stop-call","stop-call-unknown")){
+  for(String cut:List.of("download-focus","staging-background","stop-focus","stop-stock-call","stop-call","stop-call-unknown")){
    Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);AlphaLocalAgentPlugin.stops=0;
    if(cut.equals("download-focus"))context.packages.archiveRead=()->owner.activity.focused=false;
    if(cut.equals("staging-background"))context.packages.installer.staging=()->owner.activity.state=Lifecycle.State.STARTED;
    if(cut.startsWith("stop-call"))context.imageAdmitted=true;
    if(cut.startsWith("stop-"))AlphaLocalAgentPlugin.pauseObserver=()->{
     if(cut.equals("stop-focus"))owner.activity.focused=false;
+    else if(cut.equals("stop-stock-call"))context.audio.mode=android.media.AudioManager.MODE_IN_CALL;
     else{context.calls.active=cut.equals("stop-call");context.calls.unavailable=cut.equals("stop-call-unknown");}
    };
    try{
@@ -2001,6 +2196,7 @@ public final class UpdateFlowTest {
     check(java.util.Arrays.equals(Files.readAllBytes(download(context).toPath()),APK),"each known postverification lifecycle deferral keeps exact bytes: "+cut);
     int requests=connections.size();context.packages.archiveRead=()->{};context.packages.installer.staging=()->{};AlphaLocalAgentPlugin.pauseObserver=()->{};
     owner.activity.focused=true;owner.activity.state=Lifecycle.State.RESUMED;context.calls.active=false;context.calls.unavailable=false;
+    context.audio.mode=android.media.AudioManager.MODE_NORMAL;
     check(automatic(owner).resolved.get()==1&&connections.size()==requests&&context.packages.installer.committed.size()==1&&!download(context).exists(),"a later idle retry reuses admitted bytes without another controlled transport call: "+cut);
    }finally{AlphaLocalAgentPlugin.pauseObserver=()->{};}
   }
@@ -2027,12 +2223,12 @@ public final class UpdateFlowTest {
    if(change.equals("flavor"))context.packages.archive.requestedPermissions=new String[]{"android.permission.INTERNET"};
    if(change.equals("commit-uncertain"))context.packages.installer.failAt="reply";
    if(change.equals("interrupted"))context.packages.installer.querying=()->Thread.currentThread().interrupt();
-   PluginCall next=offered(change.equals("version")?9:8);next.getData().put("automatic",true);
+   PluginCall next=offered(change.equals("version")?9:8);
    if(change.equals("version"))context.packages.archive.versionCode=9;
    if(change.equals("url"))next.getData().put("apkUrl","https://updates.test/relocated.apk");
    if(change.equals("sha"))next.getData().put("sha256",sha256(new byte[]{1}));
    if(change.equals("size"))next.getData().put("sizeBytes",(long)APK.length+1);
-   owner.installUpdate(next);next.awaitAnswer();
+   owner.installUpdate(fixtureAutomatic(next));next.awaitAnswer();
    boolean rejected=List.of("sha","size","signer","flavor","interrupted","commit-uncertain").contains(change);
    boolean downloaded=List.of("corrupt","short","missing","symlink","url","version","sha","size","process-restart").contains(change);
    check((next.rejected.get()==1)==rejected,"cached metadata and uncertain commit keep the original outcome: "+change);
@@ -2056,14 +2252,189 @@ public final class UpdateFlowTest {
  private static void verifiedAutomaticCacheUsesOneRealTlsResponse(File cache)throws Exception{
   Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
   context.packages.archiveRead=()->owner.activity.focused=false;
-  PluginCall first=offered();first.getData().put("automatic",true).put("apkUrl","https://updates.test/tls-cache.apk");
-  owner.installUpdate(first);first.awaitAnswer();
-  check(first.rejected.get()==1&&cacheTlsRequests.get()==1&&java.util.Arrays.equals(Files.readAllBytes(download(context).toPath()),APK),"owned TLS delivers exact bytes retained on foreground loss");
+  PluginCall first=tlsApk(8);
+  owner.installUpdate(fixtureAutomatic(first));first.awaitAnswer();
+  check(first.rejected.get()==1&&cacheTlsRequests.get()==1&&!owner.activity.focused,"owned TLS reaches archive admission before foreground deferral");
+  check(download(context).isFile()&&java.util.Arrays.equals(Files.readAllBytes(download(context).toPath()),APK),"foreground deferral retains the exact TLS download");
   check(context.packages.installer.committed.isEmpty()&&context.packages.installer.sessions.isEmpty()&&AlphaDevicePlugin.UpdatePause.store().read()==null,"TLS deferral grants no session/pause authority");
   context.packages.archiveRead=()->{};owner.activity.focused=true;
-  PluginCall next=offered();next.getData().put("automatic",true).put("apkUrl","https://updates.test/tls-cache.apk");owner.installUpdate(next);next.awaitAnswer();
+  PluginCall next=fixtureAutomatic(tlsApk(8));owner.installUpdate(next);next.awaitAnswer();
   check(next.resolved.get()==1&&cacheTlsRequests.get()==1&&context.packages.installer.committed.size()==1&&!download(context).exists(),"retry revalidates cached bytes and commits once without a second TLS request");
   System.out.println("PASS verified cache retry over owned TLS: one request, exact retained bytes, one synthetic installer commit");
+ }
+ private static PluginCall tlsApk(long version)throws Exception{
+  PluginCall offer=offered(version);offer.getData().put("apkUrl","https://updates.test/tls-cache.apk");return offer;
+ }
+ private static String discoverTlsOffer(AlphaDevicePlugin owner,byte[] expected)throws Exception{
+  PluginCall check=new PluginCall(new JSObject());owner.checkForUpdate(check);check.awaitAnswer();
+  String digest=check.result==null?null:check.result.optString("manifestSha256");
+  check(check.resolved.get()==1&&sha256(expected).equals(digest),"discovery hashes the exact HTTPS body including its newline");
+  return digest;
+ }
+ private static void refusedOffer(AlphaDevicePlugin owner,Context context,PluginCall request,String status)throws Exception{
+  owner.installUpdate(request);request.awaitAnswer();
+  checkOfferRefusal(owner,context,request,status);
+ }
+ private static void checkOfferRefusal(AlphaDevicePlugin owner,Context context,PluginCall request,String status)throws Exception{
+  check(request.resolved.get()==1&&status.equals(request.result.optString("status")),"expected final offer refusal: "+status);
+  check(context.packages.installer.committed.isEmpty()&&context.packages.installer.sessions.isEmpty()&&
+   owner.activity.started.isEmpty()&&!download(context).exists()&&AlphaDevicePlugin.UpdatePause.store().read()==null,
+   "an unavailable offer clears its uncommitted session, pause and APK without prompting");
+ }
+ private static void automaticOfferRecheckedOverTls(File cache)throws Exception{
+  int apkReads=cacheTlsRequests.get(),feedReads=manifestTlsRequests.get();
+  Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
+  byte[] original=manifestBytes(manifestOffer(tlsApk(8)));
+  var replacement=manifestOffer(tlsApk(9));
+  var other=manifestOffer(tlsApk(9)).put("signerSha256","6d".repeat(32));
+  byte[] newer=manifestBytes(new org.json.JSONObject().put("schema","alpha-update/index-v1")
+   .put("releases",new org.json.JSONArray().put(other).put(replacement)));
+  try{
+   manifestTlsReply=new ManifestReply(200,original);
+   String oldDigest=discoverTlsOffer(owner,original);
+   PluginCall missing=tlsApk(8);missing.getData().put("automatic",true);
+   refusedOffer(owner,context,missing,"offer-unavailable");
+   check(cacheTlsRequests.get()==apkReads&&manifestTlsRequests.get()==feedReads+1,"missing binding is refused before network or staging");
+   context.packages.archiveRead=()->owner.activity.focused=false;
+   PluginCall first=bindAutomatic(tlsApk(8),oldDigest);owner.installUpdate(first);first.awaitAnswer();
+   check(first.rejected.get()==1&&cacheTlsRequests.get()==apkReads+1&&download(context).exists(),"lifecycle deferral keeps the exact old APK");
+   check(manifestTlsRequests.get()==feedReads+1,"the first deferral did not reach final feed recheck");
+   context.packages.archiveRead=()->{};owner.activity.focused=true;
+   int releases=AlphaLocalAgentPlugin.releases;
+   AlphaLocalAgentPlugin.pauseObserver=()->manifestTlsReply=new ManifestReply(200,newer);
+   PluginCall changed=bindAutomatic(tlsApk(8),oldDigest);
+   refusedOffer(owner,context,changed,"offer-response-changed");
+   check(new String(newer,java.nio.charset.StandardCharsets.UTF_8).equals(changed.result.optString("manifest")),"changed response carries exactly the bounded text for strict renderer validation");
+   check(cacheTlsRequests.get()==apkReads+1&&manifestTlsRequests.get()==feedReads+2&&AlphaLocalAgentPlugin.releases==releases+1,
+    "a cached APK is reused, but a late manifest change prevents its commit and releases its resident pause");
+   AlphaLocalAgentPlugin.pauseObserver=()->{};
+   String newDigest=discoverTlsOffer(owner,newer);
+   refusedOffer(owner,context,bindAutomatic(tlsApk(8),newDigest),"offer-unavailable");
+   check(cacheTlsRequests.get()==apkReads+2,"the new manifest's digest cannot authorize the older request tuple");
+   for(ManifestReply reply:List.of(new ManifestReply(404,new byte[0]),new ManifestReply(503,new byte[0]),
+                                  new ManifestReply(200,new byte[65537]),new ManifestReply(200,new byte[]{(byte)0xff}))){
+    manifestTlsReply=reply;
+    refusedOffer(owner,context,bindAutomatic(tlsApk(8),oldDigest),reply.status==404?"offer-withdrawn":"offer-unavailable");
+   }
+   manifestTlsReply=new ManifestReply(200,newer);
+   context.packages.archive.versionCode=9;
+   PluginCall next=bindAutomatic(tlsApk(9),newDigest);owner.installUpdate(next);next.awaitAnswer();
+   check(next.resolved.get()==1&&context.packages.installer.committed.size()==1&&owner.activity.started.isEmpty(),"the latest exact index offer commits once, quietly");
+   check(uncachedManifestRequests.get()==manifestTlsRequests.get(),"every TLS discovery and recheck requests cache revalidation");
+   System.out.println("PASS fresh HTTPS offer rejects cached withdrawal, change and transport failure before one current commit");
+  }finally{manifestTlsReply=null;AlphaLocalAgentPlugin.pauseObserver=()->{};}
+ }
+ private static void holdOfferStage(CountDownLatch entered,CountDownLatch released){
+  entered.countDown();
+  boolean interrupted=false;
+  while(true)try{released.await();break;}catch(InterruptedException stopped){interrupted=true;}
+  if(interrupted)Thread.currentThread().interrupt();
+ }
+ private static void finalOfferDeadlineRetiresBeforeLateTransport(File cache)throws Exception{
+  var offerDeadlineField=AlphaDevicePlugin.class.getDeclaredField("UPDATE_MANIFEST_RECHECK_MILLIS");offerDeadlineField.setAccessible(true);
+  int originalOfferDeadline=offerDeadlineField.getInt(null);
+  for(String cut:List.of("foreground","stock-call","image-call-access","headers","body","open")){
+   Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
+   boolean stockCall=cut.equals("stock-call"),imageCallAccess=cut.equals("image-call-access");
+   boolean readinessCut=cut.equals("foreground")||stockCall||imageCallAccess;
+   context.imageAdmitted=imageCallAccess;
+   context.phoneStateGranted=imageCallAccess;
+   var installer=context.packages.installer;
+   byte[] bytes=manifestBytes(manifestOffer(tlsApk(8)));
+   manifestTlsReply=new ManifestReply(200,bytes);
+   var entered=new CountDownLatch(1);var released=new CountDownLatch(1);
+   int releases=AlphaLocalAgentPlugin.releases;
+   try{
+    String digest=discoverTlsOffer(owner,bytes);
+    if(cut.equals("open"))manifestOpenObserver=()->holdOfferStage(entered,released);
+    else if(!cut.equals("body"))manifestExchange=exchange->{
+     holdOfferStage(entered,released);
+     exchange.sendResponseHeaders(200,bytes.length);
+     try(var output=exchange.getResponseBody()){output.write(bytes);}
+    };
+    else manifestExchange=exchange->{
+     exchange.sendResponseHeaders(200,bytes.length);
+     try(var output=exchange.getResponseBody()){
+      for(byte next:bytes){
+       output.write(next);output.flush();entered.countDown();
+       try{if(released.await(70,TimeUnit.MILLISECONDS))return;}catch(InterruptedException stopped){return;}
+      }
+     }
+    };
+    if(!readinessCut)plugin("UPDATE_MANIFEST_RECHECK_MILLIS",3000);
+    PluginCall request=bindAutomatic(tlsApk(8),digest);owner.installUpdate(request);
+    check(entered.await(15,TimeUnit.SECONDS),"final offer read reaches held "+cut+" stage");
+    check(AlphaDevicePlugin.UpdatePause.store().read()!=null,"the held final read follows resident pause");
+    if(cut.equals("foreground"))owner.activity.focused=false;
+    if(stockCall)context.audio.mode=android.media.AudioManager.MODE_IN_CALL;
+    if(imageCallAccess){
+     context.calls.defaultDialer=null;
+     context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_IGNORED;
+    }
+    if(readinessCut)released.countDown();
+    request.awaitAnswerWithin(15000);
+    if(readinessCut)check(request.rejected.get()==1&&download(context).exists()&&
+     installer.sessions.isEmpty()&&installer.committed.isEmpty()&&owner.activity.started.isEmpty()&&
+     AlphaDevicePlugin.UpdatePause.store().read()==null,"loss of readiness during a valid final read defers and retains verified bytes: "+cut);
+    else checkOfferRefusal(owner,context,request,"offer-unavailable");
+    check(installer.abandoned.size()==1&&AlphaLocalAgentPlugin.releases==releases+1,"only the staged precommit session is abandoned and its pause released: "+cut);
+    if(stockCall||imageCallAccess){
+     context.audio.mode=android.media.AudioManager.MODE_NORMAL;
+     context.appOps.phoneStateMode=android.app.AppOpsManager.MODE_ALLOWED;
+     manifestExchange=null;
+     int apkReads=cacheTlsRequests.get();
+     PluginCall retry=bindAutomatic(tlsApk(8),digest);owner.installUpdate(retry);retry.awaitAnswer();
+     check(retry.resolved.get()==1&&installer.committed.size()==1&&cacheTlsRequests.get()==apkReads,
+      "restored idle call readiness commits the verified cached APK once: "+cut);
+    }
+    if(cut.equals("open")){
+     check(released.getCount()==1,"installer stops waiting while opening the transport is still blocked");
+     PluginCall concurrent=bindAutomatic(tlsApk(8),digest);owner.installUpdate(concurrent);concurrent.awaitAnswerWithin(15000);
+     checkOfferRefusal(owner,context,concurrent,"offer-unavailable");
+     check(installer.abandoned.size()==2,"an occupied transport slot does not queue another automatic read");
+     check(tap(owner).resolved.get()==1&&installer.committed.size()==1&&released.getCount()==1,
+      "manual recovery can commit while canceled automatic network I/O is still held");
+    }
+   }finally{
+    released.countDown();manifestOpenObserver=()->{};manifestExchange=null;manifestTlsReply=null;
+    offerDeadlineField.setInt(null,originalOfferDeadline);
+   }
+  }
+  System.out.println("PASS final offer deadline bounds held network stages and leaves manual recovery available");
+  System.out.println("PASS call changes during final HTTPS defer automatic commit");
+ }
+ private static void automaticConsentRecheckedAfterTls(File cache)throws Exception{
+  Context context=installing(cache);AlphaDevicePlugin owner=bridge(context,Lifecycle.State.RESUMED);
+  byte[] current=manifestBytes(manifestOffer(tlsApk(8)));
+  try{
+   manifestTlsReply=new ManifestReply(200,current);
+   String digest=discoverTlsOffer(owner,current);
+   int reads=manifestTlsRequests.get(),releases=AlphaLocalAgentPlugin.releases;
+   manifestExchange=exchange->{
+    context.packages.installsAllowed=false;
+    exchange.sendResponseHeaders(200,current.length);
+    try(var output=exchange.getResponseBody()){output.write(current);}
+   };
+   PluginCall refused=bindAutomatic(tlsApk(8),digest);owner.installUpdate(refused);refused.awaitAnswer();
+   check(manifestTlsRequests.get()==reads+1&&!context.packages.canRequestPackageInstalls(),
+    "install consent was revoked during the final HTTPS feed response");
+   check(refused.resolved.get()==1&&refused.result!=null&&"permission-required".equals(refused.result.optString("status")),
+    "the automatic attempt reports revoked consent");
+   check(context.packages.installer.committed.isEmpty()&&context.packages.installer.abandoned.size()==1&&
+    context.packages.installer.sessions.isEmpty()&&AlphaDevicePlugin.UpdatePause.store().read()==null&&
+    AlphaLocalAgentPlugin.releases==releases+1&&!download(context).exists()&&owner.activity.started.isEmpty(),
+    "revocation before commit abandons only the staged session and releases the pause without prompting");
+   manifestExchange=null;
+   check(tap(owner).resolved.get()==1&&owner.activity.started.size()==1&&
+    "android.settings.MANAGE_UNKNOWN_APP_SOURCES".equals(owner.activity.started.get(0).action)&&
+    context.packages.installer.committed.isEmpty()&&manifestTlsRequests.get()==reads+1,
+    "an explicit manual attempt still opens Android settings after revocation");
+   context.packages.installsAllowed=true;
+   PluginCall retry=bindAutomatic(tlsApk(8),digest);owner.installUpdate(retry);retry.awaitAnswer();
+   check(retry.resolved.get()==1&&context.packages.installer.committed.size()==1&&owner.activity.started.size()==1,
+    "restored consent admits one new attempt and opens no automatic prompt");
+   System.out.println("PASS revoked install consent during final HTTPS leaves no commit or pause");
+  }finally{manifestExchange=null;manifestTlsReply=null;}
  }
  private static PluginCall updateState(AlphaDevicePlugin bridge)throws Exception{
   PluginCall read=new PluginCall(new JSObject());bridge.updateState(read);read.awaitAnswer();return read;
@@ -2114,17 +2485,31 @@ public final class UpdateFlowTest {
   File cache=Files.createTempDirectory("alpha-update-flow").toFile();
   int status=1;
   try{
-   if(cacheTlsServer!=null)verifiedAutomaticCacheUsesOneRealTlsResponse(cache);
+   if(cacheTlsServer!=null){
+    // A cold TLS handshake can exceed the in-memory fixture's three-second download deadline.
+    long normalDeadline=AlphaDevicePlugin.UPDATE_DEADLINE_NANOS;
+    deadline(TimeUnit.SECONDS.toNanos(30));
+    try{
+     verifiedAutomaticCacheUsesOneRealTlsResponse(cache);
+     automaticOfferRecheckedOverTls(cache);
+     finalOfferDeadlineRetiresBeforeLateTransport(cache);
+     automaticConsentRecheckedAfterTls(cache);
+    }finally{deadline(normalDeadline);}
+   }
    automaticUpdatesRequireSupportedAndroidAndExistingConsent(cache);
+   explicitUpdatePermissionOpensBeforeAnyOffer(cache);
    manualUpdateDoesNotWaitForAutomaticColdBootReadiness(cache);
    automaticPendingActionWaitsForAnExplicitContinue(cache);
    aReceivedConfirmationSurvivesOnlyUntilFirstLaunch(cache);
    consentRevokedBetweenAdmissionReadsNeverOpensSettingsAutomatically(cache);
+   imageSelfUpdateGrantAdmitsAutomaticUpdatesWithoutOwnerConsent(cache);
    automaticSuccessReconcilesTheExactInstalledSuccessor(cache);
    automaticDraftRefusalNeverStopsOrCommits(cache);
    automaticModeIsStrictAndExplicitFalseKeepsManualBehavior(cache);
-   automaticUpdatesRequireForegroundUnlockedMainAndKnownImageCallState(cache);
+   automaticUpdatesRequireForegroundUnlockedMainAndIdleCallState(cache);
+   automaticCallReadRequiresAuthorityBeforeAndAfter(cache);
    automaticUpdatesRecheckUseAfterDownloadAndBeforeCommit(cache);
+   System.out.println("PASS automatic call deferral protects stock and image installs before download and commit");
    verifiedAutomaticCacheAvoidsRedownloadButNeverBypassesAdmission(cache);
    applicationAttachBeforePublicationDoesNotFenceOrdinaryStartup(cache);
    onlyTheInstalledFlavorAndLineageReachAndroid(cache);

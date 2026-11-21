@@ -2,9 +2,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import type {CloudNativeRequest} from '../apps/app/src/runtime/cloud-protocol.ts';
-if(!process.execArgv.some(arg => arg === '--import=tsx' || arg === 'tsx')){
- const child=spawnSync(process.execPath,['--import=tsx',process.argv[1]],{stdio:'inherit'});process.exit(child.status??1);
-}
 const {CloudProtocol,CloudProtocolError,object}=await import('../apps/app/src/runtime/cloud-protocol.ts');
 const {managedServiceRequest}=await import('../apps/app/src/runtime/managed-service-routes.ts');
 const credential={credentialId:'first',token:'synthetic-only',userId:'owner',organizationId:'org'};

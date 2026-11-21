@@ -1,4 +1,4 @@
-import {productionCloud,stagingCloud} from '../runtime/cloud-deployment.generated';
+import {productionCloud,stagingCloud as stagingAuthority} from '../runtime/cloud-deployment.generated';
 import {abortError,anyAbortSignal,delay} from '../lib/abort';
 import {isRecord} from '../lib/parse';
 import {googleAuthorizationUrlAllowed} from '../runtime/google-authorization';
@@ -6,6 +6,10 @@ import {WebPlugin} from '@capacitor/core';
 import type {CloudCredential,CloudEnvironment} from '../runtime/cloud-protocol';
 import {cloudVoiceLimitOf,type CloudVoiceLimitFacts} from '../runtime/cloud-voice-limit';
 
+// Staging exists only in test-mocks builds, development serving and Node contract tests (no Vite).
+// The condition is written out here, not imported: Vite replaces import.meta.env before the bundler
+// links modules, so a product build drops this module's staging import whichever chunk holds it.
+const stagingCloud=import.meta.env===undefined||import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||import.meta.env.DEV===true?stagingAuthority:undefined;
 const endpoint='/__alpha-browser-cloud';
 const REQUEST_TIMEOUT_MS=120000;
 const references=new Map<string,string|null>();
@@ -16,7 +20,7 @@ async function rpc(data:Record<string,unknown>,signal?:AbortSignal){const respon
 /** Development host storage references only. Cloud bearers never enter browser storage. */
 export class BrowserCloudConnection extends WebPlugin {
  async request(input:{requestId:string;url:string;method:string;headers:Record<string,string>;body?:string;credentialReference?:string}){
-  const origin=new URL(input.url).origin,environment=origin===productionCloud.api?'production':origin===stagingCloud.api?'staging':undefined;
+  const origin=new URL(input.url).origin,environment=origin===productionCloud.api?'production':origin===stagingCloud?.api?'staging':undefined;
   if(!environment)throw Error('Cloud development authority unavailable');
   const response=await browserCloudCall({operation:'request',requestId:input.requestId,environment,input}),data=await response.json();
   return response.ok?data:{status:response.status,data};
@@ -35,9 +39,10 @@ export class BrowserCloudConnection extends WebPlugin {
  }
  async openExternal(input:{url:string;requestId:string}){
   const url=new URL(input.url),sessions=url.searchParams.getAll('session'),apps=url.searchParams.getAll('app');
-  const login=[productionCloud.web,stagingCloud.web].some(origin=>origin===url.origin)&&url.pathname==='/auth/cli-login'&&sessions.length===1&&/^[0-9a-f-]{36}$/i.test(sessions[0])&&(apps.length===0||apps.length===1&&apps[0]==='alpha')&&[...url.searchParams.keys()].every(k=>k==='session'||k==='app');
-  const billing=[productionCloud.agents,stagingCloud.agents].some(host=>host===url.host)&&url.pathname==='/cloud/billing'&&!url.search;
-  if(url.protocol!=='https:'||url.username||url.password||url.hash||url.port||!login&&!billing&&!googleAuthorizationUrlAllowed(url.href))throw Error('Unsupported Cloud browser destination');
+  const login=[productionCloud.web,stagingCloud?.web].some(origin=>origin===url.origin)&&url.pathname==='/auth/cli-login'&&sessions.length===1&&/^[0-9a-f-]{36}$/i.test(sessions[0])&&(apps.length===0||apps.length===1&&apps[0]==='alpha')&&[...url.searchParams.keys()].every(k=>k==='session'||k==='app');
+  const billing=[productionCloud.agents,stagingCloud?.agents].some(host=>host===url.host)&&url.pathname==='/cloud/billing'&&!url.search;
+  const payment=['checkout.stripe.com','invoice.stripe.com'].includes(url.hostname);
+  if(url.protocol!=='https:'||url.username||url.password||(!payment&&url.hash)||url.port||!login&&!billing&&!payment&&!googleAuthorizationUrlAllowed(url.href))throw Error('Unsupported Cloud browser destination');
   const opened=window.open(url.href,'_blank');if(!opened)throw Error('Allow the Cloud sign-in window, then try again.');opened.opener=null;
  }
 }
@@ -93,7 +98,7 @@ export class BrowserCloudSignIn extends WebPlugin {
   let handedOff=false;
   try{
    const started=await this.signIn({operation:'signInStartGoogle',environment:input.environment,attemptId},controller.signal);
-   const url=new URL(String(started.browserUrl)),origin=input.environment==='production'?productionCloud.web:stagingCloud.web;
+   const url=new URL(String(started.browserUrl)),origin=input.environment==='production'?productionCloud.web:stagingCloud?.web;
    const proof=/^[A-Za-z0-9_-]{43}$/;
    if(url.href!==origin+'/alphaphone/auth/browser-start'||started.attemptId!==attemptId||!Number.isFinite(started.expiresAt)||Number(started.expiresAt)<=Date.now()||
       typeof started.state!=='string'||!proof.test(started.state)||typeof started.challenge!=='string'||!proof.test(started.challenge))throw Object.assign(Error('Invalid Alpha sign-in response'),{code:'unavailable'});

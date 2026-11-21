@@ -1,3 +1,5 @@
+// Partial source-contract regression: authenticated extracted production members execute
+// with controlled ports; this is not whole-file implementation refinement.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
@@ -26,21 +28,23 @@ const modes = ['permission-only', 'busy-peer-and-exact-staged-copy', 'owner-dest
   'wrong-archive-flavor', 'wrong-archive-signer', 'abandon-refused',
   'stale-cache-sweep', 'cache-delete-refused', 'boot-inclusive-boundary-and-process', 'boot-precedence',
   'boot-permission-and-later-admission', 'boot-manual-cold', 'boot-download-failure-and-warm-process',
-  'verified-cache-reuse', 'verified-cache-corrupt-refetch', 'verified-cache-restart-sweep'];
+  'verified-cache-reuse', 'verified-cache-stock-call', 'verified-cache-image-call-access',
+  'verified-cache-corrupt-refetch', 'verified-cache-restart-sweep'];
 const sha = value => createHash('sha256').update(value).digest('hex');
 const signer = sha(Buffer.of(7));
 const installed = {versionCode: 7, launcher: true, signerSha256: signer};
 const offered = {schema: 'alpha-update/v1', variant: 'launcher', signerSha256: signer, versionCode: 8,
   versionName: 'Synthetic update', apkUrl: 'https://updates.test/alpha-8.apk', sha256: sha(Buffer.of(1, 2, 3, 4)), sizeBytes: 4};
 const replacement = {...offered, versionCode: 9, apkUrl: 'https://updates.test/alpha-9.apk'};
-const secondFeed = {schema: 'alpha-update/index-v1', releases: [{...offered, variant: 'standalone'}, replacement]};
+const secondFeed = {schema: 'alpha-update/index-v1', releases: [{...offered, signerSha256: sha(Buffer.of(8))}, replacement]};
 const offerJson = JSON.stringify(offered);
 const nativeInputs = {
   offer1: [200, offerJson],
   offer2: [200, JSON.stringify(secondFeed)],
   withdrawn: [404, ''],
   malformed: [200, '{bad json'],
-  invalid: [200, JSON.stringify({...offered, variant: 'standalone'})],
+  // Well formed, but offered to another signer: never this install's update.
+  invalid: [200, JSON.stringify({...offered, signerSha256: sha(Buffer.of(8))})],
   transport: [503, ''],
   exactLimit: [200, offerJson.padEnd(65536)],
   oversized: [200, offerJson.padEnd(65537)],
@@ -52,7 +56,7 @@ const initialNative = {'s.owner':0, 's.target':0, 's.phase':'idle', 's.file':'ab
 
 function settingsProgram() {
   const source = readFileSync(join(root, settings), 'utf8');
-  const reviewStart=source.indexOf('export const UPDATE_SCHEMA'), reviewEnd=source.indexOf('/** Field updates wait for Home',reviewStart);
+  const reviewStart=source.indexOf('export const UPDATE_SCHEMA'), reviewEnd=source.indexOf('export function automaticUpdateIdle(',reviewStart);
   const cacheStart=source.indexOf('const UPDATE_KEY'), cacheEnd=source.indexOf('/** Keep the reference settings components',cacheStart);
   assert.ok(reviewStart>=0&&reviewEnd>reviewStart&&cacheStart>reviewEnd&&cacheEnd>cacheStart,'Exact non-overlapping update parser and cache source blocks');
   const review=source.slice(reviewStart,reviewEnd), cache=source.slice(cacheStart,cacheEnd);
@@ -132,7 +136,7 @@ function renderer(program, name, responses) {
       const source = responses[nativeMode];
       assert.ok(source);
       writable=saved;
-      if (source.resolved) settle.resolve(source.manifest == null ? {} : {manifest:source.manifest});
+      if (source.resolved) settle.resolve(source.manifest == null ? {} : {manifest:source.manifest,manifestSha256:source.manifestSha256});
       else settle.reject(Error('Controlled native check refusal'));
       await pending;
       point('actual native reply updates the Settings cache according to its outcome','answerCheck',answer,saved);
@@ -141,7 +145,7 @@ function renderer(program, name, responses) {
     receipt() {
       const result = context.review(context.inspect().cache.manifest,installed);
       assert.ok(result);
-      return {...result, signer};
+      return {...result, signer, manifestSha256:context.inspect().cache.manifestSha256};
     },
   };
 }
@@ -162,26 +166,44 @@ export async function checkNativeUpdateStaging(extraSources = []) {
   const traces = [], skipped = [];
   try {
     const members = join(temporary,'AlphaDevicePlugin.java');
-    writeFileSync(members,exactUpdateMembers(readFileSync(join(root,plugin),'utf8')));
+    const source=exactUpdateMembers(readFileSync(join(root,plugin),'utf8'));
+    const deadlineCheck='System.nanoTime()>=deadline)throw new java.io.IOException("Update took too long")';
+    assert.equal(source.split(deadlineCheck).length,2,'The extracted download deadline check occurs once');
+    writeFileSync(members,source.replace(deadlineCheck,deadlineCheck.replace('System.nanoTime()', 'UpdateStagingHarness.downloadNanoTime()')));
     const native = Object.entries(nativeInputs);
     const program = settingsProgram();
-    const bootstrap = renderer(program,'bootstrap',{offer1:{resolved:true,manifest:offerJson}});
+    const bootstrap = renderer(program,'bootstrap',{offer1:{resolved:true,manifest:offerJson,manifestSha256:sha(offerJson)}});
     bootstrap.request();
     await bootstrap.answer('offer1');
     const receipt = bootstrap.receipt();
     assert.deepEqual(Object.fromEntries(['apkUrl','sha256','sizeBytes','versionCode'].map(key => [key,receipt[key]])),
       Object.fromEntries(['apkUrl','sha256','sizeBytes','versionCode'].map(key => [key,offered[key]])));
     const args = [...native.map(([, [code, body]]) => ['manifest',String(code),body]),
-      ['deadline'], ...modes.map(mode => [mode,JSON.stringify(receipt)])];
+      ['deadline'], ['index'], ['selfUpdateGrant'], ...modes.map(mode => [mode,JSON.stringify(receipt)])];
     const results = javaTraceCampaign(harness,[members,...compiled],args);
     const responses = Object.fromEntries(native.map(([key],index) => [key,results[index]]));
-    assert.deepEqual(responses.offer1,{resolved:true,manifest:offerJson});
-    assert.deepEqual(responses.withdrawn,{resolved:true,manifest:null});
-    assert.deepEqual(responses.transport,{resolved:false,manifest:null});
+    assert.deepEqual(responses.offer1,{resolved:true,manifest:offerJson,manifestSha256:sha(offerJson)});
+    assert.deepEqual(responses.withdrawn,{resolved:true,manifest:null,manifestSha256:null});
+    assert.deepEqual(responses.transport,{resolved:false,manifest:null,manifestSha256:null});
     assert.equal(responses.exactLimit.manifest.length,65536);
-    assert.deepEqual(responses.oversized,{resolved:false,manifest:null});
+    assert.deepEqual(responses.oversized,{resolved:false,manifest:null,manifestSha256:null});
     const deadline = results[native.length];
     assert.deepEqual(deadline,{lateBody:{verified:false,bytes:2},lateEof:{verified:true,bytes:4}});
+    // Alpha ships only the launcher. Both parsers skip another signer's row, but an index carrying a
+    // non-launcher row is malformed as a whole: it offers nothing, not even its launcher row.
+    assert.deepEqual(results[native.length + 1],{otherSigner:9,standalone:0});
+    // The image's INSTALL_SELF_UPDATES grant stands in for the owner's install consent only: never below
+    // Android 12, never past the early-boot throttle, and without it the owner's consent is still required.
+    assert.deepEqual(results[native.length + 2],{
+      granted30:{status:'unsupported',admitted:true}, granted:{status:'supported',admitted:true},
+      grantedEarlyBoot:{status:'starting',admitted:true}, neither:{status:'permission-required',admitted:false},
+      consent:{status:'supported',admitted:true}});
+    const parser = vm.createContext({Date, URL, Capacitor:{isNativePlatform:() => true},
+      localStorage:{getItem:() => null, setItem() {}}, device:{checkForUpdate() {throw Error('not called');}}});
+    program.runInContext(parser);
+    const mixed = row => ({schema:'alpha-update/index-v1',releases:[{...replacement,...row},replacement]});
+    assert.equal(parser.review(mixed({signerSha256:sha(Buffer.of(8))}),installed)?.versionCode,9);
+    assert.equal(parser.review(mixed({variant:'standalone'}),installed),null);
 
     const cache = renderer(program,'cached-offer-cadence-withdrawal-and-replacement',responses);
     cache.request();cache.duplicate();await cache.answer('offer1');
@@ -201,7 +223,7 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     restored.request(true);await restored.answer('invalid');
     traces.push(restored.trace);
 
-    for (const [index,result] of results.slice(native.length+1).entries()) {
+    for (const [index,result] of results.slice(native.length+3).entries()) {
       if (result.skip) {
         assert.equal(modes[index],'cache-delete-refused');
         skipped.push({mode:modes[index],reason:result.skip});
@@ -222,13 +244,14 @@ export async function checkNativeUpdateStaging(extraSources = []) {
     rmSync(temporary,{recursive:true,force:true});
   }
 
-  const receipt = await checkTraces({model,traces,sources,driverHashes,scope:'bounded-orchestration',assumptions:[
+  const receipt = await checkTraces({model,traces,sources,driverHashes,batchSize:8,scope: 'bounded-orchestration',assumptions:[
     'Actual native manifest transport and exact Settings review/cache functions execute through synthetic responses. The checked Settings tuple is passed to the JVM installer before the first activation event.',
     'Controlled HTTPS, fake archive metadata and an installer sink expose actual cache bytes, digest admission, file custody, precommit copy and cleanup. The fixture refuses each staged update before resident stop or commit.',
-    'Direct copyVerified probes test the real deadline behavior: late body bytes are rejected and a late EOF can verify bytes already read. The full install traces use the production deadline.',
+    'Direct copyVerified probes substitute only the download clock so the fixture can place a body chunk or EOF at the deadline. Late body bytes are rejected and late EOF can verify bytes already read. Full install traces use the real clock and production deadline.',
     'Cold-boot traces execute the actual capability and installer functions with controlled SDK, consent and Android SystemClock. Uptime samples 0,26681,29999,30000,30001,35000 preserve the inclusive boundary. A shut-down executor proves refused calls resolve before worker admission; real cache/network/session/barrier/stop/commit effects remain absent.',
     'Same-boot process replacement preserves controlled uptime; a new boot resets it. These are explicit fixture observations between attempts, not installed-device reboot validation. A failed actual digest and later warm-process admission retain the existing cleanup contract.',
     'A known automatic lifecycle deferral may retain one process-local exact tuple. Actual cached bytes, marker, network-call counts and staged copies are observed through retry, corruption/refetch and process-loss cleanup. Cache reuse reruns digest and archive admission; the source fixture stops at renderer refusal and proves no commit or resident stop. Transport/archive metadata are controlled ports, not real TLS or Android installation.',
+    'Stock call audio and a denied image phone-state app-op both exercise staged deferral and a refused busy retry. Restored idle audio or call-state access admits an exact cached retry without another fetch.',
     ...skipped.map(({mode,reason}) => `Host capability omitted ${mode}: ${reason}.`),
   ]});
   return {receipt,skipped,obligations:[

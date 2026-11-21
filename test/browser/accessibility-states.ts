@@ -1,6 +1,6 @@
 import {chooseCalendarEventAction} from './helpers/browser-calendar';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Request } from '@playwright/test';
 import {openCanonicalCalendarForm} from './helpers/canonical-calendar';
 import {openOwnedPhotoViewer,openPhotoShare} from './helpers/owned-photo';
 import {installHomeCalendar} from './helpers/home-calendar';
@@ -23,7 +23,34 @@ export type State = {
 };
 
 const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
+/**
+ * The app has booted: the phone is mounted and painted, and startup no longer holds it inert.
+ * Booting is loading the development server's module graph, not a UI reaction, so it is waited for
+ * within the test's own budget instead of an assertion's 5s: on a loaded host the graph alone takes
+ * longer than that, and the assertions that follow are then about the booted app.
+ */
+const booted = (page: Page) => page.waitForFunction(() => {
+  const phone = document.querySelector('.alpha-phone');
+  return !!phone && phone.getClientRects().length > 0 && !phone.closest('[data-alpha-startup-shell][inert]');
+}, undefined, { timeout: 0 });
+/**
+ * Opens the app and waits for it to boot. A module the development server fails to send (a dropped
+ * or truncated response) leaves the page blank for good, so that fails at once with the module's
+ * name instead of as a timeout.
+ */
+const goto = async (page: Page, url: string) => {
+  let fail = (_error: Error) => {};
+  const failed = new Promise<never>((_, reject) => { fail = reject; });
+  const listener = (request: Request) => {
+    const error = request.failure()?.errorText;
+    // Only the app's own server: a state that blocks a third-party script is not a failed boot.
+    if (request.resourceType() === 'script' && error && error !== 'net::ERR_ABORTED' && new URL(request.url()).origin === new URL(page.url()).origin) fail(new Error(`The app did not boot: ${request.url()} failed to load (${error})`));
+  };
+  page.on('requestfailed', listener);
+  try { await Promise.race([page.goto(url).then(() => booted(page)), failed]); } finally { page.off('requestfailed', listener); }
+};
 const settle = async (page: Page) => {
+  await booted(page);
   await expect(page.locator('.alpha-phone')).toBeVisible();
   // Entry motion has finished and fonts are loaded: final geometry, not a fixed wait.
   await settled(page);
@@ -51,7 +78,7 @@ const live = (name: string, steps: string[] = [], shows?: string): State => ({
   name: `live ${name}`, shows,
   open: async (page, theme) => {
     await page.addInitScript(offline);
-    await page.goto(theme ? `/?theme=${theme}` : '/');
+    await goto(page, theme ? `/?theme=${theme}` : '/');
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
     await press(page, steps);
     await settle(page);
@@ -61,7 +88,7 @@ const live = (name: string, steps: string[] = [], shows?: string): State => ({
 /** The shared Files browser is exercised over the development browser's own storage port. */
 export async function openFilesStorage(page:Page,theme='light') {
   await page.addInitScript(offline);
-  await page.goto(`/?theme=${theme}`);
+  await goto(page, `/?theme=${theme}`);
   await page.getByRole('button',{name:'Files',exact:true}).click();
   await page.getByRole('button',{name:'Internal storage',exact:true}).click();
   await expect(page.getByRole('button',{name:'Files options',exact:true})).toBeVisible();
@@ -74,7 +101,7 @@ const mock = (start: string, steps: string[] = [], shows?: string): State => ({
   open: async (page, theme) => {
     // Edit and info require a real library revision; prototype images have none.
     if(start==='photos:viewer'&&steps.some(step=>step==='Edit photo'||step==='Photo info'||step==='Share photo'))await openOwnedPhotoViewer(page,theme);
-    else await page.goto(`/?mode=mock&theme=${theme || 'light'}&start=${start}`);
+    else await goto(page, `/?mode=mock&theme=${theme || 'light'}&start=${start}`);
     await settle(page);
     if (ARRIVES[start]) { await expect(page.getByRole('button', { name: ARRIVES[start], exact: true })).toBeVisible(); await settle(page); }
     if (steps.length) { await press(page, steps); await settle(page); }
@@ -105,7 +132,13 @@ export const LIVE_STATES: State[] = [
   live('Settings privacy', ['Settings', 'Privacy']),
   live('Settings about', ['Settings', 'About']),
   // About exposes the existing connection recovery controls in the grouped layout.
-  live('Settings licenses', ['Settings', 'About', 'Licenses']),
+  {name:'live Settings licenses',open:async(page,theme)=>{
+    await live('Settings licenses',['Settings','About','Licenses']).open(page,theme);
+    // The shipped notice JSON changes the exposed tab stops after the page opens.
+    // Audit the populated inventory, using the existing budget and every focus rule.
+    await expect(page.getByRole('searchbox',{name:'Search components',exact:true})).toBeVisible();
+    await settle(page);
+  }},
   live('Settings app permissions', ['Settings', 'Privacy', 'Permissions']),
   // The remaining Settings pages, and each app's open menu, search field and editor.
   live('Settings apps', ['Settings', 'Apps']),
@@ -227,7 +260,7 @@ const connected = (name: string, steps: Array<string | RegExp> = [], options: { 
   name: `connected ${name}`, shows: options.shows,
   open: async (page, theme) => {
     await page.addInitScript(offline);
-    await page.goto(theme ? `/?theme=${theme}` : '/');
+    await goto(page, theme ? `/?theme=${theme}` : '/');
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
     await connectMailbox(page);
     // The mailbox is read when Inbox opens; Home's card and badge come from that read.
@@ -259,7 +292,7 @@ export const DEVELOPMENT_STATES: State[] = [
     name: 'live Settings developer',
     open: async (page, theme) => {
       await page.addInitScript(offline);
-      await page.goto(theme ? `/?theme=${theme}&tools=1` : '/?tools=1');
+      await goto(page, theme ? `/?theme=${theme}&tools=1` : '/?tools=1');
       await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
       await press(page, ['Settings', 'General', 'Developer']);
       await settle(page);
@@ -272,7 +305,7 @@ export const FAILURE_STATES: State[] = [
   {
     name: 'render failure recovery',
     open: async page => {
-      await page.addInitScript(offline); await page.goto('/');
+      await page.addInitScript(offline); await goto(page, '/');
       await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
       await page.evaluate(() => window.dispatchEvent(new Event('alpha:force-render-error')));
       const recovery = page.getByRole('alertdialog', { name: 'Something went wrong' });
@@ -283,7 +316,7 @@ export const FAILURE_STATES: State[] = [
   {
     name: 'startup failure recovery',
     open: async page => {
-      await page.addInitScript(offline); await page.goto('/');
+      await page.addInitScript(offline); await goto(page, '/');
       await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
       // The plain-DOM screen used when React never mounted, shown over a live page here so the
       // sweep also proves it takes the page behind it out of focus order.
@@ -356,7 +389,7 @@ const launcherBridge = () => {
       if (method === 'getLocaleInfo') return { locale: 'en-US', hour24: false };
       return {};
     }
-    if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: false, developmentBuild: true, topInset: 0, bottomInset: 0 };
+    if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: false, topInset: 0, bottomInset: 0 };
     if (plugin === 'AlphaNotifications' && method === 'status') return { permissionGranted: true, appEnabled: true };
     if (plugin === 'AlphaNotifications' && method === 'list') return { items: [], scope: 'alpha-phone' };
     if (plugin === 'AlphaVoiceCloud' && method === 'checkPermissions') return { microphone: 'granted' };
@@ -374,7 +407,7 @@ const launcher = (name: string, steps: string[] = [], shows?: string): State => 
   name: `launcher ${name}`, shows,
   open: async (page, theme) => {
     await page.addInitScript(launcherBridge);
-    await page.goto(theme ? `/?theme=${theme}` : '/');
+    await goto(page, theme ? `/?theme=${theme}` : '/');
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
     await expect(page.locator('html')).not.toHaveClass(/standalone-app/);
     await press(page, steps);
@@ -421,7 +454,7 @@ const calendarWithEvents: State = {
   name: 'connected Calendar with events',
   open: async (page, theme) => {
     await page.addInitScript(offline);
-    await page.goto(theme ? `/?theme=${theme}` : '/');
+    await goto(page, theme ? `/?theme=${theme}` : '/');
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
     await syntheticCalendar(page);
     await press(page, ['Calendar']);
@@ -444,7 +477,7 @@ const agentCalendar = (name: string, steps: string[] = []): State => ({
     const { year, month, day } = AGENT_CALENDAR_DAY;
     await page.clock.install({ time: new Date(year, month, day, 12, 0, 0) });
     await page.addInitScript(offline);
-    await page.goto(theme ? `/?theme=${theme}` : '/');
+    await goto(page, theme ? `/?theme=${theme}` : '/');
     const start = new Date(year, month, day, 14, 30, 0), end = new Date(year, month, day, 15, 15, 0);
     await installHomeCalendar(page, { title: 'Synthetic planning review with a long enough title to wrap', startAt: start.toISOString(), endAt: end.toISOString() });
     await expect(page.locator('[data-alpha-home-calendar]')).toContainText('Synthetic planning review');
@@ -458,7 +491,7 @@ const DEVELOPMENT_REPLY = 'Development reply. Edit this response in Agent connec
 const developmentAgent = (name: string, conversation: boolean): State => ({
   name: `connected agent ${name}`,
   open: async (page, theme) => {
-    await page.goto(`/?mode=dev&theme=${theme || 'light'}`);
+    await goto(page, `/?mode=dev&theme=${theme || 'light'}`);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await openConnectionDiagnostics(page);
     await page.getByRole('button', { name: 'Connect development profile', exact: true }).click();

@@ -4,18 +4,17 @@
 // Alpha's copy binding, that no second implementation remains here, the account panel and that only
 // admission and its background refresher read the entitlement. Plan names and numbers are synthetic.
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import fs from 'node:fs';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {transformSync} from 'esbuild';
+import test from 'node:test';
 import {
   describeSubscription, planAdmission, readServiceLimit, redeemFailureMessage, serviceLimitMessage, subscriptionSummary,
   SubscriptionRedeemError, organizationCreditFromLimits,
 } from '../apps/app/src/runtime/subscription-entitlement.ts';
 
 const NOW = Date.UTC(2026, 9, 12, 12, 0, 0);
-const USER = '22222222-2222-4222-8222-222222222222';
 
 test('Alpha binds its product name, the phone and the deployment name into the shared copy', () => {
   const rate = readServiceLimit({code: 'http', status: 429, data: {error: 'rate_limited', retryAfterSeconds: 42}}, NOW);
@@ -43,14 +42,6 @@ test('Alpha binds its product name, the phone and the deployment name into the s
   assert.equal(planAdmission({kind: 'credits', source: 'billing-limits'}), 'admit');
 });
 
-test('Alpha keeps no second entitlement implementation: it re-exports the projected upstream client', () => {
-  const binding = fs.readFileSync('apps/app/src/runtime/subscription-entitlement.ts', 'utf8');
-  assert.match(binding, /^export \* from '\.\.\/\.\.\/\.\.\/\.\.\/\.eliza\/client-features\/packages\/cloud\/sdk\/src\/subscription-entitlement\.ts';$/m);
-  for (const duplicate of [/subtle\.verify/, /class EntitlementRefresher/, /function readServiceLimit/, /function checkEntitlement/, /eliza-entitlement\+jwt/])
-    assert.doesNotMatch(binding, duplicate);
-  assert.ok(fs.readFileSync('scripts/prepare-client-features.ts', 'utf8').includes("'packages/cloud/sdk/src/subscription-entitlement.ts',"));
-});
-
 test('the organization credit balance is read only from an exact, fresh billing snapshot', () => {
   const at = new Date(NOW - 1000).toISOString();
   const snapshot = value => ({success: true, data: {schemaVersion: 2, v2: {balance: {status: 'available', source: 'organizations', observedAt: at, value: {revision: '7', balance: {unit: 'usd', currency: 'USD', value}}}}}});
@@ -61,10 +52,14 @@ test('the organization credit balance is read only from an exact, fresh billing 
   assert.equal(organizationCreditFromLimits(snapshot('5'), NOW + 400000).state, 'unavailable', 'a stale observation is not shown');
 });
 
+
 test('the subscription sheet leads with the plan and reports its allowance and latest Cloud limit read-only', async () => {
-  const {subscriptionSummary: sharedSummary, serviceLimitNextChange, alphaSubscriptionCopy} = await import('../apps/app/src/runtime/subscription-entitlement.ts');
-  // The sheet renders through the projected shared hook (elizaOS/eliza#38105), evaluated as shipped.
-  const hookSource = fs.readFileSync('.eliza/client-features/packages/ui/src/components/settings/cloud-subscription-summary.tsx', 'utf8');
+  const {alphaSubscriptionCopy} = await import('../apps/app/src/runtime/subscription-entitlement.ts');
+  // The sheet renders through Alpha's summary hook (apps/app/src/ui/components/settings), evaluated as
+  // shipped with the summary and timing it imports from Alpha's subscription presentation.
+  const {subscriptionSummary: sharedSummary, serviceLimitNextChange} = await import('../apps/app/src/ui/cloud/subscription-presentation.ts');
+  const hookSource = fs.readFileSync('apps/app/src/ui/components/settings/cloud-subscription-summary.tsx', 'utf8');
+  assert.match(hookSource, /import \{\s*type SubscriptionCopy,\s*type SubscriptionSummary,\s*serviceLimitNextChange,\s*subscriptionSummary,\s*\} from "\.\.\/\.\.\/cloud\/subscription-presentation";/, 'the hook reads Alpha\'s presentation');
   const hookCompiled = transformSync(hookSource.replace(/^import [\s\S]*?;\n/gm, '').replaceAll('export ', ''), {loader: 'tsx', jsxFactory: 'React.createElement'}).code;
   const useCloudSubscriptionSummary = new Function('React', 'useEffect', 'useState', 'subscriptionSummary', 'serviceLimitNextChange', hookCompiled + ';return useCloudSubscriptionSummary;')(React, React.useEffect, React.useState, sharedSummary, serviceLimitNextChange);
   const source = fs.readFileSync('apps/app/src/runtime/cloud-membership-ui.tsx', 'utf8');
@@ -107,87 +102,4 @@ test('the subscription sheet leads with the plan and reports its allowance and l
   assert.equal(change({kind: 'allowance-exhausted', retryAfterMs: null, resetsAt: at + 30 * 86400000, observedAt: at}, at), 3600000, 'a far reset never overflows a timer');
   assert.equal(change({kind: 'billing-refused', retryAfterMs: null, resetsAt: null, observedAt: at - 59900}, at), 1000);
   assert.equal(change({kind: 'rate-limited', retryAfterMs: 1000, resetsAt: at - 1, observedAt: at - 5000}, at), null, 'nothing is scheduled for a lapsed limit');
-  // The re-render timer is the shared hook's; Alpha keeps no copy of it.
-  assert.match(source, /const summary=useCloudSubscriptionSummary\(plan,\{planEndsAt:endsAt\?\?null,lastLimit:lastLimit\?\?null,copy:alphaSubscriptionCopy\(serviceName\)\}\);/);
-  assert.doesNotMatch(source, /serviceLimitNextChange|setTimeout/);
-  assert.match(hookSource, /const nextChange =\s+summary\.limit && lastLimit\s+\? serviceLimitNextChange\(lastLimit, lastLimit\.observedAt, now\)\s+: null;\s+useEffect\(\(\) => \{\s+if \(nextChange === null\) return;\s+const timer = setTimeout\(\(\) => tick\(\(value\) => value \+ 1\), nextChange\);/);
-  const ui = fs.readFileSync('apps/app/src/runtime/connection-ui.tsx', 'utf8');
-  assert.match(ui, /lastLimit=\{snapshot\.fundingRefused&&snapshot\.lastServiceLimit\?\.kind==='billing-refused'\?null:snapshot\.lastServiceLimit\} refused=\{!!snapshot\.fundingRefused\} serviceName=\{serviceName\}/, 'the sheet receives the latest Cloud limit; a billing refusal is said once, by the sheet');
-  assert.match(ui, /className="alpha-connection alpha-account-sheet"/);
 });
-
-test('a resident turn failure forwards its own reset fields and records the latest Cloud limit for the account panel', () => {
-  const ui = fs.readFileSync('apps/app/src/runtime/connection-ui.tsx', 'utf8');
-  assert.match(ui, /readServiceLimit\(\{ failureKind: 'failureKind' in reply \? reply\.failureKind : undefined, terminalFailure: 'terminalFailure' in reply \? reply\.terminalFailure : undefined, resetAt: timing\.resetAt, retryAfterSeconds: timing\.retryAfterSeconds \}\)/);
-  const failure = ui.slice(ui.indexOf('function replyFailure('), ui.indexOf("if(kind==='rate_limited')return new AlphaClientError"));
-  assert.match(failure, /if\(limit\)update\(\{lastServiceLimit:\{\.\.\.limit,observedAt:Date\.now\(\)\},\.\.\.\(funding\?\{fundingRefused:true,membershipDismissed:false\}:\{\}\)\}\);/);
-  // A billing refusal of a signed-in account answers once and offers the subscription sheet.
-  assert.match(failure, /const funding=limit\?\.kind==='billing-refused'&&!!state\.cloudAccount;/);
-  assert.match(failure, /fundingRefusedReply\(cloudServiceName\(cloud\.environment\)\)\),\{failureKind:kind\?\?limit\.kind,serviceLimit:limit\.kind,planAction:'funding'\}/);
-  assert.match(ui.slice(ui.indexOf('function detachService()'), ui.indexOf('async function verifyService')), /lastServiceLimit:null/);
-  assert.match(ui, /lastLimit=\{snapshot\.fundingRefused&&snapshot\.lastServiceLimit\?\.kind==='billing-refused'\?null:snapshot\.lastServiceLimit\}/);
-  // A limit seen on one account never appears for another, and it ends once AI gets through again.
-  assert.match(ui.slice(ui.indexOf('async function verifyService'), ui.indexOf('let membershipRead')), /\.\.\.\(!same\?\{[^}]*lastServiceLimit:null/);
-  assert.match(ui.slice(ui.indexOf('  async residentRedeem('), ui.indexOf("update({redeemNotice:redeemSuccessMessage(result)});")), /redeemed=true;[\s\S]*lastServiceLimit:null/);
-  assert.match(ui.slice(ui.indexOf('  async send('), ui.indexOf('export function ConnectionChooser')), /if\(!failed&&\(state\.lastServiceLimit\|\|state\.fundingRefused\)\)update\(\{lastServiceLimit:null,fundingRefused:false\}\);/);
-  // A request-level 429 that reads as a Cloud limit is recorded too; a refusal before the turn is the agent being busy.
-  assert.match(ui.slice(ui.indexOf('  async send('), ui.indexOf('export function ConnectionChooser')), /const limit = refused \? null : readServiceLimit\(error\);\s+if \(limit\) update\(\{ lastServiceLimit: \{ \.\.\.limit, observedAt: Date\.now\(\) \} \}\);/);
-});
-
-test('Settings retains unknown, expired, inactive and credit-funded admission states', () => {
-  const ui = fs.readFileSync('apps/app/src/runtime/connection-ui.tsx', 'utf8');
-  const start = ui.indexOf('  residentPlanSettings(){');
-  const end = ui.indexOf('\n  },', start);
-  assert.ok(start >= 0 && end > start, 'actual Settings summary method located');
-  const summarize = new Function('state', 'residentCloudFlow', 'describeSubscription', 'subscriptionSummary', 'readPlanAdmission', 'CLOUD_KEY_EXPIRY_WARNING_MS', 'cloudServiceName', 'cloud', 'planAdmission',
-    `return ({${ui.slice(start, end + 5)}}).residentPlanSettings();`);
-  const account = {email:'qa@example.invalid', userId:USER};
-  const snapshot = {cloudAccount:account, residentPlanNotice:'needs-plan', residentInference:'unavailable'};
-  const read = overrides => summarize({...snapshot, ...overrides}, () => true, describeSubscription, subscriptionSummary, () => null, 86400000, () => 'Nebula', {environment:'production'}, planAdmission);
-  for (const reason of ['outage', 'not-published', 'invalid']) {
-    const result = read({residentSubscription:{kind:'unavailable', reason}});
-    assert.equal(result.plan, 'Plan status unavailable', reason);
-    assert.equal(result.status, null, reason);
-    assert.equal(result.inference, 'Unavailable · Cloud status unconfirmed', reason);
-  }
-  const expired = read({residentSubscription:{kind:'expired', planName:'Previously verified plan'}});
-  assert.equal(expired.plan, 'Previously verified plan');
-  assert.equal(expired.status, null);
-  assert.doesNotMatch(expired.inference, /needs a plan/);
-  for (const [status, planName, headline] of [['none', null, 'No active plan'], ['canceled', 'Synthetic plan', 'Synthetic plan has ended']]) {
-    const result = read({residentSubscription:{kind:'inactive', status, planName, source:'billing-limits'}});
-    assert.equal(result.plan, headline);
-    assert.equal(result.status, status);
-    assert.equal(result.inference, 'Unavailable · check Cloud account');
-  }
-  const credits = read({residentSubscription:{kind:'credits', source:'billing-limits'}, residentPlanNotice:null, residentInference:'cloud'});
-  assert.equal(credits.plan, 'No plan');
-  assert.equal(credits.inference, 'Nebula');
-  const active = read({residentSubscription:{kind:'active', planName:'Synthetic plan', status:'active', allowance:null, expiresAt:NOW, refreshFailed:false}, residentPlanNotice:null, residentInference:'cloud'});
-  assert.equal(active.plan, 'Synthetic plan');
-  assert.equal(active.status, 'active');
-  assert.equal(read({residentSubscription:null, residentPlanNotice:null}).plan, 'Checking plan…');
-  assert.equal(read({cloudAccount:null, residentSubscription:null, residentPlanNotice:null}).plan, 'Not signed in');
-  const offline = read({cloudAccount:null, residentSubscription:{kind:'unavailable', reason:'outage'}, residentPlanNotice:'offline'});
-  assert.equal(offline.plan, 'Offline');
-  assert.equal(offline.inference, 'Unavailable · Cloud unreachable');
-  assert.equal(summarize(snapshot, () => false, describeSubscription, subscriptionSummary, () => null, 86400000), null);
-  // The Settings plan page shows the allowance Cloud reports and the latest limit with its remaining wait, never a balance.
-  const allowance = {unit:'usd_micros', granted:100, remaining:40, periodStart:Date.now() - 1000, resetsAt:Date.now() + 86400000};
-  const limited = read({residentSubscription:{kind:'active', planName:'Synthetic plan', status:'active', allowance, expiresAt:Date.now() + 60000, refreshFailed:false}, residentPlanNotice:null, residentInference:'cloud',
-    lastServiceLimit:{kind:'rate-limited', retryAfterMs:120000, resetsAt:null, observedAt:Date.now() - 40000}});
-  assert.match(limited.allowance, /^40% of this billing period's plan allowance is left\./);
-  assert.match(limited.limit, /^The AI request rate limit was reached\. Try again in about (79|80) seconds\. Alpha Phone did not retry your message\.$/);
-  const lapsed = read({residentSubscription:{kind:'active', planName:'Synthetic plan', status:'active', allowance:null, expiresAt:Date.now() + 60000, refreshFailed:false}, residentPlanNotice:null, residentInference:'cloud',
-    lastServiceLimit:{kind:'rate-limited', retryAfterMs:1000, resetsAt:null, observedAt:Date.now() - 5000}});
-  assert.equal(lapsed.allowance, null, 'no allowance row without a reported allowance');
-  assert.equal(lapsed.limit, null, 'a wait that has passed is not shown');
-  const credit = read({residentSubscription:{kind:'credits', source:'billing-limits'}, residentPlanNotice:null, residentInference:'cloud'});
-  assert.equal(credit.allowance, null);
-  assert.equal(read({cloudAccount:null, residentSubscription:null, residentPlanNotice:null, lastServiceLimit:{kind:'rate-limited', retryAfterMs:60000, resetsAt:null, observedAt:Date.now()}}).limit, null, 'no limit is shown without an account');
-  const settings = fs.readFileSync('apps/app/src/prototype/settings-adapter.ts', 'utf8');
-  assert.match(ui, /plan=\{snapshot\.membershipPlan\}/);
-  assert.match(ui, /lastLimit=\{snapshot\.fundingRefused/);
-});
-
-

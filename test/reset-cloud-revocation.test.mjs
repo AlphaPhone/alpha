@@ -1,3 +1,4 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readdirSync} from 'node:fs';
@@ -27,8 +28,7 @@ final class AlphaCredentialStore {
 }`);
   put('ai/alphacompute/alphaphone/AlphaCloudSignInPlugin.java',`package ai.alphacompute.alphaphone;
 import ai.eliza.auth.cloud.*;
-final class AlphaCloudSignInPlugin {static CloudSignInConfig REGISTRATION=registration(false);
- static CloudSignInConfig registration(boolean mocks){CloudSignInConfig.Builder b=CloudSignInConfig.builder().clientId("ai.alphacompute.alphaphone").deviceName("Alpha Phone").productName("Alpha Phone").googleClientId("alpha-phone").environment(new CloudSignInEnvironment("production","api.eliza.app","eliza.app","elizacloud","Eliza Cloud","/alphaphone/auth/callback"));if(mocks)b.environment(new CloudSignInEnvironment("staging","api-staging.eliza.app","staging.eliza.app","elizacloud-staging","Eliza Cloud","/alphaphone/auth/callback"));return b.build();}}`);
+final class AlphaCloudSignInPlugin {static final CloudSignInConfig REGISTRATION=CloudSignInConfig.builder().clientId("ai.alphacompute.alphaphone").deviceName("Alpha Phone").productName("Alpha Phone").googleClientId("alpha-phone").environment(new CloudSignInEnvironment("production","api.eliza.app","eliza.app","elizacloud","Eliza Cloud","/alphaphone/auth/callback")).build();}`);
   put('ai/alphacompute/alphaphone/Fixture.java',`package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.system.reset.DataReset;
 public class Fixture {
@@ -41,9 +41,6 @@ public class Fixture {
   DataReset.BeforeDispatch step=ResetBeforeDispatch.create((config,environment,token)->{if(block)try{Thread.sleep(10000);}catch(InterruptedException expected){}revoked.add(environment.name+"="+token);return true;});
   AlphaCredentialStore.current.put("cloud:production",key("current","eliza_mobile_current"));
   step.run(null,1000);check(revoked.equals(java.util.List.of("production=eliza_mobile_current")),"namespaced key revoked");
-  reset();AlphaCloudSignInPlugin.REGISTRATION=AlphaCloudSignInPlugin.registration(true);
-  AlphaCredentialStore.current.put("cloud:production",key("p","eliza_mobile_production"));AlphaCredentialStore.current.put("cloud:staging",key("s","eliza_mobile_staging"));
-  step.run(null,1000);check(revoked.equals(java.util.List.of("production=eliza_mobile_production","staging=eliza_mobile_staging")),"each registered environment");
   reset();AlphaCredentialStore.current.put("cloud:production",key("current","eliza_mobile_current"));AlphaCredentialStore.unreadable=true;
   step.run(null,1000);check(revoked.isEmpty(),"an unreadable store skips revocation");AlphaCredentialStore.unreadable=false;
   reset();AlphaCredentialStore.current.put("cloud:production",key("current","eliza_mobile_current"));
@@ -55,7 +52,7 @@ public class Fixture {
   const calendar=resolve(root,'vendor/eliza/plugins/plugin-native-calendar/android/src/main/java/ai/eliza/plugins/calendar/CalendarConfiguration.java');
   const alpha=['ResetBeforeDispatch','CloudDeployment'].map(name=>resolve(root,`android/app/src/main/java/ai/alphacompute/alphaphone/${name}.java`));
   // org.json comes from the real jar ahead of android.jar's stubs.
-  execFileSync(javaBinary('javac'),['--release','17','-proc:none','-cp',`${jsonJar}:${sdk}`,'-d',join(dir,'classes'),...files,...shared,...reset,calendar,...alpha],{timeout:120000});
-  assert.match(execFileSync(javaBinary('java'),['-cp',`${join(dir,'classes')}:${jsonJar}:${sdk}`,'ai.alphacompute.alphaphone.Fixture'],{encoding:'utf8',timeout:60000}),/PASS Alpha reset revocation binding/);
+  execFileSync(javaBinary('javac'),['--release','17','-proc:none','-cp',`${jsonJar}:${sdk}`,'-d',join(dir,'classes'),...files,...shared,...reset,calendar,...alpha],{timeout:scaledTimeout(120000)});
+  assert.match(execFileSync(javaBinary('java'),['-cp',`${join(dir,'classes')}:${jsonJar}:${sdk}`,'ai.alphacompute.alphaphone.Fixture'],{encoding:'utf8',timeout:scaledTimeout(60000)}),/PASS Alpha reset revocation binding/);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });

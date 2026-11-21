@@ -2,7 +2,7 @@ import {build} from "esbuild";
 import {createRealtimeVoiceTiming} from '../vendor/eliza/packages/voice/src/realtime-voice-timing.ts';
 import {validateUuid} from '../vendor/eliza/packages/core/src/utils/uuid.ts';
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {stripTypeScriptTypes} from './support/strip-types.mjs';import vm from 'node:vm';
-import {applyServerEvent,loopToListening,INITIAL_VOICE_SESSION_STATE} from '../vendor/eliza/packages/ui/src/voice/voice-session-state.ts';
+import {applyServerEvent,loopToListening,INITIAL_VOICE_SESSION_STATE} from '../apps/app/src/ui/voice/voice-session-state.ts';
 // Match the SDK reducer ordering plus pending/audio eligibility and terminal tombstones.
 // The real SDK accepts global interruption only for pending work, owned audio, or a local ACK.
 // This unit port omits socket negotiation/local-barge ACKs; it is not a full client replica.
@@ -30,7 +30,7 @@ const sdkOptions=options=>{
   },
  };
 };
-const source=stripTypeScriptTypes((readFileSync('apps/app/src/runtime/development-cartesia-flag.ts','utf8')+readFileSync('apps/app/src/runtime/development-cartesia-conversation.ts','utf8')).replace(/^import .*;\n/gm,'').replace(/^export \{.*\} from .*;\n/gm,'').replace("await import('@elizaos/ui/voice/voice-session-client')","await loadClient()").replace(/^export /gm,''),{mode:'strip'});
+const source=stripTypeScriptTypes((readFileSync('apps/app/src/runtime/development-cartesia-flag.ts','utf8')+readFileSync('apps/app/src/runtime/development-cartesia-conversation.ts','utf8')).replace(/^import .*;\n/gm,'').replace(/^export \{.*\} from .*;\n/gm,'').replace("await import('../ui/voice/voice-session-client-core.ts')","await loadClient()").replace(/^export /gm,''),{mode:'strip'});
 const binding={conversationId:'conversation',session:{agentId:'agent'}};
 async function setup({revoked=true,alreadyRetired=false,cloudRealtime=false,attestation={},askBefore=true,clientFactory}={}){
  let current=true,options,sdk,stops=0,history=0,manualMuted=false;const calls=[],errors=[],performed=[],notices=[],accepted=[];const preferenceWindow=new EventTarget();
@@ -42,6 +42,13 @@ async function setup({revoked=true,alreadyRetired=false,cloudRealtime=false,atte
 }
 test('canonical completion refreshes history without a second transcript/model dispatch',async()=>{const h=await setup();await h.controller.start();h.options.onServerEvent({t:'stt_partial',text:'unfinished',traceId:'owned'});assert.deepEqual(h.accepted,[]);h.options.onServerEvent({t:'stt_final',text:'synthetic',traceId:'owned'});h.options.onServerEvent({t:'stt_final',text:'synthetic',traceId:'owned'});assert.deepEqual(h.accepted,['synthetic']);h.options.onServerEvent({t:'reply_complete',traceId:'owned'});await Promise.resolve();assert.equal(h.history,1);assert.ok(h.calls.every(c=>!c.path.includes('/messages')));await h.controller.stop();assert.equal(h.calls.filter(c=>c.path.includes('/revoke')).length,1);await h.controller.stop();assert.equal(h.stops,1);});
 test('failed retirement remains failed on repeated Stop',async()=>{const h=await setup({revoked:false});await h.controller.start();await assert.rejects(h.controller.stop(),/not confirmed/);await assert.rejects(h.controller.stop(),/not confirmed/);assert.equal(h.stops,1);});
+test('Stop refreshes a minted conversation once after retirement, including an unconfirmed retirement',async()=>{
+ for(const revoked of [true,false]){
+  const h=await setup({revoked});await h.controller.start();
+  if(revoked)await h.controller.stop();else await assert.rejects(h.controller.stop(),/not confirmed/);
+  assert.equal(h.history,1);await h.controller.stop().catch(()=>{});assert.equal(h.history,1);
+ }
+});
 test('recheck retires the owned server ticket when its conversation changes',async()=>{const h=await setup();await h.controller.start();h.change();h.controller.recheck();for(let i=0;i<4;i++)await Promise.resolve();assert.equal(h.stops,1);assert.equal(h.calls.filter(c=>c.path.includes('/revoke')).length,1);});
 
 test('canonical teardown or rotated tickets already retired are accepted only by exact authenticated status',async()=>{const h=await setup({alreadyRetired:true});await h.controller.start();await h.controller.stop();await h.controller.stop();assert.equal(h.stops,1);});
@@ -196,17 +203,17 @@ test('accepted session reset retires busy traces and old frames cannot revive th
 });
 
 
-// The paired client compiles the SDK's own packages/ui source, whose @elizaos/* imports resolve only in
-// the prepared SDK (npm run agent:prepare). npm test skips it without one; npm run verify in CI sets
+// The paired client compiles Alpha's own voice session client (apps/app/src/ui), whose @elizaos/* imports resolve only in
+// the prepared SDK (bun run agent:prepare). bun run test skips it without one; bun run verify in CI sets
 // ALPHA_REQUIRE_PREPARED_SDK=1 with ALPHA_CLOUD_COLLECTOR_SOURCE, where a missing SDK fails.
-const skipUnprepared=!process.env.ALPHA_CLOUD_COLLECTOR_SOURCE&&process.env.ALPHA_REQUIRE_PREPARED_SDK!=='1'?'Prepared SDK unavailable; run npm run agent:prepare and export ALPHA_CLOUD_COLLECTOR_SOURCE':false;
+const skipUnprepared=!process.env.ALPHA_CLOUD_COLLECTOR_SOURCE&&process.env.ALPHA_REQUIRE_PREPARED_SDK!=='1'?'Prepared SDK unavailable; run bun run agent:prepare and export ALPHA_CLOUD_COLLECTOR_SOURCE':false;
 for (const cloudRealtime of [false,true]) test(`actual SDK ${cloudRealtime?'Cloud':'Direct'} preserves playback and recovers an admitted socket`,{skip:skipUnprepared},async()=>{
  assert.ok(process.env.ALPHA_CLOUD_COLLECTOR_SOURCE,'ALPHA_REQUIRE_PREPARED_SDK=1 needs ALPHA_CLOUD_COLLECTOR_SOURCE');
  const observed=[];let readAutomaticMute;
  const observe=row=>{if(observed.length<32&&Buffer.byteLength(JSON.stringify([...observed,row]))<=7168)observed.push(row);};
  // Compile the paired SDK client without replacing its reducer, frame parser or drain.
  const bundled=await build({
-  entryPoints:['vendor/eliza/packages/ui/src/voice/voice-session-client-core.ts'],
+  entryPoints:['apps/app/src/ui/voice/voice-session-client-core.ts'],
   alias:{
    '@elizaos/core/logging':'./.eliza/client-features/packages/core/src/logging.ts',
    '@elizaos/core/speech':'./.eliza/client-features/packages/core/src/speech.ts',

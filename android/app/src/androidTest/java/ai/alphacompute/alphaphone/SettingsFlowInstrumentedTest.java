@@ -70,11 +70,6 @@ public class SettingsFlowInstrumentedTest {
    WebViewTestDriver.evaluate(AppNavigation.request("Settings"));until(AppNavigation.selected("Settings"));AppNavigation.declineStartupAccess();
    until("document.querySelector('button[aria-label=\"About\"]')");
    for(String removed:new String[]{"Wi-Fi","Bluetooth","Mobile data","Battery","Sound & vibration","Display","Models","Privacy & data"})assertEquals("Settings omits "+removed,"false",WebViewTestDriver.evaluate("Boolean(document.querySelector('button[aria-label='+"+JSONObject.quote(JSONObject.quote(removed))+"+']'))"));
-   if(!BuildConfig.IS_LAUNCHER){
-    // The standalone app is not the phone's system shell: no Android settings row.
-    assertEquals("Standalone Settings has no Android settings row","false",WebViewTestDriver.evaluate("Boolean(document.querySelector('button[aria-label=\"Android settings\"]'))"));
-    aboutShowsTheInstalledVersion();return;
-   }
    instrumentation.addMonitor(monitor);monitored=true;
    click("Android settings");
    long end=SystemClock.elapsedRealtime()+15000;boolean foreground=false;
@@ -122,11 +117,11 @@ public class SettingsFlowInstrumentedTest {
   }
  }
 
- /** node scripts/test-native-restart.ts theme: prepare chooses Dark, the runner force-stops the
+ /** bun scripts/test-native-restart.ts theme: prepare chooses Dark, the runner force-stops the
   * app, verify reads it in a new process, cleanup returns to Light through the same control. */
  @Test public void themeProcessRestartPhase()throws Exception{
   String phase=InstrumentationRegistry.getArguments().getString("themePhase");
-  org.junit.Assume.assumeTrue("Run by node scripts/test-native-restart.ts theme","prepare".equals(phase)||"verify".equals(phase)||"cleanup".equals(phase));
+  org.junit.Assume.assumeTrue("Run by bun scripts/test-native-restart.ts theme","prepare".equals(phase)||"verify".equals(phase)||"cleanup".equals(phase));
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    if("prepare".equals(phase)){chooseDarkTheme();assertDark("before the process stops");return;}
    AppNavigation.liveMode();

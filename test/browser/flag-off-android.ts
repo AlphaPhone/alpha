@@ -22,6 +22,8 @@ export interface FlagOffDocument { name: string; mimeType: string; text: string 
 export interface FlagOffOptions {
   /** Fresh onboarding owns real permission ports; other feature fixtures represent completed setup only. */
   freshAccess?: boolean;
+  /** The launcher update advertised by Android, held until the test releases the read. */
+  appUpdate?: { manifest: string; manifestSha256: string; installedVersionCode: number; installedSigner: string };
   /** Managed Gmail accounts behind the synthetic Eliza Cloud. Omitted: the account list is refused. */
   accounts?: FlagOffAccount[];
   /** Scheduled digests: `native` = the Android result inbox delivers results (the phone's normal
@@ -67,8 +69,10 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
     // Source references Android retained for picked documents: reference -> the bytes' SHA-256.
     const references: Record<string, string> = kept('flag-off-references', {});
     const persist = () => { sessionStorage.setItem('flag-off-references', JSON.stringify(references)); sessionStorage.setItem('flag-off-slots', JSON.stringify(slots)); sessionStorage.setItem('flag-off-agent', JSON.stringify(agent)); sessionStorage.setItem('flag-off-digests', JSON.stringify({ results: f.digests.results, acked: f.digests.acked, acks: f.digests.acks, inbox: f.digests.inbox })); };
+    const updateOffer = Promise.withResolvers<void>();
     const f = w.flagOff = {
       calls: [] as string[], unexpected: [] as string[], installationId: '', posts: [] as string[], replies: [] as string[], streams: 0,
+      appUpdate: { releaseOffer: updateOffer.resolve, installs: [] as unknown[] },
       mail: { accounts: structuredClone(options.accounts ?? null) as any[] | null, accountReads: 0, searches: 0, reads: [] as string[], prepares: [] as any[], dispatches: [] as any[], operations: {} as Record<string, any>, sent: [] as string[] },
       // Results the resident agent has produced, in cursor order. `acked` is the agent's cursor for
       // the renderer route; `inbox` is what the Android result inbox has committed for the native one.
@@ -253,7 +257,8 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
     w.Capacitor = {
       PluginHeaders: [
         { name: 'AlphaDeletions', methods: promise(['pending']) },
-        { name: 'ElizaSystem', methods: promise(['getBuildInfo']) },
+        ...(options.appUpdate ? [{ name: 'AlphaDevice', methods: withListeners(['snapshot', 'updateState', 'checkForUpdate', 'installUpdate']) }] : []),
+        { name: 'ElizaSystem', methods: promise(['getBuildInfo', 'getNetworkStatus']) },
         { name: 'ElizaSense', methods: promise(['status', 'turnOff']) },
         { name: 'DailyApps', methods: withListeners(['surfaceInfo', 'listReminders', 'pendingReminderTap', ...(options.document ? ['perform', 'readSelected', 'forgetSelected', 'describeSelected'] : [])]) },
         ...(options.document ? [{ name: 'AlphaMailAttachments', methods: promise(['readSelected', 'retainSourceReference', 'openSourceReference', 'cancel']) }] : []),
@@ -271,11 +276,27 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
       nativeCallback: (plugin: string, method: string, input: any, callback: (value: unknown) => void) => { if (method === 'addListener') listeners.push({ plugin, event: input?.eventName, callback }); return String(listeners.length); },
       nativePromise: async (plugin: string, method: string, input: any) => {
         if (plugin === 'AlphaDeletions' && method === 'pending') return { deletions: [] };
+        // Android's own network check (AlphaSystemPlugin.getNetworkStatus) follows the simulated
+        // network, so offline sends are refused the way the phone refuses them.
+        if (plugin === 'ElizaSystem' && method === 'getNetworkStatus') return { connected: navigator.onLine, internetValidated: navigator.onLine };
         f.calls.push(plugin + '.' + method);
+        if (options.appUpdate && plugin === 'AlphaDevice') {
+          const { manifest, manifestSha256, installedVersionCode, installedSigner } = options.appUpdate;
+          if (method === 'snapshot') return { appVersionCode: installedVersionCode, appSigner: installedSigner, appAutomaticUpdates: 'supported' };
+          if (method === 'updateState') return { pending: false, bridgeId: '57bd19ae-1695-49be-9832-20df61437f3c' };
+          if (method === 'checkForUpdate') {
+            await updateOffer.promise;
+            return { manifest, manifestSha256 };
+          }
+          if (method === 'installUpdate') {
+            f.appUpdate.installs.push(structuredClone(input));
+            return;
+          }
+        }
         if (plugin === 'ElizaSystem' && method === 'getBuildInfo') return { launcher: true, version: 'flag-off-harness' };
         // The fixture's image listener is stopped through its real readback contract.
-        if (plugin === 'ElizaSense' && (method === 'status' || method === 'turnOff')) return { available: true, state: 'OFF', label: 'Listening off', consented: false, listening: false, microphoneOpen: false };
-        if (plugin === 'DailyApps' && method === 'surfaceInfo') return { developmentBuild: false, assistant: false };
+        if (plugin === 'ElizaSense' && (method === 'status' || method === 'turnOff')) return { available: true, state: 'OFF', label: 'Listening off', consented: false, listening: false, microphoneOpen: false, ...(method === 'turnOff' ? { saved: true } : {}) };
+        if (plugin === 'DailyApps' && method === 'surfaceInfo') return { assistant: false };
         // No reminders are saved on this phone.
         if (plugin === 'DailyApps' && method === 'listReminders') return { reminders: [] };
         if (plugin === 'DailyApps' && method === 'pendingReminderTap') return {};
@@ -381,6 +402,8 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
           return {};
         }
         if (plugin === 'AlphaConnection') {
+          // A test can make the composer's draft slots unavailable, as a failing Keystore would.
+          if ((f as any).draftSlotsFail && String(input?.slot ?? '').startsWith('assistant-draft:') && method.startsWith('secure')) throw new Error('Synthetic draft storage failure');
           if (method === 'secureRead') return { value: slots[input.slot] ?? null };
           if (method === 'secureWrite') { slots[input.slot] = input.value; persist(); return {}; }
           if (method === 'secureRemove') { delete slots[input.slot]; persist(); return {}; }
@@ -457,7 +480,7 @@ export async function residentHome(page: Page) {
   await expect(button(page, 'Notes')).toBeVisible();
   await completeAccessSetup(page);
 }
-/** Production sign-in is a page; signed-in agent controls live in Settings. */
+/** Opens the required sign-in gate or the signed-in agent activity page. */
 export async function openYourAgent(page: Page) {
   const gate = page.locator('[role="main"].alpha-cloud-sign-in');
   if (await gate.isVisible()) return gate;
@@ -465,10 +488,9 @@ export async function openYourAgent(page: Page) {
   const minimize = page.getByRole('button', { name: 'Minimize chat', exact: true });
   if (await minimize.isVisible()) await minimize.click();
   await button(page, 'Settings').click();
-  // Recovery and conversation controls live under Settings › About › Status.
   await page.getByRole('button', { name: 'About', exact: true }).click();
-  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  await page.getByRole('button', { name: 'Agent activity', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Settings', exact: true });
-  await expect(panel.getByRole('heading', {name:'Status',exact:true})).toBeVisible();
+  await expect(panel.getByRole('heading', {name:'Agent activity',exact:true})).toBeVisible();
   return panel;
 }

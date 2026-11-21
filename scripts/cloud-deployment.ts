@@ -1,13 +1,13 @@
 import fs from 'node:fs';
-import {createHash} from 'node:crypto';
+import {sha256} from './sha256.ts';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {CLOUD_DEPLOYMENT,CLOUD_SIGN_IN_REGISTRATION} from './cloud-deployment-policy.ts';
+import {CLOUD_DEPLOYMENT,CLOUD_DEPLOYMENT_IS_CANDIDATE,CLOUD_SIGN_IN_REGISTRATION,isAlphaCloudDeployment} from './cloud-deployment-policy.ts';
 import {CLOUD_SDK_BASES,cloudSdkBases,cloudEnvironments,type CloudEnvironment} from './cloud-sdk-authority.ts';
 
-export interface CloudDeploymentRow { api: string; web: string; services: string; tenant: string; name?: string; entitlementAudience?: string }
+export interface CloudDeploymentRow { api: string; web: string; services: string; tenant: string; name?: string; entitlementAudience?: string; alphaCloud?: boolean }
 export type CloudDeploymentConfig = Record<CloudEnvironment, CloudDeploymentRow>;
-interface CloudDeploymentCheckOptions { config?: CloudDeploymentConfig; sdkBases?: Readonly<Record<CloudEnvironment, string>>; namespaces?: readonly string[] }
+interface CloudDeploymentCheckOptions { config?: CloudDeploymentConfig; sdkBases?: Readonly<Record<CloudEnvironment, string>>; namespaces?: readonly string[]; candidate?: boolean }
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const productIdentity=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8'));
@@ -21,7 +21,8 @@ export function validateCloudDeployment(input: unknown): CloudDeploymentConfig {
   const candidate = config[environment];
   if (!candidate || typeof candidate !== 'object') throw Error('Invalid Cloud configuration fields');
   const row = candidate as Record<string, unknown>;
-  if(Object.keys(row).filter(key=>!['name','entitlementAudience'].includes(key)).sort().join(',')!=='api,services,tenant,web')throw Error('Invalid Cloud configuration fields');
+  if(Object.keys(row).filter(key=>!['name','entitlementAudience','alphaCloud'].includes(key)).sort().join(',')!=='api,services,tenant,web')throw Error('Invalid Cloud configuration fields');
+  if(row.alphaCloud!==undefined&&typeof row.alphaCloud!=='boolean')throw Error('Invalid Alpha Cloud marker');
   if(row.entitlementAudience!==undefined&&(typeof row.entitlementAudience!=='string'||! /^[A-Za-z0-9._-]{1,128}$/.test(row.entitlementAudience)))throw Error('Invalid entitlement audience');
   // The shared native sign-in client (CloudSignInEnvironment) refuses these at class initialisation,
   // so a configuration it cannot register fails here, at build time, rather than on the phone.
@@ -38,6 +39,7 @@ export function validateCloudDeployment(input: unknown): CloudDeploymentConfig {
   if(typeof row.tenant!=='string'||! /^[a-zA-Z0-9_-]{1,64}$/.test(row.tenant))throw Error('Invalid Cloud tenant');
  }
  const validated = config as CloudDeploymentConfig;
+ isAlphaCloudDeployment(validated);
  if(validated.production.api===validated.staging.api)throw Error('Cloud environments must use distinct API origins');
  return validated;
 }
@@ -47,7 +49,7 @@ export function storageFingerprint(config: CloudDeploymentConfig) {
   const {api, web, services, tenant, entitlementAudience} = config[environment];
   return [api, web, services, tenant, entitlementAudience ?? 'cloud-subscription'];
  });
- return createHash('sha256').update(JSON.stringify(authorities)).digest('hex');
+ return sha256(JSON.stringify(authorities));
 }
 /** Public operator data for the protected Pages callback registry; no deployment mutation. */
 export function nativeAuthCallbackRegistration(config: CloudDeploymentConfig,identity: {appId: string; appName: string},environment: CloudEnvironment){
@@ -63,7 +65,7 @@ export function nativeAuthCallbackRegistration(config: CloudDeploymentConfig,ide
 export function deploymentOutputs(config: CloudDeploymentConfig){
  validateCloudDeployment(config);
  const fingerprint=storageFingerprint(config);
- const generated='Generated from scripts/cloud-deployment-policy.ts. Run node scripts/cloud-deployment.ts.';
+ const generated='Generated from scripts/cloud-deployment-policy.ts. Run bun scripts/cloud-deployment.ts.';
  const java=['package '+productIdentity.appId+';','','/** '+generated+' */','final class CloudDeployment {',' private CloudDeployment() {}'];
  const ts=['// '+generated];
  const gradle=['// '+generated,'ext.alphaCloudWebHosts = ['];
@@ -72,28 +74,36 @@ export function deploymentOutputs(config: CloudDeploymentConfig){
   const webHost=new URL(row.web).host;
   gradle.push(` ${env}: ${JSON.stringify(webHost)},`);
   ts.push(`export const ${env}Cloud = ${JSON.stringify({name:row.name??new URL(row.api).hostname,entitlementAudience:row.entitlementAudience??'cloud-subscription',api:row.api,web:row.web,agents:new URL(row.services).host,tenant:row.tenant})} as const;`);
-  for(const [key,value] of Object.entries({...row,name:row.name??new URL(row.api).hostname,apiHost:new URL(row.api).host,webHost,servicesHost:new URL(row.services).host}))java.push(` static final String ${env.toUpperCase()}_${key.replace(/[A-Z]/g,c=>'_'+c).toUpperCase()} = ${JSON.stringify(value)};`);
+  const {alphaCloud:_alphaCloud,...authorities}=row;
+  for(const [key,value] of Object.entries({...authorities,name:row.name??new URL(row.api).hostname,apiHost:new URL(row.api).host,webHost,servicesHost:new URL(row.services).host}))java.push(` static final String ${env.toUpperCase()}_${key.replace(/[A-Z]/g,c=>'_'+c).toUpperCase()} = ${JSON.stringify(value)};`);
  }
+ // The Alpha Cloud cutover flag (scripts/cloud-deployment-policy.ts ALPHA_CLOUD_CUTOVER), derived from the rows.
+ const cutover=isAlphaCloudDeployment(config);
+ java.push(` /** Alpha Cloud cutover: in-app plans, the native billing authority, Stripe and referral routes. */`,` static final boolean ALPHA_CLOUD_CUTOVER = ${cutover};`);
+ ts.push(`/** Alpha Cloud cutover (scripts/cloud-deployment-policy.ts): in-app plans and billing replace the hosted billing page. */`,`export const alphaCloudCutover: boolean = ${cutover};`);
  java.push(` static final String STORAGE_NAMESPACE = "cloud-deployment:${fingerprint}:";`,
   ' static String storageSlot(String name) {',
   '  return name != null && (name.startsWith("cloud:") || name.startsWith("cloud-signin:") || name.equals("local-agent-provider:v1")) ? STORAGE_NAMESPACE + name : name;',
   ' }','}');
  ts.push(`export const cloudStorageNamespace = "cloud-deployment:${fingerprint}:";`,
   'export function cloudStorageSlot(name:string):string { return name.startsWith("cloud:") || name.startsWith("cloud-signin:") || name === "local-agent-provider:v1" ? cloudStorageNamespace + name : name; }');
- gradle.push(']');
+ gradle.push(']',`// Alpha Cloud cutover: which Cloud this build uses (in-app billing is on for every Cloud).`,`ext.alphaCloudCutover = ${cutover}`);
  return {
   'apps/app/src/runtime/cloud-deployment.generated.ts':ts.join('\n')+'\n',
   ['android/app/src/main/java/'+productIdentity.appId.replaceAll('.','/')+'/CloudDeployment.java']:java.join('\n')+'\n',
   'android/app/cloud-deployment.generated.gradle':gradle.join('\n')+'\n',
  };
 }
-export function checkCloudDeployment(directory=root,{config=CLOUD_DEPLOYMENT,sdkBases=CLOUD_SDK_BASES,namespaces=STORAGE_NAMESPACES}: CloudDeploymentCheckOptions={}){
+export function checkCloudDeployment(directory=root,{config=CLOUD_DEPLOYMENT,sdkBases=CLOUD_SDK_BASES,namespaces=STORAGE_NAMESPACES,candidate=CLOUD_DEPLOYMENT_IS_CANDIDATE}: CloudDeploymentCheckOptions={}){
  const outputs=deploymentOutputs(config);
  for(const [name,contents] of Object.entries(outputs)){
   const file=path.join(directory,name);
-  if(!fs.existsSync(file)||fs.readFileSync(file,'utf8')!==contents)throw Error('Stale Cloud deployment output: '+name+'; run node scripts/cloud-deployment.ts');
+  if(!fs.existsSync(file)||fs.readFileSync(file,'utf8')!==contents)throw Error('Stale Cloud deployment output: '+name+'; run bun scripts/cloud-deployment.ts');
  }
- if(storageFingerprint(config)!==namespaces.at(-1))throw Error('Cloud storage namespace would change: every installed phone loses its production credential; add a tested migration (LegacyCloudRecovery) and append the new namespace to STORAGE_NAMESPACES in scripts/cloud-deployment.ts');
+ // A candidate Cloud (ALPHA_CLOUD_DEPLOYMENT_FILE) is a development build with its own namespace by design;
+ // it must never reuse a shipped one, or its sign-ins would be read by a build for another Cloud.
+ if(candidate){if(namespaces.includes(storageFingerprint(config)))throw Error('A candidate Cloud deployment must differ from every shipped deployment');}
+ else if(storageFingerprint(config)!==namespaces.at(-1))throw Error('Cloud storage namespace would change: every installed phone loses its production credential; add a tested migration and append the new namespace to STORAGE_NAMESPACES in scripts/cloud-deployment.ts');
  // The resident agent's inference base (ELIZAOS_CLOUD_BASE_URL) must be the configured API, never a second authority.
  if(JSON.stringify(sdkBases)!==JSON.stringify(cloudSdkBases(config)))throw Error('Cloud SDK bases (scripts/cloud-sdk-authority.ts) disagree with the Cloud deployment policy');
 }

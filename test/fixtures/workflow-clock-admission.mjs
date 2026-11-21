@@ -15,7 +15,7 @@ const shellSource = 'apps/app/src/prototype/model.js';
 const template = 'apps/app/src/prototype/template.html';
 const shared = 'vendor/eliza/plugins/plugin-assistant/src/services/device-actions/';
 const dependencyPaths = ['apps/app/src/runtime/clock-contract.ts', 'apps/app/src/runtime/clock-handoff-history.ts',
-  'apps/app/src/runtime/inline-modal.ts', 'apps/app/src/runtime/modal-inert.ts',
+  'apps/app/src/runtime/inline-modal.ts', 'apps/app/src/runtime/modal-inert.ts', 'apps/app/src/ui/clock/clock-handoff-presentation.ts',
   ...['clock-contract.ts', 'clock-handoff.ts', 'clock-handoff-history.ts'].map(path => shared+path)];
 export const workflowClockSources = [clock, agent, shellSource, template, 'apps/app/src/main.tsx',
   'scripts/test-clock-handoff-flow.ts', 'test/support/strip-types.mjs', ...dependencyPaths];
@@ -27,9 +27,16 @@ export async function loadWorkflowClockFixture() {
   const bundle = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `
     export {currentClockTimeZone,buildClockRequest,describeClockDays} from './${dependencyPaths[0]}';
     export {createClockHandoffHistory,clockHandoffLegacyKey,clockHandoffSlot} from './${dependencyPaths[1]}';
-    export {createInlineModal} from './${dependencyPaths[2]}';`}, bundle: true, write: false, metafile: true,
+    export {createInlineModal} from './${dependencyPaths[2]}';
+    export {clockResultText} from './${dependencyPaths[4]}';`}, bundle: true, write: false, metafile: true,
   format: 'esm', platform: 'node', plugins: [{name: 'authenticated-clock-source', setup(build) {
     const marker = '.eliza/client-features/';
+    // The same pinned source, whether it is named by its package alias or by its prepared path.
+    build.onResolve({filter: /^@elizaos\/plugin-assistant\/device-actions\//}, args => {
+      const path = shared + args.path.slice(args.path.lastIndexOf('/') + 1) + '.ts';
+      assert.ok(dependencyPaths.includes(path), path);
+      return {path: resolve(root, path)};
+    });
     build.onResolve({filter: /\.eliza\/client-features\//}, args => {
       const path = 'vendor/eliza/' + args.path.slice(args.path.indexOf(marker) + marker.length);
       assert.ok(dependencyPaths.includes(path), path);
@@ -44,7 +51,11 @@ export async function loadWorkflowClockFixture() {
   const contextStart = agentText.indexOf('  function context(shell: Shell) {');
   const contextEnd = agentText.indexOf('  p.componentDidMount', contextStart);
   assert.ok(contextStart >= 0 && contextEnd > contextStart);
-  const context = strip(agentText.slice(contextStart, contextEnd));
+  // AC-26: context() retires open proposal cards when the published subject changes.
+  const retireStart = agentText.indexOf('  function retireProposalCards(shell:Shell){');
+  const retireEnd = agentText.indexOf('  p.cancelReadReplyCompletions', retireStart);
+  assert.ok(retireStart >= 0 && retireEnd > retireStart);
+  const context = strip(agentText.slice(retireStart, retireEnd) + agentText.slice(contextStart, contextEnd));
   const shellText = read(shellSource);
   const leaveStart = shellText.indexOf('  leave() {');
   const leaveEnd = shellText.indexOf('\n\n  preset(', leaveStart);

@@ -24,7 +24,7 @@ const textOf = value => {const index = textValues.indexOf(value); assert.notEqua
 const idOf = id => id === 'note-one' ? 1 : id === 'note-two' ? 2 : 0;
 
 export async function compileCanonicalNotesEditor(extraSources) {
-  const source = '.eliza/client-features/plugins/plugin-notes/src/client/notes-editor.ts';
+  const source = 'apps/app/src/ui/notes/notes-editor.ts';
   const built = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `
     export {NotesEditor,__quintInspectSaved} from './${source}';
     export {CanonicalNotesController,CANONICAL_NOTES_INVALIDATED_EVENT} from './apps/app/src/prototype/canonical-notes-controller.ts';

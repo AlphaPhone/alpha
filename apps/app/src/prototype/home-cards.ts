@@ -1,6 +1,6 @@
 /**
  * Home daily overview presentation. The domain (states, freshness, agenda selection and copy) is
- * the shared upstream module `packages/ui/src/overview/daily-overview.ts`; this file only binds
+ * Alpha's UI module `ui/overview/daily-overview.ts`; this file only binds
  * Alpha's locale and hour-cycle preferences (`locale-time.ts`) and keeps the names Alpha's adapters
  * use. Nothing here reads a provider or runs a digest.
  */
@@ -16,6 +16,7 @@ import {
   presentOverviewAttention,
   presentOverviewBrief,
   presentOverviewBriefCard,
+  presentOverviewCalendar,
   presentOverviewInboxCard,
   presentOverviewInboxStatus,
   presentOverviewWorkflowFreshness,
@@ -27,7 +28,7 @@ import {
   type OverviewFormat,
   type OverviewInboxCardInput,
   type OverviewInboxCardModel,
-} from '../../../../.eliza/client-features/packages/ui/src/overview/daily-overview.ts';
+} from '../ui/overview/daily-overview.ts';
 import {formatTime, formatShortDate} from './locale-time.ts';
 
 /** Alpha's locale preferences, read at each call so a changed preference applies at once. */
@@ -37,7 +38,7 @@ const format: OverviewFormat = {time: date => formatTime(date), shortDate: date 
 export type HomeAttentionSummary = OverviewAttentionSummary;
 /** Latest retained scheduled brief (latestRetainedDigest()). */
 export type HomeBriefSummary = OverviewBriefSummary;
-export {overviewReadIsStale as homeReadIsStale, selectOverviewAgenda as selectHomeAgenda};
+export {overviewReadIsStale as homeReadIsStale};
 
 /** "3:04 PM" today, otherwise "Wed, Oct 8 3:04 PM". */
 export const whenLabel = (at: number, now: number) => overviewWhenLabel(at, now, format);
@@ -83,9 +84,9 @@ export function homeCalendarValues(card: OverviewAgendaCardModel) {
   return {
     homeCalendarHasEvent: card.hasItem, homeCalendarFooter: card.footer, homeCalendarLabel: card.label, homeCalendarTime: card.heading,
     homeCalendarTitle: card.title, homeCalendarHasMeta: card.hasMeta, homeCalendarSource: card.source, homeCalendarOrigin: card.origin,
-    homeCalendarOverdue: card.overdue, homeCalendarStale: card.stale, homeCalendarDescription: card.description,
+    homeCalendarOverdue: card.overdue, homeCalendarStale: card.stale, homeCalendarDescription: card.description, homeCalendarItemDescription: card.itemDescription,
     homeCalendarNext: card.next?.text || '', homeCalendarNextSource: card.next?.source || '', homeCalendarHasNext: !!card.next,
-    homeCalendarVideo: card.video, homePeopleVisibility: card.people.length ? 'visible' : 'hidden',
+    homeCalendarVideo: card.video, homeCalendarPeople: card.people.map(ini => ({ini})), homePeopleVisibility: card.people.length ? 'visible' : 'hidden',
   };
 }
 /** One candidate for the Home agenda card, as the shared selection takes it, with the host record also as `event`. */
@@ -106,7 +107,7 @@ export function homeAgendaCandidates(events: readonly Record<string, any>[], ove
     .concat(overdue.map((row): HomeAgendaItem => { const event = {id: row.id, title: row.title, off: row.off, overdue: true}; return {item: event, event, begin: Number(row.at), end: Infinity, allDay: false, overdue: true}; }));
 }
 /** The Home agenda card's item and, under an overdue reminder, the next item that is not overdue,
- * chosen by selectHomeAgenda. The shell renders many times a second (clock, voice and call ticks):
+ * chosen by selectOverviewAgenda. The shell renders many times a second (clock, voice and call ticks):
  * the candidates are rebuilt only when the event list (by identity), the overdue reminders or
  * `calendarShown` change, and the choice is made again only then or when the clock reaches the
  * next candidate end (or goes back), the only times it can differ. */
@@ -142,3 +143,4 @@ export function createStorageAccessCheck(probe: () => void, ttl = 5000, clock: (
   };
 }
 export const homeCalendarEmptyTitle = overviewAgendaEmptyTitle;
+export const presentHomeCalendar = (input: Parameters<typeof presentOverviewCalendar>[0]) => presentOverviewCalendar(input, format);

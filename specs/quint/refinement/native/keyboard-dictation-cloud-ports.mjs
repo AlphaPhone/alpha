@@ -29,7 +29,7 @@ final class LocalAgentProviderAdmission {
 public final class NativeProviderSlot {
  public static String managementRevision(String selected,long authority){return selected+":"+authority;}
 }`,
-  'ai/eliza/plugins/passwords/PasswordSurfaces.java': `package ai.eliza.plugins.passwords;
+  'ai/alphacompute/alphaphone/PasswordSurfaces.java': `package ai.alphacompute.alphaphone;
 public final class PasswordSurfaces {public static boolean showing; public static boolean visible(){return showing;}}`,
   'ai/eliza/voice/RecordingPcm.java': `package ai.eliza.voice;
 public final class RecordingPcm {
@@ -39,8 +39,6 @@ public final class RecordingPcm {
   last=new byte[]{3,4,5,6};return last;
  }
 }`,
-  'ai/alphacompute/alphaphone/BuildConfig.java': `package ai.alphacompute.alphaphone;
-final class BuildConfig {static final String ELIZA_RUNTIME_PROFILE="cloud";}`,
   'ai/eliza/voice/CartesiaSpeech.java': `package ai.eliza.voice;
 import java.io.*;
 import java.net.*;

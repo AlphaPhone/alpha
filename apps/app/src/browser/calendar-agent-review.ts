@@ -6,12 +6,12 @@
  * guest nor change whether an event is all day. The review says so in words, and names the calendar
  * and account that will be written, so the person confirming reads every consequence of Confirm.
  */
-import {formatDeviceRecordDateTime} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts';
+import {formatDeviceRecordDateTime} from '../ui/device-actions/device-record-presentation';
 import type {CalendarFields as Fields} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {DAY_MS,deviceTimeZone} from '../lib/civil-date.ts';
 import type {CalendarRecord} from './calendar-records';
 type Existing=Pick<CalendarRecord,'allDay'|'who'|'seriesId'>;
-type CalendarReviewSource={name:string;account:string};
+export type CalendarReviewSource={name:string;account:string};
 const day=(at:number)=>new Intl.DateTimeFormat('en-US',{timeZone:'UTC',year:'numeric',month:'long',day:'numeric'}).format(at);
 const last=(end:string)=>day(Math.max(Date.parse(end)-1,0));
 /** An all-day event is whole UTC calendar dates. An agent update that names any other instants

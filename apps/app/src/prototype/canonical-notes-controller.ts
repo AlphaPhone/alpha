@@ -1,4 +1,4 @@
-import {NotesController,type NotesControllerHooks} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-controller.ts';
+import {NotesController,type NotesControllerHooks} from '../ui/notes/notes-controller.ts';
 import {createNotesClient} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts';
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {NOTES_INVALIDATED_EVENT} from '../runtime/app-record-completion';

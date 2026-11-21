@@ -10,7 +10,8 @@ import android.util.Log;
  * disabled. They are enabled only while
  * {@link AlphaImageCapability} verifies the Alpha AOSP image, so a sideloaded launcher APK can never
  * be offered the dialer role, and an install that stops verifying (for example an image update that
- * drops the overlay) disables them again. The owner still chooses the role in Android's own dialog.
+ * drops the overlay) disables them again. Fresh image setup assigns the initial roles through
+ * Android. Later changes stay under Android's owner-controlled role policy.
  */
 final class AlphaTelephonyRoles {
  private AlphaTelephonyRoles() {}
@@ -19,15 +20,32 @@ final class AlphaTelephonyRoles {
   AlphaSmsDeliverReceiver.class, AlphaMmsWapPushReceiver.class, AlphaMmsResultReceiver.class, AlphaRespondViaMessageService.class, AlphaSmsComposeActivity.class, ai.eliza.plugins.messages.MmsFileProvider.class };
  static void sync(Context context) {
   boolean image = AlphaImageCapability.verified(context);
+  // An image may enable the manifest default through SystemConfig. A failed image admission must
+  // explicitly disable handlers instead of falling back to that enabled image default.
+  int wanted = image ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+  syncComponents(context, wanted);
+ }
+
+ static boolean prepare(Context context) {
+  return AlphaImageCapability.verified(context)
+   && syncComponents(context, PackageManager.COMPONENT_ENABLED_STATE_ENABLED);
+ }
+
+ private static boolean syncComponents(Context context, int wanted) {
   PackageManager packages = context.getPackageManager();
-  int wanted = image ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
+  boolean ready = true;
   for (Class<?> component : COMPONENTS) {
    ComponentName name = new ComponentName(context, component);
    try {
-    if (packages.getComponentEnabledSetting(name) != wanted) packages.setComponentEnabledSetting(name, wanted, PackageManager.DONT_KILL_APP);
+    if (packages.getComponentEnabledSetting(name) != wanted) {
+     packages.setComponentEnabledSetting(name, wanted, PackageManager.DONT_KILL_APP);
+     ready &= packages.getComponentEnabledSetting(name) == wanted;
+    }
    } catch (RuntimeException refused) {
+    ready = false;
     Log.w("AlphaTelephonyRoles", "Role component state unchanged for " + component.getSimpleName());
    }
   }
+  return ready;
  }
 }

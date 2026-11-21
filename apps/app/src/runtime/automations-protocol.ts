@@ -1,4 +1,11 @@
-import {reminderDeliveryLabel,reminderDue} from "../../../../.eliza/client-features/packages/ui/src/utils/reminder-presentation";
+import {reminderDeliveryLabel,reminderDue} from "../ui/utils/reminder-presentation";
+import {promptRunErrorText,scheduledFireText} from "../ui/workflows/automation-run-messages";
+import {relativeScheduleText,scheduledTaskTitle,windowScheduleText} from "../ui/workflows/scheduled-task-presentation";
+// The adapter's history line and request-journal wording travel with the protocol it renders.
+export {promptRunHistoryLine} from "../ui/workflows/automation-run-messages";
+export {workflowIntentText} from "../ui/workflows/workflow-intent-messages";
+export {automationStatusLabel} from "../ui/workflows/automation-status-labels";
+export {automationRequestText} from "../ui/workflows/workflow-messages";
 import {workflowDeviceTimeZone,workflowLocalInstant,workflowCronLabel,automationLocalDateInput,localDate,workflowNextClockOccurrence,workflowSnoozeTime} from './workflow-local-time';
 export {workflowDeviceTimeZone,automationLocalDateInput,workflowSnoozeTime} from './workflow-local-time';
 import {expectRecord} from '../lib/parse.ts';
@@ -42,8 +49,8 @@ function schedule(value:unknown):string {
   case 'interval':return t.everyMinutes?`Every ${t.everyMinutes} minutes`:t.intervalMs?`Every ${t.intervalMs/60000} minutes`:'Interval';
   case 'event':return `On ${text(t.eventKind)||'event'}`;
   case 'manual':return 'Manual';
-  case 'relative_to_anchor':return text(t.anchorKey)||'Relative schedule';
-  case 'during_window':return text(t.windowKey)||'Scheduled window';
+  case 'relative_to_anchor':return relativeScheduleText(t.anchorKey,t.offsetMinutes);
+  case 'during_window':return windowScheduleText(t.windowKey);
   case 'after_task':return 'After another task';
   default:return '';
  }
@@ -56,8 +63,7 @@ function automation(value:unknown):AutomationRow {
 function scheduled(value:unknown):AutomationRow {
  const row=object(value),id=automationId(row.taskId),state=object(row.state),trigger=object(row.trigger);
  if(row.ownerVisible!==true)throw Error('An unlisted scheduled item was returned.');
- const labels:Record<string,string>={gm:'Good morning',gn:'Good night',checkin:'Daily check-in','weekly-review':'Weekly review'};
- const title=labels[text(row.metadata?.recordKey)]||text(row.metadata?.slot)||text(row.kind)||'Scheduled task';
+ const title=scheduledTaskTitle({kind:row.kind,metadata:row.metadata&&typeof row.metadata==='object'?row.metadata:null});
  const status=text(state.status),ended=scheduledTaskEnded(status);
  const snoozed=status==='scheduled'&&typeof state.firedAt==='string'&&Number.isFinite(Date.parse(state.firedAt))&&state.lastDecisionLog===`snoozed until ${state.firedAt} (ladder reset)`;
  const when=schedule(trigger)+(snoozed?' · Snoozed until '+workflowSnoozeTime(state.firedAt):'');
@@ -131,7 +137,7 @@ export class AutomationsProtocol {
   }
   const result=object(response),trigger=object(result.trigger);if(trigger.id!==id||trigger.enabled!==enabled)throw Error('Prompt state was not confirmed.');}
  async deletePrompt(id:string,signal:AbortSignal){if(object(await this.request('/api/triggers/'+automationId(id),'DELETE',undefined,signal)).ok!==true)throw Error('Prompt deletion was not confirmed.');}
- async runPrompt(id:string,signal:AbortSignal){const result=object(await this.request('/api/triggers/'+automationId(id)+'/execute','POST',{},signal)),run=object(result.result);if(result.ok!==true||!['success','error','skipped'].includes(run.status))throw Error('Prompt execution was not confirmed.');if(run.status!=='success')throw new AutomationOutcomeError(text(run.error)||'The prompt did not run. Check its execution history.');return result;}
+ async runPrompt(id:string,signal:AbortSignal){const result=object(await this.request('/api/triggers/'+automationId(id)+'/execute','POST',{},signal)),run=object(result.result);if(result.ok!==true||!['success','error','skipped'].includes(run.status))throw Error('Prompt execution was not confirmed.');if(run.status!=='success')throw new AutomationOutcomeError(promptRunErrorText(run.error,run.status));return result;}
  async editSchedule(id:string,instructions:string,trigger:{kind:'cron';expression:string;tz:string}|undefined,signal:AbortSignal){
   const promptInstructions=instructions.trim();
   if(!promptInstructions)throw Error('Enter instructions for this schedule.');
@@ -152,7 +158,7 @@ export class AutomationsProtocol {
    if(fire.kind==='raced')throw new AutomationOutcomeError('Another run was already in progress.');
    if(!['fired','skipped','dispatch_deferred','dispatch_failed'].includes(fire.kind)||fire.task?.taskId!==id)
     throw Error('Scheduled execution was not confirmed.');
-   if(fire.kind!=='fired')throw new AutomationOutcomeError(text(fire.reason)||text(fire.error)||'This item did not run. Read its current status before trying again.');
+   if(fire.kind!=='fired')throw new AutomationOutcomeError(scheduledFireText(fire,iso=>automationWhen(iso)));
   }
   else if(object(result.task).taskId!==id)throw Error('Scheduled change was not confirmed.');
   return result;

@@ -1,4 +1,4 @@
-import type { FilesStoragePort } from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts';
+import type { FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
 import type { NativeResult } from '../daily';
 
 /**

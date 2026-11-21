@@ -200,6 +200,12 @@ export class AlphaClient {
   private localSelection: string | null = null;
   private active: AbortController | null = null;
   private activeWorkflow = false;
+  /** The context revision the request in flight answers for; moves only with `ownPageChange`. */
+  private activeRevision = 0;
+  /** A page the request in flight changes itself (the agent's own Browser back, forward or reload). */
+  private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
+  /** Each context an own page change published, keyed by its revision, with the context it replaced. */
+  private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
   private consumed = new Set<string>();
   /** The session whose approvals `consumed` records. */
@@ -258,6 +264,8 @@ export class AlphaClient {
     this.active?.abort();
     this.active = null;
     this.activeWorkflow = false;
+    this.ownPageChange = null;
+    this.ownMoves.clear();
     this.transport = null;
     this.proposals.clear();
     if (options.keepConsumed !== true) {
@@ -271,11 +279,62 @@ export class AlphaClient {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
+    const ownChange = this.isOwnPageChange(next, selection), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
-    if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;}
+    // The request's own page command moved the page it acts on: the reply continues and answers
+    // for the new document. Approvals bound to the earlier document are still retired above.
+    if (ownChange) {
+      this.activeRevision = this.context.revision;
+      if (this.ownMoves.size >= 32) this.ownMoves.clear();
+      this.ownMoves.set(this.context.revision, previous);
+    } else {
+      this.ownMoves.clear();
+      if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;}
+    }
     this.emit();
+  }
+  /**
+   * Called just before the request in flight dispatches a command that changes the page it acts
+   * on (Browser back, forward or reload on the tab `page` names). Until that request ends, a
+   * context change that only moves that tab's document (same view, same tab, observation not
+   * paused) does not stop the reply. Any other change still cancels it, as the owner's Stop does.
+   * Returns a release for a command that was refused before dispatch.
+   */
+  admitOwnPageChange(page: { kind: string; id: string } | undefined): () => void {
+    const active = this.active;
+    if (!active || this.activeWorkflow || !page || this.context.sensitive || this.context.selectedObject?.kind !== page.kind || this.context.selectedObject.id !== page.id)
+      return () => {};
+    // A later command refused before dispatch must not retire an earlier one whose page may still be loading.
+    const prior = this.ownPageChange?.active === active ? this.ownPageChange : null;
+    const admitted = this.ownPageChange = { active, kind: page.kind, id: page.id };
+    return () => { if (this.ownPageChange === admitted) this.ownPageChange = prior; };
+  }
+  /**
+   * True when the published context is `expected`, or was reached from it only by own page
+   * changes (see `admitOwnPageChange`) with no other change since. A caller that holds the context
+   * it sent a turn with uses this in place of an exact comparison, so the reply's own Browser
+   * back or reload does not read as the owner leaving the page. Approvals stay revision-bound.
+   */
+  continuesContext(expected: ContextEnvelope): boolean {
+    const want = JSON.stringify(expected);
+    let at: ContextEnvelope | undefined = this.context;
+    for (let steps = 0; at && steps <= this.ownMoves.size; steps++) {
+      if (JSON.stringify(at) === want) return true;
+      at = this.ownMoves.get(at.revision);
+    }
+    return false;
+  }
+  private isOwnPageChange(next: ContextEnvelope, selection: string | null): boolean {
+    const own = this.ownPageChange;
+    if (!own || own.active !== this.active || !this.active || this.activeWorkflow || next.sensitive || this.context.sensitive) return false;
+    if (selection !== this.localSelection || next.view !== this.context.view) return false;
+    // A page between documents (loading or failed) has no selection; it is still the same tab.
+    const page = next.selectedObject;
+    if (page && (page.kind !== own.kind || page.id !== own.id)) return false;
+    const rest = (context: ContextEnvelope) => JSON.stringify({ ...context, selectedObject: undefined, revision: 0 });
+    return rest(next) === rest(this.context);
   }
   /** Cancel foreground chat; automatic workflows own their AbortSignal. */
   cancel(): void {
@@ -316,6 +375,7 @@ export class AlphaClient {
     const controller = new AbortController();
     this.active = controller;
     this.activeWorkflow = workflow;
+    this.activeRevision = revision;
     this.emit();
     let abortListener: (() => void) | undefined;
     const cancelOwned=()=>controller.abort();
@@ -346,7 +406,7 @@ export class AlphaClient {
         throw cancelled();
       if (
         epoch !== this.epoch ||
-        !workflow && revision !== this.context.revision ||
+        !workflow && this.activeRevision !== this.context.revision ||
         transport !== this.transport
       ) {
         throw new AlphaClientError(
@@ -367,6 +427,7 @@ export class AlphaClient {
       externalSignal?.removeEventListener("abort",cancelOwned);
       if (abortListener)
         controller.signal.removeEventListener("abort", abortListener);
+      if (this.ownPageChange?.active === controller) this.ownPageChange = null;
       if (this.active === controller) {
         this.active = null;
         this.activeWorkflow = false;
@@ -388,7 +449,7 @@ export class AlphaClient {
     },signal,automatic);
   }
   async send(text: string, onText?:StreamTextListener, replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,options?:{channelType:ChatChannel;requestId?:string;signal?:AbortSignal;expectedConversationId?:string;voiceTurnSignal?:VoiceTurnSignal;images?:Array<{data:string;mimeType:string;name:string}>}): Promise<AgentReply> {
-    if (!text.trim()) throw new Error("Enter a message.");
+    if (!text.trim() && !(options?.channelType==='DM'&&options.images?.length)) throw new Error("Enter a message.");
     if(options?.channelType==='VOICE_DM'&&replyTo)throw Error("A voice turn cannot resend or edit a selected message.");
     return this.run(async (transport, context, signal) => {
       let accepting=true;let result:AgentReply;
@@ -400,7 +461,7 @@ export class AlphaClient {
         ...(replyTo?{replyTo}:{}),
         context,
         signal,
-        onReplyReady:results=>{if(!accepting||signal.aborted||this.transport!==transport||this.context.revision!==context.revision)return;onReplyReady?.(results);},
+        onReplyReady:results=>{if(!accepting||signal.aborted||this.transport!==transport||this.activeRevision!==this.context.revision)return;onReplyReady?.(results);},
         onText:(value,frame)=>{if(!accepting||signal.aborted)return;if(typeof value!=='string'||value.length>200000)throw new AlphaClientError('invalid-response','Invalid streamed reply.');onText?.(value,frame);},
       }); } finally {accepting=false;}
       if (signal.aborted)

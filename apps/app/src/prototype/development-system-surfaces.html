@@ -1,12 +1,11 @@
 <sc-if value="{{isLock}}">
-<div data-alpha-development-lock-screen class="fadein" style="position: absolute; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; align-items: center">
+<div data-alpha-development-lock-screen data-alpha-lock-ink class="fadein" style="{{lockVars}}; position: absolute; inset: 0; z-index: 80; background: var(--alpha-black); color: var(--fg); display: flex; flex-direction: column; align-items: center">
   <svg class="i" viewBox="0 0 24 24" style="margin-top: 62px; width: 18px; height: 18px; color: var(--mut)"><path d="{{ic.lock}}"></path></svg>
   <div data-alpha-lock-clock class="serif" style="font-size: 132px; line-height: .9; margin-top: 44px; letter-spacing: -.035em">{{clock}}</div>
   <div style="margin-top: 16px; color: var(--mut); font-size: 15px">{{dateStr}}</div>
-  <div style="position: absolute; bottom: 58px; left: 34px; right: 34px; display: flex; justify-content: space-between; align-items: center">
-    <sc-if value="{{externalVoiceInvocation}}"><button aria-label="Talk to {{name}}" onPointerDown="{{chatControlPointer}}" onClick="{{startVoice}}" style="width: 58px; height: 58px; border-radius: 29px; background: var(--s2); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
-    <button aria-label="Unlock with fingerprint" onClick="{{unlock}}" style="width: 76px; height: 76px; border-radius: 38px; box-shadow: inset 0 0 0 1px var(--line); display: flex; align-items: center; justify-content: center; color: var(--acct)"><svg class="i" viewBox="0 0 24 24" style="width: 34px; height: 34px"><path d="{{ic.fp}}"></path></svg></button>
-    <div aria-hidden="true" style="width: 58px; height: 58px"></div>
+  <div style="position: absolute; bottom: 58px; left: 34px; right: 34px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center">
+    <sc-if value="{{externalVoiceInvocation}}"><button aria-label="Talk to {{name}}" onPointerDown="{{chatControlPointer}}" onClick="{{startVoice}}" style="grid-column: 1; justify-self: start; width: 58px; height: 58px; border-radius: 29px; background: var(--s2); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.mic}}"></path></svg></button></sc-if>
+    <button aria-label="Unlock with fingerprint" onClick="{{unlock}}" style="grid-column: 2; width: 76px; height: 76px; border-radius: 38px; box-shadow: inset 0 0 0 1px var(--line); display: flex; align-items: center; justify-content: center; color: var(--acct)"><svg class="i" viewBox="0 0 24 24" style="width: 34px; height: 34px"><path d="{{ic.fp}}"></path></svg></button>
   </div>
 </div>
 </sc-if>

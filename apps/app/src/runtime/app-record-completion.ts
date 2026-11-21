@@ -9,7 +9,7 @@ interface AppRecordInvalidation {
 }
 
 const noteMutations = new Set([
-  'notes.note.create', 'notes.note.update', 'notes.note.patch', 'notes.note.delete',
+  'notes.note.create', 'notes.note.update', 'notes.note.patch', 'notes.note.delete', 'notes.note.restore',
   'notes.create-note', 'notes.update-note', 'notes.delete-note', 'notes.restore-note',
 ]);
 const calendarMutations = new Set([

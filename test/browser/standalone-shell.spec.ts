@@ -1,6 +1,31 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
-import {DEFAULT_PULL_DISTANCE} from '../../.eliza/client-features/packages/ui/src/gestures/constants';
+import {DEFAULT_PULL_DISTANCE} from '../../apps/app/src/ui/gestures/constants';
 import { test, expect } from '@playwright/test';
+import type {Locator,Page} from '@playwright/test';
+
+// The bar and the pill enter with a 460ms rise and the sheet opens with a height transition. A box read
+// before they finish is a frame of that motion: a press there can land beside the control (in the bar's
+// rounded corner, or below the grabber) once a loaded host paints late. Wait for the motion to finish.
+const settled=(locator:Locator)=>locator.evaluate(el=>Promise.all(el.getAnimations({subtree:true}).filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation=>animation.finished.catch(()=>{}))));
+
+// Home keeps its input bar. Exercise the dismissible bar and pill inside an app,
+// where both forms remain available after the Home chat-bar change.
+async function openAppComposer(page:Page) {
+  await page.getByRole('button',{name:'Files',exact:true}).click();
+  await page.getByRole('button',{name:'Type',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();
+  await settled(page.locator('[data-alpha-input-bar]'));
+}
+
+// AC-04: an empty open conversation fits the lower 38% bound; resize,
+// capture, cancellation and full-height assertions below remain independent.
+const expectedEmptySheetHeight=(page:Page)=>page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.38)));});
+// An empty sheet that has finished opening: its resting height, with its opening motion done.
+async function restedEmptySheet(page:Page){
+  const panel=page.locator('[data-alpha-layer="conversation"]');
+  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await expectedEmptySheetHeight(page));
+  await settled(panel);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind:'offline'})));
@@ -28,7 +53,7 @@ test('chat handle captures an upward and downward drag outside its bounds', asyn
   const handle=page.getByRole('button',{name:'Resize chat',exact:true});
   await expect(handle).toBeVisible();
   const panel=page.locator('[data-alpha-layer=conversation]');
-  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.6)));}));
+  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await expectedEmptySheetHeight(page));
   const burst=await handle.evaluate(async element=>{
     const panel=document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]')!,box=element.getBoundingClientRect(),x=box.x+box.width/2,y=box.y+box.height/2,before=panel.style.height;
     const dispatch=(type:string,dy:number)=>element.dispatchEvent(new PointerEvent(type,{bubbles:true,pointerId:71,pointerType:'mouse',isPrimary:true,button:0,clientX:x,clientY:y+dy}));
@@ -36,7 +61,7 @@ test('chat handle captures an upward and downward drag outside its bounds', asyn
     const synchronous=panel.style.height;await new Promise(requestAnimationFrame);const painted=panel.style.height;dispatch('pointercancel',80);return {before,synchronous,painted};
   });
   expect(burst.synchronous).toBe(burst.before);expect(burst.painted).not.toBe(burst.before);
-  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.6)));}));
+  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await expectedEmptySheetHeight(page));
   await handle.evaluate(element=>{
     const box=element.getBoundingClientRect(),x=box.x+box.width/2,y=box.y+box.height/2;
     for(const [type,dy] of [['pointerdown',0],['pointerup',-120]] as const)element.dispatchEvent(new PointerEvent(type,{bubbles:true,pointerId:72,pointerType:'mouse',isPrimary:true,button:0,clientX:x,clientY:y+dy}));
@@ -58,7 +83,7 @@ test('chat handle captures an upward and downward drag outside its bounds', asyn
   await page.waitForTimeout(400);
   await page.getByRole('button',{name:'Shrink chat',exact:true}).click();
   await expect(page.getByRole('button',{name:'Expand chat',exact:true})).toBeVisible();
-  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.6)));}));
+  await expect.poll(()=>panel.evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await expectedEmptySheetHeight(page));
 });
 
 
@@ -125,11 +150,11 @@ test('a non-overflowing Files list has no edge fade',async({page})=>{
 });
 
 test('small sheet follows the mouse down continuously and collapses near the bottom',async({page},info)=>{
- await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect.poll(()=>page.locator('[data-alpha-layer=conversation]').evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.60)));}));await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const handle=page.getByRole('button',{name:'Resize chat',exact:true}),panel=page.locator('[data-alpha-layer="conversation"]');const before=await panel.evaluate(el=>parseFloat(getComputedStyle(el).height)),box=(await handle.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+before-150,{steps:8});await expect(panel).toHaveCSS('transition-property','none');const during=await panel.evaluate(el=>parseFloat(getComputedStyle(el).height));expect(during).toBeLessThan(before-60);expect(during).toBeGreaterThan(0);await page.screenshot({path:info.outputPath('chat-follow-finger.png'),animations:'disabled'});await page.mouse.up();await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveCount(0);await expect(panel).toHaveCSS('height','0px');
+ await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await restedEmptySheet(page);await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const handle=page.getByRole('button',{name:'Resize chat',exact:true}),panel=page.locator('[data-alpha-layer="conversation"]');const before=await panel.evaluate(el=>parseFloat(getComputedStyle(el).height)),box=(await handle.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+before-150,{steps:8});await expect(panel).toHaveCSS('transition-property','none');const during=await panel.evaluate(el=>parseFloat(getComputedStyle(el).height));expect(during).toBeLessThan(before-60);expect(during).toBeGreaterThan(0);await page.screenshot({path:info.outputPath('chat-follow-finger.png'),animations:'disabled'});await page.mouse.up();await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveCount(0);await expect(panel).toHaveCSS('height','0px');
 });
 
 test('touch capture can close the small sheet and pull the same pill into a sheet',async({page})=>{
- await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect.poll(()=>page.locator('[data-alpha-layer=conversation]').evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.60)));}));await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const cdp=await page.context().newCDPSession(page),handle=page.getByRole('button',{name:'Resize chat',exact:true}),panel=page.locator('[data-alpha-layer="conversation"]');let box=(await handle.boundingBox())!,x=box.x+box.width/2,y=box.y+box.height/2;
+ await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await restedEmptySheet(page);await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const cdp=await page.context().newCDPSession(page),handle=page.getByRole('button',{name:'Resize chat',exact:true}),panel=page.locator('[data-alpha-layer="conversation"]');let box=(await handle.boundingBox())!,x=box.x+box.width/2,y=box.y+box.height/2;
  // Release inside the collapse zone: since f21e9a6e4 and 200624134 a shorter drag only collapses as a
  // flick, and the check below can outlast the 80ms a flick allows, so it would rest where released.
  const closing=(await panel.boundingBox())!.height*.75;
@@ -137,20 +162,21 @@ test('touch capture can close the small sheet and pull the same pill into a shee
 });
 
 test('touch cancellation restores the prior detent without a click; keyboard controls still work',async({page})=>{
- await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect.poll(()=>page.locator('[data-alpha-layer=conversation]').evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.60)));}));await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const panel=page.locator('[data-alpha-layer="conversation"]'),before=await panel.evaluate(el=>getComputedStyle(el).height),handle=page.getByRole('button',{name:'Resize chat',exact:true}),box=(await handle.boundingBox())!,cdp=await page.context().newCDPSession(page),x=box.x+box.width/2,y=box.y+box.height/2;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+60,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await expect(panel).toHaveCSS('height',before);await expect(page.getByRole('button',{name:'Expand chat',exact:true})).toBeVisible();await cdp.detach();await page.getByRole('button',{name:'Expand chat',exact:true}).press('Enter');await expect(page.getByRole('button',{name:'Shrink chat',exact:true})).toBeVisible();
+ await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await restedEmptySheet(page);await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const panel=page.locator('[data-alpha-layer="conversation"]'),before=await panel.evaluate(el=>getComputedStyle(el).height),handle=page.getByRole('button',{name:'Resize chat',exact:true}),box=(await handle.boundingBox())!,cdp=await page.context().newCDPSession(page),x=box.x+box.width/2,y=box.y+box.height/2;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+60,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await expect(panel).toHaveCSS('height',before);await expect(page.getByRole('button',{name:'Expand chat',exact:true})).toBeVisible();await cdp.detach();await page.getByRole('button',{name:'Expand chat',exact:true}).press('Enter');await expect(page.getByRole('button',{name:'Shrink chat',exact:true})).toBeVisible();
 });
 
 for(const pointer of ['mouse','touch'] as const)test(`the pill's Type button focuses the composer so Android raises the keyboard: ${pointer}`,async({page,browser})=>{
  const context=pointer==='touch'?await browser.newContext({hasTouch:true,viewport:{width:412,height:915}}):page.context(),tab=pointer==='touch'?await context.newPage():page;
- await tab.goto('/');const bar=(await tab.locator('[data-alpha-input-bar]').boundingBox())!;await tab.mouse.move(bar.x+3,bar.y+bar.height/2);await tab.mouse.down();await tab.mouse.move(bar.x+3,bar.y+bar.height/2+64,{steps:8});await tab.mouse.up();
- const type=tab.getByRole('button',{name:'Type',exact:true});await expect(type).toBeVisible();await tab.waitForTimeout(400);const box=(await type.boundingBox())!;
+ await tab.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
+ await tab.goto('/');await openAppComposer(tab);const bar=(await tab.locator('[data-alpha-input-bar]').boundingBox())!;await tab.mouse.move(bar.x+3,bar.y+bar.height/2);await tab.mouse.down();await tab.mouse.move(bar.x+3,bar.y+bar.height/2+64,{steps:8});await tab.mouse.up();
+ const type=tab.getByRole('button',{name:'Type',exact:true});await expect(type).toBeVisible();await settled(tab.locator('[data-alpha-layer="pill"]'));const box=(await type.boundingBox())!;
  if(pointer==='touch')await tab.touchscreen.tap(box.x+box.width/2,box.y+box.height/2);else await type.click();
  await expect(tab.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeFocused();
  if(pointer==='touch')await context.close();
 });
 
 test('a tiny pill pointer wobble keeps the Type click and never opens a sheet',async({page})=>{
- await page.goto('/');const bar=(await page.locator('[data-alpha-input-bar]').boundingBox())!;await page.mouse.move(bar.x+3,bar.y+bar.height/2);await page.mouse.down();await page.mouse.move(bar.x+3,bar.y+bar.height/2+64,{steps:8});await page.mouse.up();const type=page.getByRole('button',{name:'Type',exact:true});await type.click({trial:true});const box=(await type.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+1,box.y+box.height/2-2);await page.mouse.up();await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);
+ await page.goto('/');await openAppComposer(page);const bar=(await page.locator('[data-alpha-input-bar]').boundingBox())!;await page.mouse.move(bar.x+3,bar.y+bar.height/2);await page.mouse.down();await page.mouse.move(bar.x+3,bar.y+bar.height/2+64,{steps:8});await page.mouse.up();const type=page.getByRole('button',{name:'Type',exact:true});await expect(type).toBeVisible();await settled(page.locator('[data-alpha-layer="pill"]'));const box=(await type.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+1,box.y+box.height/2-2);await page.mouse.up();await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);
 });
 
 test('short viewports keep the resized panel and grabber within the screen',async({page})=>{
@@ -158,11 +184,11 @@ test('short viewports keep the resized panel and grabber within the screen',asyn
 });
 
 test('an incoming view change retires a captured drag without reopening chat on release',async({page})=>{
- await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect.poll(()=>page.locator('[data-alpha-layer=conversation]').evaluate(el=>parseFloat(getComputedStyle(el).height))).toBe(await page.evaluate(()=>{const h=document.querySelector<HTMLElement>('[data-screen]')!.clientHeight;return Math.min(h,Math.max(200,h-72),Math.max(200,Math.round(h*.60)));}));await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const handle=page.getByRole('button',{name:'Resize chat',exact:true}),box=(await handle.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+70,{steps:7});await page.evaluate(()=>document.querySelector<HTMLButtonElement>('button[aria-label="Calendar"]')!.click());await page.mouse.up();await expect(page.getByRole('region',{name:'Calendar',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);
+ await page.goto('/');await page.getByRole('button',{name:'Open conversation',exact:true}).click();await restedEmptySheet(page);await page.getByRole('button',{name:'Resize chat',exact:true}).click({trial:true});const handle=page.getByRole('button',{name:'Resize chat',exact:true}),box=(await handle.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+70,{steps:7});await page.evaluate(()=>document.querySelector<HTMLButtonElement>('button[aria-label="Calendar"]')!.click());await page.mouse.up();await expect(page.getByRole('region',{name:'Calendar',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);
 });
 
 for(const origin of ['background','alpha'] as const)for(const direction of ['down','up'] as const)test(`input bar ${origin} drag ${direction} ${direction==='down'?'follows the pointer':'hands over to the sheet composer in place'} and preserves the draft`,async({page})=>{
- await page.goto('/');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Keep this unsent draft');const bar=page.locator('[data-alpha-input-bar]');await bar.getByRole('button',{name:'Open conversation',exact:true}).click({trial:true});await expect(page.locator('[data-alpha-input-bar]')).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);const before=(await bar.boundingBox())!,alpha=bar.getByRole('button',{name:'Open conversation',exact:true}),a=(await alpha.boundingBox())!,x=origin==='background'?before.x+3:a.x+a.width/2,y=origin==='background'?before.y+before.height/2:a.y+a.height/2,delta=direction==='down'?DEFAULT_PULL_DISTANCE+8:-120;
+ await page.goto('/');await openAppComposer(page);await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Keep this unsent draft');const bar=page.locator('[data-alpha-input-bar]');await bar.getByRole('button',{name:'Open conversation',exact:true}).click({trial:true});await expect(page.locator('[data-alpha-input-bar]')).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);const before=(await bar.boundingBox())!,alpha=bar.getByRole('button',{name:'Open conversation',exact:true}),a=(await alpha.boundingBox())!,x=origin==='background'?before.x+3:a.x+a.width/2,y=origin==='background'?before.y+before.height/2:a.y+a.height/2,delta=direction==='down'?DEFAULT_PULL_DISTANCE+8:-120;
  await page.evaluate(()=>{(window as any).motionClicks=0;document.addEventListener('click',event=>{const button=(event.target as Element)?.closest('button');if(button&&['Send','Talk'].includes(button.getAttribute('aria-label')||'')){(window as any).motionClicks++;event.preventDefault();event.stopImmediatePropagation();}},true);});
  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x,y+delta,{steps:10});if(direction==='down')await expect.poll(async()=>Math.abs((await bar.boundingBox())!.y-before.y)).toBeGreaterThan(30);else{await expect(bar).toHaveCSS('opacity','0');expect(Math.abs((await bar.boundingBox())!.y-before.y)).toBeLessThan(1);const composer=(await page.locator('[data-alpha-layer="conversation"] .alpha-chat-composer').boundingBox())!;expect(Math.abs(composer.y+composer.height-(before.y+before.height))).toBeLessThan(8);}expect(await bar.evaluate(el=>getComputedStyle(el).transitionProperty)).toBe('none');await page.mouse.up();
  if(direction==='down'){await expect(page.getByRole('button',{name:'Type',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Type',exact:true}).click();await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toHaveValue('Keep this unsent draft');}
@@ -170,8 +196,22 @@ for(const origin of ['background','alpha'] as const)for(const direction of ['dow
  expect(await page.evaluate(()=>(window as any).motionClicks)).toBe(0);
 });
 
+for(const origin of ['background','alpha'] as const)test(`Home keeps its input and draft after a downward ${origin} drag`,async({page})=>{
+ await page.goto('/');
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Keep the Home draft');
+ const bar=page.locator('[data-alpha-input-bar]');await bar.getByRole('button',{name:'Open conversation',exact:true}).click({trial:true});
+ await expect(bar).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
+ const before=(await bar.boundingBox())!,mark=(await bar.getByRole('button',{name:'Open conversation',exact:true}).boundingBox())!;
+ const x=origin==='background'?before.x+3:mark.x+mark.width/2,y=origin==='background'?before.y+before.height/2:mark.y+mark.height/2;
+ await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x,y+DEFAULT_PULL_DISTANCE+8,{steps:10});
+ expect(Math.abs((await bar.boundingBox())!.y-before.y)).toBeLessThan(1);await page.mouse.up();
+ await expect(input).toBeVisible();await expect(input).toHaveValue('Keep the Home draft');
+ await expect(page.getByRole('button',{name:'Type',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);
+});
+
 test('touch input background can cancel to the exact input mode, then collapse to pill',async({page})=>{
- await page.goto('/');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Unsent touch draft');const bar=page.locator('[data-alpha-input-bar]');await bar.getByRole('button',{name:'Open conversation',exact:true}).click({trial:true});const box=(await bar.boundingBox())!,x=box.x+3,y=box.y+box.height/2,cdp=await page.context().newCDPSession(page);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y-90,id:1}]});await expect(bar).toHaveCSS('transition-property','none');await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await expect(input).toHaveValue('Unsent touch draft');await expect(bar).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);const current=(await bar.boundingBox())!;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:current.x+3,y:current.y+current.height/2,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:current.x+3,y:current.y+current.height/2+45,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await expect(page.getByRole('button',{name:'Type',exact:true})).toBeVisible();await cdp.detach();
+ await page.goto('/');await openAppComposer(page);await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Unsent touch draft');const bar=page.locator('[data-alpha-input-bar]');await bar.getByRole('button',{name:'Open conversation',exact:true}).click({trial:true});const box=(await bar.boundingBox())!,x=box.x+3,y=box.y+box.height/2,cdp=await page.context().newCDPSession(page);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y-90,id:1}]});await expect(bar).toHaveCSS('transition-property','none');await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await expect(input).toHaveValue('Unsent touch draft');await expect(bar).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);const current=(await bar.boundingBox())!;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:current.x+3,y:current.y+current.height/2,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:current.x+3,y:current.y+current.height/2+45,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await expect(page.getByRole('button',{name:'Type',exact:true})).toBeVisible();await cdp.detach();
 });
 
 test('input textarea owns text selection and vertical scrolling without moving the bar',async({page})=>{
@@ -187,10 +227,10 @@ for(const target of ['Send','Talk'])test(`an input Alpha drag released over ${ta
 });
 
 for(const viewport of [{width:412,height:915},{width:1440,height:500}])for(const pointer of ['mouse','touch'] as const)test(`empty placeholder ${pointer} short pull and tap at ${viewport.width}x${viewport.height}`,async({page})=>{
- await page.setViewportSize(viewport);await page.goto('/');const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await expect(input).toBeVisible();
+ await page.setViewportSize(viewport);await page.goto('/');await openAppComposer(page);const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await expect(input).toBeVisible();await input.evaluate(el=>(el as HTMLTextAreaElement).blur());
  const cdp=pointer==='touch'?await page.context().newCDPSession(page):null;
  async function pull(up:boolean){
-  await input.click({trial:true});const box=(await input.boundingBox())!,scale=await page.locator('[data-screen]').evaluate(el=>el.getBoundingClientRect().height/(el as HTMLElement).clientHeight),x=box.x+box.width/2,y=box.y+box.height/2,delta=(up?-32:32)*scale;
+  await settled(page.locator('[data-alpha-input-bar]'));await input.click({trial:true});const box=(await input.boundingBox())!,scale=await page.locator('[data-screen]').evaluate(el=>el.getBoundingClientRect().height/(el as HTMLElement).clientHeight),x=box.x+box.width/2,y=box.y+box.height/2,delta=(up?-32:32)*scale;
   expect(y+Math.max(0,delta)).toBeLessThan(viewport.height);
   if(cdp)await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});else{await page.mouse.move(x,y);await page.mouse.down();}
   for(let step=1;step<=6;step++){await page.waitForTimeout(65);if(cdp)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+delta*step/6,id:1}]});else await page.mouse.move(x,y+delta*step/6);}
@@ -246,7 +286,7 @@ test('a separate Expand tap immediately after Open is not swallowed as a duplica
 test('an open sheet dragged down keeps its composer above the screen edge and hands over to the bar in place',async({page})=>{
  await page.goto('/');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();await expect(page.locator('[data-alpha-input-bar]')).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);const rest=(await page.locator('[data-alpha-input-bar]').boundingBox())!;
  await page.locator('[data-alpha-input-bar]').getByRole('button',{name:'Open conversation',exact:true}).click();const grab=page.getByRole('button',{name:'Resize chat',exact:true});await expect(grab).toBeVisible();
- await expect.poll(async()=>{const a=(await grab.boundingBox())!.y;await page.waitForTimeout(120);return Math.abs((await grab.boundingBox())!.y-a);}).toBeLessThan(0.5);
+ await restedEmptySheet(page);
  const panel=page.locator('[data-alpha-layer="conversation"]'),composer=panel.locator('.alpha-chat-composer'),g=(await grab.boundingBox())!,screen=page.viewportSize()!.height,x=g.x+g.width/2,y=g.y+10;
  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x,screen-40,{steps:16});
  const box=(await composer.boundingBox())!;expect(box.y+box.height).toBeLessThanOrEqual(screen);expect(Math.abs(box.y+box.height-(rest.y+rest.height))).toBeLessThan(8);
@@ -256,8 +296,10 @@ test('an open sheet dragged down keeps its composer above the screen edge and ha
 });
 // Samples the bar, the sheet and its header every frame for `ms` after `act`. Each sample is read after that
 // frame's callbacks, including the app's own per-frame updates, so it sees what was painted.
+// A header counts as shown clipped only inside a panel that paints: a closed sheet (no height, or fully
+// faded) shows none of its rows, whatever opacity a row keeps once the close has finished.
 async function frames(page:import('@playwright/test').Page,act:()=>Promise<void>,ms=650){
- await act();await page.evaluate(ms=>{(window as any).chatFrames=[];const t0=performance.now();const tick=()=>{const p=document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]')!,r=p.getBoundingClientRect(),h=document.querySelector('[data-alpha-chat-header]')!,c=p.querySelector('.alpha-chat-composer'),b=document.querySelector('[data-alpha-input-bar]');const bs=b&&getComputedStyle(b);(window as any).chatFrames.push({panel:r.height,panelOpacity:Number(getComputedStyle(p).opacity),headerClipped:h.getBoundingClientRect().top<r.top-0.5&&Number(getComputedStyle(h).opacity)>0.01,composerBottom:c?c.getBoundingClientRect().bottom:null,bar:b?{opacity:Number(bs!.opacity),transform:bs!.transform,bottom:b.getBoundingClientRect().bottom}:null});if(performance.now()-t0<ms)requestAnimationFrame(()=>setTimeout(tick));};requestAnimationFrame(()=>setTimeout(tick));},ms);
+ await act();await page.evaluate(ms=>{(window as any).chatFrames=[];const t0=performance.now();const tick=()=>{const p=document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]')!,r=p.getBoundingClientRect(),h=document.querySelector('[data-alpha-chat-header]')!,c=p.querySelector('.alpha-chat-composer'),b=document.querySelector('[data-alpha-input-bar]');const bs=b&&getComputedStyle(b);(window as any).chatFrames.push({panel:r.height,panelOpacity:Number(getComputedStyle(p).opacity),headerClipped:r.height>0&&Number(getComputedStyle(p).opacity)>0.01&&h.getBoundingClientRect().top<r.top-0.5&&Number(getComputedStyle(h).opacity)>0.01,composerBottom:c?c.getBoundingClientRect().bottom:null,bar:b?{opacity:Number(bs!.opacity),transform:bs!.transform,bottom:b.getBoundingClientRect().bottom}:null});if(performance.now()-t0<ms)requestAnimationFrame(()=>setTimeout(tick));};requestAnimationFrame(()=>setTimeout(tick));},ms);
  await page.waitForTimeout(ms+150);return page.evaluate(()=>(window as any).chatFrames as {panel:number,panelOpacity:number,headerClipped:boolean,composerBottom:number|null,bar:{opacity:number,transform:string,bottom:number}|null}[]);
 }
 test('tapping between the bar and the sheet keeps the composer in the bar\'s place and never shows a clipped header',async({page})=>{
@@ -274,7 +316,7 @@ test('releasing a drag that collapses the sheet leaves the bar in place without 
  await page.goto('/');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeVisible();await expect(page.locator('[data-alpha-input-bar]')).toHaveCSS('transform',/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
  const rest=(await page.locator('[data-alpha-input-bar]').boundingBox())!;
  await page.locator('[data-alpha-input-bar]').getByRole('button',{name:'Open conversation',exact:true}).click();const grab=page.getByRole('button',{name:'Resize chat',exact:true});await expect(grab).toBeVisible();
- await expect.poll(async()=>{const a=(await grab.boundingBox())!.y;await page.waitForTimeout(120);return Math.abs((await grab.boundingBox())!.y-a);}).toBeLessThan(0.5);
+ await restedEmptySheet(page);
  const g=(await grab.boundingBox())!;await page.mouse.move(g.x+g.width/2,g.y+10);await page.mouse.down();await page.mouse.move(g.x+g.width/2,page.viewportSize()!.height-30,{steps:16});await page.waitForTimeout(200);
  const released=await frames(page,()=>page.mouse.up());await expect(grab).toHaveCount(0);
  for(const f of released){expect(f.headerClipped).toBe(false);expect(f.bar!.opacity).toBe(1);expect(f.bar!.transform).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);expect(Math.abs(f.bar!.bottom-(rest.y+rest.height))).toBeLessThan(1);}

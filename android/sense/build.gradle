@@ -1,8 +1,8 @@
-// Product identities stay here; capture, consent and lifecycle are owned upstream.
+// Product identities stay here. Alpha owns the listener's components and UI in src/main (see below).
 def identity = new groovy.json.JsonSlurper().parse(file('../../app.config.json'))
 def preparedSense = new groovy.json.JsonSlurper().parseText(providers.exec {
  workingDir rootProject.projectDir.parentFile
- commandLine 'node', 'scripts/prepare-patched-native.ts'
+ commandLine 'bun', 'scripts/prepare-patched-native.ts'
 }.standardOutput.asText.get())
 ext.elizaSenseSourceDir = new File(preparedSense.root.toString(), 'packages/app/platforms/android/sense')
 ext.elizaSenseProfile = file('../aosp/pixel10a-composition.json')
@@ -10,3 +10,17 @@ ext.elizaSenseSpeechProject = ':sense-speech'
 ext.elizaSenseVersionCode = identity.versionCode
 ext.elizaSenseVersionName = identity.version
 apply from: new File(elizaSenseSourceDir, 'consumer.gradle')
+// Alpha owns the listener's manifest, resources, components, consent screen, notifications and tile
+// (src/main, forked from elizaOS packages/app/platforms/android/sense at 1803ea88, MIT).
+// consumer.gradle still supplies the build, signing, product BuildConfig fields and the speech
+// module. Of the shared listener sources only the pure policy classes compile: ListenerPolicy,
+// CrashLoopBreaker, SpeechGate, WakePhrase and IndicatorLease. The namespace stays ai.eliza.sense
+// because the shared WakePhrase reads ai.eliza.sense.BuildConfig; Alpha's classes import BuildConfig
+// and R from it.
+android.sourceSets.main {
+ manifest.srcFile file('src/main/AndroidManifest.xml')
+ res.srcDirs = [file('src/main/res')]
+ java.filter.exclude(['AssistantInvocation', 'ConsentActivity', 'IndicatorLeaseProvider', 'Listener', 'ListenerActionContract',
+  'ListenerActionReceiver', 'ListenerControlProvider', 'ListenerNotifications', 'ListenerStore', 'ListenerTileService',
+  'ListeningEpoch', 'ListeningService', 'SenseApplication', 'SenseConfig'].collect { "ai/eliza/sense/${it}.java" })
+}

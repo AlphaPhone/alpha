@@ -2,7 +2,9 @@ import {flagOffAndroid,completeAccessSetup} from '../flag-off-android';
 import {type Page} from '@playwright/test';
 // Renderer contract only. The synthetic bridge does not qualify Android permissions or MediaStore.
 // `owned` adds an Alpha-owned favorite that the native list returns whatever the provider scope.
-export async function photosBridge(page:Page,scope='full',openPhotos=true,authenticated=false,owned=false){
+// `init` runs in the page after the bridge is installed, before the app starts (for example to
+// extend the synthetic catalog), so a spec does not need a second start to apply it.
+export async function photosBridge(page:Page,scope='full',openPhotos=true,authenticated=false,owned=false,init?:()=>void){
  if(authenticated)await flagOffAndroid(page);
  await page.addInitScript(({scope,owned})=>{
   localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
@@ -37,11 +39,12 @@ export async function photosBridge(page:Page,scope='full',openPhotos=true,authen
      if(method==='albums')return {items:[]};if(method==='read')return row;
     }
     if(plugin==='ElizaSystem')return method==='getBuildInfo'?{launcher:false}:method==='getLaunchInfo'?{assistant:false}:method==='getLocaleInfo'?{locale:'en-US',hour24:false}:method==='listLauncherApps'?{apps:[]}:{available:false};
-    if(plugin==='DailyApps')return method==='listReminders'?{reminders:[]}:method==='pendingReminderTap'?{}:{assistant:false,developmentBuild:true,topInset:0,bottomInset:0};
+    if(plugin==='DailyApps')return method==='listReminders'?{reminders:[]}:method==='pendingReminderTap'?{}:{assistant:false,topInset:0,bottomInset:0};
     if(plugin==='AlphaVoiceCloud')return {microphone:'granted'};
     if(plugin==='AlphaNotifications')return method==='status'?{permissionGranted:true,appEnabled:true}:{items:[]};
     return previous?previous.nativePromise(plugin,method,input):{};
    }};
  },{scope,owned});
+ if(init)await page.addInitScript(init);
  await page.goto('/');if(authenticated)await completeAccessSetup(page);if(openPhotos)await page.getByRole('button',{name:'Photos',exact:true}).click();
 }

@@ -1,3 +1,14 @@
+// Partial source contract regression evidence. Original schedules, actions and assertions are retained.
+// Only the selected source members/components and controlled ports execute; this is not whole-file refinement.
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import {after as afterPartialContract} from 'node:test';
+import partialContractAssert from 'node:assert/strict';
+import {fileURLToPath as partialContractFile} from 'node:url';
+import {captureReplayClosure as capturePartialClosure} from '../specs/quint/refinement/observed-replay.mjs';
+import {captureInputs as capturePartialInputs} from '../specs/quint/refinement/check-traces.mjs';
+const partialContractInputs = capturePartialClosure([partialContractFile(import.meta.url)]);
+afterPartialContract(() => partialContractAssert.deepEqual(capturePartialInputs(Object.keys(partialContractInputs)), partialContractInputs));
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
@@ -6,12 +17,11 @@ import {modelTraces, replay, tick} from '../specs/quint/refinement/application/s
 import {shellCore} from '../specs/quint/refinement/application/shell-core-fixture.mjs';
 
 // ShadePull traces from the simulator, replayed on the shell's pull entry (openSystemShade) with
-// installSystemShade from source over the pinned shared shade policy. Android's answer and the
+// installSystemShade from source over Alpha's shade policy (ui/shell/notification-shade.ts). Android's answer and the
 // bounded wait are the environment: the plugin call settles, or the wait's timer runs, when the
 // model says so. What Android does with a request is device evidence.
 const bundled = await build({entryPoints: [resolve('apps/app/src/prototype/system-shade.ts')], bundle: true, format: 'esm',
   platform: 'node', write: false, plugins: [{name: 'ports', setup(b) {
-    b.onResolve({filter: /^@elizaos\/capacitor-system\/shade$/}, () => ({path: resolve('.eliza/client-features/plugins/plugin-native-system/src/client/shade.ts')}));
     b.onResolve({filter: /^\.\.\/platform-plugins$/}, a => ({path: a.path, namespace: 'stub'}));
     b.onLoad({filter: /.*/, namespace: 'stub'}, () => ({contents: 'export function registerPlugin(){return globalThis.alphaShadeDevice;}', loader: 'js'}));
   }}]});
@@ -58,7 +68,7 @@ function fixture(surface, timers) {
   };
 }
 
-test('simulated ShadePull traces agree with the shell pull and the Android request after every step', {timeout: 120000}, async t => {
+test("partial source contract: simulated ShadePull traces agree with the shell pull and the Android request after every step", {timeout: scaledTimeout(120000)}, async t => {
   t.mock.timers.enable({apis: ['setTimeout']});
   const traces = modelTraces({module: 'ShadePull', traces: 120, steps: 30});
   const result = await replay(traces, {
@@ -70,7 +80,7 @@ test('simulated ShadePull traces agree with the shell pull and the Android reque
     ['answer', 'closeStandIn', 'lateAnswer', 'leaveHome', 'pull', 'secureHome', 'showHome', 'unmount', 'waitEnds']);
 });
 
-test('an answer that arrives after the shell unmounted shows no fallback and arms no toast timer', async () => {
+test("partial source contract: an answer that arrives after the shell unmounted shows no fallback and arms no toast timer", async () => {
   let settle;
   globalThis.document = {querySelector: () => null, addEventListener() {}, removeEventListener() {}};
   ask = () => new Promise(resolve => { settle = resolve; });

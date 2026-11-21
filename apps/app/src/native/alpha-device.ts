@@ -1,6 +1,6 @@
 import type { CrashLogPort } from '../../../../.eliza/client-features/plugins/plugin-native-system/src/crash-log.ts';
 import type { SystemFacts } from '../../../../.eliza/client-features/plugins/plugin-native-system/src/definitions.ts';
-import type { watchMountedAppUpdates } from '../../../../.eliza/client-features/packages/ui/src/state/app-update-gate';
+import type { watchMountedAppUpdates } from '../ui/state/app-update-gate';
 
 /** Proton Pass autofill provider state (PasswordProviderSupport.status). */
 export type PasswordProviderStatus = {

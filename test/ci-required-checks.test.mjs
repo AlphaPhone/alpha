@@ -1,100 +1,248 @@
+import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import YAML from 'yaml';
 
 const read = file => fs.readFileSync(file, 'utf8');
 
-test('aggregate result fails a selected lane that did not succeed and passes skipped unselected lanes', async () => {
-  const { requiredResult } = await import('../scripts/ci/required-result.ts');
-  assert.equal(requiredResult(['changes=success', 'build=skipped:false']).ok, true);
-  assert.equal(requiredResult(['changes=success', 'build=success:true']).ok, true);
-  for (const result of ['failure', 'cancelled', 'skipped', ''])
-    assert.equal(requiredResult(['changes=success', `build=${result}:true`]).ok, false, result);
-  assert.equal(requiredResult(['changes=failure', 'build=skipped:false']).ok, false);
-  assert.equal(requiredResult(['changes=skipped']).ok, false, 'a job without selection must succeed');
-  assert.equal(requiredResult(['build=failure:false']).ok, false, 'an unselected lane may skip, never fail');
-  assert.equal(requiredResult([]).ok, false);
-  assert.throws(() => requiredResult(['build=$(id)']));
-});
+test('pull requests run one verify job and Android only for its inputs; only main pushes build the native candidate', () => {
+  const verify = YAML.parse(read('.github/workflows/verify.yml'));
+  // No path filter: the required check must report on every pull request, or it stays pending.
+  assert.deepEqual(verify.on, {pull_request: null});
+  assert.deepEqual(Object.keys(verify.jobs), ['verify']);
+  const android = read('.github/workflows/android.yml'), androidOn = YAML.parse(android).on;
+  assert.deepEqual(Object.keys(androidOn), ['pull_request', 'workflow_dispatch']);
+  for (const path of ['android/**', 'apps/app/**', 'scripts/**', 'bun.lock', 'upstream.lock.json', 'vendor/eliza'])
+    assert.ok(androidOn.pull_request.paths.includes(path), path);
+  assert.deepEqual(Object.keys(YAML.parse(android).jobs), ['build']);
+  for (const path of androidOn.pull_request.paths.filter(path => !/[*]/.test(path))) assert.ok(fs.existsSync(path), path);
+  assert.ok(!androidOn.pull_request.paths.some(path => path.startsWith('docs')), 'Documentation-only changes do not build APKs');
 
-test('production lane selects production-surface and every *.production.spec.ts in both places', async () => {
-  const { productionSpec, browserPlan } = await import('../scripts/ci/affected.ts');
-  const config = read('playwright.config.ts');
-  const literal = /const productionSpec=(\/.*\/);/.exec(config)?.[1];
-  assert.equal(literal, String(productionSpec), 'playwright.config.ts and scripts/ci/affected.ts must agree');
-  for (const file of ['test/browser/production-surface.spec.ts', 'test/browser/notes.production.spec.ts', 'test/browser/a/b-c.production.spec.ts'])
-    assert.ok(productionSpec.test(file), file);
-  for (const file of ['test/browser/notes.spec.ts', 'test/browser/production.spec.ts', 'test/browser/notes.production.spec.ts.bak'])
-    assert.ok(!productionSpec.test(file), file);
-  const plan = browserPlan(['test/browser/notes.production.spec.ts'], () => true);
-  assert.equal(plan.browser_production, true);
-  assert.equal(plan.browser_development, false);
-  assert.equal(plan.browser_specs, '[]');
-  const mixed = browserPlan(['test/browser/notes.production.spec.ts', 'test/browser/notes.spec.ts'], () => true);
-  assert.equal(mixed.browser_specs, '["test/browser/notes.spec.ts"]');
-  assert.equal(mixed.browser_production, true);
-});
-
-test('the local-agent profile step runs every profile spec whole and the change gate selects each of them', async () => {
-  const { browserPlan } = await import('../scripts/ci/affected.ts');
-  const files = ['test/browser/browser-agent-tts.spec.ts', 'test/browser/browser-host-disclosure.spec.ts', 'test/browser/host-reminder-recovery.spec.ts'];
-  const step = /name: Exercise synthetic local-agent speech profile[^\n]*\n(?:.*\n)*?.*VITE_LOCAL_AGENT=1 .*npm run test:browser -- (.*)\n/.exec(read('.github/workflows/browser.yml'))?.[1];
-  assert.ok(step, 'profile step');
-  assert.doesNotMatch(step, /--grep/);
-  for (const file of files) {
-    assert.ok(step.includes(file), file);
-    assert.equal(browserPlan([file], () => true).browser_speech, true, file);
-  }
-  assert.equal(browserPlan(['test/browser/notes.spec.ts'], () => true).browser_speech, false);
-});
-
-test('Android foundation runs on main and develop pushes and both workflows end in the required aggregate jobs', () => {
-  const android = read('.github/workflows/android.yml');
-  assert.match(android, /^on:\n(?:.*\n)*?  push:\n    branches: \[main, develop\]\n/m);
-  assert.match(android, /cancel-in-progress: \$\{\{ github\.event_name != 'push' \}\}/);
-  // A shared group would still cancel a pending main run when another push arrives.
-  assert.match(android, /group: android-\$\{\{ github\.event_name == 'push' && github\.sha \|\| github\.ref \}\}/);
-  const browser = read('.github/workflows/browser.yml');
-  // The event name also keeps a dispatch on main from cancelling the daily scheduled run.
-  assert.ok(browser.includes("group: browser-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}\n"));
-  assert.match(browser, /^on:\n(?:.*\n)*?  schedule:\n    - cron: '[^']+'\n/m);
-  assert.match(browser, /- run: npm run verify\n        env:\n(?:.*\n)*?          ALPHA_REQUIRE_PREPARED_SDK: '1'\n/);
-  assert.match(android, /name: Android foundation result\n    needs: \[changes, build\]\n    if: always\(\)/);
-  assert.match(android, /artifacts\/mapping\/\*\.txt/);
-  const manualVerify = android.split('- name: Verify standalone manual qualification\n')[1]?.split('\n      - ')[0];
-  assert.match(manualVerify, /if: github\.event_name == 'workflow_dispatch'/);
-  assert.match(manualVerify, /ALPHA_REQUIRE_PREPARED_SDK: '1'/);
-  assert.match(manualVerify, /run: npm run verify/);
-  assert.match(android, /name: Prepare pinned SDK for manual verification[\s\S]*node scripts\/prepare-local-agent\.ts/);
-  assert.match(android, /name: Prepare pinned native lifecycle sources\n\s+if: github\.event_name != 'workflow_dispatch'/);
-
-  assert.match(browser, /name: Browser MVP result\n    needs: \[changes, verify, formal, browser, production\]\n    if: always\(\)/);
-  assert.match(browser, /name: Changed-model proofs[\s\S]*?run: npm run quint:changed/);
-  assert.ok(browser.includes('"formal=$FORMAL:$VERIFY_SELECTED"'), 'a failed or skipped selected proof lane must fail the stable aggregate');
-  assert.match(browser, /name: Repository verification\n/);
-  assert.match(browser, /node scripts\/verify-upstream\.ts/);
-  const resident = read('.github/workflows/resident-android.yml');
-  // The candidate workflow test checks the other concurrency groups.
-  assert.ok(resident.includes("${{ inputs.operation == 'publish-qualification' && '-carrier' || '' }}"));
-  assert.match(resident, /vars\.ELIZA_RESIDENT_QUALIFICATION == 'push'/);
-  assert.match(resident, /vars\.ELIZA_RESIDENT_QUALIFICATION == 'nightly'/);
-  // Primary main attempts may supersede automatic candidate work; reruns are isolated. Develop pushes and
-  // nightly qualification retain distinct groups; manual qualification stays isolated by
-  // ref and upload-only carriers retain their extra suffix.
+  const resident = YAML.parse(read('.github/workflows/resident-android.yml'));
+  assert.deepEqual(resident.on.push, {branches: ['main']});
+  assert.deepEqual(Object.keys(resident.on), ['workflow_dispatch', 'push']);
+  // Independent main runs cannot cancel each other even if GitHub starts the older one later.
+  // Reruns keep their run ID. Manual builds keep their group per ref and operation.
   const carrierGroupSuffix = "${{ inputs.operation == 'publish-qualification' && '-carrier' || '' }}";
-  const concurrency = YAML.parse(resident).concurrency;
-  assert.equal(concurrency.group, "resident-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && (github.run_attempt == 1 && 'app-candidate-main' || format('app-candidate-run-{0}', github.run_id)) || (github.event_name == 'workflow_dispatch' && github.ref || format('{0}-{1}', github.event_name, github.sha)) }}" + carrierGroupSuffix);
-  assert.equal(concurrency['cancel-in-progress'], "${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_attempt == 1) }}");
+  assert.equal(resident.concurrency.group, "resident-${{ github.event_name == 'push' && format('app-candidate-run-{0}', github.run_id) || github.ref }}" + carrierGroupSuffix);
+  assert.equal(resident.concurrency['cancel-in-progress'], "${{ github.event_name == 'workflow_dispatch' }}");
+
+  // The one emulator lane runs nightly and on dispatch in a single job.
+  const emulator = YAML.parse(read('.github/workflows/android-emulator.yml'));
+  assert.deepEqual(Object.keys(emulator.on), ['schedule', 'workflow_dispatch']);
+  assert.deepEqual(Object.keys(emulator.jobs), ['emulator']);
 });
 
-test('committed ruleset requires exactly the stable check names', () => {
+test('consolidated lanes retain required operation budgets and exact APK custody', () => {
+  const resident = YAML.parse(read('.github/workflows/resident-android.yml')).jobs.build;
+  assert.equal(resident.env.ELIZA_BUN_CHANNEL, 'stable');
+  const acquisition = resident.steps.find(step => step.run === 'python3 scripts/ci/acquire-resident-bun.py');
+  assert.equal(acquisition.env.GH_TOKEN, '$' + '{{ github.token }}');
+  assert.ok(resident.steps.some(step => step.run === 'python3 -B scripts/ci/test-acquire-resident-bun.py'));
+  for (const [command, minutes] of [['bun run agent:stage-android', 30], ['bun run agent:test-mobile-workflow-bundle', 5],
+    ['bun scripts/generate-licenses.ts --packaged-runtime', 2], ['bun scripts/build-archive.ts test-results/resident-ci-distribution', 50]]) {
+    const step = resident.steps.find(step => step.run?.split('\n').includes(command));
+    assert.ok(step, command);assert.equal(step['timeout-minutes'], minutes, command);
+    assert.notEqual(step['continue-on-error'], true);
+    assert.equal(step.env.ALPHA_REQUIRE_PREPARED_SDK, '1');
+  }
+  const emulator = YAML.parse(read('.github/workflows/android-emulator.yml')).jobs.emulator;
+  const emulatorAcquisition = emulator.steps.find(step => step.run === 'python3 scripts/ci/acquire-resident-bun.py');
+  assert.deepEqual(emulatorAcquisition.env, {GH_TOKEN: '$' + '{{ github.token }}',
+    ALPHA_LOCAL_AGENT_SOURCE_DIR: '$' + '{{ github.workspace }}/vendor/eliza'});
+  assert.ok(emulator.steps.indexOf(emulatorAcquisition) < emulator.steps.findIndex(step => step.id === 'build'));
+  assert.notEqual(emulatorAcquisition['continue-on-error'], true);
+  const cache = emulator.steps.find(step => step.uses?.startsWith('actions/cache/restore@'));
+  const residentCache = resident.steps.find(step => step.id === 'native-cache');
+  assert.equal(cache.uses, residentCache.uses);assert.equal(cache.with.key, residentCache.with.key);
+  assert.equal(cache.with.path, residentCache.with.path);assert.equal(cache.with['restore-keys'], undefined);
+  assert.equal(emulator.steps.find(step => step.id === 'native-recipe').run, resident.steps.find(step => step.id === 'native-recipe').run);
+  const build = emulator.steps.find(step => step.id === 'build');
+  assert.equal(build.if, undefined, 'A cache hit still runs the normal input, ABI and build checks');
+  assert.equal(build.run, 'bun run android:build:local -- --release');
+  assert.equal(emulator['timeout-minutes'], 360);
+  assert.equal(emulator.steps.find(step => step.id === 'build')['timeout-minutes'], 180);
+  const anchor = emulator.steps.find(step => step.id === 'freeze');
+  assert.match(anchor.run, /sha256sum artifacts\/apk-manifest\.json/);
+  for (const mode of ['instrumentation', 'browser-reading']) {
+    const step = emulator.steps.find(step => step.with?.script?.includes('bun scripts/ci/emulator-suite.ts ' + mode));
+    assert.equal(step['timeout-minutes'], 90);
+    assert.ok(step.with.script.includes('$' + '{{ steps.freeze.outputs.manifest }}'));
+    assert.ok(step.with.script.includes('git rev-parse HEAD'));
+  }
+  const apks = emulator.steps.find(step => step.with?.name?.startsWith('android-emulator-apks-'));
+  assert.equal(apks.with['if-no-files-found'], 'error');
+  for (const input of ['artifacts/apk-manifest.json', 'artifacts/launcher-debug.apk', 'artifacts/instrumentation/*.apk'])
+    assert.ok(apks.with.path.split('\n').includes(input), input);
+});
+
+test('browser tests, the Quint gate, its node tests and the Lemma proofs run in CI only for promotion to main and on dispatch', () => {
+  const promotion = YAML.parse(read('.github/workflows/promotion.yml'));
+  assert.deepEqual(Object.keys(promotion.on).sort(), ['pull_request', 'workflow_dispatch']);
+  assert.deepEqual(promotion.on.pull_request, {branches: ['main']});
+  assert.deepEqual(promotion.jobs.browser.strategy.matrix.shard, [1, 2, 3, 4, 5, 6]);
+});
+
+const safetyCommand = 'bun scripts/check-quint.ts verify --steps=6 $' + '{MODELS:+--models=$MODELS}';
+const temporalCommand = 'bun scripts/check-quint.ts temporal --models="$MODELS" --tlc-liveness="$LIVENESS"';
+const selector = (step, command, env, cwd = process.cwd(), output = '$MODELS') => {
+  assert.equal(step.run.indexOf(command), step.run.lastIndexOf(command));
+  assert.ok(step.run.endsWith(command + '\n'));
+  return spawnSync('bash', ['-e', '-c', step.run.slice(0, step.run.indexOf(command)) + '\nprintf "%s" "' + output + '"'], {
+    cwd, env: {...process.env, ...env}, encoding: 'utf8', timeout: scaledTimeout(30000),
+  });
+};
+const selectedNames = result => {
+  assert.ifError(result.error);assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stdout, '');return result.stdout.split(',');
+};
+
+test('promotion partitions every safety and temporal phase exactly once without changing proof options', () => {
+  const jobs = YAML.parse(read('.github/workflows/promotion.yml')).jobs;
+  const families = ['application', 'services', 'native', 'legacy'];
+  const manifests = families.map(family => JSON.parse(read('specs/quint/' + family + '/manifest.json')));
+  const models = manifests.flat(), byModule = new Map(models.map(model => [model.module, model]));
+  assert.ok(manifests.every(models => Array.isArray(models) && models.length > 0));
+  assert.equal(byModule.size, models.length, 'Registry families must remain disjoint');
+  assert.equal(byModule.get('RendererRecovery').additionalProofInit, 'budgetInit');
+  assert.equal(byModule.get('VadSegmentation').additionalProofInit, 'counterInit');
+  const safety = jobs.symbolic, temporal = jobs.temporal;
+  assert.equal(safety.strategy['fail-fast'], false);
+  assert.equal(safety.strategy.matrix.family, '$' + "{{ fromJSON(inputs.models && '" + JSON.stringify(['selected']) + "' || '" + JSON.stringify(families) + "') }}");
+  assert.deepEqual(safety.strategy.matrix.partition, [0, 1]);
+  assert.deepEqual(safety.strategy.matrix.exclude, [{family: 'selected', partition: 1}]);
+  const verify = safety.steps.find(step => step.name === 'Bounded symbolic safety and additional proof inits');
+  assert.deepEqual(verify.env, {MODELS: '$' + '{{ inputs.models }}', MODEL_FAMILY: '$' + '{{ matrix.family }}', MODEL_PARTITION: '$' + '{{ matrix.partition }}'});
+  const phases = model => [[model.module, model.init, model.step, model.invariant, 6, model.verifyBackend ?? 'apalache'],
+    ...(model.additionalProofInit ? [[model.module, model.additionalProofInit, model.step, model.invariant, 1, model.verifyBackend ?? 'apalache']] : [])];
+  const actual = [];
+  for (const [index, family] of families.entries()) {
+    const expected = manifests[index].map(model => model.module), width = Math.ceil(expected.length / 2);
+    for (const partition of [0, 1]) {
+      const names = selectedNames(selector(verify, safetyCommand, {MODELS: '', MODEL_FAMILY: family, MODEL_PARTITION: String(partition)}));
+      assert.deepEqual(names, expected.slice(partition * width, (partition + 1) * width));
+      actual.push(...names.flatMap(name => phases(byModule.get(name))));
+    }
+  }
+  const phaseKeys = phases => phases.map(phase => JSON.stringify(phase)).sort();
+  const actualKeys = phaseKeys(actual);
+  assert.deepEqual(actualKeys, phaseKeys(models.flatMap(phases)), 'All base and additional-init phases retain their exact aliases, backend and CI depth');
+  assert.equal(new Set(actualKeys).size, actualKeys.length, 'No phase is duplicated across partitions');
+
+  assert.equal(temporal.if, '$' + '{{ !inputs.models }}');
+  assert.equal(temporal.strategy['fail-fast'], false);
+  assert.deepEqual(temporal.strategy.matrix.group, ['PhotosLibrary', 'NotesView', 'remaining']);
+  const temporalStep = temporal.steps.find(step => step.name === 'Fairness-guarded temporal properties');
+  assert.deepEqual(temporalStep.env, {TEMPORAL_GROUP: '$' + '{{ matrix.group }}'});
+  const temporalModels = models.filter(model => model.temporal?.length);
+  const temporalNames = temporal.strategy.matrix.group.flatMap(group => selectedNames(selector(temporalStep, temporalCommand, {TEMPORAL_GROUP: group})));
+  assert.deepEqual([...temporalNames].sort(), temporalModels.map(model => model.module).sort());
+  assert.equal(new Set(temporalNames).size, temporalNames.length, 'Every complete temporal property bundle has exactly one owner');
+  const liveness = group => {
+    const result = selector(temporalStep, temporalCommand, {TEMPORAL_GROUP: group}, process.cwd(), '$LIVENESS');
+    assert.equal(result.status, 0, result.stderr);return result.stdout;
+  };
+  assert.deepEqual(temporal.strategy.matrix.group.map(liveness), ['final', 'final', 'default'],
+    'Notes and Photos schedule liveness after complete graph exploration; the remaining group keeps the default');
+  assert.deepEqual(temporalNames.flatMap(name => {
+    const model = byModule.get(name);return [[name, model.init, model.step, model.temporal]];
+  }).sort(), temporalModels.map(model => [model.module, model.init, model.step, model.temporal]).sort());
+  assert.equal(jobs.comparison.if, '$' + '{{ !inputs.models }}');
+  assert.equal(jobs.comparison.steps[5].run, 'bun scripts/check-quint.ts compare');
+  assert.equal(safety.steps[4].run, 'bun run upstream:prepare-client');
+  for (const job of [safety, jobs.comparison, temporal]) {
+    assert.deepEqual(job.steps.slice(0, 5), safety.steps.slice(0, 5), 'All pinned prerequisites, through upstream:prepare-client, remain identical');
+    assert.equal(job.needs, undefined);assert.equal(job['timeout-minutes'], 240);assert.equal(job['runs-on'], 'ubuntu-24.04');
+    assert.equal(job.steps.at(-1).if, 'always()');assert.equal(job.steps.at(-1).with.path, 'test-results/quint/');
+  }
+  const safetyArtifact = safety.steps.at(-1).with.name, temporalArtifact = temporal.steps.at(-1).with.name;
+  assert.equal(safetyArtifact, 'quint-symbolic-$' + '{{ matrix.family }}-$' + '{{ matrix.partition }}');
+  assert.equal(temporalArtifact, 'quint-temporal-$' + '{{ matrix.group }}');
+  const artifacts = families.flatMap(family => [0, 1].map(partition => safetyArtifact.replace('$' + '{{ matrix.family }}', family).replace('$' + '{{ matrix.partition }}', String(partition))));
+  artifacts.push(jobs.comparison.steps.at(-1).with.name, ...temporal.strategy.matrix.group.map(group => temporalArtifact.replace('$' + '{{ matrix.group }}', group)));
+  assert.equal(new Set(artifacts).size, 12);
+});
+
+test('promotion runs every Quint check: no remembered result is restored, saved or read', async () => {
+  const workflow = YAML.parse(read('.github/workflows/promotion.yml'));
+  // Anything a pull request runs can write the Actions cache scope its promotion runs read, under a predictable key,
+  // and a remembered run carries no provenance. So the cache is off for every job, and nothing restores it.
+  assert.equal(workflow.env?.ALPHA_QUINT_CACHE, 'off');
+  const {quintCacheDisabled} = await import('../scripts/quint-lib.ts');
+  const previous = process.env.ALPHA_QUINT_CACHE;
+  try { process.env.ALPHA_QUINT_CACHE = workflow.env.ALPHA_QUINT_CACHE; assert.equal(quintCacheDisabled(), true); }
+  finally { if (previous === undefined) delete process.env.ALPHA_QUINT_CACHE; else process.env.ALPHA_QUINT_CACHE = previous; }
+  // The workflow-level setting is the only mention of the cache: no step, action input or expression names it again.
+  const text = read('.github/workflows/promotion.yml').split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+  assert.equal(text.match(/ALPHA_QUINT_CACHE/g)?.length, 1);
+  assert.doesNotMatch(text, /actions\/cache|--cache=/);
+  const consumers = [];
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    for (const scope of [job, ...job.steps]) {
+      for (const variable of ['ALPHA_QUINT_CACHE', 'ALPHA_QUINT_CACHE_DIR']) assert.equal(scope.env?.[variable], undefined, `${name} does not override ${variable}`);
+    }
+    for (const step of job.steps) {
+      // No cache action anywhere: a restored archive on any path could land where the checker reads.
+      assert.doesNotMatch(String(step.uses), /^actions\/cache/, `${name} restores or saves no cache`);
+      // Any step, not only a Quint consumer, could re-enable or move the cache for later steps through $GITHUB_ENV.
+      assert.doesNotMatch(step.run || '', /ALPHA_QUINT_CACHE|--cache=/, `${name} step ${step.name || step.run} does not touch the Quint cache`);
+      if (/check-quint|quint:|lemma:check/.test(step.run || '')) {
+        consumers.push(`${name}: ${step.run.trim().split('\n').at(-1)}`);
+      }
+    }
+  }
+  // Each step that checks models or loads the registry, so a new one must be looked at here.
+  assert.deepEqual(consumers.map(consumer => consumer.split(' ').filter((word, index, words) => !words.slice(0, index + 1).some(part => /^[-$]/.test(part))).join(' ')).sort(), [
+    'comparison: bun scripts/check-quint.ts compare', 'conformance: bun run lemma:check', 'conformance: bun run quint:check',
+    'conformance: bun run quint:tests', 'symbolic: bun scripts/check-quint.ts verify', 'temporal: bun scripts/check-quint.ts temporal',
+  ], `every Quint consumer is covered:\n${consumers.join('\n')}`);
+});
+
+test('the actual promotion selectors preserve manual filters and refuse empty or invalid partitions', () => {
+  const jobs = YAML.parse(read('.github/workflows/promotion.yml')).jobs;
+  const safety = jobs.symbolic.steps.find(step => step.name === 'Bounded symbolic safety and additional proof inits');
+  const temporal = jobs.temporal.steps.find(step => step.name === 'Fairness-guarded temporal properties');
+  const select = (family, partition = '0', models = '', cwd) => selector(safety, safetyCommand, {MODEL_FAMILY: family, MODEL_PARTITION: partition, MODELS: models}, cwd);
+  for (const models of ['NavigationProgress', 'NavigationProgress,PreviousNotesSourceOpening',
+    'NavigationProgress,NavigationProgress', ',,', 'UnknownPromotionPartitionProbe', ' NavigationProgress']) {
+    const result = select('selected', '0', models);
+    assert.equal(result.status, 0, result.stderr);assert.equal(result.stdout, models, 'The sole selected lane delegates the original raw filter to the CLI');
+  }
+  const refused = (result, reason) => {
+    assert.ifError(result.error);assert.notEqual(result.status, null);assert.notEqual(result.status, 0);assert.match(result.stderr, reason);
+  };
+  refused(select('selected'), /Unknown safety model family/);
+  for (const partition of ['', '2', '-1', 'unknown']) refused(select('application', partition), /Invalid safety model partition/);
+  refused(selector(temporal, temporalCommand, {TEMPORAL_GROUP: 'unknown'}), /Unknown temporal model group/);
+  const scratch = fs.mkdtempSync(join(tmpdir(), 'alpha-promotion-partition-'));
+  try {
+    for (const family of ['application', 'services', 'native', 'legacy']) {
+      fs.mkdirSync(join(scratch, 'specs/quint', family), {recursive: true});fs.writeFileSync(join(scratch, 'specs/quint', family, 'manifest.json'), '[]');
+    }
+    for (const [malformed, reason] of [[[], /Safety model family must not be empty/], [[{}], /Safety model family contains an invalid module/],
+      [[{module: ''}], /Safety model family contains an invalid module/]]) {
+      fs.writeFileSync(join(scratch, 'specs/quint/application/manifest.json'), JSON.stringify(malformed));refused(select('application', '0', '', scratch), reason);
+    }
+    fs.writeFileSync(join(scratch, 'specs/quint/application/manifest.json'), JSON.stringify([{module: 'OnlyOne'}]));
+    refused(select('application', '1', '', scratch), /Safety model partition must not be empty/);
+    fs.writeFileSync(join(scratch, 'specs/quint/application/manifest.json'), JSON.stringify([{module: 'PhotosLibrary', temporal: ['Checked']}, {module: 'NotesView', temporal: ['Checked']}]));
+    refused(selector(temporal, temporalCommand, {TEMPORAL_GROUP: 'remaining'}, scratch), /Temporal model group must not be empty/);
+    fs.writeFileSync(join(scratch, 'specs/quint/application/manifest.json'), '[]');
+    refused(selector(temporal, temporalCommand, {TEMPORAL_GROUP: 'PhotosLibrary'}, scratch), /Temporal model group must not be empty/);
+  } finally {fs.rmSync(scratch, {recursive: true, force: true});}
+  const unknown = spawnSync('bun', ['scripts/check-quint.ts', 'verify', '--models=UnknownPromotionPartitionProbe'], {encoding: 'utf8', timeout: scaledTimeout(30000)});
+  assert.ifError(unknown.error);assert.notEqual(unknown.status, 0);assert.match(unknown.stderr, /Unknown model UnknownPromotionPartitionProbe/);
+});
+
+test('committed ruleset requires exactly the verify job', () => {
   const ruleset = JSON.parse(read('scripts/ci/required-checks-ruleset.json'));
   assert.equal(ruleset.target, 'branch');
   assert.deepEqual(ruleset.conditions.ref_name.include, ['~DEFAULT_BRANCH']);
   const checks = ruleset.rules.find(rule => rule.type === 'required_status_checks').parameters.required_status_checks;
-  assert.deepEqual(checks.map(row => row.context).sort(), ['Android foundation result', 'Browser MVP result', 'Repository verification']);
-  assert.ok(checks.every(row => row.integration_id === 15368));
-  const workflows = read('.github/workflows/android.yml') + read('.github/workflows/browser.yml');
-  for (const { context } of checks) assert.ok(workflows.includes(`name: ${context}\n`), context);
+  assert.deepEqual(checks, [{context: 'Repository verification', integration_id: 15368}]);
+  assert.equal(YAML.parse(read('.github/workflows/verify.yml')).jobs.verify.name, 'Repository verification');
 });

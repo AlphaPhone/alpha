@@ -1,3 +1,5 @@
+// Partial source-contract regression: authenticated extracted production members execute
+// with controlled ports; this is not whole-file implementation refinement.
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -37,13 +39,9 @@ export async function checkNativeGmailBackground(extraSources=[]) {
       capacitor+'Bridge.java',capacitor+'BridgeActivity.java',
       'scripts/prepare-patched-native.ts','test/fixtures/native-source.mjs',
       'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),...generatedSources,...extraSources,
-      ...[harness,'Trace.java','java.mjs','gmail-background-platform.mjs'].map(name=>join(directory,name)),
+      ...[harness,'Trace.java','java.mjs','gmail-background-platform.mjs','reminder-delivery-platform.mjs'].map(name=>join(directory,name)),
       fileURLToPath(import.meta.url)];
     const driverHashes=captureInputs(sources);
-    const bridge=readFileSync(join(root,capacitor,'Bridge.java'),'utf8');
-    assert.match(bridge,/HandlerThread\("CapacitorPlugins"\)/);
-    assert.match(bridge,/taskHandler\.post\(currentThreadTask\)/);
-    assert.match(readFileSync(join(root,capacitor,'BridgeActivity.java'),'utf8'),/public void onDestroy\(\)[\s\S]*bridge\.onDestroy\(\)/);
     const host=JSON.parse(readFileSync(join(root,hostPath),'utf8'));
     assert.deepEqual(host.profile.modules.find(item=>item.name==='eliza-notifications'),{
       name:'eliza-notifications',source:{root:'patchedNative',path:modulePath},relocateBuild:true,
@@ -62,14 +60,14 @@ export async function checkNativeGmailBackground(extraSources=[]) {
     const traces=javaTraceCampaign(harness,[...compiled,...fixture.paths],scenarios.map(name=>[name]));
     // Keep every trace; bounded batches prevent one large generated checker from timing out.
     const receipt=await checkTraces({model,sources,driverHashes,generatedSources,traces,batchSize:8,
-      scope:'bounded-orchestration',assumptions:[
-        'The app-owned AlphaGmailPlugin, GmailBackground, GmailDeliveryWorker and CloudDeployment run with authenticated staged MailBackgroundDelivery and MailHistoryReconciliation. The exact native verified Cloud identity helper runs over synthetic responses.',
+      scope: 'bounded-orchestration',assumptions:[
+        'The app-owned AlphaGmailPlugin, GmailBackground, GmailDeliveryWorker, GmailNoticePoster and CloudDeployment run with authenticated staged MailBackgroundDelivery and MailHistoryReconciliation. The exact native verified Cloud identity helper runs over synthetic responses.',
         'Every JVM URL open is intercepted and accepts only the exact constructed Cloud routes. No network request, socket, real credential or provider action is used. One held transport callback and two serial bridge instances exercise owner retirement and readback.',
         'The exact Activity/bridge teardown calls shut the real product executor in one schedule. A second schedule delays execute on a forwarding port backed by the real executor, then lets a later selection reach admission before delivering the older rejection. Accepted worker draining is outside this refusal boundary.',
         'Synthetic WorkManager records request generation, CONNECTED constraint, 15-minute UPDATE, KEEP catch-up and 30-second exponential backoff. WorkManager execution and platform notification delivery are external.',
         'One retained notification identity per active selection, selected decimal history boundaries and page continuations, closed storage outcomes before or after commit, and synthetic active-list evidence. Host credential replacement triggers the actual registered retirement closure before replacing the bytes.',
         'A history-only403/409 has a three-refusal durable budget, reset by accepted pages;401 and verified owner/grant revocation stop immediately. The source replay covers each refusal through WorkManager completion, without further retries of that completed request.',
-        'Tap capture enters the actual shared ledger directly with a synthetic opaque key. The actual product bridge resolves status/pending/consume/release. Android intent delivery and installed MailNoticePoster effects are outside the source replay.',
+        'Tap capture enters the actual shared ledger directly with a synthetic opaque key. The actual product bridge resolves status/pending/consume/release. Delivery of those intents by Android and real notification effects remain outside the source replay.',
       ]});
     return {receipt,obligations:[
       {model,obligation:'WorkManager and notification effects on Android',reason:'Command recording, stop state, synthetic alert visibility and active-list evidence are controlled. Device timing, reboot, WorkManager deduplication, PendingIntent routing and native notification permission enforcement require installed-platform evidence.'},

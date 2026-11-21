@@ -1,6 +1,9 @@
 import type { Component as ReactComponent, PointerEvent as ReactPointerEvent } from 'react';
-import type { ShadeSurface } from '@elizaos/capacitor-system/shade';
-import type { MobileAssistantDetent, MobileShellNavigation, MobileShellNavigationAction } from '@elizaos/ui/mobile-shell/core';
+import type { ShadeSurface } from '../ui/shell/notification-shade.ts';
+import type { MobileShellNavigationAction, navigateMobileShell } from '../ui/mobile-shell/navigation.ts';
+
+type MobileShellNavigation = ReturnType<typeof navigateMobileShell>;
+type MobileAssistantDetent = MobileShellNavigation['assistant'];
 
 /**
  * Types for the prototype shell in model.js (the `Component` class, its `api(k)` object and the
@@ -104,6 +107,8 @@ export interface ShellProps {
 
 export interface ToastOptions {
   undo?: (() => unknown) | null;
+  /** An error toast is announced and styled as a failure. */
+  kind?: 'error';
 }
 
 export interface OpenViewOptions {

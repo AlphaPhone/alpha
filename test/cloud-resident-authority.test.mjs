@@ -40,41 +40,20 @@ test('real staging transport reaches identity and entitlement but rejects other 
 });
 
  test('real browser resident admits owner-bound Cloud speech without enabling mocks or packaged speech',async()=>{
- const flags={DEV:true,VITE_ALPHA_CLOUD_RESIDENT:'1',VITE_ELIZA_DEV_ALLOW_TEST_MOCKS:'',VITE_ALPHA_DEV_CLOUD_VOICE:''};
+ const flags={DEV:true,VITE_ALPHA_CLOUD_RESIDENT:'1',VITE_ELIZA_DEV_ALLOW_TEST_MOCKS:''};
  assert.equal((await protocol(flags)).developmentCloudVoiceEnabled,true);
- for(const env of [{...flags,DEV:false},{...flags,VITE_ALPHA_CLOUD_RESIDENT:''},{...flags,VITE_ALPHA_CLOUD_RESIDENT:'',VITE_ALPHA_DEV_CLOUD_VOICE:'1'}])assert.equal((await protocol(env)).developmentCloudVoiceEnabled,false);
- assert.equal((await protocol({DEV:true,VITE_ALPHA_CLOUD_RESIDENT:'',VITE_ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_ALPHA_DEV_CLOUD_VOICE:'1'})).developmentCloudVoiceEnabled,true,'existing explicit mock preview still works');
+ for(const env of [{...flags,DEV:false},{...flags,VITE_ALPHA_CLOUD_RESIDENT:''},{...flags,VITE_ALPHA_CLOUD_RESIDENT:'',VITE_ELIZA_DEV_ALLOW_TEST_MOCKS:'1'}])assert.equal((await protocol(env)).developmentCloudVoiceEnabled,false);
  Object.defineProperty(globalThis,'androidBridge',{configurable:true,value:{}});try{const native=await protocol({...flags,VITE_ALPHA_CLOUD_ENVIRONMENT:'staging'});assert.equal(native.Capacitor.isNativePlatform(),true);assert.equal(native.developmentCloudVoiceEnabled,false);}finally{delete globalThis.androidBridge;}
  });
 
-test('explicit private local preview reuses email sign-in host without mocks or Cloud resident provider',async()=>{
- const p=await protocol({DEV:true,VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:'1',VITE_LOCAL_AGENT:'1',VITE_ELIZA_DEV_ALLOW_TEST_MOCKS:''});assert.equal(typeof p.cloudSignIn?.status,'function');assert.equal(p.developmentCloudVoiceEnabled,false);const original=globalThis.fetch,calls=[];globalThis.fetch=async(url,input)=>{calls.push({url,body:JSON.parse(input.body)});return Response.json({inApp:true,email:true,google:false});};try{const ready=await p.cloudSignIn.status({environment:'production'});assert.equal(ready.email,true);assert.equal(ready.google,false);assert.equal(calls.length,1);assert.equal(calls[0].url,'/__alpha-browser-cloud');assert.equal(calls[0].body.operation,'signInStatus');assert.equal(calls[0].body.email,undefined);}finally{globalThis.fetch=original;}
+test('the development server reuses the email sign-in host without a Cloud resident provider',async()=>{
+ const p=await protocol({DEV:true,VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:'1',VITE_LOCAL_AGENT:'1',VITE_ELIZA_DEV_ALLOW_TEST_MOCKS:'1'});assert.equal(typeof p.cloudSignIn?.status,'function');assert.equal(p.developmentCloudVoiceEnabled,false);const original=globalThis.fetch,calls=[];globalThis.fetch=async(url,input)=>{calls.push({url,body:JSON.parse(input.body)});return Response.json({inApp:true,email:true,google:false});};try{const ready=await p.cloudSignIn.status({environment:'production'});assert.equal(ready.email,true);assert.equal(ready.google,false);assert.equal(calls.length,1);assert.equal(calls[0].url,'/__alpha-browser-cloud');assert.equal(calls[0].body.operation,'signInStatus');assert.equal(calls[0].body.email,undefined);}finally{globalThis.fetch=original;}
  for(const flags of[{DEV:false,VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:'1',VITE_LOCAL_AGENT:'1'},{DEV:true,VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:'1'},{DEV:true,VITE_LOCAL_AGENT:'1'}])assert.equal((await protocol(flags)).cloudSignIn,undefined);
 });
 
-test('private sign-in bridge requires all explicit preview/profile gates and creates no Cloud resident',async()=>{
- const {readFileSync}=await import('node:fs'),path=await import('node:path');const text=readFileSync('scripts/browser-cloud-dev-bridge.ts','utf8');const body=text.slice(text.indexOf('export function browserCloudDevBridge()')).replace('export ','');const {transform}=await import('esbuild');const code=(await transform(body,{loader:'ts',format:'cjs'})).code;
- const allowed={ALPHA_PRIVATE_LOCAL_PREVIEW:'1',VITE_ALPHA_PRIVATE_LOCAL_PREVIEW:'1',VITE_LOCAL_AGENT:'1',ALPHA_BROWSER_CLOUD_PROFILE:'/synthetic/cloud-profile'};
- async function mount(env){let providers=0;const handlers=[],mounted=[];const plugin=new Function('process','path','homedir','environment','createCloudResidentHost','createBrowserCloudDevHandler','BROWSER_CLOUD_BRIDGE_PATH',code+';return browserCloudDevBridge();')({env},path,()=>'/synthetic',value=>value,async()=>{providers++;return{close(){}};},input=>{handlers.push(input);return()=>{};},'/__alpha-browser-cloud');assert.equal(plugin.apply,'serve');await plugin.configureServer({middlewares:{use:(route,handler)=>mounted.push({route,handler})},httpServer:{once(){}}});return{providers,handlers,mounted};}
- const actual=await mount(allowed);assert.equal(actual.providers,0);assert.equal(actual.mounted.length,1);assert.equal(actual.mounted[0].route,'/__alpha-browser-cloud');assert.equal(actual.handlers[0].profile,'/synthetic/cloud-profile');assert.equal(actual.handlers[0].resident,undefined);
- for(const name of Object.keys(allowed)){const env={...allowed};delete env[name];assert.equal((await mount(env)).mounted.length,0,name+' is required');}
-});
-
-test('the real Cloud development plugin forwards only an explicit valid resident profile mode', async () => {
- const {readFileSync} = await import('node:fs');
- const path = await import('node:path');
- const {transform} = await import('esbuild');
- const text = readFileSync('scripts/browser-cloud-dev-bridge.ts', 'utf8');
- const body = text.slice(text.indexOf('export function browserCloudDevBridge()')).replace('export ', '');
- const code = (await transform(body, {loader: 'ts', format: 'cjs'})).code;
- async function mount(mode) {
-  const launches = [];
-  const env = {VITE_ALPHA_CLOUD_RESIDENT: '1', VITE_LOCAL_AGENT: '1', ALPHA_ELIZA_SOURCE: '/synthetic/sdk', ALPHA_REMOTE_PROFILE: '/synthetic/resident', ALPHA_REMOTE_PORT: '47869', ...(mode === undefined ? {} : {ALPHA_CLOUD_RESIDENT_PROFILE: mode})};
-  const plugin = new Function('process', 'path', 'homedir', 'environment', 'createCloudResidentHost', 'createBrowserCloudDevHandler', 'BROWSER_CLOUD_BRIDGE_PATH', code + ';return browserCloudDevBridge();')({env}, path, () => '/synthetic', value => value, async options => { launches.push(options); return {close() {}}; }, () => () => {}, '/__alpha-browser-cloud');
-  await plugin.configureServer({middlewares: {use() {}}, httpServer: {once() {}}});
-  return launches;
- }
- assert.equal((await mount(undefined))[0].profileMode, 'lean');
- assert.equal((await mount('full'))[0].profileMode, 'full');
- await assert.rejects(mount('unknown'), /profile mode/);
+test('the browser Cloud bridge mounts nothing without test mocks or a Cloud resident',async()=>{
+ const {browserCloudDevBridge}=await import('../scripts/browser-cloud-dev-bridge.ts');
+ async function mount(env){const saved=process.env;process.env={...saved,...env};try{const mounted=[];await browserCloudDevBridge().configureServer({middlewares:{use:route=>mounted.push(route)},httpServer:{once(){}}});return mounted;}finally{process.env=saved;}}
+ assert.deepEqual(await mount({ELIZA_DEV_ALLOW_TEST_MOCKS:'',VITE_ALPHA_CLOUD_RESIDENT:''}),[]);
+ assert.deepEqual(await mount({ELIZA_DEV_ALLOW_TEST_MOCKS:'1',VITE_ALPHA_CLOUD_RESIDENT:'',ALPHA_BROWSER_CLOUD_PROFILE:'/synthetic/cloud-profile'}),['/__alpha-browser-cloud']);
 });

@@ -6,8 +6,8 @@ import {createScanLinkReview} from './scan-link-review';
 import {scanExportTitle,exportScanPdf,scanPdfFailure,scanPdfRetryable,systemPickerActive} from './scan-pdf';
 import {Capacitor} from '@capacitor/core';
 import {recognizeLocalText} from './local-ocr';
+import {localOcrErrorText} from '../ui/documents/local-ocr-messages';
 import type {ScanPageCamera} from './scan-page-camera';
-import {errorText} from '../lib/error-text';
 
 /** 'unsaved' is a scan-mode capture that was not published to Photos. It stays
  * in memory unless the user explicitly chooses Keep photo. */
@@ -22,7 +22,7 @@ export function openScanReview(image:Blob,save:(text:string,id:string)=>Promise<
   dialog.className='scan-dialog scan-text-review';
   const heading=document.createElement('h2');heading.textContent='Scan text';
   const disclosure=document.createElement('p');disclosure.style.margin='0';const onDevice=document.createElement('span');onDevice.textContent='On device';onDevice.style.cssText='display:inline-block;padding:2px 10px;border-radius:999px;background:var(--s2,#eee);font-size:13px;font-weight:600';disclosure.append(onDevice);
-  const status=document.createElement('p');status.setAttribute('role','status');status.setAttribute('aria-label','Scan status');status.textContent='Starting local scan…';
+  const status=document.createElement('p');status.setAttribute('role','status');status.setAttribute('aria-label','Scan status');status.textContent='Reading text…';
   const field=document.createElement('textarea');field.setAttribute('aria-label','Scanned text');field.rows=9;field.maxLength=100000;field.disabled=true;field.className='scan-dialog-text';
   const actions=document.createElement('div');actions.className='scan-dialog-actions';
   const button=(label:string)=>{const value=document.createElement('button');value.type='button';value.textContent=label;actions.append(value);return value;};
@@ -58,6 +58,6 @@ export function openScanReview(image:Blob,save:(text:string,id:string)=>Promise<
   dialog.append(heading,content,actions);(document.querySelector('.os')||document.body).append(dialog);dialog.showModal();close.focus();
   void recognizeLocalText(image,controller.signal,value=>{if(!closed)status.textContent=`Reading text… ${Math.round(value.progress*100)}%`;}).then(result=>{
     if(closed)return;field.disabled=false;if(eventReview)eventReview.hidden=false;field.value=result.text;links.update();copy.disabled=!result.text;commit.disabled=!result.text;close.textContent='Close scan';status.textContent=result.text?'':'No text';field.focus();
-  },error=>{if(closed)return;close.textContent='Close scan';status.textContent=errorText(error,'Scan failed');});
+  },error=>{if(closed)return;close.textContent='Close scan';status.textContent=localOcrErrorText(error,'Scan failed');});
   return dispose;
 }

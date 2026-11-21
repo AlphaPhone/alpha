@@ -30,7 +30,9 @@ async function box(locator: Locator) { const value = await locator.boundingBox()
 /** Resize, then wait until the renderer has measured the new window and rendered it. */
 async function resize(page: Page, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--alpha-visible-height'))).toBe(`${viewport.height}px`);
+  // Maps can occupy the renderer while it redraws after rotation. Wait for the
+  // measured viewport before inspecting layout.
+  await expect(page.locator('html')).toHaveCSS('--alpha-visible-height', `${viewport.height}px`, { timeout: 15_000 });
   await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
 }
 /** Within the readable column and centred in the window, or the full phone width when narrow. */
@@ -148,7 +150,7 @@ test('the Browser menu ends above the dock on short screens and its rows stay re
 
 test('the Maps notice sits beside the map in landscape and is bounded on a wide portrait screen', async ({ page }) => {
   // The base map has no notice until there is news; a refused location request is the fullest one
-  // (message, help, Add location and Location settings).
+  // (message, help, My location and Location settings).
   await page.addInitScript(() => { navigator.geolocation.watchPosition = ((_: unknown, error: (value: {code: number}) => void) => { queueMicrotask(() => error({code: 1})); return 19; }) as typeof navigator.geolocation.watchPosition; navigator.geolocation.clearWatch = () => {}; });
   await open(page, 'Maps');
   const notice = page.locator('[data-alpha-maps-status]');
@@ -158,7 +160,7 @@ test('the Maps notice sits beside the map in landscape and is bounded on a wide 
   await expect(notice).toBeVisible();
   await resize(page, LANDSCAPE);
   expect((await box(notice)).width).toBeLessThanOrEqual(915 / 2);
-  await expectTarget(page, page.getByRole('button', { name: 'Add location', exact: true }));
+  await expectTarget(page, notice.getByRole('button', { name: 'My location', exact: true }));
   await resize(page, TABLET_PORTRAIT);
   expect((await box(notice)).width).toBeLessThanOrEqual(561);
   await resize(page, PORTRAIT);

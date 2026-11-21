@@ -1,12 +1,14 @@
 import {developmentCartesiaVoiceEnabled} from '../runtime/development-cartesia-flag';
 import {developmentCloudVoiceEnabled} from '../runtime/development-cloud-voice';
 import { Capacitor } from '@capacitor/core';
+import { speechCleanupNotice } from '../runtime/voice-states';
 import { speakLocalText } from '../local-speech-playback';
 import { markVoiceTiming, abandonVoiceTurn, finishVoiceTurn } from '../runtime/voice-timing';
 import { connectionController } from '../runtime/connection-ui';
 import { planLocalSpeech, screenSpeechText } from '../runtime/local-speech-text';
 import { createOnDeviceVoice } from '../runtime/local-voice';
 import { createCloudVoice, cloudVoiceFailure } from '../runtime/cloud-voice';
+import { speechFailureReason } from '../ui/voice/speech-bridge-messages';
 import { selectVoiceRoute, speechRoute, noteNetworkSpeechFailure } from '../runtime/voice-selection';
 import { speakCloudSpeechChunks } from '../../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts';
 
@@ -98,7 +100,12 @@ export async function readNoteAloud(text: string, owner: { noteId?: string } = {
     return done(noteReading === reading && !signal.aborted ? 'finished' : 'stopped');
   } catch (error) {
     if (noteReading !== reading || signal.aborted) return done('stopped');
-    const cause = (cloud ? cloudVoiceFailure(error) : null) || (error instanceof Error && !(error instanceof DOMException) && error.message ? error.message : '');
+    const cleanupNotice = speechCleanupNotice(error);
+    if (cleanupNotice) {
+      if (reading.pending) retainSpeechRetirement(reading.pending);
+      return done('failed', cleanupNotice);
+    }
+    const cause = (cloud ? cloudVoiceFailure(error) : null) || speechFailureReason(error) || '';
     return done('failed', reading.state === 'reading' ? (cause ? `Stopped · ${cause}` : 'Stopped') : (cause ? `Couldn’t start reading · ${cause}` : 'Couldn’t start reading'));
   }
   finally { if (noteReading === reading) { noteReading = undefined; noteReadingChanged(); } }
@@ -173,7 +180,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
     const knownUsers=new Set((shell.S().msgs||[]).filter((row:Shell)=>row.from==='user').map((row:Shell)=>row.id));
     const previousSpeech=stopLocalSpeechPlayback();stop(shell);
     const retiring=shell.stopVoiceConversation?.();
-    const directReadAloud=developmentCartesiaVoiceEnabled;
+    const directReadAloud=speechRoute()==='direct'||developmentCartesiaVoiceEnabled&&!developmentCloudVoiceEnabled;
     const cloud = selectVoiceRoute() === 'cloud'||directReadAloud;
     const controller = new AbortController(), state: Reading = { id, text, controller, message: 'Waiting…' };
     let reached = false;
@@ -217,8 +224,8 @@ export function installLocalSpeechPlayback(Component: Shell) {
       if((error as {code?:string})?.code==='speech-cleanup-unconfirmed'&&state.pending)retainSpeechRetirement(state.pending);
       if (!current()) return;
       state.controller = undefined;
-      const recovery = cloud ? cloudVoiceFailure(error) : null;
-      state.message = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError') ? 'Reading stopped.' : recovery || (error instanceof Error && !reached ? error.message : 'Stopped');
+      const recovery = speechCleanupNotice(error) || (cloud ? cloudVoiceFailure(error) : null);
+      state.message = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError') ? 'Reading stopped.' : recovery || (!reached && speechFailureReason(error)) || 'Stopped';
       refresh(shell);
     } finally {if(states.get(shell)===state&&!current()){stop(shell);refresh(shell);}}
   }
@@ -249,7 +256,8 @@ export function installLocalSpeechPlayback(Component: Shell) {
   }
   p.renderVals = function () {
     const out = original.call(this), source = this.S().msgs || [], state = states.get(this);
-    const cloud = selectVoiceRoute() === 'cloud'||developmentCartesiaVoiceEnabled;
+    const directReadAloud=speechRoute()==='direct'||developmentCartesiaVoiceEnabled&&!developmentCloudVoiceEnabled;
+    const cloud = selectVoiceRoute() === 'cloud'||directReadAloud;
     const available = cloud || createOnDeviceVoice() !== null;
     const byId = new Map<unknown, Shell>(source.map((entry: Shell) => [entry.id, entry]));
     out.msgs = (out.msgs || []).map((message: Shell) => {

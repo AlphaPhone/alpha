@@ -116,7 +116,7 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
   return fieldAllowed() && !destroyed
    && getCurrentInputConnection() != null && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
    && lock != null && !lock.isKeyguardLocked() && power != null && power.isInteractive() && audio != null && audio.getMode() == AudioManager.MODE_NORMAL
-   && !ai.eliza.plugins.passwords.PasswordSurfaces.visible();
+   && !PasswordSurfaces.visible();
  }
  private void renderReady() {
   if (status == null) return;

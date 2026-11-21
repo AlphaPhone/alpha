@@ -41,8 +41,11 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  @Override public void load() {
   SelectedDocumentAccess.initialize(getContext());
   super.load();
+  AlphaNotificationChannels.describe(getContext());
   openAssistant();
  }
+ /** A channel the shared code created since the last look gets its description on the next return to the app. */
+ @Override protected void handleOnResume(){super.handleOnResume();AlphaNotificationChannels.describe(getContext());}
  @Override protected void handleOnDestroy(){worker.shutdownNow();super.handleOnDestroy();}
  @Override protected void handleOnNewIntent(Intent intent) { super.handleOnNewIntent(intent); openAssistant(); }
  private void openAssistant() {
@@ -53,9 +56,9 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  /** Capacitor's own permission request launches through the activity; see {@link LateLaunch}. */
  @Override @PluginMethod public void requestPermissions(PluginCall call){LateLaunch.ask(call,()->super.requestPermissions(call));}
  /** The shared reminder plugin asks for the notification permission inside this method; see {@link LateLaunch}. */
- @Override @PluginMethod public void scheduleReminder(PluginCall call){LateLaunch.ask(call,()->super.scheduleReminder(call));}
+ @Override @PluginMethod public void scheduleReminder(PluginCall call){LateLaunch.ask(call,()->{super.scheduleReminder(call);AlphaNotificationChannels.describe(getContext());});}
  @PluginMethod public void surfaceInfo(PluginCall call) {
-  JSObject value = new JSObject(); value.put("assistant", getActivity() instanceof AlphaAssistActivity); value.put("developmentBuild", BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS);
+  JSObject value = new JSObject(); value.put("assistant", getActivity() instanceof AlphaAssistActivity);
   addReminderCapabilities(value);
   // Repeat days reach Clock (clock.handoff.v2): clockHandoff accepts days.
   value.put("clockRepeatDaysVersion", 1);
@@ -74,7 +77,7 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  @PluginMethod public void describeSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.describe(call,()->SelectedDocumentAccess.documents(getContext())));}
  @PluginMethod public void readSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.read(call,()->SelectedDocumentAccess.documents(getContext())));}
  @PluginMethod public void openSelected(PluginCall call){Activity activity=getActivity();documents(call,()->SelectedDocumentCalls.open(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
- @PluginMethod public void shareSelected(PluginCall call){Activity activity=getActivity();documents(call,()->SelectedDocumentCalls.share(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
+ @PluginMethod public void shareSelected(PluginCall call){Activity activity=getActivity();documents(call,()->AlphaShareSheet.shareSelected(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
  @PluginMethod public void forgetSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.forget(call,()->SelectedDocumentAccess.documents(getContext())));}
  private void documents(PluginCall call,Runnable task){PluginWorkers.submit(worker,task,()->call.reject("Saved document access is unavailable"));}
  private Integer clockInteger(JSObject data,String key) {

@@ -38,7 +38,7 @@ public final class CloudSignInCallbackInstrumentedTest {
   for (String other : new String[]{"https://" + HOST + "/", "https://" + HOST + "/alphaphone/auth/callback/extra", "https://" + HOST + "/auth/callback", "https://api." + HOST + "/alphaphone/auth/callback", "http://" + HOST + "/alphaphone/auth/callback"})
    assertTrue(other, packages.queryIntentActivities(new Intent(Intent.ACTION_VIEW, Uri.parse(other)).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(context().getPackageName()), 0).isEmpty());
   boolean staging = !packages.queryIntentActivities(new Intent(Intent.ACTION_VIEW, Uri.parse("https://staging.eliza.app/alphaphone/auth/callback")).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(context().getPackageName()), 0).isEmpty();
-  assertEquals("The staging return exists only in test-mocks builds", BuildConfig.ELIZA_DEV_ALLOW_TEST_MOCKS, staging);
+  assertFalse("Alpha registers no staging return", staging);
  }
 
  /** Launches MainActivity with uri over a fresh pending record and asserts the record and the Cloud credential are unchanged. */
@@ -68,7 +68,7 @@ public final class CloudSignInCallbackInstrumentedTest {
  /**
   * An expired record with the matching state is never used. A return that starts Alpha has no live
   * sign-in attempt, so the shared client consumes nothing and writes no credential; the record stays
-  * for the next sign-in to replace (CloudSignInPlugin.captureCallback).
+  * for the next sign-in to replace (AlphaCloudSignInClient.captureCallback).
   */
  @Test public void expiredPendingRecordIsNeverUsed() throws Exception {
   gate();

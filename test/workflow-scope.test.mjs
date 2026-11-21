@@ -4,8 +4,11 @@ import assert from 'node:assert/strict';
 // before any generation request. The filter recognizes phrasings, so these tables pin the ones it must
 // catch and the supported requests it must not refuse. The typed catalog and compiler remain the bound
 // for wording the filter does not recognize.
-// The phrase-refusal scope is the shared @elizaos/contracts/workflow-scope, consumed through the pin.
-const S = await import('../.eliza/client-features/packages/contracts/src/workflow-scope.ts');
+// The phrase classifier is the shared @elizaos/contracts/workflow-scope, consumed through the pin; the
+// refusal wording and the step names are Alpha's (apps/app/src/ui/workflows/workflow-scope.ts).
+const {workflowScopeCategories} = await import('../.eliza/client-features/packages/contracts/src/workflow-scope.ts');
+const {checkWorkflowScope, WORKFLOW_OPERATION_LABELS} = await import('../apps/app/src/ui/workflows/workflow-scope.ts');
+const S = {workflowScopeCategories, checkWorkflowScope, WORKFLOW_OPERATION_LABELS};
 const operations = ['supplied_text', 'selected_notes', 'selected_reminders', 'calendar_range', 'contains', 'compose_draft', 'model_draft', 'save_note', 'app_notification', 'read_aloud'];
 
 const baseRefused = {
