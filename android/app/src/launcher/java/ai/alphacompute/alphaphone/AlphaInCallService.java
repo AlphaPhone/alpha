@@ -36,6 +36,7 @@ import android.telecom.PhoneAccount;
 import android.util.Log;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.UUID;
 
@@ -67,6 +68,8 @@ public final class AlphaInCallService extends InCallService {
     private final Map<String, String> names = new HashMap<>();
     /** What each call's notice last said, by call ID (AlphaCallPresentation.noticeContent). Main thread only. */
     private final Map<String, String> posted = new HashMap<>();
+    /** Outgoing calls and incoming fallback screens can each launch once. Main thread only. */
+    private final Set<String> launched = new HashSet<>();
     private java.util.concurrent.ExecutorService lookups;
     private static AlphaInCallService activeService;
 
@@ -128,23 +131,29 @@ public final class AlphaInCallService extends InCallService {
     private void openCallSurface(String event, String callId, Call call) {
         NotificationManager notifications = getSystemService(NotificationManager.class);
         if ("removed".equals(event) || call.getState() == Call.STATE_DISCONNECTED) {
-            if (callId != null) { posted.remove(callId); notifications.cancel(callId, 1); }
+            if (callId != null) {
+                posted.remove(callId);
+                launched.remove(callId);
+                notifications.cancel(callId, 1);
+            }
             publish();
             return;
         }
-        String label = callerLabel(callId, call.getDetails());
-        boolean ringing = call.getState() == Call.STATE_RINGING;
+        int state = call.getState();
+        Call.Details details = call.getDetails();
+        String label = callerLabel(callId, details);
+        boolean ringing = AlphaCallPresentation.ringing(state);
         // Telecom reports a burst of state and detail changes as a call starts, and most leave the
         // notice saying what it already says. Posting it again for each one passes Android's per-app
         // notice rate, and Android then drops updates, which can leave a stale notice (a ringing
         // notice on an answered call). The notice is posted only when what it says or offers changes.
-        String content = AlphaCallPresentation.noticeContent(label, call.getState());
+        String content = AlphaCallPresentation.noticeContent(label, state);
         if (!content.equals(posted.put(callId, content))) {
             // Only a ringing call alerts. Outgoing and connected calls use the quiet channel.
             Notification.Builder builder = new Notification.Builder(this, ringing ? CHANNEL_ID : ONGOING_CHANNEL_ID)
                 .setSmallIcon(NOTIFICATION_ICON)
                 .setContentTitle(label)
-                .setContentText(AlphaCallPresentation.stateLabel(call.getState()))
+                .setContentText(AlphaCallPresentation.stateLabel(state))
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -165,10 +174,19 @@ public final class AlphaInCallService extends InCallService {
             notifications.notify(callId, 1, builder.build());
         }
         publish();
-        // Open the call once, preserving the dialer's incoming/outgoing entry behavior.
-        // Later state updates refresh the existing screen and notification without
-        // taking focus back from another task on every Telecom callback.
-        if ("added".equals(event)) showCall(callId);
+        // Android presents the ringing notification as a full-screen intent or a heads-up.
+        // A second activity launch here would put the heads-up over Alpha's own call screen.
+        boolean waitingForIncomingAlert = ringing || (details != null
+            && details.getCallDirection() == Call.Details.DIRECTION_INCOMING
+            && state != Call.STATE_ACTIVE && state != Call.STATE_HOLDING);
+        boolean launchNow = "added".equals(event) && !waitingForIncomingAlert;
+        // Keep the incoming screen available if Android cannot present a banner or full-screen alert.
+        if (ringing) {
+            NotificationChannel channel = notifications.getNotificationChannel(CHANNEL_ID);
+            launchNow = !notifications.areNotificationsEnabled() || channel == null
+                || channel.getImportance() < NotificationManager.IMPORTANCE_HIGH;
+        }
+        if (launchNow && launched.add(callId)) showCall(callId);
     }
 
     /**
@@ -238,6 +256,7 @@ public final class AlphaInCallService extends InCallService {
         callbacks.clear();
         names.clear();
         posted.clear();
+        launched.clear();
         if (lookups != null) lookups.shutdownNow();
         ACTIVE_CALLS.clear();
         CALL_IDS.clear();
