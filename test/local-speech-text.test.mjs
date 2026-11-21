@@ -41,6 +41,12 @@ test('on-device replies turn abbreviated dates and times into speech', () => {
   assert.equal(converse('Sun Microsystems. Deadline: Sept. 1 at 9:05 a.m.'), 'Sun Microsystems. Deadline, September first at nine oh five A M.');
 });
 
+test('a colon after a Calendar date separates the heading from the slots', () => {
+  assert.equal(formatSpeechText('Here are three 30-minute options for tomorrow, Sun, Nov 22:'), 'Here are three 30-minute options for tomorrow, Sunday, November twenty-second.');
+  assert.equal(formatSpeechText('Sun, Nov 22: 1. 12:00-12:30 PM'), "Sunday, November twenty-second, 1. twelve o'clock to twelve thirty P M");
+  assert.equal(formatSpeechText('See Nov 22:30 in the transcript.'), 'See Nov 22:30 in the transcript.');
+});
+
 test('speech formatting handles clock syntax without rewriting other numeric display data', () => {
   assert.equal(formatSpeechText('Times: 2-3 p.m., 09:05–10:00, 18:30 to 19:00.'), "Times, two to three P M, nine oh five to ten o'clock, six thirty P M to seven P M.");
   assert.equal(formatSpeechText('2% of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.'), '2 percent of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.');

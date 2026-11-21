@@ -23,7 +23,7 @@ function namesPattern(names: string[]): string {
 }
 
 const namedDate = new RegExp(
-  String.raw`\b(?:(${namesPattern(weekdays)})\.?[,]?[ \t]+)?(${namesPattern(months)}|Sept)\.?[ \t]+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?![\p{L}\d:/-]|\.\d)`,
+  String.raw`\b(?:(${namesPattern(weekdays)})\.?[,]?[ \t]+)?(${namesPattern(months)}|Sept)\.?[ \t]+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?![\p{L}\d/-]|[.:]\d)`,
   'giu',
 );
 const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`;

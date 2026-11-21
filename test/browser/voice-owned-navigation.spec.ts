@@ -294,3 +294,21 @@ test('Talk sends natural speech for the recorded Calendar reply and keeps the di
  expect(spoken).toContain('one P M to one thirty P M');
  expect(spoken).not.toMatch(/:|\b(?:Sun|Nov)\b/);
 });
+
+test('Talk expands a Calendar date heading that ends in a colon',async({page})=>{
+ await setup(page,'full');
+ const answer='Here are three 30-minute options for tomorrow, Sun, Nov 22:\n\n1. 12:00-12:30 PM\n2. 12:30-1:00 PM\n3. 1:00-1:30 PM';
+ await page.evaluate(answer=>{(window as any).ownedVoiceNavigation.answer=answer;},answer);
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.playAdmissions)).toBe(1);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ const {spoken,reply}=await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  return {spoken:f.spoken.join(' '),reply:f.shell.S().msgs.findLast((row:any)=>row.from==='agent')?.text};
+ });
+ expect(reply).toBe(answer);
+ expect(spoken).toContain('Sunday, November twenty-second');
+ expect(spoken).toContain('one o\'clock to one thirty P M');
+ expect(spoken).not.toMatch(/:|\b(?:Sun|Nov)\b/);
+});
