@@ -91,6 +91,19 @@ test('canonical Notes negotiates only the exact foreground list filter', () => {
   assert.ok(!selectDeviceCapabilities([], {...apk,canonicalNotes:true}).includes(capability));
 });
 
+// Voice recording has its own capability, so the agent can start a voice note in the agent's own Notes
+// without the folder, move and restore set (notes.organize.v1), which is never offered.
+test('canonical Notes negotiates voice recording alone, never the organise set', () => {
+  const offer = ['notes.record.v1', 'notes.organize.v1', 'notes.list-filter.v1'];
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, canonicalNotes: true}),
+    ['calendar.local-event.v1', 'notes.local-record.v1', 'notes.list-filter.v1', 'notes.record.v1']);
+  assert.ok(!selectDeviceCapabilities(offer, apk).includes('notes.record.v1'));
+  assert.ok(!selectDeviceCapabilities(offer, {...apk,canonicalNotes:true,foregroundReview:false}).includes('notes.record.v1'));
+  assert.ok(!selectDeviceCapabilities(['notes.organize.v1'], {...apk,canonicalNotes:true}).includes('notes.record.v1'));
+  for (const profile of [apk, {...apk, canonicalNotes: true}])
+    assert.ok(!selectDeviceCapabilities(offer, profile).includes('notes.organize.v1'));
+});
+
 // Source contract on connection-ui.tsx: only the resident connection, which owns canonical app
 // records, selects with canonicalNotes. Remote and Cloud enrollments never advertise the filter.
 test('only the resident connection may negotiate the canonical Notes filter', () => {
