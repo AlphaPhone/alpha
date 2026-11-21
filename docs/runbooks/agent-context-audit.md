@@ -466,6 +466,92 @@ Read with these in mind:
 - **The side calls are capped at the tip.** Its logs record 4,096 on the large text
   calls that recorded none before.
 
+### Phone-like runs: the merged runtime and the follow-ups
+
+The phone loads the personal-assistant plugin and sends its requests in direct-request
+mode; the desktop launcher turns the plugin off and the eval sent no mode. From case set
+revision 5 the eval sends the phone's mode, and `resident-launch3.sh` in the work cache
+turns the plugin on. With it a reminder request carries the reminder tools (19.6K
+characters for the reminder create tool alone).
+
+One conversation, 5 s apart, Android mode, plugin loaded, case set revision 7 (46 turns:
+41 cases and 5 follow-ups). "Merged" is upstream `6e2a094775` as pinned by the product.
+"Follow-ups" adds the history-window rebind, Calendar descriptions, the role-word
+contact query, the constant evaluator schema and the device-turn tool surface. Both
+with the phone's 4,096 output caps. No provider refusal in either run.
+
+| | Merged | Follow-ups |
+| --- | --- | --- |
+| Cases passing | 38 of 46 | 42 of 46 |
+| Device requests routed correctly | 24 of 31 | 28 of 31 |
+| Input per turn, median and p90 | 31K, 59K | 34K, 60K |
+| Provider's cached share | 37% (planner 30%) | 46% (planner 43%) |
+| Uncached tokens charged in any 60 s, median | 130K | 135K |
+| Lowest allowance once a call holds its share | 50K | 48K |
+
+The follow-ups fix the vague call and text that became a contact lookup, "Open a new
+tab" (a stalled request on the merged run), find-in-page, and a text with a Calendar
+event. "Open example.com" proposed `open_view` once in place of the browser open (one
+run; the tool list was the same as the merged run's). A text and an alarm, and a photo
+and a text, still propose only the first operation.
+
+The follow-ups' requests are not smaller: more of the run's proposals were made and
+then rejected, so the recorded outcomes of earlier requests grew (proposal end states
+4.8K to 8.5K characters per Stage 1 call, effect receipts 3.2K to 4.7K). That is the
+text the one-line outcome rendering under review folds, one line per outcome. On the
+merged run, 48 of 49 Stage 1 requests carried the resident's "needs attention" notice
+rows (the rig has no embedding provider); the follow-ups keep those out of prompt
+history.
+
+### Output caps of 4,096 cut off reasoning
+
+The personal assistant plans a reminder with a separate large text call (core
+`runExtractorPipeline` from `extract-task-plan.ts`). It is sent with reasoning on, and
+under the 4,096 cap the model used all of it reasoning and wrote nothing
+(`finishReason: length`, 4,096 completion tokens, 4,096 of them reasoning). On the
+merged run "Remind me to call mom at 5pm" replied that it "ran into a hiccup". On the
+follow-ups run "Remind me to take out the trash before bed, at 10pm" was retried by
+the planner three times in one turn, each attempt cut off, and replied "It's not
+saved" after 24 seconds and 153K input tokens. A call cut off this way writes no usage
+row, so earlier logs cannot show how often it happened. Before revision 7 the eval
+scored these turns as passes.
+
+The owner's decision is that there is no 4,096 cap: output may use the model's maximum
+and input its context window. What each policy costs, on the Pixel's own turns of
+November 19 and 20 replayed through the branch (Stage 1 and the first planner call of
+158 turns at the phone's real spacing; a host replay, nothing sent):
+
+| Output cap on Stage 1 and the planner | Lowest allowance, 1 phone | 2 phones | 3 phones |
+| --- | --- | --- | --- |
+| 4,096 | 92K | 64K | 45K |
+| None sent (held as 16,384) | 80K | 51K | 32K |
+| 16,384 | 80K | 51K | 32K |
+| 32,768 | 63K | 35K | 16K |
+| 40,960 | 55K | 27K | 8K |
+
+No call of these replays starts without enough allowance under any policy, even three
+phones at 40,960. A cap costs allowance only while its call runs. Sending no cap gives
+the model its maximum output for the same hold as an explicit 16,384, which is why an
+uncapped call once streamed 40,960 tokens.
+
+### The phone's decode mode
+
+On the Cloud route planner tools go out non-strict with their schemas as written; every
+whole-turn run here used the direct route, which sends them strict, rewritten and
+wrapped in one `arguments` object. The 39 routing requests in the four forms, live,
+three runs of the phone's form and the direct form:
+
+| | Phone's form | Direct form |
+| --- | --- | --- |
+| Expected operation proposed | 104 of 117 | 107 of 117 |
+| Device requests routed right | 100 of 105 | 101 of 105 |
+| Operation object failing its schema | 5 of 117 | 0 of 117 |
+| Prompt tokens per request | 9,671 | 9,783 |
+
+Routing is the same within noise. The phone's form produced an operation that fails its
+schema in about 4% of answers (a rejected call and a planner retry on the phone); the
+strict forms never did. Strict costs about 110 tokens more per request.
+
 ## 3. What a change must show
 
 - The audit on a phone running the change: input per turn, the allowance left and the
@@ -481,8 +567,9 @@ Read with these in mind:
 
 ## 4. Known and open
 
-- **No phone has run the branch.** Everything above is a host measurement. Real
-  numbers need the upstream changes merged, the pin advanced and a build on a phone.
+- **No phone measurement yet.** The first changes are merged (upstream
+  `6e2a094775`, product `983f47b18e`); everything above is a host measurement until a
+  build on a phone is audited.
 - **A text and an alarm in one request proposes only the text.** The planner's first
   reply usually holds both calls; the turn stops at the first approval pause with the
   second still queued.
