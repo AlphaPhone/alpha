@@ -12,9 +12,12 @@
  *
  *   bun scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
  *     --token-file <paired-machine-token> --output test-results/phone-actions.json \
- *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--only <case id>[,...]]
+ *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--ask-before] [--only <case id>[,...]]
  *     [--database <resident .elizadb>]
  *
+ * Each request is sent the way a phone sends it by default, as one the owner wants done
+ * without being asked first (agentActionMode direct-request-v1). The eval still performs
+ * nothing: it rejects every proposal. --ask-before sends the other mode.
  * With --only the run sends just the named cases and follow-ups, to repeat the few a
  * change is about.
  * With --one-conversation every case of a run is sent in the same conversation, in order,
@@ -39,7 +42,7 @@ import { selectDeviceCapabilities } from '../apps/app/src/runtime/phone-context.
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** An Alpha-image phone: every reviewed surface the launcher can run. */
 export const DEVICE_PROFILE = Object.freeze({ android: true, native: true, camera: true, foregroundReview: true, canonicalNotes: true, photoLibrary: true, files: true, clockRepeatDays: true, aospImage: true });
-const CASESET_REVISION = 4;
+const CASESET_REVISION = 5;
 
 /**
  * `expect` lists what the turn must propose: each entry is a set of acceptable operation
@@ -48,9 +51,11 @@ const CASESET_REVISION = 4;
  * canonical Notes/Calendar/Maps action). `allow` lists operations a turn may also propose
  * without failing, where more than one answer is right. `proposal` must match the JSON of
  * some proposed operation and `reply` the reply text, where the routing alone does not
- * show the turn used what came before it.
+ * show the turn used what came before it. `mustNotRefuse` fails a turn whose reply says the
+ * agent cannot do it: without a proposal to count, a refusal would otherwise pass.
  */
-export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[]; allow?: readonly string[]; proposal?: RegExp; reply?: RegExp }
+export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[]; allow?: readonly string[]; proposal?: RegExp; reply?: RegExp; mustNotRefuse?: boolean }
+const REFUSAL = /\b(can['’]t|cannot|unable to|not able to|don['’]t have (a way|the ability|access))\b/i;
 const CALL = ['phone_call', 'phone_dial'], TEXT = ['sms_compose', 'sms_send'], CLOCK = ['clock_*'];
 // A phone has no timer operation: Clock takes an alarm at a time of day, never a duration. A
 // relative reminder is the nearest it can offer, and an alarm in its place is wrong.
@@ -87,15 +92,15 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
   { id: 'text-and-alarm', family: 'multi', view: 'home', text: "Text Sam I'll be late, and set an alarm for 7am.", expect: [TEXT, CLOCK] },
   { id: 'photo-and-text', family: 'multi', view: 'home', text: "Take a picture and text mom that I'm here.", expect: [['camera_capture_photo'], TEXT] },
   { id: 'call-or-text-choice', family: 'multi', view: 'home', text: 'Call Sam, and if you cannot, do nothing else.', expect: [CALL] },
-  { id: 'open-messages', family: 'navigation', view: 'home', text: 'Open Messages.', expect: [], allow: VIEW },
-  { id: 'show-contacts', family: 'navigation', view: 'home', text: 'Show my contacts.', expect: [], allow: VIEW },
-  { id: 'open-camera', family: 'navigation', view: 'home', text: 'Open the camera.', expect: [], allow: VIEW },
-  { id: 'directions', family: 'other-actions', view: 'home', text: 'Directions to the Ferry Building in San Francisco.', expect: [] },
-  { id: 'note', family: 'other-actions', view: 'home', text: 'Create a note called Groceries with milk and eggs.', expect: [] },
+  { id: 'open-messages', family: 'navigation', view: 'home', mustNotRefuse: true, text: 'Open Messages.', expect: [], allow: VIEW },
+  { id: 'show-contacts', family: 'navigation', view: 'home', mustNotRefuse: true, text: 'Show my contacts.', expect: [], allow: VIEW },
+  { id: 'open-camera', family: 'navigation', view: 'home', mustNotRefuse: true, text: 'Open the camera.', expect: [], allow: VIEW },
+  { id: 'directions', family: 'other-actions', view: 'home', mustNotRefuse: true, text: 'Directions to the Ferry Building in San Francisco.', expect: [] },
+  { id: 'note', family: 'other-actions', view: 'home', mustNotRefuse: true, text: 'Create a note called Groceries with milk and eggs.', expect: [] },
   { id: 'calendar-read', family: 'other-actions', view: 'calendar', text: "What's on my calendar tomorrow?", expect: [] },
   // A reminder is not an alarm: guidance that sends "wake me" to Clock must not take this too.
   { id: 'reminder-plain', family: 'other-actions', view: 'home', text: 'Remind me to call mom at 5pm.', expect: [], allow: REMINDER },
-  { id: 'question', family: 'chat', view: 'home', text: 'What is the capital of France?', expect: [] },
+  { id: 'question', family: 'chat', view: 'home', text: 'What is the capital of France?', expect: [], reply: /paris/i },
   { id: 'thanks', family: 'chat', view: 'home', text: 'Thanks!', expect: [] },
   { id: 'phone-question', family: 'chat', view: 'home', text: 'How do phone alarms differ from timers?', expect: [] },
 ]);
@@ -126,6 +131,7 @@ export function judgeTurn(item: PhoneCase, operations: readonly { type?: string 
   const routed = judge(item.expect, operations.map(operation => operation.type ?? 'unknown'), item.allow);
   if (routed !== 'pass') return routed;
   if (item.proposal && !operations.some(operation => item.proposal!.test(JSON.stringify(operation)))) return 'content';
+  if (item.mustNotRefuse && REFUSAL.test(reply)) return 'content';
   return item.reply && !item.reply.test(reply) ? 'content' : 'pass';
 }
 
@@ -165,8 +171,8 @@ function loopback(origin: string) {
 interface Proposal { id: string; digest: string; state: string; payload?: { operation?: { type?: string } & Record<string, unknown> } }
 
 /** Sends every case `runs` times; every proposal a turn caused is rejected before the next turn. */
-export async function evaluate({ origin, token, cases = CASES, followUps = FOLLOW_UPS, runs = 1, pauseMs = 0, oneConversation = false, now = () => new Date() }: {
-  origin: string; token: string; cases?: readonly PhoneCase[]; followUps?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; now?: () => Date;
+export async function evaluate({ origin, token, cases = CASES, followUps = FOLLOW_UPS, runs = 1, pauseMs = 0, oneConversation = false, askBefore = false, now = () => new Date() }: {
+  origin: string; token: string; cases?: readonly PhoneCase[]; followUps?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; askBefore?: boolean; now?: () => Date;
 }) {
   const base = loopback(origin), installationId = randomUUID();
   const device: Record<string, string> = { 'X-Eliza-Device-Id': installationId, 'X-Eliza-Device-Key': randomBytes(32).toString('hex'), 'X-Eliza-Device-Capabilities': selectDeviceCapabilities([], DEVICE_PROFILE).join(',') };
@@ -207,13 +213,13 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
           strayProposals += (await rejectUnseen()).length;
           const conversation = shared ?? await open(`Phone-action eval ${item.id}`);
           const context = { view: item.view, revision: 1, sensitive: false, timeZone: 'America/New_York' };
-          const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, { text: item.text, channelType: 'DM', metadata: { uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
+          const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, { text: item.text, channelType: 'DM', metadata: { ...(askBefore ? {} : { agentActionMode: 'direct-request-v1' }), uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
           const operations = (await rejectUnseen()).map(proposal => proposal.payload?.operation ?? {});
           row.proposed = operations.map(operation => operation.type ?? 'unknown');
           row.outcome = judgeTurn(item, operations, String(reply.text ?? ''));
           row.replyChars = String(reply.text ?? '').length;
-          // The requests are synthetic, so the start of the reply is kept for reading a content verdict.
-          if (item.reply) row.reply = String(reply.text ?? '').slice(0, 300);
+          // The requests are synthetic, so the start of the reply is kept for reading a verdict later.
+          row.reply = String(reply.text ?? '').slice(0, 300);
         } catch (error) {
           row.error = (error instanceof Error ? error.message : String(error)).slice(0, 200);
         }
@@ -224,7 +230,7 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
     }
     strayProposals += (await rejectUnseen()).length;
     await call('/api/client-devices/revoke', {}); revoked = true;
-    return { version: 1, kind: 'phone-actions', conversations: oneConversation ? 'one-per-run' : 'one-per-case', recordedAt: startedAt.toISOString(), expectedModel: AGENT_MODEL, deviceProfile: DEVICE_PROFILE, negotiatedCapabilities: negotiated, source: sourceBinding(), summary: { ...summarize(rows), strayProposals }, rows };
+    return { version: 1, kind: 'phone-actions', conversations: oneConversation ? 'one-per-run' : 'one-per-case', actionMode: askBefore ? 'ask-before' : 'direct-request-v1', recordedAt: startedAt.toISOString(), expectedModel: AGENT_MODEL, deviceProfile: DEVICE_PROFILE, negotiatedCapabilities: negotiated, source: sourceBinding(), summary: { ...summarize(rows), strayProposals }, rows };
   } finally {
     if (!revoked) await call('/api/client-devices/revoke', {}).catch(() => {});
   }
@@ -235,7 +241,7 @@ if (import.meta.main) {
   const origin = flag('--origin'), tokenFile = flag('--token-file'), output = flag('--output');
   const runs = Number(flag('--runs') ?? 1), pauseMs = Number(flag('--pause-ms') ?? 0);
   if (!origin || !tokenFile || !output || !Number.isInteger(runs) || runs < 1 || !(pauseMs >= 0)) {
-    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--only <case id>[,...]] [--database <resident .elizadb>]');
+    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--ask-before] [--only <case id>[,...]] [--database <resident .elizadb>]');
     process.exit(2);
   }
   const only = flag('--only')?.split(',').filter(Boolean);
@@ -244,7 +250,7 @@ if (import.meta.main) {
     console.error(`Unknown case: ${unknown.join(', ') || '(none named)'}`);
     process.exit(2);
   }
-  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: FOLLOW_UPS.filter(item => only.includes(item.id)) } : {}) });
+  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), askBefore: args.includes('--ask-before'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: FOLLOW_UPS.filter(item => only.includes(item.id)) } : {}) });
   const database = flag('--database');
   // The run's own model calls, read from the resident's records after the last turn.
   const usage = database ? audit((await loadCalls(database)).filter(call => call.at >= Date.parse(result.recordedAt))) : null;

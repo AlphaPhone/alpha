@@ -35,6 +35,12 @@ test('a turn that routes right can still fail on what its proposal or its reply 
   for (const reply of ['No, it was rejected on your phone.', "It hasn't been sent.", 'That text was declined.', 'It is still waiting for your approval.', 'It did not go out.'])
     assert.equal(judgeTurn(outcome, [], reply), 'pass', reply);
   for (const reply of ['Yes, it went out.', 'Sent!']) assert.equal(judgeTurn(outcome, [], reply), 'content', reply);
+  // A turn that expects no proposal cannot pass by saying it cannot do the thing.
+  const open = CASES.find(item => item.id === 'open-messages');
+  assert.equal(judgeTurn(open, [], 'Opening Messages.'), 'pass');
+  assert.equal(judgeTurn(open, [{type: 'open_view'}], 'Review this on your phone.'), 'pass');
+  assert.equal(judgeTurn(open, [], "I can't open apps from here."), 'content');
+  assert.equal(judgeTurn(CASES.find(item => item.id === 'question'), [], 'Paris.'), 'pass');
 });
 
 test('cases with more than one right answer say so, and none expects an operation a phone lacks', () => {
@@ -63,7 +69,7 @@ test('the case set covers each device family, off-surface requests and requests 
 test('every proposal a run causes is rejected, late ones are never credited to the next case, and the phone is revoked', async () => {
   const token = 'synthetic-eval-token', proposals = [];
   let revokes = 0, late = false;
-  const opened = [], sentTo = [];
+  const opened = [], sentTo = [], modes = [];
   const propose = type => proposals.push({id: `p${proposals.length}`, digest: 'd', state: 'pending', payload: {operation: {type}}});
   const server = http.createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -87,12 +93,13 @@ test('every proposal a run causes is rejected, late ones are never credited to t
     if (url.endsWith('/messages')) {
       sentTo.push(url.split('/')[3]);
       assert.match(req.headers['x-eliza-device-capabilities'], /phone\.call\.v1/);
+      modes.push(body.metadata.agentActionMode);
       assert.equal(body.metadata.clientDevice.context.view, body.text.startsWith('Ring') ? 'maps' : 'home');
       if (/^Call/.test(body.text)) propose('phone_call');
       // A wrong tool for the request, and a proposal that lands after its turn was read.
       if (/^Ring/.test(body.text)) propose('open_view');
       if (/^Thanks/.test(body.text)) late = true;
-      return send({text: 'Review this on your phone.'});
+      return send({text: /capital/.test(body.text) ? 'Paris.' : 'Review this on your phone.'});
     }
     res.writeHead(404); res.end('{}');
   });
@@ -111,6 +118,12 @@ test('every proposal a run causes is rejected, late ones are never credited to t
     assert.match(result.source.caseSet, /^[a-f0-9]{64}$/);
     assert.ok(!('model' in result), 'the runtime model is not claimed as observed');
     assert.equal(result.conversations, 'one-per-case');
+    // A phone's default: the owner wants a request done without being asked first.
+    assert.equal(result.actionMode, 'direct-request-v1');
+    assert.ok(modes.length === 8 && modes.every(mode => mode === 'direct-request-v1'));
+    modes.length = 0;
+    assert.equal((await evaluate({origin, token, cases: cases.slice(0, 1), askBefore: true})).actionMode, 'ask-before');
+    assert.deepEqual(modes, [undefined]);
     assert.deepEqual(sentTo, opened, 'each case has its own conversation');
     // As an owner uses a phone for a while: a run's cases follow each other in one conversation.
     opened.length = 0; sentTo.length = 0;
@@ -118,7 +131,8 @@ test('every proposal a run causes is rejected, late ones are never credited to t
     assert.equal(session.conversations, 'one-per-run');
     assert.deepEqual(sentTo, ['c0', 'c0', 'c0', 'c0', 'c1', 'c1', 'c1', 'c1']);
     assert.deepEqual(session.rows.map(row => row.outcome), result.rows.map(row => row.outcome));
-    assert.equal(revokes, 2);
+    // One synthetic phone per run of the eval, each revoked: the first run, the ask-before one, this one.
+    assert.equal(revokes, 3);
     // Follow-up turns come after the cases, in the same conversation, and are judged on what
     // the proposal and the reply carry as well as on the routing. Separate conversations skip them.
     const call = cases.filter(item => item.id === 'call-number');
