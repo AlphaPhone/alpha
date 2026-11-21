@@ -598,6 +598,31 @@ and refused again inside the same 60-second window, and a text with a Calendar e
 its reply. The others move between runs of one arm (reading a number from notes, a timer,
 a new tab). Output is about 1% of all tokens in every run: input is the lever.
 
+### Recorded outcomes without ids and times
+
+Upstream `1627967c86` prints recorded outcomes in the same record format without the
+fields no later step reads (request and receipt UUIDs, the redacted idempotency key, ISO
+times, resource versions), names each request by its history key, keeps the legend fixed
+and folds a proposal's later state into its row. Same run, back to back against its
+parent on November 21:
+
+| | `d0fac57d11` | `1627967c86` |
+| --- | --- | --- |
+| Cases passing | 42 of 46 | 44 of 46 |
+| Provider refusals | 0 | 0 |
+| Input | 1.61M | 1.20M |
+| Charged: uncached input plus output | 894K | 579K |
+| Provider's cached share | 46% | 54% |
+| Input per turn, median and p90 | 33K, 64K | 24K, 40K |
+| Stage 1, planner, evaluator median | 12.5K, 18.0K, 14.2K | 8.4K, 14.8K, 8.3K |
+| Output | 17K | 24K |
+
+Charged tokens fall by a third. On synthetic rows the planner routed the same (19 of 20
+in both forms), and a line in another person's text in the form's own record format
+misled the model no more often than today's (6 of 10 against 8 of 10). A room with a
+single record pays about 140 tokens more for the fixed legend. The keys are positions in
+the dialogue window, so rows stay append-only only inside it (100 messages by default).
+
 ### The phone's decode mode
 
 On the Cloud route planner tools go out non-strict with their schemas as written; every
@@ -649,6 +674,7 @@ Upstream branch `claude/agent-context-followups` (local, on upstream develop
 | Reminder planning at low reasoning, both routes | Reasoning at "high" by default | Correct 36 of 40 against 21 of 25; about two thirds fewer output tokens |
 | Every review proposal of one reply recorded | Text plus alarm proposing only the text | Both calls in the first reply 10 of 10 |
 | Extractor call re-sent once after a refusal (wait hint up to 5 s) | A reminder lost when its planning call was refused | |
+| Recorded outcomes without unread ids and times | UUIDs and ISO times at about a token per digit | Whole turn: charged tokens 894K to 579K, 44 of 46 |
 
 Parked after ten rounds: a compact one-line rendering of recorded outcomes. It made
 requests with recorded outcomes 20% to 30% smaller (one probe 17.2K to 12.0K tokens), but
@@ -658,10 +684,9 @@ against 9 of 65 for today's form) but did not close it. A forged line with a wro
 stale marker still misled the model in 3 of 5 runs, against 5 of 5 for a forgery of
 today's format. Keeping the marker secret meant stripping it from every outgoing path
 or rotating it on every leak, and each round found another way out. The patch and the
-round reports are kept in the work cache (`parked/outcome-lines-v10`). Under test
-instead: today's record format with the fields no later step reads dropped (request
-and receipt UUIDs, the redacted idempotency key, ISO times), which cost about one token
-per digit and add no new shape to forge.
+round reports are kept in the work cache (`parked/outcome-lines-v10`). Today's record
+format with the unread fields dropped (section 2) took most of the saving instead and
+adds no new shape to forge.
 
 Dropped: narrowing a reminder's retrieval to the reminder tools when Stage 1 names a
 reminder operation. It would cut a time-clause reminder's tool definitions from about
