@@ -21,7 +21,6 @@ type Access = { owner: int, shielded: bool, search: R::Read, reading: R::Read, a
 
 pure val initial: Access = { owner: 0, shielded: false, search: R::unread, reading: R::unread, asked: 0 }
 
-pure def idle(r: R::Read): R::Read = { ...r, status: R::Idle }
 ```
 
 ### What the agent's access asks of the world
@@ -42,6 +41,7 @@ type Moved = { state: Access, out: List[Effect] }
 ```quint
 pure val noteValues = Set(1, 2)
 pure val selectedValues = Set(0, 2)
+pure val frontValues = Set(true, false)
 pure val revisionValues = Set(0, 3)
 pure val foundValues = Set(0, 2)
 pure val ownerValues = Set(0, 1, 2)
@@ -75,10 +75,12 @@ pure def queried(a: Access, ticket: int, ok: bool, found: int, by: Actor): Moved
   { state: { ...a, search: R::answer(a.search, ok) }, out: if (told) List(Answers({ ticket: ticket, found: found })) else List() }
 ```
 
-### The agent reads one note, or the note the owner has open, and is told the revision it read
+### The agent reads one note, or the note the owner has open in Notes in front, and is told the revision it read
 
 The note the owner has open is the editor's ([Note editor](./editor.md)),
-taken as a fact; asking about "this note" reads that note and no other.
+taken as a fact with whether Notes is in front: asking about "this note"
+reads the note open on screen now and no other, and nothing when Notes is
+behind or no note is open.
 
 ```quint
 pure def readOne(note: int, a: Access): Moved =
@@ -90,10 +92,10 @@ pure def canReadNote(a: Access, note: int, by: Actor): bool =
 
 pure def readNote(a: Access, note: int, by: Actor): Moved = readOne(note, a)
 
-pure def canReadOpen(a: Access, selected: int, by: Actor): bool =
-  by == Agent and isOwner(a.owner) and not(a.shielded) and a.reading.status != R::Loading and selected > 0
+pure def canReadOpen(a: Access, selected: int, front: bool, by: Actor): bool =
+  by == Agent and isOwner(a.owner) and not(a.shielded) and a.reading.status != R::Loading and selected > 0 and front
 
-pure def readOpen(a: Access, selected: int, by: Actor): Moved = readOne(selected, a)
+pure def readOpen(a: Access, selected: int, front: bool, by: Actor): Moved = readOne(selected, a)
 
 pure def canNoteRead(a: Access, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(a.reading, ticket)
 
@@ -147,15 +149,17 @@ pure def sometimesWithheld(a: Access): bool = a.shielded and a.reading.status ==
 > As the owner, I want nothing of my notes told to the agent of whoever
 > uses the phone after me, and no late answer taken after a restart.
 
-### When another owner takes the phone, or the phone restarts, nothing asked before is answered
+### When another owner takes the phone, or the phone restarts, nothing asked before is answered, and only the phone restarts
 
 ```quint
 pure def canOwnerChanged(a: Access, owner: int, by: Actor): bool = by == Phone and owner != a.owner and owner >= 0
 
 pure def ownerChanged(a: Access, owner: int, by: Actor): Access =
-  { ...a, owner: owner, search: idle(a.search), reading: idle(a.reading), asked: 0 }
+  { ...a, owner: owner, search: dropped(a.search), reading: dropped(a.reading), asked: 0 }
 
-pure def restart(a: Access): Access = { ...a, search: idle(a.search), reading: idle(a.reading) }
+pure def canRestart(a: Access, by: Actor): bool = by == Phone
+
+pure def restart(a: Access, by: Actor): Access = { ...a, search: dropped(a.search), reading: dropped(a.reading) }
 
 pure def stepNoLateAnswer(before: Access, via: str, after: Access): bool =
   (via == "ownerChanged" or via == "restart")

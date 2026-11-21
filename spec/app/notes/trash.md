@@ -1,19 +1,22 @@
 # Recently deleted
 
-Where a deleted note waits before it is gone for good. Deleting a note moves
-it here; for three days the owner can open it and recover it, and after that
-it is erased. Everything that removes a note is one action at a time,
-written down before it is done, bound to the revision the owner saw, and
-honest when its outcome cannot be known. Erasing a voice note erases its
+Where a deleted note waits before it is gone for good. Deleting a note from
+[the editor](./editor.md) moves it here; for three days the owner can open
+it and recover it, and after that the phone's maintenance erases it.
+Everything that removes a note is one action at a time, written down before
+it is done, bound to the revision the owner saw, and honest when its
+outcome cannot be known. Only the owner and the phone act here: the agent
+never deletes, recovers or erases a note. Erasing a voice note erases its
 recording after it; a recording whose erasure was cut off is
 [finished off by the phone](./voiceDeletion.md).
 
 ## Story: Delete a note and get it back
 
 > As the owner, I want a deleted note kept for a while, so that I can change
-> my mind and recover it.
+> my mind and recover it, and to be told in the note I deleted when it
+> could not be moved here.
 
-### Recently deleted holds the owner, the deleted notes, the question it is asking, and the one action it is carrying out
+### Recently deleted holds the owner, the deleted notes, the time of the phone's last maintenance, the question it is asking, the note the editor holds open while it is deleted, and the one action it is carrying out
 
 Each deleted note is listed with the time it was deleted, its revision, and
 its recording if it is a voice note (none is 0). An action names the note,
@@ -31,21 +34,20 @@ type Entry = { id: int, at: int, revision: int, recording: int }
 type Act = Discard | Recover | Erase | EmptyAll | Destroy | Sweep
 type Question = NoQuestion | AskErase | AskEmpty | AskFull
 type Trash = {
-  owner: int, showing: bool, read: R::Read, entries: List[Entry], opened: int,
-  question: Question, target: int, refused: int, loose: int, review: V::Review,
+  owner: int, showing: bool, read: R::Read, entries: List[Entry], opened: int, clock: int,
+  question: Question, target: int, refused: int, loose: int, review: V::Review, holding: int, asked: int,
   act: Act, subject: int, revision: int, asOf: int, recordings: List[int], actor: Actor,
   attempt: A::Attempt, pending: bool, audio: A::Attempt, failed: bool, unsure: bool,
 }
 
 pure val initial: Trash = {
-  owner: 0, showing: false, read: R::unread, entries: List(), opened: 0,
-  question: NoQuestion, target: 0, refused: 0, loose: 0, review: V::unreviewed,
+  owner: 0, showing: false, read: R::unread, entries: List(), opened: 0, clock: 0,
+  question: NoQuestion, target: 0, refused: 0, loose: 0, review: V::unreviewed, holding: 0, asked: 0,
   act: Sweep, subject: 0, revision: 0, asOf: 0, recordings: List(), actor: Phone,
   attempt: A::plan(0), pending: false, audio: A::plan(0), failed: false, unsure: false,
 }
 
 pure def has(entries: List[Entry], id: int): bool = entries.some(e => e.id == id)
-pure def inFlight(a: A::Attempt): bool = a.outcome == A::Recorded or a.outcome == A::Sent
 pure def busy(s: Trash): bool = inFlight(s.attempt) or inFlight(s.audio)
 pure val noEntry: Entry = { id: 0, at: 0, revision: 0, recording: 0 }
 pure def entryOf(s: Trash, id: int): Entry = s.entries.select(e => e.id == id).nthOr(0, noEntry)
@@ -55,9 +57,10 @@ pure def one(recording: int): List[int] = if (recording > 0) List(recording) els
 
 ### A deleted note stays for three days
 
-The requirements say three days; the notes kept on the phone before were
-held for thirty. This is the one place the time is written, in milliseconds.
-A clock set back delays the erasure and never brings it forward.
+The requirements say three days for the agent's notes; the notes kept on
+the phone before were held for thirty. This is the one place the time is
+written, in milliseconds. A clock set back delays the erasure and never
+brings it forward.
 
 ```quint
 pure val retention = 259200000
@@ -69,7 +72,8 @@ pure def due(e: Entry, now: int): bool = now >= e.at + retention
 
 To read the list, to write an action down with every recording it will
 erase, to carry it out, to erase those recordings once their notes are
-gone, and to tell the list that the store changed.
+gone, to tell the list that the store changed, and to answer the editor
+that asked for a deletion.
 
 ```quint
 type Effect =
@@ -78,6 +82,7 @@ type Effect =
   | Does({ ticket: int, owner: int, act: Act, subject: int, revision: int, asOf: int })
   | ErasesAudio({ ticket: int, owner: int, recordings: List[int] })
   | Changed
+  | Answers({ ticket: int, note: int, binned: bool, told: Told })
 type Moved = { state: Trash, out: List[Effect] }
 ```
 
@@ -87,6 +92,7 @@ type Moved = { state: Trash, out: List[Effect] }
 pure val idValues = Set(1, 2)
 pure val revisionValues = Set(1, 2)
 pure val recordingValues = Set(0, 7)
+pure val askedValues = Set(1, 2)
 pure val nowValues = Set(0, 1, retention, retention + 1)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val ownerValues = Set(0, 1, 2)
@@ -98,33 +104,32 @@ pure val weight_kept = 6
 pure val weight_finished = 6
 ```
 
-### Opening Recently deleted reads it, and drops any question
+### Opening Recently deleted reads it, when nothing else of Notes is open
 
 ```quint
-pure def canShow(s: Trash): bool = not(s.showing) and isOwner(s.owner)
+pure def canShow(s: Trash, covered: bool, by: Actor): bool = mayOpen(covered, by) and not(s.showing) and isOwner(s.owner)
 
-pure def show(s: Trash): Moved =
+pure def show(s: Trash, covered: bool, by: Actor): Moved =
   val read = R::ask(s.read)
-  { state: { ...s, showing: true, read: read, question: NoQuestion, review: V::dismiss(s.review) },
-    out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
+  { state: { ...s, showing: true, read: read }, out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
 ```
 
-### The phone reads Recently deleted again to tidy it
+### The phone's maintenance, at its start, on resuming and every fifteen minutes, reads Recently deleted again with the time
 
 ```quint
-pure def canReread(s: Trash, by: Actor): bool = by == Phone and isOwner(s.owner) and s.read.status != R::Loading
+pure def canMaintain(s: Trash, now: int, by: Actor): bool = by == Phone and isOwner(s.owner) and s.read.status != R::Loading
 
-pure def reread(s: Trash, by: Actor): Moved =
+pure def maintain(s: Trash, now: int, by: Actor): Moved =
   val read = R::ask(s.read)
-  { state: { ...s, read: read }, out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
+  { state: { ...s, read: read, clock: now }, out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
 ```
 
-### Only the newest reading is taken, and a reading that fails shows no notes and closes the one open
+### Only the phone answers a reading, only the newest reading is taken, and a reading that fails shows no notes and closes the one open
 
 ```quint
-pure def canListed(s: Trash, ticket: int): bool = R::canAnswer(s.read, ticket)
+pure def canListed(s: Trash, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.read, ticket)
 
-pure def listed(s: Trash, ticket: int, ok: bool, entries: List[Entry]): Trash =
+pure def listed(s: Trash, ticket: int, ok: bool, entries: List[Entry], by: Actor): Trash =
   val held = if (ok) entries else List()
   { ...s, read: R::answer(s.read, ok), entries: held, opened: if (has(held, s.opened)) s.opened else 0,
     review: V::revise(s.review), unsure: s.unsure and not(ok) }
@@ -141,14 +146,16 @@ pure def canLeave(s: Trash): bool = s.showing and s.question == NoQuestion
 pure def leave(s: Trash): Trash = { ...s, showing: false, opened: 0 }
 ```
 
-### Only the owner deletes a note, and only one that no unsaved draft or save of the editor holds; deleting moves it to Recently deleted
+### Only the owner deletes a note, from the editor, and only when nothing else is being done; deleting moves it to Recently deleted
 
 The deletion names the revision the owner saw, and the store refuses it if
 the note changed since. It is numbered and written down first. Nothing else
-may be running, no question open, and the last outcome known. The editor
-says whether it holds that note unsaved or saving
-([Note editor](./editor.md), "Only the owner deletes the open note, and
-only once everything typed is saved and no save is on its way").
+may be running, no question open, the last outcome known and storage
+working. The editor asks only for the saved note it has open, and keeps it
+open until this answers ([Note editor](./editor.md), "Only the owner deletes
+the open note, only once everything typed is saved and no save is on its
+way, and only when Recently deleted can take it"); its own number for the
+deletion comes with it.
 
 ```quint
 pure def begun(act: Act, subject: int, revision: int, asOf: int, recordings: List[int], by: Actor, s: Trash): Moved =
@@ -157,24 +164,28 @@ pure def begun(act: Act, subject: int, revision: int, asOf: int, recordings: Lis
       attempt: attempt, pending: true, failed: false },
     out: List(Keeps({ ticket: attempt.id, owner: s.owner, act: act, subject: subject, recordings: recordings })) }
 
-pure def canDiscard(s: Trash, id: int, revision: int, editing: bool, by: Actor): bool =
-  by == Owner and isOwner(s.owner) and id > 0 and revision > 0 and not(editing) and not(busy(s)) and not(s.unsure)
-    and s.question == NoQuestion and not(has(s.entries, id))
+pure def ready(s: Trash): bool = isOwner(s.owner) and not(busy(s)) and not(s.unsure) and s.question == NoQuestion
 
-pure def discard(s: Trash, id: int, revision: int, recording: int, editing: bool, now: int, by: Actor): Moved =
-  begun(Discard, id, revision, now, List(), by, { ...s, loose: recording })
+pure def canDiscard(s: Trash, id: int, revision: int, recording: int, asked: int, storage: bool, by: Actor): bool =
+  by == Owner and ready(s) and storage and id > 0 and revision > 0 and recording >= 0 and asked > 0 and not(has(s.entries, id))
+
+pure def discard(s: Trash, id: int, revision: int, recording: int, asked: int, now: int, storage: bool, by: Actor): Moved =
+  begun(Discard, id, revision, now, List(), by, { ...s, loose: recording, holding: id, asked: asked })
 ```
 
-### An action is carried out only once it is written down, and one that could not be written is dropped
+### An action is carried out only once it is written down, and one that could not be written is dropped, and a deletion so dropped is answered as refused
 
 ```quint
+pure def answer(binned: bool, told: Told, s: Trash): List[Effect] =
+  if (s.act == Discard) List(Answers({ ticket: s.asked, note: s.subject, binned: binned, told: told })) else List()
+
 pure def canKept(s: Trash, ticket: int, by: Actor): bool =
   by == Phone and A::canDispatch(s.attempt) and s.pending and ticket == s.attempt.id
 
 pure def kept(s: Trash, ticket: int, ok: bool, by: Actor): Moved =
   if (ok) { state: { ...s, attempt: A::dispatch(s.attempt), pending: false },
     out: List(Does({ ticket: ticket, owner: s.owner, act: s.act, subject: s.subject, revision: s.revision, asOf: s.asOf })) }
-  else { state: { ...s, attempt: A::plan(s.attempt.id), pending: false, failed: true }, out: List() }
+  else { state: { ...s, attempt: A::plan(s.attempt.id), pending: false, failed: true, holding: 0 }, out: answer(false, WasRefused, s) }
 ```
 
 ### An action written down when the phone went down is written down again, under its own number
@@ -190,15 +201,15 @@ pure def resumeAction(s: Trash, by: Actor): Moved =
     out: List(Keeps({ ticket: s.attempt.id, owner: s.owner, act: s.act, subject: s.subject, recordings: s.recordings })) }
 ```
 
-### An action ends as its own answer says: done, refused, no room, or unknown
+### An action ends as its own answer says: done, refused, no room, or unknown, and a deletion is answered to the editor that asked for it
 
 Done changes the list, which is then read again and the list of notes told.
 Erasing a voice note then erases its recording. Refused changes nothing,
 also when the note changed since the revision the action named. No room,
 for a deletion, asks the owner what to do with that note, at the revision
-the store refused. Unknown changes nothing either: the list is read again,
-and nothing new starts until it has been. Once the owner's action leaves
-Recently deleted empty, it closes.
+the store refused, while the editor still has it open. Unknown changes
+nothing either: the list is read again, and nothing new starts until it has
+been. Once the owner's action leaves Recently deleted empty, it closes.
 
 ```quint
 type Verdict = Done | Denied | NoRoom | Lost
@@ -214,7 +225,7 @@ pure def canFinished(s: Trash, ticket: int, verdict: Verdict, revision: int, by:
   by == Phone and A::canConclude(s.attempt, ticket) and (verdict == NoRoom implies revision > 0)
 
 pure def finished(s: Trash, ticket: int, verdict: Verdict, revision: int, by: Actor): Moved =
-  val t = { ...s, attempt: A::conclude(s.attempt, verdict == Done, verdict != Lost) }
+  val t = { ...s, attempt: A::conclude(s.attempt, verdict == Done, verdict != Lost), holding: 0 }
   val shown = s.read.status == R::Loaded or s.read.status == R::Loading
   val left = if (shown) remaining(s) else List()
   val read = R::ask(s.read)
@@ -226,11 +237,26 @@ pure def finished(s: Trash, ticket: int, verdict: Verdict, revision: int, by: Ac
         audio: if (erasing) audio else s.audio,
         showing: s.showing and not(left == List() and s.act != Sweep and not(erasing) and s.question == NoQuestion) },
       out: (if (erasing) List(ErasesAudio({ ticket: audio.id, owner: s.owner, recordings: s.recordings })) else List())
-        .concat(List(relist, Changed)) }
-  else if (verdict == Lost) { state: { ...t, unsure: true, read: read, entries: if (shown) s.entries else List() }, out: List(relist) }
-  else if (verdict == NoRoom and s.act == Discard)
-    { state: { ...t, question: AskFull, target: s.subject, refused: revision, review: V::present(s.review) }, out: List() }
-  else { state: { ...t, failed: true }, out: List() }
+        .concat(List(relist, Changed)).concat(answer(true, NotTold, s)) }
+  else if (verdict == Lost)
+    { state: { ...t, unsure: true, read: read, entries: if (shown) s.entries else List() },
+      out: List(relist).concat(answer(false, WasUnknown, s)) }
+  else if (verdict == NoRoom and s.act == Discard and s.holding == s.subject)
+    { state: { ...t, holding: s.holding, question: AskFull, target: s.subject, refused: revision, review: V::present(s.review) },
+      out: answer(false, WasFull, s) }
+  else { state: { ...t, failed: true }, out: answer(false, if (verdict == NoRoom) WasFull else WasRefused, s) }
+```
+
+### A deletion is answered once, to the editor that asked for it, about the note it named
+
+```quint
+pure def stepADeletionIsAnsweredWhereItWasAsked(before: Trash, via: str, after: Trash, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Answers(a) => (via == "finished" or via == "kept") and before.act == Discard and a.ticket == before.asked
+        and a.note == before.subject and (a.binned iff after.attempt.outcome == A::Confirmed)
+        and (a.told == WasUnknown iff after.attempt.outcome == A::Unknown) and (a.binned iff a.told == NotTold)
+    | _ => true
+  })
 ```
 
 ### The recording of an erased voice note is erased after it, and its outcome is kept honestly
@@ -258,7 +284,7 @@ pure def canCloseEntry(s: Trash): bool = s.opened != 0
 pure def closeEntry(s: Trash): Trash = { ...s, opened: 0 }
 ```
 
-### Only the owner recovers a note, and only before its three days are up
+### Only the owner recovers a note, only before its three days are up, and only while storage works
 
 The note comes back at the revision it was deleted with; one whose folder
 is gone meanwhile comes back in no folder (Notes, "A note whose folder is
@@ -266,11 +292,10 @@ gone, like one recovered after its folder was removed, is listed in no
 folder").
 
 ```quint
-pure def canRecover(s: Trash, id: int, now: int, by: Actor): bool =
-  by == Owner and isOwner(s.owner) and not(busy(s)) and not(s.unsure) and s.question == NoQuestion and s.showing
-    and s.entries.some(e => e.id == id and not(due(e, now)))
+pure def canRecover(s: Trash, id: int, now: int, storage: bool, by: Actor): bool =
+  by == Owner and ready(s) and storage and s.showing and s.entries.some(e => e.id == id and not(due(e, now)))
 
-pure def recover(s: Trash, id: int, now: int, by: Actor): Moved =
+pure def recover(s: Trash, id: int, now: int, storage: bool, by: Actor): Moved =
   begun(Recover, id, entryOf(s, id).revision, now, List(), by, s)
 ```
 
@@ -280,7 +305,7 @@ pure def recover(s: Trash, id: int, now: int, by: Actor): Moved =
 pure def alwaysTheOpenNoteIsListed(s: Trash): bool = s.opened != 0 implies (s.showing and has(s.entries, s.opened))
 ```
 
-### A note leaves Recently deleted only recovered, erased, emptied out or past its three days
+### A note leaves Recently deleted only when the store confirms it was recovered, erased, emptied out or past its three days
 
 Any other step leaves the list as it was, except a new reading, a restart,
 and another owner taking the phone.
@@ -289,11 +314,18 @@ and another owner taking the phone.
 pure def stepANoteLeavesOnlyForAReason(before: Trash, via: str, after: Trash): bool =
   if (via == "finished") before.entries.every(e => or {
     after.entries.includes(e),
-    before.act == Sweep and due(e, before.asOf),
-    (before.act == Recover or before.act == Erase) and e.id == before.subject,
-    before.act == EmptyAll,
+    after.attempt.outcome == A::Confirmed and before.act == Sweep and due(e, before.asOf),
+    after.attempt.outcome == A::Confirmed and (before.act == Recover or before.act == Erase) and e.id == before.subject,
+    after.attempt.outcome == A::Confirmed and before.act == EmptyAll,
   })
   else (via == "listed" or via == "restart" or via == "ownerChanged" or after.entries == before.entries)
+```
+
+### Only the owner and the phone act here: the agent never deletes, recovers or erases a note
+
+```quint
+pure def stepTheAgentNeverRemovesANote(before: Trash, via: str, after: Trash): bool =
+  (after.attempt.id != before.attempt.id) implies (after.actor == Owner or (after.actor == Phone and after.act == Sweep))
 ```
 
 ### A note can be in Recently deleted, can be recovered, and Recently deleted can be empty or unavailable
@@ -329,7 +361,7 @@ pure def canAskEmpty(s: Trash, by: Actor): bool =
 pure def askEmpty(s: Trash, by: Actor): Trash = { ...s, question: AskEmpty, target: 0, review: V::present(s.review) }
 ```
 
-### Only the owner confirms, and only what was shown
+### Only the owner confirms, only what was shown, and only while storage works
 
 A question asked before the list changed can no longer be confirmed.
 Confirming starts the erasure, the emptying, or, from the question a full
@@ -337,41 +369,60 @@ Recently deleted asks, the deletion of that note for good at the revision
 the store refused, so a note changed since is refused, not destroyed.
 
 ```quint
-pure def canConfirm(s: Trash, by: Actor): bool =
-  by == Owner and isOwner(s.owner) and s.question != NoQuestion and V::canConfirm(s.review) and not(busy(s)) and not(s.unsure)
+pure def canConfirm(s: Trash, storage: bool, by: Actor): bool =
+  by == Owner and isOwner(s.owner) and s.question != NoQuestion and V::canConfirm(s.review) and not(busy(s))
+    and not(s.unsure) and storage
 
-pure def confirm(s: Trash, now: int, by: Actor): Moved =
-  val asked = { ...s, question: NoQuestion, review: V::confirm(s.review) }
+pure def confirm(s: Trash, now: int, storage: bool, by: Actor): Moved =
+  val asked = { ...s, question: NoQuestion, review: V::confirm(s.review), holding: 0 }
   val entry = entryOf(s, s.target)
   if (s.question == AskErase) begun(Erase, s.target, entry.revision, now, one(entry.recording), by, asked)
   else if (s.question == AskEmpty) begun(EmptyAll, 0, 0, now, recordingsOf(s.entries), by, asked)
   else begun(Destroy, s.target, s.refused, now, one(s.loose), by, asked)
 ```
 
-### A question can be put aside, and the full question goes when its note is closed or changed
+### A question can be put aside, and the full question goes when the editor closes its note
 
 ```quint
 pure def canCancel(s: Trash): bool = s.question != NoQuestion
 
-pure def cancel(s: Trash): Trash = { ...s, question: NoQuestion, review: V::dismiss(s.review) }
+pure def cancel(s: Trash): Trash = { ...s, question: NoQuestion, review: V::dismiss(s.review), holding: 0 }
 
-pure def canForget(s: Trash, id: int, by: Actor): bool = by == Phone and s.question == AskFull and s.target == id
+pure def canNoteClosed(s: Trash, id: int, by: Actor): bool = by == Phone and s.holding == id and id > 0
 
-pure def forget(s: Trash, id: int, by: Actor): Trash = { ...s, question: NoQuestion, review: V::dismiss(s.review) }
+pure def noteClosed(s: Trash, id: int, by: Actor): Trash =
+  { ...s, holding: 0, question: if (s.question == AskFull) NoQuestion else s.question,
+    review: if (s.question == AskFull) V::dismiss(s.review) else s.review }
 ```
 
-### Notes past their three days are erased by the phone, as one action like any other, from a reading it asked for
+### Notes past their three days are erased by the phone, as one action like any other, from the reading of its maintenance
 
 Neither the owner nor the agent can ask for it: only the phone's own
-maintenance erases what is due.
+maintenance erases what is due, and only while storage works.
 
 ```quint
-pure def canSweep(s: Trash, now: int, by: Actor): bool =
-  by == Phone and isOwner(s.owner) and not(busy(s)) and not(s.unsure) and s.read.status == R::Loaded
-    and s.entries.some(e => due(e, now))
+pure def canSweep(s: Trash, storage: bool, by: Actor): bool =
+  by == Phone and isOwner(s.owner) and not(busy(s)) and not(s.unsure) and s.read.status == R::Loaded and storage
+    and s.entries.some(e => due(e, s.clock))
 
-pure def sweep(s: Trash, now: int, by: Actor): Moved =
-  begun(Sweep, 0, 0, now, recordingsOf(s.entries.select(e => due(e, now))), by, s)
+pure def sweep(s: Trash, storage: bool, by: Actor): Moved =
+  begun(Sweep, 0, 0, s.clock, recordingsOf(s.entries.select(e => due(e, s.clock))), by, s)
+```
+
+### A note past its three days is put to erasing by the phone
+
+Once maintenance has read Recently deleted with a time past a note's three
+days, the phone carries out an erasure of what is due, unless the note is
+gone by then.
+
+```quint
+pure def leadsToADueNoteIsErased(s: Trash, later: Trash): bool =
+  (s.read.status == R::Loaded and isOwner(s.owner) and s.entries.some(e => due(e, s.clock)))
+    implies (not(later.entries.some(e => due(e, s.clock)))
+      or (later.act == Sweep and later.attempt.id > s.attempt.id and A::ended(later.attempt)))
+
+pure val fair_sweep = "strong"
+pure val fair_listed = "weak"
 ```
 
 ### One action runs at a time, under a number never used before
@@ -432,14 +483,16 @@ pure def stepDestroyedOnlyAfterNoRoom(before: Trash, via: str, after: Trash): bo
     implies (before.question == AskFull and after.subject == before.target and after.revision == before.refused)
 ```
 
-### A full Recently deleted takes nothing in, and asks about the very note it refused
+### A full Recently deleted takes nothing in, and asks about the very note it refused, while the editor still holds it open
 
 ```quint
 pure def stepNoRoomWritesNothing(before: Trash, via: str, after: Trash): bool =
   (after.question == AskFull and before.question != AskFull)
     implies (after.entries == before.entries and before.act == Discard and after.target == before.subject)
 
-pure def alwaysTheFullQuestionNamesANote(s: Trash): bool = s.question == AskFull implies (s.target > 0 and s.refused > 0)
+pure def alwaysTheFullQuestionIsAboutTheOpenNote(s: Trash): bool =
+  (s.question == AskFull implies (s.target > 0 and s.refused > 0 and s.holding == s.target))
+    and (s.holding > 0 implies ((inFlight(s.attempt) and s.act == Discard and s.subject == s.holding) or s.question == AskFull))
 ```
 
 ### A deletion always names the note it deletes, and the revision
@@ -470,7 +523,7 @@ pure def alwaysOneEffectAtATime(s: Trash): bool =
     and (inFlight(s.attempt) implies isOwner(s.owner))
 ```
 
-### A question can go stale, Recently deleted can be emptied, and a voice note's recording can be erased or left unknown
+### A question can go stale, Recently deleted can be emptied, notes can expire, and a voice note's recording can be erased or left unknown
 
 ```quint
 pure def sometimesAQuestionWentStale(s: Trash): bool = s.question != NoQuestion and not(V::canConfirm(s.review))
@@ -493,24 +546,24 @@ pure def sometimesARecordingLeftUnknown(s: Trash): bool = s.audio.outcome == A::
 > As the owner, I want an action that was interrupted, or whose answer never
 > came, neither repeated nor assumed done.
 
-### A restart keeps the action and its number, an action already under way becomes unknown, and nothing late is taken
+### Only the phone restarts Recently deleted: a restart keeps the action and its number, an action already under way becomes unknown, and nothing late is taken
 
 What was on screen is gone, and the list is read again when it is next
 opened. An action written down but not yet carried out is written down
 again by the phone.
 
 ```quint
-pure def restart(s: Trash): Trash =
-  val cut = s.attempt.outcome == A::Sent
-  { ...s, showing: false, entries: List(), opened: 0, question: NoQuestion, review: V::dismiss(s.review),
-    read: { ...s.read, status: R::Idle }, pending: false,
-    attempt: if (cut) A::conclude(s.attempt, false, false) else s.attempt, unsure: s.unsure or cut,
-    audio: if (s.audio.outcome == A::Sent) A::conclude(s.audio, false, false) else s.audio }
+pure def canRestart(s: Trash, by: Actor): bool = by == Phone
+
+pure def restart(s: Trash, by: Actor): Trash =
+  { ...s, showing: false, entries: List(), opened: 0, question: NoQuestion, review: V::dismiss(s.review), holding: 0,
+    read: dropped(s.read), pending: false, attempt: cutOff(s.attempt), unsure: s.unsure or s.attempt.outcome == A::Sent,
+    audio: cutOff(s.audio) }
 
 pure def stepARestartKeepsTheAction(before: Trash, via: str, after: Trash): bool =
   via == "restart" implies and {
     after.act == before.act, after.subject == before.subject, after.attempt.id == before.attempt.id,
-    not(canListed(after, before.read.ticket)), not(A::canConclude(after.attempt, before.attempt.id)),
+    not(canListed(after, before.read.ticket, Phone)), not(A::canConclude(after.attempt, before.attempt.id)),
     not(A::canConclude(after.audio, before.audio.id)),
   }
 ```
@@ -522,8 +575,8 @@ pure def alwaysUnknownIsRemembered(s: Trash): bool = s.unsure implies s.attempt.
 
 pure def stepUnknownIsNeverSentAgain(before: Trash, via: str, after: Trash): bool =
   after.attempt.id >= before.attempt.id and after.audio.id >= before.audio.id
-    and ((before.unsure and via != "ownerChanged") implies after.attempt == before.attempt)
-    and ((before.attempt.outcome == A::Unknown and after.attempt.id == before.attempt.id and via != "ownerChanged")
+    and (before.unsure implies after.attempt == before.attempt)
+    and ((before.attempt.outcome == A::Unknown and after.attempt.id == before.attempt.id)
       implies after.attempt.outcome == A::Unknown)
 ```
 
@@ -565,11 +618,13 @@ pure def layers(s: Trash): int =
 pure def canBack(s: Trash): bool = layers(s) > 0
 
 pure def back(s: Trash): Trash =
-  if (s.question != NoQuestion) { ...s, question: NoQuestion, review: V::dismiss(s.review) }
+  if (s.question != NoQuestion) { ...s, question: NoQuestion, review: V::dismiss(s.review), holding: 0 }
   else if (s.opened != 0) { ...s, opened: 0 }
   else { ...s, showing: false }
 
-pure def left(s: Trash): Trash = { ...s, showing: false, opened: 0, question: NoQuestion, review: V::dismiss(s.review) }
+pure def left(s: Trash): Trash =
+  { ...s, showing: false, opened: 0, question: NoQuestion, review: V::dismiss(s.review),
+    holding: if (s.question == AskFull) 0 else s.holding }
 
 pure def stepBackClosesOneLayer(before: Trash, via: str, after: Trash): bool =
   (via == "back" implies layers(after) == layers(before) - 1)
@@ -581,16 +636,15 @@ pure def stepBackClosesOneLayer(before: Trash, via: str, after: Trash): bool =
 > As the owner, I want nothing of my Recently deleted shown to, or done
 > for, whoever uses the phone after me.
 
-### When another owner takes the phone, Recently deleted forgets what it showed and asked, and its action is put aside for its own owner
+### When another owner takes the phone, Recently deleted forgets what it showed and asked; an action sent is cut off as unknown, and one only written down is dropped, never done
 
 ```quint
 pure def canOwnerChanged(s: Trash, owner: int, by: Actor): bool = by == Phone and owner != s.owner and owner >= 0
 
 pure def ownerChanged(s: Trash, owner: int, by: Actor): Trash =
-  { ...s, owner: owner, showing: false, read: { ...s.read, status: R::Idle }, entries: List(), opened: 0,
+  { ...s, owner: owner, showing: false, read: dropped(s.read), entries: List(), opened: 0, holding: 0,
     question: NoQuestion, review: V::dismiss(s.review), pending: false, unsure: false, failed: false,
-    attempt: if (inFlight(s.attempt)) A::plan(s.attempt.id) else s.attempt,
-    audio: if (inFlight(s.audio)) A::plan(s.audio.id) else s.audio }
+    attempt: if (s.attempt.outcome == A::Recorded) A::plan(s.attempt.id) else cutOff(s.attempt), audio: cutOff(s.audio) }
 ```
 
 ### Nothing is done for an owner but the one the phone has now, and no answer for the owner before is taken
@@ -602,5 +656,5 @@ pure def stepNothingForAFormerOwner(before: Trash, via: str, after: Trash, out: 
     | Does(d) => d.owner == before.owner
     | ErasesAudio(x) => x.owner == before.owner
     | _ => true
-  }) and (via == "ownerChanged" implies (not(busy(after)) and not(canListed(after, before.read.ticket))))
+  }) and (via == "ownerChanged" implies (not(busy(after)) and not(canListed(after, before.read.ticket, Phone))))
 ```

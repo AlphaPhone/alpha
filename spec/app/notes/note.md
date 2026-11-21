@@ -1,9 +1,9 @@
 # A note
 
 What every part of Notes means by a note: its kind, where it came from, the
-one source it points back to, and who is acting on it. It has no state of
-its own; the list, the editor, the recorder, the voice note, the link note,
-Recently deleted and the agent's access import it.
+one source it points back to, who is acting on it, and the few rules every
+part keeps alike. It has no state of its own; every machine of Notes imports
+it.
 
 ## Story: Say what a note is
 
@@ -14,6 +14,9 @@ Recently deleted and the agent's access import it.
 ### A note is text, a checklist, a voice note or a link
 
 ```quint
+import attempt as A from "../../kit/attempt"
+import read as R from "../../kit/read"
+
 type Kind = Text | Checklist | Voice | Link
 ```
 
@@ -68,10 +71,30 @@ pure val linkValues = Set(
 )
 ```
 
+### A source is opened, visited or vouched for only while the phone reads the mark it had when it was linked
+
+The phone reads the source's mark each time it is to be used, so a source
+that changed since it was linked fails closed wherever it is used, and
+nothing has to remember that it changed.
+
+```quint
+pure def unchanged(link: Source, mark: int): bool = link.tie != NoLink and link.id > 0 and mark == link.mark
+
+pure def lawAChangedSourceIsNeverTrusted(link: Source, mark: int): bool =
+  (mark != link.mark or link.tie == NoLink) implies not(unchanged(link, mark))
+```
+
+### A deletion asked from the editor is answered: moved to Recently deleted, refused, unknown, or refused for want of room
+
+```quint
+type Told = NotTold | WasRefused | WasUnknown | WasFull
+```
+
 ### The owner, the resident agent and the phone each act in their own name
 
 The shell knows who sent an event, so an event never says it. The phone
-also speaks for the other areas of Alpha: the account, the browser, files.
+also speaks for the other areas of Alpha: the account, the browser, files,
+Calendar.
 
 ```quint
 type Actor = Owner | Agent | Phone
@@ -83,4 +106,58 @@ The account area says who owns the phone now; Notes takes it as a fact.
 
 ```quint
 pure def isOwner(owner: int): bool = owner > 0
+```
+
+## Story: Keep one thing open at a time
+
+> As the owner, I want Notes to show one note, dialog or question at a time,
+> so that Back always closes the one thing I am looking at.
+
+### Only the owner opens a note, a dialog or a question in Notes, and only when nothing else of Notes is open
+
+The shell tells each part of Notes whether another part already has a note,
+a dialog, the actions menu, a question or the notes from before open: it is
+covered. Nothing opens over it. With one thing open at a time, the shell
+sends Back to the one part of Notes that has something open, and only when
+none has does Back close Notes ([Shell](../shell/index.md), "Back closes
+one layer: the drawer, then Ask Alpha by a step, then the app on top").
+
+```quint
+pure def mayOpen(covered: bool, by: Actor): bool = by == Owner and not(covered)
+
+pure def lawNothingOpensOverAnother(by: Actor): bool = not(mayOpen(true, by)) and not(mayOpen(false, Agent))
+```
+
+## Story: Stay honest when cut off
+
+> As the owner, I want anything sent outside that a restart or another
+> owner cut off to be reported as unknown, never repeated, and a reading
+> cut off never to answer later.
+
+### An effect still on its way is in flight from being written down until it is answered
+
+```quint
+pure def inFlight(a: A::Attempt): bool = a.outcome == A::Recorded or a.outcome == A::Sent
+```
+
+### An effect sent and cut off before its answer becomes unknown, and is never sent again
+
+A restart or another owner taking the phone cuts it off. One written down
+and not yet sent is the machine's own to carry out or drop.
+
+```quint
+pure def cutOff(a: A::Attempt): A::Attempt = if (a.outcome == A::Sent) A::conclude(a, false, false) else a
+
+pure def lawACutOffEffectIsUnknown(id: int): bool =
+  val a = cutOff({ id: id, outcome: A::Sent })
+  a.outcome == A::Unknown and not(A::canRecord(a)) and not(A::canDispatch(a)) and not(A::canConclude(a, id))
+```
+
+### A reading cut off is dropped, keeps its ticket, and takes no answer
+
+```quint
+pure def dropped(r: R::Read): R::Read = { ...r, status: R::Idle }
+
+pure def lawADroppedReadingTakesNoAnswer(ticket: int, asked: int): bool =
+  not(R::canAnswer(dropped({ status: R::Loading, ticket: ticket }), asked))
 ```

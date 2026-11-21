@@ -3,8 +3,9 @@
 A voice note kept in the owner's store: its transcript, made by the phone as
 the audio allows and added to the note only as the owner
 [reviewed](../../kit/review.md) it; a summary of what was added; Ask Alpha
-about it; and playback. [Recording](./recording.md) makes the voice note;
-it is otherwise a note in [Notes](./index.md).
+about it; and playback, which [recording](./recording.md) waits on until it
+has stopped. Recording makes the voice note; it is otherwise a note in
+[Notes](./index.md).
 
 ## Story: Read and use the transcript
 
@@ -12,11 +13,12 @@ it is otherwise a note in [Notes](./index.md).
 > all of it, to read the transcript before it joins the note, to have it
 > summarised, and to ask Alpha about it.
 
-### The voice note holds its audio, the transcript heard and the transcript the note holds, its summary, and the one write to the note on its way
+### The voice note holds its audio, the transcript heard and the transcript the note holds, its summary, the one write to the note on its way, and its playback
 
 The note's revision is the one the store last confirmed. The transcript is
 counted in segments of audio: `heard` is what the phone has transcribed,
 `added` what the note holds, and `summary` what its summary covers.
+Playback is asked of the phone, and so is stopping it.
 
 ```quint
 import read as R from "../../kit/read"
@@ -29,25 +31,25 @@ type VoiceNote = {
   owner: int, note: int, revision: int, segments: int, showing: bool,
   listen: R::Read, asked: int, heard: int, deaf: bool, quiet: bool, added: int, review: V::Review,
   summarising: R::Read, upTo: int, summary: int,
-  writing: A::Attempt, part: Part, writeUpTo: int, play: R::Read,
+  writing: A::Attempt, part: Part, writeUpTo: int, play: R::Read, from: int, halting: bool, unconfirmed: bool,
 }
 
 pure val initial: VoiceNote = {
   owner: 0, note: 0, revision: 0, segments: 0, showing: false,
   listen: R::unread, asked: 0, heard: 0, deaf: false, quiet: false, added: 0, review: V::unreviewed,
   summarising: R::unread, upTo: 0, summary: 0,
-  writing: A::plan(0), part: Transcript, writeUpTo: 0, play: R::unread,
+  writing: A::plan(0), part: Transcript, writeUpTo: 0, play: R::unread, from: 0, halting: false, unconfirmed: false,
 }
 
-pure def idle(r: R::Read): R::Read = { ...r, status: R::Idle }
-pure def busy(v: VoiceNote): bool = v.writing.outcome == A::Recorded or v.writing.outcome == A::Sent
+pure def busy(v: VoiceNote): bool = inFlight(v.writing)
 ```
 
 ### What a voice note asks of the world
 
 To transcribe the audio up to a segment, to summarise the transcript added,
 to write the transcript or the summary to the note over the revision it
-builds on, to hand the added transcript to Ask Alpha, and to play the audio.
+builds on, to hand the added transcript to Ask Alpha, to play the audio
+from a segment, and to stop playing it.
 
 ```quint
 type Effect =
@@ -55,7 +57,8 @@ type Effect =
   | Summarises({ ticket: int, owner: int, note: int, upTo: int })
   | Writes({ ticket: int, owner: int, note: int, base: int, part: Part, upTo: int })
   | AsksAlpha({ note: int, upTo: int })
-  | Plays({ ticket: int, note: int, segments: int })
+  | Plays({ ticket: int, note: int, from: int, segments: int })
+  | Halts({ ticket: int })
 type Moved = { state: VoiceNote, out: List[Effect] }
 ```
 
@@ -69,24 +72,27 @@ pure val segmentsValues = Set(1, 2, 3)
 pure val heardValues = Set(0, 1)
 pure val summaryValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
+pure val fromValues = Set(0, 1)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val weight_transcribed = 3
 pure val weight_written = 3
 ```
 
-### The owner opens a voice note with its audio, the transcript it holds and its summary
+### The owner opens a voice note with its audio, the transcript it holds and its summary, when nothing else of Notes is open
 
-Nothing being written to another voice note may be on its way.
+Nothing being written to another voice note may be on its way, and nothing
+may still be playing.
 
 ```quint
-pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, by: Actor): bool =
-  by == Owner and isOwner(v.owner) and not(busy(v)) and not(v.showing) and note > 0 and revision > 0
+pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, by: Actor): bool =
+  mayOpen(covered, by) and isOwner(v.owner) and not(busy(v)) and not(v.showing) and silent(v) and note > 0 and revision > 0
     and segments > 0 and 0 <= summary and summary <= heard and heard <= segments
 
-pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, by: Actor): VoiceNote =
+pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, by: Actor): VoiceNote =
   { ...v, note: note, revision: revision, segments: segments, showing: true,
-    listen: idle(v.listen), asked: heard, heard: heard, deaf: false, quiet: false, added: heard,
-    review: V::dismiss(v.review), summarising: idle(v.summarising), upTo: 0, summary: summary, writeUpTo: 0, play: idle(v.play) }
+    listen: dropped(v.listen), asked: heard, heard: heard, deaf: false, quiet: false, added: heard,
+    review: V::dismiss(v.review), summarising: dropped(v.summarising), upTo: 0, summary: summary, writeUpTo: 0,
+    play: dropped(v.play), from: 0, unconfirmed: false }
 ```
 
 ### The phone transcribes all the audio not yet transcribed, one request at a time, shown or not, until the owner cancels or a transcription fails
@@ -116,7 +122,7 @@ pure def transcribed(v: VoiceNote, ticket: int, ok: bool, by: Actor): VoiceNote 
 ```quint
 pure def canCancelTranscription(v: VoiceNote, by: Actor): bool = by == Owner and v.listen.status == R::Loading
 
-pure def cancelTranscription(v: VoiceNote, by: Actor): VoiceNote = { ...v, listen: idle(v.listen), quiet: true }
+pure def cancelTranscription(v: VoiceNote, by: Actor): VoiceNote = { ...v, listen: dropped(v.listen), quiet: true }
 
 pure def canRetryTranscription(v: VoiceNote, by: Actor): bool = by == Owner and v.note > 0 and (v.deaf or v.quiet)
 
@@ -201,7 +207,7 @@ pure def written(v: VoiceNote, ticket: int, ok: bool, known: bool, latest: int, 
   else { ...v, writing: writing, summary: v.writeUpTo, revision: latest }
 ```
 
-### The transcript and summary shown are what the note holds: they change only when the store confirms a write, or another note opens
+### The transcript and summary shown are what the note holds: they change only when the store confirms a write, another note opens, or another owner takes the phone
 
 ```quint
 pure def stepTheNoteHoldsWhatIsShown(before: VoiceNote, via: str, after: VoiceNote): bool =
@@ -235,13 +241,14 @@ pure def stepOnlyTheAddedTranscriptLeaves(before: VoiceNote, via: str, after: Vo
   })
 ```
 
-### A write whose outcome is unknown is never sent again
+### A write whose outcome is unknown is never sent again, and a later one builds on the revision last confirmed, so the store refuses it if the unknown one landed
 
 ```quint
-pure def stepAnUnknownWriteStaysUnknown(before: VoiceNote, via: str, after: VoiceNote): bool =
+pure def stepAnUnknownWriteStaysUnknown(before: VoiceNote, via: str, after: VoiceNote, out: List[Effect]): bool =
   after.writing.id >= before.writing.id
-    and ((before.writing.outcome == A::Unknown and after.writing.id == before.writing.id and via != "ownerChanged")
+    and ((before.writing.outcome == A::Unknown and after.writing.id == before.writing.id)
       implies after.writing.outcome == A::Unknown)
+    and out.every(e => match e { | Writes(w) => w.base == before.revision and w.ticket > before.writing.id | _ => true })
 ```
 
 ### A transcript on show is one not yet in the note, and nothing else is written or summarised meanwhile
@@ -285,41 +292,78 @@ pure def sometimesAWriteUnknown(v: VoiceNote): bool = v.writing.outcome == A::Un
 
 ## Story: Listen to a voice note
 
-> As the owner, I want to play a voice note, and be told when it cannot be
-> played.
+> As the owner, I want to play a voice note from the start or from a line of
+> its transcript, and be told when it cannot be played or stopped.
 
-### A voice note plays, and only the answer to the current playing counts
+### A voice note plays from the start, or from a line of the transcript, and only within the audio written; only the answer to the current playing counts
 
 Played through, the player rests; one that cannot be played says so.
 
 ```quint
-pure def canPlay(v: VoiceNote, by: Actor): bool = by == Owner and v.showing and v.play.status != R::Loading
+pure def canPlay(v: VoiceNote, from: int, by: Actor): bool =
+  by == Owner and v.showing and silent(v) and 0 <= from and from < v.segments and from <= v.heard
 
-pure def play(v: VoiceNote, by: Actor): Moved =
+pure def play(v: VoiceNote, from: int, by: Actor): Moved =
   val play = R::ask(v.play)
-  { state: { ...v, play: play }, out: List(Plays({ ticket: play.ticket, note: v.note, segments: v.segments })) }
+  { state: { ...v, play: play, from: from, unconfirmed: false },
+    out: List(Plays({ ticket: play.ticket, note: v.note, from: from, segments: v.segments })) }
 
 pure def canPlayed(v: VoiceNote, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(v.play, ticket)
 
-pure def played(v: VoiceNote, ticket: int, ok: bool, by: Actor): VoiceNote = { ...v, play: R::answer(v.play, ok) }
-
-pure def canStopPlaying(v: VoiceNote, by: Actor): bool = by == Owner and v.play.status == R::Loading
-
-pure def stopPlaying(v: VoiceNote, by: Actor): VoiceNote = { ...v, play: idle(v.play) }
+pure def played(v: VoiceNote, ticket: int, ok: bool, by: Actor): VoiceNote =
+  { ...v, play: R::answer(v.play, ok), halting: false, unconfirmed: false }
 ```
 
-### Nothing plays but the voice note on show
+### Playing stops only when the phone confirms it, and a stop it could not confirm is told and can be asked again
+
+Until then the voice note is still playing, and nothing records
+([Recording](./recording.md), "Capture starts or goes on only while the
+microphone is allowed and free, nothing of Notes plays, the phone is in no
+call, and Notes is in front").
 
 ```quint
-pure def alwaysOnlyTheNoteOnShowPlays(v: VoiceNote): bool = v.play.status == R::Loading implies (v.showing and v.note > 0)
+pure def silent(v: VoiceNote): bool = v.play.status != R::Loading
+
+pure def halt(play: R::Read, v: VoiceNote): Moved =
+  if (play.status == R::Loading and not(v.halting))
+    { state: { ...v, halting: true, unconfirmed: false }, out: List(Halts({ ticket: play.ticket })) }
+  else { state: v, out: List() }
+
+pure def canStopPlaying(v: VoiceNote, by: Actor): bool = by == Owner and v.play.status == R::Loading and not(v.halting)
+
+pure def stopPlaying(v: VoiceNote, by: Actor): Moved = halt(v.play, v)
+
+pure def canHalted(v: VoiceNote, ticket: int, by: Actor): bool = by == Phone and v.halting and ticket == v.play.ticket
+
+pure def halted(v: VoiceNote, ticket: int, ok: bool, by: Actor): VoiceNote =
+  if (ok) { ...v, play: dropped(v.play), halting: false, unconfirmed: false } else { ...v, halting: false, unconfirmed: true }
 ```
 
-### A voice note can play, and can fail to play
+### Nothing plays but the voice note on show, or one being stopped, and it plays from within its transcript
 
 ```quint
-pure def sometimesPlaying(v: VoiceNote): bool = v.play.status == R::Loading and v.added > 0
+pure def alwaysOnlyTheNoteOnShowPlays(v: VoiceNote): bool =
+  (v.play.status == R::Loading implies ((v.showing and v.note > 0) or v.halting or v.unconfirmed))
+    and ((v.halting or v.unconfirmed) implies v.play.status == R::Loading) and not(v.halting and v.unconfirmed)
+    and v.from >= 0 and (v.showing implies v.from <= v.heard)
+
+pure def stepPlaybackStartsWithinTheAudio(before: VoiceNote, via: str, after: VoiceNote, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Plays(p) => p.from < before.segments and p.from <= before.heard and p.from >= 0 and p.note == before.note
+        and before.play.status != R::Loading
+    | Halts(h) => h.ticket == before.play.ticket and before.play.status == R::Loading
+    | _ => true
+  })
+```
+
+### A voice note can play from a line, fail to play, and fail to confirm it stopped
+
+```quint
+pure def sometimesPlaying(v: VoiceNote): bool = v.play.status == R::Loading and v.added > 0 and v.from > 0
 
 pure def sometimesUnplayable(v: VoiceNote): bool = v.play.status == R::Failed and v.showing
+
+pure def sometimesStopUnconfirmed(v: VoiceNote): bool = v.unconfirmed and v.showing
 ```
 
 ## Story: Leave a voice note
@@ -327,18 +371,18 @@ pure def sometimesUnplayable(v: VoiceNote): bool = v.play.status == R::Failed an
 > As the owner, I want Back and leaving Notes to close what is open over the
 > voice note, then the voice note, while its transcript goes on being made.
 
-### Back closes the transcript on show first, then the voice note; leaving Notes closes both and stops playing
+### Back closes the transcript on show first, then the voice note; leaving Notes closes both; closing the voice note asks the phone to stop playing it
 
 A write on its way still lands, and transcription goes on behind.
 
 ```quint
 pure def canBack(v: VoiceNote): bool = v.showing
 
-pure def back(v: VoiceNote): VoiceNote =
-  if (v.review.showing) { ...v, review: V::dismiss(v.review) }
-  else { ...v, showing: false, play: idle(v.play) }
+pure def back(v: VoiceNote): Moved =
+  if (v.review.showing) { state: { ...v, review: V::dismiss(v.review) }, out: List() }
+  else halt(v.play, { ...v, showing: false })
 
-pure def left(v: VoiceNote): VoiceNote = { ...v, showing: false, review: V::dismiss(v.review), play: idle(v.play) }
+pure def left(v: VoiceNote): Moved = halt(v.play, { ...v, showing: false, review: V::dismiss(v.review) })
 
 pure def stepLeavingKeepsTheWrite(before: VoiceNote, via: str, after: VoiceNote): bool =
   (via == "back" or via == "left") implies (after.writing == before.writing and after.listen == before.listen)
@@ -349,19 +393,19 @@ pure def stepLeavingKeepsTheWrite(before: VoiceNote, via: str, after: VoiceNote)
 > As the owner, I want nothing of my voice notes shown to, or written for,
 > whoever uses the phone after me.
 
-### When another owner takes the phone, the voice note is let go of and no answer for the owner before is taken
+### When another owner takes the phone, the voice note is let go of, its playing is stopped, a write on its way is cut off, and no answer for the owner before is taken
 
 ```quint
 pure def canOwnerChanged(v: VoiceNote, owner: int, by: Actor): bool = by == Phone and owner != v.owner and owner >= 0
 
-pure def ownerChanged(v: VoiceNote, owner: int, by: Actor): VoiceNote =
-  { ...initial, owner: owner, listen: idle(v.listen), summarising: idle(v.summarising), play: idle(v.play),
-    writing: A::plan(v.writing.id) }
+pure def ownerChanged(v: VoiceNote, owner: int, by: Actor): Moved =
+  halt(v.play, { ...initial, owner: owner, listen: dropped(v.listen), summarising: dropped(v.summarising),
+    play: v.play, halting: v.halting, unconfirmed: v.unconfirmed, writing: cutOff(v.writing) })
 
 pure def stepNoAnswerForAFormerOwner(before: VoiceNote, via: str, after: VoiceNote): bool =
   via == "ownerChanged" implies and {
-    after.note == 0, not(busy(after)), after.listen.status != R::Loading,
-    after.summarising.status != R::Loading, after.play.status != R::Loading,
+    after.note == 0, not(busy(after)), after.listen.status != R::Loading, after.summarising.status != R::Loading,
+    after.play.status == R::Loading implies (after.halting or after.unconfirmed),
   }
 ```
 
@@ -377,12 +421,14 @@ pure def alwaysTheVoiceNoteIsTheOwners(v: VoiceNote): bool =
 
 > As the owner, I want a write cut off by a restart reported, not repeated.
 
-### A restart closes the voice note, drops what was asked and not answered, and leaves a write cut off unknown
+### Only the phone restarts a voice note: a restart closes it, ends its playing, drops what was asked and not answered, and leaves a write cut off unknown
 
 ```quint
-pure def restart(v: VoiceNote): VoiceNote =
-  { ...v, showing: false, listen: idle(v.listen), summarising: idle(v.summarising), play: idle(v.play),
-    review: V::dismiss(v.review), writing: if (busy(v)) A::conclude(v.writing, false, false) else v.writing }
+pure def canRestart(v: VoiceNote, by: Actor): bool = by == Phone
+
+pure def restart(v: VoiceNote, by: Actor): VoiceNote =
+  { ...v, showing: false, listen: dropped(v.listen), summarising: dropped(v.summarising), play: dropped(v.play),
+    halting: false, unconfirmed: false, review: V::dismiss(v.review), writing: cutOff(v.writing) }
 
 pure def stepNoLateAnswerAfterRestart(before: VoiceNote, via: str, after: VoiceNote): bool =
   via == "restart" implies (not(busy(after)) and after.listen.status != R::Loading and after.added == before.added)
