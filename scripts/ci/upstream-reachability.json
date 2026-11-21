@@ -3,17 +3,25 @@
   "repository": "elizaOS/eliza",
   "base": "develop",
   "baseCommit": "0fc3586dce354d2c84f7b54da90cf5fcd29f71fc",
-  "head": "c2eb617570aee6f240074c4695ba3b3af392653c",
+  "head": "8dff6d6b7e9f58c8850f43bd5b6639c0c18ab496",
   "recordedAt": "2026-11-21",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...c2eb617570aee6f240074c4695ba3b3af392653c",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...8dff6d6b7e9f58c8850f43bd5b6639c0c18ab496",
   "status": "ahead",
-  "aheadBy": 1,
+  "aheadBy": 3,
   "behindBy": 0,
   "mergeBase": "0fc3586dce354d2c84f7b54da90cf5fcd29f71fc",
   "pinOnlyCommits": [
     {
       "sha": "c2eb617570aee6f240074c4695ba3b3af392653c",
       "subject": "Let a phone report its position with each message, and search near it"
+    },
+    {
+      "sha": "8dff6d6b7e9f58c8850f43bd5b6639c0c18ab496",
+      "subject": "Tell the model not to guess a place name from the phone's coordinates"
+    },
+    {
+      "sha": "8dff6d6b7e9f58c8850f43bd5b6639c0c18ab496",
+      "subject": "Answer where-am-I from a Maps lookup or the coordinates"
     }
   ],
   "pullRequests": [

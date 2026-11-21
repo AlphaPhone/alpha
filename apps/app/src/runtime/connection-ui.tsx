@@ -1160,6 +1160,8 @@ function activate(next: Active, session: VerifiedSession, name: string) {
     const peer=new ClientObservationSupportSession({...session,connectionEpoch:generation},()=>epoch===generation&&active===next&&state.session===session,signal=>next.remote.request('/api/status',undefined,signal));
     clientObservationSession=peer;
     void peer.handshake(controller.signal).catch(()=>{}).finally(()=>appRequests.delete(controller));
+    // A cold platform fix can take seconds; start one now so the first turn already has a position.
+    void phoneLocationReader().read(controller.signal).catch(()=>{});
   }
   startConversationEvents(next,session);
   lastInferenceWarm=Number.NEGATIVE_INFINITY;

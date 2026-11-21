@@ -78,3 +78,16 @@ test('the position goes only to a peer that declares the location field',async()
   assert.deepEqual((await peer.context(context,signal())).location,expected,JSON.stringify(fields));
  }
 });
+
+test('a cold fix that outlasts one turn is ready for the next',async()=>{
+ let deliver;const calls={read:0};
+ const reader=new PhoneLocationReader({available:()=>true,now:()=>fix.timestamp+1000,bridge:{
+  checkPermissions:async()=>({location:'granted'}),
+  getCurrentPosition:()=>{calls.read++;return new Promise(resolve=>{deliver=()=>resolve({coords:fix,cached:false});});},
+ }});
+ // The warm-up read at connection gives up after the turn budget; the platform request keeps going.
+ assert.equal(await reader.read(signal()),undefined);
+ deliver();await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);
+ assert.equal(calls.read,1);
+});
