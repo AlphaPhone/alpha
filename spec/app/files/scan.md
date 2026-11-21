@@ -82,8 +82,26 @@ pure val heldValues = Set(1, 5)
 pure val baseValues = Set(0, 1)
 pure val linksValues = Set(0, 2, 12)
 pure val linkValues = Set(1, 2)
+pure val weight_start = 4
+pure val weight_loaded = 6
+pure val weight_add = 10
+pure val weight_recognize = 8
+pure val weight_recognized = 10
+pure val weight_makeNote = 8
+pure val weight_noted = 8
+pure val weight_exportPdf = 6
+pure val weight_prepared = 8
+pure val weight_exported = 8
+pure val weight_keepPhoto = 6
+pure val weight_kept = 6
 pure val weight_saveDraft = 3
 pure val weight_draftSaved = 3
+pure val weight_takeTheirs = 4
+pure val weight_discardDraft = 3
+pure val weight_discarded = 4
+pure val weight_editText = 3
+pure val weight_reviewLinks = 3
+pure val weight_close = 2
 pure val pagesValues =
   Set(List())
     .union(Set(List({ image: 1, camera: true, text: 1, blank: false, edits: 0, links: 2 })))

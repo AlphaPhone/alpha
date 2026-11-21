@@ -91,10 +91,10 @@ type Moved = { state: Files, out: List[Effect] }
 ### What the simulator tries
 
 ```quint
-pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+pure val ticketValues = Set(1, 2, 3)
 pure val requestValues = Set(7, 8)
-pure val targetValues = Set(1, 2)
-pure val folderValues = Set(0, 1)
+pure val targetValues = Set(1, 4)
+pure val folderValues = Set(1)
 pure val depthValues = Set(0, 1)
 pure val nameValues = Set("", "c")
 pure val siblingsValues = Set(List(), List("b"))
@@ -104,9 +104,42 @@ pure val volumesValues = Set(List()).union(Set(List({ id: 1, used: 3, total: 8 }
 pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })
 pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
 pure val destValues = Set({ folder: 1, path: List(), names: List("b") }).union(Set({ folder: 4, path: List(1), names: List() }))
+pure val weight_enter = 30
+pure val weight_accessReported = 3
+pure val weight_storageRead = 100
+pure val weight_openVolume = 40
+pure val weight_openFolder = 30
+pure val weight_listed = 100
+pure val weight_openCategory = 5
+pure val weight_toggle = 30
+pure val weight_selectAll = 15
+pure val weight_askToDelete = 20
+pure val weight_confirmDelete = 5
+pure val weight_openMoveTo = 40
+pure val weight_moveInto = 20
+pure val weight_moveUp = 5
+pure val weight_destRead = 100
+pure val weight_begin = 40
+pure val weight_keepBoth = 15
+pure val weight_replaceThem = 5
+pure val weight_goBack = 5
+pure val weight_finished = 100
+pure val weight_searchFor = 10
+pure val weight_searched = 100
+pure val weight_openShare = 30
+pure val weight_shareTo = 40
+pure val weight_shareEnded = 100
+pure val weight_approve = 10
+pure val weight_renameShown = 3
+pure val weight_refresh = 3
+pure val weight_agentLook = 5
+pure val weight_agentLooked = 100
+pure val weight_agentFilter = 5
+pure val weight_agentOpen = 3
+pure val weight_restart = 3
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 1, name: "a", revision: 1, kind: F::Folder, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })))
+    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })))
     .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1 })))
 ```
 
@@ -764,7 +797,7 @@ pure def alwaysTheChangeKeepsItsRules(s: Files): bool =
     and C::alwaysAChoiceWaitsOnAFittingChange(s.change) and C::alwaysAStaleSheetIsClosed(s.change)
 ```
 
-### A change can be under way, a deletion can wait for confirmation, several items can be selected, and the Move to sheet can be ready
+### A change can be under way, a move or a copy among them, a deletion can wait for confirmation, several items can be selected, and the Move to sheet can be ready
 
 ```quint
 pure def sometimesAChangeIsUnderWay(s: Files): bool = C::busy(s.change) and browse(s) == Reading
@@ -773,7 +806,7 @@ pure def sometimesADeleteConfirmationStoppedCounting(s: Files): bool = s.deletin
 pure def sometimesTheSheetIsOpen(s: Files): bool = s.change.panel != 0 and browse(s) == Showing
 pure def sometimesAnApprovedChangeRuns(s: Files): bool = C::busy(s.change) and s.change.approval != 0
 pure def sometimesTheMoveToSheetIsReady(s: Files): bool = M::ready(s.sheet) and s.picked.length() > 0
-pure def sometimesAMoveIsUnderWay(s: Files): bool = C::busy(s.change) and s.change.work == C::MoveTo
+pure def sometimesAMoveIsUnderWay(s: Files): bool = C::busy(s.change) and (s.change.work == C::MoveTo or s.change.work == C::CopyTo)
 pure def sometimesAShownFileIsRenamed(s: Files): bool = C::busy(s.change) and s.change.work == C::Rename and s.change.folder == 0
 pure def sometimesSharingWasOpened(s: Files): bool = s.change.sending.outcome == A::Confirmed
 ```

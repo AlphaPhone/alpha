@@ -345,7 +345,7 @@ that had stopped counting back to life.
 pure def alwaysTheEmailReviewIsNotAhead(s: Preview): bool = s.email.shown <= s.email.revision
 ```
 
-### One insert leaves at a time, and an insert left unknown is not sent again until the file is read anew, changed or selected again
+### One insert leaves at a time, and an insert left unknown is not sent again for the same revision of the file
 
 The owner is told the insert could not be confirmed, and to look at the
 draft before trying again.

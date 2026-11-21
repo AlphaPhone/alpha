@@ -245,27 +245,28 @@ pure def view(s: Trash): View =
 Files is told whether Alpha may read the storage, and so is the Trash.
 
 ```quint
-pure def unseen(s: Trash): Trash =
-  { ...s, listing: F::drop(s.listing), erasing: V::dismiss(s.erasing),
+pure def unseen(open: bool, allowed: bool, s: Trash): Trash =
+  { ...s, open: open, allowed: allowed, listing: F::drop(s.listing), erasing: V::dismiss(s.erasing),
     entries: s.entries.select(e => s.job.entries.includes(e) or s.binned.includes(e)) }
 
-pure def looking(s: Trash): Moved =
+pure def looking(open: bool, allowed: bool, s: Trash): Moved =
   val listing = R::ask(s.listing)
-  if (seen(s) and not(busy(s))) { state: { ...s, listing: listing }, out: List(Look({ ticket: listing.ticket })) }
-  else { state: s, out: List() }
+  val told = { ...s, open: open, allowed: allowed }
+  if (seen(told) and not(busy(told))) { state: { ...told, listing: listing }, out: List(Look({ ticket: listing.ticket })) }
+  else { state: told, out: List() }
 
 pure def canEnter(s: Trash, allowed: bool, by: Actor): bool = by == Phone and not(s.open)
 
-pure def enter(s: Trash, allowed: bool, by: Actor): Moved = looking({ ...s, open: true, allowed: allowed })
+pure def enter(s: Trash, allowed: bool, by: Actor): Moved = looking(true, allowed, s)
 
 pure def canLeave(s: Trash, by: Actor): bool = by == Phone and s.open
 
-pure def leave(s: Trash, by: Actor): Trash = unseen({ ...s, open: false })
+pure def leave(s: Trash, by: Actor): Trash = unseen(false, s.allowed, s)
 
 pure def canAccessReported(s: Trash, allowed: bool, by: Actor): bool = by == Phone and allowed != s.allowed
 
 pure def accessReported(s: Trash, allowed: bool, by: Actor): Moved =
-  if (allowed) looking({ ...s, allowed: true }) else { state: unseen({ ...s, allowed: false }), out: List() }
+  if (allowed) looking(s.open, true, s) else { state: unseen(s.open, false, s), out: List() }
 ```
 
 ### Unseen or without access, the Trash reads nothing and holds only what a job or the moment to undo needs
