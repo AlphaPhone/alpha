@@ -82,7 +82,6 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   mapsSelectionCurrent:validateMapsSelectedObject,
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
-  // An SMS card names the SIM it goes from; Approve sends it with no dialog after.
 };
 /** Runs an approved Browser open or control for the device executor. One that Browser refused
  * before any effect closes the attempt as not started, with Browser's reason; any other failure
