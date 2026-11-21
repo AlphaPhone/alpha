@@ -524,6 +524,17 @@ saved" after 24 seconds and 153K input tokens. A call cut off this way writes no
 row, so earlier logs cannot show how often it happened. Before revision 7 the eval
 scored these turns as passes.
 
+Creating a workflow fails the same way. Its authoring call (`WORKFLOW`, one large text
+call per attempt) sends no output limit of its own and reasons at "high", so on a phone
+launched with the caps `TEXT_LARGE_MAX_TOKENS=4096` is its only limit. On the pinned
+prompt, sent straight to the provider, 10 of 10 capped calls stopped at the limit with
+nothing written, and the turn replied with a failure. Uncapped, 10 of 10 finished in
+5.6K to 11.7K tokens (4 to 8 s), and every draft passed the workflow's own parse and
+TypeScript checks. A cap of 8,192 still cut off 2 of 5. On the Pixel's v618 build
+(caps of 4,096) "create a workflow called Alpha device test" failed on both tries. A
+cut-off shows in the turn's trajectory record (`finishReason: length`), not in the
+agent log.
+
 The owner's decision is that there is no 4,096 cap: output may use the model's maximum
 and input its context window. The phone now launches with no output cap on any call (the
 five `*_MAX_TOKENS` lines are gone from `AlphaLocalAgentPlugin.java`): a call that sends
