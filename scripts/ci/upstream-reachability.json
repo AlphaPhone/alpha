@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "906cc32589b146340f8e6f803cd66d6ba0948dc9",
-  "head": "be396ee248590c42b8894228d3ee0fc5806af82b",
+  "baseCommit": "7582bcdc12a1ebbc766c3e08dd9074c1056e7809",
+  "head": "4a667ee9f20f4ab21da7c37b18ba45cbd6a6d8e0",
   "recordedAt": "2026-11-21",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...be396ee248590c42b8894228d3ee0fc5806af82b",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...4a667ee9f20f4ab21da7c37b18ba45cbd6a6d8e0",
   "status": "diverged",
-  "aheadBy": 22,
-  "behindBy": 121,
+  "aheadBy": 23,
+  "behindBy": 128,
   "mergeBase": "e66a28c3ea1b09fefaccb85d72486dada8f00758",
   "pinOnlyCommits": [
     {
@@ -98,6 +98,10 @@
     {
       "sha": "be396ee248590c42b8894228d3ee0fc5806af82b",
       "subject": "Bind Calendar slot duration to the registered action contract"
+    },
+    {
+      "sha": "4a667ee9f20f4ab21da7c37b18ba45cbd6a6d8e0",
+      "subject": "Separate Android runtime status from failure alerts"
     }
   ],
   "pullRequests": [

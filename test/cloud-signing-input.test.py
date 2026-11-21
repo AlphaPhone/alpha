@@ -798,7 +798,7 @@ class PrivateProducerSourceReviewTest(unittest.TestCase):
             {"checks": {"combinedVerification": "passed"}}, {}))
 
     def test_isolated_source_requires_exact_committed_approval(self):
-        self.assertEqual(PRODUCER.REPOSITORY, "alphacompute/alpha")
+        self.assertEqual(PRODUCER.REPOSITORY, "eliza-research/alpha")
         with tempfile.TemporaryDirectory(prefix="alpha-source-review-") as directory:
             root = Path(directory)
             (root / "scripts/ci").mkdir(parents=True)
