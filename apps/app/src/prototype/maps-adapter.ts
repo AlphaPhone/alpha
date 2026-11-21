@@ -525,7 +525,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       // nothing dials until the owner does it there.
       const phone = place.phone, dial = place.phoneHref?.slice('tel:'.length);
       data.pc = {
-        name: locationText(place.name), meta: place.meta==='Coordinates'?'Selected location':place.meta, addr: locationText(place.address),
+        name: locationText(place.name), meta: place.origin==='manual'?'Selected location':place.meta, addr: locationText(place.address),
         hasHours: !!place.hours, openTxt: 'Hours', openCss: '', hoursTxt: place.hours || '',
         hasPhone: !!phone, phone: phone || '',
         call: dial && isMvpView('phone') ? () => {if(active())currentApi.open('phone',{prefill:dial});} : undefined,
@@ -537,7 +537,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         dirs: placeSourceVerified ? () => {retireSearch();screen.openDirections();const next=screen.view().directions;if(next&&!next.originText.trim()&&mapsController?.snapshot().route.phase!=='ready')screen.locate();} : undefined,
         share: restrictedPlace ? undefined : () => screen.sharePlace(),
         nativeName: place.name, nativeEditing: place.editingName,
-        canRename:!restrictedPlace&&(place.saved||place.meta==='Coordinates'||place.meta==='Device location'),
+        canRename:!restrictedPlace&&(place.saved||place.origin==='manual'),
         nativeEdit: restrictedPlace ? undefined : () => screen.startRename(),
         nativeRename: (event: Event) => screen.rename((event.target as HTMLInputElement).value),
         nativeApplyName: () => screen.applyName(),

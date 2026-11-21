@@ -1836,7 +1836,8 @@ export class MapsScreenController {
             : selected.origin === "location"
               ? "Your location"
               : selected.origin === "provider"
-                ? "Place"
+                ? // The provider's most specific category (for example "Pharmacy"), when it sent one.
+                  detail?.categories?.[0] || "Place"
                 : "Coordinates",
         address: detail?.address || coordLabel(selected.coordinate),
         ...(detail?.openingHours ? { hours: detail.openingHours } : {}),
