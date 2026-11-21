@@ -57,9 +57,12 @@ test('partial recovery requires opt-in, review and confirmation; changing mode r
  await d.getByLabel(partialLabel,{exact:true}).check();
  await d.getByRole('button',{name:'Review calendar restore',exact:true}).click();
  await page.screenshot({path:info.outputPath('calendar-partial-review.png')});
- expect(await raw(page)).toBe('damaged original');await d.getByRole('button',{name:'Confirm calendar restore',exact:true}).click();
+ expect(await raw(page)).toBe('damaged original');
+ const settings=page.getByRole('button',{name:'Settings',exact:true});
+ await Promise.all([page.waitForEvent('load'),d.getByRole('button',{name:'Confirm calendar restore',exact:true}).click()]);
+ await expect(settings).toBeVisible();
  await expect(d).toHaveCount(0);const state=JSON.parse(await raw(page));expect(state.events).toHaveLength(1);expect(state.events[0].alert).toBeNull();
- await page.reload();expect(JSON.parse(await raw(page)).events).toHaveLength(1);
+ await page.reload();await expect(settings).toBeVisible();expect(JSON.parse(await raw(page)).events).toHaveLength(1);
 });
 test('closing a partial preview and wholly damaged backups preserve the original bytes',async({page})=>{
  let d=await open(page);await choose(d,partialBackup);await d.getByLabel(partialLabel,{exact:true}).check();
