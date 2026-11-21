@@ -572,6 +572,15 @@ refusals. The follow-ups send smaller planner requests and stay clear without ca
 At the Pixel's real spacing both fit either way (section 1). So the cap removal
 belongs with the follow-ups.
 
+The follow-up tip `516c7e8a56` (adds the planner's `model` value, the parser re-send,
+the idle limit, reminder planning at low reasoning and every review proposal of one
+reply recorded), same run, no cap: 43 of 46, device requests 30 of 31; text plus alarm
+now proposes both. Input per turn is the same (34K median), but turns are faster
+(median 2.6 s against 3.9 s; the reminder's planning call 1.1 s against 6.4 s), so at a
+fixed 5-second pause the same tokens land in less time: uncached tokens in any 60 s rose
+to 149K median and the run was refused 12 times; two reminders failed when the planning
+call itself was refused, which a side call did not re-send (a re-send is under review).
+
 ### The phone's decode mode
 
 On the Cloud route planner tools go out non-strict with their schemas as written; every
