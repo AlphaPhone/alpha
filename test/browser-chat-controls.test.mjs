@@ -9,8 +9,8 @@ import {selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts
 
 const signal=()=>new AbortController().signal;
 const refused=pattern=>error=>error.name==='BrowserOpenRefused'&&pattern.test(error.message);
-async function browser(run,{native=true}={}){
- const host=await browserAdapterHost({native,instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext']});
+async function browser(run,{native=true,results={}}={}){
+ const host=await browserAdapterHost({native,results,instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext']});
  const sent=name=>host.calls.filter(call=>call.name===name).map(call=>call.input);
  const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
  let sequence=0;
@@ -70,10 +70,64 @@ test('switching finds one tab by a word of its title or its site and shows it af
   await present();assert.equal(host.state().cur,news);assert.equal(host.viewOpens.at(-1)[0],'browser');
   await (await control({type:'browser_tab_switch',target:'docs.example.org'}))();assert.equal(host.state().cur,docs);
   assert.deepEqual(asked,[]);
+  host.shellState.view='browser';await host.sync();
   await assert.rejects(control({type:'browser_tab_switch',target:'field guide'}),refused(/already showing/));
   await assert.rejects(control({type:'browser_tab_switch',target:'recipes'}),refused(/No open tab matches “recipes”/));
   assert.equal(host.state().cur,docs);
  });
+});
+// Review finding: from Home, the owner asked for the tab Browser last showed and was told it was
+// "already showing" while Home stayed on screen. Browser's selected tab is not showing from Home.
+test('from Home, switching to the tab Browser last showed opens Browser on that tab',async()=>{
+ await browser(async({host,open,control,asked})=>{
+  await open('https://owner.example/','Owner page',{fresh:false});
+  const news=await open('https://www.nytimes.com/','The New York Times');
+  host.shellState.view='home';await host.sync();
+  const opens=host.viewOpens.length;
+  await (await control({type:'browser_tab_switch',target:'nytimes'}))();
+  assert.equal(host.state().cur,news);assert.equal(host.viewOpens.length,opens+1);assert.equal(host.viewOpens.at(-1)[0],'browser');
+  assert.deepEqual(asked,[]);
+ });
+});
+// Review finding: after a restart the restored tabs load only when shown, and requests from Home
+// were refused as if no page were open.
+test('after a restart, the restored selected tab can be switched to and reloaded from Home; the rest say why they wait',async()=>{
+ const saved={browsingState:()=>({history:[],tabs:[{id:'t1',url:'https://en.wikipedia.org/wiki/Cat',title:'Cat - Wikipedia'},{id:'t2',url:'https://example.com/',title:'Example Domain'}],cur:'t1'})};
+ await browser(async({host,sent,control})=>{
+  await new Promise(resolve=>setTimeout(resolve,50));await host.sync();
+  assert.equal(host.state().cur,'t1');assert.equal(sent('create').length,0,'restored tabs are not loaded while Browser is hidden');
+  const opens=host.viewOpens.length;
+  await (await control({type:'browser_tab_switch',target:'wikipedia'}))();
+  assert.equal(host.state().cur,'t1');assert.equal(host.viewOpens.length,opens+1);assert.equal(host.viewOpens.at(-1)[0],'browser');
+  await (await control({type:'browser_history',action:'reload'}))();
+  assert.equal(host.viewOpens.length,opens+2,'reloading a restored tab shows Browser, which loads its saved address');
+  assert.deepEqual(sent('command'),[]);
+  await assert.rejects(control({type:'browser_history',action:'back'}),refused(/has not loaded since Alpha restarted/));
+  await assert.rejects(control({type:'browser_find',text:'cat'}),refused(/has not loaded since Alpha restarted/));
+  await (await control({type:'browser_tab_switch',target:'example'}))();assert.equal(host.state().cur,'t2');
+ },{results:saved});
+});
+// Review finding: the Browser-context "go back" refused a loading or failed page as "Current native
+// browser tab changed". Back follows the tab's own history; other refusals say what is in the way.
+test('the Browser-context history command goes back from a loading or failed page and names what blocks it',async()=>{
+ await browser(async({host,open,page,sent})=>{
+  host.shellState.view='browser';await host.sync();
+  const tab=await open('https://example.com/a','A',{fresh:false,canBack:true});
+  const run=subaction=>host.component.browserCommand({subaction},undefined,signal(),()=>{});
+  await page(tab,'https://example.com/slow','',{canBack:true,loading:true,committed:false});
+  assert.equal((await run('back')).ok,true);
+  await page(tab,'https://example.com/slow','',{canBack:true,loading:false,committed:false,error:'This site can’t be reached'});
+  assert.equal((await run('back')).ok,true);assert.equal((await run('reload')).ok,true);
+  assert.deepEqual(sent('command').map(input=>input.command),['back','back','reload']);
+  await page(tab,'https://example.com/slow','',{canBack:false,loading:false,committed:false,error:'This site can’t be reached'});
+  assert.deepEqual(await run('back'),{ok:false,code:'UNAVAILABLE',message:'There is no previous page in this tab.'});
+  host.component.vset('browser',{menu:true});await host.sync();
+  assert.equal((await run('reload')).message,'Close the Browser menu first.');
+  host.component.vset('browser',{menu:false});await host.sync();
+  host.shellState.view='home';await host.sync();
+  assert.equal((await run('reload')).message,'Browser is not showing.');
+  assert.equal(sent('command').length,3);
+ },{results:{command:input=>({session:input.session,id:input.id})}});
 });
 test('several matching tabs are listed for the owner to pick; picking none does nothing',async()=>{
  await browser(async({host,open,control,asked})=>{
@@ -198,6 +252,33 @@ test('a bound search runs without a card only when the whole message asked for t
  }
  const f=bound({type:'browser_search',query:'weather in Paris'});await f.run('Search for Weather in Paris please');assert.deepEqual(f.actions.calls,['control']);
  assert.deepEqual(await f.run('Search for Weather in Paris please'),[],'one message runs one search');
+});
+// Review finding: quotes the model kept around the owner's words made the server treat the search
+// as direct while this coordinator left it on a card. Both now use the shared matcher.
+test('a quoted search the owner asked for runs directly, as the server reports',async()=>{
+ const text='search for "best pizza"';
+ for(const query of ['"best pizza"','best pizza','“best pizza”']){
+  const f=bound({type:'browser_search',query});assert.equal((await f.run(text)).length,1,query);assert.deepEqual(f.actions.calls,['control'],query);
+ }
+ const other=bound({type:'browser_search',query:'"cheap pizza"'});assert.deepEqual(await other.run(text),[]);assert.deepEqual(other.actions.calls,[]);
+});
+// Review finding: two direct Browser controls for one message each succeeded, but only the first
+// was presented; the second was checked against the page the first replaced and skipped silently.
+test('one message runs at most one direct Browser action; a second one keeps its review card',async()=>{
+ const pairs=[
+  [{type:'browser_tab_switch',target:'news'},{type:'browser_history',action:'reload'},'switch to the news tab and reload it'],
+  [{type:'browser_tab_switch',target:'news'},{type:'browser_find',text:'harbour'},'switch to the news tab and find harbour'],
+  [{type:'browser_tab_new'},{type:'browser_history',action:'back'},'open a new tab and go back'],
+ ];
+ for(const [first,second,text] of pairs){
+  const actions=policyFixture([['first','request',undefined,first.type],['second','request',undefined,second.type]]);
+  Object.assign(actions.proposals.get('first').proposal.operation,first);Object.assign(actions.proposals.get('second').proposal.operation,second);
+  const ran=await actions.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text,current:()=>{}});
+  assert.equal(ran.length,1,text);assert.deepEqual(actions.calls,['first'],text);assert.ok(actions.proposals.has('second'),'the second keeps its card');
+ }
+ // Other direct actions of the same message are not held back by a Browser action.
+ const mixed=policyFixture([['tab','request',undefined,'browser_tab_new'],['note','request',undefined,'create_note']]);
+ assert.equal((await mixed.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'open a new tab',current:()=>{}})).length,2);
 });
 
 test('Browser controls are advertised only where this phone carries them out',()=>{

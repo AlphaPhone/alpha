@@ -24,6 +24,7 @@
 import { NOTES_LIST_FILTER_CAPABILITY } from "@elizaos/contracts";
 import {
   browserDestinationMatches,
+  browserSearchQueryMatches,
   directBrowserDestination,
   directBrowserSearchQuery,
   groundBrowserDestination,
@@ -784,8 +785,12 @@ export class DeviceActionCoordinator<
     const name = this.profile.assistantName;
     const allowed =
       operation.type === "browser_search"
-        ? directBrowserSearchQuery(proof.text, name)?.toLowerCase() ===
-          operation.query.toLowerCase()
+        ? // The same match the server and the shared coordinator use: quotes
+          // the model kept around the owner's words are not part of them.
+          browserSearchQueryMatches(
+            operation.query,
+            directBrowserSearchQuery(proof.text, name),
+          )
         : browserDestinationMatches(
             operation,
             directBrowserDestination(proof.text, name),
@@ -1546,9 +1551,19 @@ export class DeviceActionCoordinator<
       ...BROWSER_CONTROL_DIRECT_TYPES,
     ];
     const results: DeviceOperationReceipt[] = [];
+    // Every direct Browser action shows its effect only after the chat request
+    // settles, each one checked against the tab and page the request was made
+    // from. After one has run, a second one for the same message would be checked
+    // against the page the first is about to replace and then skipped while still
+    // reporting success, so it keeps its review card instead.
+    let browserRan = false;
     for (const [proposalId, entry] of [...this.proposals]) {
+      const browserEffect =
+        entry.proposal.operation.type === "browser_navigate" ||
+        isBrowserControl(entry.proposal.operation);
       if (
         results.length >= 4 ||
+        (browserEffect && browserRan) ||
         (!directTypes.includes(entry.proposal.operation.type) &&
           !(proof?.messageId === messageId && directSmsRequest(entry.proposal.operation, proof.text))) ||
         entry.proposal.workflow ||
@@ -1609,6 +1624,7 @@ export class DeviceActionCoordinator<
       }
       const result = await this.approve(proposalId, context, signal);
       results.push(result);
+      if (browserEffect) browserRan = true;
       if (result.status !== "succeeded" || signal.aborted) break;
     }
     return results;

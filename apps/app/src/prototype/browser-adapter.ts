@@ -283,12 +283,13 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     shell.vset('browser', {tabs: rest.length ? rest : [{id: fallback, hist: ['newtab'], pos: 0}], cur: state().cur === id ? (rest[0]?.id || fallback) : state().cur});
   }
   // The open tabs a chat request names by a few words. A private tab is found only for a request
-  // made from a private tab. A switch never names the tab that is already showing.
+  // made from a private tab. A switch never names the tab that is already showing; from outside
+  // Browser, Browser's selected tab is not showing, so switching to it opens Browser on it.
   const tabPage = (id: string) => { const known = tabInfo(id) || restored.get(id); return known && {title: pageTitle(known.title, known.url), url: known.url as string}; };
   function namedTabs(target: string, closing: boolean) {
-    const s = state(), fromPrivate = shell.S?.().view === 'browser' && isPrivate(s.cur);
+    const s = state(), inBrowser = shell.S?.().view === 'browser', fromPrivate = inBrowser && isPrivate(s.cur);
     const visible: (Bag & {id: string})[] = s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv);
-    return {visible, found: matchingTabs(closing ? visible : visible.filter(tab => tab.id !== s.cur), target, tabPage)};
+    return {visible, found: matchingTabs(closing || !inBrowser ? visible : visible.filter(tab => tab.id !== s.cur), target, tabPage)};
   }
   async function command(command: string) {
     const id = state()?.cur; if (!id || !tabs.has(id)) return;
@@ -573,7 +574,19 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       try{command=parseNativeHistoryCommand(raw,selection);}catch(error){return {ok:false,code:'UNSUPPORTED',message:error instanceof Error?error.message:String(error)};}
       const id=state()?.cur,info=tabInfo(id);
       const admittedNavigation=info?.navigation;
-      const bound=()=>{signal.throwIfAborted();current();if(disposed||!Capacitor.isNativePlatform()||document.hidden||shell.S().view!=='browser'||state()?.menu||state()?.tabsOpen||state()?.lib||state()?.share||state()?.editing||shell.S().shade||state()?.cur!==id||!tabs.has(id)||!info||(command.subaction==='reload'?!info.url:!info.committed||info.error||info.loading)||tabInfo(id)?.navigation!==admittedNavigation)throw Error('Current native browser tab changed');
+      // Each refusal says what stands in the way. Back and forward follow the tab's own
+      // history, so they work on a page that is still loading or failed to load.
+      const bound=()=>{signal.throwIfAborted();current();
+        if(disposed||!Capacitor.isNativePlatform()||document.hidden||shell.S().view!=='browser')throw Error('Browser is not showing.');
+        if(shell.S().shade)throw Error('Close the notification shade first.');
+        if(state()?.menu)throw Error('Close the Browser menu first.');
+        if(state()?.tabsOpen)throw Error('Close the tab list first.');
+        if(state()?.lib)throw Error('Close bookmarks and history first.');
+        if(state()?.share)throw Error('Close the share sheet first.');
+        if(state()?.editing)throw Error('Finish editing the address first.');
+        if(state()?.cur!==id||!tabs.has(id)||!info)throw Error(id&&restored.has(id)&&state()?.cur===id?'This tab\'s page has not loaded yet.':'Current native browser tab changed');
+        if(tabInfo(id)?.navigation!==admittedNavigation)throw Error('The Browser page changed after the request. Nothing was done.');
+        if(command.subaction==='reload'&&!info.url)throw Error('No page is open in this tab.');
         // The turn asked about one page; a redirect or another tab since then is not that page.
         if(!observedTabCurrent(command.selection,tabs.selection(id)))throw Error('The Browser page changed after the request. Nothing was done.');
         if(command.subaction==='back'&&!info.canBack)throw Error('There is no previous page in this tab.');
@@ -666,6 +679,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         return () => { if (still()) { closeTab(id); show(); } };
       }
       const info = tabInfo(selected);
+      // After a restart a restored tab keeps only its saved address until Browser shows it. Reloading
+      // it is showing it, which loads that address; anything else needs the page loaded first.
+      const unloaded = !info && !tabs.has(selected) && restored.has(selected);
+      if (unloaded) {
+        if (!observedTabCurrent(input.observed, tabs.selection(selected))) refuse('The Browser page changed after the request. Nothing was done.');
+        if (operation.type === 'browser_history' && operation.action === 'reload') return () => { if (still()) show(); };
+        refuse('This tab\'s page has not loaded since Alpha restarted. Open Browser so it can load, then ask again.');
+      }
       if (operation.type === 'browser_find') {
         // The web build's page is a sandboxed frame this app cannot search (see openFind below).
         if (!Capacitor.isNativePlatform()) refuse('This Browser cannot find text in a page.');
