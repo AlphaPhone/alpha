@@ -236,11 +236,22 @@ pure def lawAnEditedDraftIsNotForgotten(revision: int): bool =
 ### A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone
 
 ```quint
-pure def foundSent(l: Letter): Letter = { ...markedSent(l, l.doubt.revision), revision: l.revision + 1 }
+pure def foundSent(l: Letter): Letter = { ...l, sent: l.doubt.revision, doubt: noDoubt, revision: l.revision + 1 }
 
 pure def notSent(l: Letter): Letter = { ...l, doubt: noDoubt }
 
 pure def lawAFoundSendChangesTheDraft(revision: int, attempt: int): bool =
   val l = foundSent(doubted({ ...blank, revision: revision }, attempt, revision))
   l.revision == revision + 1 and l.sent == revision and l.doubt == noDoubt
+```
+
+### A send found leaves alone the operation the draft was handed to meanwhile
+
+Discovered by the proof: the check can answer after the draft was handed
+to a save or a deletion, which is still under way.
+
+```quint
+pure def lawAFoundSendLeavesAHandOverAlone(revision: int, attempt: int, use: Use): bool =
+  val l = foundSent(handed(doubted({ ...blank, revision: revision }, attempt, revision), attempt + 1, use))
+  l.sending == attempt + 1 and l.use == use
 ```

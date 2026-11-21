@@ -200,13 +200,15 @@ pure def changeFrom(s: Composer, access: Access, account: int, typing: bool): Wr
 ### An open draft is of this session, has its own number and account, never fewer recipients than invalid ones, attachments within what was counted, and no mark of a send beyond its revision
 
 So are its copies on the phone. A draft saving to Gmail is handed to that
-save.
+save. Discovered by the proof: a send it remembers as unknown names an
+attempt, and a revision it has had.
 
 ```quint
 pure def whole(l: L::Letter, made: int): bool =
   0 <= l.id and l.id <= made and l.attachments >= 0 and l.mib >= 0 and (l.attachments == 0 implies l.mib == 0)
     and 0 <= l.invalid and l.invalid <= l.recipients and 0 <= l.sent and l.sent <= l.revision
     and (l.draft.sync == D::Saving implies (l.sending != 0 and l.use == L::ToSave))
+    and l.doubt.attempt >= 0 and 0 <= l.doubt.revision and l.doubt.revision <= l.revision
 
 pure def ofTheDraftOpen(l: L::Letter, s: Composer): bool =
   l.id == s.letter.id and l.session == s.session and l.account != 0
@@ -639,9 +641,15 @@ pure def useSaved(s: Composer): Written = touched(L::theirs(s.letter), { ...s, n
 
 ### A draft unsure of its Gmail copy, or at a clash, is handed to nothing until that is settled
 
+Discovered by the proof: so are its copies on the phone, which a restart
+reopens, and every draft on the shelf, which comes back.
+
 ```quint
+pure def settledFirst(l: L::Letter): bool =
+  (l.unsure or l.draft.sync == D::Conflicted) implies (l.sending == 0 and l.draft.sync != D::Saving)
+
 pure def alwaysAnUnsureDraftIsHandedToNothing(s: Composer): bool =
-  (s.letter.unsure or s.letter.draft.sync == D::Conflicted) implies (s.letter.sending == 0 and s.letter.draft.sync != D::Saving)
+  settledFirst(s.letter) and settledFirst(s.kept) and settledFirst(s.copy) and s.shelf.shelved.forall(k => settledFirst(S::held(s.shelf, k)))
 ```
 
 ### A draft can be saved to Gmail, ready to be saved over its copy, at a clash kept on the phone across a restart, unsure of its copy, its lost save found or not, and a clash settled either way
@@ -725,10 +733,14 @@ pure def stepADraftComesBackAsItWasSetAside(before: Composer, via: str, after: C
 
 ### The shelf is of this session, holds drafts numbered before now, and never the draft open
 
+Discovered by the proof: each draft on the shelf is whole as an open
+draft is, so that it opens whole.
+
 ```quint
 pure def alwaysTheShelfHoldsOtherDraftsOfThisSession(s: Composer): bool =
   S::alwaysEachDraftIsWholeUnderItsNumber(s.shelf)
-    and s.shelf.shelved.forall(k => k <= s.made and S::held(s.shelf, k).session == s.session) and not(s.open and s.shelf.shelved.contains(s.letter.id))
+    and s.shelf.shelved.forall(k => whole(S::held(s.shelf, k), s.made) and S::held(s.shelf, k).session == s.session)
+    and not(s.open and s.shelf.shelved.contains(s.letter.id))
 ```
 
 ### Discarding asks the owner first, and then forgets the draft on the phone
@@ -746,7 +758,7 @@ pure def canKeepDraft(s: Composer): bool = s.discarding
 pure def keepDraft(s: Composer): Composer = { ...s, discarding: false }
 
 pure def canDiscard(s: Composer, by: Actor): bool =
-  by == Owner and s.discarding and s.write.status != R::Loading and s.letter.sending == 0
+  by == Owner and s.open and s.discarding and s.write.status != R::Loading and s.letter.sending == 0
     and s.letter.draft.sync != D::Saving
 
 pure def discard(s: Composer, by: Actor): Written =
