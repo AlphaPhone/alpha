@@ -90,6 +90,40 @@ test('live agent Notes use the mock-mode Notes design with typed cards',async({p
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
+test('Notes options selects and deletes notes with one undo and a short toast',async({page})=>{
+ await openSeeded(page);
+ const options=page.getByRole('button',{name:'Notes options',exact:true});
+ const menu=page.getByRole('dialog',{name:'Notes options'});
+ await options.click();
+ await expect(menu.getByRole('button',{name:'Recently deleted',exact:true})).toBeVisible();
+ await menu.getByRole('button',{name:'Select',exact:true}).click();
+ const remove=page.getByRole('button',{name:'Delete selected notes',exact:true});
+ await expect(remove).toBeDisabled();
+ await page.getByRole('button',{name:'Select Launch checklist',exact:true}).click();
+ await page.getByRole('button',{name:'Select Groceries',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'2 selected',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Select Groceries',exact:true})).toHaveAttribute('aria-pressed','true');
+ await shot(page,'select-notes');
+ await remove.click();
+ await expect(page.getByRole('heading',{name:'Notes',exact:true})).toBeVisible();
+ await expect(card(page,'Launch checklist')).toHaveCount(0);
+ await expect(card(page,'Groceries')).toHaveCount(0);
+ await expect(card(page,'Gift ideas')).toBeVisible();
+ await page.getByRole('button',{name:'Undo',exact:true}).click();
+ await expect(card(page,'Launch checklist')).toBeVisible();
+ await expect(card(page,'Groceries')).toBeVisible();
+
+ await page.clock.install();
+ await card(page,'Groceries').click();
+ await page.getByRole('button',{name:'More',exact:true}).click();
+ await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Undo',exact:true})).toBeVisible();
+ await page.clock.fastForward(4100);
+ await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0);
+ await options.click();
+ await expect(menu.getByRole('button',{name:'Recently deleted',exact:true})).toBeEnabled();
+});
+
 test('live agent Notes in dark mode, the text editor and the checklist editor',async({page})=>{
  const {foreign,errors}=await openSeeded(page,'/?theme=dark');
  await shot(page,'live-list-dark');

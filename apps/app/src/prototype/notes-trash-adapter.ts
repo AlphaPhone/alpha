@@ -3,7 +3,7 @@ import {
 } from '../runtime/notes-trash';
 import type {NoteRecord} from '../runtime/notes-store';
 import type {NotesTarget} from '../runtime/notes-contract';
-import {notesTrashPolicy,notesTrashDaysShort} from '../runtime/notes-trash-policy';
+import {notesTrashPolicy,notesTrashDaysShort,NOTES_DELETE_TOAST_MS} from '../runtime/notes-trash-policy';
 import {readNotesFolders,restoredNoteFolder} from '../runtime/notes-folders';
 import {notePreview} from '../runtime/notes-view';
 import {maintainNotesTrash} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-trash-maintenance.ts';
@@ -119,7 +119,7 @@ export function installNotesTrashAdapter(Component:Shell,views:Record<string,Bag
   if(outcome.status==='unconfirmed')return false;
   if(outcome.status!=='moved'){shell.toast(outcome.status==='changed'?'Note changed':'Delete failed');return false;}
   void load(shell);
-  shell.toast('Deleted',{undo:()=>void restore(shell,outcome.entry.id)});
+  shell.toast('Deleted',{durationMs:NOTES_DELETE_TOAST_MS,undo:()=>void restore(shell,outcome.entry.id)});
   return true;
  }
 

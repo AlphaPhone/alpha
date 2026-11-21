@@ -7,6 +7,7 @@ import {noteShareText} from '../../../../.eliza/client-features/plugins/plugin-n
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {agentPendingText,agentAvailabilityNotice,connectionController} from '../runtime/connection-ui';
 import {copySelectedText} from '../runtime/text-share';
+import {NOTES_DELETE_TOAST_MS} from '../runtime/notes-trash-policy';
 import {CanonicalNotesController,type NotesPhase} from './canonical-notes-controller';
 import {CanonicalNotesEditor} from './canonical-notes-editor';
 import type {CanonicalNoteSaveIntent} from './note-recorder';
@@ -57,6 +58,8 @@ export class CanonicalNotesUi {
  private openValue:string|null=null;
  private blankCreationValue:string|null=null;
  private trashValue:CanonicalTrashEntry[]=[];
+ private selectedNoteIds:Set<string>|null=null;
+ private deletingSelection=false;
  /** The saved record the open draft started from, so Try again can tell an untouched record from one changed elsewhere. */
  private draftBase:{token:string;print:string}|null=null;
  private rebasing=false;
@@ -203,9 +206,43 @@ export class CanonicalNotesUi {
   const removed=await this.editor.remove(id);
   if(removed&&this.controller.current){
    const entry=this.trashValue.find(row=>row.id===id);
-   api.toast('Deleted',entry?{undo:()=>void this.undoRemove(entry,api)}:undefined);
+   api.toast('Deleted',{durationMs:NOTES_DELETE_TOAST_MS,...(entry?{undo:()=>void this.undoRemove(entry,api)}:{})});
   }
   return removed;
+ }
+ endSelection():boolean{
+  if(!this.selectedNoteIds)return false;
+  if(!this.deletingSelection){this.selectedNoteIds=null;this.hooks.paint();}
+  return true;
+ }
+ private async removeSelection(api:Bag):Promise<void>{
+  const selection=this.selectedNoteIds;
+  if(!selection?.size||this.deletingSelection||this.controller.pending||
+   !this.controller.current||!api.isActive()||this.open||this.phase!=='ready')return;
+  const ids=[...selection].filter(id=>this.controller.hasViewNote(id));
+  const undo:CanonicalTrashEntry[]=[];
+  let removed=0;
+  this.deletingSelection=true;
+  this.hooks.paint();
+  try{
+   // Each operation uses the existing canonical delete and its observed outcome.
+   // After a refusal or an unknown outcome, leave the remaining notes selected.
+   for(const id of ids){
+    if(!this.controller.current||!api.isActive()||!await this.editor.remove(id))break;
+    selection.delete(id);
+    removed++;
+    const entry=this.trashValue.find(row=>row.id===id);
+    if(entry)undo.push(entry);
+   }
+  }finally{
+   this.deletingSelection=false;
+   if(!selection.size||!api.isActive())this.selectedNoteIds=null;
+   this.hooks.paint();
+  }
+  if(removed&&this.controller.current&&api.isActive()){
+   const label=removed<ids.length?`Deleted ${removed} of ${ids.length} notes`:removed===1?'Deleted':`Deleted ${removed} notes`;
+   api.toast(label,{durationMs:NOTES_DELETE_TOAST_MS,...(undo.length?{undo:async()=>{for(const entry of undo)await this.undoRemove(entry,api);}}:{})});
+  }
  }
  private trashEntry(reviewed:CanonicalTrashEntry,strictRevision:boolean):CanonicalTrashEntry|undefined{
   return this.controller.current?this.trashValue.find(row=>row.id===reviewed.id&&row.deletedAt===reviewed.deletedAt&&(!strictRevision||row.revision===reviewed.revision)):undefined;
@@ -345,6 +382,25 @@ export class CanonicalNotesUi {
    trashAskOpen:!!asked,trashAskTitle:asked?.title||'',trashAskDescription:asked?deletionDate(asked):'',trashAskClose:()=>api.set({trashAsk:null}),trashAskRecover:()=>{if(asked)restore(asked);},trashAskDelete:()=>{},
    openTrash:()=>{void this.leave(null).then(left=>{if(left&&this.controller.current&&api.isActive()){api.set({folder:'deleted',filter:null,folderSheet:null,sheet:null,q:null});void this.controller.refresh().catch(()=>{});}});},
    closeTrash:()=>api.set({folder:null,trashAsk:null}),emptyTrash:()=>{},trashConfirmGo:()=>{},trashCancel:()=>api.set({trashConfirm:null,trashFull:null})};
+  if(!open&&!trashOpen&&!view.noteRecorder){
+   const selection=this.selectedNoteIds;
+   const rowCount=(view.pinnedRows?.length??0)+(view.otherRows?.length??0);
+   const canSelect=ready&&!busy&&this.phase==='ready'&&rowCount>0;
+   if(!selection&&canSelect)out.beginSelection=()=>{if(api.isActive()&&this.controller.current){this.selectedNoteIds=new Set();this.hooks.paint();}};
+   if(selection){
+    const chosen=[...selection].filter(id=>this.controller.hasViewNote(id)).length;
+    const row=(note:Bag)=>({...note,selectionPressed:selection.has(note.id),actionLabel:`Select ${note.title}`,
+     open:()=>{
+      if(this.deletingSelection||this.controller.pending||this.selectedNoteIds!==selection||!api.isActive()||!this.controller.hasViewNote(note.id))return;
+      if(selection.has(note.id))selection.delete(note.id);else selection.add(note.id);
+      this.hooks.paint();
+     }});
+    Object.assign(out,{selecting:true,primaryNotes:false,canRecord:false,canCreate:false,notesTitle:chosen?`${chosen} selected`:'Select notes',
+     selectionBusy:this.deletingSelection,selectionDeleteDisabled:!chosen||busy||this.deletingSelection||this.phase!=='ready',
+     finishSelection:()=>this.endSelection(),deleteSelection:()=>void this.removeSelection(api),
+     pinnedRows:view.pinnedRows.map(row),otherRows:view.otherRows.map(row)});
+   }
+  }
   if(out.ed&&open){out.ed={...out.ed,
    toCal:saved?()=>{out.ed.closeMenu?.();void this.scheduleDraft(open,'reminder',api);}:undefined,
    toEvent:saved?()=>{out.ed.closeMenu?.();void this.scheduleDraft(open,'event',api);}:undefined,
@@ -388,11 +444,12 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
   const canonical=value.notesSourceMode==='canonical';
   const previousNotesAction=canonical&&!older?.selected?older?.chooseFromMenu:undefined;
   const withNotesMenu=(view:Bag)=>{
-   if(view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
+   if(view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder||view.selecting)return view;
    if(!view.openTrash&&!previousNotesAction)return view;
    const close=()=>value.set({previousNotesMenu:false});
    return {...view,previousNotesAction,previousNotesMenu:!!state.previousNotesMenu,
     openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:close,
+    notesMenuSelect:view.beginSelection?()=>{close();view.beginSelection();}:undefined,
     notesMenuTrash:view.openTrash?()=>{close();view.openTrash();}:undefined,notesMenuTrashDisabled:!view.hasDeleted};
   };
   if(!canonical)return withNotesMenu({...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose});

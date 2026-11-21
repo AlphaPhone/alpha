@@ -2522,10 +2522,12 @@
     <sc-if value="{{notes.canRecord}}"><button class="ib" data-agent-id="notes-record" aria-label="Record voice note" onClick="{{notes.record}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.mic}}"></path></svg></button></sc-if>
       <sc-if value="{{notes.canCreate}}"><button class="ib" data-agent-id="notes-new" aria-label="New note" disabled="{{notes.createDisabled}}" onClick="{{notes.newNote}}"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg></button></sc-if>
     <sc-if value="{{notes.openPreviousNotesMenu}}"><button class="ib" aria-label="Notes options" aria-haspopup="dialog" aria-expanded="{{notes.previousNotesMenu}}" onClick="{{notes.openPreviousNotesMenu}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.more}}"></path></svg></button></sc-if>
+    <sc-if value="{{notes.selecting}}"><button class="ib" aria-label="Delete selected notes" disabled="{{notes.selectionDeleteDisabled}}" onClick="{{notes.deleteSelection}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.trash}}"></path></svg></button><button class="tap notes-selection-done" disabled="{{notes.selectionBusy}}" onClick="{{notes.finishSelection}}">Done</button></sc-if>
   </div>
   <sc-if value="{{notes.previousNotesMenu}}"><div ref="{{notes.previousNotesModal}}" data-alpha-popup style="display:contents">
     <button aria-hidden="true" tabindex="-1" onClick="{{notes.closePreviousNotesMenu}}" style="position:absolute;inset:0;z-index:11;background:transparent"></button>
     <div class="notes-menu" role="dialog" aria-label="Notes options">
+      <sc-if value="{{notes.notesMenuSelect}}"><button onClick="{{notes.notesMenuSelect}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.notesList}}"></path></svg>Select</button></sc-if>
       <sc-if value="{{notes.notesMenuTrash}}"><button data-agent-id="notes-trash" disabled="{{notes.notesMenuTrashDisabled}}" onClick="{{notes.notesMenuTrash}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.trash}}"></path></svg>Recently deleted</button></sc-if>
       <sc-if value="{{notes.previousNotesAction}}"><button onClick="{{notes.previousNotesAction}}"><svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="{{ic.folder}}"></path></svg>On this phone</button></sc-if>
     </div>
@@ -2541,7 +2543,8 @@
     <sc-if value="{{notes.none}}"><div role="status" style="padding:48px 8px;line-height:1.5;display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--mut)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:28px;height:28px"><path d="{{ic.notes}}"></path></svg><h2 style="margin:0;font-size:16px;font-weight:600">{{notes.emptyTitle}}</h2></div></sc-if>
     <sc-if value="{{notes.hasPinned}}"><div class="notes-section" style="padding: 8px 8px 2px; font-size: 13px; font-weight: 600; color: var(--mut)">Pinned</div></sc-if>
     <sc-for list="{{notes.pinnedRows}}" as="n" key="{{n.id}}">
-          <button data-alpha-note-id="{{n.id}}" onClick="{{n.open}}" class="tap notes-row" data-agent-id="{{n.id}}" aria-label="Open {{n.title}}" aria-current="{{n.current}}" style="display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 8px; border-bottom: 1px solid var(--line); box-sizing: border-box; text-align: left">
+          <button data-alpha-note-id="{{n.id}}" onClick="{{n.open}}" class="tap notes-row" data-agent-id="{{n.id}}" aria-label="{{n.actionLabel}}" aria-pressed="{{n.selectionPressed}}" aria-current="{{n.current}}" style="display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 8px; border-bottom: 1px solid var(--line); box-sizing: border-box; text-align: left">
+            <sc-if value="{{notes.selecting}}"><span class="notes-select-check" aria-hidden="true"><sc-if value="{{n.selectionPressed}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.check}}"></path></svg></sc-if></span></sc-if>
             <sc-if value="{{n.isVoice}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; color: var(--acct)"><path d="{{ic.notesWave}}"></path></svg></sc-if>
             <span style="display: block; flex: 1 1 auto; min-width: 0">
               <span style="display: block; font-weight: 600; font-size: 16px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{n.title}}</span>
@@ -2551,7 +2554,8 @@
     </sc-for>
     <sc-if value="{{notes.notesHead}}"><div class="notes-section" style="padding: 14px 8px 2px; font-size: 13px; font-weight: 600; color: var(--mut)">Notes</div></sc-if>
     <sc-for list="{{notes.otherRows}}" as="n" key="{{n.id}}">
-          <button data-alpha-note-id="{{n.id}}" onClick="{{n.open}}" class="tap notes-row" data-agent-id="{{n.id}}" aria-label="Open {{n.title}}" aria-current="{{n.current}}" style="display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 8px; border-bottom: 1px solid var(--line); box-sizing: border-box; text-align: left">
+          <button data-alpha-note-id="{{n.id}}" onClick="{{n.open}}" class="tap notes-row" data-agent-id="{{n.id}}" aria-label="{{n.actionLabel}}" aria-pressed="{{n.selectionPressed}}" aria-current="{{n.current}}" style="display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 8px; border-bottom: 1px solid var(--line); box-sizing: border-box; text-align: left">
+            <sc-if value="{{notes.selecting}}"><span class="notes-select-check" aria-hidden="true"><sc-if value="{{n.selectionPressed}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.check}}"></path></svg></sc-if></span></sc-if>
             <sc-if value="{{n.isVoice}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; color: var(--acct)"><path d="{{ic.notesWave}}"></path></svg></sc-if>
             <span style="display: block; flex: 1 1 auto; min-width: 0">
               <span style="display: block; font-weight: 600; font-size: 16px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{n.title}}</span>

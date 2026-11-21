@@ -1,6 +1,7 @@
 import { testMocksEnabled } from '../build-flags';
 import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import { nextDefaultNoteTitle } from '../runtime/note-default-title';
+import { NOTES_DELETE_TOAST_MS } from '../runtime/notes-trash-policy';
 import { accessibilityTimeoutScale } from '../runtime/accessibility-timeout';
 import { recordRendererFailure } from '../runtime/crash-log';
 import iconCatalog from '../icon-catalog.json';
@@ -3282,7 +3283,7 @@ function notesAway(api) {
   return p;
 }
 function notesUndoable(api, note, idx, label) {
-  api.toast(label, { undo: function () { var s = api.get("notes"); if (recordById(s.list, note.id)) return; var l = s.list.slice(); l.splice(Math.min(idx, l.length), 0, note); api.set({ list: l }); } });
+  api.toast(label, { durationMs: NOTES_DELETE_TOAST_MS, undo: function () { var s = api.get("notes"); if (recordById(s.list, note.id)) return; var l = s.list.slice(); l.splice(Math.min(idx, l.length), 0, note); api.set({ list: l }); } });
 }
 async function notesDelete(api, id) {
   if (api.canonicalNotes) return api.canonicalNotes.remove(id, api);
@@ -3328,10 +3329,11 @@ registerView("notes", {
     if (st.sheet) { api.set({ sheet: null }); return true; }
     if (st.menu) { api.set({ menu: null }); return true; }
     if (st.open) { notesClose(api); return true; }
+    if (api.canonicalNotes?.endSelection()) return true;
     if (st.filter) { api.set({ filter: null }); return true; }
     return false;
   },
-  onLeave: function (api) { var p = notesAway(api); if (p) api.set(p); },
+  onLeave: function (api) { api.canonicalNotes?.endSelection(); var p = notesAway(api); if (p) api.set(p); },
   suggestions: function (st, api) {
     var n = st.open ? recordById(st.list, st.open) : null;
     if (n && n.kind === "voice") {
@@ -3424,7 +3426,7 @@ registerView("notes", {
       var voiceDur = n.kind === "voice" ? (typeof n.dur === "number" ? n.dur : n.audio && typeof n.audio.durationMs === "number" ? n.audio.durationMs / 1000 : null) : null;
       var preview = notePreview(n) || (n.audio && typeof n.audio.transcript === "string" ? n.audio.transcript.trim().slice(0, 240) : "");
       return {
-        id: n.id, title: n.title || "Untitled", date: noteDateLabel(n, now) || (typeof n.when === "string" ? n.when : ""),
+        id: n.id, title: n.title || "Untitled", actionLabel: "Open " + (n.title || "Untitled"), date: noteDateLabel(n, now) || (typeof n.when === "string" ? n.when : ""),
         preview: (voiceDur != null ? notesFmt(voiceDur) + (preview ? " · " : "") : "") + preview,
         isVoice: n.kind === "voice", isLink: n.kind === "link", pinned: !!n.pinned,
         current: st.open === n.id ? "true" : "false", open: function () { api.set(Object.assign(notesLeave(api, n.id), { pos: 0, menu: null })); }
@@ -5625,7 +5627,7 @@ class Component extends DCLogic {
     // a provider or deletion deadline. Consecutive passive notices share the next slot.
     if (this.toastActive && this.undoFn) {
       var queue = this.toastQueue || (this.toastQueue = []), last = queue[queue.length - 1];
-      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind };
+      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind, durationMs: opts.durationMs };
       if (last && !last.undo && !next.undo) queue[queue.length - 1] = next;
       else queue.push(next);
       return;
@@ -5639,8 +5641,8 @@ class Component extends DCLogic {
     if (!inside) this.toastOrigin = active;
     this.toastHeld = inside; this.toastActive = true;
     this.toastSequence = (this.toastSequence || 0) + 1;
-    // Undo stays as long as the reviewed-deletion notice (10 s) so the two restore offers match.
-    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * accessibilityTimeoutScale();
+    var defaultDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500));
+    this.toastDuration = (Number.isFinite(opts.durationMs) ? Math.max(1900, Math.min(12000, opts.durationMs)) : defaultDuration) * accessibilityTimeoutScale();
     this.undoFn = opts.undo || null;
     this.toastKind = opts.kind === "error" ? "error" : "";
     this.setState({ toast: msg, toastUndo: !!opts.undo }); this.scheduleToast();
@@ -5665,7 +5667,7 @@ class Component extends DCLogic {
       if (heldFocus && doc?.activeElement === doc.body && origin?.isConnected && !origin.closest("[inert],[hidden]")) origin.focus({ preventScroll: true });
       var next = self.toastQueue?.shift();
       if (next) {
-        self.showToast(next.msg, { undo: next.undo, kind: next.kind });
+        self.showToast(next.msg, next);
         if (heldFocus) { self.toastHeld = false; self.scheduleToast(); }
       }
     });

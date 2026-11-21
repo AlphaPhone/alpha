@@ -7,6 +7,7 @@ export {NOTES_TRASH_FULL_CODE,NotesTrashFull,isNotesTrashFull} from '../../../..
 export const NOTES_TRASH_RETENTION_MS=30*24*60*60*1000;
 export const NOTES_TRASH_MAX_ENTRIES=10000;
 export const NOTES_TRASH_MAX_BYTES=30*1024*1024;
+export const NOTES_DELETE_TOAST_MS=4000;
 /**
  * The generic retention policy is the elizaOS Notes Trash module; Alpha
  * supplies the product inputs: 30 days, its limits, its note kinds and voice recordings.

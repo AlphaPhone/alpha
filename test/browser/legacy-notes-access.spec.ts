@@ -16,6 +16,8 @@ test('retained previous notes have a visible route and return to the current col
  const options=page.getByRole('button',{name:'Notes options',exact:true});
  const menu=page.getByRole('dialog',{name:'Notes options',exact:true});
  await options.click();
+ await expect(menu.getByRole('button',{name:'Select',exact:true})).toBeFocused();
+ await page.keyboard.press('Tab');
  await expect(menu.getByRole('button',{name:'On this phone',exact:true})).toBeFocused();
  await page.keyboard.press('Escape');
  await expect(menu).toHaveCount(0);
