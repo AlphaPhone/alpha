@@ -236,6 +236,9 @@ export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];
  directionsFromHere?:boolean;
  /** The exact place the agent resolved. Maps selects it by its provider id and coordinates, under its own name. */
  place?:MapsCardPlace;
+ /** The named place a `places` card's search was made around. Maps searches `mapQuery` around it again,
+  * not around its viewport or the phone, so it shows the places chat listed. */
+ searchNear?:{latitude:number;longitude:number};
  /** How to travel on a `directionsFromHere` card, when the request named it. */
  travelMode?:MapsCardRoute['travelMode'];
  /** A planned route for Maps to draw: both ends as `latitude, longitude`, and how to travel. */
@@ -257,7 +260,8 @@ const point=(place:MapsCardPlace)=>`${place.latitude}, ${place.longitude}`;
 function present(card:MapsCardSpec):MapsChatCard{
  switch(card.kind){
   case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',place:card.place};
-  case 'places':return {kind:card.kind,title:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query};
+  case 'places':return {kind:card.kind,title:card.near?`“${card.query}” near ${card.near.name}`:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query,
+   ...(card.near?{searchNear:{latitude:card.near.latitude,longitude:card.near.longitude}}:{})};
   case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:point(card.destination),
    route:{origin:point(card.origin),destination:point(card.destination),name:card.destination.name,travelMode:card.travelMode}};
   case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',place:card.place};
