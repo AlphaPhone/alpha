@@ -59,6 +59,9 @@ test('review text is short and names Photos',()=>{
   assert.equal(d({type:'photos_open',id:id(1,'v')}).title,'Open video');
   assert.deepEqual(d({type:'photos_album_create',name:'Trip',ids:[id(1),id(2)]}),{title:'Create album “Trip”',description:'2 items'});
   assert.deepEqual(d({type:'photos_share',ids:[id(1)]}),{title:'Share 1 item',description:"Android share sheet"});
+  // The open-item target (photos.view-selected.v1) names no ids; the card says so instead of a count.
+  assert.deepEqual(d({type:'photos_album_create',name:'Trip',ids:[],selected:true}),{title:'Create album “Trip”',description:'The open item'});
+  assert.deepEqual(d({type:'photos_share',ids:[],selected:true}),{title:'Share the open item',description:"Android share sheet"});
 });
 
 test('results are validated exactly',()=>{
@@ -78,4 +81,23 @@ test('review only in Photos on the unlocked phone',()=>{
   assert.equal(m.photosViewContextAllowed({view:'photos'}),true);
   assert.equal(m.photosViewContextAllowed({view:'photos',sensitive:true}),false);
   assert.equal(m.photosViewContextAllowed({view:'home'}),false);
+});
+
+test('Alpha\'s coordinator accepts the open-item target only with photos.view-selected.v1',async()=>{
+  const {tsImport}=await import('./support/ts-import.mjs');
+  const {DeviceActionCoordinator}=await tsImport(new URL('../apps/app/src/ui/device-actions/client-coordinator.ts',import.meta.url).pathname,import.meta.url);
+  assert.equal(m.PHOTOS_SELECTED_CAPABILITY,'photos.view-selected.v1');
+  const session={ownerId:'owner-1',agentId:'agent-1',sessionId:'session-1',origin:'https://agent.example'},identity={installationId:'installation-1',enrollmentId:'enrollment-1'};
+  const coordinator=capabilities=>new DeviceActionCoordinator({session,scope:'test',credential:{...identity,capabilities},
+    profile:{assistantName:'Alpha',operations:{admitView:()=>true,parseWorkflowRead:()=>{throw Error('no workflow reads');}},workflow:{parseBinding:()=>{throw Error('no workflow');}}}});
+  const proposal=operation=>({id:'11111111-1111-4111-8111-111111111111',subjectUserId:session.ownerId,requestedBy:session.agentId,action:'device_action',
+    digest:'a'.repeat(64),state:'pending',expiresAt:new Date(Date.now()+60_000).toISOString(),payload:{action:'device_action',version:1,...identity,operation}});
+  const view=['photos.library.v1','photos.view.v1'];
+  for(const operation of [{type:'photos_share',ids:[],selected:true},{type:'photos_album_create',name:'Trip',ids:[],selected:true}]){
+    assert.throws(()=>coordinator(view).parse(proposal(operation)),/Photos actions were not negotiated/,operation.type);
+    assert.deepEqual(coordinator([...view,m.PHOTOS_SELECTED_CAPABILITY]).parse(proposal(operation)).operation,operation,operation.type);
+    assert.throws(()=>coordinator(['photos.library.v1',m.PHOTOS_SELECTED_CAPABILITY]).parse(proposal(operation)),/Photos actions were not negotiated/,'the open-item form still needs the view capability');
+  }
+  // Library ids need only the view capability.
+  assert.deepEqual(coordinator(view).parse(proposal({type:'photos_share',ids:[id(1)]})).operation,{type:'photos_share',ids:[id(1)]});
 });

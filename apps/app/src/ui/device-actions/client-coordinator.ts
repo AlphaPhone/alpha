@@ -135,8 +135,8 @@ import {
   isPhotosViewOperation,
   PHOTOS_VIEW_DIRECT_TYPES,
   type PhotosViewResult,
-  photosViewCapabilityAvailable,
   photosViewContextAllowed,
+  photosViewFormSupported,
   validatePhotosViewResult,
 } from "@elizaos/plugin-assistant/device-actions/photos-view-contract";
 import {
@@ -994,7 +994,7 @@ export class DeviceActionCoordinator<
       throw Error("Notes folders were not negotiated with this agent");
     if (
       isPhotosViewOperation(op) &&
-      !photosViewCapabilityAvailable(this.credential.capabilities)
+      !photosViewFormSupported(op, this.credential.capabilities)
     )
       throw Error("Photos actions were not negotiated with this agent");
     if (
