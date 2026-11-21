@@ -116,11 +116,11 @@ pure val weight_selectAll = 15
 pure val weight_askToDelete = 20
 pure val weight_confirmDelete = 5
 pure val weight_openMoveTo = 40
-pure val weight_moveInto = 20
+pure val weight_moveInto = 40
 pure val weight_moveUp = 5
 pure val weight_destRead = 100
-pure val weight_begin = 40
-pure val weight_keepBoth = 15
+pure val weight_begin = 25
+pure val weight_keepBoth = 40
 pure val weight_replaceThem = 5
 pure val weight_goBack = 5
 pure val weight_finished = 100
@@ -722,12 +722,13 @@ pure def stepOneRequestPerChange(before: Files, via: str, after: Files, out: Lis
   })
 ```
 
-### The owner shares the selection from the share sheet, and Android says whether it could open it
+### The owner opens the share sheet for the selection while none is open, shares from it, and Android says whether it could open it
 
 Whether an email account is set up is the mail area's fact.
 
 ```quint
-pure def canOpenShare(s: Files, mail: bool, by: Actor): bool = by == Owner and browse(s) == Showing and s.picked.length() > 0
+pure def canOpenShare(s: Files, mail: bool, by: Actor): bool =
+  by == Owner and browse(s) == Showing and s.picked.length() > 0 and s.change.panel == 0
 
 pure def openShare(s: Files, mail: bool, by: Actor): Files = { ...s, change: C::openShare(s.change, chosen(s), mail, 0) }
 
