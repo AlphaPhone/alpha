@@ -201,7 +201,10 @@ pure def stepWhatWasSavedIsSaid(before: Reminder, via: str, after: Reminder): bo
       (after.change == Schedule and ((after.attempt.outcome == A::Refused and after.reason != NoReason) or via == "found")))
 ```
 
-### A reminder is unscheduled until the agent creates it, pending while its scheduling is unanswered or unknown, and not saved only for a scheduling that was refused or that a read did not find
+### A reminder is unscheduled until the agent creates it, pending while its scheduling is unanswered or unknown, not saved only for a scheduling that was refused or that a read did not find, and cancelled directly only as a to-do
+
+Discovered by the proof: only a to-do is ever cancelled, so a cancellation
+under way never belongs to a reminder with a time.
 
 ```quint
 pure def alwaysTheStatusFollowsTheRecord(r: Reminder): bool =
@@ -211,7 +214,7 @@ pure def alwaysTheStatusFollowsTheRecord(r: Reminder): bool =
     and ((r.status == Pending and r.change == Schedule) implies (r.attempt.outcome != A::Confirmed and r.attempt.outcome != A::Refused))
     and (r.status == Unsaved implies (r.change == Schedule and (r.attempt.outcome == A::Refused or r.attempt.outcome == A::Unknown)))
     and (r.readBack implies r.attempt.outcome != A::Planned)
-    and r.basis <= r.revision
+    and r.basis <= r.revision and (r.change == Cancel implies r.at == 0)
 ```
 
 ### Whether Alpha cannot tell how the last change ended is shown to the owner
@@ -278,11 +281,11 @@ pure def lawAnOlderAlarmNeverRings(r: Reminder, now: int, revision: int, who: O:
   (revision != r.revision implies not(canDue(r, now, revision, true, who))) and not(canDue(r, now, r.revision, false, who))
 ```
 
-### A posted reminder was posted at or after its time, and a to-do never rings
+### A posted reminder was posted at or after its time, a to-do never rings, and a daily reminder always has a time to ring at
 
 ```quint
 pure def alwaysNoEarlyReminder(r: Reminder): bool =
-  (r.status == Posted implies (r.postedAt >= r.at and r.at > 0)) and (r.daily implies r.at > 0)
+  (r.status == Posted implies (r.postedAt >= r.at and r.at > 0)) and (r.daily implies (r.at > 0 and (timed(r.change) implies r.target > 0)))
 ```
 
 ### A reminder can ring
@@ -322,7 +325,7 @@ pure def allowed(r: Reminder, change: Change): bool =
 pure def canDecide(r: Reminder, change: Change, seen: int, number: int, target: int, now: int, signedIn: int, by: O::Actor): bool =
   by == O::Owner and signedIn == r.owner and allowed(r, change) and seen == r.revision and A::ended(r.attempt)
     and not(r.attempt.outcome == A::Unknown and r.revision == r.basis) and number > r.attempt.id
-    and (timed(change) implies target > now)
+    and (timed(change) implies (target > now and target > 0))
 
 pure def decide(r: Reminder, change: Change, seen: int, number: int, target: int, now: int, signedIn: int, by: O::Actor): Reminder =
   { ...r, change: change, target: if (change == Snooze or change == Reopen) target else r.at, decidedAt: now, basis: r.revision,
