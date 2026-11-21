@@ -6,9 +6,10 @@ the mailbox, given in steps and never widened here. Inbox takes each
 connected account's grant as the account area reports it, and states only
 which of those consents each of its deeds needs. The
 [list](./index.md), the [message](./message.md), the
-[drafts](./drafts.md), the [operations](./sending.md), [what Alpha may
-do](./agent.md) and the [notices](./notices.md) all ask this before they
-act, each for the account it acts on.
+[drafts](./drafts.md), the [operations](./sending.md),
+[marking](./marking.md), [what Alpha may do](./agent.md) and the
+[notices](./notices.md) all ask this before they act, each for the
+account it acts on, which the event names apart from the grant.
 
 ## Story: Do only what the grant allows
 
@@ -18,7 +19,8 @@ act, each for the account it acts on.
 ### A grant is the consent to read, to send and to change the mailbox that Google gave for one account
 
 Changing the mailbox covers saving and deleting Gmail drafts, archiving,
-moving to Trash and marking read or unread. Account 0 is no account.
+moving to Trash, restoring, and marking read or unread. Account 0 is no
+account.
 
 ```quint
 type Grant = { read: bool, send: bool, modify: bool }
