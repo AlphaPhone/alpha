@@ -169,6 +169,14 @@ test('an allowance refills all the time, and a call is refused when what is left
   assert.match(renderSimulation(result), /Cached \d+ of \d+ input tokens: \d+\.\d%/);
 });
 
+test('a cap above the provider ceiling holds the ceiling, the same as no cap', () => {
+  const model = {...PLAIN, uncachedTpm: 60_000, totalTpm: 600_000, uncappedOutputHold: 16_384, outputHoldCeiling: 16_384};
+  const lowest = maxTokens => simulateProvider([used(0, 20_000, {ms: 3_000, ...(maxTokens ? {maxTokens} : {}), usage: {input: 20_000, output: 300, cached: 0}})], model).allowanceLeft.lowest;
+  assert.equal(lowest(4096), 60_000 - 20_000 - 4096);
+  assert.equal(lowest(40_960), 60_000 - 20_000 - 16_384);
+  assert.equal(lowest(undefined), lowest(40_960));
+});
+
 test('a running call holds its input and its output cap; a finished one was charged only what it used', () => {
   const model = {...PLAIN, uncachedTpm: 60_000, totalTpm: 600_000};
   // 20,000 in and a cap of 8,192, of which 300 were used, over three seconds.
@@ -241,13 +249,13 @@ test('a cached count the provider did not report stays absent when a logged call
 // Measured on the provider: at admission a call holds its whole input, cached or not, estimated
 // about a quarter high, plus its output cap, or 16,384 tokens when it sends no cap.
 test('a call is admitted against its estimated input and its cap, and charged what it used', () => {
-  assert.equal(CEREBRAS_QWEN.admissionInputFactor, 1.25);
+  assert.equal(CEREBRAS_QWEN.admissionInputFactor, 1.24);
   assert.equal(CEREBRAS_QWEN.uncappedOutputHold, 16_384);
   const receipts = 'x '.repeat(4000);
   const call = (at, extra = {}) => stage1(at, receipts, 'go', extra);
   const input = simulateProvider([call(0)]).inputTokens;
   const over = (calls, uncachedTpm) => simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm}).uncachedMinute.callsOver;
-  const held = Math.round(1.25 * input);
+  const held = Math.round(1.24 * input);
   // No cap sent: the provider holds 16,384 for the output.
   assert.equal(over([call(0)], held + 16_384), 0);
   assert.equal(over([call(0)], held + 16_383), 1);

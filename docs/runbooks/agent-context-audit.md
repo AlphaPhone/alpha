@@ -12,10 +12,16 @@ documentation:
   one request of 18,947 uncached tokens the reported allowance was full again 7.6
   seconds later.
 - **A request holds more than it uses.** When it is admitted it holds its whole input,
-  cached or not, estimated about a quarter high, plus its output cap; a request that
-  sends no cap holds 16,384 for the output. It is refused (HTTP 429) when the allowance
-  left is smaller than that. When it finishes it gives the hold back and is charged the
-  input that missed the cache plus its output. Cached input is never charged.
+  cached or not, estimated about a quarter high (1.24 times), plus its output cap up to
+  16,384; a request that sends no cap, or a larger one, holds 16,384 for the output. It
+  is refused (HTTP 429) when the allowance left is smaller than that. When it finishes
+  it gives the hold back and is charged the input that missed the cache plus the output
+  it actually wrote. Cached input is never charged.
+- **The model's limits.** The context window is 131,072 tokens and the most a call can
+  write is 40,960, which is also the limit when no cap is sent (an uncapped call stopped
+  at exactly 40,960). Reasoning tokens count inside the cap; the model reasons by default
+  unless the request says `reasoning_effort: none`. Since one request's hold must fit in
+  the 150K allowance, the largest input an uncapped request can ever carry is about 107K.
 - **A refusal asks for a longer wait than is needed.** It carries `Retry-After: 59`.
   Three requests of 36K tokens refused together and re-sent each second were admitted
   5, 14 and 27 seconds later, as the allowance refilled. A refused request is not
@@ -524,15 +530,15 @@ November 19 and 20 replayed through the branch (Stage 1 and the first planner ca
 | Output cap on Stage 1 and the planner | Lowest allowance, 1 phone | 2 phones | 3 phones |
 | --- | --- | --- | --- |
 | 4,096 | 92K | 64K | 45K |
-| None sent (held as 16,384) | 80K | 51K | 32K |
-| 16,384 | 80K | 51K | 32K |
-| 32,768 | 63K | 35K | 16K |
-| 40,960 | 55K | 27K | 8K |
+| None sent, or the model's 40,960 | 80K | 52K | 33K |
 
-No call of these replays starts without enough allowance under any policy, even three
-phones at 40,960. A cap costs allowance only while its call runs. Sending no cap gives
-the model its maximum output for the same hold as an explicit 16,384, which is why an
-uncapped call once streamed 40,960 tokens.
+No call of these replays starts without enough allowance under either policy, even with
+three phones. A cap costs allowance only while its call runs: the model's maximum holds
+12,288 more per running call than 4,096, and nothing more is charged unless more is
+written. On the recorded synthetic conversations, which send turns every 5 to 10
+seconds, one phone never runs short either way, while two or three phones on one key
+run short under every policy: there the uncached input alone exceeds the refill, and
+the output cap changes the count of short calls by 1% to 4%.
 
 ### The phone's decode mode
 
