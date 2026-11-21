@@ -603,14 +603,43 @@ strict forms never did. Strict costs about 110 tokens more per request.
 - No tool definition that differs between two turns of a conversation in one view: in
   the audit, the same digest for the same tool name.
 
+### Follow-ups after the merge
+
+Upstream branch `claude/agent-context-followups` (local, on upstream develop
+`0fc3586dce`), each change reviewed by an independent verifier before it was committed:
+
+| Change | What it fixes | Measured |
+| --- | --- | --- |
+| History window kept when a message or outcome lands mid-turn; failure notices out of prompt history | Planner and evaluator calls that carried the whole room | 580-message room: planner request 374K to 53K characters |
+| Calendar details described once | Repeated descriptions on alternate spellings | CALENDAR 21.5K to 19.4K characters |
+| Role-word contact query | "Ping my brother" becoming a contact lookup | Lookups first 0 of 15 (3 of 8 recorded before) |
+| Constant evaluator schema, no planner routing text | Evaluator bytes changing every turn | One request: 3,072 to 17,408 of 17.5K reused |
+| Guessed tools left behind tool search on device turns | Tool lists changing every turn | 9.4 to 6.2 tools per request, definitions down 26% |
+| Typed Cloud refusal, canonical form for a product Cloud | Up to ten uploads per refused step | One upload per refusal |
+| Stage 1 re-send on `parser_error`; cut-off Stage 1 replies "cut off" | "I hit a snag" after a cut-off reasoning call | Re-send answered 20 of 20 |
+| Minute stamps | 25 tokens per stamp | 4% at Stage 1 and the planner, 9% at the evaluator |
+| `ELIZA_PLANNER_MAX_TOKENS=model`; no re-call after a model-maximum stop | The planner's 8,192 default; three retries of a cut-off | |
+| Streamed idle limit (60 s) on the direct route; `parser_error` never transient | A silent re-send waiting for the 180 s deadline | |
+| Reminder planning at low reasoning, both routes | Reasoning at "high" by default | Correct 36 of 40 against 21 of 25; about two thirds fewer output tokens |
+| Every review proposal of one reply recorded | Text plus alarm proposing only the text | Both calls in the first reply 10 of 10 |
+
+Not landed after review: a compact one-line rendering of recorded outcomes (22% to 40%
+smaller requests, but a third party's forged outcome line misled the model more often
+than today's form; a per-room marker is under test), and narrowing a reminder's
+retrieval (every rule tried so far dropped a second tool the owner asked for in some
+wording).
+
 ## 4. Known and open
 
 - **No phone measurement yet.** The first changes are merged (upstream
   `6e2a094775`, product `983f47b18e`); everything above is a host measurement until a
   build on a phone is audited.
-- **A text and an alarm in one request proposes only the text.** The planner's first
-  reply usually holds both calls; the turn stops at the first approval pause with the
-  second still queued.
+- **A photo and a text in one request proposes only the photo.** The photo is a handoff
+  the phone runs without a card, which ends the turn's queue. (A text and an alarm are
+  both recorded on the follow-up branch, except on the Phone, Messages and Contacts
+  screens, which hold one card at a time.)
+- **The Cloud route drops the provider's error code from a 400,** so the Stage 1 re-send
+  after a `parser_error` applies only on the direct route.
 - **Tools chosen per request sit before the system prompt** in the provider's read
   order: Calendar (18K characters), reminders (20K), messaging (13K). A turn whose tool
   set differs from the last one's re-reads the system prompt and the history. In the
