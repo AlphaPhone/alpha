@@ -27,7 +27,6 @@ lemma forbid_ensures(d: Approvals, id: int, operation: app__approvals__operation
     assert after.proposals == d.proposals[id := p];
     assert entry(after, id) == p;
     assert entry(d, id) == app__approvals__proposal_initial;
-    assert id !in d.leases;
     assert leaseOf(after, id) == app__approvals__lease_initial;
     forall i | i in d.ids ensures entry(after, i) == entry(d, i) && leaseOf(after, i) == leaseOf(d, i) {
       EntryAfterPut(d, after, id, p, i);
@@ -70,7 +69,6 @@ lemma propose_ensures(d: Approvals, id: int, operation: app__approvals__operatio
     assert after.proposals == d.proposals[id := p];
     assert entry(after, id) == p;
     assert entry(d, id) == app__approvals__proposal_initial;
-    assert id !in d.leases;
     assert leaseOf(after, id) == app__approvals__lease_initial;
     forall i | i in d.ids ensures entry(after, i) == entry(d, i) && leaseOf(after, i) == leaseOf(d, i) {
       EntryAfterPut(d, after, id, p, i);
@@ -113,7 +111,6 @@ lemma start_ensures(d: Approvals, id: int, operation: app__approvals__operation_
     assert after.proposals == d.proposals[id := p];
     assert entry(after, id) == p;
     assert entry(d, id) == app__approvals__proposal_initial;
-    assert id !in d.leases;
     assert leaseOf(after, id) == app__approvals__lease_initial;
     forall i | i in d.ids ensures entry(after, i) == entry(d, i) && leaseOf(after, i) == leaseOf(d, i) {
       EntryAfterPut(d, after, id, p, i);

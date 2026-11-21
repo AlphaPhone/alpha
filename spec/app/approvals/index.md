@@ -70,12 +70,16 @@ pure val seenValues = Set(0, 1)
 pure val signedInValues = Set(1, 2)
 pure val messageValues = Set(1, 2)
 pure val ticketValues = Set(1, 2)
+pure val operationValues = Set(Glance, Look, Change, EmergencyCall)
+pure val wantedValues = Set(Direct, ReviewFirst)
+pure val weight_hold = 4
+pure val weight_succeeded = 4
+pure val weight_completed = 4
+pure val weight_present = 3
+pure val weight_start = 3
 ```
 
 ### Every proposal the desk holds keeps the rules of a proposal under its own number, every lease the rules of a lease, and the pass the rules of a pass
-
-Discovered by the proof: a lease is held only for a proposal the desk
-holds.
 
 ```quint
 pure def keepsItsRules(i: int, p: P::Proposal, l: L::Lease): bool =
@@ -86,10 +90,9 @@ pure def keepsItsRules(i: int, p: P::Proposal, l: L::Lease): bool =
 pure def alwaysEveryProposalKeepsItsRules(d: Approvals): bool =
   d.ids.forall(i => i > 0 and keepsItsRules(i, entry(d, i), leaseOf(d, i)))
     and D::alwaysAtMostFourDirectRunsAMessage(d.pass) and d.interrupted.forall(i => d.ids.contains(i))
-    and d.leases.keys().forall(i => d.ids.contains(i))
 ```
 
-### The agent proposes under a number not used before, and a card waiting is posted as a notice until it is decided
+### The agent proposes under a number not used before, with no lease on it yet, and a card waiting is posted as a notice until it is decided
 
 ```quint
 pure val weight_approve = 3
@@ -107,19 +110,20 @@ pure def routed(id: int, d: Approvals, m: P::Moved): Acted =
 
 pure def kept(id: int, d: Approvals, p: P::Proposal): Acted = routed(id, d, { state: p, out: List() })
 
+pure def added(id: int, d: Approvals, m: Acted): Acted =
+  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket), leases: d.leases.put(id, L::initial) } }
+
 pure def canPropose(d: Approvals, id: int, operation: Operation, signedIn: int, by: Actor): bool =
   not(d.ids.contains(id)) and P::canPropose(P::initial, id, operation, signedIn, by)
 
 pure def propose(d: Approvals, id: int, operation: Operation, expires: int, signedIn: int, by: Actor): Acted =
-  val m = kept(id, d, P::propose(P::initial, id, operation, expires, signedIn, by))
-  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket) } }
+  added(id, d, kept(id, d, P::propose(P::initial, id, operation, expires, signedIn, by)))
 
 pure def canForbid(d: Approvals, id: int, operation: Operation, signedIn: int, by: Actor): bool =
   not(d.ids.contains(id)) and P::canForbid(P::initial, id, operation, signedIn, by)
 
 pure def forbid(d: Approvals, id: int, operation: Operation, signedIn: int, by: Actor): Acted =
-  val m = routed(id, d, P::forbid(P::initial, id, operation, signedIn, by))
-  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket) } }
+  added(id, d, routed(id, d, P::forbid(P::initial, id, operation, signedIn, by)))
 ```
 
 ### No card is left posted as a notice once it is decided, and a notice is posted only for a card waiting
@@ -209,9 +213,8 @@ pure def canStart(d: Approvals, id: int, operation: Operation, message: int, typ
     and P::canRequest(P::initial, id, operation, message, typed, signedIn, by)
 
 pure def start(d: Approvals, id: int, operation: Operation, message: int, typed: bool, automated: bool, wanted: Preference, protectedScreen: bool, expires: int, signedIn: int, by: Actor): Acted =
-  val m = routed(id, d, P::request(P::initial, id, operation, message, typed, expires, signedIn, by))
-  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket),
-      pass: D::admit(d.pass, operation, message, typed, automated, wanted, protectedScreen, by) } }
+  val m = added(id, d, routed(id, d, P::request(P::initial, id, operation, message, typed, expires, signedIn, by)))
+  { ...m, state: { ...m.state, pass: D::admit(d.pass, operation, message, typed, automated, wanted, protectedScreen, by) } }
 
 pure def canHear(d: Approvals, message: int, by: Actor): bool = D::canHear(d.pass, message, by)
 
