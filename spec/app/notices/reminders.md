@@ -1,275 +1,310 @@
 # Reminders
 
-A reminder is a record the agent schedules on the phone: it rings as a
-notification when its time comes, and the owner completes, snoozes, reopens
-or cancels it. Every change is recorded before Android is asked, asked
-once, and read back after a restart; each change is one use of the kit's
-[attempt](../../kit/attempt.md). Reminders have no view of their own: they
-show in Calendar and on Home, and a tap on a reminder's notification opens
-it through the [notice taps](./index.md). Deleting a reminder goes through
-the [deletion notice](./deletions.md).
+The owner's reminders on the phone, as Alpha last read them: each is a
+[reminder](./reminder.md) held here under its number. The desk keeps the
+read of the whole list, which shows only its newest answer, marks the list
+stale when it may be out of date and says once that it could not be read;
+it lets the agent leave only a few creations unconfirmed at a time; and it
+picks every reminder up once after a restart. Reminders have no view of
+their own: Calendar and Home show this list. The cloud agent's feed of
+owner reminders is the cloud area's.
 
-## Story: Have the agent set a reminder
+## Story: See my reminders as they are
 
-> As the owner, I want a reminder the agent sets for me to be scheduled
-> once, and to be told plainly when Android would not let it be scheduled.
+> As the owner, I want the reminders Alpha shows me to be the newest it
+> read, marked when they may be out of date, and to be told once when they
+> could not be read.
 
-### A reminder has a status, its time, the revision shown, the change under way with its time and attempt, and when it was posted
-
-The status is unscheduled, pending, scheduled, posted, completed,
-cancelled, permission denied or scheduling failed.
+### The desk holds each reminder under its number, the listing it was sent after, the read of the list, whether the list shown may be out of date and whether its failure was told, whether the agent was refused for too many unconfirmed creations, and what a restart left to pick up
 
 ```quint
+import reminder as M from "./reminder"
 import attempt as A from "../../kit/attempt"
+import read as W from "../../kit/read"
+import operation as O from "../approvals/operation"
 
-type Status = Unscheduled | Pending | Scheduled | Posted | Completed | Cancelled | PermissionDenied | SchedulingFailed
-type Change = Schedule | Complete | Snooze | Reopen | Cancel
-type Answer = Done | Denied | Failed | Lost
-type Act = Operate | ReadBack | Withdraw
-type Effect = { act: Act, number: int, change: Change, at: int }
-type Reminder = {
-  status: Status, at: int, revision: int,
-  change: Change, target: int, decidedAt: int, attempt: A::Attempt, postedAt: int,
+type Effect = Reminding({ reminder: int, does: M::Effect }) | Listing({ ticket: int, failed: bool })
+type Reminders = {
+  reminders: int -> M::Reminder, numbers: Set[int], since: int -> int, listing: W::Read, stale: bool, reported: bool,
+  full: bool, interrupted: Set[int],
 }
-type Worked = { state: Reminder, out: List[Effect] }
+type Acted = { state: Reminders, out: List[Effect] }
 
-pure val initial: Reminder = {
-  status: Unscheduled, at: 0, revision: 0,
-  change: Schedule, target: 0, decidedAt: 0, attempt: A::plan(0), postedAt: 0,
+pure val maxUnconfirmed = 2
+
+pure val initial: Reminders = {
+  reminders: Map(), numbers: Set(), since: Map(), listing: W::unread, stale: true, reported: false, full: false, interrupted: Set(),
 }
-```
 
-### What the simulator tries
+pure def held(d: Reminders, number: int): M::Reminder =
+  if (not(d.numbers.contains(number))) M::initial else if (d.reminders.keys().contains(number)) d.reminders.get(number) else M::initial
 
-```quint
+pure def sinceOf(d: Reminders, number: int): int = if (d.since.keys().contains(number)) d.since.get(number) else 0
+
+pure def routed(number: int, d: Reminders, m: M::Worked): Acted =
+  { state: { ...d, reminders: d.reminders.put(number, m.state) }, out: m.out.listMap(e => Reminding({ reminder: number, does: e })) }
+
+pure def kept(number: int, d: Reminders, r: M::Reminder): Acted = routed(number, d, { state: r, out: List() })
+
 pure val numberValues = Set(1, 2, 3)
+pure val ticketValues = Set(1, 2, 3)
+pure val signedInValues = Set(1)
 pure val nowValues = Set(0, 10, 20, 30)
-pure val atValues = Set(10, 20)
+pure val atValues = Set(0, 10, 20)
 pure val targetValues = Set(10, 30)
 pure val seenValues = Set(0, 1, 2)
+pure val revisionValues = Set(0, 1)
+pure val approvalValues = Set(1)
+```
+
+### Every reminder the desk holds keeps the rules of a reminder under its own number
+
+```quint
+pure def keepsItsRules(n: int, r: M::Reminder): bool =
+  n > 0 and r.status != M::Unscheduled and M::alwaysTheStatusFollowsTheRecord(r) and M::alwaysNoEarlyReminder(r)
+    and M::alwaysANewTimeIsInTheFuture(r)
+
+pure def alwaysEveryReminderKeepsItsRules(d: Reminders): bool =
+  d.numbers.forall(n => keepsItsRules(n, held(d, n))) and d.interrupted.forall(n => d.numbers.contains(n))
+```
+
+### Alpha reads the owner's reminders, and only the newest read's answer is taken; the list is then current, or still marked out of date and its failure said once
+
+Any change answered since the last read marks the list out of date.
+
+```quint
+pure val weight_read = 2
+
+pure def canRead(d: Reminders, by: O::Actor): bool = by == O::Phone and d.listing.status != W::Loading
+
+pure def read(d: Reminders, by: O::Actor): Acted =
+  val listing = W::ask(d.listing)
+  { state: { ...d, listing: listing }, out: List(Listing({ ticket: listing.ticket, failed: false })) }
+
+pure def canListed(d: Reminders, ticket: int, by: O::Actor): bool = by == O::Phone and W::canAnswer(d.listing, ticket)
+
+pure def listed(d: Reminders, ticket: int, ok: bool, by: O::Actor): Acted =
+  { state: { ...d, listing: W::answer(d.listing, ok), stale: not(ok), reported: not(ok) },
+    out: if (not(ok) and not(d.reported)) List(Listing({ ticket: ticket, failed: true })) else List() }
+```
+
+### The list shown is current only after a read answered since the last change, and a failure is said once until a read succeeds
+
+```quint
+pure def alwaysTheListIsCurrentOrMarked(d: Reminders): bool =
+  ((d.listing.status == W::Failed or d.listing.ticket == 0) implies d.stale) and (d.reported implies d.listing.status != W::Loaded)
+
+pure def stepAFailureIsSaidOnce(before: Reminders, via: str, after: Reminders, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Listing(l) => (l.failed implies (via == "listed" and not(before.reported) and after.reported))
+        and (not(l.failed) implies (via == "read" and l.ticket == after.listing.ticket))
+    | _ => true
+  })
+    and ((after.stale == false and before.stale) implies via == "listed")
+```
+
+### The list can be current, out of date after a change, and unreadable
+
+```quint
+pure def sometimesCurrent(d: Reminders): bool = not(d.stale) and d.numbers.size() > 0
+
+pure def sometimesUnreadable(d: Reminders): bool = d.reported and d.numbers.size() > 0
+```
+
+## Story: Have the agent set reminders
+
+> As the owner, I want the agent to set the reminders I approved, and never
+> to pile up reminders whose saving it could not confirm.
+
+### The agent creates a reminder under a new number; while one is unconfirmed, another needs the owner's explicit choice, and past a few the agent is refused and the owner told until a creation goes through
+
+The owner's choice is part of the approval the shell checks.
+
+```quint
+pure def unconfirmed(d: Reminders): int =
+  d.numbers.filter(n => held(d, n).status == M::Pending and held(d, n).change == M::Schedule).size()
+
+pure def canCreate(d: Reminders, number: int, at: int, daily: bool, now: int, approval: int, insisted: bool, signedIn: int, by: O::Actor): bool =
+  not(d.numbers.contains(number)) and unconfirmed(d) < maxUnconfirmed and (unconfirmed(d) > 0 implies insisted)
+    and M::canCreate(M::initial, number, at, daily, now, approval, signedIn, by)
+
+pure def create(d: Reminders, number: int, at: int, daily: bool, now: int, approval: int, insisted: bool, signedIn: int, by: O::Actor): Acted =
+  val m = kept(number, d, M::create(M::initial, number, at, daily, now, approval, signedIn, by))
+  { ...m, state: { ...m.state, numbers: d.numbers.union(Set(number)), stale: true, full: false } }
+
+pure def canRefuseCreate(d: Reminders, by: O::Actor): bool = by == O::Agent and unconfirmed(d) >= maxUnconfirmed and not(d.full)
+
+pure def refuseCreate(d: Reminders, by: O::Actor): Reminders = { ...d, full: true }
+```
+
+### Never more than a few creations are left unconfirmed
+
+```quint
+pure def alwaysFewCreationsAreUnconfirmed(d: Reminders): bool = unconfirmed(d) <= maxUnconfirmed
+```
+
+### The agent can be refused for too many unconfirmed creations
+
+```quint
+pure def sometimesFull(d: Reminders): bool = d.full
+```
+
+### Android is asked once, its answer settles the change, and a refused change is tried again, for the reminder they name; each answer marks the list out of date
+
+```quint
 pure val weight_operate = 3
-pure val weight_answer = 3
+pure val weight_answer = 4
+
+pure def canOperate(d: Reminders, number: int, now: int, by: O::Actor): bool =
+  d.numbers.contains(number) and not(d.interrupted.contains(number)) and M::canOperate(held(d, number), now, by)
+
+pure def operate(d: Reminders, number: int, now: int, by: O::Actor): Acted =
+  val m = routed(number, d, M::operate(held(d, number), now, by))
+  { ...m, state: { ...m.state, since: d.since.put(number, d.listing.ticket) } }
+
+pure def canAnswer(d: Reminders, number: int, result: M::Answer, reason: M::Reason, by: O::Actor): bool =
+  M::canAnswer(held(d, number), number, result, reason, by)
+
+pure def answer(d: Reminders, number: int, result: M::Answer, reason: M::Reason, by: O::Actor): Acted =
+  val m = routed(number, d, M::answer(held(d, number), number, result, reason, by))
+  { ...m, state: { ...m.state, stale: true } }
+
+pure def canRetry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): bool =
+  d.numbers.contains(number) and M::canRetry(held(d, number), now, signedIn, by)
+
+pure def retry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): Acted =
+  kept(number, d, M::retry(held(d, number), now, signedIn, by))
+
+pure def canDiscard(d: Reminders, number: int, signedIn: int, by: O::Actor): bool = M::canDiscard(held(d, number), signedIn, by)
+
+pure def discard(d: Reminders, number: int, signedIn: int, by: O::Actor): Acted = kept(number, d, M::discard(held(d, number), signedIn, by))
 ```
 
-### The agent creates a reminder for a time to come, and the record is kept before Android is asked
+### A scheduling Alpha could not tell about is settled only by a read asked after it was sent: found, it is scheduled; missing, nothing was saved
 
-The agent does this only for a reminder the owner approved
-([Approvals](../approvals/)).
+A reminder sent after the read was asked is naturally missing from it.
 
 ```quint
-pure def canCreate(r: Reminder, number: int, at: int, now: int): bool =
-  r.status == Unscheduled and number > 0 and at > now
+pure def canFound(d: Reminders, number: int, ticket: int, by: O::Actor): bool =
+  d.listing.status == W::Loaded and ticket == d.listing.ticket and sinceOf(d, number) < d.listing.ticket
+    and M::canFound(held(d, number), by)
 
-pure def create(r: Reminder, number: int, at: int, now: int): Reminder =
-  { ...r, status: Pending, at: at, change: Schedule, target: at, decidedAt: now, attempt: A::record(A::plan(number)) }
+pure def found(d: Reminders, number: int, ticket: int, present: bool, by: O::Actor): Acted =
+  kept(number, d, M::found(held(d, number), present, by))
+
+pure def stepAnUnknownSchedulingIsSettledByALaterRead(before: Reminders, via: str, after: Reminders): bool =
+  before.numbers.forall(n => (held(before, n).status == M::Pending and held(after, n).status != M::Pending
+      and held(before, n).attempt.outcome == A::Unknown)
+    implies (via == "found" and before.listing.status == W::Loaded and sinceOf(before, n) < before.listing.ticket))
 ```
 
-### Android is asked to carry out a recorded change, once
+### A scheduling Alpha could not tell about is settled once a read answers
+
+If Alpha reads the list and the phone settles what it finds, no scheduling
+stays unknown.
 
 ```quint
-pure def canOperate(r: Reminder): bool = A::canDispatch(r.attempt)
+pure def leadsToAnUnknownSchedulingIsSettled(d: Reminders, later: Reminders): bool =
+  d.numbers.forall(n => (held(d, n).status == M::Pending and held(d, n).attempt.outcome == A::Unknown)
+    implies held(later, n).status != M::Pending)
 
-pure def operate(r: Reminder): Worked =
-  { state: { ...r, attempt: A::dispatch(r.attempt) },
-    out: List({ act: Operate, number: r.attempt.id, change: r.change, at: r.target }) }
+pure val fair_read = "weak"
+pure val fair_listed = "weak"
+pure val fair_found = "weak"
 ```
 
-### Android's answer settles the change: done, denied for want of permission, failed, or lost
-
-A scheduling that is denied or fails shows as such; any other change that
-is refused leaves the reminder as it was. A lost answer leaves it as it was
-too, and the change is never sent again. A settled change withdraws the
-notification of a posted reminder that it moves on.
+### A scheduling can be found by a read, or missing from it
 
 ```quint
-pure def statusAfter(change: Change): Status =
-  if (change == Complete) Completed else if (change == Cancel) Cancelled else Scheduled
+pure def sometimesFoundByARead(d: Reminders): bool =
+  d.numbers.exists(n => held(d, n).status == M::Scheduled and held(d, n).change == M::Schedule and held(d, n).attempt.outcome == A::Unknown)
 
-pure def canAnswer(r: Reminder, number: int): bool = A::canConclude(r.attempt, number)
-
-pure def answer(r: Reminder, number: int, result: Answer): Worked =
-  val attempt = A::conclude(r.attempt, result == Done, result != Lost)
-  val status =
-    if (result == Done) statusAfter(r.change)
-    else if (r.change == Schedule and result == Denied) PermissionDenied
-    else if (r.change == Schedule and result == Failed) SchedulingFailed
-    else r.status
-  val updated = { ...r, attempt: attempt, status: status,
-    at: if (result == Done and r.change != Complete and r.change != Cancel) r.target else r.at,
-    revision: if (result == Done) r.revision + 1 else r.revision }
-  { state: updated,
-    out: if (r.status == Posted and status != Posted) List({ act: Withdraw, number: r.attempt.id, change: r.change, at: r.at }) else List() }
+pure def sometimesMissingFromARead(d: Reminders): bool =
+  d.numbers.exists(n => held(d, n).status == M::Unsaved and held(d, n).attempt.outcome == A::Unknown)
 ```
 
-### A refused change can be tried again under its own number, while its time is still to come
+## Story: Act on my reminders
+
+> As the owner, I want my reminders to ring on time, and Done, Snooze,
+> Reopen and removal to act on the one I see.
+
+### The owner's decisions, the phone's ringing, changes made elsewhere and a deletion carried out reach the reminder they name
 
 ```quint
-pure def timed(change: Change): bool = change == Schedule or change == Snooze or change == Reopen
+pure val weight_decide = 3
 
-pure def canRetry(r: Reminder, now: int): bool =
-  r.attempt.outcome == A::Refused and A::canRecord(r.attempt) and (timed(r.change) implies r.target > now)
+pure def canDecide(d: Reminders, number: int, change: M::Change, seen: int, fresh: int, target: int, now: int, signedIn: int, by: O::Actor): bool =
+  M::canDecide(held(d, number), change, seen, fresh, target, now, signedIn, by)
 
-pure def retry(r: Reminder, now: int): Reminder =
-  { ...r, attempt: A::record(r.attempt), decidedAt: now, status: if (r.change == Schedule) Pending else r.status }
+pure def decide(d: Reminders, number: int, change: M::Change, seen: int, fresh: int, target: int, now: int, signedIn: int, by: O::Actor): Acted =
+  kept(number, d, M::decide(held(d, number), change, seen, fresh, target, now, signedIn, by))
+
+pure def canDue(d: Reminders, number: int, now: int, revision: int, notifications: bool, by: O::Actor): bool =
+  M::canDue(held(d, number), now, revision, notifications, by)
+
+pure def due(d: Reminders, number: int, now: int, revision: int, notifications: bool, by: O::Actor): Acted =
+  kept(number, d, M::due(held(d, number), now, revision, notifications, by))
+
+pure def canRevise(d: Reminders, number: int, by: O::Actor): bool = d.numbers.contains(number) and M::canRevise(held(d, number), by)
+
+pure def revise(d: Reminders, number: int, by: O::Actor): Acted =
+  val m = kept(number, d, M::revise(held(d, number), by))
+  { ...m, state: { ...m.state, stale: true } }
+
+pure def canDeleted(d: Reminders, number: int, by: O::Actor): bool = d.numbers.contains(number) and M::canDeleted(held(d, number), by)
+
+pure def deleted(d: Reminders, number: int, by: O::Actor): Acted = routed(number, d, M::deleted(held(d, number), by))
 ```
 
-### Only a recorded change reaches Android, and its record keeps the change and the time it was asked for
+### Reminders can be posted while another is snoozed, and one can be deleted while another is completed
 
 ```quint
-pure def stepRecordBeforeOperate(before: Reminder, via: str, after: Reminder, out: List[Effect]): bool =
-  out.every(e => if (e.act == Operate)
-      via == "operate" and before.attempt.outcome == A::Recorded and e.number == before.attempt.id
-        and e.change == before.change and e.at == before.target
-    else if (e.act == ReadBack) via == "recover" and before.attempt.outcome == A::Sent and e.number == before.attempt.id
-    else via == "answer" and before.status == Posted)
-    and out.length() <= 1
-```
+pure def sometimesTwoReminders(d: Reminders): bool =
+  d.numbers.exists(n => held(d, n).status == M::Posted)
+    and d.numbers.exists(m => held(d, m).change == M::Snooze and held(d, m).status == M::Scheduled and held(d, m).attempt.outcome == A::Confirmed)
 
-### A retry reuses its number, and an unknown outcome is never sent again
-
-```quint
-pure def stepARetryKeepsItsNumber(before: Reminder, via: str, after: Reminder, out: List[Effect]): bool =
-  (via == "retry" implies after.attempt.id == before.attempt.id)
-    and (before.attempt.outcome == A::Unknown implies
-      (after.attempt.id != before.attempt.id or after.attempt == before.attempt))
-```
-
-### A reminder is unscheduled until the agent creates it, pending while its scheduling is unanswered, and denied or failed only for a scheduling that was refused
-
-Discovered by the proof: a change's number is never below zero. Without
-it, a decision could take the number zero that marks a reminder not yet
-created.
-
-```quint
-pure def alwaysTheStatusFollowsTheRecord(r: Reminder): bool =
-  r.attempt.id >= 0 and (r.status == Unscheduled iff r.attempt.id == 0)
-    and (r.status == Unscheduled implies r.attempt.outcome == A::Planned)
-    and ((r.status == Pending and r.change == Schedule) implies (r.attempt.outcome != A::Confirmed and r.attempt.outcome != A::Refused))
-    and (((r.status == PermissionDenied or r.status == SchedulingFailed) and r.change == Schedule) implies r.attempt.outcome == A::Refused)
-```
-
-### A reminder can be scheduled, and its scheduling can be denied, fail, or be left unknown
-
-```quint
-pure def sometimesScheduled(r: Reminder): bool = r.status == Scheduled and r.change == Schedule
-
-pure def sometimesPermissionDenied(r: Reminder): bool = r.status == PermissionDenied
-
-pure def sometimesSchedulingFailed(r: Reminder): bool = r.status == SchedulingFailed
-
-pure def sometimesUnknown(r: Reminder): bool = r.status == Pending and r.attempt.outcome == A::Unknown
-```
-
-## Story: Be reminded on time
-
-> As the owner, I want a reminder to ring when its time comes, never
-> before.
-
-### Android posts a scheduled reminder only once its time has come
-
-```quint
-pure def canDue(r: Reminder, now: int): bool = r.status == Scheduled and now >= r.at
-
-pure def due(r: Reminder, now: int): Reminder = { ...r, status: Posted, postedAt: now }
-```
-
-### A posted reminder was posted at or after its time
-
-```quint
-pure def alwaysNoEarlyReminder(r: Reminder): bool = r.status == Posted implies r.postedAt >= r.at
-```
-
-### A reminder can ring
-
-```quint
-pure def sometimesPosted(r: Reminder): bool = r.status == Posted
-```
-
-## Story: Complete, snooze, reopen or cancel
-
-> As the owner, I want Done, Snooze and Reopen to act on the reminder as I
-> see it, one at a time, and never to set a time that has passed.
-
-### The owner decides on the revision they see, once the last change has ended, and each decision takes a new number
-
-Done on a scheduled or posted reminder, Snooze on a posted one, Reopen on
-a completed one, and Cancel on one not yet completed or cancelled. Snooze
-and Reopen move it to a time still to come. The notification of a posted
-reminder offers Done and Snooze for the revision it was posted with.
-
-```quint
-pure def allowed(status: Status, change: Change): bool =
-  if (change == Complete) status == Scheduled or status == Posted
-  else if (change == Snooze) status == Posted
-  else if (change == Reopen) status == Completed
-  else if (change == Cancel) status != Unscheduled and status != Completed and status != Cancelled
-  else false
-
-pure def canDecide(r: Reminder, change: Change, seen: int, number: int, target: int, now: int): bool =
-  allowed(r.status, change) and seen == r.revision and A::ended(r.attempt) and number > r.attempt.id
-    and (timed(change) implies target > now)
-
-pure def decide(r: Reminder, change: Change, seen: int, number: int, target: int, now: int): Reminder =
-  { ...r, change: change, target: if (change == Snooze or change == Reopen) target else r.at, decidedAt: now,
-    attempt: A::record(A::plan(number)) }
-```
-
-### The reminder can change elsewhere, and a decision on what was shown before is then refused
-
-```quint
-pure def canRevise(r: Reminder): bool = r.status != Unscheduled
-
-pure def revise(r: Reminder): Reminder = { ...r, revision: r.revision + 1 }
-
-pure def lawADecisionOnAnOlderRevisionIsRefused(change: Change, number: int, target: int, now: int): bool =
-  not(canDecide(revise({ ...initial, status: Posted, attempt: A::conclude(A::dispatch(A::record(A::plan(1))), true, true) }), change, 0, number, target, now))
-```
-
-### One change runs at a time, and a new one starts only after the last has ended
-
-```quint
-pure def stepOneChangeAtATime(before: Reminder, via: str, after: Reminder): bool =
-  after.attempt.id != before.attempt.id implies
-    ((via == "decide" and A::ended(before.attempt)) or (via == "create" and before.status == Unscheduled))
-```
-
-### A time is scheduled, snoozed to or reopened at, and tried again, only while it is still to come
-
-```quint
-pure def alwaysANewTimeIsInTheFuture(r: Reminder): bool =
-  (timed(r.change) and r.attempt.outcome != A::Planned) implies r.target > r.decidedAt
-```
-
-### A reminder can be completed, snoozed, reopened and cancelled
-
-```quint
-pure def sometimesCompleted(r: Reminder): bool = r.status == Completed
-
-pure def sometimesSnoozed(r: Reminder): bool = r.status == Scheduled and r.change == Snooze and r.attempt.outcome == A::Confirmed
-
-pure def sometimesReopened(r: Reminder): bool = r.status == Scheduled and r.change == Reopen and r.attempt.outcome == A::Confirmed
-
-pure def sometimesCancelled(r: Reminder): bool = r.status == Cancelled
+pure def sometimesDeletedBesideCompleted(d: Reminders): bool =
+  d.numbers.exists(n => held(d, n).status == M::Deleted) and d.numbers.exists(m => held(d, m).status == M::Completed)
 ```
 
 ## Story: Pick up reminders after a restart
 
 > As the owner, I want a change that was on its way to Android when the
-> phone restarted to be read back, never sent a second time.
+> phone restarted to be read back once, never sent a second time, and my
+> reminders armed again.
 
-### After a restart Alpha reads back how a sent change ended, and changes nothing else
+### A restart marks every reminder to be picked up and the list out of date, and each reminder is then picked up once: read back if a change was sent, armed again if it has a time
 
-The answer comes back as Android's answer does.
+Nothing is sent for a reminder until it is picked up.
 
 ```quint
-pure def canRecover(r: Reminder): bool = r.attempt.outcome == A::Sent
+pure def canRestart(d: Reminders, by: O::Actor): bool = by == O::Phone and d.numbers.size() > 0
 
-pure def recover(r: Reminder): Worked =
-  { state: r, out: List({ act: ReadBack, number: r.attempt.id, change: r.change, at: r.target }) }
+pure def restart(d: Reminders, by: O::Actor): Reminders =
+  { ...d, interrupted: d.numbers, stale: true, listing: { ...d.listing, status: if (d.listing.status == W::Loading) W::Idle else d.listing.status } }
+
+pure def canRecover(d: Reminders, number: int, by: O::Actor): bool = by == O::Phone and d.interrupted.contains(number)
+
+pure def recover(d: Reminders, number: int, by: O::Actor): Acted =
+  val m = routed(number, d, M::recovered(held(d, number), by))
+  { ...m, state: { ...m.state, interrupted: d.interrupted.exclude(Set(number)) } }
 ```
 
-### A change can be waiting to be read back after a restart
+### Each reminder is picked up once after a restart, and only then sent anything
 
 ```quint
-pure def sometimesAwaitingReadBack(r: Reminder): bool = r.attempt.outcome == A::Sent and r.change != Schedule
+pure def stepEachReminderIsPickedUpOnce(before: Reminders, via: str, after: Reminders, out: List[Effect]): bool =
+  (after.interrupted.subseteq(before.interrupted) or via == "restart")
+    and out.every(e => match e {
+      | Reminding(r) => (r.does.act == M::Operate implies not(before.interrupted.contains(r.reminder)))
+          and ((r.does.act == M::Arm) implies via == "recover")
+      | _ => true
+    })
+```
+
+### A reminder can wait to be picked up while another was
+
+```quint
+pure def sometimesPickedUpInTurn(d: Reminders): bool =
+  d.interrupted.size() > 0 and d.numbers.exists(n => not(d.interrupted.contains(n)))
 ```

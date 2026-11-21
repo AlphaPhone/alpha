@@ -1,224 +1,285 @@
 # Deletions
 
-The notice of a deletion the owner reviewed: "Deletion queued for 10
-seconds", with Undo. The deletion waits in the kit's
-[undo](../../kit/undo.md) window and is carried out once, as the kit's
-[attempt](../../kit/attempt.md). Which item it deletes, and the review that
-queued it, belong to the app it is in (a calendar event, a reminder); the
-Undo toast is a [toast](./toasts.md).
+The notice of the deletions the owner queued: "Deletion queued", with Undo,
+one row for each. Each is a [deletion](./deletion.md), held here under its
+number; the desk also says who is signed in, keeps an item from being
+deleted twice, picks every deletion up after a restart, and reads which
+deletions the phone still has pending. Who is signed in comes from the
+account area.
 
-## Story: Undo a deletion
+## Story: Delete several things, each with its own Undo
 
-> As the owner, when I delete something I want ten seconds to take it back,
-> and once the time is up I want it deleted once, or told plainly when Alpha
-> cannot tell whether it was.
+> As the owner, I want to delete one thing after another, each with its own
+> moment to take it back, and never to have the same thing deleted twice.
 
-### A deletion has its Undo window, its attempt, whether it is paused, whose it is, who is signed in, whether the item changed, and whether its outcome was dismissed
+### The desk holds each deletion under its number, who is signed in, what a restart left to pick up, and the status read of pending deletions
 
 ```quint
-import undo as U from "../../kit/undo"
+import deletion as X from "./deletion"
 import attempt as A from "../../kit/attempt"
+import undo as U from "../../kit/undo"
+import read as R from "../../kit/read"
 
-type Result = Gone | Conflict | NeedsPermission | Lost
-type Act = Delete | ReadBack
-type Effect = { act: Act, number: int }
-type Deletion = {
-  window: U::Undo, attempt: A::Attempt, paused: bool,
-  owner: int, viewer: int, changed: bool, dismissed: bool,
-}
-type Done = { state: Deletion, out: List[Effect] }
+type Effect = About({ deletion: int, does: X::Act }) | CheckStatus({ ticket: int })
+type Deletions = { deletions: int -> X::Deletion, numbers: Set[int], viewer: int, interrupted: Set[int], status: R::Read }
+type Acted = { state: Deletions, out: List[Effect] }
 
-pure val windowLength = 10000
+pure val initial: Deletions = { deletions: Map(), numbers: Set(), viewer: 0, interrupted: Set(), status: R::unread }
 
-pure val initial: Deletion = {
-  window: U::free, attempt: A::plan(0), paused: false,
-  owner: 0, viewer: 0, changed: false, dismissed: false,
-}
+pure def held(d: Deletions, number: int): X::Deletion =
+  if (not(d.numbers.contains(number))) X::initial else if (d.deletions.keys().contains(number)) d.deletions.get(number) else X::initial
+
+pure def routed(number: int, d: Deletions, m: X::Done): Acted =
+  { state: { ...d, deletions: d.deletions.put(number, m.state) }, out: m.out.listMap(e => About({ deletion: number, does: e.act })) }
+
+pure def kept(number: int, d: Deletions, x: X::Deletion): Acted = routed(number, d, { state: x, out: List() })
+
+pure val numberValues = Set(1, 2)
+pure val itemIdValues = Set(1, 2)
+pure val ownerValues = Set(1, 2)
+pure val ticketValues = Set(1, 2)
 ```
 
-### What the simulator tries
+### Every deletion the desk holds keeps the rules of a deletion under its own number
 
 ```quint
-pure val numberValues = Set(1, 2)
-pure val startValues = Set(0, 4000)
+pure def keepsItsRules(n: int, x: X::Deletion): bool =
+  n > 0 and x.attempt.id == n and X::alwaysNothingIsDeletedEarly(x) and X::alwaysASentDeletionLeftItsWindow(x)
+    and X::alwaysUndoIsOfferedOnlyWhileItCanBeUndone(x)
+
+pure def alwaysEveryDeletionKeepsItsRules(d: Deletions): bool =
+  d.numbers.forall(n => keepsItsRules(n, held(d, n))) and d.interrupted.forall(n => d.numbers.contains(n))
+```
+
+### A deletion is queued under a new number, for the owner signed in, of an item no other deletion still has in hand, and never of one whose deletion went ahead or cannot be told
+
+An item can be deleted again only once its last deletion was undone, kept,
+refused for a conflict, or never written.
+
+```quint
+pure def settledBack(x: X::Deletion): bool =
+  x.window.holding == U::Undone or x.kept or x.trouble == X::NotQueued or (x.attempt.outcome == A::Refused and not(x.paused))
+
+pure def itemFree(d: Deletions, itemId: int): bool = d.numbers.forall(n => held(d, n).itemId != itemId or settledBack(held(d, n)))
+
+pure def canQueue(d: Deletions, number: int, itemId: int): bool =
+  not(d.numbers.contains(number)) and itemFree(d, itemId) and X::canQueue(X::initial, number, itemId, d.viewer)
+
+pure def queue(d: Deletions, number: int, itemId: int): Acted =
+  val m = routed(number, d, X::queue(X::initial, number, itemId, d.viewer))
+  { ...m, state: { ...m.state, numbers: d.numbers.union(Set(number)) } }
+```
+
+### An item is in hand in at most one deletion, and one that was deleted or cannot be told is never queued again
+
+```quint
+pure def alwaysAnItemIsInHandOnce(d: Deletions): bool =
+  d.numbers.forall(n => d.numbers.forall(m =>
+    (n != m and held(d, n).itemId == held(d, m).itemId) implies (settledBack(held(d, n)) or settledBack(held(d, m)))))
+
+pure def stepAnUnknownDeletionIsNeverRequeued(before: Deletions, via: str, after: Deletions): bool =
+  after.numbers.forall(m => not(before.numbers.contains(m)) implies
+    (via == "queue" and before.numbers.forall(n => held(before, n).itemId != held(after, m).itemId or settledBack(held(before, n)))))
+```
+
+### The journal's answer, the Undo, the window, Android's answer and a renewed review reach the deletion they name, for the owner signed in
+
+What the window and Undo do is the [deletion](./deletion.md)'s; the clock
+is not trusted for a deletion a restart has not yet picked up.
+
+```quint
 pure val nowValues = Set(0, 4000, 10000, 20000)
-pure val laterValues = Set(4000, 9999, 10000, 14000)
-pure val ownerValues = Set(0, 1)
+pure val startValues = Set(0, 4000)
+pure val charsValues = Set(30)
+pure val scaleValues = Set(100, 150)
+pure val weight_recorded = 3
 pure val weight_release = 3
 pure val weight_answer = 3
+
+pure def canRecorded(d: Deletions, number: int, chars: int, scale: int): bool =
+  not(d.interrupted.contains(number)) and X::canRecorded(held(d, number), number, chars, scale)
+
+pure def recorded(d: Deletions, number: int, ok: bool, start: int, chars: int, scale: int): Acted =
+  routed(number, d, X::recorded(held(d, number), number, ok, start, chars, scale))
+
+pure def canUndo(d: Deletions, number: int, now: int): bool =
+  not(d.interrupted.contains(number)) and X::canUndo(held(d, number), number, now, d.viewer)
+
+pure def undo(d: Deletions, number: int, now: int): Acted = routed(number, d, X::undo(held(d, number), number, now, d.viewer))
+
+pure def canUndone(d: Deletions, number: int): bool = X::canUndone(held(d, number), number)
+
+pure def undone(d: Deletions, number: int, restored: bool): Acted = routed(number, d, X::undone(held(d, number), number, restored))
+
+pure def canRelease(d: Deletions, number: int, now: int): bool =
+  d.numbers.contains(number) and not(d.interrupted.contains(number)) and X::canRelease(held(d, number), now)
+
+pure def release(d: Deletions, number: int, now: int): Acted = routed(number, d, X::release(held(d, number), now, d.viewer))
+
+pure def canAnswer(d: Deletions, number: int): bool = X::canAnswer(held(d, number), number)
+
+pure def answer(d: Deletions, number: int, result: X::Result): Acted = kept(number, d, X::answer(held(d, number), number, result))
+
+pure def canResume(d: Deletions, number: int, chars: int, scale: int): bool =
+  d.numbers.contains(number) and not(d.interrupted.contains(number)) and X::canResume(held(d, number), chars, scale, d.viewer)
+
+pure def resume(d: Deletions, number: int, start: int, chars: int, scale: int): Acted =
+  routed(number, d, X::resume(held(d, number), start, chars, scale, d.viewer))
+
+pure def canChangeItem(d: Deletions, number: int): bool = d.numbers.contains(number) and X::canChangeItem(held(d, number))
+
+pure def changeItem(d: Deletions, number: int): Acted = kept(number, d, X::changeItem(held(d, number)))
 ```
 
-### Deleting queues the deletion for ten seconds, for the owner signed in, recorded before anything is done
+### Two deletions can be in their windows at once, and one can be undone while another goes ahead
 
 ```quint
-pure def canQueue(d: Deletion, number: int): bool = d.window.holding == U::Free and number > 0
+pure def sometimesTwoDeletionsPending(d: Deletions): bool =
+  d.numbers.exists(n => d.numbers.exists(m => n != m and held(d, n).window.holding == U::Held and held(d, m).window.holding == U::Held))
 
-pure def queue(d: Deletion, number: int, start: int): Deletion =
-  { ...d, window: U::hold(start, windowLength), attempt: A::record(A::plan(number)), owner: d.viewer }
+pure def sometimesOneUndoneAnotherSent(d: Deletions): bool =
+  d.numbers.exists(n => held(d, n).window.holding == U::Undone) and d.numbers.exists(m => held(d, m).attempt.outcome == A::Sent)
 ```
 
-### The owner can undo while the ten seconds last, or while the deletion is paused, and never once it was sent
+### Every deletion queued is decided
 
-An Undo tapped too late changes nothing: the deletion already went ahead.
-
-```quint
-pure def unsent(d: Deletion): bool = d.attempt.outcome == A::Recorded or (d.paused and d.attempt.outcome == A::Refused)
-
-pure def canUndo(d: Deletion, now: int): bool =
-  d.owner == d.viewer and unsent(d) and d.window.holding != U::Undone and (U::canUndo(d.window, now) or d.paused)
-
-pure def undo(d: Deletion, now: int): Deletion = { ...d, window: U::undo(d.window), paused: false }
-```
-
-### When the ten seconds are up the deletion is sent, unless the owner or the item changed: then it pauses instead
+If the journal answers and the phone keeps time, no deletion stays being
+written or in its window.
 
 ```quint
-pure def canRelease(d: Deletion, now: int): bool =
-  U::canRelease(d.window, now) and not(d.paused) and A::canDispatch(d.attempt)
+pure def leadsToEveryDeletionIsDecided(d: Deletions, later: Deletions): bool =
+  d.numbers.forall(n => (held(d, n).writing or held(d, n).window.holding == U::Held) implies
+    (not(held(later, n).writing) and (held(later, n).window.holding != U::Held or held(later, n).paused)))
 
-pure def release(d: Deletion, now: int): Done =
-  val released = { ...d, window: U::release(d.window) }
-  if (d.owner != d.viewer or d.changed) { state: { ...released, paused: true }, out: List() }
-  else { state: { ...released, attempt: A::dispatch(d.attempt) }, out: List({ act: Delete, number: d.attempt.id }) }
-```
-
-### The deletion ends as deleted, refused for a conflict, paused for a permission Android withholds, or unknown
-
-A conflict means the item changed before it could be deleted. Android
-withholding a permission pauses the deletion, so Undo is offered again.
-
-```quint
-pure def canAnswer(d: Deletion, number: int): bool = A::canConclude(d.attempt, number)
-
-pure def answer(d: Deletion, number: int, result: Result): Deletion =
-  { ...d, attempt: A::conclude(d.attempt, result == Gone, result != Lost), paused: result == NeedsPermission }
-```
-
-### Nothing is deleted while the deletion is queued, paused or undone
-
-```quint
-pure def alwaysNothingIsDeletedEarly(d: Deletion): bool =
-  (d.window.holding == U::Held implies d.attempt.outcome == A::Recorded)
-    and (d.window.holding == U::Undone implies (d.attempt.outcome == A::Recorded or d.attempt.outcome == A::Refused))
-    and (d.paused implies (d.attempt.outcome == A::Recorded or d.attempt.outcome == A::Refused))
-    and (d.window.holding == U::Free implies (d.attempt.outcome == A::Planned and not(d.paused)))
-```
-
-### A deletion is sent once, for the owner who queued it, only when its time is up and the item is unchanged
-
-```quint
-pure def stepADeletionIsSentOnce(before: Deletion, via: str, after: Deletion, out: List[Effect]): bool =
-  out.every(e => if (e.act == Delete)
-      via == "release" and e.number == before.attempt.id and before.attempt.outcome == A::Recorded
-        and before.owner == before.viewer and not(before.changed) and after.attempt.outcome == A::Sent
-    else before.attempt.outcome == A::Sent and e.number == before.attempt.id)
-    and out.length() <= 1
-```
-
-### An Undo tapped after the ten seconds, on a deletion that is not paused, is refused
-
-```quint
-pure def lawUndoTooLateIsRefused(number: int, start: int, later: int): bool =
-  val d = queue({ ...initial }, number, start)
-  later >= start + windowLength implies not(canUndo(d, later))
-```
-
-### A deletion can be undone, deleted, refused, and paused before anything was sent
-
-```quint
-pure def sometimesUndone(d: Deletion): bool = d.window.holding == U::Undone
-
-pure def sometimesDeleted(d: Deletion): bool = d.attempt.outcome == A::Confirmed
-
-pure def sometimesConflict(d: Deletion): bool = d.attempt.outcome == A::Refused and not(d.paused)
-
-pure def sometimesPausedUnsent(d: Deletion): bool = d.paused and d.attempt.outcome == A::Recorded
-```
-
-### A queued deletion is decided
-
-If the phone keeps time, a deletion in its window does not stay there: it
-is undone, sent or paused.
-
-```quint
-pure def leadsToAQueuedDeletionIsDecided(d: Deletion, later: Deletion): bool =
-  d.window.holding == U::Held implies later.window.holding != U::Held or later.paused
-
+pure val fair_recorded = "weak"
 pure val fair_release = "weak"
+pure val fair_undone = "weak"
+pure val fair_recover = "weak"
 ```
 
-## Story: Change owner or restart with a deletion pending
+## Story: See how my deletions ended
+
+> As the owner, I want to see how each deletion ended, check again while
+> one is unsettled, put away what I have read, and know when Alpha cannot
+> say which deletions are still pending.
+
+### The owner can ask again how a sent deletion ended, and dismiss an ended one
+
+```quint
+pure def canRefresh(d: Deletions, number: int): bool = X::canRefresh(held(d, number), d.viewer)
+
+pure def refresh(d: Deletions, number: int): Acted = routed(number, d, X::refresh(held(d, number), d.viewer))
+
+pure def canDismiss(d: Deletions, number: int): bool = X::canDismiss(held(d, number), d.viewer)
+
+pure def dismiss(d: Deletions, number: int): Acted = routed(number, d, X::dismiss(held(d, number), d.viewer))
+
+pure def canDismissed(d: Deletions, number: int): bool = X::canDismissed(held(d, number), number)
+
+pure def dismissed(d: Deletions, number: int, ok: bool): Acted = kept(number, d, X::dismissed(held(d, number), number, ok))
+```
+
+### Alpha reads which deletions are pending quietly, and says the status is unavailable only when it knows of a deletion the owner can see
+
+```quint
+pure def canCheckStatus(d: Deletions): bool = d.status.status != R::Loading
+
+pure def checkStatus(d: Deletions): Acted =
+  val status = R::ask(d.status)
+  { state: { ...d, status: status }, out: List(CheckStatus({ ticket: status.ticket })) }
+
+pure def canChecked(d: Deletions, ticket: int): bool = R::canAnswer(d.status, ticket)
+
+pure def checked(d: Deletions, ticket: int, ok: bool): Deletions = { ...d, status: R::answer(d.status, ok) }
+
+pure def statusUnavailable(d: Deletions): bool =
+  d.status.status == R::Failed and d.numbers.exists(n => X::visible(held(d, n), d.viewer))
+```
+
+### Each effect names the deletion it is for, and only the newest status read is asked
+
+```quint
+pure def stepEachEffectNamesItsDeletion(before: Deletions, via: str, after: Deletions, out: List[Effect]): bool =
+  out.every(e => match e {
+    | About(a) => after.numbers.contains(a.deletion)
+    | CheckStatus(c) => via == "checkStatus" and c.ticket == after.status.ticket
+  })
+```
+
+### The status can be unavailable while a deletion shows
+
+```quint
+pure def sometimesStatusUnavailable(d: Deletions): bool = statusUnavailable(d)
+```
+
+## Story: Change owner or restart with deletions pending
 
 > As the owner, I want a deletion I queued never to be carried out for
 > someone else, never shown to them, and never to be repeated after a
 > restart.
 
-### The phone says who is signed in, and the notice shows a deletion only to its owner
+### The phone says who is signed in; another owner then sees none of the notice, and each Undo offered to the owner before is withdrawn
 
-Changing owner clears the notice: the other owner sees none of it, and
-nothing on it can be undone or dismissed until its owner is back.
+A deletion whose window ends while another owner is signed in pauses
+instead of going ahead.
 
 ```quint
-pure def canSwitchOwner(d: Deletion, owner: int): bool = owner != d.viewer
+pure def canSwitchOwner(d: Deletions, owner: int): bool = owner != d.viewer
 
-pure def switchOwner(d: Deletion, owner: int): Deletion = { ...d, viewer: owner }
+pure def switchOwner(d: Deletions, owner: int): Deletions = { ...d, viewer: owner }
 
-pure def visible(d: Deletion): bool =
-  d.window.holding != U::Free and d.owner == d.viewer and not(d.dismissed) and d.window.holding != U::Undone
+pure def canConceal(d: Deletions, number: int): bool = X::canConceal(held(d, number), d.viewer)
+
+pure def conceal(d: Deletions, number: int): Acted = routed(number, d, X::conceal(held(d, number), d.viewer))
+
+pure def lawAnotherOwnerSeesNoDeletion(d: Deletions, number: int, now: int): bool =
+  held(d, number).owner != d.viewer implies
+    (not(X::visible(held(d, number), d.viewer)) and not(canUndo(d, number, now)) and not(canDismiss(d, number)) and not(canRefresh(d, number)))
 ```
 
-### The phone says when the item changed
+### An Undo offered to another owner is withdrawn
+
+If the phone withdraws what it should, no Undo stays offered to an owner who
+is not signed in.
 
 ```quint
-pure def canChangeItem(d: Deletion): bool = not(d.changed)
+pure def leadsToAnotherOwnersUndoIsWithdrawn(d: Deletions, later: Deletions): bool =
+  d.numbers.forall(n => (held(d, n).offered and held(d, n).owner != d.viewer) implies
+    (not(held(later, n).offered) or held(later, n).owner == later.viewer))
 
-pure def changeItem(d: Deletion): Deletion = { ...d, changed: true }
+pure val fair_conceal = "weak"
 ```
 
-### A restart pauses a deletion still in its window, and reads back how a sent one ended
-
-The clock cannot be trusted across a restart, so the window is not
-resumed: the owner undoes it, or reviews the deletion again.
+### A restart marks every deletion to be picked up, and each is then picked up once: written again, paused, or read back
 
 ```quint
-pure def restart(d: Deletion): Done =
-  { state: { ...d, paused: d.paused or d.window.holding == U::Held },
-    out: if (d.attempt.outcome == A::Sent) List({ act: ReadBack, number: d.attempt.id }) else List() }
+pure def canRestart(d: Deletions): bool = d.numbers.size() > 0
+
+pure def restart(d: Deletions): Deletions = { ...d, interrupted: d.numbers, status: { ...d.status, status: R::Idle } }
+
+pure def canRecover(d: Deletions, number: int): bool = d.interrupted.contains(number)
+
+pure def recover(d: Deletions, number: int): Acted =
+  val m = routed(number, d, X::restart(held(d, number)))
+  { ...m, state: { ...m.state, interrupted: d.interrupted.exclude(Set(number)) } }
 ```
 
-### An outcome that needs review can be dismissed by its owner, and it is never repeated
-
-Dismissing keeps the receipt: nothing is restored or deleted again.
+### Nothing is sent, released or undone for a deletion a restart has not yet picked up, and a restart changes nothing else
 
 ```quint
-pure def canDismiss(d: Deletion): bool = visible(d) and A::ended(d.attempt) and not(d.paused)
-
-pure def dismiss(d: Deletion): Deletion = { ...d, dismissed: true }
+pure def stepARestartIsPickedUpFirst(before: Deletions, via: str, after: Deletions, out: List[Effect]): bool =
+  out.every(e => match e {
+    | About(a) => (a.does == X::Delete or a.does == X::Restore) implies not(before.interrupted.contains(a.deletion))
+    | _ => true
+  })
+    and (via == "restart" implies (before.numbers.forall(n => held(after, n) == held(before, n))
+      and after.numbers.subseteq(before.numbers) and before.numbers.subseteq(after.numbers)))
+    and (after.interrupted.subseteq(before.interrupted) or via == "restart")
 ```
 
-### An unknown outcome is never sent again, and a deletion's number never changes
+### A deletion can wait to be picked up after a restart while another was
 
 ```quint
-pure def stepAnUnknownDeletionIsNeverRequeued(before: Deletion, via: str, after: Deletion, out: List[Effect]): bool =
-  (before.attempt.outcome != A::Planned implies after.attempt.id == before.attempt.id)
-    and ((before.attempt.outcome == A::Unknown or before.attempt.outcome == A::Confirmed) implies
-      (after.attempt == before.attempt and not(out.some(e => e.act == Delete))))
-```
-
-### A deletion that was sent has left its window and is not paused
-
-```quint
-pure def alwaysASentDeletionLeftItsWindow(d: Deletion): bool =
-  (d.attempt.outcome == A::Sent or d.attempt.outcome == A::Confirmed or d.attempt.outcome == A::Unknown)
-    implies (d.window.holding == U::Released and not(d.paused))
-```
-
-### A deletion can pause for a changed owner, wait to be verified, and end unknown and dismissed
-
-```quint
-pure def sometimesPausedForAnotherOwner(d: Deletion): bool = d.paused and d.owner != d.viewer
-
-pure def sometimesVerifying(d: Deletion): bool = d.attempt.outcome == A::Sent
-
-pure def sometimesUnknownDismissed(d: Deletion): bool = d.attempt.outcome == A::Unknown and d.dismissed
+pure def sometimesPickedUpInTurn(d: Deletions): bool =
+  d.interrupted.size() > 0 and d.numbers.exists(n => not(d.interrupted.contains(n)) and held(d, n).paused)
 ```

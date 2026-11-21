@@ -1,523 +1,520 @@
 # Approvals
 
-What the agent proposes to do on the phone, and how the owner decides. One
-proposal is followed from the moment the agent makes it to its receipt:
-the card the owner reviews, the reservation and the claim that an effect
-needs, the single effect, and what Alpha does after a restart.
+What the agent proposes to do on the phone, and how the owner decides. The
+approvals desk holds every proposal the agent made, keeps the message pass
+that admits direct runs, lets only one effect be carried out at a time,
+asks again after a restart for what it never heard, holds the answer each
+read is for, and reads which proposals the agent still has waiting.
 
 - [Operation](./operation.md): who sends an event, and the kinds of thing the agent asks for
+- [Proposal](./proposal.md): one proposal from the card to its receipt
 - [Direct](./direct.md): what one message may run without a card
+- [Lease](./lease.md): the answer a read was for
 
-A proposal is one use of the kit's [attempt](../../kit/attempt.md), reviewed
-through the kit's [review](../../kit/review.md). The conversation that lists
-the cards is the assistant's, and what each operation does belongs to the
-app it acts in.
+The conversation that lists the cards is the assistant's, and what each
+operation does belongs to the app it acts in. Who is signed in comes from
+the account area, whether the screen is protected and whether a reply is
+being written from the shell and the assistant, and the owner's choice to
+review phone actions first from settings: each arrives as an event
+parameter. A card waiting is posted as one of Alpha's own
+[notices](../notices/posting.md), and its tap opens through the
+[notice taps](../notices/index.md); the history of phone actions, where the
+owner declines a card or says whether an action happened, is a page of
+settings.
 
-## Story: Be asked before Alpha acts
+## Story: One action at a time
 
-> As the owner, I want everything the agent would do on my phone to reach
-> me as a card that says exactly what will be done, so that nothing that
-> matters happens unseen.
+> As the owner, I want the phone to carry out one thing the agent asked
+> for at a time, whether I approved it on a card or it ran directly, so
+> that no two actions race each other.
 
-### A proposal has a custody, a card, a journal row, a receipt and the time its approval ends
-
-The custody is unproposed, pending, approved or declined by the owner,
-claimed, executing, done, needing reconciliation, or lapsed. The journal
-row is the attempt: planned, reserved (recorded), applying (sent), then
-finished. A read whose result answers the question that asked for it holds
-a lease on that answer.
+### The desk holds each proposal under its number, the listing it was made after, the one being carried out, the pass of the message being answered, what a restart left unheard, the answer each read is for, and the listing of the proposals the agent still has waiting
 
 ```quint
 import operation.* from "./operation"
+import proposal as P from "./proposal"
+import direct as D from "./direct"
+import lease as L from "./lease"
 import attempt as A from "../../kit/attempt"
-import review as R from "../../kit/review"
+import read as W from "../../kit/read"
 
-type Custody = Unproposed | Pending | Approved | Declined | Claimed | Executing | Done | Reconciling | Lapsed
-type Receipt = NoReceipt | Succeeded | Denied | Cancelled | Failed | Unsure
-type Lease = NoLease | Held | Completing | Answered | Dropped | Unconfirmed
-type Effect = AskClaim | TellDecline | DoIt | ReadBack | TellReceipt | AskAnswer | StopContinuing | ShowAnswer
+type Effect =
+  About({ id: int, does: P::Effect }) | ListWaiting({ ticket: int }) | Leasing({ read: int, asks: L::Effect })
+    | Noticing({ card: int, up: bool })
+type Approvals = {
+  proposals: int -> P::Proposal, ids: Set[int], since: int -> int, running: int, pass: D::Pass,
+  interrupted: Set[int], leases: int -> L::Lease, waiting: W::Read,
+}
+type Acted = { state: Approvals, out: List[Effect] }
 
-type Proposal = {
-  custody: Custody, operation: Operation, expires: int, sensitive: bool,
-  review: R::Review, attempt: A::Attempt, receipt: Receipt, told: bool, lease: Lease,
+pure val initial: Approvals = {
+  proposals: Map(), ids: Set(), since: Map(), running: 0, pass: D::initial,
+  interrupted: Set(), leases: Map(), waiting: W::unread,
 }
 
-type Moved = { state: Proposal, out: List[Effect] }
+pure def entry(d: Approvals, id: int): P::Proposal =
+  if (not(d.ids.contains(id))) P::initial else if (d.proposals.keys().contains(id)) d.proposals.get(id) else P::initial
 
-pure val initial: Proposal = {
-  custody: Unproposed, operation: Show, expires: 0, sensitive: false,
-  review: R::unreviewed, attempt: A::plan(0), receipt: NoReceipt, told: false, lease: NoLease,
-}
-```
+pure def leaseOf(d: Approvals, id: int): L::Lease =
+  if (d.leases.keys().contains(id)) d.leases.get(id) else L::initial
 
-### What the simulator tries
+pure def sinceOf(d: Approvals, id: int): int =
+  if (d.since.keys().contains(id)) d.since.get(id) else 0
 
-```quint
+pure def inFlight(p: P::Proposal): bool = p.stage == P::Sent and p.attempt.outcome == A::Sent
+
 pure val idValues = Set(1, 2)
-pure val nowValues = Set(1, 5, 9)
+pure val nowValues = Set(1, 9)
 pure val expiresValues = Set(4, 8)
-pure val resultValues = Set(NoReceipt, Succeeded, Denied, Cancelled, Failed, Unsure)
-pure val weight_present = 3
-pure val weight_approve = 4
-pure val weight_grant = 4
+pure val seenValues = Set(0, 1)
+pure val signedInValues = Set(1, 2)
+pure val messageValues = Set(1, 2)
+pure val ticketValues = Set(1, 2)
+```
+
+### Every proposal the desk holds keeps the rules of a proposal under its own number, every lease the rules of a lease, and the pass the rules of a pass
+
+```quint
+pure def keepsItsRules(i: int, p: P::Proposal, l: L::Lease): bool =
+  P::alwaysNoProposalIsAnEmergencyCall(p) and P::alwaysASettledCardIsInert(p) and P::alwaysADirectRunChangesNothing(p)
+    and P::alwaysTheJournalFollowsTheStage(p) and P::alwaysOnlyADecisionIsAcknowledged(p)
+    and p.attempt.id == i and L::alwaysALeaseNamesItsRead(l) and (l.status != L::NoLease implies l.id == i)
+
+pure def alwaysEveryProposalKeepsItsRules(d: Approvals): bool =
+  d.ids.forall(i => i > 0 and keepsItsRules(i, entry(d, i), leaseOf(d, i)))
+    and D::alwaysAtMostFourDirectRunsAMessage(d.pass) and d.interrupted.forall(i => d.ids.contains(i))
+```
+
+### The agent proposes under a number not used before, and a card waiting is posted as a notice until it is decided
+
+```quint
+pure val weight_approve = 3
+pure val weight_reserved = 3
+pure val weight_grant = 3
+
+pure def noticing(id: int, before: P::Proposal, after: P::Proposal): List[Effect] =
+  if (before.stage != P::Pending and after.stage == P::Pending) List(Noticing({ card: id, up: true }))
+  else if (before.stage == P::Pending and after.stage != P::Pending) List(Noticing({ card: id, up: false }))
+  else List()
+
+pure def routed(id: int, d: Approvals, m: P::Moved): Acted =
+  { state: { ...d, proposals: d.proposals.put(id, m.state) },
+    out: m.out.listMap(e => About({ id: id, does: e })).concat(noticing(id, entry(d, id), m.state)) }
+
+pure def kept(id: int, d: Approvals, p: P::Proposal): Acted = routed(id, d, { state: p, out: List() })
+
+pure def canPropose(d: Approvals, id: int, operation: Operation, signedIn: int, by: Actor): bool =
+  not(d.ids.contains(id)) and P::canPropose(P::initial, id, operation, signedIn, by)
+
+pure def propose(d: Approvals, id: int, operation: Operation, expires: int, signedIn: int, by: Actor): Acted =
+  val m = kept(id, d, P::propose(P::initial, id, operation, expires, signedIn, by))
+  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket) } }
+
+pure def canForbid(d: Approvals, id: int, operation: Operation, signedIn: int, by: Actor): bool =
+  not(d.ids.contains(id)) and P::canForbid(P::initial, id, operation, signedIn, by)
+
+pure def forbid(d: Approvals, id: int, operation: Operation, signedIn: int, by: Actor): Acted =
+  val m = routed(id, d, P::forbid(P::initial, id, operation, signedIn, by))
+  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket) } }
+```
+
+### No card is left posted as a notice once it is decided, and a notice is posted only for a card waiting
+
+```quint
+pure def stepNoApprovalNoticeOutlivesItsProposal(before: Approvals, via: str, after: Approvals, out: List[Effect]): bool =
+  after.ids.forall(i => ((entry(before, i).stage == P::Pending) != (entry(after, i).stage == P::Pending))
+    implies out.some(e => match e {
+      | Noticing(n) => n.card == i and (n.up iff entry(after, i).stage == P::Pending)
+      | _ => false
+    }))
+    and out.every(e => match e {
+      | Noticing(n) => n.up iff entry(after, n.card).stage == P::Pending
+      | _ => true
+    })
+```
+
+### The owner's decisions, the phone's changes and the agent's and journal's answers reach the proposal they name
+
+```quint
+pure def canPresent(d: Approvals, id: int, signedIn: int, protectedScreen: bool, by: Actor): bool =
+  not(d.interrupted.contains(id)) and P::canPresent(entry(d, id), signedIn, protectedScreen, by)
+
+pure def present(d: Approvals, id: int, signedIn: int, protectedScreen: bool, by: Actor): Acted =
+  kept(id, d, P::present(entry(d, id), signedIn, protectedScreen, by))
+
+pure def canRevise(d: Approvals, id: int, by: Actor): bool = P::canRevise(entry(d, id), id, by)
+
+pure def revise(d: Approvals, id: int, by: Actor): Acted = kept(id, d, P::revise(entry(d, id), id, by))
+
+pure def canShield(d: Approvals, id: int, signedIn: int, protectedScreen: bool, by: Actor): bool =
+  P::canShield(entry(d, id), signedIn, protectedScreen, by)
+
+pure def shield(d: Approvals, id: int, signedIn: int, protectedScreen: bool, by: Actor): Acted =
+  kept(id, d, P::shield(entry(d, id), signedIn, protectedScreen, by))
+
+pure def canWithdraw(d: Approvals, id: int, by: Actor): bool = P::canWithdraw(entry(d, id), id, by)
+
+pure def withdraw(d: Approvals, id: int, by: Actor): Acted = kept(id, d, P::withdraw(entry(d, id), id, by))
+
+pure def canApprove(d: Approvals, id: int, seen: int, now: int, available: bool, signedIn: int, protectedScreen: bool, by: Actor): bool =
+  not(d.interrupted.contains(id)) and P::canApprove(entry(d, id), seen, now, available, signedIn, protectedScreen, by)
+
+pure def approve(d: Approvals, id: int, seen: int, now: int, available: bool, signedIn: int, protectedScreen: bool, by: Actor): Acted =
+  routed(id, d, P::approve(entry(d, id), seen, now, available, signedIn, protectedScreen, by))
+
+pure def canDecline(d: Approvals, id: int, signedIn: int, by: Actor): bool = P::canDecline(entry(d, id), signedIn, by)
+
+pure def decline(d: Approvals, id: int, signedIn: int, by: Actor): Acted = routed(id, d, P::decline(entry(d, id), signedIn, by))
+
+pure def canReserved(d: Approvals, id: int, by: Actor): bool = P::canReserved(entry(d, id), id, by)
+
+pure def reserved(d: Approvals, id: int, journal: P::Journal, by: Actor): Acted = routed(id, d, P::reserved(entry(d, id), id, journal, by))
+
+pure def canRetry(d: Approvals, id: int, signedIn: int, by: Actor): bool = P::canRetry(entry(d, id), signedIn, by)
+
+pure def retry(d: Approvals, id: int, signedIn: int, by: Actor): Acted = kept(id, d, P::retry(entry(d, id), signedIn, by))
+
+pure def canGrant(d: Approvals, id: int, by: Actor): bool = P::canGrant(entry(d, id), id, by)
+
+pure def grant(d: Approvals, id: int, claim: P::Claim, by: Actor): Acted = kept(id, d, P::grant(entry(d, id), id, claim, by))
+
+pure def canCancel(d: Approvals, id: int, signedIn: int, by: Actor): bool = P::canCancel(entry(d, id), signedIn, by)
+
+pure def cancel(d: Approvals, id: int, signedIn: int, by: Actor): Acted = routed(id, d, P::cancel(entry(d, id), signedIn, by))
+
+pure def canExpire(d: Approvals, id: int, now: int, by: Actor): bool = P::canExpire(entry(d, id), now, by)
+
+pure def expire(d: Approvals, id: int, now: int, by: Actor): Acted = routed(id, d, P::expire(entry(d, id), now, by))
+
+pure def canAcknowledge(d: Approvals, id: int, by: Actor): bool = P::canAcknowledge(entry(d, id), id, by)
+
+pure def acknowledge(d: Approvals, id: int, by: Actor): Acted = kept(id, d, P::acknowledge(entry(d, id), id, by))
+
+pure def canAttest(d: Approvals, id: int, signedIn: int, happened: bool, by: Actor): bool =
+  P::canAttest(entry(d, id), signedIn, happened, by)
+
+pure def attest(d: Approvals, id: int, signedIn: int, happened: bool, by: Actor): Acted =
+  routed(id, d, P::attest(entry(d, id), signedIn, happened, by))
+```
+
+### The agent runs something directly only when the message's pass admits it, and it is then a proposal like any other
+
+```quint
+pure def canStart(d: Approvals, id: int, operation: Operation, message: int, typed: bool, automated: bool, wanted: Preference, protectedScreen: bool, signedIn: int, by: Actor): bool =
+  not(d.ids.contains(id)) and D::canAdmit(d.pass, operation, message, typed, automated, wanted, protectedScreen, by)
+    and P::canRequest(P::initial, id, operation, message, typed, signedIn, by)
+
+pure def start(d: Approvals, id: int, operation: Operation, message: int, typed: bool, automated: bool, wanted: Preference, protectedScreen: bool, expires: int, signedIn: int, by: Actor): Acted =
+  val m = routed(id, d, P::request(P::initial, id, operation, message, typed, expires, signedIn, by))
+  { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket),
+      pass: D::admit(d.pass, operation, message, typed, automated, wanted, protectedScreen, by) } }
+
+pure def canHear(d: Approvals, message: int, by: Actor): bool = D::canHear(d.pass, message, by)
+
+pure def hear(d: Approvals, message: int, by: Actor): Approvals = { ...d, pass: D::hear(d.pass, message, by) }
+```
+
+### The phone carries out a claimed effect only while no other is being carried out
+
+```quint
 pure val weight_perform = 4
-pure val weight_performed = 6
-pure val weight_completed = 6
-pure val pValues =
-  Set(initial)
-    .union(Set({ ...initial, custody: Pending, operation: Change, expires: 4, attempt: A::plan(1), review: R::present(R::unreviewed) }))
-    .union(Set({ ...initial, custody: Pending, operation: Look, expires: 8, attempt: A::plan(1), sensitive: true, lease: Held }))
-    .union(Set({ ...initial, custody: Claimed, operation: Change, expires: 4, attempt: A::record(A::plan(1)) }))
-    .union(Set({ ...initial, custody: Claimed, operation: Change, expires: 8, attempt: A::record(A::plan(1)), sensitive: true }))
+pure val weight_performed = 4
+
+pure def canPerform(d: Approvals, id: int, now: int, protectedScreen: bool, signedIn: int, wanted: Preference, by: Actor): bool =
+  d.running == 0 and P::canPerform(entry(d, id), now, protectedScreen, signedIn, wanted, by)
+
+pure def perform(d: Approvals, id: int, now: int, protectedScreen: bool, signedIn: int, wanted: Preference, by: Actor): Acted =
+  val m = routed(id, d, P::perform(entry(d, id), now, protectedScreen, signedIn, wanted, by))
+  { ...m, state: { ...m.state, running: id } }
 ```
 
-### Only the agent proposes, once, under a number, and never an emergency call
-
-A proposal for an emergency call is refused before it has a card: the
-owner dials it. Only a read can hold a lease on an answer.
+### The effect's answer frees the phone for the next, and a direct run that did not succeed ends its message's pass
 
 ```quint
-pure def canPropose(p: Proposal, id: int, operation: Operation, replies: bool, by: Actor): bool =
-  by == Agent and p.custody == Unproposed and id > 0 and not(emergency(operation)) and (replies implies operation == Look)
+pure def canPerformed(d: Approvals, id: int, by: Actor): bool = P::canPerformed(entry(d, id), id, by)
 
-pure def propose(p: Proposal, id: int, operation: Operation, expires: int, replies: bool, by: Actor): Proposal =
-  { ...p, custody: Pending, operation: operation, expires: expires, attempt: A::plan(id), lease: if (replies) Held else NoLease }
+pure def performed(d: Approvals, id: int, result: P::Result, by: Actor): Acted =
+  val p = entry(d, id)
+  val m = routed(id, d, P::performed(p, id, result, by))
+  val failed = result != P::Done and p.message > 0 and D::canStop(d.pass, p.message, by)
+  { ...m, state: { ...m.state, running: if (d.running == id) 0 else d.running, pass: if (failed) D::stop(d.pass, p.message, by) else d.pass } }
 ```
 
-### No proposal is ever an emergency call
+### At most one approved or direct effect is being carried out at a time, and it is the one the desk is running
 
 ```quint
-pure def alwaysNoProposalIsAnEmergencyCall(p: Proposal): bool =
-  p.custody != Unproposed implies not(emergency(p.operation))
-
-pure def lawAnEmergencyCallIsNeverProposed(id: int, replies: bool, who: Actor): bool =
-  not(canPropose(initial, id, EmergencyCall, replies, who))
+pure def alwaysOneActionAtATime(d: Approvals): bool =
+  d.ids.forall(i => inFlight(entry(d, i)) iff i == d.running) and (d.running != 0 implies d.ids.contains(d.running))
 ```
 
-### The card is shown for a pending proposal, never on a protected screen
+### An effect is sent only when nothing else is being carried out, and the one running stops only with its answer or a restart
 
 ```quint
-pure def canPresent(p: Proposal, by: Actor): bool =
-  by == Phone and p.custody == Pending and not(p.sensitive) and not(p.review.showing)
-
-pure def present(p: Proposal, by: Actor): Proposal = { ...p, review: R::present(p.review) }
+pure def stepOneActionAtATime(before: Approvals, via: str, after: Approvals, out: List[Effect]): bool =
+  out.every(e => match e {
+    | About(a) => a.does == P::DoIt implies (before.running == 0 and after.running == a.id)
+    | ListWaiting(t) => t.ticket == after.waiting.ticket
+    | _ => true
+  })
+    and ((before.running != 0 and after.running != before.running) implies
+      ((via == "performed" and after.running == 0) or via == "restart"))
 ```
 
-### What a pending proposal would do can change, and the card then no longer counts
-
-The agent amends it, or the thing it names changes on the phone. The card
-must be shown again as it now is before it can be approved.
+### A proposal can wait its turn while another is being carried out
 
 ```quint
-pure def canRevise(p: Proposal, by: Actor): bool = by != Owner and p.custody == Pending
+pure def sometimesAnEffectWaitsItsTurn(d: Approvals): bool =
+  d.running != 0 and d.ids.exists(i => entry(d, i).stage == P::Claimed)
 
-pure def revise(p: Proposal, by: Actor): Proposal = { ...p, review: R::revise(p.review) }
+pure def sometimesADirectRunAndACardTogether(d: Approvals): bool =
+  d.ids.exists(i => entry(d, i).message > 0) and d.ids.exists(i => entry(d, i).message == 0 and entry(d, i).stage != P::Pending)
 ```
 
-### The card is open only while the proposal is pending and the screen is not protected
+### What is being carried out comes to an end
 
-A settled card is inert: nothing on it can be approved again.
+If the phone answers, the effect it is carrying out does not stay so.
 
 ```quint
-pure def alwaysASettledCardIsInert(p: Proposal): bool =
-  p.review.showing implies (p.custody == Pending and not(p.sensitive))
+pure def leadsToTheRunningActionEnds(d: Approvals, later: Approvals): bool = d.running != 0 implies later.running == 0
+
+pure val fair_performed = "weak"
 ```
 
-### A card can be open on a proposal that changed after it was shown
+## Story: Change owner with an approval in hand
+
+> As the owner, I want nothing I approved to be carried out once someone
+> else is signed in, and their cards never shown to me.
+
+### Another owner signing in, review first being turned on, or a change to what was approved retires each proposal not yet sent, one by one, and the agent is told
+
+The phone retires each proposal the change touches; a card of another
+owner was already closed when they signed in.
 
 ```quint
-pure def sometimesTheCardShowsAnOlderProposal(p: Proposal): bool =
-  p.review.showing and p.review.shown != p.review.revision
+pure def canRetire(d: Approvals, id: int, why: P::Retirement, signedIn: int, wanted: Preference, by: Actor): bool =
+  P::canRetire(entry(d, id), why, signedIn, wanted, by)
+
+pure def retire(d: Approvals, id: int, why: P::Retirement, signedIn: int, wanted: Preference, by: Actor): Acted =
+  routed(id, d, P::retire(entry(d, id), why, signedIn, wanted, by))
 ```
 
-## Story: Decide
-
-> As the owner, I want to approve or decline exactly what the card shows,
-> in time, and for my decision to be the only thing that lets it happen.
-
-### Only the owner approves, and only the card as shown, in time, on a screen that is not protected
-
-Approving reserves the journal row and asks the agent for the claim.
+### Nothing of another owner is carried out, approved or shown
 
 ```quint
-pure def canApprove(p: Proposal, now: int, by: Actor): bool =
-  by == Owner and p.custody == Pending and R::canConfirm(p.review) and A::canRecord(p.attempt)
-    and now < p.expires and not(p.sensitive)
-
-pure def approve(p: Proposal, now: int, by: Actor): Moved =
-  { state: { ...p, custody: Approved, review: R::confirm(p.review), attempt: A::record(p.attempt) }, out: List(AskClaim) }
+pure def lawNothingIsCarriedOutForAnotherOwner(d: Approvals, id: int, seen: int, now: int, signedIn: int, wanted: Preference, who: Actor): bool =
+  signedIn != entry(d, id).owner implies
+    (not(canPerform(d, id, now, false, signedIn, wanted, who)) and not(canApprove(d, id, seen, now, true, signedIn, false, who))
+      and not(canPresent(d, id, signedIn, false, who)))
 ```
 
-### Only the owner declines, from the open card
-
-Declining gives up the answer the read was for.
+### A card of another owner can be retired while the agent waits to hear of it
 
 ```quint
-pure def release(lease: Lease): Lease = if (lease == Held or lease == Completing) Dropped else lease
-
-pure def canDecline(p: Proposal, by: Actor): bool = by == Owner and p.custody == Pending and p.review.showing
-
-pure def decline(p: Proposal, by: Actor): Moved =
-  { state: { ...p, custody: Declined, review: R::dismiss(p.review), lease: release(p.lease) }, out: List(TellDecline) }
+pure def sometimesARetiredCardIsUntold(d: Approvals): bool =
+  d.ids.exists(i => entry(d, i).stage == P::Lapsed and not(entry(d, i).told))
 ```
 
-### An approval is given only on the card as it was shown
+## Story: Pick up the cards after a restart
+
+> As the owner, I want a restart to lose nothing I decided, never to do an
+> action a second time, and to show me which cards are still waiting.
+
+### A restart ends what was being carried out: a change waits to be read back, and what cannot be read back is unknown
+
+Every proposal is then marked as one Alpha may have to ask about again, and
+the listing that was being asked is asked again.
 
 ```quint
-pure def stepApprovalIsOfTheCardAsShown(before: Proposal, via: str, after: Proposal): bool =
-  (before.custody == Pending and after.custody == Approved) implies
-    (via == "approve" and before.review.showing and before.review.shown == before.review.revision)
+pure def canRestart(d: Approvals, by: Actor): bool = by == Phone
+
+pure def restart(d: Approvals, by: Actor): Acted =
+  val m = if (d.running == 0) { state: d, out: List() } else routed(d.running, d, P::restart(entry(d, d.running), by))
+  { ...m, state: { ...m.state, running: 0, interrupted: d.ids, waiting: { ...d.waiting, status: W::Idle } } }
 ```
 
-### Nobody but the owner decides
+### A restart keeps every proposal as it was, but for the one being carried out
 
 ```quint
-pure def lawOnlyTheOwnerDecides(p: Proposal, now: int, who: Actor): bool =
-  who != Owner implies (not(canApprove(p, now, who)) and not(canDecline(p, who)))
+pure def stepARestartKeepsEveryProposal(before: Approvals, via: str, after: Approvals): bool =
+  via == "restart" implies
+    (after.ids.subseteq(before.ids) and before.ids.subseteq(after.ids) and after.running == 0
+      and before.ids.forall(i => i == before.running or (entry(after, i) == entry(before, i) and leaseOf(after, i) == leaseOf(before, i))))
 ```
 
-### The agent can withdraw a pending proposal, which then lapses
+### After a restart Alpha asks once again for what it never heard about each proposal, never about the one being carried out, and gives up an answer that was being written
 
-A lapsed proposal was never reserved, so it has no receipt.
+What it asks again is the [proposal](./proposal.md)'s to say: the journal,
+the claim, a read-back, or the telling of a decision.
 
 ```quint
-pure def canWithdraw(p: Proposal, by: Actor): bool = by == Agent and p.custody == Pending
+pure def canRecover(d: Approvals, id: int, by: Actor): bool =
+  by == Phone and d.interrupted.contains(id) and d.running != id
+    and (P::outstanding(entry(d, id)) or leaseOf(d, id).status == L::Completing)
 
-pure def withdraw(p: Proposal, by: Actor): Proposal =
-  { ...p, custody: Lapsed, review: R::dismiss(p.review), lease: release(p.lease) }
+pure def recover(d: Approvals, id: int, by: Actor): Acted =
+  val p = entry(d, id)
+  val l = leaseOf(d, id)
+  { state: { ...d, interrupted: d.interrupted.exclude(Set(id)), leases: if (l.status == L::Completing) d.leases.put(id, L::restart(l, by)) else d.leases },
+    out: if (P::outstanding(p)) List(About({ id: id, does: P::askedAgain(p) })) else List() }
 ```
 
-### The phone says when its screen is protected, and that closes the card and gives up the answer
-
-A locked phone, a password field or a private page is protected.
+### Only a restart lets Alpha ask again, once a proposal, and only a change sent before it is read back
 
 ```quint
-pure def canScreen(p: Proposal, by: Actor): bool = by == Phone
-
-pure def screen(p: Proposal, sensitive: bool, by: Actor): Moved =
-  if (sensitive)
-    { state: { ...p, sensitive: true, review: R::dismiss(p.review), lease: release(p.lease) },
-      out: if (p.lease == Completing) List(StopContinuing) else List() }
-  else { state: { ...p, sensitive: false }, out: List() }
+pure def stepWhatIsAskedAgainIsAskedOnce(before: Approvals, via: str, after: Approvals, out: List[Effect]): bool =
+  (after.interrupted.subseteq(before.interrupted) or via == "restart")
+    and out.every(e => match e {
+      | About(a) =>
+        (via == "recover" implies (before.interrupted.contains(a.id) and not(after.interrupted.contains(a.id))))
+          and (a.does == P::ReadBack implies (via == "recover" and entry(before, a.id).stage == P::Reconciling))
+      | _ => true
+    })
 ```
 
-### A proposal can be declined, and can lapse unanswered
+### Alpha can ask again after a restart, and still have more to ask
 
 ```quint
-pure def sometimesDeclined(p: Proposal): bool = p.custody == Declined
-
-pure def sometimesLapsed(p: Proposal): bool = p.custody == Lapsed
+pure def sometimesAskedAgainAfterARestart(d: Approvals): bool =
+  d.ids.exists(i => not(d.interrupted.contains(i)) and entry(d, i).stage == P::Approved) and d.interrupted.size() > 0
 ```
 
-## Story: Have it done once
-
-> As the owner, I want what I approved to happen at most once, and to be
-> told how it ended, including when Alpha cannot tell.
-
-### The agent answers the claim, and a claim it refuses cancels the approval
-
-The agent refuses when it no longer lists the proposal as waiting: it was
-withdrawn, or decided somewhere else. Nothing was sent, and the agent
-already knows.
+### The proposals still waiting are read once for the conversation, never while the page is hidden, the screen protected or a reply being written
 
 ```quint
-pure def closed(told: bool, p: Proposal): Moved =
-  { state: { ...p, custody: Done, receipt: Cancelled, told: told, lease: release(p.lease) },
-    out: if (told) List() else List(TellReceipt) }
+pure def canFetch(d: Approvals, blocked: bool, by: Actor): bool = by == Phone and d.waiting.status == W::Idle and not(blocked)
 
-pure def canGrant(p: Proposal, id: int, by: Actor): bool = by == Agent and p.custody == Approved and id == p.attempt.id
-
-pure def grant(p: Proposal, id: int, granted: bool, by: Actor): Moved =
-  if (granted) { state: { ...p, custody: Claimed }, out: List() } else closed(true, p)
+pure def fetch(d: Approvals, blocked: bool, by: Actor): Acted =
+  val waiting = W::ask(d.waiting)
+  { state: { ...d, waiting: waiting }, out: List(ListWaiting({ ticket: waiting.ticket })) }
 ```
 
-### Until the effect is sent the owner can cancel
+### Only the newest listing's answer is taken, and one that failed is not asked again until the conversation changes or Alpha restarts
+
+A change of conversation also refuses the answer to a listing asked before
+it.
 
 ```quint
-pure def unsent(p: Proposal): bool = p.custody == Approved or p.custody == Claimed
+pure def canFetched(d: Approvals, ticket: int, by: Actor): bool = by == Phone and W::canAnswer(d.waiting, ticket)
 
-pure def canCancel(p: Proposal, by: Actor): bool = by == Owner and unsent(p)
+pure def fetched(d: Approvals, ticket: int, ok: bool, by: Actor): Approvals = { ...d, waiting: W::answer(d.waiting, ok) }
 
-pure def cancel(p: Proposal, by: Actor): Moved = closed(false, p)
+pure def canBind(d: Approvals, by: Actor): bool = by == Phone
+
+pure def bind(d: Approvals, by: Actor): Approvals = { ...d, waiting: { ...d.waiting, status: W::Idle } }
+
+pure def stepAFailedListingWaitsForTheConversationToChange(before: Approvals, via: str, after: Approvals): bool =
+  (before.waiting.status == W::Failed and after.waiting.status != W::Failed) implies (via == "bind" or via == "restart")
 ```
 
-### When its time runs out a pending proposal lapses, and an approval not yet sent is cancelled
+### A pending card that a listing asked after it was made left out is shown as unavailable, which proves neither that it was done nor that it was not
 
-The pending one lapses as a withdrawn one does. An effect already sent is
-not touched by the clock.
+A card made after the listing was asked is naturally missing from it.
 
 ```quint
-pure def canExpire(p: Proposal, now: int, by: Actor): bool =
-  by == Phone and (p.custody == Pending or unsent(p)) and now >= p.expires
+pure def canMissing(d: Approvals, id: int, ticket: int, by: Actor): bool =
+  d.waiting.status == W::Loaded and ticket == d.waiting.ticket and sinceOf(d, id) < d.waiting.ticket
+    and P::canVanish(entry(d, id), by)
 
-pure def expire(p: Proposal, now: int, by: Actor): Moved =
-  if (p.custody == Pending) { state: withdraw(p, by), out: List() } else closed(false, p)
+pure def missing(d: Approvals, id: int, ticket: int, by: Actor): Acted = kept(id, d, P::vanish(entry(d, id), by))
+
+pure def stepACardIsUnavailableOnlyFromALaterListing(before: Approvals, via: str, after: Approvals): bool =
+  before.ids.forall(i => (entry(before, i).stage == P::Pending and entry(after, i).stage == P::Unavailable)
+    implies (via == "missing" and before.waiting.status == W::Loaded and sinceOf(before, i) < before.waiting.ticket))
 ```
 
-### The phone sends the effect only for a claimed reservation, in time, on a screen that is not protected
+### After a restart a pending card is shown and approved again only once a listing asked since confirms it is still waiting
+
+A card opened from its notice after a restart is checked the same way.
 
 ```quint
-pure def canPerform(p: Proposal, now: int, by: Actor): bool =
-  by == Phone and p.custody == Claimed and A::canDispatch(p.attempt) and now < p.expires and not(p.sensitive)
+pure def canStillWaiting(d: Approvals, id: int, ticket: int, by: Actor): bool =
+  by == Phone and d.waiting.status == W::Loaded and ticket == d.waiting.ticket and d.interrupted.contains(id)
+    and entry(d, id).stage == P::Pending
 
-pure def perform(p: Proposal, now: int, by: Actor): Moved =
-  { state: { ...p, custody: Executing, attempt: A::dispatch(p.attempt) }, out: List(DoIt) }
+pure def stillWaiting(d: Approvals, id: int, ticket: int, by: Actor): Approvals = { ...d, interrupted: d.interrupted.exclude(Set(id)) }
+
+pure def lawACardIsNotApprovedBeforeItIsConfirmedAfterARestart(d: Approvals, id: int, seen: int, now: int, signedIn: int, who: Actor): bool =
+  d.interrupted.contains(id) implies (not(canPresent(d, id, signedIn, false, who)) and not(canApprove(d, id, seen, now, true, signedIn, false, who)))
 ```
 
-### An approval that ran out, and a protected screen, let nothing be approved or sent
+### A pending card can wait for a listing after a restart
 
 ```quint
-pure def lawAnApprovalThatRanOutIsRefused(p: Proposal, now: int, who: Actor): bool =
-  now >= p.expires implies (not(canApprove(p, now, who)) and not(canPerform(p, now, who)))
-
-pure def lawAProtectedScreenBlocks(p: Proposal, now: int, who: Actor): bool =
-  p.sensitive implies (not(canPresent(p, who)) and not(canApprove(p, now, who)) and not(canPerform(p, now, who)))
+pure def sometimesACardWaitsForAListing(d: Approvals): bool =
+  d.ids.exists(i => d.interrupted.contains(i) and entry(d, i).stage == P::Pending) and d.waiting.status == W::Loading
 ```
 
-### The effect ends as succeeded, denied, failed or unknown, and the agent is told the receipt
-
-Denied is Android's refusal and failed the operation's own: both say that
-nothing was done. A read that succeeded goes on to answer its question, unless the screen
-is protected; any other ending gives the answer up.
+### The listing can fail and wait, and a card can be found unavailable
 
 ```quint
-pure def isResult(result: Receipt): bool =
-  result == Succeeded or result == Denied or result == Failed or result == Unsure
+pure def sometimesTheListingFailed(d: Approvals): bool = d.waiting.status == W::Failed
 
-pure def canPerformed(p: Proposal, id: int, result: Receipt, by: Actor): bool =
-  by == Phone and (p.custody == Executing or p.custody == Reconciling) and A::canConclude(p.attempt, id) and isResult(result)
-
-pure def performed(p: Proposal, id: int, result: Receipt, by: Actor): Moved =
-  val lease = if (p.lease != Held) p.lease else if (result == Succeeded and not(p.sensitive)) Completing else Dropped
-  { state: {
-      ...p, custody: if (result == Unsure) Reconciling else Done,
-      attempt: A::conclude(p.attempt, result == Succeeded, result != Unsure), receipt: result, lease: lease,
-    },
-    out: if (lease == Completing and p.lease == Held) List(TellReceipt, AskAnswer) else List(TellReceipt) }
-```
-
-### The agent acknowledges the receipt it was told
-
-```quint
-pure def canAcknowledge(p: Proposal, id: int, by: Actor): bool =
-  by == Agent and p.receipt != NoReceipt and not(p.told) and id == p.attempt.id
-
-pure def acknowledge(p: Proposal, id: int, by: Actor): Proposal = { ...p, told: true }
-```
-
-### Nothing is reserved before the owner approves
-
-```quint
-pure def alwaysNothingIsReservedBeforeApproval(p: Proposal): bool =
-  (p.custody == Unproposed or p.custody == Pending or p.custody == Declined or p.custody == Lapsed)
-    implies (p.attempt.outcome == A::Planned and p.receipt == NoReceipt)
-```
-
-### The journal row follows the custody: reserved while approved or claimed, applying while executing
-
-```quint
-pure def alwaysTheJournalFollowsTheCustody(p: Proposal): bool =
-  (unsent(p) implies (p.attempt.outcome == A::Recorded and p.receipt == NoReceipt))
-    and (p.custody == Executing implies (p.attempt.outcome == A::Sent and p.receipt == NoReceipt))
-    and (p.custody == Reconciling implies (p.attempt.outcome == A::Sent or p.attempt.outcome == A::Unknown))
-    and (p.custody == Done implies p.receipt != NoReceipt)
-```
-
-### A receipt says how the journal row ended, and unknown only of an effect that was sent
-
-A cancelled receipt is of a reservation whose effect was never sent.
-
-```quint
-pure def alwaysTheReceiptMatchesTheJournal(p: Proposal): bool =
-  (p.receipt == NoReceipt implies (p.attempt.outcome == A::Planned or p.attempt.outcome == A::Recorded or p.attempt.outcome == A::Sent))
-    and (p.receipt == Succeeded iff p.attempt.outcome == A::Confirmed)
-    and ((p.receipt == Denied or p.receipt == Failed) iff p.attempt.outcome == A::Refused)
-    and (p.receipt == Unsure iff p.attempt.outcome == A::Unknown)
-    and (p.receipt == Cancelled implies p.attempt.outcome == A::Recorded)
-    and ((p.receipt == Unsure) iff (p.custody == Reconciling and p.attempt.outcome != A::Sent))
-```
-
-### An effect is sent at most once for a proposal, and only for a reservation the agent granted
-
-```quint
-pure def stepAnEffectNeedsAReservationAndAClaim(before: Proposal, via: str, after: Proposal, out: List[Effect]): bool =
-  out.some(e => e == DoIt) implies
-    (via == "perform" and before.custody == Claimed and before.attempt.outcome == A::Recorded
-      and after.attempt.outcome == A::Sent and not(before.sensitive))
-
-pure def stepASentEffectIsNeverSentAgain(before: Proposal, via: str, after: Proposal, out: List[Effect]): bool =
-  (before.attempt.outcome != A::Planned and before.attempt.outcome != A::Recorded) implies
-    (not(out.some(e => e == DoIt)) and after.attempt.id == before.attempt.id)
-```
-
-### A proposal keeps its number and what it would do from the moment it is made
-
-```quint
-pure def stepAProposalKeepsItsNumber(before: Proposal, via: str, after: Proposal): bool =
-  before.custody != Unproposed implies
-    (after.attempt.id == before.attempt.id and after.operation == before.operation and after.expires == before.expires)
-```
-
-### The custody only moves forward
-
-```quint
-pure def progress(custody: Custody): int =
-  if (custody == Unproposed) 0 else if (custody == Pending) 1 else if (custody == Approved) 2
-  else if (custody == Claimed) 3 else if (custody == Executing) 4 else if (custody == Reconciling) 5 else 6
-
-pure def stepTheCustodyOnlyMovesForward(before: Proposal, after: Proposal): bool =
-  progress(after.custody) >= progress(before.custody)
-```
-
-### The agent is told every receipt when it is first written
-
-A claim the agent itself refused needs no telling.
-
-```quint
-pure def alwaysOnlyAReceiptIsAcknowledged(p: Proposal): bool = p.told implies p.receipt != NoReceipt
-
-pure def stepEveryReceiptIsTold(before: Proposal, via: str, after: Proposal, out: List[Effect]): bool =
-  (before.receipt == NoReceipt and after.receipt != NoReceipt and not(after.told)) implies out.some(e => e == TellReceipt)
-```
-
-### An approval the agent or the phone still owes an answer to comes to an end
-
-If the agent answers the claim and the phone watches the clock, an approved
-or claimed proposal does not stay so: it is performed, cancelled, or runs
-out.
-
-```quint
-pure def leadsToAnApprovalEnds(p: Proposal, later: Proposal): bool =
-  unsent(p) implies not(unsent(later))
-
-pure val fair_grant = "weak"
-pure val fair_expire = "weak"
-```
-
-### An approved effect can succeed and be acknowledged, can be denied, and can be cancelled first
-
-```quint
-pure def sometimesDoneAndAcknowledged(p: Proposal): bool = p.receipt == Succeeded and p.told
-
-pure def sometimesDenied(p: Proposal): bool = p.receipt == Denied
-
-pure def sometimesCancelledAfterApproval(p: Proposal): bool = p.receipt == Cancelled and not(p.told)
-```
-
-## Story: Pick up after a restart
-
-> As the owner, I want a restart in the middle of an approved action to
-> lose nothing I decided and never to do the action a second time.
-
-### A restart closes the card and loses every answer that was on its way
-
-The journal row, the receipt and the custody are kept. An effect that was
-executing now needs reconciliation, and an answer that was being completed
-is unconfirmed.
-
-```quint
-pure def canRestart(p: Proposal, by: Actor): bool = by == Phone
-
-pure def restart(p: Proposal, by: Actor): Proposal = {
-  ...p, review: R::dismiss(p.review),
-  custody: if (p.custody == Executing) Reconciling else p.custody,
-  lease: if (p.lease == Completing) Unconfirmed else p.lease,
-}
-```
-
-### Alpha asks again for what it never heard, and never sends the effect again
-
-It asks the agent again for the claim, reads back how a sent effect ended,
-and tells again a receipt the agent has not acknowledged. A read-back that
-proves how the effect ended settles it; one that proves nothing leaves the
-receipt unknown.
-
-```quint
-pure def canRecover(p: Proposal, by: Actor): bool =
-  by == Phone and (p.custody == Approved or (p.custody == Reconciling and p.attempt.outcome == A::Sent)
-    or (p.receipt != NoReceipt and not(p.told)))
-
-pure def recover(p: Proposal, by: Actor): Moved =
-  { state: p, out: if (p.custody == Approved) List(AskClaim) else if (p.receipt == NoReceipt) List(ReadBack) else List(TellReceipt) }
-
-pure def stepRecoveryChangesNothing(before: Proposal, via: str, after: Proposal): bool =
-  via == "recover" implies after == before
-```
-
-### A receipt never changes once it is written, so an unknown outcome is never retried
-
-```quint
-pure def stepAReceiptNeverChanges(before: Proposal, via: str, after: Proposal): bool =
-  before.receipt != NoReceipt implies after.receipt == before.receipt
-```
-
-### An effect can need reconciliation, with its outcome still to read back or unknown for good
-
-```quint
-pure def sometimesAwaitingReadBack(p: Proposal): bool = p.custody == Reconciling and p.receipt == NoReceipt
-
-pure def sometimesUnknownForGood(p: Proposal): bool = p.receipt == Unsure and p.told
+pure def sometimesACardUnavailable(d: Approvals): bool = d.ids.exists(i => entry(d, i).stage == P::Unavailable)
 ```
 
 ## Story: Get the answer a read was for
 
 > As the owner, when I approve a read that my question needed, I want the
-> answer to that question once, and not at all if I have moved on.
+> answer to that question once, and not at all if the read did not succeed
+> or I have moved on.
 
-### Leaving the conversation closes the card and gives up the answer
+### The agent holds a lease on the answer when it proposes a read, and the read's receipt decides it: a succeeded read asks for the answer, any other ending gives it up
+
+The rules of one lease are the [lease](./lease.md)'s.
 
 ```quint
-pure def canLeave(p: Proposal, by: Actor): bool =
-  by == Owner and (p.review.showing or p.lease == Held or p.lease == Completing)
+pure def leased(id: int, d: Approvals, l: L::Leased): Acted =
+  { state: { ...d, leases: d.leases.put(id, l.state) }, out: l.out.listMap(e => Leasing({ read: id, asks: e })) }
 
-pure def leave(p: Proposal, by: Actor): Moved =
-  { state: { ...p, review: R::dismiss(p.review), lease: release(p.lease) },
-    out: if (p.lease == Completing) List(StopContinuing) else List() }
+pure def canHold(d: Approvals, id: int, by: Actor): bool =
+  d.ids.contains(id) and (entry(d, id).stage == P::Pending or entry(d, id).stage == P::Reserving)
+    and L::canHold(leaseOf(d, id), id, entry(d, id).operation, entry(d, id).owner, by)
+
+pure def hold(d: Approvals, id: int, by: Actor): Approvals =
+  { ...d, leases: d.leases.put(id, L::hold(leaseOf(d, id), id, entry(d, id).operation, entry(d, id).owner, by)) }
+
+pure def canSucceeded(d: Approvals, id: int, by: Actor): bool =
+  L::canSucceeded(leaseOf(d, id), id, by) and entry(d, id).attempt.outcome == A::Confirmed
+
+pure def succeeded(d: Approvals, id: int, signedIn: int, protectedScreen: bool, by: Actor): Acted =
+  leased(id, d, L::succeeded(leaseOf(d, id), id, signedIn, protectedScreen, by))
+
+pure def canEnded(d: Approvals, id: int, by: Actor): bool =
+  L::canEnded(leaseOf(d, id), id, by) and P::decided(entry(d, id)) and entry(d, id).attempt.outcome != A::Confirmed
+
+pure def ended(d: Approvals, id: int, by: Actor): Approvals = { ...d, leases: d.leases.put(id, L::ended(leaseOf(d, id), id, by)) }
 ```
 
-### The agent's answer is shown once, and only while the lease is still completing
-
-An answer that arrives after the lease was given up is refused, and one
-the agent could not complete is unconfirmed.
+### Leaving the conversation, the screen becoming protected or another owner signing in gives up the answer, and the agent's answer is taken only while it is awaited and Alpha has not restarted since
 
 ```quint
-pure def canCompleted(p: Proposal, id: int, by: Actor): bool =
-  by == Agent and p.lease == Completing and id == p.attempt.id
+pure def canGiveUp(d: Approvals, id: int, by: Actor): bool = d.ids.contains(id) and L::canGiveUp(leaseOf(d, id), by)
 
-pure def completed(p: Proposal, id: int, ok: bool, by: Actor): Moved =
-  { state: { ...p, lease: if (ok) Answered else Unconfirmed }, out: if (ok) List(ShowAnswer) else List() }
+pure def giveUp(d: Approvals, id: int, by: Actor): Acted = leased(id, d, L::giveUp(leaseOf(d, id), by))
 
-pure def stepOneAnswerPerLease(before: Proposal, via: str, after: Proposal, out: List[Effect]): bool =
-  (out.some(e => e == ShowAnswer) or (after.lease == Answered and before.lease != Answered)) implies
-    (via == "completed" and before.lease == Completing and after.lease == Answered
-      and out.length() == 1 and out.every(e => e == ShowAnswer))
+pure def canCompleted(d: Approvals, id: int, by: Actor): bool =
+  L::canCompleted(leaseOf(d, id), id, by) and not(d.interrupted.contains(id))
+
+pure def completed(d: Approvals, id: int, ok: bool, by: Actor): Acted = leased(id, d, L::completed(leaseOf(d, id), id, ok, by))
 ```
 
-### Only a read holds a lease, and an answer is completed only for a read that succeeded
+### An answer is asked for, shown or left unconfirmed only for a read that succeeded, and a lease is held only by a read of the owner it is for
 
 ```quint
-pure def alwaysOnlyASucceededReadIsAnswered(p: Proposal): bool =
-  (p.lease != NoLease implies p.operation == Look)
-    and ((p.lease == Completing or p.lease == Answered or p.lease == Unconfirmed) implies p.receipt == Succeeded)
-    and (p.lease == Completing implies not(p.sensitive))
+pure def followsItsRead(l: L::Lease, p: P::Proposal): bool =
+  ((l.status == L::Completing or l.status == L::Answered or l.status == L::Unconfirmed) implies p.attempt.outcome == A::Confirmed)
+    and (l.status != L::NoLease implies (L::reads(p.operation) and l.owner == p.owner))
+
+pure def alwaysALeaseFollowsItsRead(d: Approvals): bool = d.ids.forall(i => followsItsRead(leaseOf(d, i), entry(d, i)))
 ```
 
-### A lease that was answered, given up or left unconfirmed stays so
-
-An unconfirmed answer is never asked for again.
+### A read's answer can be shown, given up because the read was declined, and left unconfirmed by a restart
 
 ```quint
-pure def stepASettledLeaseIsFinal(before: Proposal, via: str, after: Proposal): bool =
-  (before.lease == Answered or before.lease == Dropped or before.lease == Unconfirmed or before.lease == NoLease)
-    implies (after.lease == before.lease or before.custody == Unproposed)
-```
+pure def sometimesAnAnswerShown(d: Approvals): bool = d.ids.exists(i => leaseOf(d, i).status == L::Answered)
 
-### A read can be answered, given up while completing, and left unconfirmed
+pure def sometimesAnAnswerGivenUpForADeclinedRead(d: Approvals): bool =
+  d.ids.exists(i => leaseOf(d, i).status == L::Dropped and entry(d, i).stage == P::Declined)
 
-```quint
-pure def sometimesAnswered(p: Proposal): bool = p.lease == Answered
-
-pure def sometimesGivenUpAfterTheRead(p: Proposal): bool = p.lease == Dropped and p.receipt == Succeeded
-
-pure def sometimesUnconfirmed(p: Proposal): bool = p.lease == Unconfirmed
+pure def sometimesAnAnswerLeftUnconfirmed(d: Approvals): bool = d.ids.exists(i => leaseOf(d, i).status == L::Unconfirmed)
 ```
