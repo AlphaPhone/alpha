@@ -276,6 +276,12 @@ test('one message runs at most one direct Browser action; a second one keeps its
   const ran=await actions.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text,current:()=>{}});
   assert.equal(ran.length,1,text);assert.deepEqual(actions.calls,['first'],text);assert.ok(actions.proposals.has('second'),'the second keeps its card');
  }
+ // A switch left for the owner to pick a tab holds back what the message asked of that tab.
+ const held=policyFixture([['switch','request',undefined,'browser_tab_switch'],['reload','request',undefined,'browser_history']]);
+ Object.assign(held.proposals.get('switch').proposal.operation,{type:'browser_tab_switch',target:'shop'});Object.assign(held.proposals.get('reload').proposal.operation,{type:'browser_history',action:'reload'});
+ held.options.browserTabNeedsChoice=target=>target==='shop';
+ assert.deepEqual(await held.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'switch to the shop tab and reload it',current:()=>{}}),[]);
+ assert.deepEqual(held.calls,[]);assert.ok(held.proposals.has('switch')&&held.proposals.has('reload'),'both keep their cards');
  // Other direct actions of the same message are not held back by a Browser action.
  const mixed=policyFixture([['tab','request',undefined,'browser_tab_new'],['note','request',undefined,'create_note']]);
  assert.equal((await mixed.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'open a new tab',current:()=>{}})).length,2);

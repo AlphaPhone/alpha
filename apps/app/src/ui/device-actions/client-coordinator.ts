@@ -1575,12 +1575,16 @@ export class DeviceActionCoordinator<
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
       // Words that match several tabs need the owner's pick, and only the
-      // action's review card can show it.
+      // action's review card can show it. A later Browser action of the same
+      // message was asked for the tab the owner has yet to pick, so it waits
+      // for its own card instead of running on the tab showing now.
       if (
         entry.proposal.operation.type === "browser_tab_switch" &&
         this.options.browserTabNeedsChoice?.(entry.proposal.operation.target)
-      )
+      ) {
+        browserRan = true;
         continue;
+      }
       const browser =
         this.options.currentRequestBrowserPolicy &&
         (entry.proposal.operation.type === "browser_navigate" ||
