@@ -154,7 +154,7 @@ export type Audit = ReturnType<typeof audit>;
  * stage inside that window, an upper bound on a prefix cache's hit rate for that text.
  */
 export function audit(calls: RecordedCall[], options: { cacheMinutes?: number; tpm?: number } = {}) {
-  const cacheMs = (options.cacheMinutes ?? 5) * 60_000;
+  const cacheMs = (options.cacheMinutes ?? 10) * 60_000;
   const ordered = [...calls].sort((a, b) => a.at - b.at);
   const rows = ordered.map(call => {
     const text = wireText(call);
@@ -285,7 +285,7 @@ export type ProviderModel = {
   /** The cap a stage's calls sent, where the log does not record it (runtimes before the usage record). */
   outputReserve?: Record<string, number>;
 };
-export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 5, admissionInputFactor: 1.25, uncappedOutputHold: 16_384 };
+export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 10, admissionInputFactor: 1.25, uncappedOutputHold: 16_384 };
 
 export type ProviderSimulation = ReturnType<typeof simulateProvider>;
 

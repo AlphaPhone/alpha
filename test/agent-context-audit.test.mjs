@@ -96,7 +96,9 @@ test('the provider simulation caches whole prefix units in tools, system, messag
   assert.equal(cached({...next, tools: [tools[0]]}), 3072);
   assert.equal(cached({...next, tools: [...tools, {name: 'EXTRA', chars: 5_700, hash: 'eeee'}]}), 4096);
   // A prefix older than the provider keeps it, or one still being read, is not reused.
-  assert.equal(cached(stage1(400_000, receipts, 'two', {tools, system: longSystem})), 0);
+  assert.equal(cached(stage1(700_000, receipts, 'two', {tools, system: longSystem})), 0);
+  // Ten minutes: a prefix stored and not read again was still reused at 5 and 10 minutes and not at 20.
+  assert.equal(cached(stage1(400_000, receipts, 'two', {tools, system: longSystem})), 8192);
   assert.equal(cached({...next, at: 500, ms: 900}), 0);
   // Under one unit nothing is reused.
   assert.equal(simulateProvider([stage1(0, '[]', 'one'), stage1(20_000, '[]', 'one')]).cachedTokens, 0);

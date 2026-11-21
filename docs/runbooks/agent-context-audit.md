@@ -23,12 +23,38 @@ documentation:
 - **The cache reuses a request's leading text in units of 1,024 tokens**, read as tool
   definitions, then the system prompt, then the messages. One changed byte in a tool
   definition makes the rest of the request a miss.
+- **A stored prefix is kept for between 10 and 20 minutes.** Eight requests were stored
+  and each read back once: those read at 5 and 10 minutes were reused, those read at 20,
+  30, 45, 60 and 90 minutes were not. One sample per interval; the audit assumes 10.
+- **A digit costs about one token.** Ids and timestamps cost several times what prose
+  does per character.
 
 So three things cost allowance: input that misses the cache, the size of a request while
 it runs, and a missing output cap. Output itself is small, about 2% of a turn's input.
 
 This runbook covers host tools. None is an APK, emulator, image or device acceptance
 result.
+
+### The route a phone uses
+
+A phone signed in to the Cloud does not call Cerebras itself. Its runtime posts each
+call to the Cloud, which sends it to Cerebras with one key shared by every phone. This
+was read from the code and rendered offline with the network stubbed; no Cloud turn was
+sent. Every live figure below was taken on the direct route.
+
+- The Cloud adds no text. Tool definitions arrive in the phone's order and bytes, the
+  system prompt is unchanged, and the output cap, the conversation's cache key and the
+  provider's cached count all pass through. The runtime changes therefore apply.
+- Planner tools go out non-strict with their schemas as written. The direct route sends
+  them strict with rewritten schemas, which are larger where a schema has an open map
+  (a Calendar read is 7.8K characters on the phone's route and 16.9K on the direct one).
+  The routing evals in section 1 send the phone's form; the whole-turn runs in section 2
+  send the direct form.
+- A refusal comes back with no wait. The phone re-sends once per model type, up to ten
+  uploads for one refused step, and then waits five seconds. The hold setting
+  `OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS` belongs to the direct route and does nothing here.
+- Nothing in the Cloud counts tokens or paces a phone. One phone's holds can refuse
+  another phone's call.
 
 ## 1. Read a phone's recorded requests
 
@@ -48,7 +74,7 @@ excerpts around each point where two requests stop matching.
 The report gives, per stage (Stage 1, planner, evaluator, side calls): call counts and
 input tokens; calls and tokens per turn; input tokens in any 60 seconds against
 `--tpm`; where each stage's characters go; the share of each request that an earlier
-request of the same stage, within `--cache-minutes` (default 5), already contained;
+request of the same stage, within `--cache-minutes` (default 10), already contained;
 and the text at which requests most often diverge.
 
 It ends with the provider's cache and limits applied to the recorded requests: cached
