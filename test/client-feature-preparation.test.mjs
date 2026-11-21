@@ -332,7 +332,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
  assert.equal(stamp.managedGoogleBodyLimitPatch,undefined);
- assert.equal(stamp.files[googlePath],'e848c0e814caebd58eac087684a6020825aeda81e8af7c2cc66530c584003214');
+ assert.equal(stamp.files[googlePath],'0e1e9b51bc40e07925d3a7d1ea07b0d4b10c6ad1563dd9f786d846357846eac5');
  for(const name of Object.keys(stamp.sourceFiles).filter(name=>name.startsWith('packages/app/src/runtime/managed-google-agent/'))){
   assert.equal(stamp.sourceFiles[name],stamp.files[name],name+' is copied directly from upstream');
   assert.deepEqual(fs.readFileSync(path.join(source,name)),fs.readFileSync(path.join('vendor/eliza',name)),name+' has exact raw upstream bytes');
