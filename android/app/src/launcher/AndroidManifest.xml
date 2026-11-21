@@ -89,7 +89,7 @@
    <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
    <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
   </service>
-  <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+  <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:screenOrientation="portrait" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
   <activity android:name=".AlphaSmsNoticeActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoDisplay" />
   <!-- SMS role surfaces (Alpha's forks; MmsWapPushReceiver and MmsFileProvider stay shared), declared
        disabled and enabled only on the verified image. Incoming texts and MMS are stored before their
