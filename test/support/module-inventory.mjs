@@ -851,6 +851,7 @@ export const moduleInventory = {
     "apps/app/src/ui/voice/end-of-turn.ts",
     "apps/app/src/ui/voice/sense-invocation.ts",
     "apps/app/src/ui/voice/speech-bridge-messages.ts",
+    "apps/app/src/ui/voice/speech-format.ts",
     "apps/app/src/ui/voice/tts-playback-activity.ts",
     "apps/app/src/ui/voice/voice-activity.ts",
     "apps/app/src/ui/voice/voice-chat-playback.ts",

@@ -10,29 +10,40 @@ function load(file, names, box) {
   vm.runInNewContext('{' + stripTypeScriptTypes(source, {mode:'strip'}) + ';Object.assign(globalThis,{' + names.join(',') + '});}', box);
   return box;
 }
-const {planLocalSpeech} = load('apps/app/src/runtime/local-speech-text.ts', ['planLocalSpeech'], {});
+const speechText = load('apps/app/src/ui/voice/speech-format.ts', ['formatSpeechText','SPEECH_CREDENTIAL_PATTERN'], {});
+const {formatSpeechText,planLocalSpeech} = load('apps/app/src/runtime/local-speech-text.ts', ['planLocalSpeech'], speechText);
 const listen = text => planLocalSpeech(text).join(' ');
 const converse = text => planLocalSpeech(text, {mode: 'conversation'}).join(' ');
 const refusal = (text, mode) => { try { planLocalSpeech(text, {mode}); return null; } catch (error) { return error; } };
 
 test('times, money, ranges, phone numbers and dates read as a person says them', () => {
   for (const [text, spoken] of [
-    ['Your meeting is at 3:30 PM.', 'Your meeting is at 3 30 PM.'],
-    ['Lunch at 7:00 then 9:05.', "Lunch at 7 o'clock then 9 oh 5."],
-    ['It starts at 3:00 PM.', 'It starts at 3 PM.'],
+    ['Your meeting is at 3:30 PM.', 'Your meeting is at three thirty P M.'],
+    ['Lunch at 7:00 then 9:05.', "Lunch at seven o'clock then nine oh five."],
+    ['It starts at 3:00 PM.', 'It starts at three P M.'],
     ['That is $20 today.', 'That is 20 dollars today.'],
     ['It costs $12.50.', 'It costs 12 dollars 50.'],
     ['Only $1 or £5 or €2.5 now.', 'Only 1 dollar or 5 pounds or 2 euros 50 now.'],
     ['Paid $1,299 in all.', 'Paid 1299 dollars in all.'],
     ['Open 9-5 on weekdays.', 'Open 9 to 5 on weekdays.'],
     ['It takes 5-10 minutes.', 'It takes 5 to 10 minutes.'],
-    ['Booked 9:30-10:00 today.', "Booked 9 30 to 10 o'clock today."],
+    ['Booked 9:30-10:00 today.', "Booked nine thirty to ten o'clock today."],
     ['Call 555-123-4567 later.', 'Call 555, 123, 4567 later.'],
-    ['Due on 2026-11-06 at 10:30.', 'Due on 2026, 11, 06 at 10 30.'],
+    ['Due on 2026-11-06 at 10:30.', 'Due on 2026, 11, 06 at ten thirty.'],
   ]) {
     assert.equal(listen(text), spoken, text);
     assert.doesNotMatch(listen(text), /\b(?:dash|colon)\b/, text);
   }
+});
+
+test('on-device replies turn abbreviated dates and times into speech', () => {
+  assert.equal(converse('Availability: Sun, Nov 22, 12:00 PM - 12:30 PM.'), 'Availability, Sunday, November twenty second, noon to twelve thirty P M.');
+  assert.equal(converse('Sun Microsystems. Deadline: Sept. 1 at 9:05 a.m.'), 'Sun Microsystems. Deadline, September first at nine oh five A M.');
+});
+
+test('speech formatting handles clock syntax without rewriting other numeric display data', () => {
+  assert.equal(formatSpeechText('Times: 2-3 p.m., 09:05–10:00, 18:30 to 19:00.'), "Times, two to three P M, nine oh five to ten o'clock, six thirty P M to seven P M.");
+  assert.equal(formatSpeechText('2% of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.'), '2 percent of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.');
 });
 
 test('bullets and quotes are read without spoken labels, and each bullet stays its own sentence', () => {
@@ -52,7 +63,7 @@ test('conversation folds accents, slashes and web prefixes; Listen still refuses
 
 test('a credential is refused as a whole reply in conversation, with its own code', () => {
   for (const text of ['Your wifi password is: hunter2', 'The secret: abc', 'Card 4111 1111 1111 1111 on file.']) {
-    const error = refusal(text, 'conversation');
+    const error = refusal(formatSpeechText(text), 'conversation');
     assert.equal(error?.code, 'speech-refused', text);
   }
   // A value split from its label by the sentence splitter is still caught on the whole reply.
@@ -82,7 +93,7 @@ test('on-device conversation speech folds what it can and resolves silence for n
   const {f, voice} = onDevice();
   let started = 0;
   await voice.speak('Café Luna opens at 9:30.', new AbortController().signal, () => started++, false, {conversation: true});
-  assert.deepEqual(f.synthesized, ['Cafe Luna opens at 9 30.'], 'the native Listen re-plan accepts a planned chunk');
+  assert.deepEqual(f.synthesized, ['Cafe Luna opens at nine thirty.'], 'the native Listen re-plan accepts a planned chunk');
   await voice.speak('こんにちは', new AbortController().signal, () => started++, false, {conversation: true});
   assert.equal(f.synthesized.length, 1);
   assert.equal(started, 2, 'an unsayable sentence counts as played silence');

@@ -38,6 +38,7 @@ import { createNativeLiveDictation, nativeAssistantListener, nativeLiveVoiceRead
 import { installNativeVoiceTurnMarks } from '../runtime/native-voice-turn';
 import { VoiceAssistantSession, type AssistantState, type AssistantTextFrame } from '../runtime/voice-assistant';
 import { shouldRespondToVoiceTurn, buildVoiceTurnSignal } from '@elizaos/voice/turn';
+import { formatSpeechText } from '../ui/voice/speech-format';
 import { toSpeakableText } from '../ui/voice/voice-chat-playback.ts';
 import { connectionController } from '../runtime/connection-ui';
 import { workflowReplyText } from '../runtime/action-message-presentation';
@@ -909,7 +910,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           },
           // After the short gap: the chain. Unavailable, slow or failing: the long gap decides.
           ...(streamingCloud||openMic?{}:{endpoint:(text:string,signal:AbortSignal)=>{current();return semanticEndpoint!(text,signal);}}),
-          shouldRespond:(text,context)=>shouldRespondToVoiceTurn(text,context)&&(!cueHeard||shouldRespondToVoiceTurn(text,{recentAgentReply:cueHeard.text,replyAgeMs:cueAge(cueHeard),agentSpeaking:cueHeard.settledAt===undefined})),
+          shouldRespond:(text,context)=>{
+            if(!shouldRespondToVoiceTurn(text,context))return false;
+            // Playback spells out display dates and clocks. An ASR echo can contain either form.
+            const spoken=context.recentAgentReply&&formatSpeechText(context.recentAgentReply,!streamingCloud);
+            if(spoken&&spoken!==context.recentAgentReply&&!shouldRespondToVoiceTurn(formatSpeechText(text),{...context,recentAgentReply:spoken}))return false;
+            return !cueHeard||shouldRespondToVoiceTurn(text,{recentAgentReply:cueHeard.text,replyAgeMs:cueAge(cueHeard),agentSpeaking:cueHeard.settledAt===undefined});
+          },
           // The session asks for the signal only after the endpointer or the long gap committed the
           // turn, so a low text end-of-turn score must not hold it back: the server vetoes a turn on
           // nextSpeaker 'user' or a score below 0.4. A committed turn carries no score (none is made
@@ -918,7 +925,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           send:sendTurn,
           // On-device speech refuses a likely secret over the whole reply, before any sentence plays.
           speakable:text=>{const spoken=toSpeakableText(workflowReplyText(text).text);if(!streamingCloud)screenConversationSpeech(spoken);return spoken;},
-          speak:async input=>{input.signal.throwIfAborted();current();const started=()=>{current();input.onStarted();};const pending=streamingCloud?streamingCloud.speak(input.text,input.signal,started):replySpeech?replySpeech.speak(input.text,input.signal,started):local!.speak(input.text,input.signal,started,true,{conversation:true});conversationSpeech=pending;try{await pending;input.signal.throwIfAborted();current();}catch(failure){if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}throw failure;}finally{if(conversationSpeech===pending)conversationSpeech=undefined;}},
+          speak:async input=>{input.signal.throwIfAborted();current();const started=()=>{current();input.onStarted();};const pending=streamingCloud?streamingCloud.speak(formatSpeechText(input.text),input.signal,started):replySpeech?replySpeech.speak(input.text,input.signal,started):local!.speak(input.text,input.signal,started,true,{conversation:true});conversationSpeech=pending;try{await pending;input.signal.throwIfAborted();current();}catch(failure){if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}throw failure;}finally{if(conversationSpeech===pending)conversationSpeech=undefined;}},
           // After an interruption only what was played stays in this conversation's reply; the rest is
           // marked unheard, and the agent is asked to keep only the played prefix (nothing when it was
           // fully heard).

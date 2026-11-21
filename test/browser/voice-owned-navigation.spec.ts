@@ -274,3 +274,23 @@ test('Talk speaks calendar clock ranges as ranges without altering phone numbers
  });
  expect(spoken).toEqual(['2 to 3 pm, 3 to 4 pm, or 4 to 5 pm.','10:30 to 11:00','3:00 PM','Call 415-555-0100 on 2026-11-21.']);
 });
+
+test('Talk sends natural speech for the recorded Calendar reply and keeps the display text',async({page})=>{
+ await setup(page,'full');
+ const answer='Here are three 30-minute options for tomorrow afternoon:\n1. Sun, Nov 22, 12:00 PM - 12:30 PM\n2. Sun, Nov 22, 12:30 PM - 1:00 PM\n3. Sun, Nov 22, 1:00 PM - 1:30 PM';
+ await page.evaluate(answer=>{(window as any).ownedVoiceNavigation.answer=answer;},answer);
+ await utterance(page);
+ for(let piece=1;piece<=2;piece++){
+  await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.playAdmissions)).toBe(piece);
+  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ }
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ const {spoken,reply}=await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  return {spoken:f.spoken.join(' '),reply:f.shell.S().msgs.findLast((row:any)=>row.from==='agent')?.text};
+ });
+ expect(reply).toBe(answer);
+ expect(spoken).toContain('Sunday, November twenty-second, noon to twelve thirty P M');
+ expect(spoken).toContain('one P M to one thirty P M');
+ expect(spoken).not.toMatch(/:|\b(?:Sun|Nov)\b/);
+});

@@ -16,6 +16,7 @@ import {
   type VoiceActivityMetrics,
   type VoiceActivityOptions,
 } from "./voice-activity";
+import { formatSpeechText } from "./speech-format";
 import { toSpeakableText } from "./voice-chat-playback";
 
 /** The same semantic/echo gate used by the OG converse surface and injected hosts. */
@@ -29,7 +30,7 @@ function createVoiceTurnAggregator(
     ...options,
     onCommit: (text) => {
       const context = options.responseContext();
-      if (shouldRespondToVoiceTurn(text, context))
+      if (shouldRespondToVoiceTurn(formatSpeechText(text), context))
         options.onCommit(text, buildVoiceTurnSignal(text, context));
     },
   });
@@ -611,7 +612,7 @@ export class BatchVoiceConversation<Clip> {
           "The voice reply was not confirmed for this turn.",
         );
       session.replyIds.add(reply.assistantMessageId);
-      const text = toSpeakableText(reply.text);
+      const text = formatSpeechText(toSpeakableText(reply.text));
       if (text) {
         this.publish({
           phase: "preparing-speech",

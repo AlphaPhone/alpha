@@ -1,4 +1,5 @@
-const credentialLike = /`|-----BEGIN|\b(?:csk-|sk[-_]|gh[pousr]_|xox[baprs]-|AKIA|ASIA)[A-Za-z0-9_-]{8,}|\b(?:password|passphrase|api[_ -]?key|access[_ -]?token|secret|recovery[_ -]?(?:code|phrase)|seed phrase)\s*(?::|=|is\b)|\b[A-Za-z0-9_-]{32,}\b|(?:\d[ -]?){12,19}/i;
+import { formatSpeechText, SPEECH_CREDENTIAL_PATTERN } from '../ui/voice/speech-format';
+
 const unsupportedSpeech = /[^A-Za-z0-9\s'.,!?;:()]/;
 
 /** The refusal every read-aloud route applies before any audio request: a bounded
@@ -6,27 +7,26 @@ const unsupportedSpeech = /[^A-Za-z0-9\s'.,!?;:()]/;
 export function screenSpeechText(input: string): void {
   if (typeof input !== 'string' || !input.trim() || input.length > 16000) throw new Error('Listening supports a message up to 16,000 characters. Copy a shorter passage into a note to listen.');
   if (/(?:https?:\/\/|www\.|mailto:)|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(input)) throw new Error("This message has a link or email address, so it can't be read aloud.");
-  if (credentialLike.test(input)) throw new Error("This message may contain a password or code, so it can't be read aloud.");
+  if (SPEECH_CREDENTIAL_PATTERN.test(input)) throw new Error("This message may contain a password or code, so it can't be read aloud.");
 }
 
 /** The one refusal a spoken conversation reply keeps: a likely password, key or card number.
  * Screen the whole reply, since sentence splitting can separate 'password is:' from the value. */
 export function screenConversationSpeech(input: string): void {
-  if (credentialLike.test(input)) throw Object.assign(new Error("This reply may contain a password or code, so it wasn't read aloud."), { code: 'speech-refused' });
+  if (SPEECH_CREDENTIAL_PATTERN.test(input)) throw Object.assign(new Error("This reply may contain a password or code, so it wasn't read aloud."), { code: 'speech-refused' });
 }
 
 const currency: Record<string, string> = { $: 'dollar', '£': 'pound', '€': 'euro' };
-/** Times, money and ranges as a person reads them; digits never come out as 'colon' or 'dash'. */
+/** Local synthesis needs currency and numeric ranges written out. */
 function speakNumbers(text: string): string {
   return text
     .replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
     .replace(/([$£€])\s?(\d+)(?:\.(\d{1,2}))?(?!\d|\.\d)/g, (_, sign: string, whole: string, cents?: string) => `${whole} ${currency[sign]}${whole === '1' ? '' : 's'}${cents && Number(cents) ? ` ${cents.padEnd(2, '0')}` : ''}`)
-    // A range of short numbers or clock times; part of a longer run (phone, ISO date) is not a range.
-    .replace(/(?<![\d:-])(\d{1,2}(?::\d{2})?)-(\d{1,2}(?::\d{2})?)(?![\d:-])/g, '$1 to $2')
+    // A range of short numbers; longer runs include phone numbers and ISO dates.
+    .replace(/(?<![\d:-])(\d{1,2})-(\d{1,2})(?![\d:-])/g, '$1 to $2')
     // Phone numbers and dates keep their groups as pauses; a plain space would let a date and
     // time run together into a card-length string of digits.
-    .replace(/(\d)-(?=\d)/g, '$1, ')
-    .replace(/\b(\d{1,2}):(\d{2})\b(\s*[AaPp]\.?[Mm]\b)?/g, (_, hour: string, minute: string, meridiem = '') => `${hour}${minute === '00' ? (meridiem ? '' : " o'clock") : minute[0] === '0' ? ` oh ${minute[1]}` : ` ${minute}`}${meridiem}`);
+    .replace(/(\d)-(?=\d)/g, '$1, ');
 }
 
 /** Plan an entire local read before any native audio request. 'listen' (explicit Listen
@@ -42,15 +42,15 @@ export function planLocalSpeech(input: string, options: { mode?: 'listen' | 'con
   let text = conversation
     ? input.normalize('NFD').replace(/\p{M}+/gu, '').replace(/([A-Za-z])\/(?=[A-Za-z])/g, '$1 ').replace(/\b(?:https?:\/\/|mailto:)|\bwww\./gi, '')
     : input;
-  text = speakNumbers(text.normalize('NFC')
+  text = formatSpeechText(text.normalize('NFC')
     .replace(/[‘’]/g, "'").replace(/[“”"]/g, '').replace(/…/g, '...')
-    .replace(/[—–]/g, '; ').replace(/−/g, '-')
     .replace(/^\s{0,3}#{1,6}\s+/gm, '')
     // A former bullet stays its own sentence once line breaks collapse.
     .replace(/^[ \t]*[-*+][ \t]+([A-Za-z0-9*_'"].*?)[ \t]*$/gm, (_, item: string) => /[.!?;:,]$/.test(item) ? item : `${item}.`)
-    .replace(/^[ \t]*>[ \t]?/gm, ''))
+    .replace(/^[ \t]*>[ \t]?/gm, '')
     .replace(/(\*\*|__)([^\n]+?)\1/g, '$2')
-    .replace(/(^|[\s(])([*_])([^\n]+?)\2(?=$|[\s).,!?;:])/g, '$1$3')
+    .replace(/(^|[\s(])([*_])([^\n]+?)\2(?=$|[\s).,!?;:])/g, '$1$3'), true);
+  text = speakNumbers(text.replace(/[—–]/g, '; ').replace(/−/g, '-'))
     .replace(/(^|[^A-Za-z0-9])\-\s*(?=\d)/g, '$1minus ')
     .replace(/([A-Za-z])-([A-Za-z])/g, '$1 $2')
     .replace(/-/g, ' dash ')
