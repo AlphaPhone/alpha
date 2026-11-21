@@ -24,6 +24,7 @@
 import { NOTES_LIST_FILTER_CAPABILITY } from "@elizaos/contracts";
 import {
   browserDestinationMatches,
+  browserSearchQueryMatches,
   directBrowserDestination,
   directBrowserSearchQuery,
   groundBrowserDestination,
@@ -69,6 +70,7 @@ import {
   isCameraCapture,
   validateCameraCaptureResult,
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
+import { authoredCameraCapture } from "@elizaos/plugin-assistant/device-actions/camera-request";
 import {
   BROWSER_CONTROL_DIRECT_TYPES,
   BROWSER_OPEN_NEW_TAB_CAPABILITY,
@@ -200,7 +202,11 @@ import { describePhotosViewOperation } from "../photos/photos-view-presentation.
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT } from "../telephony/telephony-messages.ts";
-import { SMS_CARRIER_CHARGES, smsSendFacts } from "../telephony/sms-card-facts.ts";
+import {
+  SMS_CARRIER_CHARGES,
+  SMS_OPEN_THREAD_DRAFT,
+  smsSendFacts,
+} from "../telephony/sms-card-facts.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -697,6 +703,8 @@ export class DeviceActionCoordinator<
   private executing: string | undefined;
   private readonly ports: DeviceActionCoordinatorPorts<C, R>;
   private browserAttempts = new Map<string, CurrentDeviceActionRequest>();
+  /** Request keys whose one direct photo has been started. */
+  private cameraAttempts = new Set<string>();
   private browserPolicy = new Map<
     string,
     { key: string; allowed: boolean; grounded: boolean }
@@ -711,6 +719,13 @@ export class DeviceActionCoordinator<
    * refusal lives only here and would not survive a reload.
    */
   private contradictedNumbers = new Map<string, boolean>();
+  /**
+   * Pending contact changes and deletions whose name matched no contact when
+   * they were reviewed, and whether the agent has recorded the refusal. The
+   * owner was told nothing was changed, so a contact saved later under that
+   * name never turns the old request into a card.
+   */
+  private missingContacts = new Map<string, boolean>();
   constructor(
     ports: DeviceActionCoordinatorPorts<C, R>,
     private readonly options: {
@@ -784,8 +799,12 @@ export class DeviceActionCoordinator<
     const name = this.profile.assistantName;
     const allowed =
       operation.type === "browser_search"
-        ? directBrowserSearchQuery(proof.text, name)?.toLowerCase() ===
-          operation.query.toLowerCase()
+        ? // The same match the server and the shared coordinator use: quotes
+          // the model kept around the owner's words are not part of them.
+          browserSearchQueryMatches(
+            operation.query,
+            directBrowserSearchQuery(proof.text, name),
+          )
         : browserDestinationMatches(
             operation,
             directBrowserDestination(proof.text, name),
@@ -819,6 +838,28 @@ export class DeviceActionCoordinator<
       return false;
     proof.current();
     this.browserAttempts.set(key, proof);
+    return true;
+  }
+  /** A photo runs without its card only when this very message, as the owner
+   * typed it, asks for one now; a capture the model proposed for any other
+   * words ("summarize this page", "don't take a photo") keeps its card. */
+  private cameraAllowed(
+    messageId: string,
+    proof?: CurrentDeviceActionRequest,
+  ): boolean {
+    if (!proof || proof.messageId !== messageId) return false;
+    proof.current();
+    return requestedCameraCapture(proof.text, this.profile.assistantName);
+  }
+  /** One requested photo is one shot, however many captures were proposed. */
+  private consumeCameraRequest(messageId: string): boolean {
+    const key = this.requestKey(messageId);
+    if (this.cameraAttempts.has(key)) return false;
+    if (this.cameraAttempts.size >= 128) {
+      const oldest = this.cameraAttempts.values().next().value;
+      if (oldest !== undefined) this.cameraAttempts.delete(oldest);
+    }
+    this.cameraAttempts.add(key);
     return true;
   }
   get supportsCalendarAgenda(): boolean {
@@ -1256,6 +1297,8 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
     for (const id of this.contradictedNumbers.keys())
       if (!pendingIds.has(id)) this.contradictedNumbers.delete(id);
+    for (const id of this.missingContacts.keys())
+      if (!pendingIds.has(id)) this.missingContacts.delete(id);
     const items: ReviewItem[] = [];
     for (const proposal of valid) {
       // An approval whose claim never arrived is shown again: deciding is
@@ -1340,7 +1383,12 @@ export class DeviceActionCoordinator<
         items.push({
           proposalId: proposal.id,
           proposal: null,
-          notice: `${card.title}: ${NUMBER_MISMATCH_NOTICE}`,
+          notice: `${card.title}: ${
+            proposal.operation.type === "contact_create" ||
+            proposal.operation.type === "contact_update"
+              ? CONTACT_NUMBER_MISMATCH_NOTICE
+              : NUMBER_MISMATCH_NOTICE
+          }`,
         });
         continue;
       }
@@ -1383,14 +1431,39 @@ export class DeviceActionCoordinator<
         contactOp.type === "contact_delete"
       ) {
         let names: string[] | null = null;
-        try {
-          names =
-            (await this.options.contactMatches?.(contactOp.query, signal)) ??
-            null;
-        } catch {
-          names = null;
+        if (!this.missingContacts.has(proposal.id)) {
+          try {
+            names =
+              (await this.options.contactMatches?.(contactOp.query, signal)) ??
+              null;
+          } catch {
+            names = null;
+          }
+          assertCurrentReview();
+          // An address book that answered with no match is final for this
+          // request; one that could not be read is asked again next time.
+          if (names && !names.length)
+            this.missingContacts.set(proposal.id, false);
         }
-        assertCurrentReview();
+        if (this.missingContacts.has(proposal.id)) {
+          // The agent records the refusal, so the request cannot come back as
+          // a card after a reload. One it could not take is retried next review.
+          if (!this.missingContacts.get(proposal.id)) {
+            try {
+              await this.mutation(
+                proposal,
+                "decision",
+                { decision: "reject" },
+                signal,
+              );
+              this.missingContacts.set(proposal.id, true);
+            } catch (error) {
+              if (signal.aborted) throw error;
+            }
+            assertCurrentReview();
+          }
+          names = [];
+        }
         if (!names?.length) {
           items.push({
             proposalId: proposal.id,
@@ -1546,7 +1619,29 @@ export class DeviceActionCoordinator<
       ...BROWSER_CONTROL_DIRECT_TYPES,
     ];
     const results: DeviceOperationReceipt[] = [];
+    // Every direct Browser action shows its effect only after the chat request
+    // settles, each one checked against the tab and page the request was made
+    // from. A later Browser action of the same message was asked of the page the
+    // first one leaves: after the first has run it would be checked against the
+    // page about to be replaced and skipped while still reporting success, and
+    // while the first waits on its card (for review or for the owner's pick of a
+    // tab) it would run on the page showing now. So only a message's first
+    // Browser action may run directly; every later one keeps its review card.
+    let browserSeen = false;
     for (const [proposalId, entry] of [...this.proposals]) {
+      const browserEffect =
+        entry.proposal.operation.type === "browser_navigate" ||
+        isBrowserControl(entry.proposal.operation);
+      if (
+        browserEffect &&
+        entry.proposal.requestMessageId === messageId &&
+        !entry.proposal.workflow &&
+        (operationType === undefined ||
+          entry.proposal.operation.type === operationType)
+      ) {
+        if (browserSeen) continue;
+        browserSeen = true;
+      }
       if (
         results.length >= 4 ||
         (!directTypes.includes(entry.proposal.operation.type) &&
@@ -1593,6 +1688,8 @@ export class DeviceActionCoordinator<
         !keypadGrounded(entry.proposal.operation, messageId, proof)
       )
         continue;
+      const camera = entry.proposal.operation.type === "camera_capture_photo";
+      if (camera && !this.cameraAllowed(messageId, proof)) continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
       if (entry.proposal.operation.type === "sms_latest_sender" || entry.proposal.operation.type === "sms_compose") proof?.current();
@@ -1607,6 +1704,13 @@ export class DeviceActionCoordinator<
           continue;
         entry.currentRequest = proof;
       }
+      if (
+        camera &&
+        (this.proposals.get(proposalId) !== entry ||
+          !this.cameraAllowed(messageId, proof) ||
+          !this.consumeCameraRequest(messageId))
+      )
+        continue;
       const result = await this.approve(proposalId, context, signal);
       results.push(result);
       if (result.status !== "succeeded" || signal.aborted) break;
@@ -3347,6 +3451,29 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
 }
 export const NUMBER_MISMATCH_NOTICE =
   "That is not the number in your message, so nothing was called or sent. Ask again with the number.";
+/** The same refusal for a contact change, which saves a number rather than calling it. */
+export const CONTACT_NUMBER_MISMATCH_NOTICE =
+  "That is not the number in your message, so nothing was saved. Ask again with the number.";
+/** The phone numbers a new contact or a contact change writes, adds or removes. */
+function contactChangeNumbers(op: {
+  type: string;
+  contact?: { phoneNumbers?: unknown };
+  set?: { phoneNumbers?: unknown };
+  add?: { phoneNumbers?: unknown };
+  remove?: { phoneNumbers?: unknown };
+}): string[] {
+  const lists =
+    op.type === "contact_create"
+      ? [op.contact?.phoneNumbers]
+      : op.type === "contact_update"
+        ? [op.set?.phoneNumbers, op.add?.phoneNumbers, op.remove?.phoneNumbers]
+        : [];
+  return lists.flatMap((list) =>
+    Array.isArray(list)
+      ? list.filter((item): item is string => typeof item === "string")
+      : [],
+  );
+}
 /** The digits of a dial number, or "" for text that is not one. */
 function dialDigits(written: string): string {
   try {
@@ -3383,7 +3510,9 @@ function requestWords(text: string): string {
  * unless the owner also wrote that name. A message that writes no number (a
  * contact name, "the number in that email") is not judged here and keeps its
  * ordinary card; a number that is part of the text being sent is the
- * message's content, not its addressee.
+ * message's content, not its addressee. A new contact or a contact change is
+ * judged the same way by the numbers it saves: a number saved under a name is
+ * the recipient of every later call or text to that name.
  */
 export function numberContradictsRequest(
   operation: ReviewableDeviceOperation,
@@ -3396,15 +3525,18 @@ export function numberContradictsRequest(
     recipients?: string[];
     body?: string;
   };
+  const contactNumbers = contactChangeNumbers(op);
   if (
     op.type !== "phone_call" &&
     op.type !== "phone_dial" &&
     op.type !== "sms_compose" &&
-    op.type !== "sms_send"
+    op.type !== "sms_send" &&
+    !contactNumbers.length
   )
     return false;
-  const proposed =
-    op.type === "sms_send"
+  const proposed = contactNumbers.length
+    ? contactNumbers
+    : op.type === "sms_send"
       ? (op.recipients ?? [])
       : op.target?.kind === "number" && op.target.number
         ? [op.target.number]
@@ -3418,30 +3550,91 @@ export function numberContradictsRequest(
   if (!proposed.length && contact === undefined) return false;
   // The body as the owner wrote it is taken out of the request, so its numbers
   // are never the addressee and a body that repeats the addressee does not
-  // hide it. A body the model reworded can only keep its own numbers out.
+  // hide it. It is cut only as whole words ("hi" is not the "hi" in "Phil",
+  // "55" not the "55" in "555"), preferring its last occurrence and one whose
+  // cut leaves the proposed recipient. A body the model reworded can only keep
+  // its own numbers out.
   const body = typeof op.body === "string" ? op.body.trim() : "";
-  const at = body ? request.toLowerCase().indexOf(body.toLowerCase()) : -1;
-  const addressed =
-    at >= 0 ? `${request.slice(0, at)} ${request.slice(at + body.length)}` : request;
-  const bodyDigits = at >= 0 ? "" : body.replace(/\D/g, "");
-  const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
-    .map(([text]) => dialDigits(text))
-    .filter(
-      (digits) =>
-        digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
-    );
-  if (!written.length) return false;
-  if (contact !== undefined) {
-    const name = requestWords(contact).trim();
-    return !name || !requestWords(addressed).includes(` ${name} `);
-  }
-  return proposed.some((number) => {
-    const digits = dialDigits(number);
-    return !written.some((wrote) => sameLine(wrote, digits));
-  });
+  const occurrences = body ? wholeWordOccurrences(request, body) : [];
+  const bodyDigits = occurrences.length ? "" : body.replace(/\D/g, "");
+  const contradicts = (addressed: string) => {
+    const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
+      .map(([text]) => dialDigits(text))
+      .filter(
+        (digits) =>
+          digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
+      );
+    if (!written.length) return false;
+    if (contact !== undefined) {
+      const name = requestWords(contact).trim();
+      return !name || !requestWords(addressed).includes(` ${name} `);
+    }
+    return proposed.some((number) => {
+      const digits = dialDigits(number);
+      return !written.some((wrote) => sameLine(wrote, digits));
+    });
+  };
+  if (!occurrences.length) return contradicts(request);
+  const cuts = occurrences
+    .map((at) => `${request.slice(0, at)} ${request.slice(at + body.length)}`)
+    .reverse();
+  return cuts.every(contradicts);
+}
+/**
+ * Where `part` occurs in `text` as whole words, case aside: an edge that is a
+ * letter or digit never matches inside a longer word or number.
+ */
+function wholeWordOccurrences(text: string, part: string): number[] {
+  const haystack = text.toLowerCase(),
+    needle = part.toLowerCase();
+  const word = /[\p{L}\p{N}]/u;
+  const found: number[] = [];
+  for (
+    let at = haystack.indexOf(needle);
+    at >= 0;
+    at = haystack.indexOf(needle, at + 1)
+  )
+    if (
+      !(word.test(needle[0] ?? "") && word.test(haystack[at - 1] ?? "")) &&
+      !(
+        word.test(needle.at(-1) ?? "") &&
+        word.test(haystack[at + needle.length] ?? "")
+      )
+    )
+      found.push(at);
+  return found;
 }
 /** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
 /** An empty keypad, or a number written in the owner's own current message. */
+/**
+ * The owner's message asks for one photo now: the whole-message command
+ * ("take a picture", "Eliza, snap a selfie please") or the same command asked
+ * as "(can|could|would|will) you (please) take a picture ...?". This is the
+ * agent's own reading (plugin-assistant camera-request requestedCameraCapture),
+ * built on the shared strict command: negations ("don't take a photo"),
+ * questions about the past, deferrals and compound requests never match.
+ */
+export function requestedCameraCapture(
+  text: string,
+  assistantName?: string,
+): boolean {
+  if (authoredCameraCapture(text, assistantName) !== undefined) return true;
+  // The agent refuses control characters anywhere in the message, so the
+  // question form is never read past one either ("can you<TAB>take a photo?").
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Reject controls before matching.
+  if (typeof text !== "string" || /[\u0000-\u001f\u007f]/.test(text))
+    return false;
+  const asked =
+    /^(.{0,80}?)(?:can|could|would|will)\s+you\s+(?:please\s+)?(.+?)[?.!]*$/i.exec(
+      typeof text === "string" && text.length <= 512 ? text.trim() : "",
+    );
+  return (
+    !!asked &&
+    !/[?]/.test(asked[1]) &&
+    authoredCameraCapture(`${asked[1]}${asked[2]}`, assistantName) !== undefined
+  );
+}
+
 function keypadGrounded(
   operation: { number?: string },
   messageId: string,
@@ -3582,11 +3775,13 @@ function describeTelephonyAction(
         : {
             title: "Review SMS",
             // Approve sends it: no dialog follows. A name is still matched on the phone, where
-            // the owner picks the person and number before anything is sent.
+            // the owner picks the person and number before anything is sent. When that person's
+            // conversation is open in Messages, the phone drafts it there instead (AC-14), which
+            // the card says, since it cannot know what will be open when Approve is tapped.
             description:
               target.kind === "number"
-                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body)}`
-                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_CARRIER_CHARGES}`,
+                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body, true)}`
+                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_OPEN_THREAD_DRAFT} ${SMS_CARRIER_CHARGES}`,
           };
     }
     case "phone_keypad":

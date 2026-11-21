@@ -335,9 +335,11 @@ test('adding or removing one value keeps every other value of the contact as the
   // Remove matches a number in its dialable form and an address without case; then add; a rename rides along.
   ({p} = await change({set: {displayName: 'Samuel Lee'}, remove: {phoneNumbers: ['4155550132'], emailAddresses: ['sam@work.example']}, add: {emailAddresses: ['sam@example.com']}}));
   assert.deepEqual(did(p, 'save')[0][1], {displayName: 'Samuel Lee', phoneNumbers: [{number: '+14155550199', type: 'work'}], emailAddresses: [{address: 'sam@example.com', type: 'home'}]});
-  // A value to remove that the contact does not have changes nothing.
-  ({p} = await change({remove: {phoneNumbers: ['+19995550100']}}));
-  assert.deepEqual(did(p, 'save')[0][1], {displayName: 'Sam Lee', phoneNumbers: sam.phoneNumbers, emailAddresses: sam.emailAddresses});
+  // A value to remove that the contact does not have changes nothing: nothing is offered or saved,
+  // and the agent is never told it was saved.
+  ({p, result} = await change({remove: {phoneNumbers: ['+19995550100']}}));
+  assert.deepEqual([did(p, 'ask'), did(p, 'save')], [[], []]);
+  assert.equal(result.telephonyResult.status, 'not-found');
   // A contact that changed since it was shown is stale, as for a whole-field change.
   p = ports({getContact: async () => sam, saveContact: async () => ({status: 'stale'})});
   assert.equal((await run({type: 'contact_update', query: 'Sam', add: {phoneNumbers: ['+16285550148']}}, p)).telephonyResult.status, 'stale');
@@ -414,4 +416,48 @@ test('an addressed read uses the negotiated full address and thread',async()=>{
   const result=await run(operation,ports({latestIncomingSender:async include=>{assert.equal(include,true);return sender;}}));
   assert.deepEqual(result.telephonyResult,{kind:'sms-latest-sender',...sender});
   assert.equal(result.summary,sender.address);
+});
+
+// Review (contacts): a number written with or without its country code is one line. "Remove
+// 415-555-0100 from Bob" for a contact stored as +14155550100 removes that line; a change that
+// would leave the contact as it is is never offered or reported as saved.
+const reviewOutput = await build({entryPoints: [resolve('apps/app/src/prototype/telephony-review.ts')], bundle: true, format: 'esm', platform: 'node', write: false,
+  alias: {'@elizaos/contracts/telephony-actions': resolve('.eliza/client-features/packages/contracts/src/telephony-actions.ts')}});
+writeFileSync(join(dir, 'review.mjs'), reviewOutput.outputFiles[0].text);
+const {contactChangeLines} = await import(pathToFileURL(join(dir, 'review.mjs')));
+const bob = numbers => ({id: '7', version: 'b'.repeat(64), displayName: 'Bob Lee', phoneNumbers: numbers.map(number => ({number, type: 'mobile'})), emailAddresses: [{address: 'bob@example.com', type: 'home'}]});
+function bobPorts(contact) {
+  return ports({contactValues: true, searchContacts: async () => [{id: contact.id, displayName: contact.displayName, phoneNumbers: contact.phoneNumbers.map(row => row.number)}], getContact: async () => contact});
+}
+
+test('removing a number written without its country code removes the stored line, and the review strikes it', async () => {
+  const p = bobPorts(bob(['+14155550100', '5105550164']));
+  const out = await run({type: 'contact_update', query: 'Bob', remove: {phoneNumbers: ['4155550100']}}, p);
+  const [[, review]] = did(p, 'ask'), [[, draft]] = did(p, 'save');
+  assert.deepEqual(draft.phoneNumbers, [{number: '5105550164', type: 'mobile'}]);
+  const lines = contactChangeLines(review.options[0].before, review.options[0].after);
+  assert.deepEqual(lines.filter(line => line.struck).length, 1);
+  assert.ok(lines.every(line => !line.added));
+  assert.deepEqual(out.telephonyResult, {kind: 'contact-write', status: 'saved'});
+});
+test('a change that would leave every matching contact as it is asks nothing, saves nothing and is not reported saved', async () => {
+  for (const change of [{remove: {phoneNumbers: ['6505715862']}}, {remove: {emailAddresses: ['old@example.com']}}, {add: {phoneNumbers: ['+14155550100']}}, {add: {emailAddresses: ['BOB@example.com']}}]) {
+    const p = bobPorts(bob(['(415) 555-0100']));
+    const out = await run({type: 'contact_update', query: 'Bob', ...change}, p);
+    assert.deepEqual(p.log.filter(([kind]) => kind === 'ask' || kind === 'save'), [], JSON.stringify(change));
+    assert.notEqual(out.telephonyResult.status, 'saved', JSON.stringify(change));
+    assert.equal(out.telephonyResult.status, 'not-found');
+  }
+});
+test('adding a number the contact holds in another format saves it once, and the review marks only new lines as added', async () => {
+  const p = bobPorts(bob(['(415) 555-0100']));
+  await run({type: 'contact_update', query: 'Bob', add: {phoneNumbers: ['+14155550100', '5105550164']}}, p);
+  const [[, review]] = did(p, 'ask'), [[, draft]] = did(p, 'save');
+  assert.deepEqual(draft.phoneNumbers.map(row => row.number), ['(415) 555-0100', '5105550164']);
+  assert.deepEqual(contactChangeLines(review.options[0].before, review.options[0].after).filter(line => line.added).map(line => line.text).length, 1);
+});
+test('a new contact whose number another contact holds with a country code is shown as that twin first', async () => {
+  const p = ports({searchContacts: async () => [{id: '9', displayName: 'Robert', phoneNumbers: ['+14155550100']}]});
+  await run({type: 'contact_create', contact: {displayName: 'Bob Lee', phoneNumbers: ['4155550100'], emailAddresses: []}}, p);
+  assert.equal(did(p, 'ask')[0]?.[1].kind, 'contact-create');
 });

@@ -5,8 +5,8 @@
 // before there is anything to approve. Recording request and journal stubs: no device and no call.
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';
 const dir=mkdtempSync(join(tmpdir(),'call-number-guard-'));
-const output=await build({stdin:{contents:"export {DeviceActions} from './apps/app/src/runtime/device-actions.ts';export {numberContradictsRequest,NUMBER_MISMATCH_NOTICE} from './apps/app/src/ui/device-actions/client-coordinator.ts';",resolveDir:resolve('.'),loader:'ts'},bundle:true,format:'esm',platform:'node',write:false});
-writeFileSync(join(dir,'sdk.mjs'),output.outputFiles[0].text);const {DeviceActions,numberContradictsRequest,NUMBER_MISMATCH_NOTICE}=await import(pathToFileURL(join(dir,'sdk.mjs')));process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
+const output=await build({stdin:{contents:"export {DeviceActions} from './apps/app/src/runtime/device-actions.ts';export {numberContradictsRequest,NUMBER_MISMATCH_NOTICE,CONTACT_NUMBER_MISMATCH_NOTICE} from './apps/app/src/ui/device-actions/client-coordinator.ts';",resolveDir:resolve('.'),loader:'ts'},bundle:true,format:'esm',platform:'node',write:false});
+writeFileSync(join(dir,'sdk.mjs'),output.outputFiles[0].text);const {DeviceActions,numberContradictsRequest,NUMBER_MISMATCH_NOTICE,CONTACT_NUMBER_MISMATCH_NOTICE}=await import(pathToFileURL(join(dir,'sdk.mjs')));process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
 
 const call=number=>({type:'phone_call',target:{kind:'number',number}});
 test('a number the owner wrote must be the number proposed, in whatever format either is written',()=>{
@@ -40,18 +40,34 @@ test('a text must go to the number written, and a number inside the text being s
  assert.equal(numberContradictsRequest(text(['+16505715862'],'my number is 415-555-0100'),'text 415-555-0100 saying my number is 415-555-0100'),true);
  assert.equal(numberContradictsRequest(text(['+14155550100'],'my number is 415-555-0100'),'text 415-555-0100 saying my number is 415-555-0100'),false);
 });
+test('a short body is cut only as whole words, never out of the recipient it also spells',()=>{
+ const text=(recipients,body)=>({type:'sms_send',recipients,body,subscriptionId:1});
+ const compose=(number,body)=>({type:'sms_compose',target:{kind:'number',number},body});
+ // "55" is not the "55" in "555", and "0100" after the number is the body.
+ assert.equal(numberContradictsRequest(compose('4155550100','55'),'message 415-555-0100: 55'),false);
+ assert.equal(numberContradictsRequest(text(['+14155550100'],'55'),'message 415-555-0100: 55'),false);
+ assert.equal(numberContradictsRequest(compose('4155550100','0100'),'text 415-555-0100 saying 0100'),false);
+ assert.equal(numberContradictsRequest(compose('6505715862','55'),'message 415-555-0100: 55'),true,'an invented number is still refused');
+ // "hi" is not the "hi" in "Phil".
+ assert.equal(numberContradictsRequest({type:'sms_compose',target:{kind:'contact',query:'Phil'},body:'hi'},"text Phil hi, he's at 415-555-0100"),false);
+ assert.equal(numberContradictsRequest({type:'sms_compose',target:{kind:'contact',query:'Shaw'},body:'hi'},'text 415-555-0100 hi'),true);
+ // A number written only as the body is never the recipient, whichever occurrence is cut.
+ assert.equal(numberContradictsRequest(compose('4155550100','415-555-0100'),'text 650-571-5862 415-555-0100'),true);
+ assert.equal(numberContradictsRequest(compose('6505715862','415-555-0100'),'text 650-571-5862 415-555-0100'),false);
+ assert.equal(numberContradictsRequest({type:'sms_compose',target:{kind:'contact',query:'Ada'},body:'tell Ada hi'},'text 650-571-5862 saying tell Ada hi'),true);
+});
 
 const context={view:'home',revision:1,sensitive:false},session={ownerId:'owner',agentId:'agent',origin:'https://agent.example',sessionId:'session'},id='5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20',message='7b0d6c1e-52a4-4f0e-9d3b-2f6a8c1e4d70',digest='d'.repeat(64);
 // The agent's side of a proposal: a reject decision ends it; nothing else may be decided, claimed or receipted.
-function fixture(operation,{offline=false}={}){let effects=0,state='pending';const posts=[];
+function fixture(operation,{offline=false,capabilities=['phone.call.v1']}={}){let effects=0,state='pending';const posts=[];
  const proposal=()=>({id,digest,state,subjectUserId:'owner',requestedBy:'agent',action:'device_action',expiresAt:new Date(Date.now()+600000).toISOString(),payload:{action:'device_action',version:1,installationId:'device',enrollmentId:'enrollment',requestMessageId:message,operation},execution:null});
  const request=async(path,body)=>{if(body===undefined)return {proposals:[proposal()]};posts.push({path,body});
   if(!path.endsWith(`/proposals/${id}/decision`)||body.decision!=='reject')throw Error('only a refusal may reach the agent: '+path);
   if(offline)throw Error('offline');state='rejected';return {proposal:proposal(),digest};};
  const journal={reserve:async()=>{throw Error('nothing may be reserved');},markApplying:async()=>{},finish:async()=>{},get:async()=>({entry:undefined}),list:async()=>({entries:[]})};
- const client=new DeviceActions(session,{installationId:'device',enrollmentId:'enrollment',key:'a'.repeat(64),capabilities:['phone.call.v1']},'c'.repeat(64),request,journal,async()=>{effects++;return {status:'succeeded',summary:'placed'};});
+ const client=new DeviceActions(session,{installationId:'device',enrollmentId:'enrollment',key:'a'.repeat(64),capabilities},'c'.repeat(64),request,journal,async()=>{effects++;return {status:'succeeded',summary:'placed'};});
  // A reload: a new client for the same agent, with none of the old one's memory.
- const reloaded=()=>new DeviceActions(session,{installationId:'device',enrollmentId:'enrollment',key:'a'.repeat(64),capabilities:['phone.call.v1']},'c'.repeat(64),request,journal,async()=>{effects++;return {status:'succeeded',summary:'placed'};});
+ const reloaded=()=>new DeviceActions(session,{installationId:'device',enrollmentId:'enrollment',key:'a'.repeat(64),capabilities},'c'.repeat(64),request,journal,async()=>{effects++;return {status:'succeeded',summary:'placed'};});
  return {client,reloaded,posts,get effects(){return effects;},get state(){return state;},online(){offline=false;}};}
 const signal=()=>new AbortController().signal,asked=text=>({messageId:message,text,current(){}});
 
@@ -91,4 +107,29 @@ test('the number the owner wrote keeps its ordinary review card',async()=>{
  // No number in the request: the card is the owner's review, as before.
  const [named]=await fixture(call('6505715862')).client.pendingReview(context,signal(),asked('call the pharmacy back'));
  assert.equal(named.proposal?.title,'Place call');
+});
+
+// Review (contacts): a number saved under a name becomes the recipient of every later "call Bob", so a
+// new contact or a contact change for a number the owner did not write is refused the same way (v612:
+// "add a contact Bob Lee 415-555-0100" was proposed with 6505715862).
+const newContact=numbers=>({type:'contact_create',contact:{displayName:'Bob Lee',phoneNumbers:numbers,emailAddresses:[]}});
+const changeContact=(part,numbers)=>({type:'contact_update',query:'Bob Lee',[part]:{phoneNumbers:numbers}});
+test('a new contact or a contact change must save the number the owner wrote',()=>{
+ for(const operation of [newContact(['6505715862']),newContact(['4155550100','6505715862']),changeContact('set',['6505715862']),changeContact('add',['6505715862']),changeContact('remove',['6505715862'])])
+  assert.equal(numberContradictsRequest(operation,'add a contact Bob Lee 415-555-0100'),true,JSON.stringify(operation));
+ for(const operation of [newContact(['+14155550100']),changeContact('add',['4155550100']),changeContact('remove',['+14155550100'])])
+  assert.equal(numberContradictsRequest(operation,'add a contact Bob Lee 415-555-0100'),false,JSON.stringify(operation));
+ // A message that writes no number, and a change that saves no number, are the owner's review as before.
+ assert.equal(numberContradictsRequest(newContact(['6505715862']),'save the pizza place as a contact'),false);
+ assert.equal(numberContradictsRequest({type:'contact_update',query:'Bob Lee',add:{emailAddresses:['bob@example.com']}},'add bob@example.com to Bob Lee, his cell is 415-555-0100'),false);
+ assert.equal(numberContradictsRequest({type:'contact_delete',query:'Bob Lee'},'delete Bob Lee 415-555-0100'),false);
+});
+test('a new contact for a number the owner did not write is a notice that says nothing was saved, and the agent records the refusal',async()=>{
+ const f=fixture(newContact(['6505715862']),{capabilities:['contacts.write.v1']});
+ const items=await f.client.pendingReview(context,signal(),asked('add a contact Bob Lee 415-555-0100'));
+ assert.deepEqual(items.map(item=>[item.proposal,item.notice]),[[null,`Add contact: ${CONTACT_NUMBER_MISMATCH_NOTICE}`]]);
+ assert.match(CONTACT_NUMBER_MISMATCH_NOTICE,/nothing was saved/);
+ assert.deepEqual(f.posts.map(post=>[post.path.split('/').at(-1),post.body.decision]),[['decision','reject']]);
+ assert.deepEqual(await f.reloaded().pendingReview(context,signal()),[]);
+ assert.equal(f.effects,0);
 });

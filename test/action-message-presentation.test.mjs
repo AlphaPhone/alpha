@@ -214,6 +214,17 @@ test('every phone action completion is one sentence the owner reads as the agent
  assert.deepEqual(rows,frozen);
 });
 const mapsCard=body=>mapsChatText(`Maps\n\n[MAPSCARD]\n${JSON.stringify(body)}\n[/MAPSCARD]`).cards[0];
+test('a Maps results card for a search near a named place opens Maps around that place',()=>{
+ const rx={name:'Pharmacy 1',latitude:37.8,longitude:-122.3937,provider:'eliza-cloud',providerPlaceId:'g:rx1',formattedAddress:'1 Market St',categories:[]};
+ const ferry={name:'Ferry Building',latitude:37.7955,longitude:-122.3937,provider:'eliza-cloud',providerPlaceId:'g:ferry',categories:[]};
+ const near=mapsCard({kind:'places',query:'pharmacy',places:[rx],nextCursor:null,attribution:null,near:ferry});
+ // The tap searches "pharmacy" around the Ferry Building, not around the viewport or the phone.
+ assert.deepEqual(near,{kind:'places',title:'“pharmacy” near Ferry Building',lines:['Pharmacy 1, 1 Market St'],attribution:'',mapQuery:'pharmacy',searchNear:{latitude:37.7955,longitude:-122.3937}});
+ // A plain search, an older agent's card, or an unreadable point: no search point, the old title.
+ for(const body of [{kind:'places',query:'pharmacy',places:[rx],nextCursor:null,attribution:null},{kind:'places',query:'pharmacy',places:[rx],nextCursor:null,attribution:null,near:{name:'x'}}]){
+  const plain=mapsCard(body);assert.equal(plain.title,'Places for “pharmacy”');assert.equal(plain.searchNear,undefined);assert.equal(plain.mapQuery,'pharmacy');
+ }
+});
 test('a Maps locate card takes its subject from the card fields, and from the prompt only when an older agent names none',()=>{
  const pharmacy={name:'Corner Pharmacy',latitude:37.79,longitude:-122.4,provider:'eliza-cloud',providerPlaceId:'g:p1',categories:[]};
  const nearPrompt='I need your precise location to search near you for “coffee”.';

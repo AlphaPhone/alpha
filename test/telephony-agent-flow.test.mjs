@@ -35,7 +35,7 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
   const request = async (path, body) => {
     if (body === undefined) return {proposals: [proposal()]};
     posts.push({path, body});
-    if (path.endsWith('/decision')) state = 'approved';
+    if (path.endsWith('/decision')) state = body.decision === 'reject' ? 'rejected' : 'approved';
     if (path.endsWith('/claim')) { state = 'executing'; attemptId = 'attempt'; }
     if (path.endsWith('/receipt')) { if (receiptOutage) throw Error('offline'); state = body.receipt.outcome === 'applied' ? 'done' : 'reconciliation_required'; }
     return {proposal: proposal(), digest};
@@ -68,11 +68,13 @@ test('a text to a number, a draft, a single contact value, a contact search and 
     await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
   const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
   // Approve sends a text at once: the card, not a dialog after it, says the SIM and the carrier charge.
-  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nApprove sends it right away. Your carrier may charge for texts.');
-  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nApprove sends it right away. Your carrier may charge for texts.`);
+  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nApprove sends it right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.');
+  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nApprove sends it right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.`);
   const toContact = await card({...number, target: {kind: 'contact', query: 'Priya'}});
-  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. Your carrier may charge for texts.');
+  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.');
   for (const shown of [await card(number), toContact]) assert.doesNotMatch(shown, /Android|again/);
+  // Approving a text whose conversation is open drafts it there (telephony-executor), so the card says so.
+  for (const shown of [await card(number), toContact]) assert.match(shown, /open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there/);
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
   assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Nothing is sent until you tap Send/); assert.doesNotMatch(draft, /Android/);
   const change = await card(add);
@@ -85,6 +87,8 @@ test('a contact change or deletion is carded only for a contact the phone holds,
   const book = addressBook;
   try {
     // No such contact: a notice says so, no card is offered, and nothing can be approved or run.
+    // The owner was told nothing was changed, so the agent records the request as refused: a contact
+    // saved later under that name never turns it into a card (review: contacts, stale not-found).
     addressBook = () => [];
     for (const [operation, title] of [[change, 'Change contact'], [remove, 'Delete contact']]) {
       const f = fixture({operation});
@@ -92,9 +96,12 @@ test('a contact change or deletion is carded only for a contact the phone holds,
       const items = await f.client.pendingReview(context, signal());
       assert.deepEqual(lookups, ['Test Alpha'], 'the phone looks the name up before any card');
       assert.deepEqual(items.map(item => [item.proposal, item.notice]), [[null, `${title}: No contact matching “Test Alpha” is on this phone. Nothing was changed.`]]);
-      assert.deepEqual(await f.client.pending(context, signal()), []);
-      await assert.rejects(f.client.approve(id, context, signal()), /Review this action again/);
-      assert.equal(f.effects, 0); assert.deepEqual(f.posts, [], 'nothing is decided for the owner');
+      assert.deepEqual(f.posts.map(post => [post.path.split('/').pop(), post.body.decision]), [['decision', 'reject']], 'only the refusal reaches the agent');
+      addressBook = () => ['Test Alpha Park'];
+      assert.deepEqual(await f.client.pending(context, signal()), [], 'a contact added later does not revive it');
+      await assert.rejects(f.client.approve(id, context, signal()));
+      assert.equal(f.effects, 0); assert.equal(f.posts.length, 1);
+      addressBook = () => [];
     }
     // Contacts unreadable: the same, with the reason.
     addressBook = () => null;

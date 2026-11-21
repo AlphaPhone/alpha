@@ -201,20 +201,35 @@ type ContactSet = NonNullable<ContactUpdate['set']>;
 /** Numbers and addresses to put on a contact beside the ones it has, or to take off it. */
 export type ContactValues = Pick<ContactSet, 'phoneNumbers' | 'emailAddresses'>;
 /**
+ * Whether two written numbers are the same line: the same digits, or the same last ten when a
+ * country code or trunk prefix is written on one side only ("+14155550100", "(415) 555-0100").
+ */
+export function sameContactNumber(a: string, b: string): boolean {
+  const x = a.replace(/\D/g, ''), y = b.replace(/\D/g, '');
+  return x === y || (x.length >= 10 && y.length >= 10 && x.slice(-10) === y.slice(-10));
+}
+/**
  * `set` replaces a named field whole. Then the `remove` values are taken away and the `add` values
- * the contact does not hold yet are appended; every other value stays. Numbers match in their
- * dialable form and addresses without case, and a value already on the contact keeps its type.
+ * the contact does not hold yet are appended; every other value stays. Numbers match as the same
+ * line (`sameContactNumber`, a country code aside) and addresses without case, and a value already
+ * on the contact keeps its type.
  */
 export function appliedContactChange(before: ContactRecord, set: ContactSet, normalize: (number: string) => string | null, add: ContactValues = {}, remove: ContactValues = {}): ContactDraft {
   const key = (number: string) => normalize(number) || number, mail = (address: string) => address.toLowerCase();
-  const gone = (values: string[] | undefined, same: (value: string) => string, value: string) => !!values?.some(other => same(other) === same(value));
-  const phoneNumbers = (set.phoneNumbers ? set.phoneNumbers.map(number => ({number, type: before.phoneNumbers.find(row => key(row.number) === key(number))?.type || 'mobile'})) : before.phoneNumbers).filter(row => !gone(remove.phoneNumbers, key, row.number));
-  const emailAddresses = (set.emailAddresses ? set.emailAddresses.map(address => ({address, type: before.emailAddresses.find(row => mail(row.address) === mail(address))?.type || 'home'})) : before.emailAddresses).filter(row => !gone(remove.emailAddresses, mail, row.address));
+  const line = (a: string, b: string) => sameContactNumber(key(a), key(b)), sameMail = (a: string, b: string) => mail(a) === mail(b);
+  const gone = (values: string[] | undefined, same: (a: string, b: string) => boolean, value: string) => !!values?.some(other => same(other, value));
+  const phoneNumbers = (set.phoneNumbers ? set.phoneNumbers.map(number => ({number, type: before.phoneNumbers.find(row => line(row.number, number))?.type || 'mobile'})) : before.phoneNumbers).filter(row => !gone(remove.phoneNumbers, line, row.number));
+  const emailAddresses = (set.emailAddresses ? set.emailAddresses.map(address => ({address, type: before.emailAddresses.find(row => sameMail(row.address, address))?.type || 'home'})) : before.emailAddresses).filter(row => !gone(remove.emailAddresses, sameMail, row.address));
   return {
     displayName: set.displayName ?? before.displayName,
-    phoneNumbers: [...phoneNumbers, ...(add.phoneNumbers || []).filter((number, index, all) => !phoneNumbers.some(row => key(row.number) === key(number)) && all.findIndex(other => key(other) === key(number)) === index).map(number => ({number, type: 'mobile'}))],
-    emailAddresses: [...emailAddresses, ...(add.emailAddresses || []).filter((address, index, all) => !emailAddresses.some(row => mail(row.address) === mail(address)) && all.findIndex(other => mail(other) === mail(address)) === index).map(address => ({address, type: 'home'}))],
+    phoneNumbers: [...phoneNumbers, ...(add.phoneNumbers || []).filter((number, index, all) => !phoneNumbers.some(row => line(row.number, number)) && all.findIndex(other => line(other, number)) === index).map(number => ({number, type: 'mobile'}))],
+    emailAddresses: [...emailAddresses, ...(add.emailAddresses || []).filter((address, index, all) => !emailAddresses.some(row => sameMail(row.address, address)) && all.findIndex(other => sameMail(other, address)) === index).map(address => ({address, type: 'home'}))],
   };
+}
+/** The change leaves every field of the contact exactly as it is. */
+function changesNothing(option: {before: ContactRecord; after: ContactDraft}): boolean {
+  const fields = (draft: ContactDraft) => JSON.stringify([draft.displayName, draft.phoneNumbers.map(row => [row.number, row.type]), draft.emailAddresses.map(row => [row.address, row.type])]);
+  return fields(option.before) === fields(option.after);
 }
 /**
  * What the owner is offered for one matching contact: its fields before and after the change.
@@ -252,7 +267,7 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
       // the same name or one of its numbers is shown first, so the same person is not added twice unseen.
       const {contact} = operation, key = (number: string) => ports.normalize(number) || number, wanted = contact.phoneNumbers.map(key);
       const twin = (await ports.searchContacts(contact.displayName, LOOKUP_LIMIT)).find(row =>
-        row.displayName.trim().toLowerCase() === contact.displayName.toLowerCase() || row.phoneNumbers.some(number => wanted.includes(key(number))));
+        row.displayName.trim().toLowerCase() === contact.displayName.toLowerCase() || row.phoneNumbers.some(number => wanted.some(other => sameContactNumber(other, key(number)))));
       ports.current();
       if (twin) {
         if (await ports.ask({kind: 'contact-create', options: [{name: contactChoiceName(twin.displayName), numbers: twin.phoneNumbers}]}, signal) !== 0) return result('cancelled');
@@ -269,7 +284,11 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
     if (!found.length) return result('not-found');
     if (operation.type === 'contact_update') {
       // Each change is worked out against the contact as the phone holds it now, and shown before and after.
-      const options = found.flatMap(before => contactChangeOptions(before, operation, ports.normalize, ports.contactValues));
+      // A change that would leave a contact exactly as it is (removing a number or address it does not
+      // hold, adding one it already holds) is never offered: approving it would save nothing, yet report
+      // a save. When no matching contact would change, nothing is asked and nothing was changed.
+      const options = found.flatMap(before => contactChangeOptions(before, operation, ports.normalize, ports.contactValues)).filter(option => !changesNothing(option));
+      if (!options.length) return result('not-found');
       const choice = await ports.ask({kind: 'contact-save', options}, signal);
       if (choice === null || !options[choice]) return result('cancelled');
       ports.current();

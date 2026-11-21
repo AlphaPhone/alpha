@@ -187,7 +187,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     active,
     invalidate: () => { if (!disposed && !document.hidden && (active() || screen.isNavigating())) api?.set({ nativeMapsRevision: ++renders }); },
     toast: text => api?.toast(text),
-    discardHandoff: () => { retireSearch(); pendingHandoff=undefined; const maps=api?.get('maps'); if(maps&&(maps.query!=null||maps.nearMe||maps.fromHere))api!.set({query:null,nearMe:null,fromHere:null}); },
+    discardHandoff: () => { retireSearch(); pendingHandoff=undefined; const maps=api?.get('maps'); if(maps&&(maps.query!=null||maps.nearMe||maps.fromHere||maps.searchNear))api!.set({query:null,nearMe:null,fromHere:null,searchNear:null}); },
     handoffReturn: () => !!mapsEventReturnOffered(api?.get('maps').fromEvent,api?.S.stack,screen.isNavigating()),
     released: dropPlane,
     // With no Maps provider on Android, an event's location can be handed to an installed map
@@ -259,12 +259,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // "Directions to X from here": the hand-off below searches the destination; the stages after the view finish it.
     if(st.fromHere&&!st.nearMe&&typeof st.query==='string'&&st.query.trim()&&!pendingHandoff)fromHere={query:st.query.trim(),stage:'search',epoch:-1,closest:false};
     if(typeof st.query==='string'&&st.query.trim()&&!st.nearMe&&!pendingHandoff){
+      // A chat card for "pharmacy near the Ferry Building" names the point its places were found around.
+      const near=st.searchNear&&Number.isFinite(st.searchNear.latitude)&&Number.isFinite(st.searchNear.longitude)?{latitude:Number(st.searchNear.latitude),longitude:Number(st.searchNear.longitude)}:undefined;
       const handoff=pendingHandoff={query:st.query};
       queueMicrotask(()=>{
         if(pendingHandoff!==handoff)return;pendingHandoff=undefined;
         if(disposed||!currentApi.isActive()||currentApi.get('maps').query!==handoff.query)return;
         const fromEvent=!!currentApi.get('maps').fromEvent;
-        currentApi.set({query:null,fromHere:null});screen.handoff(handoff.query,fromEvent);if(fromHere)fromHere.epoch=searchEpoch;
+        currentApi.set({query:null,fromHere:null,searchNear:null});screen.handoff(handoff.query,fromEvent,near);if(fromHere)fromHere.epoch=searchEpoch;
       });
     }
     // A chat card's "near you" search: the user's tap asks this phone for its position (the platform may
@@ -679,7 +681,7 @@ export function installMapsChatAdapter(Component:Bag){
    return {...message,displayText:parsed.displayText,hasCalendarText:message.hasCalendarText!==false&&!!parsed.displayText,
     messageActionsLabel:message.messageActionsLabel?'Message actions: '+(parsed.displayText||parsed.cards[0]?.title||'Maps'):message.messageActionsLabel,
     mapsCards:parsed.cards.map(card=>({...card,lines:card.lines.map(text=>({text})),hasAttribution:!!card.attribution,canOpenMap:current(),
-      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.place?{agentPlace:{place:card.place,fromHere:!!card.directionsFromHere,...(card.travelMode?{travelMode:card.travelMode}:{})}}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere,routeMode:card.travelMode??null}:{keepState:true});}})),
+      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.place?{agentPlace:{place:card.place,fromHere:!!card.directionsFromHere,...(card.travelMode?{travelMode:card.travelMode}:{})}}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere,routeMode:card.travelMode??null,searchNear:card.searchNear??null}:{keepState:true});}})),
     hasMapsChoice:open,mapsChoices:open?choice!.options.map(option=>({label:option.label,choose:()=>void answer(this,id,option.value,current)})):[]};
   });return out;
  };

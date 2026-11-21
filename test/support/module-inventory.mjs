@@ -714,6 +714,7 @@ export const moduleInventory = {
     "apps/app/src/runtime/text-scale.ts",
     "apps/app/src/runtime/text-share.ts",
     "apps/app/src/runtime/toast-layer.ts",
+    "apps/app/src/runtime/turn-effect-state.ts",
     "apps/app/src/runtime/view-focus.ts",
     "apps/app/src/runtime/view-navigation.ts",
     "apps/app/src/runtime/voice-assistant.ts",

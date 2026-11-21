@@ -8,7 +8,7 @@ import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
 import {browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall,OWN_KEYS_NOT_SET_UP} from './browser-cloud-resident';
 import {appRecordInvalidations} from './app-record-completion';
 import {findViewActionHandoff} from '../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts';
-import {normalizeEffectReceipts} from '../../../../.eliza/client-features/packages/core/src/types/effects.ts';
+import {effectBeforeFailure,effectInterruptedText} from './turn-effect-state.ts';
 import {assertAppRecordRequestAllowed,type AppRecordMethod,type AppRecordPort} from './app-record-route-policy';
 import {AUTOMATIONS_COMMITTED_EVENT,automationsCommitted} from './automation-completion';
 import {OWNER_REMINDER_LIST,OWNER_REMINDER_READBACK,ownerReminderRoute,reminderReadPath,type ReminderNotificationBinding} from './owner-reminder-notification-protocol';
@@ -462,7 +462,7 @@ const actionReceipts = new Map<string, { sessionId: string; result: Promise<Oper
 const readReplyOwners=new Map<ReadReplyBinding,{actions:DeviceActions;proposalId:string;digest:string;cancelled:boolean}>();
 function retireReadReplies(){for(const binding of [...readReplyOwners.keys()])void connectionController.cancelReadReply(binding).catch(()=>{});}
 let navigationContext:(()=>ContextEnvelope|null)|undefined;
-let requestedCameraContinuation:{messageId:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
+let requestedCameraContinuation:{messageId:string;text:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
 let deviceRecovery: DeviceRecovery | undefined;
 let deviceExecutor: DeviceExecutor = async () => ({ status: 'failed', summary: 'Device action executor is unavailable.' });
 /** Foreground local reviews (free/busy over owner-chosen calendars). The phone shell supplies the
@@ -1802,17 +1802,6 @@ const signInProbeMessage = (environment: CloudEnvironment) => `Checking ${cloudS
 const pairingRetired = () => 'Pairing unavailable';
 /** The one wording for a Cloud sign-in that Cloud refused (401, an expired key). */
 const residentSignInExpired = () => 'Sign-in expired';
-/** A turn that failed after its action committed: the owner is told the action went through, never the generic failure. */
-export const EFFECT_APPLIED_INTERRUPTED = 'Done · reply cut off';
-/** Upstream's post-commit interruption (`TURN_INTERRUPTED_AFTER_EFFECT`), or an effect receipt the reply proves applied and not rolled back. */
-function effectAppliedBeforeFailure(reply:{terminalFailure?:unknown;actionResults?:unknown}):boolean {
-  const code=reply.terminalFailure&&typeof reply.terminalFailure==='object'?(reply.terminalFailure as {code?:unknown}).code:undefined;
-  if(code==='TURN_INTERRUPTED_AFTER_EFFECT')return true;
-  if(!Array.isArray(reply.actionResults))return false;
-  const receipts=reply.actionResults.flatMap(result=>{if(!result||typeof result!=='object'||!('effectReceipts' in result))return [];try{return [...normalizeEffectReceipts((result as {effectReceipts:unknown}).effectReceipts)];}catch{return [];}});
-  const reverted=new Set(receipts.flatMap(receipt=>receipt.outcome==='rolled_back'?receipt.rollback.revertedReceiptIds:[]));
-  return receipts.some(receipt=>receipt.outcome==='applied'&&!reverted.has(receipt.receiptId));
-}
 /** Owner-facing states for upstream's CHAT_FAILURE_KINDS (pinned contracts `chat.ts`). Each says
  * what happened and what to do next; none retries the message. Every known kind has one (replyFailure);
  * only an unknown kind keeps the generic text. */
@@ -2339,8 +2328,10 @@ export const connectionController = {
     // photo waits there as its review card instead of failing the reply. Nothing is taken without a readable direct mode.
     const allowed=async()=>{current();const preferences=await readDevicePreferences(signal).catch(()=>{signal.throwIfAborted();return {askBeforeAgentActions:true};});current();return !preferences.askBeforeAgentActions;};
     if(!await allowed())return [];
-    await pending.selected.actions.pendingReview(context,signal);current();
-    return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo');
+    // The owner's own words prove the photo was asked for: a capture the model proposed for other words keeps its card.
+    const proof:CurrentDeviceActionRequest={messageId,text:pending.text,current};
+    await pending.selected.actions.pendingReview(context,signal,proof);current();
+    return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo',proof);
   },
   /** The agent proposed this message's photo without showing Camera, and the phone is still on the screen the request was sent from. */
   requestedCameraNeedsOpening(messageId:string):boolean {
@@ -3585,7 +3576,7 @@ export const connectionController = {
       // The agent chose not to answer this turn (an echo it caught, say). That is not a failed reply:
       // the turn ends with nothing to say; voice listens again and chat shows no empty bubble.
       const ignored=('noResponseReason' in reply&&reply.noResponseReason==='ignored')||(channelType==='DM'&&!failed&&typeof reply.text==='string'&&!reply.text.trim());
-      const effectApplied=failed&&effectAppliedBeforeFailure(reply);
+      const effectApplied=failed?effectBeforeFailure(reply):undefined;
       // A completed Calendar read can truthfully fail its coverage guard. Its
       // visible answer and durable message identity remain usable; this is not
       // a transport failure and must not gain a retry prompt or extra card.
@@ -3609,7 +3600,7 @@ export const connectionController = {
         // The turn failed after its action committed (a calendar event exists, say): the owner is
         // told the action went through and the reply was cut off. A mapped provider or Cloud limit
         // keeps its own retry information after that; the generic and plain interrupted texts do not.
-        if(effectApplied){const mapped=responseFailure instanceof AlphaClientError?responseFailure as AlphaClientError&{failureKind?:unknown;serviceLimit?:unknown;planAction?:unknown}:undefined;responseFailure=Object.assign(new AlphaClientError('transport-failed',mapped&&mapped.failureKind!=='interrupted'?`${EFFECT_APPLIED_INTERRUPTED} ${mapped.message}`:EFFECT_APPLIED_INTERRUPTED),{failureKind:typeof mapped?.failureKind==='string'?mapped.failureKind:failureKindOf(reply)??'interrupted'},mapped?.serviceLimit===undefined?{}:{serviceLimit:mapped.serviceLimit},mapped?.planAction===undefined?{}:{planAction:mapped.planAction});}
+        if(effectApplied){const lead=effectInterruptedText(effectApplied);const mapped=responseFailure instanceof AlphaClientError?responseFailure as AlphaClientError&{failureKind?:unknown;serviceLimit?:unknown;planAction?:unknown}:undefined;responseFailure=Object.assign(new AlphaClientError('transport-failed',mapped&&mapped.failureKind!=='interrupted'?`${lead} ${mapped.message}`:lead),{failureKind:typeof mapped?.failureKind==='string'?mapped.failureKind:failureKindOf(reply)??'interrupted'},mapped?.serviceLimit===undefined?{}:{serviceLimit:mapped.serviceLimit},mapped?.planAction===undefined?{}:{planAction:mapped.planAction});}
         if ('failureKind' in responseFailure) retractReadiness();
       }
       for(const key of ['messageId','userMessageId'] as const)if(reply[key]!==undefined&&!validateUuid(reply[key]))throw Error('The agent returned an invalid message identity.');
@@ -3663,7 +3654,7 @@ export const connectionController = {
       }
       // Ask-first phones also open Camera for the requested photo; there it waits as its review card (continueRequestedCamera takes nothing).
       if(!failed&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&(Array.isArray(reply.actionResults)||cameraProposalOnly)){
-        requestedCameraContinuation={messageId:reply.userMessageId,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
+        requestedCameraContinuation={messageId:reply.userMessageId,text:authoredRequestText,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
       }
       // A reply that got through means the last Cloud limit no longer applies.
       if(!failed&&(state.lastServiceLimit||state.fundingRefused))update({lastServiceLimit:null,fundingRefused:false});

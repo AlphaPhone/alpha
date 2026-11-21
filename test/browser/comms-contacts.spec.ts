@@ -97,7 +97,8 @@ test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-view
       return {items: items.map((item: any) => item.proposal ? `${item.proposal.title}\n${item.proposal.description}` : `notice ${item.notice}`), posts, effects};
     }, operation);
     const missing = await review({type: 'contact_delete', query: 'Test Alpha'});
-    expect(missing).toEqual({items: ['notice Delete contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.'], posts: [], effects: 0});
+    // The owner was told nothing was changed, so the only post is the refusal the agent records.
+    expect(missing).toEqual({items: ['notice Delete contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.'], posts: [expect.stringMatching(/\/decision$/)], effects: 0});
     expect((await review({type: 'contact_update', query: 'Test Alpha', set: {phoneNumbers: ['+14155550101']}})).items).toEqual(['notice Change contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.']);
     const one = await review({type: 'contact_update', query: 'Ada', add: {phoneNumbers: ['+14155550101']}});
     expect(one.items).toHaveLength(1);
