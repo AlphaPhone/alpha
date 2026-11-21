@@ -579,7 +579,8 @@ now proposes both. Input per turn is the same (34K median), but turns are faster
 (median 2.6 s against 3.9 s; the reminder's planning call 1.1 s against 6.4 s), so at a
 fixed 5-second pause the same tokens land in less time: uncached tokens in any 60 s rose
 to 149K median and the run was refused 12 times; two reminders failed when the planning
-call itself was refused, which a side call did not re-send (a re-send is under review).
+call itself was refused, which a side call did not re-send (`d0fac57d11` now re-sends an
+extractor call once after a refusal; not yet measured in a whole-turn run).
 
 ### The phone's decode mode
 
@@ -631,12 +632,19 @@ Upstream branch `claude/agent-context-followups` (local, on upstream develop
 | Streamed idle limit (60 s) on the direct route; `parser_error` never transient | A silent re-send waiting for the 180 s deadline | |
 | Reminder planning at low reasoning, both routes | Reasoning at "high" by default | Correct 36 of 40 against 21 of 25; about two thirds fewer output tokens |
 | Every review proposal of one reply recorded | Text plus alarm proposing only the text | Both calls in the first reply 10 of 10 |
+| Extractor call re-sent once after a refusal (wait hint up to 5 s) | A reminder lost when its planning call was refused | |
 
 Not landed after review: a compact one-line rendering of recorded outcomes (22% to 40%
 smaller requests, but a third party's forged outcome line misled the model more often
-than today's form; a per-room marker is under test), and narrowing a reminder's
-retrieval (every rule tried so far dropped a second tool the owner asked for in some
-wording).
+than today's form; a per-room marker is under test).
+
+Dropped: narrowing a reminder's retrieval to the reminder tools when Stage 1 names a
+reminder operation. It would cut a time-clause reminder's tool definitions from about
+100K to 24K characters, but four rounds of rules (word lists, then allow-lists of
+moments and asides) each dropped a second tool the owner asked for in some wording: the
+last, in 447 of about 3,600 adversarial decisions (a run-on second request with a verb
+outside its lists, a misspelt verb, no verb, or a joiner typo such as "an"). A safe version would need to recognise the reminder's own
+words, not exclude other verbs.
 
 ## 4. Known and open
 
@@ -663,4 +671,8 @@ wording).
   by an English keyword floor (section 1).
 - **The device tool still differs by view,** and by two wordings: asking for an
   address in a new tab, and naming the phone's own calendar.
+- **Re-sends stack on the direct route.** After a refusal with no wait hint the
+  OpenAI plugin's own retries and the turn's re-sends multiply: 8 to 12 provider
+  attempts for one step in the no-cap runs. A refused request is not charged, so this
+  costs time and request count, not tokens.
 
