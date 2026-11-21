@@ -64,6 +64,16 @@ pure def alwaysASignInIsNumbered(s: Session): bool =
   s.account >= 0 and s.signIn >= 0 and (s.account > 0 implies s.signIn > 0)
 ```
 
+### A sign-out is never under way while the phone's store is being read
+
+Discovered by the proof: without it, the store's answer could take the
+account away from a sign-out in flight.
+
+```quint
+pure def alwaysNoSignOutWhileTheStoreIsRead(s: Session): bool =
+  (s.work == Leaving or s.work == Removing) implies s.store.status != R::Loading
+```
+
 ### A change in flight names the account it stores, or the account it removes, and only a hold waits for a turn
 
 ```quint

@@ -138,6 +138,17 @@ pure def reported(s: Provider, ticket: int, ok: bool, mode: Mode, text: bool, vo
 pure def alwaysOwnKeyNeedsASavedKey(s: Provider): bool = s.mode == OwnKey implies s.text
 ```
 
+### A key offered to save or to use for voice is the one just checked, and the agent is waited for only to remove a key or to choose where requests go
+
+Discovered by the proof: without it, a confirmed offer could use a key
+nobody checked.
+
+```quint
+pure def alwaysAnOfferFitsWhatWasChecked(s: Provider): bool =
+  ((s.choice.showing and (s.offer == SaveText or s.offer == UseVoice)) implies s.candidate)
+    and (s.work == Waiting implies (s.removing or s.offer == UseText or s.offer == UseCloud))
+```
+
 ### Where requests go, and which keys are saved, change only on the phone's word
 
 ```quint

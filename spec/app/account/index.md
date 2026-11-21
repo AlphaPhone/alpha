@@ -532,6 +532,20 @@ pure def stepNothingStartsAfterErasing(before: Resident, after: Resident, out: L
   before.erasing implies (after.erasing and not(launches(out)))
 ```
 
+### A start has no reason yet, a stop is for a cancel, a change or an erase, an agent down for a change is held, and only erasing makes the reason an erase
+
+Discovered by the proof: without it, letting go of a hold could leave a
+down agent waiting for nothing.
+
+```quint
+pure def alwaysEachPhaseHasItsReason(s: Resident): bool = and {
+  s.phase == Starting implies s.why == NotYet,
+  (s.phase == Stopping or s.phase == Unstopped) implies (s.why == Cancelled or s.why == ForChange or s.why == Erased),
+  (s.phase == Down and s.why == ForChange) implies held(s),
+  s.why == Erased implies s.erasing,
+}
+```
+
 ### An agent can be down for a sign-in change
 
 ```quint
