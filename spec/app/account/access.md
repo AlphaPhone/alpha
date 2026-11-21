@@ -6,7 +6,8 @@ Calendar edits. The phone's Google host enforces them and treats a
 switch it has no record of as off. A switch is never a grant: switching
 off disconnects nothing and the agent still reads what the grants in
 [Google & email](./google.md) allow. Inbox and Calendar take the facts
-below.
+below. The switches belong to the Cloud account signed in, so a new
+sign-in from [Session](./session.md) reads them again.
 
 ## Story: Decide what the agent may change in Google
 
@@ -62,15 +63,17 @@ pure def accessRead(a: AgentAccess, ticket: int, ok: bool, mail: bool, calendar:
   else { ...a, read: R::answer(a.read, ok) }
 ```
 
-### Switching saves both switches as shown with the one changed, one save at a time, and every save is read back whatever the phone answers
+### Only the owner switches, once both switches are read back, one save at a time; a save writes the other switch as read back, and every save is read back whatever the phone answers
 
 A save the phone refused is said so; the switch shows what the phone
-reads back.
+reads back. A switch never read, or saved and not yet read back, is
+never written over.
 
 ```quint
-pure def canSetAccess(a: AgentAccess, which: Switch, on: bool): bool = not(a.saving)
+pure def canSetAccess(a: AgentAccess, which: Switch, on: bool, origin: O::Origin): bool =
+  not(a.saving) and O::acts(origin) and a.read.status == R::Loaded and a.unsure == off
 
-pure def setAccess(a: AgentAccess, which: Switch, on: bool): Moved =
+pure def setAccess(a: AgentAccess, which: Switch, on: bool, origin: O::Origin): Moved =
   val now = shown(a)
   val want = if (which == MailChanges) { ...now, mail: on } else { ...now, calendar: on }
   { state: { ...a, saving: true, ticket: a.ticket + 1, trouble: Fine,
@@ -82,8 +85,17 @@ pure def canAccessSaved(a: AgentAccess, ticket: int): bool = a.saving and ticket
 pure def accessSaved(a: AgentAccess, ticket: int, ok: bool): Moved =
   readAccess({ ...a, saving: false, trouble: if (ok) Fine else NotSaved })
 
+pure def stepASaveWritesOnlyTheSwitchChanged(before: AgentAccess, after: AgentAccess, out: List[Effect]): bool =
+  out.every(e => match e {
+    | SaveAccess(x) => before.unsure == off and before.read.status == R::Loaded
+        and (x.mail == before.known.mail or x.calendar == before.known.calendar)
+    | _ => true
+  })
+
 pure def stepEverySaveIsReadBack(before: AgentAccess, via: str, after: AgentAccess, out: List[Effect]): bool =
-  via == "accessSaved" implies (out == List(ReadAccess({ check: after.read.ticket })) and after.read.status == R::Loading)
+  via == "accessSaved" implies (
+    out.length() == 1 and out.every(e => match e { | ReadAccess(r) => r.check == after.read.ticket | _ => false })
+      and after.read.status == R::Loading)
 ```
 
 ### The agent may change mail or calendar only when both the grant and the switch allow it, and switching off never touches what it may read
@@ -121,11 +133,30 @@ pure def sometimesUnconfirmedIsOff(a: AgentAccess): bool = a.known.calendar and 
 pure def sometimesNotSaved(a: AgentAccess): bool = a.trouble == NotSaved and a.read.status == R::Loading
 ```
 
-## Story: Keep the switches across a restart and an erase
+## Story: Keep the switches to their sign-in, across a restart and an erase
 
-> As the owner, I want the switches read again after Alpha restarts, a
-> save cut short shown off until it is read back, and both off after I
-> erase Alpha.
+> As the owner, I want the switches read again for a new sign-in and
+> after Alpha restarts, a save cut short shown off until it is read back,
+> and both off after I erase Alpha.
+
+### A new sign-in, or signing out, shows both switches off until they are read again for it
+
+```quint
+pure def canReset(a: AgentAccess, signIn: int): bool = signIn >= 0
+
+pure def reset(a: AgentAccess, signIn: int): Moved =
+  val r = { ...a, unsure: { mail: true, calendar: true }, saving: false, read: O::retire(a.read), trouble: Fine }
+  if (signIn > 0) readAccess(r) else { state: r, out: List() }
+
+pure def stepANewSignInShowsNothingUntilReadBack(before: AgentAccess, via: str, after: AgentAccess): bool =
+  via == "reset" implies (not(shown(after).mail) and not(shown(after).calendar) and not(after.saving))
+```
+
+### A switch can be read back after a new sign-in
+
+```quint
+pure def sometimesReadAgainForANewSignIn(a: AgentAccess): bool = a.unsure.mail and a.unsure.calendar and a.read.status == R::Loading and a.ticket == 0
+```
 
 ### A restart reads the switches again and keeps a save cut short unconfirmed
 

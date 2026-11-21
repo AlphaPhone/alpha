@@ -14,7 +14,7 @@ switches in [Agent access to Google](./access.md).
 > allows, as Cloud reports it, and to be told whenever an account allows
 > less than before.
 
-### Google & email holds the accounts read back with what each allows, the read in flight, the browser visit, and a disconnect with its review
+### Google & email holds the accounts read back with what each allows, the read in flight, the browser visit, and a disconnect with its review and the account whose sync it paused
 
 ```quint
 import read as R from "../../kit/read"
@@ -25,19 +25,20 @@ type Link = { id: int, read: bool, modify: bool, send: bool }
 type Work = Resting | Disconnecting | Confirming
 type Note = Quiet | Denied | Failed | Narrowed | Disconnected | StillConnected | Unconfirmed | CutByRestart
 type Google = {
-  links: List[Link], list: R::Read, tab: O::Visit,
-  work: Work, ticket: int, leaving: int, review: V::Review, gone: int, note: Note,
+  links: List[Link], list: R::Read, tab: O::Visit, resumedFor: int,
+  work: Work, ticket: int, leaving: int, review: V::Review, gone: int, paused: int, note: Note,
 }
 
 pure val initial: Google = {
-  links: List(), list: R::unread, tab: O::novisit,
-  work: Resting, ticket: 0, leaving: 0, review: V::unreviewed, gone: 0, note: Quiet,
+  links: List(), list: R::unread, tab: O::novisit, resumedFor: 0,
+  work: Resting, ticket: 0, leaving: 0, review: V::unreviewed, gone: 0, paused: 0, note: Quiet,
 }
 
 pure val signInValues = Set(0, 1)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val tabValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
+pure val nowValues = Set(0, 1000)
 pure val linksValues = Set(
   List(),
   List({ id: 1, read: true, modify: true, send: true }),
@@ -49,12 +50,12 @@ pure val linksValues = Set(
 pure val weight_listed = 20
 ```
 
-### What the page asks of the phone is a read of the accounts, a consent tab, a disconnect, to pause an account's calendar sync, or to forget an account's mail
+### What the page asks of the phone is a read of the accounts, a consent tab, a disconnect, to pause or resume an account's calendar sync, or to forget an account's mail
 
 ```quint
 type Effect =
   ReadAccounts({ check: int }) | OpenConsent({ tab: int, read: bool, modify: bool, send: bool })
-  | Disconnect({ ticket: int, account: int }) | PauseSync({ account: int }) | Forget({ account: int })
+  | Disconnect({ ticket: int, account: int }) | PauseSync({ account: int }) | ResumeSync({ account: int }) | Forget({ account: int })
 type Moved = { state: Google, out: List[Effect] }
 ```
 
@@ -100,8 +101,10 @@ pure def refresh(g: Google, signIn: int): Moved = reading(Resting, g)
 
 An account that a confirmed disconnect removed is said to be
 disconnected; one still listed after a disconnect is said to be still
-connected; a readback that failed after a disconnect leaves it
-unconfirmed. Inbox takes `shrank` as the fact that a grant was narrowed.
+connected and its calendar sync resumes; a readback that failed, or that
+lists an account that is not one, leaves a disconnect unconfirmed and the
+accounts as they were. Inbox takes `shrank` as the fact that a grant was
+narrowed.
 
 ```quint
 pure def covers(a: Link, b: Link): bool = (b.read implies a.read) and (b.modify implies a.modify) and (b.send implies a.send)
@@ -115,22 +118,23 @@ pure def unreadable(before: List[Link], after: List[Link]): List[Link] =
 pure def forgotten(before: List[Link], after: List[Link]): List[Effect] =
   unreadable(before, after).listMap(b => Forget({ account: b.id }))
 
-pure def canListed(g: Google, ticket: int, links: List[Link]): bool =
-  R::canAnswer(g.list, ticket) and links.every(l => l.id > 0)
+pure def canListed(g: Google, ticket: int): bool = R::canAnswer(g.list, ticket)
 
 pure def listed(g: Google, ticket: int, ok: bool, links: List[Link]): Moved =
   val fresh = links.listMap(l => shaped(l))
   val confirming = g.work == Confirming
   val dropped = confirming and not(holds(fresh, g.leaving))
   val except = if (dropped) g.leaving else 0
-  if (not(ok)) { state: { ...g, list: R::answer(g.list, false), work: Resting, leaving: 0,
-      note: if (confirming) Unconfirmed else g.note }, out: List() }
+  val resumes = g.paused > 0 and holds(fresh, g.paused)
+  if (not(ok) or not(links.every(l => l.id > 0)))
+    { state: { ...g, list: R::answer(g.list, false), work: Resting, leaving: if (confirming) 0 else g.leaving,
+        note: if (confirming) Unconfirmed else g.note }, out: List() }
   else
     { state: { ...g, list: R::answer(g.list, true), links: fresh, work: Resting, leaving: if (confirming) 0 else g.leaving,
-        review: if (fresh != g.links) V::revise(g.review) else g.review,
+        review: if (fresh != g.links) V::revise(g.review) else g.review, paused: 0,
         gone: if (dropped) g.leaving else if (holds(fresh, g.gone)) 0 else g.gone,
         note: if (shrank(g.links, fresh, except)) Narrowed else if (dropped) Disconnected else if (confirming) StillConnected else g.note },
-      out: forgotten(g.links, fresh) }
+      out: forgotten(g.links, fresh).concat(if (resumes) List(ResumeSync({ account: g.paused })) else List()) }
 ```
 
 ### What an account allows never shrinks without the owner being told
@@ -144,15 +148,17 @@ pure def stepScopesNeverShrinkSilently(before: Google, via: str, after: Google):
 ### An account that leaves the list, or no longer allows reading, holds no mail
 
 ```quint
+pure def forgets(out: List[Effect], id: int): bool = out.some(e => match e { | Forget(f) => f.account == id | _ => false })
+
 pure def stepAnUnreadableAccountIsForgotten(before: Google, after: Google, out: List[Effect]): bool =
-  before.links.every(b => (b.read implies readable(after.links, b.id)) or out.includes(Forget({ account: b.id })))
+  before.links.every(b => (b.read implies readable(after.links, b.id)) or forgets(out, b.id))
 ```
 
-### The accounts change only by a readback, a new sign-in or erasing Alpha
+### The accounts change only by a readback, a new sign-in, signing out before a restart, or erasing Alpha
 
 ```quint
 pure def stepOnlyAReadbackChangesTheAccounts(before: Google, via: str, after: Google): bool =
-  after.links != before.links implies (via == "listed" or via == "reset" or via == "erase")
+  after.links != before.links implies (via == "listed" or via == "reset" or via == "erase" or (via == "restart" and after.links == List()))
 ```
 
 ### Two accounts can be connected, one of them able to send
@@ -179,17 +185,18 @@ pure def sometimesListedButUnreadable(g: Google): bool = holds(g.links, 1) and n
 > Alpha may do with my mail, and come back to Alpha with the accounts as
 > Google now allows them.
 
-### Connecting opens a new visit, only once the accounts are known, and never asks for less than an account already allows
+### Connecting is the owner's, opens a new visit, only once the accounts are known, and never asks for less than an account already allows
 
 ```quint
-pure def canConnect(g: Google, read: bool, modify: bool, send: bool, signIn: int): bool =
-  signIn > 0 and not(g.tab.open) and g.work == Resting and not(g.review.showing) and g.list.status == R::Loaded and (read or modify or send)
+pure def canConnect(g: Google, read: bool, modify: bool, send: bool, signIn: int, origin: O::Origin, now: int): bool =
+  signIn > 0 and O::acts(origin) and not(g.tab.open) and g.work == Resting and not(g.review.showing) and g.list.status == R::Loaded
+    and (read or modify or send)
 
-pure def connect(g: Google, read: bool, modify: bool, send: bool, signIn: int): Moved =
+pure def connect(g: Google, read: bool, modify: bool, send: bool, signIn: int, origin: O::Origin, now: int): Moved =
   val m = modify or g.links.some(l => l.modify)
   val sd = send or g.links.some(l => l.send)
   val r = read or m or g.links.some(l => l.read)
-  { state: { ...g, tab: O::go(g.tab), note: Quiet },
+  { state: { ...g, tab: O::go(g.tab, now), note: Quiet },
     out: List(OpenConsent({ tab: g.tab.number + 1, read: r, modify: m, send: sd })) }
 
 pure def stepConsentNeverAsksForLess(before: Google, after: Google, out: List[Effect]): bool =
@@ -214,16 +221,48 @@ pure def returned(g: Google, tab: int, result: Result): Moved =
 
 pure def stepABrowserReturnGrantsNothing(before: Google, via: str, after: Google, out: List[Effect]): bool =
   after.tab.number >= before.tab.number
-    and ((via == "returned" or via == "returnedCold" or via == "stopWaiting")
-      implies (after.links == before.links and out == List(ReadAccounts({ check: after.list.ticket })) and not(after.tab.open)))
+    and ((via == "returned" or via == "returnedCold" or via == "stopWaiting" or via == "consentTimedOut" or via == "resumed")
+      implies (after.links == before.links and out.length() == 1 and out.every(e => match e { | ReadAccounts(r) => r.check == after.list.ticket | _ => false })
+        and (not(after.tab.open) or via == "resumed")))
 ```
 
-### The owner can stop waiting for the browser, and the accounts are read back
+### The owner can stop waiting for the browser, and a visit not back within ten minutes ends; either way the accounts are read back
 
 ```quint
+pure val consentLimit = 600
+
 pure def canStopWaiting(g: Google): bool = g.tab.open
 
 pure def stopWaiting(g: Google): Moved = reading(g.work, { ...g, tab: O::back(g.tab) })
+
+pure def canConsentTimedOut(g: Google, now: int): bool = O::overdue(g.tab, now, consentLimit)
+
+pure def consentTimedOut(g: Google, now: int): Moved = reading(g.work, { ...g, tab: O::back(g.tab) })
+```
+
+### Coming back to Alpha with a visit open reads the accounts back once for that visit
+
+The return may still come.
+
+```quint
+pure def canResumed(g: Google): bool = g.tab.open and g.resumedFor != g.tab.number and g.list.status != R::Loading
+
+pure def resumed(g: Google): Moved = reading(g.work, { ...g, resumedFor: g.tab.number })
+```
+
+### A consent visit never keeps the owner waiting for good
+
+```quint
+pure def leadsToAConsentVisitEnds(g: Google, later: Google): bool =
+  g.tab.open implies (not(later.tab.open) or later.tab.number > g.tab.number)
+
+pure val fair_consentTimedOut = "weak"
+```
+
+### Coming back to Alpha during a visit can read the accounts back
+
+```quint
+pure def sometimesResumedWithoutAReturn(g: Google): bool = g.tab.open and g.resumedFor == g.tab.number and g.list.status == R::Loading
 ```
 
 ### A connection can be denied in the browser
@@ -269,7 +308,7 @@ pure def canConfirmDisconnect(g: Google): bool =
   V::canConfirm(g.review) and g.work == Resting and holds(g.links, g.leaving) and g.list.status != R::Loading
 
 pure def confirmDisconnect(g: Google): Moved =
-  { state: { ...g, work: Disconnecting, ticket: g.ticket + 1, review: V::confirm(g.review) },
+  { state: { ...g, work: Disconnecting, ticket: g.ticket + 1, review: V::confirm(g.review), paused: g.leaving },
     out: List(PauseSync({ account: g.leaving }), Disconnect({ ticket: g.ticket + 1, account: g.leaving })) }
 
 pure def canDisconnectAnswered(g: Google, ticket: int): bool = g.work == Disconnecting and ticket == g.ticket
@@ -279,7 +318,7 @@ pure def disconnectAnswered(g: Google, ticket: int): Moved = reading(Confirming,
 pure def stepADisconnectIsConfirmedAndToldToCalendar(before: Google, via: str, after: Google, out: List[Effect]): bool =
   out.every(e => match e {
     | Disconnect(x) => via == "confirmDisconnect" and V::canConfirm(before.review) and holds(before.links, x.account)
-        and x.account == before.leaving and out.includes(PauseSync({ account: x.account }))
+        and x.account == before.leaving and out.some(e => match e { | PauseSync(p) => p.account == x.account | _ => false })
     | _ => true
   })
 
@@ -292,13 +331,27 @@ pure def alwaysADisconnectNamesItsAccount(g: Google): bool = and {
 }
 ```
 
+### Only a disconnect the readback confirmed leaves an account's sync paused
+
+```quint
+pure def stepOnlyAConfirmedDisconnectLeavesSyncPaused(before: Google, after: Google, out: List[Effect]): bool =
+  (before.paused > 0 and after.paused != before.paused and holds(after.links, before.paused))
+    implies out.some(e => match e { | ResumeSync(r) => r.account == before.paused | _ => false })
+```
+
+### A disconnect left still connected resumes the account's sync
+
+```quint
+pure def sometimesSyncResumed(g: Google): bool = g.note == StillConnected and g.paused == 0 and g.links.length() > 0
+```
+
 ### An account is said to be disconnected only when the readback no longer lists it, and it then holds nothing
 
 ```quint
 pure def stepADisconnectedAccountHoldsNothing(before: Google, via: str, after: Google, out: List[Effect]): bool =
   (after.note == Disconnected and before.note != Disconnected)
     implies (via == "listed" and before.work == Confirming and after.gone == before.leaving and not(holds(after.links, after.gone))
-      and out.includes(Forget({ account: after.gone })) and not(mayRead(after, after.gone)) and not(maySend(after, after.gone)))
+      and forgets(out, after.gone) and not(mayRead(after, after.gone)) and not(maySend(after, after.gone)))
 ```
 
 ### A disconnect can be reviewed for one account
@@ -339,7 +392,7 @@ The visit's number is kept, so the old visit's return is refused.
 
 ```quint
 pure def cleared(note: Note, g: Google): Google =
-  { ...g, links: List(), tab: O::back(O::coldBack(g.tab)), work: Resting, leaving: 0, gone: 0,
+  { ...g, links: List(), tab: O::ended(g.tab), work: Resting, leaving: 0, gone: 0, paused: 0,
     review: V::dismiss(V::revise(g.review)), note: note, list: O::retire(g.list) }
 
 pure def canReset(g: Google, signIn: int): bool = signIn >= 0
@@ -350,10 +403,10 @@ pure def reset(g: Google, signIn: int): Moved =
   else { state: c, out: forgotten(g.links, List()) }
 
 pure def lawSigningOutLeavesNoGoogle(read: bool, send: bool): bool =
-  val g = { ...initial, links: List({ id: 1, read: read, modify: false, send: send }), tab: { open: true, number: 1, orphan: false } }
+  val g = { ...initial, links: List({ id: 1, read: read, modify: false, send: send }), tab: { open: true, number: 1, orphan: false, at: 0 } }
   val out = reset(g, 0)
   out.state.links.length() == 0 and not(out.state.tab.open) and out.state.list.status != R::Loading
-    and out.out == List(Forget({ account: 1 }))
+    and out.out.length() == 1 and forgets(out.out, 1)
 ```
 
 ### Accounts can be listed for the sign-in
@@ -362,7 +415,10 @@ pure def lawSigningOutLeavesNoGoogle(read: bool, send: bool): bool =
 pure def sometimesANewSignInsAccounts(g: Google): bool = g.links.length() > 0 and g.list.ticket >= 2 and g.tab.number == 0 and g.note == Quiet
 ```
 
-### A restart keeps the accounts last read back, orphans an open visit, leaves a disconnect in flight unconfirmed, and reads the accounts again
+### A restart keeps the accounts last read back for the sign-in still saved, orphans an open visit, leaves a disconnect in flight unconfirmed, and reads the accounts again; with no sign-in it keeps nothing
+
+A sign-in the phone reports as changed after the restart resets the
+accounts too ([Session](./session.md)).
 
 ```quint
 pure def canRestart(g: Google, signIn: int): bool = signIn >= 0
@@ -370,7 +426,11 @@ pure def canRestart(g: Google, signIn: int): bool = signIn >= 0
 pure def restart(g: Google, signIn: int): Moved =
   val r = { ...g, tab: O::orphaned(g.tab), work: Resting, leaving: 0, review: V::dismiss(V::revise(g.review)), list: O::retire(g.list),
     note: if (g.work == Resting) g.note else Unconfirmed }
-  if (signIn > 0) reading(Resting, r) else { state: r, out: List() }
+  if (signIn > 0) reading(Resting, r)
+  else { state: { ...cleared(Quiet, g), tab: O::orphaned(g.tab) }, out: forgotten(g.links, List()) }
+
+pure def stepNoSignInHoldsNoGoogle(before: Google, via: str, after: Google): bool =
+  (via == "restart" and after.list.status != R::Loading) implies after.links == List()
 ```
 
 ### A consent visit's return after a restart grants nothing and reads the accounts back

@@ -4,9 +4,13 @@ The steps of signing in to Alpha Cloud on Alpha's own screens: a code
 sent by email or text, or Google in a browser tab, then a second check
 when the account asks for one. The phone checks each code and keeps what
 it verified until [Session](./session.md) has the agent held and asks it
-to store the sign-in; this page hands over only the account and the way
-it was made, and never sees the sign-in itself. Renewing a sign-in near
-its end starts here too.
+to store the sign-in; this page hands over only the account, the way it
+was made and whether it created the account, and never sees the sign-in
+itself. Renewing a sign-in near its end starts here too. Whether a
+sign-in is required and whether the session can take one come from
+[Session](./session.md), whether the owner's own key is in use from
+[AI provider](./provider.md), and whether startup has resolved from
+startup.
 
 ## Story: Choose how to sign in
 
@@ -15,36 +19,39 @@ its end starts here too.
 
 ### Sign-in is closed, choosing, in the browser, at the code or at a second check
 
-It holds the request in flight with its number, which ways this phone
-offers, the browser visit and when it opened, the address a code is
-sent to, the attempt that code belongs to with its wrong tries and its
-end, the last address a code went to with when another may go there,
-what to tell the owner, and whether it last handed a sign-in over.
+It holds how the page was opened and whether a required page waits for
+startup, the request in flight with its number, which ways this phone
+offers, the browser visit, the address a code is sent to, the attempt
+that code belongs to with its wrong tries and its end, the last address
+a code went to with when another may go there, what to tell the owner,
+and how the page last ended.
 
 ```quint
 import read as R from "../../kit/read"
 import outside as O from "./outside"
 import session as S from "./session"
 
+type Entry = OwnerOpened | Required
+type Ended = NotEnded | HandedOver | OwnKeyInstead
 type Factor = Totp | Sms | Passkey
 type Step = Closed | Choose | Browser | Code | Second
 type Work = Resting | Sending | Resending | Verifying | Cancelling
-type Verdict = Passed | NeedsSecond | Wrong | Lapsed | Unreachable | Refused
-type Trouble = Fine | WrongCode | CodeSpent | NotSent | NotResent | NoAnswer | NotSignedIn | TooLate | TabExpired | Restarted
+type Verdict = Passed | Created | NeedsSecond | Wrong | Lapsed | Unreachable | Refused
+type Trouble = Fine | WrongCode | CodeSpent | NotSent | NotResent | NoAnswer | NotSignedIn | TooLate | TabExpired | Restarted | Busy
 type SignIn = {
-  step: Step, work: Work, ticket: int,
-  readiness: R::Read, google: bool, sms: bool, tab: O::Visit, tabAt: int,
+  entry: Entry, waiting: bool, step: Step, work: Work, ticket: int,
+  readiness: R::Read, google: bool, sms: bool, tab: O::Visit,
   method: S::Method, address: str, prefill: bool,
   attempt: int, factor: Factor, wrong: int, spent: bool, expiresAt: int,
-  sentTo: str, resendAt: int, trouble: Trouble, handed: bool,
+  sentTo: str, resendAt: int, trouble: Trouble, ended: Ended,
 }
 
 pure val initial: SignIn = {
-  step: Closed, work: Resting, ticket: 0,
-  readiness: R::unread, google: false, sms: false, tab: O::novisit, tabAt: 0,
+  entry: OwnerOpened, waiting: false, step: Closed, work: Resting, ticket: 0,
+  readiness: R::unread, google: false, sms: false, tab: O::novisit,
   method: S::Email, address: "", prefill: false,
   attempt: 0, factor: Totp, wrong: 0, spent: false, expiresAt: 0,
-  sentTo: "", resendAt: 0, trouble: Fine, handed: false,
+  sentTo: "", resendAt: 0, trouble: Fine, ended: NotEnded,
 }
 
 pure val ticketValues = Set(1, 2, 3, 4)
@@ -68,19 +75,25 @@ type SecretCode = str
 type Effect =
   CheckMethods({ check: int }) | OpenBrowser({ tab: int }) | SendCode({ ticket: int, method: S::Method, address: str, keeps: int })
   | Verify({ ticket: int, attempt: int, code: SecretCode }) | AskPasskey({ ticket: int, attempt: int })
-  | Withdraw({ ticket: int, tab: int }) | Abandon({ attempt: int }) | Admit({ account: int, method: S::Method })
+  | Withdraw({ ticket: int, tab: int }) | Abandon({ attempt: int }) | DropSignIn
+  | Admit({ account: int, method: S::Method, created: bool })
 type Moved = { state: SignIn, out: List[Effect] }
 ```
 
-### Opening sign-in shows the choice and asks the phone which ways work
+### Opening sign-in shows the choice and asks the phone which ways work, from Account or from the assistant's card, never by the agent
 
 ```quint
-pure def canBegin(s: SignIn): bool = s.step == Closed and s.work == Resting
-
-pure def begin(s: SignIn): Moved =
-  { state: { ...s, step: Choose, trouble: Fine, prefill: false, google: false, sms: false, handed: false,
+pure def opening(entry: Entry, s: SignIn): Moved =
+  { state: { ...s, entry: entry, waiting: false, step: Choose, trouble: Fine, prefill: false, google: false, sms: false, ended: NotEnded,
       readiness: R::ask(s.readiness) },
     out: List(CheckMethods({ check: s.readiness.ticket + 1 })) }
+
+pure def canBegin(s: SignIn, origin: O::Origin): bool = s.step == Closed and s.work == Resting and not(s.waiting) and O::opens(origin)
+
+pure def begin(s: SignIn, origin: O::Origin): Moved = opening(OwnerOpened, s)
+
+pure def lawTheAgentOpensNoSignIn(origin: O::Origin): bool =
+  not(canBegin(initial, O::ByAgent)) and (canBegin(initial, origin) iff O::opens(origin))
 
 pure def canAskMethods(s: SignIn): bool = s.step == Choose and s.work == Resting and s.readiness.status != R::Loading
 
@@ -156,6 +169,72 @@ pure def alwaysTheRequestFitsTheStep(s: SignIn): bool = and {
 pure def sometimesGoogleIsOffered(s: SignIn): bool = s.step == Choose and offered(s, S::Google)
 ```
 
+## Story: Sign in when Alpha needs it
+
+> As the owner of a phone with no sign-in and no key of my own, I want
+> Alpha to show me sign-in by itself once it has started, with no Back
+> that leaves me nowhere, and to let me bring my own key instead.
+
+### A required sign-in opens by itself once startup has resolved, and waits for startup until then
+
+[Session](./session.md) says whether a sign-in is required.
+
+```quint
+pure def canRequire(s: SignIn, required: bool, ready: bool): bool =
+  required and s.step == Closed and s.work == Resting and not(s.waiting)
+
+pure def require(s: SignIn, required: bool, ready: bool): Moved =
+  if (ready) opening(Required, s) else { state: { ...s, entry: Required, waiting: true }, out: List() }
+
+pure def canStartupResolved(s: SignIn, required: bool): bool = s.waiting
+
+pure def startupResolved(s: SignIn, required: bool): Moved =
+  if (required) opening(Required, s) else { state: { ...s, waiting: false }, out: List() }
+
+pure def alwaysOnlyARequiredPageWaits(s: SignIn): bool = s.waiting implies (s.entry == Required and s.step == Closed)
+```
+
+### A required sign-in has no Back on its choice
+
+Back still leaves a code step, a browser visit or a request in flight,
+back to the choice.
+
+```quint
+pure def lawTheRequiredChoiceHasNoBack(entry: Entry): bool =
+  (canCancel({ ...initial, step: Choose, entry: entry }) iff entry == OwnerOpened)
+    and canCancel({ ...initial, step: Code, entry: entry, attempt: 1, address: "owner@example.com" })
+```
+
+### Saving the owner's own key ends a required sign-in, and drops any code on screen
+
+```quint
+pure def canKeyInUse(s: SignIn, ownKey: bool): bool =
+  ownKey and s.entry == Required and (s.step != Closed or s.waiting) and s.work == Resting
+
+pure def keyInUse(s: SignIn, ownKey: bool): Moved =
+  { state: { ...s, step: Closed, waiting: false, wrong: 0, spent: false, address: "", prefill: false, trouble: Fine,
+      ended: OwnKeyInstead, tab: O::back(s.tab) },
+    out: if (s.step == Code or s.step == Second) List(Abandon({ attempt: s.attempt })) else List() }
+```
+
+### A required sign-in can wait for startup
+
+```quint
+pure def sometimesARequiredSignInWaitsForStartup(s: SignIn): bool = s.waiting
+```
+
+### A required sign-in can show its choice
+
+```quint
+pure def sometimesARequiredChoice(s: SignIn): bool = s.entry == Required and s.step == Choose and not(canCancel(s))
+```
+
+### The owner's own key can end a required sign-in
+
+```quint
+pure def sometimesOwnKeyEndsTheRequiredSignIn(s: SignIn): bool = s.ended == OwnKeyInstead and s.step == Closed
+```
+
 ## Story: Sign in with a code
 
 > As the owner, I want a code sent to my email or my number, to type it
@@ -209,13 +288,14 @@ pure def resend(s: SignIn, now: int, online: bool): Moved =
     out: List(SendCode({ ticket: s.ticket + 1, method: s.method, address: s.address, keeps: s.attempt })) }
 ```
 
-### A resend that fails destroys nothing: the attempt, its tries and its times stay as they were
+### A send or resend that fails destroys nothing: the attempt, its tries, its times and where the last code went stay as they were
 
 ```quint
-pure def stepAFailedResendKeepsTheAttempt(before: SignIn, via: str, after: SignIn): bool =
-  (before.work == Resending and via == "sent" and after.attempt == before.attempt) implies and {
-    after.step == Code, after.address == before.address, after.wrong == before.wrong,
-    after.spent == before.spent, after.expiresAt == before.expiresAt, after.resendAt == before.resendAt,
+pure def stepAFailedSendKeepsTheAttempt(before: SignIn, via: str, after: SignIn): bool =
+  (via == "sent" and (after.trouble == NotSent or after.trouble == NotResent)) implies and {
+    after.attempt == before.attempt, after.wrong == before.wrong, after.spent == before.spent,
+    after.expiresAt == before.expiresAt, after.resendAt == before.resendAt, after.sentTo == before.sentTo,
+    after.trouble == NotResent implies (after.step == Code and after.address == before.address),
   }
 
 pure def stepAskingForAnotherCodeKeepsTheOneInHand(before: SignIn, via: str, after: SignIn): bool =
@@ -227,10 +307,15 @@ pure def stepAskingForAnotherCodeKeepsTheOneInHand(before: SignIn, via: str, aft
 
 ### An attempt begins only when a code went out or the browser asked for a second check, and the minute's wait only when a code went out
 
+Erasing Alpha forgets where the last code went.
+
 ```quint
+pure def wentOut(via: str, after: SignIn): bool = via == "sent" and after.trouble == Fine and after.step == Code
+
 pure def stepAnAttemptBeginsOnlyWhenACodeWentOut(before: SignIn, via: str, after: SignIn): bool =
-  (after.attempt != before.attempt implies ((via == "sent" or via == "returned") and after.attempt == before.attempt + 1))
-    and ((after.resendAt != before.resendAt or after.sentTo != before.sentTo) implies (via == "sent" and after.attempt == before.attempt + 1))
+  (after.attempt != before.attempt implies ((wentOut(via, after) or via == "returned") and after.attempt == before.attempt + 1))
+    and ((after.resendAt != before.resendAt or after.sentTo != before.sentTo)
+      implies ((wentOut(via, after) and after.attempt == before.attempt + 1) or (via == "erase" and after.sentTo == "")))
 ```
 
 ### A typed code is checked only while the attempt is unspent and its time is running
@@ -248,15 +333,21 @@ pure def verify(s: SignIn, code: SecretCode, now: int, online: bool): Moved =
 
 A fifth wrong code spends it, and so does the phone saying it lapsed. A
 check that never reached Cloud keeps the step and the attempt, to try
-again. Any other refusal returns to the choice.
+again. Any other refusal returns to the choice. A sign-in verified while
+the session is busy with another change is dropped by the phone, and the
+owner is asked to sign in again.
 
 ```quint
 pure val maxWrong = 5
 
-pure def handOver(account: int, s: SignIn): Moved =
-  { state: { ...s, step: Closed, work: Resting, wrong: 0, spent: false, address: "", prefill: false, trouble: Fine,
-      handed: true, tab: O::back(s.tab) },
-    out: List(Admit({ account: account, method: s.method })) }
+pure def passed(verdict: Verdict): bool = verdict == Passed or verdict == Created
+
+pure def handOver(account: int, created: bool, free: bool, s: SignIn): Moved =
+  if (free)
+    { state: { ...s, step: Closed, waiting: false, work: Resting, wrong: 0, spent: false, address: "", prefill: false, trouble: Fine,
+        ended: HandedOver, tab: O::back(s.tab) },
+      out: List(Admit({ account: account, method: s.method, created: created })) }
+  else { state: chooser(Busy, s), out: List(DropSignIn) }
 
 pure def chooser(trouble: Trouble, s: SignIn): SignIn =
   { ...s, step: Choose, work: Resting, wrong: 0, spent: false, trouble: trouble, tab: O::back(s.tab),
@@ -266,11 +357,11 @@ pure def spentOr(trouble: Trouble, s: SignIn): SignIn =
   if (s.step == Code) { ...s, work: Resting, spent: true, trouble: CodeSpent } else chooser(trouble, s)
 
 pure def canVerified(s: SignIn, ticket: int, verdict: Verdict, account: int): bool =
-  s.work == Verifying and ticket == s.ticket and (verdict == Passed implies account > 0)
+  s.work == Verifying and ticket == s.ticket and (passed(verdict) implies account > 0)
     and (verdict == NeedsSecond implies s.step == Code)
 
-pure def verified(s: SignIn, ticket: int, verdict: Verdict, account: int, factor: Factor, now: int): Moved =
-  if (verdict == Passed) handOver(account, s)
+pure def verified(s: SignIn, ticket: int, verdict: Verdict, account: int, factor: Factor, free: bool, now: int): Moved =
+  if (passed(verdict)) handOver(account, verdict == Created, free, s)
   else if (verdict == NeedsSecond)
     { state: { ...s, step: Second, work: Resting, factor: factor, wrong: 0, expiresAt: now + secondLife, trouble: Fine }, out: List() }
   else if (verdict == Wrong and s.wrong + 1 < maxWrong) { state: { ...s, work: Resting, wrong: s.wrong + 1, trouble: WrongCode }, out: List() }
@@ -280,14 +371,24 @@ pure def verified(s: SignIn, ticket: int, verdict: Verdict, account: int, factor
   else { state: chooser(NotSignedIn, s), out: List() }
 ```
 
-### Only a verified answer hands a sign-in over, naming its account
+### Only a verified answer hands a sign-in over, naming its account, and only when the session can take it; otherwise the phone drops it
 
 ```quint
 pure def stepOnlyAVerifiedAnswerHandsOver(before: SignIn, via: str, after: SignIn, out: List[Effect]): bool =
   out.every(e => match e {
-    | Admit(a) => a.account > 0 and (via == "verified" or via == "returned") and after.handed and after.step == Closed
+    | Admit(a) => a.account > 0 and (via == "verified" or via == "returned") and after.ended == HandedOver and after.step == Closed
+    | DropSignIn => (via == "verified" or via == "returned") and after.trouble == Busy and after.step == Choose
     | _ => true
   })
+
+pure def lawAVerifiedSignInIsHandedOverOrDropped(account: int, free: bool): bool =
+  val checking = { ...initial, step: Code, work: Verifying, ticket: 1, attempt: 1, address: "owner@example.com", expiresAt: 10 }
+  val answer = verified(checking, 1, Created, account, Totp, free, 0)
+  account > 0 implies (answer.out.length() == 1 and answer.out.every(e => match e {
+    | Admit(a) => free and a.account == account and a.method == S::Email and a.created
+    | DropSignIn => not(free)
+    | _ => false
+  }))
 ```
 
 ### A code whose ten minutes are over is spent
@@ -340,7 +441,13 @@ pure def alwaysACodeHasAnAddress(s: SignIn): bool =
 ### A code can be handed over as a sign-in
 
 ```quint
-pure def sometimesHandedOverWithACode(s: SignIn): bool = s.handed and s.method == S::Email and s.attempt > 0
+pure def sometimesHandedOverWithACode(s: SignIn): bool = s.ended == HandedOver and s.method == S::Email and s.attempt > 0
+```
+
+### A sign-in verified while the session was busy is dropped, and the owner chooses again
+
+```quint
+pure def sometimesDroppedWhileTheSessionWasBusy(s: SignIn): bool = s.trouble == Busy and s.step == Choose
 ```
 
 ### A code can be spent, with another still to ask for
@@ -391,13 +498,13 @@ pure def sometimesTheChoiceWaitsItsMinute(s: SignIn): bool = s.step == Choose an
 pure def canChooseGoogle(s: SignIn, online: bool): bool = s.step == Choose and s.work == Resting and online and offered(s, S::Google)
 
 pure def chooseGoogle(s: SignIn, now: int, online: bool): Moved =
-  { state: { ...s, step: Browser, method: S::Google, tab: O::go(s.tab), tabAt: now, address: "", prefill: false, trouble: Fine },
+  { state: { ...s, step: Browser, method: S::Google, tab: O::go(s.tab, now), address: "", prefill: false, trouble: Fine },
     out: List(OpenBrowser({ tab: s.tab.number + 1 })) }
 
 pure def canReopenGoogle(s: SignIn, online: bool): bool = s.step == Browser and s.work == Resting and online
 
 pure def reopenGoogle(s: SignIn, now: int, online: bool): Moved =
-  { state: { ...s, tab: O::go(s.tab), tabAt: now, trouble: Fine }, out: List(OpenBrowser({ tab: s.tab.number + 1 })) }
+  { state: { ...s, tab: O::go(s.tab, now), trouble: Fine }, out: List(OpenBrowser({ tab: s.tab.number + 1 })) }
 ```
 
 ### Only the return of the visit that is open is used, and using it closes the visit
@@ -407,10 +514,10 @@ with its own ten minutes, or returns to the choice.
 
 ```quint
 pure def canReturned(s: SignIn, tab: int, verdict: Verdict, account: int): bool =
-  s.step == Browser and s.work == Resting and O::canReturn(s.tab, tab) and (verdict == Passed implies account > 0)
+  s.step == Browser and s.work == Resting and O::canReturn(s.tab, tab) and (passed(verdict) implies account > 0)
 
-pure def returned(s: SignIn, tab: int, verdict: Verdict, account: int, factor: Factor, now: int): Moved =
-  if (verdict == Passed) handOver(account, s)
+pure def returned(s: SignIn, tab: int, verdict: Verdict, account: int, factor: Factor, free: bool, now: int): Moved =
+  if (passed(verdict)) handOver(account, verdict == Created, free, s)
   else if (verdict == NeedsSecond)
     { state: { ...s, step: Second, tab: O::back(s.tab), attempt: s.attempt + 1, factor: factor, wrong: 0, spent: false,
         expiresAt: now + secondLife, trouble: Fine }, out: List() }
@@ -431,7 +538,7 @@ pure def stepABrowserReturnIsUsedOnce(before: SignIn, via: str, after: SignIn, o
 ```quint
 pure val browserGrace = 600
 
-pure def canBrowserTimedOut(s: SignIn, now: int): bool = s.step == Browser and s.work == Resting and now >= s.tabAt + browserGrace
+pure def canBrowserTimedOut(s: SignIn, now: int): bool = s.step == Browser and s.work == Resting and O::overdue(s.tab, now, browserGrace)
 
 pure def browserTimedOut(s: SignIn, now: int): SignIn = chooser(TabExpired, s)
 ```
@@ -439,7 +546,7 @@ pure def browserTimedOut(s: SignIn, now: int): SignIn = chooser(TabExpired, s)
 ### A Google sign-in can be handed over
 
 ```quint
-pure def sometimesHandedOverWithGoogle(s: SignIn): bool = s.handed and s.method == S::Google
+pure def sometimesHandedOverWithGoogle(s: SignIn): bool = s.ended == HandedOver and s.method == S::Google
 ```
 
 ### A browser visit can time out
@@ -461,7 +568,7 @@ pure val secondLife = 600
 
 pure def lawASecondCheckHasItsOwnTenMinutes(now: int): bool =
   val checking = { ...initial, step: Code, work: Verifying, ticket: 1, attempt: 1, address: "owner@example.com", expiresAt: now + 1 }
-  verified(checking, 1, NeedsSecond, 0, Totp, now).state.expiresAt == now + secondLife
+  verified(checking, 1, NeedsSecond, 0, Totp, true, now).state.expiresAt == now + secondLife
 ```
 
 ### A passkey is asked of the phone, with no code to type
@@ -504,7 +611,8 @@ phone drops any attempt or sign-in it made for it, and the page waits for
 the phone to say so.
 
 ```quint
-pure def canCancel(s: SignIn): bool = s.step != Closed and s.work != Cancelling
+pure def canCancel(s: SignIn): bool =
+  s.step != Closed and s.work != Cancelling and not(s.entry == Required and s.step == Choose and s.work == Resting)
 
 pure def cancel(s: SignIn): Moved =
   val abandon = if (s.step == Code or s.step == Second) List(Abandon({ attempt: s.attempt })) else List()
@@ -527,11 +635,11 @@ pure def canCancelled(s: SignIn, ticket: int): bool = s.work == Cancelling and t
 pure def cancelled(s: SignIn, ticket: int): SignIn = chooser(Fine, s)
 ```
 
-### An attempt is abandoned only by Back, and only the one on screen
+### An attempt is abandoned only by Back, or by the owner's own key ending a required sign-in, and only the one on screen
 
 ```quint
 pure def stepOnlyBackAbandonsAnAttempt(before: SignIn, via: str, after: SignIn, out: List[Effect]): bool =
-  out.every(e => match e { | Abandon(a) => via == "cancel" and a.attempt == before.attempt | _ => true })
+  out.every(e => match e { | Abandon(a) => (via == "cancel" or via == "keyInUse") and a.attempt == before.attempt | _ => true })
 ```
 
 ### A sign-in can be withdrawn while its check is in flight
@@ -559,8 +667,8 @@ before the restart is never taken for a new one.
 
 ```quint
 pure def restart(s: SignIn): SignIn =
-  { ...s, step: Closed, work: Resting, tab: O::orphaned(s.tab), readiness: O::retire(s.readiness),
-    google: false, sms: false, wrong: 0, spent: false, address: "", prefill: false, trouble: Fine, handed: false }
+  { ...s, waiting: false, step: Closed, work: Resting, tab: O::orphaned(s.tab), readiness: O::retire(s.readiness),
+    google: false, sms: false, wrong: 0, spent: false, address: "", prefill: false, trouble: Fine, ended: NotEnded }
 ```
 
 ### The return of a visit orphaned by a restart signs no one in, and the owner is told once
@@ -577,9 +685,12 @@ pure def returnedCold(s: SignIn, tab: int): SignIn = { ...s, tab: O::coldBack(s.
 pure def sometimesToldARestartEndedSignIn(s: SignIn): bool = s.trouble == Restarted
 ```
 
-### Erasing Alpha ends whatever was under way and refuses every answer still in flight
+### Erasing Alpha ends whatever was under way, forgets every address a code went to, and refuses every answer still in flight
 
 ```quint
 pure def erase(s: SignIn): SignIn =
-  { ...restart(s), tab: O::back(O::coldBack(s.tab)) }
+  { ...restart(s), tab: O::ended(s.tab), method: S::Email, sentTo: "", resendAt: 0, expiresAt: 0 }
+
+pure def stepErasingLeavesNoAddress(before: SignIn, via: str, after: SignIn): bool =
+  via == "erase" implies (after.sentTo == "" and after.address == "" and after.step == Closed and not(after.tab.open or after.tab.orphan))
 ```

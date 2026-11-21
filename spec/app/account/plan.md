@@ -3,11 +3,13 @@
 The owner's Alpha Cloud plan as the phone knows it, for the sign-in
 [Session](./session.md) holds: what Cloud last answered, whether AI runs
 on it, the usage Cloud reported, a refusal for billing, and the record
-that keeps AI running for a while when Cloud cannot be reached. Cloud
-signs its answer and Alpha Cloud's own spec verifies the signature; this
-machine only takes the verified answer. Buying, changing and cancelling
-a plan are in [Billing](./billing.md); the owner's own provider key,
-which needs no plan, is in [AI provider](./provider.md).
+that keeps AI running for a while when the phone is offline. Cloud signs
+its answer, and Alpha Cloud's own spec verifies the signature and the
+answer's own honesty; this machine takes only the verified answer and
+says what the owner is shown from it. Buying, changing and cancelling a
+plan are in [Billing](./billing.md) and [Plan changes](./change.md); the
+owner's own provider key, which needs no plan, is in
+[AI provider](./provider.md).
 
 The plan holds no account. Transitions that need the current sign-in take
 it as `signIn` from [Session](./session.md), which also resets the plan
@@ -19,14 +21,16 @@ whenever the sign-in changes.
 > plan, or that Cloud could not say, and never to be shown a plan that
 > has already run out.
 
-### The plan is checking, a member's, funded by credits, unfunded, kept for a while, lapsed, unavailable, refused with the sign-in, or declined for billing
+### The plan is checking, a member's, funded by credits, unfunded, kept offline, lapsed, unavailable, refused with the sign-in, or declined for billing
 
-It holds Cloud's last answer with the tier, when that answer stops being
-valid, whether the plan ends at the end of its period and the revision
-of the subscription, the usage Cloud reported, the latest time the phone
-has told it, the check in flight and when it was asked, the record kept
-for the sign-in it was written for and why it is being used, why Cloud
-refused for billing, and whether the funding sheet is open.
+It holds Cloud's last verified answer with the tier, when that answer
+stops being valid, whether the plan ends at the end of its period and the
+revision of the subscription, the usage Cloud reported, the latest time
+the phone has told it, the check in flight and when it was asked, whether
+the network's return may check it at once, the record kept for the
+sign-in it was written for and whether the last check was made offline,
+why Cloud refused for billing, whether the funding sheet is open, and
+which Home notice the owner dismissed.
 
 ```quint
 import read as R from "../../kit/read"
@@ -34,13 +38,13 @@ import outside as O from "./outside"
 
 type Tier = Plus | Pro
 type Standing = Checking | Member | Funded | Unfunded | Grace | Lapsed | Unavailable | Rejected | Declined
-type KeptFor = Offline | Outage
 type Refusal = PaymentDeclined | PlanNeeded | AllowanceUsed
+type HomeNotice = NoNotice | NeedsPlan | KeptOffline
 type Kept = { signIn: int, until: int }
 type Effect = Check({ ticket: int }) | EndSignIn | Answered
 type Plan = {
   standing: Standing, tier: Tier, until: int, ending: bool, revision: int, usage: int, seen: int,
-  check: R::Read, checkedAt: int, kept: Kept, keptFor: KeptFor, refusal: Refusal, funding: bool,
+  check: R::Read, checkedAt: int, permit: bool, kept: Kept, offline: bool, refusal: Refusal, funding: bool, dismissed: HomeNotice,
 }
 type Moved = { state: Plan, out: List[Effect] }
 
@@ -48,16 +52,13 @@ pure val nobody: Kept = { signIn: 0, until: 0 }
 
 pure val initial: Plan = {
   standing: Checking, tier: Plus, until: 0, ending: false, revision: 0, usage: -1, seen: 0,
-  check: R::unread, checkedAt: 0, kept: nobody, keptFor: Offline, refusal: PlanNeeded, funding: false,
+  check: R::unread, checkedAt: 0, permit: false, kept: nobody, offline: false, refusal: PlanNeeded, funding: false, dismissed: NoNotice,
 }
 
 pure val signInValues = Set(0, 1, 2)
+pure val forSignInValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val nowValues = Set(10, 70, 650)
-pure val untilValues = Set(50, 600)
-pure val paidToValues = Set(0, 100, 5000000)
-pure val usageValues = Set(-1, 40, 100)
-pure val revisionValues = Set(1, 2)
 pure val weight_checked = 30
 pure val weight_recheck = 10
 ```
@@ -96,17 +97,18 @@ pure def earliest(a: int, b: int): int = if (a < b) a else b
 
 pure def timed(now: int, p: Plan): Plan =
   val t = latest(p.seen, now)
-  { ...p, seen: t, standing:
-      if ((p.standing == Member or p.standing == Funded) and t >= p.until) Lapsed
-      else if (p.standing == Grace and t >= p.kept.until) Unavailable
-      else p.standing }
+  noted(
+    if ((p.standing == Member or p.standing == Funded) and t >= p.until) Lapsed
+    else if (p.standing == Grace and t >= p.kept.until) Unavailable
+    else p.standing,
+    { ...p, seen: t })
 
 pure def canPassTime(p: Plan, now: int): bool = now > p.seen
 
 pure def passTime(p: Plan, now: int): Plan = timed(now, p)
 ```
 
-### A plan is shown as a member's or funded only while Cloud's answer is still valid, and kept only until its record runs out
+### A verified answer is shown as a member's or funded only while it is still valid, and a plan is kept only until its record runs out
 
 ```quint
 pure def alwaysExpiryIsHonest(p: Plan): bool =
@@ -122,10 +124,11 @@ even of the same account, is dropped.
 
 ```quint
 pure def asking(kept: Kept, p: Plan): Moved =
-  { state: { ...p, kept: kept, check: R::ask(p.check), checkedAt: p.seen }, out: List(Check({ ticket: p.check.ticket + 1 })) }
+  { state: { ...p, kept: kept, check: R::ask(p.check), checkedAt: p.seen, permit: false }, out: List(Check({ ticket: p.check.ticket + 1 })) }
 
 pure def cleared(kept: Kept, p: Plan): Plan =
-  { ...p, kept: kept, standing: Checking, until: 0, ending: false, usage: -1, funding: false, check: O::retire(p.check) }
+  noted(Checking, { ...p, kept: kept, until: 0, ending: false, usage: -1, funding: false, offline: false, permit: false,
+    check: O::retire(p.check) })
 
 pure def canReset(p: Plan, signIn: int): bool = signIn >= 0
 
@@ -137,60 +140,79 @@ pure def stepANewSignInStartsFromNothing(before: Plan, via: str, after: Plan): b
   (via == "reset" or via == "erase") implies (after.kept == nobody and after.usage == -1 and not(after.funding) and not(aiOn(after)))
 ```
 
-### Cloud's answer makes the plan a member's, funded, unfunded or refused, and a check that got no answer keeps a plan only on this sign-in's own record
+### Cloud's verified answer makes the plan a member's, funded, unfunded or refused; an answer already out of date counts as none
 
-A signed answer that is already out of date cannot be trusted and counts
-as no answer. A member's record is kept for a week, never past the end of
-the paid period; credits keep one for a week. An unfunded account or a
-refused sign-in loses its record, and Cloud refusing the sign-in ends it
-([Session](./session.md)). A check that got no answer keeps a plan from
-its record only while the phone is offline, or when Cloud answered that
-billing cannot be checked, and the owner is told which. An answer that
-admits the account closes the funding sheet. Every answer Cloud gave is
-told to [Billing](./billing.md), which waits for one after an outcome it
-could not confirm.
+A member's record is kept for a week, never past the end of the paid
+period; credits keep one for a week. An unfunded account or a refused
+sign-in loses its record, and Cloud refusing the sign-in ends it
+([Session](./session.md)). An answer that admits the account closes the
+funding sheet. Every answer Cloud gave is told to [Billing](./billing.md),
+[Plan changes](./change.md) and [Codes](./codes.md), which wait for one
+after an outcome they could not confirm.
 
 ```quint
-type Answer = Signed | Credits | NoPlan | SignInRefused | BillingDown | NoAnswer
+type Kind = Signed | Credits | NoPlan | SignInRefused
+type Verified = { kind: Kind, tier: Tier, until: int, paidTo: int, ending: bool, revision: int, usage: int }
 
 pure val graceWindow = 604800
 
+pure val answerValues = Set(
+  { kind: Signed, tier: Pro, until: 600, paidTo: 5000000, ending: true, revision: 2, usage: 40 },
+  { kind: Signed, tier: Plus, until: 50, paidTo: 100, ending: false, revision: 1, usage: -1 },
+  { kind: Credits, tier: Plus, until: 600, paidTo: 0, ending: false, revision: 1, usage: 40 },
+  { kind: NoPlan, tier: Plus, until: 0, paidTo: 0, ending: false, revision: 1, usage: -1 },
+  { kind: SignInRefused, tier: Plus, until: 0, paidTo: 0, ending: false, revision: 1, usage: -1 },
+)
+
+pure def admits(answer: Verified): bool = answer.kind == Signed or answer.kind == Credits
+
 pure def canChecked(p: Plan, ticket: int, signIn: int): bool = R::canAnswer(p.check, ticket) and signIn > 0
 
-pure def checked(p: Plan, ticket: int, answer: Answer, tier: Tier, until: int, paidTo: int, ending: bool, revision: int,
-    usage: int, online: bool, signIn: int, now: int): Moved =
+pure def checked(p: Plan, ticket: int, answer: Verified, signIn: int, now: int): Moved =
   val q = timed(now, p)
   val t = q.seen
-  val ok = { ...q, check: R::answer(q.check, true), usage: usage, funding: false }
-  val failed = { ...q, check: R::answer(q.check, false) }
-  val record = q.kept.signIn == signIn and t < q.kept.until
-  if ((answer == Signed or answer == Credits) and until > t)
-    { state: { ...ok, standing: if (answer == Signed) Member else Funded, tier: tier, until: until, ending: ending, revision: revision,
-        kept: if (answer == Credits) { signIn: signIn, until: t + graceWindow }
-          else if (paidTo > t) { signIn: signIn, until: earliest(t + graceWindow, paidTo) } else nobody }, out: List(Answered) }
-  else if (answer == NoPlan) { state: { ...ok, standing: Unfunded, kept: nobody, funding: q.funding }, out: List(Answered) }
-  else if (answer == SignInRefused) { state: { ...ok, standing: Rejected, kept: nobody, usage: -1 }, out: List(Answered, EndSignIn) }
-  else if (q.standing == Member or q.standing == Funded or q.standing == Declined or q.standing == Rejected) { state: failed, out: List() }
-  else if (record and (answer == BillingDown or not(online)))
-    { state: { ...failed, standing: Grace, keptFor: if (answer == BillingDown) Outage else Offline, funding: false }, out: List() }
-  else { state: { ...failed, standing: Unavailable }, out: List() }
+  val ok = { ...q, check: R::answer(q.check, true), usage: answer.usage, funding: false, offline: false }
+  if (admits(answer) and answer.until > t)
+    { state: noted(if (answer.kind == Signed) Member else Funded, { ...ok, tier: answer.tier, until: answer.until,
+        ending: answer.ending, revision: answer.revision,
+        kept: if (answer.kind == Credits) { signIn: signIn, until: t + graceWindow }
+          else if (answer.paidTo > t) { signIn: signIn, until: earliest(t + graceWindow, answer.paidTo) } else nobody }),
+      out: List(Answered) }
+  else if (answer.kind == NoPlan) { state: noted(Unfunded, { ...ok, kept: nobody, funding: q.funding }), out: List(Answered) }
+  else if (answer.kind == SignInRefused) { state: noted(Rejected, { ...ok, kept: nobody, usage: -1 }), out: List(Answered, EndSignIn) }
+  else failed(true, signIn, q)
 ```
 
-### A plan is kept only from a record written for a sign-in, and while no answer from Cloud says otherwise
+### A check that got no answer keeps a plan only while the phone is offline, only from this sign-in's own record, and never over a refusal
+
+The owner is told the plan is kept offline. A check that fails while
+the phone is online keeps nothing, so Cloud saying billing cannot be
+checked never keeps a plan.
 
 ```quint
-pure def alwaysGraceIsBoundToASignInsRecord(p: Plan): bool =
-  p.standing == Grace implies (p.kept.signIn > 0 and p.check.status != R::Loaded and p.check.status != R::Idle)
-```
+pure def failed(online: bool, signIn: int, q: Plan): Moved =
+  val f = { ...q, check: R::answer(q.check, false) }
+  val record = q.kept.signIn == signIn and q.seen < q.kept.until
+  if (q.standing == Member or q.standing == Funded or q.standing == Declined or q.standing == Rejected) { state: f, out: List() }
+  else if (record and not(online)) { state: noted(Grace, { ...f, offline: true, funding: false }), out: List() }
+  else { state: noted(Unavailable, { ...f, offline: not(online) }), out: List() }
 
-### A check that fails while the phone is online keeps no plan from the record
+pure def canUnanswered(p: Plan, ticket: int, signIn: int): bool = R::canAnswer(p.check, ticket) and signIn > 0
 
-```quint
+pure def unanswered(p: Plan, ticket: int, online: bool, signIn: int, now: int): Moved = failed(online, signIn, timed(now, p))
+
 pure def lawAnOnlineFailureKeepsNothing(now: int): bool =
   val waiting = { ...initial, check: { status: R::Loading, ticket: 1 }, kept: { signIn: 1, until: now + 100 }, seen: now }
-  checked(waiting, 1, NoAnswer, Plus, 0, 0, false, 0, -1, true, 1, now).state.standing == Unavailable
-    and checked(waiting, 1, NoAnswer, Plus, 0, 0, false, 0, -1, false, 1, now).state.standing == Grace
-    and checked(waiting, 1, NoAnswer, Plus, 0, 0, false, 0, -1, false, 2, now).state.standing == Unavailable
+  unanswered(waiting, 1, true, 1, now).state.standing == Unavailable
+    and unanswered(waiting, 1, false, 1, now).state.standing == Grace
+    and unanswered(waiting, 1, false, 2, now).state.standing == Unavailable
+```
+
+### A plan is kept only from a record written for a sign-in, while the phone is offline, and while no answer from Cloud says otherwise
+
+```quint
+pure def alwaysGraceIsBoundToASignInsRecordAndKeptOnlyOffline(p: Plan): bool =
+  p.standing == Grace implies (p.kept.signIn > 0 and p.offline and p.check.status != R::Loaded and p.check.status != R::Idle)
 ```
 
 ### A refusal is never upgraded: an unfunded account, a refused sign-in or a billing refusal has no record to fall back on
@@ -207,14 +229,14 @@ pure def stepARefusalIsNeverUpgradedByTheRecord(before: Plan, after: Plan): bool
 
 ```quint
 pure def stepARefusedSignInIsEnded(before: Plan, after: Plan, out: List[Effect]): bool =
-  (after.standing == Rejected and before.standing != Rejected) implies out.includes(EndSignIn)
+  (after.standing == Rejected and before.standing != Rejected) implies out.some(e => match e { | EndSignIn => true | _ => false })
 ```
 
-### Only a check that Cloud answered turns AI on, and only such an answer writes the record, never with a past end
+### Only a check turns AI on, and only Cloud's answer writes the record, never with a past end
 
 ```quint
 pure def stepOnlyCloudsAnswerTurnsAiOn(before: Plan, via: str, after: Plan): bool =
-  (not(aiOn(before)) and aiOn(after)) implies via == "checked"
+  (not(aiOn(before)) and aiOn(after)) implies (via == "checked" or via == "unanswered")
 
 pure def stepOnlyCloudsAnswerWritesTheRecord(before: Plan, via: str, after: Plan): bool =
   (after.kept != before.kept and after.kept != nobody)
@@ -251,13 +273,7 @@ pure def sometimesAiOffWithoutAPlan(p: Plan): bool = p.standing == Unfunded and 
 ### A plan can be kept while the phone is offline, with the balance unavailable
 
 ```quint
-pure def sometimesKeptOffline(p: Plan): bool = p.standing == Grace and p.keptFor == Offline and balance(p) == BalanceUnavailable
-```
-
-### A plan can be kept while billing cannot be checked
-
-```quint
-pure def sometimesKeptThroughAnOutage(p: Plan): bool = p.standing == Grace and p.keptFor == Outage
+pure def sometimesKeptOffline(p: Plan): bool = p.standing == Grace and balance(p) == BalanceUnavailable
 ```
 
 ### A plan can lapse
@@ -266,7 +282,7 @@ pure def sometimesKeptThroughAnOutage(p: Plan): bool = p.standing == Grace and p
 pure def sometimesLapsed(p: Plan): bool = p.standing == Lapsed
 ```
 
-### A kept plan can run out while Cloud stays out of reach
+### A kept plan can run out while the phone stays offline
 
 ```quint
 pure def sometimesTheRecordRanOut(p: Plan): bool = p.standing == Unavailable and p.kept != nobody and p.seen >= p.kept.until
@@ -289,16 +305,22 @@ pure def sometimesTheSignInIsRefused(p: Plan): bool = p.standing == Rejected
 > As the owner, I want to be told when Cloud refuses a request because of
 > billing, and to add funds or choose a plan from there.
 
-### A request Cloud refused for billing turns Cloud AI off until a check admits the account again
+### A request Cloud refused for billing under the current sign-in turns Cloud AI off until a check made after it admits the account again
 
-The refusal comes from the agent's or another Cloud request: a payment
-declined, a plan needed, or the allowance used up.
+The refusal comes from the agent's or another Cloud request made under a
+sign-in: a payment declined, a plan needed, or the allowance used up. A
+refusal of a request made under an earlier sign-in is refused, and a
+check already in flight no longer counts.
 
 ```quint
-pure def canBillingRefused(p: Plan, refusal: Refusal, signIn: int): bool = signIn > 0 and p.standing != Rejected
+pure def canBillingRefused(p: Plan, refusal: Refusal, signIn: int, forSignIn: int): bool =
+  signIn > 0 and forSignIn == signIn and p.standing != Rejected
 
-pure def billingRefused(p: Plan, refusal: Refusal, signIn: int): Plan =
-  { ...p, standing: Declined, refusal: refusal, kept: nobody }
+pure def billingRefused(p: Plan, refusal: Refusal, signIn: int, forSignIn: int): Moved =
+  asking(nobody, noted(Declined, { ...p, refusal: refusal, kept: nobody, offline: false }))
+
+pure def lawARefusalUnderAnEarlierSignInIsRefused(refusal: Refusal, signIn: int): bool =
+  signIn > 1 implies not(canBillingRefused(initial, refusal, signIn, signIn - 1))
 ```
 
 ### The funding sheet opens only while Cloud AI is off, from Account or the assistant's card, and closes once Cloud admits the account
@@ -306,9 +328,9 @@ pure def billingRefused(p: Plan, refusal: Refusal, signIn: int): Plan =
 What it offers is in [Billing](./billing.md).
 
 ```quint
-pure def canOpenFunding(p: Plan, signIn: int): bool = signIn > 0 and not(aiOn(p)) and not(p.funding)
+pure def canOpenFunding(p: Plan, signIn: int, origin: O::Origin): bool = signIn > 0 and not(aiOn(p)) and not(p.funding) and O::opens(origin)
 
-pure def openFunding(p: Plan, signIn: int): Plan = { ...p, funding: true }
+pure def openFunding(p: Plan, signIn: int, origin: O::Origin): Plan = { ...p, funding: true }
 
 pure def canCloseFunding(p: Plan): bool = p.funding
 
@@ -323,10 +345,55 @@ pure def alwaysTheFundingSheetIsOpenOnlyWithoutCloudAi(p: Plan): bool = p.fundin
 pure def sometimesFundingAfterARefusal(p: Plan): bool = p.funding and p.standing == Declined and p.refusal == PaymentDeclined
 ```
 
+## Story: Be told on Home when AI is off
+
+> As the owner, I want Home to tell me when AI is off for want of a plan
+> or kept only while offline, once, and not to see it again after I
+> dismiss it until something changes.
+
+### Home tells the owner that a plan is needed or that AI is kept offline, never while another screen covers Home, and a dismissal holds until the notice changes
+
+A sign-in near its end is told in Account only ([Session](./session.md)).
+
+```quint
+pure def noticeOf(standing: Standing): HomeNotice =
+  if (standing == Unfunded or standing == Declined) NeedsPlan
+  else if (standing == Grace) KeptOffline
+  else NoNotice
+
+pure def homeNotice(p: Plan): HomeNotice = noticeOf(p.standing)
+
+pure def noted(standing: Standing, p: Plan): Plan =
+  { ...p, standing: standing, dismissed: if (noticeOf(standing) == p.dismissed) p.dismissed else NoNotice }
+
+pure def onHome(p: Plan, covered: bool): bool = not(covered) and homeNotice(p) != NoNotice and p.dismissed != homeNotice(p)
+
+pure def canDismissHomeNotice(p: Plan): bool = onHome(p, false)
+
+pure def dismissHomeNotice(p: Plan): Plan = { ...p, dismissed: homeNotice(p) }
+
+pure def alwaysADismissalHoldsOnlyForItsNotice(p: Plan): bool = p.dismissed == NoNotice or p.dismissed == homeNotice(p)
+
+pure def lawACoveredHomeShowsNoNotice(standing: Standing): bool = not(onHome({ ...initial, standing: standing }, true))
+```
+
+### Home can tell the owner a plan is needed
+
+```quint
+pure def sometimesAPlanIsNeededOnHome(p: Plan): bool = onHome(p, false) and homeNotice(p) == NeedsPlan
+```
+
+### A notice can be dismissed while AI stays off
+
+```quint
+pure def sometimesANoticeIsDismissed(p: Plan): bool = p.dismissed == NeedsPlan and not(aiOn(p))
+```
+
 ## Story: Keep my plan up to date
 
-> As the owner, I want my plan checked again while it matters to me, and
-> never so often that it gets in the way.
+> As the owner, I want my plan checked again while it matters to me and
+> before Cloud's answer runs out, and never so often that it gets in the
+> way.
 
 ### While Alpha is visible and the account screen shows, or AI is off, the plan is checked again once a minute, at once when it lapsed
 
@@ -349,8 +416,44 @@ pure def recheck(p: Plan, now: int, signIn: int, visible: bool, open: bool): Mov
 pure def stepAutomaticChecksAreAMinuteApart(before: Plan, via: str, after: Plan): bool =
   via == "recheck" implies (after.standing == Lapsed or after.checkedAt - before.checkedAt >= recheckGap)
 
-pure def lawAHiddenAlphaIsNotChecked(now: int, open: bool): bool =
+pure def lawAHiddenAlphaIsNotRechecked(now: int, open: bool): bool =
   not(canRecheck({ ...initial, standing: Lapsed }, now, 1, false, open))
+```
+
+### A member's or funded answer is checked again within a minute of running out, whether or not Alpha is visible
+
+The agent works in the background, so its plan must not lapse while the
+screen is off.
+
+```quint
+pure val renewMargin = 60
+
+pure def renewable(p: Plan): bool =
+  (p.standing == Member or p.standing == Funded) and p.seen >= p.until - renewMargin and p.check.status != R::Loading
+
+pure def canRenew(p: Plan, now: int, signIn: int): bool = signIn > 0 and renewable(timed(now, p))
+
+pure def renew(p: Plan, now: int, signIn: int): Moved = asking(p.kept, timed(now, p))
+
+pure def lawAnAnswerRunningOutIsRenewedWhileHidden(now: int): bool =
+  val near = { ...initial, standing: Member, until: now + 30, seen: now, checkedAt: now }
+  canRenew(near, now, 1) and not(canRecheck(near, now, 1, false, true))
+```
+
+### An answer about to run out is renewed, unless it changes first
+
+```quint
+pure def leadsToAnAnswerRunningOutIsRenewed(p: Plan, later: Plan): bool =
+  renewable(p) implies (later.check.ticket > p.check.ticket or not(later.standing == Member or later.standing == Funded))
+
+pure val fair_renew = "weak"
+```
+
+### An answer can be renewed before it runs out
+
+```quint
+pure def sometimesRenewedBeforeRunningOut(p: Plan): bool =
+  p.standing == Member and p.check.status == R::Loading and p.seen >= p.until - renewMargin and p.seen < p.until
 ```
 
 ### The owner, or a return from a payment, can check the plan at once, and the newest check is the one that counts
@@ -361,19 +464,28 @@ pure def canCheckNow(p: Plan, signIn: int): bool = signIn > 0
 pure def checkNow(p: Plan, signIn: int): Moved = asking(p.kept, p)
 ```
 
-### The network coming back checks a plan waiting on it once, at once, and nothing else
+### The network coming back lets a plan waiting on it be checked once, at once, while Alpha is visible, and nothing else
 
 Reconnecting a saved sign-in retries Cloud's answer only: the plan asks
-nothing of the agent.
+nothing of the agent. A return of the network while no check waits on it,
+or one already used, permits nothing; any check made spends it.
 
 ```quint
-pure def canReconnected(p: Plan, signIn: int): bool =
-  signIn > 0 and p.check.status != R::Loading and (p.standing == Unavailable or (p.standing == Grace and p.keptFor == Offline))
+pure def waitsOnTheNetwork(p: Plan): bool = p.standing == Unavailable or p.standing == Grace
 
-pure def reconnected(p: Plan, signIn: int): Moved = asking(p.kept, p)
+pure def networkBack(p: Plan): Plan = { ...p, permit: waitsOnTheNetwork(p) and p.check.status != R::Loading }
 
-pure def stepReconnectingChecksOnce(before: Plan, via: str, after: Plan, out: List[Effect]): bool =
-  via == "reconnected" implies (out == List(Check({ ticket: after.check.ticket })) and after.standing == before.standing)
+pure def canReconnected(p: Plan, signIn: int, visible: bool): bool =
+  signIn > 0 and visible and p.permit and p.check.status != R::Loading and waitsOnTheNetwork(p)
+
+pure def reconnected(p: Plan, signIn: int, visible: bool): Moved = asking(p.kept, p)
+
+pure def stepReconnectingChecksOnceForEachReturn(before: Plan, via: str, after: Plan, out: List[Effect]): bool =
+  via == "reconnected" implies (before.permit and not(after.permit) and out.length() == 1 and out.every(e => match e { | Check(c) => c.ticket == after.check.ticket | _ => false }) and after.standing == before.standing)
+
+pure def lawAHiddenAlphaSpendsNoPermit(signIn: int): bool =
+  not(canReconnected({ ...initial, standing: Unavailable, permit: true }, signIn, false))
+    and (signIn > 0 implies canReconnected({ ...initial, standing: Unavailable, permit: true }, signIn, true))
 ```
 
 ### A lapsed plan is checked again
@@ -383,6 +495,12 @@ pure def leadsToALapsedPlanIsCheckedAgain(p: Plan, later: Plan): bool =
   (p.standing == Lapsed and p.check.status != R::Loading) implies (later.check.ticket > p.check.ticket or later.standing == Checking)
 
 pure val fair_recheck = "weak"
+```
+
+### The network's return can check a plan kept offline
+
+```quint
+pure def sometimesTheNetworkReturnChecks(p: Plan): bool = p.standing == Grace and p.check.status == R::Loading and not(p.permit)
 ```
 
 ## Story: Keep my plan across a restart and an erase
@@ -412,5 +530,5 @@ pure def sometimesKeptAfterARestart(p: Plan): bool = p.standing == Checking and 
 ### Erasing Alpha leaves no plan and no record, and refuses the check still in flight
 
 ```quint
-pure def erase(p: Plan): Plan = cleared(nobody, p)
+pure def erase(p: Plan): Plan = cleared(nobody, { ...p, dismissed: NoNotice })
 ```
