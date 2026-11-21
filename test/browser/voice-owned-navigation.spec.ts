@@ -312,3 +312,43 @@ test('Talk expands a Calendar date heading that ends in a colon',async({page})=>
  expect(spoken).toContain('one o\'clock to one thirty P M');
  expect(spoken).not.toMatch(/:|\b(?:Sun|Nov)\b/);
 });
+
+test('a spoken exact note title opens its editor from Home and keeps Talk listening',async({page})=>{
+ await setup(page,'sheet',false,true);
+ await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.prompt='In the Notes app, open the note titled Taco Night Groceries.';
+  f.notes=[
+   {id:'taco-plan',title:'Taco Night Plan',body:'\nDinner at six.',color:'yellow',createdAt:'2026-11-21T12:00:00Z',updatedAt:'2026-11-21T12:00:00Z'},
+   {id:'groceries',title:'Taco Night Groceries',body:'\nAvocados, limes, and shredded cheese.',color:'yellow',createdAt:'2026-11-21T12:01:00Z',updatedAt:'2026-11-21T12:01:00Z'},
+  ];
+  f.releaseNotesRead();
+ });
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+ await utterance(page);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Taco Night Groceries');
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Avocados, limes, and shredded cheese.');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken))
+  .toEqual(['Opened "Taco Night Groceries" in Notes.']);
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(0);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+});
+
+test('a spoken title matching two notes asks the owner to choose and opens neither',async({page})=>{
+ await setup(page,'sheet',false,true);
+ await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.prompt='Open the note titled Groceries.';
+  f.notes=['first','second'].map(id=>({id,title:'Groceries',body:'\nDifferent list.',color:'yellow',createdAt:'2026-11-21T12:00:00Z',updatedAt:'2026-11-21T12:00:00Z'}));
+  f.releaseNotesRead();
+ });
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken))
+  .toEqual(['More than one note is titled "Groceries". Open Notes and choose the one you want.']);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+ await expect(page.locator('[data-alpha-subview="notes-editor"]')).toHaveCount(0);
+});

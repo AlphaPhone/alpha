@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { directOwnerAction, emailOwnerRequest, smsOwnerRequest } from '../apps/app/src/ui/device-actions/owner-request.ts';
+import { directOwnerAction, emailOwnerRequest, namedNoteOpenRequest, smsOwnerRequest } from '../apps/app/src/ui/device-actions/owner-request.ts';
 
 test('direct messages preserve the exact authored recipient and body and distinguish a draft',()=>{
   assert.deepEqual(smsOwnerRequest('Send a text to Carson saying On my way.'),{send:true,recipient:'carson',body:'On my way.'});
@@ -36,4 +36,13 @@ test('Calendar and reminder updates require a selected target and exact times',(
   const next=tomorrow.getTime();
   assert.equal(directOwnerAction({...reminder,fields:{...reminder.fields,schedule:{at:next,dueAt:next,recurrence:null,alertMinutes:null}}},
     'Update reminder Charge the Pixel tomorrow at 3 pm',{view:'calendar',timeZone:'UTC',selectedObject:{kind:'reminder',id:'reminder-1'}}),true);
+});
+
+test('named note opening requires an explicit Notes or note reference',()=>{
+  assert.equal(namedNoteOpenRequest('In the Notes app, open the note titled Taco Night Groceries.'),'Taco Night Groceries');
+  assert.equal(namedNoteOpenRequest('Switch to Notes and show me the note called Groceries.'),'Groceries');
+  assert.equal(namedNoteOpenRequest('Open "Ideas in Notes." in Notes.'),'Ideas in Notes.');
+  assert.equal(namedNoteOpenRequest('Open the note titled Notes.'),'Notes');
+  for (const prompt of ['Open Notes.','Open "Calendar".','Open the note you just created.','Read the note titled Groceries.',
+    'Show me what I wrote in Notes.','Delete the note called Groceries.']) assert.equal(namedNoteOpenRequest(prompt),undefined);
 });

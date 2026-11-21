@@ -50,7 +50,7 @@ import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
 import {cachedDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
-import {sendsSavedEmail} from '../ui/device-actions/owner-request';
+import {namedNoteOpenRequest,sendsSavedEmail} from '../ui/device-actions/owner-request';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
@@ -721,6 +721,40 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // lays its viewfinder and controls out above it (phone.css .alpha-camera-chat-open).
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
+  }
+  async function resolveNamedNote(shell:Shell,title:string,current:()=>void):Promise<
+    {notes:CanonicalNotesUi;id:string;title:string}|{message:string}
+  > {
+    current();
+    syncCanonicalNotes(shell);
+    const notes:CanonicalNotesUi|null=shell.canonicalNotesUi;
+    const unavailable={message:'I couldn’t read your saved notes. Try again from Notes.'};
+    if(shell.notesSourceMode!=='canonical'||!notes?.current)return unavailable;
+    try{await notes.refresh();}catch{return unavailable;}
+    current();
+    if(shell.canonicalNotesUi!==notes||!notes.current||notes.pending)return unavailable;
+    const titleKey=(value:string)=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
+    const key=titleKey(title);
+    const matches=notes.notes().filter(note=>titleKey(note.title)===key);
+    if(matches.length>1)return {message:`More than one note is titled “${title}”. Open Notes and choose the one you want.`};
+    const note=matches[0];
+    if(!note)return {message:`I couldn’t find a note titled “${title}”.`};
+    if(notes.editing&&notes.open!==note.id)return {message:'Close the note you’re editing before opening another one.'};
+    return {notes,id:note.id,title:note.title};
+  }
+  function openNamedNote(shell:Shell,target:{notes:CanonicalNotesUi;id:string},chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void):Promise<boolean>{
+    if(shell.canonicalNotesUi!==target.notes||!target.notes.openSaved(target.id))return Promise.resolve(false);
+    if(!openInternalView(shell,'notes',chat))return Promise.resolve(false);
+    return new Promise((resolve,reject)=>shell.setState({},()=>{
+      try{
+        context(shell);
+        const observed=alphaClient.getState().context;
+        const opened=shell.live&&!document.hidden&&!observed.sensitive&&observed.view==='notes'
+          &&shell.canonicalNotesUi===target.notes&&target.notes.open===target.id;
+        if(opened)onCommitted?.(observed);
+        resolve(opened);
+      }catch(error){reject(error);}
+    }));
   }
   /** Opens Camera for a photo the agent proposed without showing Camera: the same navigation as the Camera app icon. */
   function openRequestedCamera(shell:Shell):Promise<boolean>{
@@ -2114,6 +2148,33 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:savedEmailReply,complete:true,localVoiceReply:true as const};
       }
     }
+    const noteTitle=input.navigation&&input.context.view!=='notes'?namedNoteOpenRequest(text):undefined;
+    if(noteTitle&&input.navigation){
+      this.voiceSendTurnId=turnId;
+      try{
+        const target=await resolveNamedNote(this,noteTitle,current);
+        current();
+        let answer:string;
+        if('message' in target)answer=target.message;
+        else{
+          let opened=false;
+          try{
+            opened=await input.navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(this,target,chat,onCommitted));
+          }finally{
+            const next=input.navigation.finish(opened);
+            if(next)acceptedContext=next;
+          }
+          answer=opened?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
+        }
+        current();
+        const replyId=`voice-note-open:${turnId}`;
+        this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+        this.agentSay(answer,undefined,{id:replyId},belongs);
+        return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+      }finally{
+        if(this.voiceSendTurnId===turnId)this.voiceSendTurnId=undefined;
+      }
+    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     const continuation=input.navigation;
@@ -2278,6 +2339,36 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.setState((previous:Shell)=>({draft:'',msgs:[...previous.msgs,{id:crypto.randomUUID(),from:'user',text}]}));
       const answer=await sendPlainSmsDraft(plain);
       if(this.live&&connectionController.getSelectedConversationId()===plain.binding.conversationId)this.agentSay(answer);
+      return;
+    }
+    const noteTitle=fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment
+      ?namedNoteOpenRequest(text):undefined;
+    if(noteTitle){
+      const bound=sendBinding();
+      context(this);
+      if(alphaClient.getState().context.sensitive||connectionController.getSnapshot().open)return;
+      const revision=alphaClient.getState().context.revision;
+      const current=()=>{
+        context(this);
+        const observed=alphaClient.getState().context;
+        if(!this.live||document.hidden||observed.sensitive||observed.revision!==revision||
+           connectionController.getSnapshot().open||sendBinding()!==bound||this.S().view!==view||
+           String(this.S().draft||'')!==text||this.mailAttachment||this.transcriptAttachment||
+           this.cameraAttachment||this.fileAttachments?.length||this.messageReplyTarget||this.messageEditTarget)
+          throw Error('The conversation changed.');
+      };
+      this.draftSendPending=true;
+      try{
+        const target=await resolveNamedNote(this,noteTitle,current);
+        current();
+        const chat=this.S().chat==='full'?'full':'sheet';
+        this.setState((previous:Shell)=>({draft:'',chat,msgs:[...previous.msgs,{id:crypto.randomUUID(),from:'user',text}]}));
+        const answer='message' in target?target.message:
+          await openNamedNote(this,target,chat)?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
+        if(this.live&&!document.hidden&&sendBinding()===bound)this.agentSay(answer);
+      }catch{
+        if(this.live&&!document.hidden&&sendBinding()===bound)this.toast('Couldn’t open that note.');
+      }finally{this.draftSendPending=false;}
       return;
     }
     if(sendsSavedEmail(text)&&fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment){

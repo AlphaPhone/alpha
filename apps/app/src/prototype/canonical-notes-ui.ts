@@ -170,6 +170,13 @@ export class CanonicalNotesUi {
  }
  /** A new note's card id ('draft-'+token) names its draft; once the first save commits it names that record. */
  private resolve(id:string):string{const draft=this.editor.draft;return draft&&id==='draft-'+draft.token?draft.id??id:id;}
+ /** Opens a saved record without replacing an editor draft or saving on its behalf. */
+ openSaved(id:string):boolean{
+  if(!this.current||this.pending||this.phase!=='ready'||!this.controller.hasViewNote(id))return false;
+  if(this.editing)return this.open===id;
+  this.editor.open(id);
+  return this.open===id;
+ }
  /** Opens one record (or closes the editor) after the current draft is saved. */
  select(id:string|null):void{void this.leave(id).catch(()=>this.needsReview());}
  /** A new note; one created while a folder is selected starts in that folder (format data folderId). */

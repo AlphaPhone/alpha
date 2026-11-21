@@ -24,7 +24,7 @@ export async function setup(page:Page,detent='sheet',development=false,canonical
    const open=new Promise<void>(resolve=>f.releaseNotesRead=resolve);
    c.getAppRecordClient=()=>({sessionId:f.session.sessionId,identity:f.session,current:()=>true,request:async(path:string,method:string)=>{
     if(path!=='/api/notes/state'||method!=='GET')throw Error('Only the Notes list read is available');
-    await open;return {success:true,data:{notes:[],trash:[],revision:1}};
+    await open;return {success:true,data:{notes:f.notes??[],trash:[],revision:1}};
    }} as any);
    c.canonicalNotesFilterAvailable=()=>true;
   }

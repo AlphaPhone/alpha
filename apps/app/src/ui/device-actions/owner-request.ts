@@ -14,6 +14,19 @@ function word(value: string) {
   return unquote(value).replace(/\.$/, "").toLowerCase();
 }
 
+/** A local editor navigation request. An app name alone or an unspecified note stays in chat. */
+export function namedNoteOpenRequest(text: string): string | undefined {
+  const request = ownerCommand(text).replace(/[.!?]+$/, "").trim();
+  const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:go|switch) to (?:the )?notes(?: app)? and )/i, "");
+  const named = /^(?:open|show)(?: me)? (?:the |my )?note (?:called|named|titled) (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command);
+  const quoted = /^(?:open|show)(?: me)? ((?:the |my )?note )?(".+"|“.+”)( in (?:the )?notes(?: app)?)?$/i.exec(command);
+  const quotedTitle = quoted && (request !== command || quoted[1] || quoted[3]) ? quoted[2] : undefined;
+  const target = named?.[1] ?? quotedTitle;
+  if (!target) return;
+  const title = unquote(target).trim();
+  if (title && !/[\r\n]/.test(title)) return title;
+}
+
 // Punctuation from dictation can separate the end of the instruction from its
 // message. Accept familiar lead-ins and delimiters while keeping the body exact.
 const smsBodySeparator = String.raw`(?::\s*|\s+(?:saying|that says|to say|and (?:just )?say|with (?:the )?message)(?:\s*[:,]\s*|\s+))`;
