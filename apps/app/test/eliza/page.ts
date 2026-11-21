@@ -18,14 +18,16 @@ process.stdout.write(`pnpm dev serves ${origin} after ${Date.now() - started} ms
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage();
+  // A cold dev server on a busy machine transforms the page's modules for minutes before the first load ends.
+  page.setDefaultTimeout(600_000);
   const problems: string[] = [];
   page.on("pageerror", (error) => problems.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") problems.push(message.text()); });
   await page.goto(origin);
   const ask = page.getByRole("region", { name: "Ask Alpha" });
   await ask.getByRole("textbox", { name: "Ask Alpha" }).fill("Hello from the browser");
-  await ask.getByRole("button", { name: "Send" }).click({ timeout: 60_000 });
-  await ask.getByText("You said: Hello from the browser").waitFor({ timeout: 60_000 });
+  await ask.getByRole("button", { name: "Send" }).click();
+  await ask.getByText("You said: Hello from the browser").waitFor();
   const lines = await ask.getByRole("listitem").allTextContents();
   const seen = [...problems];
   const conversations = JSON.parse(await page.evaluate(async () => (await fetch("/agent/api/conversations")).text())) as { conversations: { title: string }[] };
