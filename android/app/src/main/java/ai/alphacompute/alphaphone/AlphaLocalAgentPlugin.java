@@ -706,18 +706,10 @@ private static final class ResidentAttachDiagnostic {
   // to turn. With a fresh reference each turn no two requests shared a prefix, and the hosted
   // model's per-minute limit counted the whole conversation again on every call.
   env.put("ELIZA_SECRET_SWAP_STABLE_REFERENCES","true");
-  // The hosted model holds a call's output cap against that limit from the moment the call is
-  // admitted, and 16,384 tokens for a call that sends none (measured). 4096 holds a long note,
-  // message or reply; the planner's own 8192 only stops a runaway, and the first step of a turn
-  // and its check send no cap at all.
-  env.put("ELIZA_PLANNER_MAX_TOKENS","4096");
-  env.put("ELIZA_STAGE1_MAX_TOKENS","4096");
-  env.put("ELIZA_EVALUATOR_MAX_TOKENS","4096");
-  // The other text calls of a turn sent no cap either: the reply written after a failed delivery
-  // and its check, Calendar field extraction, scheduled-task messages. The longest recorded on a
-  // phone wrote about 450 tokens.
-  env.put("TEXT_SMALL_MAX_TOKENS","4096");
-  env.put("TEXT_LARGE_MAX_TOKENS","4096");
+  // No output cap: a call that sends none may write the model's maximum, 40,960 tokens, and holds
+  // 16,384 of the per-minute limit while it runs, the same as any cap of 16,384 or more (measured).
+  // A 4,096 cap cut off calls that reason first: a reminder's planning call spent all of it
+  // reasoning and saved nothing.
   // The hosted model answers a per-minute refusal with Retry-After 59 and admits the same request
   // seconds later: its allowance refills 2,500 tokens a second (measured). On an owner's own key
   // the runtime held the model for the stated minute and failed every turn in it. The runtime
