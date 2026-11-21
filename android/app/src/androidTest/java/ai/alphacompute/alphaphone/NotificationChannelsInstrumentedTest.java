@@ -8,7 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.json.JSONObject;
 import org.junit.Test;
 import static org.junit.Assert.*;
-/** Real channel Settings mutation; isolated channel only, never a user's reminder channel. */
+/** Real channel Settings mutation on an isolated channel only, never a user's reminder channel; and the real grouping of Alpha's workflow channels. */
 public final class NotificationChannelsInstrumentedTest {
  private String fixtureChannel;
  private String nativeDiagnostic(){Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager m=c.getSystemService(NotificationManager.class);NotificationChannel row=fixtureChannel==null?null:m.getNotificationChannel(fixtureChannel);AccessibilityNodeInfo root=InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();return "appEnabled="+m.areNotificationsEnabled()+",importance="+(row==null?"missing":row.getImportance())+",foreground="+(root==null?"none":root.getPackageName());}
@@ -40,6 +40,16 @@ public final class NotificationChannelsInstrumentedTest {
  private void channelState(NotificationManager manager,String id,boolean enabled)throws Exception{
   for(int i=0;i<150;i++){NotificationChannel channel=manager.getNotificationChannel(id);if(channel!=null&&(channel.getImportance()!=NotificationManager.IMPORTANCE_NONE)==enabled){assertTrue("Global app setting must remain allowed",manager.areNotificationsEnabled());return;}SystemClock.sleep(100);}
   NotificationChannel channel=manager.getNotificationChannel(id);fail("Exact fixture channel write not observed: appEnabled="+manager.areNotificationsEnabled()+", importance="+(channel==null?"missing":channel.getImportance()));
+ }
+ /** Android's own channel store: Alpha's workflow channels join the Workflows group, and the group is not moved by a repeat. */
+ @Test public void workflowChannelsJoinTheirGroup(){
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager manager=context.getSystemService(NotificationManager.class);
+  new WorkflowNoticePoster(context);AlphaNotificationChannels.describe(context);AlphaNotificationChannels.describe(context);
+  for(String id:new String[]{WorkflowNoticePoster.CHANNEL,WorkflowNoticePoster.APPROVAL_CHANNEL}){NotificationChannel channel=manager.getNotificationChannel(id);assertNotNull(id,channel);assertEquals(id,AlphaNotificationChannels.WORKFLOWS,channel.getGroup());}
+  NotificationChannelGroup group=manager.getNotificationChannelGroup(AlphaNotificationChannels.WORKFLOWS);assertNotNull("Workflows group installed",group);
+  assertEquals(context.getString(R.string.alpha_channel_group_workflows),group.getName().toString());
+  // A poster that creates its channel again leaves the group in place.
+  new WorkflowNoticePoster(context);assertEquals(AlphaNotificationChannels.WORKFLOWS,manager.getNotificationChannel(WorkflowNoticePoster.CHANNEL).getGroup());
  }
  @Test public void blockedChannelReadbackUserRecoveryAndRealNotification()throws Exception{
   org.junit.Assume.assumeTrue("Permission-restoring runner required","1".equals(InstrumentationRegistry.getArguments().getString("notificationChannels")));
