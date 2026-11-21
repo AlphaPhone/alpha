@@ -35,7 +35,7 @@ function fixture({capabilities = ALL, operation = callPriya, result = {kind: 'ph
   const request = async (path, body) => {
     if (body === undefined) return {proposals: [proposal()]};
     posts.push({path, body});
-    if (path.endsWith('/decision')) state = 'approved';
+    if (path.endsWith('/decision')) state = body.decision === 'reject' ? 'rejected' : 'approved';
     if (path.endsWith('/claim')) { state = 'executing'; attemptId = 'attempt'; }
     if (path.endsWith('/receipt')) { if (receiptOutage) throw Error('offline'); state = body.receipt.outcome === 'applied' ? 'done' : 'reconciliation_required'; }
     return {proposal: proposal(), digest};
@@ -85,6 +85,8 @@ test('a contact change or deletion is carded only for a contact the phone holds,
   const book = addressBook;
   try {
     // No such contact: a notice says so, no card is offered, and nothing can be approved or run.
+    // The owner was told nothing was changed, so the agent records the request as refused: a contact
+    // saved later under that name never turns it into a card (review: contacts, stale not-found).
     addressBook = () => [];
     for (const [operation, title] of [[change, 'Change contact'], [remove, 'Delete contact']]) {
       const f = fixture({operation});
@@ -92,9 +94,12 @@ test('a contact change or deletion is carded only for a contact the phone holds,
       const items = await f.client.pendingReview(context, signal());
       assert.deepEqual(lookups, ['Test Alpha'], 'the phone looks the name up before any card');
       assert.deepEqual(items.map(item => [item.proposal, item.notice]), [[null, `${title}: No contact matching “Test Alpha” is on this phone. Nothing was changed.`]]);
-      assert.deepEqual(await f.client.pending(context, signal()), []);
-      await assert.rejects(f.client.approve(id, context, signal()), /Review this action again/);
-      assert.equal(f.effects, 0); assert.deepEqual(f.posts, [], 'nothing is decided for the owner');
+      assert.deepEqual(f.posts.map(post => [post.path.split('/').pop(), post.body.decision]), [['decision', 'reject']], 'only the refusal reaches the agent');
+      addressBook = () => ['Test Alpha Park'];
+      assert.deepEqual(await f.client.pending(context, signal()), [], 'a contact added later does not revive it');
+      await assert.rejects(f.client.approve(id, context, signal()));
+      assert.equal(f.effects, 0); assert.equal(f.posts.length, 1);
+      addressBook = () => [];
     }
     // Contacts unreadable: the same, with the reason.
     addressBook = () => null;

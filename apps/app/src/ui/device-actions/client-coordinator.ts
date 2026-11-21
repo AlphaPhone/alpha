@@ -715,6 +715,13 @@ export class DeviceActionCoordinator<
    * refusal lives only here and would not survive a reload.
    */
   private contradictedNumbers = new Map<string, boolean>();
+  /**
+   * Pending contact changes and deletions whose name matched no contact when
+   * they were reviewed, and whether the agent has recorded the refusal. The
+   * owner was told nothing was changed, so a contact saved later under that
+   * name never turns the old request into a card.
+   */
+  private missingContacts = new Map<string, boolean>();
   constructor(
     ports: DeviceActionCoordinatorPorts<C, R>,
     private readonly options: {
@@ -1286,6 +1293,8 @@ export class DeviceActionCoordinator<
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
     for (const id of this.contradictedNumbers.keys())
       if (!pendingIds.has(id)) this.contradictedNumbers.delete(id);
+    for (const id of this.missingContacts.keys())
+      if (!pendingIds.has(id)) this.missingContacts.delete(id);
     const items: ReviewItem[] = [];
     for (const proposal of valid) {
       // An approval whose claim never arrived is shown again: deciding is
@@ -1370,7 +1379,12 @@ export class DeviceActionCoordinator<
         items.push({
           proposalId: proposal.id,
           proposal: null,
-          notice: `${card.title}: ${NUMBER_MISMATCH_NOTICE}`,
+          notice: `${card.title}: ${
+            proposal.operation.type === "contact_create" ||
+            proposal.operation.type === "contact_update"
+              ? CONTACT_NUMBER_MISMATCH_NOTICE
+              : NUMBER_MISMATCH_NOTICE
+          }`,
         });
         continue;
       }
@@ -1413,14 +1427,39 @@ export class DeviceActionCoordinator<
         contactOp.type === "contact_delete"
       ) {
         let names: string[] | null = null;
-        try {
-          names =
-            (await this.options.contactMatches?.(contactOp.query, signal)) ??
-            null;
-        } catch {
-          names = null;
+        if (!this.missingContacts.has(proposal.id)) {
+          try {
+            names =
+              (await this.options.contactMatches?.(contactOp.query, signal)) ??
+              null;
+          } catch {
+            names = null;
+          }
+          assertCurrentReview();
+          // An address book that answered with no match is final for this
+          // request; one that could not be read is asked again next time.
+          if (names && !names.length)
+            this.missingContacts.set(proposal.id, false);
         }
-        assertCurrentReview();
+        if (this.missingContacts.has(proposal.id)) {
+          // The agent records the refusal, so the request cannot come back as
+          // a card after a reload. One it could not take is retried next review.
+          if (!this.missingContacts.get(proposal.id)) {
+            try {
+              await this.mutation(
+                proposal,
+                "decision",
+                { decision: "reject" },
+                signal,
+              );
+              this.missingContacts.set(proposal.id, true);
+            } catch (error) {
+              if (signal.aborted) throw error;
+            }
+            assertCurrentReview();
+          }
+          names = [];
+        }
         if (!names?.length) {
           items.push({
             proposalId: proposal.id,
@@ -3408,6 +3447,29 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
 }
 export const NUMBER_MISMATCH_NOTICE =
   "That is not the number in your message, so nothing was called or sent. Ask again with the number.";
+/** The same refusal for a contact change, which saves a number rather than calling it. */
+export const CONTACT_NUMBER_MISMATCH_NOTICE =
+  "That is not the number in your message, so nothing was saved. Ask again with the number.";
+/** The phone numbers a new contact or a contact change writes, adds or removes. */
+function contactChangeNumbers(op: {
+  type: string;
+  contact?: { phoneNumbers?: unknown };
+  set?: { phoneNumbers?: unknown };
+  add?: { phoneNumbers?: unknown };
+  remove?: { phoneNumbers?: unknown };
+}): string[] {
+  const lists =
+    op.type === "contact_create"
+      ? [op.contact?.phoneNumbers]
+      : op.type === "contact_update"
+        ? [op.set?.phoneNumbers, op.add?.phoneNumbers, op.remove?.phoneNumbers]
+        : [];
+  return lists.flatMap((list) =>
+    Array.isArray(list)
+      ? list.filter((item): item is string => typeof item === "string")
+      : [],
+  );
+}
 /** The digits of a dial number, or "" for text that is not one. */
 function dialDigits(written: string): string {
   try {
@@ -3444,7 +3506,9 @@ function requestWords(text: string): string {
  * unless the owner also wrote that name. A message that writes no number (a
  * contact name, "the number in that email") is not judged here and keeps its
  * ordinary card; a number that is part of the text being sent is the
- * message's content, not its addressee.
+ * message's content, not its addressee. A new contact or a contact change is
+ * judged the same way by the numbers it saves: a number saved under a name is
+ * the recipient of every later call or text to that name.
  */
 export function numberContradictsRequest(
   operation: ReviewableDeviceOperation,
@@ -3457,15 +3521,18 @@ export function numberContradictsRequest(
     recipients?: string[];
     body?: string;
   };
+  const contactNumbers = contactChangeNumbers(op);
   if (
     op.type !== "phone_call" &&
     op.type !== "phone_dial" &&
     op.type !== "sms_compose" &&
-    op.type !== "sms_send"
+    op.type !== "sms_send" &&
+    !contactNumbers.length
   )
     return false;
-  const proposed =
-    op.type === "sms_send"
+  const proposed = contactNumbers.length
+    ? contactNumbers
+    : op.type === "sms_send"
       ? (op.recipients ?? [])
       : op.target?.kind === "number" && op.target.number
         ? [op.target.number]
