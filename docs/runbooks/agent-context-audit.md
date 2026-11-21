@@ -546,6 +546,32 @@ seconds, one phone never runs short either way, while two or three phones on one
 run short under every policy: there the uncached input alone exceeds the refill, and
 the output cap changes the count of short calls by 1% to 4%.
 
+### No output cap, merged and follow-ups
+
+The same one-conversation run (46 turns, 5 s apart, case set revision 8, which fails a
+reply that says a create did not take effect), with and without the 4,096 caps. "No
+cap" sends none on Stage 1, the evaluator and the side calls; the planner sends its
+runtime default of 8,192. Follow-ups are upstream `b943a738c5`: the earlier follow-ups
+plus the Cloud refusal change, the Stage 1 re-send after a `parser_error` and minute
+stamps.
+
+| | Merged, 4,096 | Merged, no cap | Follow-ups, 4,096 | Follow-ups, no cap |
+| --- | --- | --- | --- | --- |
+| Cases passing | 38 of 46 | 38 of 46 | 42 of 46 | 42 of 46 |
+| Calls cut off at the cap | 1 | 0 | 3 (one turn) | 0 |
+| Reminders saved | 2 of 3 | 0 of 3 (refused) | 2 of 3 | 3 of 3 |
+| Provider refusals | 0 | 16 | 0 | 0 |
+| Planner input, median and p90 | 18K, 34K | 23K, 36K | 20K, 30K | 19K, 23K |
+| Uncached tokens charged in any 60 s, p90 | 183K | 234K | 185K | 165K |
+| Lowest allowance once a call holds its share | 50K | -35K | 48K | 68K |
+
+The merged runtime is close to the limit at this pace even with caps: its planner
+requests carry tools guessed from the request. Without caps each running call holds
+12,288 more and it ran short on its own: the audit of its own calls agrees with the
+refusals. The follow-ups send smaller planner requests and stay clear without caps.
+At the Pixel's real spacing both fit either way (section 1). So the cap removal
+belongs with the follow-ups.
+
 ### The phone's decode mode
 
 On the Cloud route planner tools go out non-strict with their schemas as written; every
