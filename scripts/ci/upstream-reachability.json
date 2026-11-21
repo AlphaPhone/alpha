@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "7582bcdc12a1ebbc766c3e08dd9074c1056e7809",
-  "head": "4a667ee9f20f4ab21da7c37b18ba45cbd6a6d8e0",
+  "baseCommit": "3cdc101d9dc23bc72077ad2e6e1aaa36f487d2e1",
+  "head": "a1119d28b5dba1362860e161158c4d93c7f26075",
   "recordedAt": "2026-11-21",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...4a667ee9f20f4ab21da7c37b18ba45cbd6a6d8e0",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...a1119d28b5dba1362860e161158c4d93c7f26075",
   "status": "diverged",
-  "aheadBy": 23,
-  "behindBy": 128,
+  "aheadBy": 24,
+  "behindBy": 131,
   "mergeBase": "e66a28c3ea1b09fefaccb85d72486dada8f00758",
   "pinOnlyCommits": [
     {
@@ -102,6 +102,10 @@
     {
       "sha": "4a667ee9f20f4ab21da7c37b18ba45cbd6a6d8e0",
       "subject": "Separate Android runtime status from failure alerts"
+    },
+    {
+      "sha": "a1119d28b5dba1362860e161158c4d93c7f26075",
+      "subject": "Keep planned runtime stops on the status channel"
     }
   ],
   "pullRequests": [
