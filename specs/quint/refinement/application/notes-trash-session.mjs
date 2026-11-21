@@ -4,6 +4,7 @@
 // (answered at once) and the maintenance schedule (its `run` callback is the background pass).
 // The view is rendered again after every step until it stops changing, as the shell does.
 import assert from 'node:assert/strict';
+import {NOTES_DELETE_TOAST_MS} from '../../../../apps/app/src/runtime/notes-trash-policy.ts';
 import {loadProductModule, modelTraces, replayTraces, settle, witnessTraces} from './notes-files-media-itf.mjs';
 
 const source = 'apps/app/src/prototype/notes-trash-adapter.ts';
@@ -11,7 +12,7 @@ const shared = '../../../../.eliza/client-features/plugins/plugin-notes/src/clie
 const port = names => `const p=()=>globalThis.__notesTrashPorts;${names.map(name => `export const ${name}=(...a)=>p().${name}(...a);`).join('')}`;
 const stubs = {
   '../runtime/notes-trash': port(['editNotesTrash', 'notesTrashDaysLabel', 'readNotesTrash', 'savedNoteIds', 'savedNotes', 'sortedNotesTrash', 'withNotesDeletionLock']),
-  '../runtime/notes-trash-policy': 'export const notesTrashPolicy={};export const notesTrashDaysShort=()=>"30d";',
+  '../runtime/notes-trash-policy': `export const notesTrashPolicy={};export const notesTrashDaysShort=()=>"30d";export const NOTES_DELETE_TOAST_MS=${NOTES_DELETE_TOAST_MS};`,
   '../runtime/notes-folders': 'export const readNotesFolders=async()=>({folders:[]});export const restoredNoteFolder=note=>note;',
   '../runtime/notes-view': 'export const notePreview=note=>note.body??"";',
   [`${shared}notes-trash-maintenance.ts`]: port(['maintainNotesTrash']),

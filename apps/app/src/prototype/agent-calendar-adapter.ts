@@ -40,9 +40,9 @@ const OWNER_ERRORS:[RegExp,string][]=[
 ];
 /** The shared calendar API client's refusals are worded by Alpha (ui/calendar/calendar-api-messages.ts); a native
  * rejection Alpha has no words for reads as 'Couldn’t update', and Alpha's own runtime errors keep their message. */
-export function calendarErrorText(error:unknown):string{
+export function calendarErrorText(error:unknown,fallback="Couldn’t update"):string{
  const message=error instanceof Error?error.message:typeof error==='string'?error:'';
- return OWNER_ERRORS.find(([pattern])=>pattern.test(message))?.[1]??refusalText(typeof error==='string'?new Error(error):error,CALENDAR_API_REFUSALS,'Couldn’t update');
+ return OWNER_ERRORS.find(([pattern])=>pattern.test(message))?.[1]??refusalText(typeof error==='string'?new Error(error):error,CALENDAR_API_REFUSALS,fallback);
 }
 const DAY=86400000;
 /** Day offset from today by civil dates, so a DST change never moves a row. Legacy all-day records are stored at
@@ -128,7 +128,7 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
  const refresh=(force=false)=>{if(!owner?.live||!controller)return;const target=port(),window=range(owner.S?.()?.view==='calendar'?owner.vget('calendar'):{}),key=JSON.stringify([target?.identity,target?.scope,window]);if(!force&&requestKey===key)return;requestKey=key;if(!target?.current()){if(!bootstrapCurrent()||controller.state.savedAt==null)void controller.refresh(window);void restoreBeforeAgent(window);return;}void controller.refresh(window);};
  // One end-time wake, foreground events, and a one-minute re-read while Calendar is the open, visible view. No background reads.
  const POLL_MS=60000;let poll:ReturnType<typeof setInterval>|undefined;
- const pollOpenCalendar=()=>{if(!owner?.live||!controller||document.hidden||owner.S?.()?.view!=='calendar'||deviceCalendarScope(owner)||controller.state.mutating||!port()?.current())return;refresh(true);};
+ const pollOpenCalendar=()=>{if(!owner?.live||!controller||document.hidden||owner.S?.()?.view!=='calendar'||owner.vget('calendar').open||deviceCalendarScope(owner)||controller.state.mutating||!port()?.current())return;refresh(true);};
  const readNext=()=>{if(!owner?.live||!controller)return;controller.invalidateNext();if(document.hidden)return;refresh(true);};
  const watchNextEnd=()=>{clearTimeout(nextEnded);const end=Date.parse(controller?.state.next?.event?.endAt??'');if(end>Date.now())nextEnded=setTimeout(readNext,Math.min(end-Date.now()+1000,2147483647));};
  const resumed=()=>{if(document.hidden)cancelRetention();else if(owner?.live)readNext();};
@@ -271,7 +271,39 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
     if(chosen.where&&origin)out.ev.goWhere=()=>{const now=port(),current=controller?.selection(chosen.canonicalEventKey);if(!now?.current()||mapBinding(now)!==origin.binding||current?.revision!==origin.revision||current.sourceRevision!==origin.sourceRevision){api.toast('Event changed');return;}api.open('maps',{query:chosen.where,fromEvent:origin});};
     out.ev.canonicalDraftEntry=true;if(cancellationModeForEditorEvent(chosen.canonicalEvent)==='decline_invitation'){out.ev.deleteLabel='Decline invitation';out.ev.deleteText='Decline';}
     const e=chosen.canonicalEvent,policy=eventEditorMutability(e),managed=managedGoogleSource(e),recurringEvent=!!(e.recurringEventId||e.recurrence?.length),sourceReadOnly=(cals as Bag[]).find(c=>c.id===chosen.cal)?.writable===false;out.ev.calName=cals.find(c=>c.id===chosen.cal)?.name??'Agent Calendar';out.ev.notes=e.description;out.ev.hasNotes=!!e.description;out.ev.hasPeople=!!e.attendees?.length;out.ev.people=(e.attendees??[]).map((guest:Bag)=>({name:guest.displayName||guest.email||'Guest',ini:String(guest.displayName||guest.email||'G').slice(0,2).toUpperCase(),st:attendeeResponseLabel(guest),open:null}));if(!e.isAllDay)Object.assign(out.ev,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)));if(e.isAllDay){out.ev.when='All day';const options:Intl.DateTimeFormatOptions={weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'},start=new Date(e.startAt).toLocaleDateString(undefined,options),end=new Date(Date.parse(e.endAt)-86400000).toLocaleDateString(undefined,options);out.ev.day=start+(start===end?'':' – '+end);}out.ev.readOnly=policy.kind!=='editable'||sourceReadOnly;out.ev.readOnlyLabel=model?.savedAt!=null?'Saved':sourceReadOnly?`${out.ev.calName} · Read only`:'Read only';const deleteScope=state.canonicalDeleteScope?.eventKey===calendarEventKey(e)?state.canonicalDeleteScope.scope:undefined;const deleteVerb=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline':'Delete';out.ev.recurrenceScopes=recurringEvent&&!managed?['instance','this_and_following','series'].map(scope=>{const label=scope==='instance'?'This occurrence':scope==='series'?'Entire series':'This and following',text=`${deleteVerb} ${label.toLowerCase()}`;return{label,selected:deleteScope===scope,pick:()=>api.set({canonicalDeleteScope:{eventKey:calendarEventKey(e),scope}}),deleteLabel:text,deleteText:text,del:()=>remove(scope)};}):[];out.ev.edit=()=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}const timing=canonicalCalendarEditorTiming(e,zone());api.set({form:{id:chosen.id,canonicalOwnerKey:model!.ownerKey,canonicalEventKey:calendarEventKey(e),expectedProviderVersion:policy.providerVersion,creationId:crypto.randomUUID(),title:e.title,notes:e.description,where:e.location,off:timing.off,t:timing.t,d:timing.d,zone:zone(),who:(e.attendees??[]).map((guest:Bag)=>calendarGuestEmail(guest.email)).filter(Boolean),canonicalGuestsReviewed:true,video:false,repeat:recurringEvent?'preserve':'none',alert:null,cal:chosen.cal,allDay:e.isAllDay,canonicalAllDay:e.isAllDay?{startDate:e.startAt.slice(0,10),endDateExclusive:e.endAt.slice(0,10)}:undefined,canonicalTiming:[timing.off,timing.t,timing.d,zone(),!!e.isAllDay],recurrenceScope:managed&&recurringEvent?'instance':undefined}});};// A repeating event is deleted from one of its scope actions; the scope is part of the reviewed action.
-    const remove=async(deleteScope?:string)=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}if(recurringEvent&&!deleteScope){api.toast('Pick occurrences');return;}const mode=cancellationModeForEditorEvent(e);if(!mode){api.toast('Couldn’t verify organizer');return;}const shell=owner,calendar=controller,reviewTarget=port(),binding=reviewTarget?mapBinding(reviewTarget):null,bytes=JSON.stringify(e),scope=JSON.stringify(state.canonicalDeleteScope);const selected=()=>{const now=port(),visible=api.get('calendar');return owner===shell&&!!shell?.live&&controller===calendar&&!!now?.current()&&mapBinding(now)===binding&&visible.open===chosen.id&&!visible.form&&JSON.stringify(visible.canonicalDeleteScope)===scope;};const current=()=>selected()&&JSON.stringify(calendar?.state.feed?.events.find(value=>calendarEventKey(value)===calendarEventKey(e)))===bytes;const title=mode==='decline_invitation'?'Decline invitation?':'Delete event?',label=mode==='decline_invitation'?'Decline invitation':'Delete event',occurrences=deleteScope==='series'?'Entire series':deleteScope==='this_and_following'?'This and following':recurringEvent?'This occurrence':'This event';if(!shell||!current()||!await confirmCalendarAction(shell,api,title,[e.title,out.ev.calName,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)).summary,occurrences,'No guest notification will be sent.'].join('\n'),label,current)||!current())return;try{await calendar!.delete(calendarEventKey(e),policy.providerVersion,crypto.randomUUID(),deleteScope as typeof state.canonicalDeleteScope.scope);if(selected()){api.set({open:null,canonicalDeleteScope:null});refresh(true);}}catch(error){if(current())api.toast(calendarErrorText(error));}};
+    const feedback=state.canonicalDeleteFeedback?.eventId===chosen.id?state.canonicalDeleteFeedback:undefined;
+    out.ev.deleteStatus=feedback?.text;
+    if(feedback?.pending)out.ev.busy=true;
+    const remove=async(deleteScope?:string)=>{
+     if(policy.kind!=='editable'||sourceReadOnly||controller?.state.mutating||feedback?.pending)return;
+     if(recurringEvent&&!deleteScope){api.toast('Pick occurrences');return;}
+     const mode=cancellationModeForEditorEvent(e);
+     if(!mode){api.set({canonicalDeleteFeedback:{eventId:chosen.id,text:'Couldn’t verify the organizer.'}});return;}
+     const shell=owner,calendar=controller,reviewTarget=port(),binding=reviewTarget?mapBinding(reviewTarget):null;
+     const bytes=JSON.stringify(e),scope=JSON.stringify(state.canonicalDeleteScope);
+     const selected=()=>{
+      const now=port(),visible=api.get('calendar');
+      return owner===shell&&!!shell?.live&&controller===calendar&&!!now?.current()&&mapBinding(now)===binding&&
+       visible.open===chosen.id&&!visible.form&&JSON.stringify(visible.canonicalDeleteScope)===scope;
+     };
+     const current=()=>selected()&&JSON.stringify(calendar?.state.feed?.events.find(value=>calendarEventKey(value)===calendarEventKey(e)))===bytes;
+     const declining=mode==='decline_invitation',simple=!declining&&!recurringEvent&&!e.attendees?.length;
+     const title=declining?'Decline invitation?':'Delete event?';
+     const label=simple?'Yes':declining?'Decline invitation':'Delete event';
+     const occurrences=deleteScope==='series'?'Entire series':deleteScope==='this_and_following'?'This and following':recurringEvent?'This occurrence':'This event';
+     const details=simple?e.title:[e.title,out.ev.calName,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)).summary,occurrences,'No guest notification will be sent.'].join('\n');
+     if(!shell||!calendar||!current()||!await confirmCalendarAction(shell,api,title,details,label,current,simple?{cancelLabel:'No',destructive:true}:undefined)||!current())return;
+     const operation={eventId:chosen.id,text:declining?'Declining…':'Deleting…',pending:true};
+     api.set({canonicalDeleteFeedback:operation});
+     try{
+      await calendar.delete(calendarEventKey(e),policy.providerVersion,crypto.randomUUID(),deleteScope as typeof state.canonicalDeleteScope.scope);
+      if(selected()){api.set({open:null,canonicalDeleteScope:null,canonicalDeleteFeedback:null});refresh(true);}
+     }catch(error){
+      if(selected())api.set({canonicalDeleteFeedback:{eventId:chosen.id,text:calendarErrorText(error,"Couldn’t delete this event.")}});
+     }finally{
+      if(api.get('calendar').canonicalDeleteFeedback===operation)api.set({canonicalDeleteFeedback:null});
+     }
+    };
     out.ev.del=()=>remove(deleteScope);out.ev.scopedDelete=out.ev.recurrenceScopes.length>0;out.ev.singleDelete=!out.ev.scopedDelete;
     if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice='Open in Google';}}
   }

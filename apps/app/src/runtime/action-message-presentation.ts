@@ -17,6 +17,18 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
 }
 const REVIEW_TEXT = 'Review on phone';
 const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';
+// A model's instruction to use a live approval control is advisory until this
+// turn has an admitted review. Generic explanations such as "if you see an
+// approval card..." do not imply there is a live control to use.
+const PHONE_APPROVAL_COMMAND = /(?:^|[.!?]\s+)(?:just\s+)?(?:tap|press|click)\s+(?:the\s+)?["“]?(?:approve|confirm)\b(?:["”])?(?=\s|[.!?,]|$)/i;
+export function isPhoneReviewInstruction(text: string): boolean {
+  const reply=text.trim();
+  return reply===REVIEW_TEXT||reply===REVIEW_INSTRUCTION||PHONE_APPROVAL_COMMAND.test(reply);
+}
+export function phoneReviewReply(text: string, hasReview: boolean): string {
+  return !hasReview&&isPhoneReviewInstruction(text)?'I couldn’t open a review card for this request.':text;
+}
+
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 // Presentation only: preserve the journal while explaining uncertainty safely.
 export function actionResultText(text: string): string {

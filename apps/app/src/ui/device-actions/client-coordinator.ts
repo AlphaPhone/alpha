@@ -201,7 +201,7 @@ import { describePhotosViewOperation } from "../photos/photos-view-presentation.
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT, type ContactMatch } from "../telephony/telephony-messages.ts";
-import { SMS_CARRIER_CHARGES, smsSendFacts } from "../telephony/sms-card-facts.ts";
+import { smsReviewCopy, smsSendFacts, type SmsReviewPreview } from "../telephony/sms-card-facts.ts";
 import { callOwnerRecipient, directOwnerAction, samePhoneRecipient, smsOwnerRequest } from "./owner-request.ts";
 
 function object(value: unknown): Record<string, unknown> {
@@ -236,6 +236,7 @@ export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
  */
 type AlphaProposalCard = DeviceActionProposalCard & {
   smsReview?: "draft" | "addressed-draft" | "send" | "recipient";
+  smsPreview?: SmsReviewPreview;
 };
 export type ReviewItem = Omit<PendingReviewItem, "proposal"> & {
   proposal: AlphaProposalCard | null;
@@ -1157,16 +1158,13 @@ export class DeviceActionCoordinator<
             smsRecipient || smsComposeTarget(op).kind === "number" ? "send" as const : "recipient" as const,
         } : {}),
       };
-    if (isSmsSend(op)) {
-      const sim = this.profile.simLabel?.(op.subscriptionId);
+    if (isSmsSend(op))
       return {
         ...base,
         title: "Review SMS",
         smsReview: "send",
-        // Approve sends it: no dialog follows, so the card says everything the send depends on.
-        description: `To: ${op.recipients.join(", ")}${sim ? `\nFrom: ${sim}` : ""}\n\n${op.body}\n\n${smsSendFacts(op.recipients.length, op.body)}`,
+        ...smsReviewCopy(`To: ${op.recipients.join(", ")}`, op.body, smsSendFacts(op.recipients.length, op.body)),
       };
-    }
     if (isCameraCapture(op))
       return {
         ...base,
@@ -3507,6 +3505,7 @@ function describeTelephonyAction(
 ): {
   title: string;
   description: string;
+  smsPreview?: SmsReviewPreview;
 } {
   const fields = (set: {
     displayName?: string;
@@ -3582,20 +3581,13 @@ function describeTelephonyAction(
       const target = smsComposeTarget(operation);
       const to = smsRecipient ? `To: ${smsRecipient.name} (${smsRecipient.number})`
         : target.kind === "number" ? `To: ${target.number}` : `To contact: ${target.query}`;
-      return "draft" in operation
-        ? {
-            title: "Draft SMS",
-            description: `${to}\n\n${operation.body}\n\n${target.kind === "number" || smsRecipient
-              ? `From: the SIM chosen in Messages, or your default texting SIM\n${smsSendFacts(1, operation.body)}`
-              : "Choose a recipient before sending."}`,
-          }
-        : {
-            title: "Review SMS",
-            description:
-              target.kind === "number" || smsRecipient
-                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body)}`
-                : `${to}\n\n${operation.body}\n\nChoose the person and number on your phone before sending. ${SMS_CARRIER_CHARGES}`,
-          };
+      const note = target.kind === "number" || smsRecipient
+        ? smsSendFacts(1, operation.body)
+        : "Choose a recipient before sending.";
+      return {
+        title: "draft" in operation ? "Draft SMS" : "Review SMS",
+        ...smsReviewCopy(to, operation.body, note),
+      };
     }
     case "phone_keypad":
       return {

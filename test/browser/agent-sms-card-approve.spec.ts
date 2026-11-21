@@ -12,9 +12,9 @@ import {preloadPageModules} from './helpers/page-modules';
 
 const NUMBER = '+15550100199', BODY = 'On my way';
 
-async function setup(page: Page, contactMode?: 'one' | 'two' | 'none', reviewFirst=true) {
+async function setup(page: Page, contactMode?: 'one' | 'two' | 'none', reviewFirst=true, missingReview=false) {
   await page.addInitScript(installTelephonyFixture, {});
-  await page.addInitScript(({number, body, contactMode, reviewFirst}) => {
+  await page.addInitScript(({number, body, contactMode, reviewFirst, missingReview}) => {
     const w = window as any, fixture = w.smsCardFixture = {
       proposal: null as any, decisions: [] as string[], receipts: [] as any[], sends: [] as any[], refused: [] as string[],
       journal: new Map<string, any>(),
@@ -77,6 +77,11 @@ async function setup(page: Page, contactMode?: 'one' | 'two' | 'none', reviewFir
       if (pathname === '/api/workflow/status') return ok({});
       if (pathname === '/api/conversations' && input.method === 'POST') return ok({conversation: {id: 'fixture-chat', title: 'Fixture'}});
       if (pathname === '/api/conversations/fixture-chat/messages' && input.method === 'POST') {
+        if(missingReview)return ok({
+          text:'Already prepped that for you, Carson, saying test. Just tap approve on your phone and it sends.',
+          agentName:'SMS card fixture',
+          messageId:'11111111-1111-4111-8111-111111111111',userMessageId:'22222222-2222-4222-8222-222222222222',
+        });
         if (!String(input.headers['X-Eliza-Device-Capabilities'] ?? '').split(',').includes('sms.compose.v2')) throw Error('sms.compose.v2 was not negotiated');
         fixture.proposal = {id: 'fixture-proposal', digest: 'a'.repeat(64), state: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(), subjectUserId: 'fixture-owner', requestedBy: agentId, action: 'device_action',
           payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', ...(contactMode?{requestMessageId:'22222222-2222-4222-8222-222222222222'}:{}), operation: {type: 'sms_compose', target: contactMode ? {kind:'contact', query:contactMode==='none'?'Qassem':'Carson'} : {kind: 'number', number}, body, ...(contactMode ? {draft:true} : {})}}};
@@ -94,7 +99,7 @@ async function setup(page: Page, contactMode?: 'one' | 'two' | 'none', reviewFir
       }
       throw Error('Unexpected fixture route ' + pathname);
     };
-  }, {number: NUMBER, body: BODY, contactMode, reviewFirst});
+  }, {number: NUMBER, body: BODY, contactMode, reviewFirst, missingReview});
   await page.route('https://**/*', route => route.abort());
   await page.goto('/?mode=dev');
   await page.getByText('Local development agent', {exact: true}).click();
@@ -141,9 +146,10 @@ test('Send on the Review SMS card sends the text once, under that card, with no 
   const card = await setup(page);
   // Everything the send depends on is on the card itself; it never says to confirm again.
   await expect(card).toContainText(`To: ${NUMBER}`);
-  await expect(card).toContainText('From: the SIM chosen in Messages, or your default texting SIM');
-  await expect(card).toContainText(BODY);
-  await expect(card).toContainText('Send submits it right away. Your carrier may charge for texts.');
+  await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);
+  await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveCSS('font-size','17px');
+  await expect(card).not.toContainText(/From:|Send submits|carrier may charge/);
+  await card.screenshot({path:test.info().outputPath('sms-review-card.png')});
   await expect(card).not.toContainText(/Android|again/);
   expect((await state(page)).sendSms).toBe(0);
   // The card's own Send control is what the owner taps; nothing opens after it.
@@ -197,7 +203,7 @@ for(const contactMode of ['one','two','none'] as const) test(voiceCases[contactM
     expect(mismatch.text).toContain('recipient doesn’t match');
     expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0});
     await card.evaluate(node=>node.scrollIntoView({block:'center'}));
-    await page.evaluate(() => (window as any).smsCardFixture.voice('Yeah, send it to Carson.'));
+    await page.evaluate(() => (window as any).smsCardFixture.voice('Hmm, send this text.'));
     // The host draft is retired. The distinct, explicitly confirmed device send is journaled once.
     expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,refused:0,sendSms:1});
     const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends[0]);
@@ -264,9 +270,9 @@ test('an addressed SMS draft sends on one explicit tap in chat',async({page})=>{
   expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,sendSms:1});
 });
 
-test('with review off an explicit send to one exact contact sends once without a card',async({page})=>{
+for(const spoken of ['Send a text to Carson saying, On my way','Can you send a text to Carson and say On my way'])test(`with review off ${spoken} sends once without a card`,async({page})=>{
   const card=await setup(page,'one',false);
-  const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
+  const reply=await page.evaluate(text=>(window as any).smsCardFixture.voice(text),spoken);
   expect(reply.text).toBe('Message sent.');
   await expect(card).toHaveCount(0);
   const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends);
@@ -293,4 +299,14 @@ test('with review off an explicit draft remains unsent without a card',async({pa
   const sent=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
   expect(sent.text).toBe('Message sent.');
   expect((await state(page)).sendSms).toBe(1);
+});
+
+test('a spoken SMS reply can’t tell the owner to approve a missing card',async({page})=>{
+ await setup(page,'one',false,true);
+ const reply=await page.evaluate(async()=>await (window as any).smsCardFixture.voice('Carson should get it and it should just say test.'));
+ expect(reply.text).toBe('I couldn’t open a review card for this request.');
+ expect(reply.speechText??reply.text).toBe(reply.text);
+ await expect(page.getByText('I couldn’t open a review card for this request.',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:/Review SMS|^Approve/})).toHaveCount(0);
+ expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0});
 });

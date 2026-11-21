@@ -71,8 +71,8 @@ test('a deletion that would overfill Trash is refused: the note stays saved, Tra
  // One more deletion: refused, in words, before anything is written.
  // The earlier deletion's Undo toast has the same word; let it expire first.
  await expect.poll(async()=>{const state=await toastObservation(page);return Number(state.undo)+state.queued.filter(notice=>notice.undo).length;}).toBe(2);
- await finishUndoWindow(page);await expect(page.getByRole('button',{name:'Undo',exact:true})).toBeVisible();
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);await expect(page.getByRole('button',{name:'Undo',exact:true})).toBeVisible();
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Deleted',{exact:true})).toHaveCount(0,{timeout:15_000});
  await page.getByRole('button',{name:'Open Charlie',exact:true}).click();
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
@@ -156,8 +156,8 @@ test('a deletion that would push Trash past its byte limit is refused: the note 
  // A second heavy note does not fit: refused in words before anything is written.
  // The earlier deletion's Undo toast has the same word; let it expire first.
  await expect.poll(async()=>{const state=await toastObservation(page);return Number(state.undo)+state.queued.filter(notice=>notice.undo).length;}).toBe(2);
- await finishUndoWindow(page);await expect(page.getByRole('button',{name:'Undo',exact:true})).toBeVisible();
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);await expect(page.getByRole('button',{name:'Undo',exact:true})).toBeVisible();
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Deleted',{exact:true})).toHaveCount(0,{timeout:15_000});
  await page.getByRole('button',{name:'Open Second heavy',exact:true}).click();
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();

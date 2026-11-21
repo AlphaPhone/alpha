@@ -159,7 +159,7 @@ test('an unresolved text draft asks who should receive it and returns to listeni
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
 
-test('the next spoken Send this text confirms one visible addressed SMS without forwarding the command',async({page})=>{
+for(const spoken of ['Hmm, send this.', 'Yeah, I think I wanna send it.'])test(`spoken confirmation ${spoken} confirms one visible SMS without forwarding the command`,async({page})=>{
  await setup(page,'full');
  await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsSendReview=true;f.prompt='Text Carson. Can you bring ice?';});
  await utterance(page);
@@ -170,13 +170,14 @@ test('the next spoken Send this text confirms one visible addressed SMS without 
  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
- await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Send this text.';});
+ await page.evaluate(prompt=>{(window as any).ownedVoiceNavigation.prompt=prompt;},spoken);
  await utterance(page);
  await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts)).toEqual(['send-reviewed-text']);
  await expect(page.getByText('Text submitted.',{exact:true})).toBeVisible();
  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await page.evaluate(()=>{(window as any).ownedVoiceNavigation.prompt='Hmm, send this text.';});
  await utterance(page);
  await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {requests:f.inputs.length,approvals:f.approvedTexts};})).toEqual({requests:1,approvals:['send-reviewed-text']});
@@ -250,4 +251,26 @@ test('speaking Send this text cannot approve an addressed card hidden from the o
  await utterance(page);
  await expect(page.getByText('Give me the recipient and message you want to send.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts??[])).toEqual([]);
+});
+
+test('a vague yes does not approve the open SMS review',async({page})=>{
+ await setup(page,'full');
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.smsSendReview=true;f.prompt='Text Carson. Can you bring ice?';});
+ await utterance(page);
+ await expect(page.locator('[data-alpha-voice-send-review="send-reviewed-text"]')).toBeVisible();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;f.finishPlayback();f.smsSendReview=false;f.prompt='Yeah.';});
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(2);
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.approvedTexts??[])).toEqual([]);
+});
+
+test('Talk speaks calendar clock ranges as ranges without altering phone numbers or dates',async({page})=>{
+ await page.goto('/?mode=dev');
+ const spoken=await page.evaluate(async()=>{
+  const {toSpeakableText}=await import('/src/ui/voice/voice-chat-playback.ts');
+  return ['2-3 p.m., 3–4 p.m., or 4-5 p.m.','10:30–11:00','3:00 PM PM','Call 415-555-0100 on 2026-11-21.'].map(toSpeakableText);
+ });
+ expect(spoken).toEqual(['2 to 3 pm, 3 to 4 pm, or 4 to 5 pm.','10:30 to 11:00','3:00 PM','Call 415-555-0100 on 2026-11-21.']);
 });

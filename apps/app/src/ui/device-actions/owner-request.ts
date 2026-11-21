@@ -14,10 +14,19 @@ function word(value: string) {
   return unquote(value).replace(/\.$/, "").toLowerCase();
 }
 
+// Punctuation from dictation can separate the end of the instruction from its
+// message. Accept familiar lead-ins and delimiters while keeping the body exact.
+const smsBodySeparator = String.raw`(?::\s*|\s+(?:saying|that says|to say|and (?:just )?say|with (?:the )?message)(?:\s*[:,]\s*|\s+))`;
+const explicitSms = new RegExp(
+  String.raw`^(send|draft|write)\s+(?:(?:an?|this|the)\s+)?(?:text(?: message)?|sms|message)\s+to\s+(.+?)(?:${smsBodySeparator}([\s\S]+))?$`,
+  "i",
+);
+const textSms = new RegExp(String.raw`^text\s+(.+?)${smsBodySeparator}([\s\S]+)$`, "i");
+
 export function smsOwnerRequest(text: string) {
-  const command = ownerCommand(text);
-  const explicit = /^(send|draft|write)\s+(?:(?:an?|this|the)\s+)?(?:text(?: message)?|sms|message)\s+to\s+(.+?)(?:(?::|\s+saying\s+|\s+that says\s+|\s+with (?:the )?message\s+)\s*([\s\S]+))?$/i.exec(command);
-  const textCommand = /^text\s+(.+?)(?::|\s+saying\s+)\s*([\s\S]+)$/i.exec(command);
+  const command = ownerCommand(text.trim().replace(/^(?:(?:thanks|thank you|okay|ok|sure|hmm+|um+|uh)[,.!]\s+)*/i, ""));
+  const explicit = explicitSms.exec(command);
+  const textCommand = textSms.exec(command);
   if (explicit) return {send: explicit[1].toLowerCase() === "send", recipient: word(explicit[2]), body: explicit[3] === undefined ? undefined : unquote(explicit[3])};
   if (textCommand) return {send: true, recipient: word(textCommand[1]), body: unquote(textCommand[2])};
 }
@@ -145,7 +154,9 @@ export function callOwnerRecipient(text:string) {
 
 export function ownerActionFollowUp(card:{title:string;smsReview?:string},text:string) {
   if(card.smsReview){
-    if(card.smsReview==='addressed-draft'||card.smsReview==='send')return "What exactly should the text say, and who should get it?";
+    if(card.smsReview==='addressed-draft'||card.smsReview==='send')return smsOwnerRequest(text)?.body
+      ? "I couldn’t verify that the text matched your request."
+      : "What exactly should the text say, and who should get it?";
     return smsOwnerRequest(text)?.body
       ? "Which recipient did you mean? Give me their full contact name or phone number."
       : "Who should get the text, and what should it say?";

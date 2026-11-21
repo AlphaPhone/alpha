@@ -57,7 +57,18 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
  await expect(trash.getByText('30d',{exact:true})).toBeVisible();
  await expect(trash.getByText(/Deleted notes stay here/)).toHaveCount(0);
  await page.screenshot({path:test.info().outputPath('notes-trash.png')});
- await recover(page,'Trash audit','30 days left');
+ await page.evaluate(()=>document.querySelector<HTMLElement>('.alpha-phone')!.style.setProperty('--native-bottom-inset','24px'));
+ await page.getByRole('button',{name:'Trash audit, 30 days left',exact:true}).click();
+ const recovery=page.locator('[data-alpha-notes-recovery]').getByRole('dialog',{name:/Trash audit/});
+ await expect(recovery).toBeVisible();
+ const sheet=await recovery.evaluate(dialog=>{
+  const phone=dialog.closest('.alpha-phone')!;
+  const navBar=getComputedStyle(phone,'::after');
+  return {sheet:getComputedStyle(dialog).backgroundColor,bar:navBar.backgroundColor,inset:parseFloat(navBar.height)};
+ });
+ expect(sheet.inset).toBeGreaterThan(0);
+ expect(sheet.bar).toBe(sheet.sheet);
+ await recovery.getByRole('button',{name:'Recover',exact:true}).click();
  await expect(page.getByText('Trash audit restored',{exact:true})).toBeVisible();
  // Recovering the last deleted note closes Recently deleted.
  await expect(trash).toHaveCount(0);
@@ -97,7 +108,7 @@ test('Delete now and Empty ask first, and checklists use the same Recently delet
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title).sort()).toEqual(['Second','Third']);
  expect(await savedRecords(page)).toEqual([]);
  await expect.poll(async()=>{const state=await toastObservation(page);return Number(state.undo)+state.queued.filter(notice=>notice.undo).length;}).toBe(3);
- for(let offer=0;offer<3;offer++)await finishUndoWindow(page);
+ for(let offer=0;offer<3;offer++)await finishUndoWindow(page,4_000);
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0,{timeout:10000});await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await expect(trash.getByText('First',{exact:true})).toHaveCount(0);
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Second','Third']);

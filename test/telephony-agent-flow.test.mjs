@@ -72,6 +72,30 @@ test('the single reviewed SMS recipient stays bound to the first address shown',
   }
 });
 
+test('approvals-off accepts dictated send separators only for the matching recipient and body',async()=>{
+  setSmsReviewRecipient(async query=>query.toLowerCase()==='carson'?{id:'1',name:'Carson',number:'+15550100200'}:null);
+  try {
+    const operation={type:'sms_compose',target:{kind:'contact',query:'Carson'},body:'Test.'};
+    for(const [text,mode] of [
+      ['Can you send a text to Carson saying, Test.', 'off'],
+      ['Can you send a text to Carson and say Test.', 'off'],
+      ['Can you send a text to Carson and say Something else.', 'off'],
+      ['Can you send a text to someone else and say Test.', 'off'],
+      ['Can you send a text to Carson and say Test.', 'on'],
+    ]){
+      const f=fixture({operation,requestMessageId:messageId,result:{kind:'sms-compose',status:'submitted'}});
+      const owner={...proof,text};
+      await f.client.pendingReview(context,signal(),owner);
+      const allowed=()=>Promise.resolve(mode==='off');
+      const expected=mode==='off'&&text.includes('Carson')&&text.endsWith('Test.')?1:0;
+      await f.client.performRequested(messageId,context,signal(),allowed,undefined,owner);
+      assert.equal(f.effects,expected,text+' / '+mode);
+      await f.client.performRequested(messageId,context,signal(),allowed,undefined,owner);
+      assert.equal(f.effects,expected,'The same turn cannot send twice.');
+    }
+  }finally{setSmsReviewRecipient(async()=>null);}
+});
+
 test('a confirmed Talk draft retires the editor handoff and journals exactly one addressed send', async () => {
   const number = '+14155550132';
   const target = {kind:'number',number};
@@ -167,11 +191,10 @@ test('a text to a number, a draft, a single contact value, a contact search and 
   for (const [operation, capability] of [[number, 'sms.compose.v2'], [add, 'contacts.write.v2'], [{type: 'contact_show', query: 'Priya'}, 'contacts.show.v1']])
     await assert.rejects(fixture({operation, capabilities: without(capability)}).client.pending(context, signal()), /not negotiated/, capability);
   const card = async operation => { const [shown] = await fixture({operation}).client.pending(context, signal()); return `${shown.title}\n${shown.description}`; };
-  // Approve sends a text at once: the card, not a dialog after it, says the SIM and the carrier charge.
-  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\nRunning late\n\nSend submits it right away. Your carrier may charge for texts.');
-  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.\nSend submits it right away. Your carrier may charge for texts.`);
+  assert.equal(await card(number), 'Review SMS\nTo: +14155550100\n\nRunning late');
+  assert.equal(await card({...number, body: 'x'.repeat(200)}), `Review SMS\nTo: +14155550100\n\n${'x'.repeat(200)}\n\nIt likely goes as 2 linked texts.`);
   const toContact = await card({...number, target: {kind: 'contact', query: 'Priya'}});
-  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nChoose the person and number on your phone before sending. Your carrier may charge for texts.');
+  assert.equal(toContact, 'Review SMS\nTo contact: Priya\n\nRunning late\n\nChoose a recipient before sending.');
   for (const shown of [await card(number), toContact]) assert.doesNotMatch(shown, /Android|again/);
   const draft = await card({...number, target: {kind: 'contact', query: 'Priya'}, draft: true});
   assert.match(draft, /^Draft SMS\nTo contact: Priya\n\nRunning late/); assert.match(draft, /Choose a recipient before sending/); assert.doesNotMatch(draft, /Android/);

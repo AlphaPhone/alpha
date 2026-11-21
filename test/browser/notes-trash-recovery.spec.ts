@@ -162,7 +162,7 @@ test('a note edited after a full Trash refused it is not deleted by the earlier 
  await expectPendingToast(page,'Note changed');
  expect((await savedRecords(page)).map((note:any)=>[note.title,note.body])).toEqual([['Changing','Newer text']]);
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title)).toEqual(['Filler']);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Note changed',{exact:true})).toBeVisible();
  await expect(full).toHaveCount(0);
  const saved=await savedRecords(page);
@@ -199,7 +199,7 @@ test('a permanent-delete confirmation in a stale view never drops the Trash copy
  await expectPendingToast(page,'Note changed');
  expect((await trashEntries(page)).find((entry:any)=>entry.id===row.id)).toEqual(row);
  expect(await savedRecords(page)).toEqual([]);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Note changed',{exact:true})).toBeVisible();
  // The other view's Trash row, with the newer text, is exactly as it was written.
  const entries=await trashEntries(page);
@@ -237,7 +237,7 @@ test('a voice note refused by a full Trash is erased with its own recording only
  expect((await savedRecords(page)).map((note:any)=>note.id)).toEqual(['other-voice']);
  expect((await describeAudio(page,'full-audio')).transcript).toBe('');
  expect(await pendingDeletions(page)).toEqual([]);expect(await trashEntries(page)).toEqual(filler);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Full memo and its recording deleted forever',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0);
  expect((await savedRecords(page)).map((n:any)=>n.id)).toEqual(['other-voice']);
@@ -280,7 +280,7 @@ test('a stale Trash row of a note that is then deleted permanently is dropped, s
  await expectPendingToast(page,'Stale text deleted forever');
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title).sort()).toEqual(['Filler','Stale memo']);
  expect((await savedRecords(page)).some((note:any)=>note.title==='Stale text')).toBe(false);
- await finishUndoWindow(page);
+ await finishUndoWindow(page,4_000);
  await expect(page.getByText('Stale text deleted forever',{exact:true})).toBeVisible();
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Filler','Stale memo']);
  // The full Undo offer is finished; subsequent passive feedback uses ordinary elapsed time.

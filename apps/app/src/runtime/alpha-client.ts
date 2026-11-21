@@ -63,6 +63,7 @@ export interface ActionProposal {
   reviewNoteTarget?:import('./notes-contract').NotesTarget;
   /** Presentation of a validated SMS operation. Approval remains bound to the original proposal. */
   smsReview?: 'draft' | 'addressed-draft' | 'send' | 'recipient';
+  smsPreview?: import('../ui/telephony/sms-card-facts').SmsReviewPreview;
   /** Authored draft displayed in plain chat when action review is off. */
   plainSmsDraft?: true;
   title: string;

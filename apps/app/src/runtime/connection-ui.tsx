@@ -54,7 +54,7 @@ import { pauseHostedBackground } from './hosted-background';
 import {developmentDeviceStore,developmentActionJournal} from './local-agent-storage';
 import { reviewLocalRecovery,archiveLocalRecovery,stopLocalAgent,localAgentBootStatus, configureLocalProvider, bindResidentCloudProvider, LocalCloudProviderStopUnconfirmed, LocalAgentProtocol, nativeVoiceTraceId, localAgentPackaged, localAgentRefusal, localAgentStopped, browserLocalAgentEnabled, localProviderStatus, clearLocalProvider, clearLocalProviderIfCurrent, providerStatusLabel, LOCAL_PROVIDER_MODEL, selectLocalProvider,editLocalProviderKeys,removeLocalProviderKey,type LocalProviderKey,type ManagedLocalProviderStatus,type LocalProviderStatus } from './local-agent';
 import { presentDeviceRecordOperation } from './device-record-presentation';
-import {actionResultText,checkinDisplayText, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
+import {actionResultText,checkinDisplayText,isPhoneReviewInstruction,phoneReviewReply, succeededBrowserDestination, systemNoticeDisplayText, systemNoticeKind, type SystemNoticeKind } from './action-message-presentation';
 import type { MessagePage } from './remote-protocol';
 import type {DeviceRecovery,CurrentDeviceActionRequest} from "./device-actions";
 import type { WorkflowPhoneReview } from './workflow-device-contract';
@@ -3575,7 +3575,7 @@ export const connectionController = {
       requestSignal.throwIfAborted();assertCurrent();
       const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
-      const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');onText?.(value,frame);};
+      const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');if(!isPhoneReviewInstruction(value))onText?.(value,frame);};
       const replyReady=(results:readonly unknown[]|undefined)=>{assertCurrent();onReplyReady?.(results);};
       const voiceTurnId=isAndroid&&selected.kind==='resident'&&channelType==='VOICE_DM'?activeVoiceTurn():undefined;
       const voiceTraceId=voiceTurnId?nativeVoiceTraceId(requestId):undefined;
@@ -3692,7 +3692,7 @@ export const connectionController = {
       if(!failed&&(state.lastServiceLimit||state.fundingRefused))update({lastServiceLimit:null,fundingRefused:false});
       return { text: responseFailure
         ? `${responseFailure.message} Review the action below.`
-        : directReply??(ignored?'':reply.text), ...(ignored&&!responseFailure&&!directReply?{ignored:true as const}:{}), ...(completedReads.length?{completedReads}:{}), ...(completedActions.length?{completedActions}:{}), ...(notices.length ? { notices } : {}), ...(!responseFailure?{...(typeof reply.messageId==='string'?{messageId:reply.messageId}:{}),messageBinding}:{}), ...recorded, ...(proposals ? { proposals } : {}), ...(!failed&&Array.isArray(reply.actionResults)?{actionResults:reply.actionResults}:{}) };
+        : directReply??(ignored?'':phoneReviewReply(reply.text,!!proposals?.length)), ...(ignored&&!responseFailure&&!directReply?{ignored:true as const}:{}), ...(completedReads.length?{completedReads}:{}), ...(completedActions.length?{completedActions}:{}), ...(notices.length ? { notices } : {}), ...(!responseFailure?{...(typeof reply.messageId==='string'?{messageId:reply.messageId}:{}),messageBinding}:{}), ...recorded, ...(proposals ? { proposals } : {}), ...(!failed&&Array.isArray(reply.actionResults)?{actionResults:reply.actionResults}:{}) };
     } catch (error) {
       // Nothing carrying the message left this phone (no conversation, offline, changed owner, or a
       // Stop before the post): the composer keeps the text instead of reporting an unknown outcome.

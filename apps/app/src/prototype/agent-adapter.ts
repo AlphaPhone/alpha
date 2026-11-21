@@ -491,11 +491,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
     const approvalLabel=proposal.smsReview==='addressed-draft'||proposal.smsReview==='send'?'Send':
       proposal.smsReview==='draft'||proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
-    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,smsPreview:proposal.smsPreview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
   type PlainSmsDraft={proposal:import('../runtime/alpha-client').ActionProposal;binding:NonNullable<AgentReply['messageBinding']>};
   const sendThisText=/^(?:yes[,]?\s+)?send this (?:text|message|draft)[.!]?$/i;
-  const sendReviewedText=/^(?:(?:yes|yeah|yep),?\s+)?send (?:it|(?:this|the) (?:text|message|draft))(?:\s+to\s+(.+?))?[.!?]?$/iu;
+  const spokenConfirmationLead=/^(?:(?:yes|yeah|yep|okay|ok|sure|hmm+|um+|uh)[,.!]?\s+)*(?:go ahead and )?/iu;
+  const sendReviewedText=/^(?:(?:i think )?i (?:want to|wanna|would like to|want you to) |i['’]d like to |let['’]s )?send (?:it|this(?: (?:text|message|draft))?|the (?:text|message|draft))(?:\s+to\s+(.+?))?[.!?]?$/iu;
   function rememberPlainSmsDraft(shell:Shell,reply:AgentReply){
     const proposal=reply.proposals?.find(item=>item.plainSmsDraft===true);
     if(proposal&&reply.messageBinding)shell.plainSmsDraft={proposal,binding:reply.messageBinding};
@@ -1929,7 +1930,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(c.systemNotice&&m.cGeneric)return {...m,cGeneric:false,cNotice:true,noticeSub:c.sub&&c.sub!==c.title?c.sub:'',hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub&&m.displayText!==c.title};
       const waitingForReply=!!c.recovered&&this.S().typing;
       const voiceSendId=(c.smsReview==='send'||c.smsReview==='addressed-draft')&&!c.done&&!c.recovered&&!c.reviewUnavailable&&this.pendingVoiceSmsReview?.id===c.proposalId&&this.voiceConversationActive?.()?c.proposalId:'';
-      if(m.cProposal)return {...m,voiceSendId,...(waitingForReply?{proposalDisabled:true}:{})};
+      const smsPreview=c.proposalId&&!c.done&&!c.reviewUnavailable?c.smsPreview:undefined;
+      if(m.cProposal)return {...m,voiceSendId,proposalSmsPreview:smsPreview,...(waitingForReply?{proposalDisabled:true}:{})};
       if(!c.proposalId||c.done||c.reviewUnavailable||!m.cGeneric)return m;
       const message=live.find(item=>item.card===c);if(!message)return m;
       // Only the card being approved or declined shows progress; the others stay readable but wait.
@@ -1938,7 +1940,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.approvalLabel??(c.reviewDestination?'Open':'Approve'),voiceSendId:busy||held||waitingForReply?'':voiceSendId,reviewTextStyle:c.smsReview?'white-space:pre-wrap;overflow-wrap:anywhere;':'',icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:approving?'Working…':c.title,smsPreview:held?undefined:smsPreview,smsReviewClass:smsPreview&&!held?'sms-review-row':'',text:held?'Not during an emergency call.':smsPreview?'':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.approvalLabel??(c.reviewDestination?'Open':'Approve'),voiceSendId:busy||held||waitingForReply?'':voiceSendId,reviewTextStyle:c.smsReview?'white-space:pre-wrap;overflow-wrap:anywhere;':'',icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
         {ini:'',who:declining?'Declining…':'',text:'Keep things as they are.',label:declining?'':'Decline',ariaLabel:declining?'Declining…':'Decline Keep things as they are.',secondaryAction:true,icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
@@ -2072,8 +2074,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.plainSmsDraft=undefined;
     // The immediate next accepted microphone turn can confirm exactly one displayed Send card.
     // Never send the confirmation to the model or reopen a consumed approval.
-    const approvalPhrase=(reviewed||plain)?sendReviewedText.exec(text.trim()):null;
-    if(sendThisText.test(text.trim())||approvalPhrase){
+    const spokenCommand=text.trim().replace(spokenConfirmationLead,'');
+    const approvalPhrase=(reviewed||plain)?sendReviewedText.exec(spokenCommand):null;
+    if(sendThisText.test(spokenCommand)||approvalPhrase){
       const message=reviewed&&input.approvalSignal&&reviewed.generation===input.talkGeneration&&
         reviewed.conversationId===binding.conversationId&&reviewed.revision===input.context.revision&&
         reviewed.expiresAt>Date.now()&&this.emergencyLive?.()!==true&&visibleSmsReview(reviewed.id)

@@ -44,10 +44,30 @@ function extractVoiceText(input: string): string {
   text = text.replace(/<\/?[a-zA-Z][^>]*$|<\/?$/s, "");
   return text;
 }
+// Keep clock ranges conversational without changing bare numeric ranges, dates or phone numbers.
+const TWELVE_HOUR_CLOCK = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`;
+const SEPARATOR = String.raw`[ \t]*[-–—−][ \t]*`;
+const MERIDIEM_RANGE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}:+.-])(${TWELVE_HOUR_CLOCK}(?:[ \t]*[ap]m)?)${SEPARATOR}(${TWELVE_HOUR_CLOCK}[ \t]*[ap]m)\b`,
+  "giu",
+);
+const CLOCK = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`;
+const CLOCK_RANGE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}:+.-])(${CLOCK})${SEPARATOR}(${CLOCK})\b`, "giu",
+);
+
+function speakClockRanges(text: string): string {
+  return text
+    .replace(/(\d[ \t]*)([ap])\.[ \t]*m\b(?:\.(?=[ \t]*[,;:–—−-]))?/gi, '$1$2m')
+    .replace(/\b([ap]m)(?:[ \t]+\1)+\b/gi, '$1')
+    .replace(MERIDIEM_RANGE, '$1 to $2')
+    .replace(CLOCK_RANGE, '$1 to $2');
+}
+
 export function toSpeakableText(input: string): string {
   const extracted = extractVoiceText(input);
   if (!extracted) return "";
-  const normalized = sanitizeSpeechText(extracted);
+  const normalized = sanitizeSpeechText(speakClockRanges(extracted));
   if (!normalized) return "";
   return normalized;
 }

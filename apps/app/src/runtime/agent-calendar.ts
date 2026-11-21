@@ -254,7 +254,17 @@ export class AgentCalendar {
  }
  delete(eventKey:string,version:string,key:string,scope?:LifeOpsCalendarEventUpdate['recurrenceScope']){
   const event=this.eventForMutation(eventKey,version,scope),mode=cancellationModeForEditorEvent(event);if(!mode)throw Error('Organizer disposition is unavailable; no cancellation was sent');if(!key.trim())throw Error('Retain this deletion operation key');
-  return this.mutate(api=>api.deleteLifeOpsCalendarEvent(event.externalId,{side:event.side,grantId:event.grantId,calendarId:event.calendarId,expectedProviderVersion:version,idempotencyKey:key,cancellationMode:mode,...(scope?{recurrenceScope:scope}:{})}));
+  const epoch=this.epoch;
+  return this.mutate(async(api,port)=>{
+   const result=await api.deleteLifeOpsCalendarEvent(event.externalId,{side:event.side,grantId:event.grantId,calendarId:event.calendarId,expectedProviderVersion:version,idempotencyKey:key,cancellationMode:mode,...(scope?{recurrenceScope:scope}:{})});
+   const feed=this.value.feed;
+   // A confirmed one-off deletion can leave the current view immediately. A series
+   // deletion still needs a fresh window to reconcile its other occurrences.
+   if(result.outcome==='deleted'&&!event.recurrence?.length&&!event.recurringEventId&&feed&&epoch===this.epoch&&port.current()){
+    this.publish({feed:{...feed,events:feed.events.filter(row=>calendarEventKey(row)!==eventKey)}});
+   }
+   return result;
+  });
  }
  /** Review the same owner-bound Calendar service as the active view; no legacy source is read or linked. */
  async reviewSync():Promise<AgentCalendarSyncReview>{
