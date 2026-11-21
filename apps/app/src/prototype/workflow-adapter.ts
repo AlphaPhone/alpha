@@ -16,7 +16,7 @@ import { connectionController, agentAvailabilityNotice, residentAlwaysPresent } 
 import { testMocksEnabled } from '../build-flags';
 import { AUTOMATIONS_COMMITTED_EVENT } from '../runtime/automation-completion';
 import { showWorkflowAgentUnavailable } from './workflow-authoring';
-import { WorkflowAdmissionRejected, WorkflowMetadataRejected, WorkflowLifecycleRejected, WorkflowActivationRejected, type RemoteWorkflow, type WorkflowRun, type WorkflowApproval, type WorkflowApprovalReceipt } from '../runtime/workflow-protocol';
+import { WorkflowAdmissionRejected, WorkflowMetadataRejected, WorkflowLifecycleRejected, WorkflowActivationRejected, WorkflowPauseRejected, type RemoteWorkflow, type WorkflowRun, type WorkflowApproval, type WorkflowApprovalReceipt } from '../runtime/workflow-protocol';
 import { workflowRefusalText, workflowIntentText } from '../ui/workflows/workflow-messages';
 import { occurrenceNotRunText, workflowRunStatusLabel, workflowRunErrorText, workflowReconciliationText, workflowEventLabel, workflowApprovalStatusLabel, workflowPhoneStepTitle } from '../ui/workflows/workflow-run-presentation';
 import { describePhoneTrigger, normalizePhoneSpec, type PhoneTimeTrigger } from '../runtime/phone-workflow-authoring';
@@ -487,7 +487,8 @@ export function installWorkflowAdapter(Component:any,views:Bag){
   });
  };
  const syncPhone=()=>{if(!receipt||operation)return;const selected=receipt;void work(async(client,signal,valid)=>{phoneContext(selected);const review=await client.phoneReview(selected,signal);if(!valid())return;phoneContext(selected);await connectionController.syncWorkflowPhoneReceipts(review,signal);if(valid()){phoneDiscovery=null;phoneStatus='Receipts sent';phoneSteps=[];phoneReview=null;}});};
- const pause=()=>{if(!detail)return;const id=detail.id;void work(async(client,signal,valid)=>{const current=await client.pause(id,signal);if(valid()){detail=current;flows=flows.map(f=>f.id===id?current:f);api?.toast('Paused');}});};
+ // The pause names the version the owner sees, so a workflow changed elsewhere is refused rather than paused unseen (elizaOS/eliza#39945).
+ const pause=()=>{if(!detail)return;const selected=detail;void work(async(client,signal,valid)=>{try{const current=await client.pause(selected.id,signal,selected.versionId);if(valid()){detail=current;flows=flows.map(f=>f.id===current.id?current:f);api?.toast('Paused');}}catch(error){if(error instanceof WorkflowPauseRejected&&valid()){const current=await client.detail(selected.id,signal);if(valid()){detail=current;flows=flows.map(f=>f.id===current.id?current:f);}}throw error;}});};
  const activate=()=>{if(!detail||operation||detail.removed)return;
   // The agent refuses to enable a manual typed workflow: it has no schedule. Nothing is sent.
   if(manualPhoneWorkflow(detail)){noSchedule=true;api?.toast('No schedule');publish();return;}

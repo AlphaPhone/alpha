@@ -40,6 +40,22 @@ console.log(JSON.stringify(out));`);
  assert.deepEqual(out.supported,[true,false]);
 });
 
+test('pausing names the reviewed version, and a changed workflow is a known non-change',()=>{
+ const out=run(prelude+`
+const agent=(status,deactivate,current='v1')=>{const calls=[];return {calls,client:new P.WorkflowProtocol(async(path,body)=>{calls.push({path,body});if(path==='/api/workflow/status')return {engine:'smthrs',status:'ready',...status};if(path==='/api/workflow/workflows/flow')return flow(true,current);if(path.endsWith('/deactivate'))return deactivate(body);throw Error(path);})};};
+const exact=agent({typedScheduleProtocol:1},()=>flow(false));out.exact=(await exact.client.pause('flow',signal,'v1')).active;out.exactBody=exact.calls.find(c=>c.path.endsWith('/deactivate')).body;
+const legacy=agent({},()=>flow(false));await legacy.client.pause('flow',signal,'v1');out.legacyBody=legacy.calls.find(c=>c.path.endsWith('/deactivate')).body;
+out.changed=await message(()=>agent({typedScheduleProtocol:1},()=>{throw new P.WorkflowHttpError(409,{code:'WORKFLOW_ACTIVATION_NOT_APPLIED',workflowId:'flow',expectedVersionId:'v1'});}).client.pause('flow',signal,'v1'));
+const stale=agent({typedScheduleProtocol:1},()=>flow(false),'v2');out.stale=await message(()=>stale.client.pause('flow',signal,'v1'));out.staleSent=stale.calls.some(c=>c.path.endsWith('/deactivate'));
+console.log(JSON.stringify(out));`);
+ assert.equal(out.exact,false);
+ assert.deepEqual(out.exactBody,{expectedVersionId:'v1'});
+ assert.deepEqual(out.legacyBody,{});
+ assert.match(out.changed,/^WorkflowPauseRejected: This workflow changed before it was paused\. Nothing was changed\./);
+ assert.match(out.stale,/^WorkflowPauseRejected: /);
+ assert.equal(out.staleSent,false);
+});
+
 test('scheduled runs report their occurrence; missed and overlapping occurrences read as not run',()=>{
  const out=run(prelude+`
 const occurrence=(status)=>({scheduledAt:'2026-10-26T07:30:00.000Z',trigger:weekdays,status,text:''});

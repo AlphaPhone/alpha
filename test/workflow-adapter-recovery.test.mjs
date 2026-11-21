@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {spawnSync} from 'node:child_process';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 const {workflowRendererFixture}=await import('../scripts/workflow-renderer-fixture.ts');
-const {WorkflowProtocol,WorkflowAdmissionRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected}=await import('../apps/app/src/runtime/workflow-protocol.ts');
+const {WorkflowProtocol,WorkflowAdmissionRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected,WorkflowPauseRejected}=await import('../apps/app/src/runtime/workflow-protocol.ts');
 const {resolveWorkflowTap,readyTapStep,tapRecheck}=await import('../apps/app/src/runtime/workflow-device-contract.ts');
 const {runIntentReconcilable}=await import('../apps/app/src/runtime/workflow-intents.ts');
 
@@ -25,6 +25,7 @@ function adapterFixture(options={}){
   list:async()=>{calls.list++;await gate?.list;return [workflow];},removedWorkflows:async()=>[],
   detail:async()=>{calls.detail++;return {...workflow,...(options.inactive?{active:false}:{})};},executions:async()=>[],
   activate:async()=>{calls.activate=(calls.activate||0)+1;return {...workflow,active:true};},
+  pause:async(id,signal,version)=>{(calls.pause||=[]).push(version);if(options.pauseRefused)throw new WorkflowPauseRejected();return {...workflow,active:false};},
   receipt:async()=>{calls.receipt++;await gate?.receipt;return {...execution};},approvals:async()=>null,
   phoneReview:async()=>({steps:[]}),reconcile:async()=>null,
   run:async(id,version,signal,beforeSubmit)=>{await beforeSubmit?.(undefined);calls.run++;return {...execution,id:'run-'+calls.run};},
@@ -161,6 +162,19 @@ for(const [name,notifications,off] of [['off',{permissionGranted:false,appEnable
   assert.equal(app.render().fd.notificationsOff,off);
   if(off){app.render().fd.openNotificationSettings();assert.equal(JSON.stringify(app.settingsOpened),JSON.stringify([{page:'notifications'}]));}
  }finally{app.close();}
+});
+test('pausing names the version on screen, and a refused pause shows the current workflow',async()=>{
+ for(const refused of [false,true]){
+  const app=adapterFixture({view:'workflows',pauseRefused:refused});
+  try{
+   app.render().openWorkflow('flow');await wait(()=>app.render().detail&&app.render().fd.on);
+   const reads=app.calls.detail;app.render().fd.toggle();
+   await wait(()=>app.calls.pause?.length===1&&(refused?app.calls.detail>reads:!app.render().fd.on));
+   assert.deepEqual(app.calls.pause,['v1']);
+   if(refused){await wait(()=>app.toasts.includes('This workflow changed before it was paused. Nothing was changed. Review the current version, then pause it again.'));assert.equal(app.render().fd.on,true);}
+   else assert.equal(app.toasts.at(-1),'Paused');
+  }finally{app.close();}
+ }
 });
 test('opening a workflow that is already on says when notifications are off, so the notice survives leaving for settings',async()=>{
  const app=adapterFixture({view:'workflows',notifications:{permissionGranted:true,appEnabled:false}});
