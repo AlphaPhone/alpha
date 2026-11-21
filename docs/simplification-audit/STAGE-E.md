@@ -68,3 +68,27 @@ Waves run in order. Units in one wave own disjoint files and run in parallel, ex
 Each wave ends with a gate unit that owns the whole tree: `tsc`, `typecheck:scripts`, build, bundle audit, `npm test`
 (all lanes that exist), `quint:check`, refinement, `lemma:check`, and the Playwright projects once journeys exist.
 The wave is committed and pushed to the draft PR when its gate is green or its remaining failures are listed.
+
+## 4. Revision after the merge with `develop` (2026-11-21)
+
+`develop` changed the ground under this plan while the code stage ran:
+
+- The repository runs on Bun. `scripts/run-node-tests.ts` is gone; `scripts/run-tests.ts` runs `test/*.test.*`
+  minus `test/quint-*`, and `quint:tests` runs the Quint wrappers.
+- CI is already reduced upstream: a pull request runs one job (`verify.yml`, `bun run verify`), the Android build runs
+  only when build inputs change (`android.yml`), and formal models and browser tests run only on promotion
+  (`promotion.yml`). `ci-plan.md` units CI-1 … CI-8 are therefore done upstream or void. **No workflow is rewritten here.**
+- CONTRIBUTING.md now states the test rules this plan wanted (no new source slices or source-text assertions; whole-file
+  refinement; no duplicate aggregate runners).
+- `develop` receives about 250 commits a day, most of them touching tests and specs.
+
+Consequence (D23): this change does **not** rewrite the suites into new folders (`test/integration`, journeys). A
+tree-wide move of 1,300 test files cannot be merged against that rate of change and would hide coverage loss inside
+renames. Stage E is reduced to what can be checked file by file on the current tree:
+
+| Unit | Scope |
+|---|---|
+| E-del | Delete every host test, Playwright spec, fixture and `scripts/test-*` body whose verdict in `tests-plan.md` §1 is DELETE and which still exists, after re-checking the reason on the current file: source-text, transplant, stub unit test, test of a deleted feature, or exact duplicate of another kept test. Rows marked "carry" are deleted only when the carried case already exists in a kept behavioural test; otherwise they stay and are listed. |
+| E-formal | `quint:check`, `quint:tests` and `lemma:check` at 100 %: repair or delete models, manifests, harnesses and wrappers that pin code this change deleted (ledger "Pins left broken" rows), delete models whose code is gone (formal-plan §2.2), delete duplicate aggregate runners. No harness port. |
+| E-scripts | `scripts-plan.md` §1.1 "delete now" rows and S2 tombstones that still exist and have no caller. D22 stands. |
+| Follow-ups (listed in the PR, not done) | Journey and integration-folder consolidation (`tests-plan.md` §2), harness ports off source text (`formal-plan.md` §3), `scripts/lib` migration, large-file splits and foldering (stage F), Prettier. |
