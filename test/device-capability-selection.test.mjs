@@ -104,3 +104,11 @@ test('only the resident connection may negotiate the canonical Notes filter', ()
   assert.ok(!body('connectRemote').includes('NOTES_LIST_FILTER_CAPABILITY') && !body('connectCloud').includes('NOTES_LIST_FILTER_CAPABILITY'));
   assert.ok(!body('connectRemote').includes('notes.list-filter.v1') && !body('connectCloud').includes('notes.list-filter.v1'));
 });
+
+test('Files shown targets are offered only beside Files itself (FILE-04)', () => {
+  const offer = ['files.browser.v1', 'files.shown-target.v1'];
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, files: true}).slice(2), offer);
+  assert.deepEqual(selectDeviceCapabilities(['files.browser.v1'], {...apk, files: true}).slice(2), ['files.browser.v1']);
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, files: false}).slice(2), []);
+  assert.deepEqual(selectDeviceCapabilities(['files.shown-target.v1'], {...apk, files: true}).slice(2), []);
+});

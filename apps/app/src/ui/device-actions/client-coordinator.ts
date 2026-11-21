@@ -89,10 +89,12 @@ import {
 import {
   FILES_CAPABILITY,
   FILES_DIRECT_TYPES,
+  FILES_SHOWN_TARGET_CAPABILITY,
   type FilesAgentOperation,
   type FilesIdentity,
   filesContextAllowed,
   filesNeedsIdentity,
+  filesShownTarget,
   isFilesOperation,
   validateFilesOperation,
 } from "@elizaos/plugin-assistant/device-actions/files-browser-contract";
@@ -677,7 +679,7 @@ export class DeviceActionCoordinator<
   private reviewSequence = 0;
   private readonly filesReviews = new Map<
     string,
-    { digest: string; identities: FilesIdentity[] }
+    { digest: string; paths?: string[]; identities?: FilesIdentity[] }
   >();
   private proposals = new Map<
     string,
@@ -983,6 +985,12 @@ export class DeviceActionCoordinator<
       throw Error("Device library access was not negotiated with this agent");
     if (isFilesOperation(op) && !this.capability(FILES_CAPABILITY))
       throw Error("Files access was not negotiated with this agent");
+    if (
+      isFilesOperation(op) &&
+      filesShownTarget(op) &&
+      !this.capability(FILES_SHOWN_TARGET_CAPABILITY)
+    )
+      throw Error("Files shown items were not negotiated with this agent");
     if (
       isNotesOrganizeOperation(op) &&
       !this.capability(
@@ -1478,40 +1486,70 @@ export class DeviceActionCoordinator<
         }
         card = this.card(proposal, context, names);
       }
-      // A Files move or trash binds the identity of each file as the card shows
-      // it; whatever identity the agent sent is replaced.
+      // Shown positions resolve to the paths the card then shows. A Files move
+      // or trash binds the identity of each file as the card shows it; whatever
+      // identity the agent sent is replaced.
       let reviewed = proposal;
+      const files = proposal.operation;
       if (
-        isFilesOperation(proposal.operation) &&
-        filesNeedsIdentity(proposal.operation)
+        isFilesOperation(files) &&
+        (filesShownTarget(files) || filesNeedsIdentity(files))
       ) {
-        const op = proposal.operation;
         let operation: FilesAgentOperation | undefined;
         try {
           const before = this.filesReviews.get(proposal.id);
-          const identities =
-            before?.identities ??
-            (await this.ports.filesIdentity?.(op.paths, signal));
-          assertCurrentReview();
+          // The operation on the resolved paths; a missing path or identity refuses the card.
+          const resolve = (paths?: string[]) => {
+            // One path for each position, or the card would name other files.
+            if (filesShownTarget(files) && paths?.length !== files.shown.length)
+              throw Error("Shown files were not resolved");
+            const target = validateFilesOperation(
+              filesShownTarget(files)
+                ? {
+                    ...Object.fromEntries(
+                      Object.entries(files).filter(([key]) => key !== "shown"),
+                    ),
+                    paths,
+                  }
+                : files,
+            );
+            if (filesShownTarget(target))
+              throw Error("Shown files were not resolved");
+            return target;
+          };
+          const bind = (paths?: string[], identities?: FilesIdentity[]) => {
+            const target = resolve(paths);
+            if (!filesNeedsIdentity(target)) return target;
+            if (!identities) throw Error("Files identities were not read");
+            return validateFilesOperation({ ...target, reviewed: identities });
+          };
+          let paths = before?.paths;
+          if (filesShownTarget(files) && !paths) {
+            paths = await this.ports.filesShownPaths?.(files.shown, signal);
+            assertCurrentReview();
+          }
+          let identities = before?.identities;
+          const unbound = resolve(paths);
+          if (filesNeedsIdentity(unbound) && !identities) {
+            identities = await this.ports.filesIdentity?.(
+              unbound.paths,
+              signal,
+            );
+            assertCurrentReview();
+          }
           // Once a card has been shown, a refresh must not bind its approval to replacement files.
           const recorded = this.filesReviews.get(proposal.id);
-          if (
-            identities &&
-            (!recorded || recorded.digest === proposal.digest)
-          ) {
-            operation = validateFilesOperation({
-              ...op,
-              reviewed: recorded?.identities ?? identities,
-            });
-            if (
-              !recorded &&
-              isFilesOperation(operation) &&
-              filesNeedsIdentity(operation) &&
-              operation.reviewed
-            )
+          if (!recorded || recorded.digest === proposal.digest) {
+            operation = recorded
+              ? bind(recorded.paths, recorded.identities)
+              : bind(paths, identities);
+            if (!recorded)
               this.filesReviews.set(proposal.id, {
                 digest: proposal.digest,
-                identities: operation.reviewed,
+                ...(filesShownTarget(files) ? { paths } : {}),
+                ...(filesNeedsIdentity(operation) && operation.reviewed
+                  ? { identities: operation.reviewed }
+                  : {}),
               });
           }
         } catch {
@@ -1527,6 +1565,8 @@ export class DeviceActionCoordinator<
           continue;
         }
         reviewed = { ...proposal, operation };
+        // A card for shown items names the files they resolved to.
+        if (filesShownTarget(files)) card = this.card(reviewed, context);
       }
       this.proposals.set(proposal.id, {
         proposal: reviewed,
@@ -2020,8 +2060,9 @@ export class DeviceActionCoordinator<
       assertNotesQueryContext(context);
     if (
       isFilesOperation(reviewed.proposal.operation) &&
-      filesNeedsIdentity(reviewed.proposal.operation) &&
-      !reviewed.proposal.operation.reviewed
+      (filesShownTarget(reviewed.proposal.operation) ||
+        (filesNeedsIdentity(reviewed.proposal.operation) &&
+          !reviewed.proposal.operation.reviewed))
     )
       throw Error("Review these files again before making changes");
     const p = reviewed.proposal,

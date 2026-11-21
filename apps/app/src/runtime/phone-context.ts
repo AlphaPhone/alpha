@@ -3,7 +3,7 @@ import {canonicalNotesListContextAllowed,NOTES_LIST_FILTER_CAPABILITY} from '../
 import {parseClientTurnObservation,parseClientCalendarDayObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
 import {CAMERA_CAPTURE_CAPABILITY,CAMERA_LENS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
-import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+import {FILES_CAPABILITY,FILES_SHOWN_TARGET_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
 import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_OPEN_NEW_TAB_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
@@ -159,7 +159,8 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   // Browser chat reminders use the runtime scheduler; do not offer a second device-creation lifecycle.
   if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);
   for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
-  if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
+  // Shown positions on a share, move or trash resolve to the files on screen before review.
+  if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY,...(agent.includes(FILES_SHOWN_TARGET_CAPABILITY)?[FILES_SHOWN_TARGET_CAPABILITY]:[]));
   // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.
   for(const capability of [BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_HISTORY_CAPABILITY,...(native?[BROWSER_FIND_CAPABILITY]:[]),BROWSER_OPEN_NEW_TAB_CAPABILITY])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes('gmail.local-compose.v1'))capabilities.push('gmail.local-compose.v1');

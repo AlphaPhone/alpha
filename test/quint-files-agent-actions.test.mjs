@@ -38,6 +38,7 @@ async function fixture(compiled) {
   const screen = {view: 'home', sensitive: false, hidden: false, granted: true};
   let op = 'files_filter', authority = 'none', outcome = 'none', proposal = null, reviewed = false;
   let navigated = false, filtered = false, preview = false, shareSheet = false, identityCurrent = true;
+  let shown = false, resolved = false;
   const counts = {folders: 0, moved: 0, trashed: 0};
   const held = {select: null};
   const document = Object.assign(new EventTarget(), {querySelector: () => null});
@@ -116,13 +117,19 @@ async function fixture(compiled) {
     files_move: () => ({type: 'files_move', paths: [file.path], dest: 'Documents'}),
     files_trash: () => ({type: 'files_trash', paths: [file.path]}),
   };
+  // files.shown-target.v1: the same operations naming the first filter result instead of a path.
+  const shownOperations = {
+    files_share: () => ({type: 'files_share', shown: [1]}),
+    files_move: () => ({type: 'files_move', shown: [1], dest: 'Documents'}),
+    files_trash: () => ({type: 'files_trash', shown: [1]}),
+  };
   let pending = null;
   proposal = helpers.validateFilesOperation(operations[op]());
   return {
     observe: () => ({'s.op': op, 's.authority': authority, 's.view': screen.view, 's.sensitive': screen.sensitive,
       's.foreground': !screen.hidden, 's.granted': screen.granted, 's.reviewed': reviewed, 's.navigated': navigated,
       's.filtered': filtered, 's.preview': preview, 's.shareSheet': shareSheet, 's.folders': counts.folders,
-      's.moved': counts.moved, 's.trashed': counts.trashed, 's.outcome': outcome}),
+      's.moved': counts.moved, 's.trashed': counts.trashed, 's.outcome': outcome, 's.shown': shown, 's.resolved': resolved}),
     async scene(next, sensitive, foreground, granted) {
       if (screen.view === 'files' && next !== 'files') view.onLeave(api);
       Object.assign(screen, {view: next, sensitive, hidden: !foreground, granted});
@@ -130,7 +137,27 @@ async function fixture(compiled) {
     },
     propose(next) {
       op = next; proposal = helpers.validateFilesOperation(operations[next]()); reviewed = false; outcome = 'none';
-      navigated = filtered = preview = shareSheet = false; identityCurrent = true;
+      navigated = filtered = preview = shareSheet = false; identityCurrent = true; shown = resolved = false;
+    },
+    proposeShown(next) {
+      op = next; proposal = helpers.validateFilesOperation(shownOperations[next]()); reviewed = false; outcome = 'none';
+      navigated = filtered = preview = shareSheet = false; identityCurrent = true; shown = true; resolved = false;
+    },
+    /** Building the card resolves the positions with the runner (setFilesShownPaths), as the
+     * coordinator does, and reviews the operation on those paths. A position past the results
+     * shown resolves nothing. */
+    async resolveShown(found) {
+      const {shown: positions, ...rest} = found ? proposal : {...proposal, shown: [2]};
+      try {
+        const paths = await runner.shownPaths(positions, new AbortController().signal);
+        assert.deepEqual(paths, [file.path]);
+        proposal = helpers.validateFilesOperation({...rest, paths});
+        resolved = true;
+      } catch (error) {
+        assert.match(String(error), /Files does not show/);
+        resolved = false;
+      }
+      assert.equal(resolved, found);
     },
     /** Building the card reads each file's identity from the open Files view (setFilesReviewIdentity). */
     async bindIdentities() {
@@ -151,6 +178,13 @@ async function fixture(compiled) {
       pending = settled(mounted.run(proposal, crypto.randomUUID(), expected));
       for (let i = 0; i < 8 && !held.select; i++) await tick();
       if (!held.select) return this.finish();
+    },
+    /** The executor given a shown target that was never resolved, which no card offers. */
+    async runUnresolved() {
+      assert.ok('shown' in proposal);
+      const result = await settled(mounted.run(proposal, crypto.randomUUID(), contextNow()));
+      assert.equal(result.threw, null, result.summary);
+      return result;
     },
     releaseSelect() {held.select.resolve();},
     async finish() {
@@ -212,6 +246,33 @@ const scenarios = {
     await f.scene('files', false, true, true); step('Files open', call('scene', 'files', false, true, true, true));
     f.propose('files_folder_create'); step('folder proposed', call('propose', 'files_folder_create'));
     await f.begin('review'); step('approved, folder created', [call('approve'), call('createFolder', true)]);
+  },
+  'shown filter results resolve to the files a share opens': async (f, step) => {
+    await f.scene('files', false, true, true); step('Files open', call('scene', 'files', false, true, true, true));
+    await f.begin('request'); step('filter shows results', [call('runDirect'), call('showFilter')]);
+    f.settle(); step('settled', call('settle'));
+    f.proposeShown('files_share'); step('share of shown item 1 proposed', call('proposeShown', 'files_share'));
+    await f.resolveShown(true); step('card names the resolved file', call('resolveShown', true));
+    await f.begin('review'); step('approved, sheet opens', [call('approve'), call('share', true)]);
+  },
+  'a shown trash resolves, then binds the identity it reviews': async (f, step) => {
+    await f.scene('files', false, true, true); step('Files open', call('scene', 'files', false, true, true, true));
+    await f.begin('request'); step('filter shows results', [call('runDirect'), call('showFilter')]);
+    f.settle(); step('settled', call('settle'));
+    f.proposeShown('files_trash'); step('trash of shown item 1 proposed', call('proposeShown', 'files_trash'));
+    await f.resolveShown(true); step('positions resolve', call('resolveShown', true));
+    await f.bindIdentities(); step('card binds identities', call('bindIdentities'));
+    await f.begin('review'); step('approved and trashed', [call('approve'), call('transfer')]);
+  },
+  'a position Files does not show leaves no card': async (f, step) => {
+    await f.scene('files', false, true, true); step('Files open', call('scene', 'files', false, true, true, true));
+    f.proposeShown('files_share'); step('share of a shown item proposed', call('proposeShown', 'files_share'));
+    await f.resolveShown(false); step('nothing resolves', call('resolveShown', false));
+    // Defence in depth: the runner itself never acts on positions that were not resolved.
+    const result = await f.runUnresolved();
+    assert.equal(result.status, 'failed');
+    assert.equal(result.summary, 'Nothing changed because these files changed after review.');
+    assert.equal(f.observe()['s.shareSheet'], false, 'No share sheet for unresolved positions');
   },
   'a protected screen refuses a direct filter': async (f, step) => {
     await f.scene('files', true, true, true); step('protected screen', call('scene', 'files', true, true, true, true));
