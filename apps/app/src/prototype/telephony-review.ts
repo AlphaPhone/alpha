@@ -6,7 +6,7 @@
  * the app or a cancelled request chooses nothing. The rows render inside the chat card whose
  * approval is running (AP-16 D8: the proposal card is the one approval surface, never a modal).
  */
-import type {ContactDraft, ContactRecord, TelephonyReview} from '../runtime/telephony-executor';
+import {sameContactNumber, type ContactDraft, type ContactRecord, type TelephonyReview} from '../runtime/telephony-executor';
 import {displayNumber, initials} from './telephony-presenters';
 import type {BrowserTabChoice} from './browser-adapter';
 
@@ -28,12 +28,17 @@ export function askTelephonyReview(review: TelephonyReview | TabReview, signal: 
     pending = entry; signal.addEventListener('abort', abort, {once: true}); repaint();
   });
 }
-/** A contact's fields as lines; a line the change removes is struck, a line it adds is strong. */
+/**
+ * A contact's fields as lines; a line the change removes is struck, a line it adds is strong. A number
+ * is the same line written either way ("+14155550100", "(415) 555-0100"), an address without case.
+ */
 export function contactChangeLines(before: ContactRecord, after: ContactDraft): {text: string; struck: boolean; added: boolean}[] {
-  const was = [...before.phoneNumbers.map(row => displayNumber(row.number)), ...before.emailAddresses.map(row => row.address)];
-  const will = [...after.phoneNumbers.map(row => displayNumber(row.number)), ...after.emailAddresses.map(row => row.address)];
-  return [...was.filter(text => !will.includes(text)).map(text => ({text, struck: true, added: false})),
-    ...will.map(text => ({text, struck: false, added: !was.includes(text)}))];
+  const holds = (draft: ContactDraft, value: {number?: string; address?: string}) => value.number !== undefined
+    ? draft.phoneNumbers.some(row => sameContactNumber(row.number, value.number!))
+    : draft.emailAddresses.some(row => row.address.toLowerCase() === value.address!.toLowerCase());
+  const lines = (draft: ContactDraft) => [...draft.phoneNumbers.map(row => ({text: displayNumber(row.number), value: {number: row.number}})), ...draft.emailAddresses.map(row => ({text: row.address, value: {address: row.address}}))];
+  return [...lines(before).filter(line => !holds(after, line.value)).map(line => ({text: line.text, struck: true, added: false})),
+    ...lines(after).map(line => ({text: line.text, struck: false, added: !holds(before, line.value)}))];
 }
 /** Template values of the sheet for the review that is open, or `{open: false}`. */
 export function presentTelephonyReview(entry: Pending | null) {
