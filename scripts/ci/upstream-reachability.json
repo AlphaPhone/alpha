@@ -2,13 +2,13 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "0fc3586dce354d2c84f7b54da90cf5fcd29f71fc",
-  "head": "8aa6ed3d995b7e6f7fc226107a7bf4410fc617dc",
+  "baseCommit": "12a138c6f1d0f554dad0ccd136c1d7cd64ad2d37",
+  "head": "bde4f7695159549ea475a44fc8739e5d53e414bd",
   "recordedAt": "2026-11-21",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...8aa6ed3d995b7e6f7fc226107a7bf4410fc617dc",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...bde4f7695159549ea475a44fc8739e5d53e414bd",
   "status": "diverged",
-  "aheadBy": 19,
-  "behindBy": 70,
+  "aheadBy": 20,
+  "behindBy": 106,
   "mergeBase": "e66a28c3ea1b09fefaccb85d72486dada8f00758",
   "pinOnlyCommits": [
     {
@@ -86,6 +86,10 @@
     {
       "sha": "8aa6ed3d995b7e6f7fc226107a7bf4410fc617dc",
       "subject": "Reuse verified Calendar discovery in event reads"
+    },
+    {
+      "sha": "bde4f7695159549ea475a44fc8739e5d53e414bd",
+      "subject": "Route dictated free slots through the owner Calendar feed"
     }
   ],
   "pullRequests": [
