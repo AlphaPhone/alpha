@@ -1,18 +1,58 @@
 /**
- * Scheduled digests (resident briefs). The protocol client, the client-scoped result inbox, the
- * occurrence policy and the retained-brief selection are the shared upstream client
- * (`plugins/plugin-workflow/src/client/hosted-digests.ts`); the agent schedules through the durable
- * runtime scheduler and this app never runs a digest. Alpha keeps only its retained-brief binding
- * for Home: one store for the current connection and the `alpha:retained-digest` window event.
+ * Scheduled digests (resident briefs). The wire types, the result parser, the protocol client, the
+ * client-scoped result inbox, renewal and missed-occurrence selection are the shared upstream
+ * client (`plugins/plugin-workflow/src/client/hosted-digests.ts`); the agent schedules through the
+ * durable runtime scheduler and this app never runs a digest. What the owner reads (occurrence and
+ * loop state, summaries, the zone note and the retained brief) is Alpha's own
+ * (`../ui/digests/hosted-digests.ts`). Alpha keeps its retained-brief binding for Home: one store
+ * for the current connection and the `alpha:retained-digest` window event.
  */
 import {
   RetainedBriefStore,
-  type DigestResult,
-  type DigestSpec,
   type RetainedDigestSummary,
+} from '../ui/digests/hosted-digests.ts';
+import type {
+  DigestResult,
+  DigestSpec,
 } from '../../../../.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts';
 
-export * from '../../../../.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts';
+import {WorkflowHttpError} from '../../../../.eliza/client-features/packages/contracts/src/workflow-client.ts';
+
+export {
+  DIGEST_SOURCE_MAX_HOURS,
+  DigestInbox,
+  HostedDigestProtocol,
+  HostedSourceRejected,
+  digestRan,
+  digestRenewals,
+  missedRunNowMutationId,
+  missedRunNowOffers,
+  parseDigestResult,
+  type DigestCapabilities,
+  type DigestLoop,
+  type DigestResult,
+  type DigestSource,
+  type DigestSpec,
+  type DigestStorage,
+  type DigestTemplate,
+  type HostedLiveAccount,
+  type HostedLiveCalendar,
+  type HostedLiveSelection,
+  type HostedNativeSelection,
+  type MissedRunNow,
+} from '../../../../.eliza/client-features/plugins/plugin-workflow/src/client/hosted-digests.ts';
+export {
+  digestLoopState,
+  digestStatusLabel,
+  digestSummaryText,
+  digestZoneNote,
+  digestZoneChoices,
+  digestCalendarErrorText,
+  DIGEST_CALENDAR_PERMISSION_DENIED,
+  DIGEST_CALENDARS_UNAVAILABLE,
+  HOSTED_SOURCE_REJECTED_TEXT,
+  type RetainedDigestSummary,
+} from '../ui/digests/hosted-digests.ts';
 
 //@ skip
 const retained = new RetainedBriefStore();
@@ -37,6 +77,14 @@ export function bindRetainedDigestScope(scope: string | null): void {
  * occurrence never replaces the last brief on Home. Returns false when `scope` is not the bound one. */
 export function rememberRetainedDigests(results: DigestResult[] | null, agent = 'Your agent', scope?: string): boolean {
   return retained.remember(results, {agent, ...(scope === undefined ? {} : {scope})});
+}
+/** A stale schedule edit is refused before mutation, with all three reviewed identities echoed. */
+export function digestLoopEditRefused(body: Record<string, unknown>, error: unknown): boolean {
+  return error instanceof WorkflowHttpError && error.status === 409
+    && error.code === 'WORKFLOW_TYPED_NOT_APPLIED'
+    && error.workflowId !== undefined && error.workflowId === body.id
+    && error.mutationId !== undefined && error.mutationId === body.mutationId
+    && error.expectedVersionId !== undefined && error.expectedVersionId === body.expectedVersionId;
 }
 /** A saved request still in review never reached the agent, so it may be discarded. Once dispatched
  * only Retry is safe; a record from an older build has no phase and counts as dispatched. */

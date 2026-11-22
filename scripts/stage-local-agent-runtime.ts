@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {nativeViewDeclarationsJson} from './native-view-policy.ts';
+import {imageNativeViewDeclarationsJson,nativeViewDeclarationsJson} from './native-view-policy.ts';
 import {verifyNativeGoogleHostArtifact} from './native-google-host-artifact.ts';
 import {stageAgentBundleDependencies} from './agent-bundle-dependencies.ts';
 import {MOBILE_BUILD_RECEIPT,verifyMobileBuildReceipt} from './mobile-uuid-adapter.ts';
@@ -49,6 +49,7 @@ fs.copyFileSync(path.join(source,'packages/agent/dist-mobile',MOBILE_BUILD_RECEI
 fs.copyFileSync(path.join(source,'.alpha-runtime-source.json'),path.join(root,'android/app/src/main/assets/agent/alpha-source.json'));
 // Host configuration is separate from the authenticated, unmodified producer source.
 fs.writeFileSync(path.join(root,'android/app/src/main/assets/agent/native-view-declarations.json'),nativeViewDeclarationsJson);
+fs.writeFileSync(path.join(root,'android/app/src/main/assets/agent/image-native-view-declarations.json'),imageNativeViewDeclarationsJson);
 execFileSync(process.execPath,[path.join(root,'scripts/stage-workflow-worker.ts')],{cwd:root,env:process.env,stdio:'inherit'});
 // The one runtime profile: every staged runtime keeps its local embedding model.
 fs.writeFileSync(path.join(root,'android/app/src/main/assets/agent/alpha-runtime-profile.json'),JSON.stringify({version:1,runtimeProfile:'native'},null,2)+'\n');

@@ -1,7 +1,7 @@
 // Flag-off Android renderer: explicit native email sign-in, permission setup, resident binding,
 // cancellation, expiry and refusal. Synthetic native outcomes do not establish real authentication.
 import { test, expect, type Page } from '@playwright/test';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, openYourAgent } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface } from './flag-off-android';
 import { residentStub, stub, setStub, enterNativeEmailCode, type StubAccount } from './resident-stub';
 import { recordStartupFrames, expectNoHomeBeforePrompt, startupLoading } from './helpers/startup-frames';
 
@@ -129,14 +129,15 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   const { foreign, welcome } = await firstRun(page, {}, true);
   await enterNativeEmailCode(page);
   await expect(welcome).toHaveCount(0, { timeout: 30_000 });
-  // Fresh sign-in owns the original required sequence, with no Skip or automatic requests.
+  // Fresh sign-in follows the ordered access sequence, with explicit Skip and no automatic requests.
   const access=page.locator('dialog.alpha-startup-permissions');
   await expect(access).toBeVisible();
   expect(await page.evaluate(()=>(window as any).firstRunAccess.requests)).toEqual([]);
   await expect(access.getByRole('heading',{name:'Access',exact:true})).toBeVisible();
   for(const name of ['Notifications','Microphone','Camera','Location','Calendar','Photos','Files']) {
     await expect(access.locator('[aria-current=step]',{hasText:name})).toBeVisible();
-    await expect(access.getByRole('button',{name:/Skip|Not now|Back/})).toHaveCount(0);
+    await expect(access.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
+    await expect(access.getByRole('button',{name:/Not now|Back/})).toHaveCount(0);
     await access.getByRole('button',{name:'Allow',exact:true}).click();
   }
   await expect(access.getByRole('heading',{name:/^(All set|All set)$/})).toBeVisible();
@@ -171,9 +172,8 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   await ask.fill('First request after sign-in'); await ask.press('Enter');
   await expect(page.getByRole('button', { name: 'Message actions: Resident reply 1', exact: true })).toHaveCount(1);
   expect(await harness(page, f => f.streams)).toBe(1);
-  const settings=await openYourAgent(page);
-  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toBeVisible();
-  await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();
+  await page.getByRole('button', { name: 'Chat actions', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Search chat', exact: true })).toBeVisible();
   expect(await page.locator('body').innerText()).not.toContain(account.token);
   await expectNoDevelopmentSurface(page);
   const lifecycle=await page.evaluate(()=>(window as any).firstRunLifecycle) as Array<{path:string;method:string;ownerId:string;credentialId:string|null}>;

@@ -305,7 +305,10 @@ async function guidanceTargets(page, viewports) {
             } : null,
           };
         }, width > height);
-        assert.equal(targets.length, 9, 'Four guidance controls, Map information, three attribution links and status');
+        assert.equal(targets.length, 6, 'End navigation, Map information, three attribution links and status');
+        assert.equal(targets[0].label, 'End navigation');
+        for (const name of ['Reroute', 'Ask Alpha', 'Enable voice guidance', 'Mute voice guidance'])
+          await expect(button(page, name)).toHaveCount(0);
         for (const {label, owned} of targets) {
           assert.ok(owned.length && owned.every(Boolean), `${width}×${height} at ${percent}%: ${label} owns its sampled points`);
         }
@@ -343,24 +346,24 @@ async function reroute(page) {
   await route(page, t);
   await start(page, t);
   await geo(page, far);
-  await expect(status(page)).toContainText('Off route. Tap Reroute from here.');
-  const rerouteButton = button(page, 'Reroute');
-  await expect(rerouteButton).toBeVisible();
+  await expect(status(page)).toContainText('Off route. End navigation to plan a new route.');
+  await expect(button(page, 'Reroute')).toHaveCount(0);
+  await page.waitForFunction(() => !!window.closedMaps.agentPort.current);
   assert.equal((await requests(page)).filter(row => row.endpoint === 'routes').length, 1);
   await t.point('An off-route GPS fix preserves the historical service state pending an explicit choice', action('PositionFix'));
   const portrait = await guidanceTargets(page, [[412, 915], [360, 640]]);
   const landscape = await guidanceTargets(page, [[915, 412], [640, 360]]);
   await page.evaluate(() => {
-    window.closedMaps.routeRefusal = true;
-    document.addEventListener('pointerdown', event => {
-      const button = event.target.closest('button');
-      window.closedMaps.reroutePointer = {label: button?.textContent.trim(),
-        layer: event.target.closest('[data-alpha-layer]')?.getAttribute('data-alpha-layer')};
-    }, {capture: true, once: true});
+    const fixture = window.closedMaps;
+    fixture.routeRefusal = true;
+    fixture.explicitRerouteResult = null;
+    void fixture.agentPort.current.reroute().then(
+      value => {fixture.explicitRerouteResult = {ok: true, value};},
+      error => {fixture.explicitRerouteResult = {ok: false, code: error.code};});
   });
-  await rerouteButton.tap();
-  assert.deepEqual(await page.evaluate(() => window.closedMaps.reroutePointer),
-    {label: 'Reroute', layer: 'app'});
+  await page.waitForFunction(() => window.closedMaps.explicitRerouteResult !== null);
+  assert.deepEqual(await page.evaluate(() => window.closedMaps.explicitRerouteResult),
+    {ok: false, code: 'MAPS_PROVIDER_UNAVAILABLE'});
   await expect(button(page, 'End navigation')).toBeVisible();
   await expect(status(page)).toContainText('Cloud Maps is temporarily unavailable. Try again later.');
   await page.waitForFunction(() => window.closedMapsGeo.watches.size === 1);
@@ -379,8 +382,10 @@ async function reroute(page) {
 
 export async function mountClosedMaps(extraSources, runs, holdRouteReplies = false) {
   checkClientFeatures();
-  const watched = new Set([adapter, ...['maps-screen.ts', 'state.ts', 'cloud-provider.ts', 'cloud-session.ts']
-    .map(path => resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/'+path))]);
+  // The Maps view-model is Alpha's own module; the mounted page no longer loads the pinned client's copy.
+  const watched = new Set([adapter, ...['maps-screen.ts', 'cloud-provider.ts', 'state.ts'].map(path => resolve(root, 'apps/app/src/ui/maps/'+path)),
+    ...['cloud-provider.ts', 'cloud-session.ts']
+      .map(path => resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/'+path))]);
   if (holdRouteReplies) watched.add(resolve(root, '.eliza/client-features/plugins/plugin-maps/src/client/device-navigation.ts'));
   const sources = [...new Set([
     ...filesWithin(resolve(root, 'apps/app/src')), ...filesWithin(resolve(root, '.eliza/client-features')),
@@ -497,12 +502,12 @@ export async function mountClosedMaps(extraSources, runs, holdRouteReplies = fal
 }
 
 export async function checkMapsRefinement(extraSources = []) {
-  const {results, sources, driverHashes} = await mountClosedMaps(extraSources, [passiveOffline, offlineRecovery, guidance, reroute]);
+  const {results, sources, driverHashes} = await mountClosedMaps(extraSources, [passiveOffline, offlineRecovery, guidance, reroute], true);
   const shared = {model, modelPath, sources, driverHashes, scope: 'bounded-orchestration', assumptions: [
     'Actual flag-off Maps renderer, shared Maps screen/controller, Cloud provider and browser location run in Chromium. The account transport, external map style and precise fixes are closed synthetic ports. No geographic request leaves the fixture.',
     'Connection observations are scoped to the captured synthetic owner and its actual capability requests. The network, subscription and Cloud service facts are controlled inputs. Informational and unmodeled notices have no historical error category.',
     'The accepted Directions projection includes the owner entering explicit origin coordinates. The real Arrived projection checks the screen and released location separately from the accepted route retained in the arrival state.',
-    'Mounted hit tests cover guidance, Map information, attribution and status at two sizes per orientation and two text scales. Landscape checks the right-docked assistant and taps Map information. Portrait taps Reroute and observes its exact admission.',
+    'Mounted hit tests cover End navigation, Map information, attribution and status at two sizes per orientation and two text scales. Landscape retains the right-docked assistant and Map information disclosure hit tests. Removed manual reroute, Maps voice and Ask controls remain absent. Explicit reroute uses the registered agent navigation port and observes its refusal, exact provider request and retained guidance; remote command authentication is a separate obligation.',
     'Calendar return, native background service, remote agent requests, installed permission flow and fairness are independent obligations.',
   ]};
   const receipt = await checkTraces({...shared, traces: results.map(result => result.trace)});

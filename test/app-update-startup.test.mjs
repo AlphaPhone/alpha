@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {supportsAppUpdateStartup,waitForAppUpdateStartup} from '../.eliza/client-features/packages/ui/src/state/app-update-gate.ts';
+import {supportsAppUpdateStartup,waitForAppUpdateStartup} from '../apps/app/src/ui/state/app-update-gate.ts';
 
 const activationId = '11111111-2222-4333-8444-555555555555';
 const bridgeId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';

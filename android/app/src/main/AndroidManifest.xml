@@ -81,7 +81,7 @@
  <!-- Already merged from the location plugin; declared here so the location service type is checked against them. -->
  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
- <application android:name=".AlphaApplication" android:label="@string/app_name" android:icon="@drawable/app_icon" android:roundIcon="@drawable/app_icon" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="false" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:requestLegacyExternalStorage="true" android:theme="@style/AppTheme">
+ <application android:name=".AlphaApplication" android:label="@string/app_name" android:icon="@drawable/app_icon" android:roundIcon="@drawable/app_icon" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="false" android:enableOnBackInvokedCallback="true" android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:requestLegacyExternalStorage="true" android:theme="@style/AppTheme">
   <meta-data android:name="ai.alphacompute.alphaphone.UPDATE_CHANNEL" android:value="${alphaUpdateChannel}" />
   <meta-data android:name="ai.alphacompute.alphaphone.UPDATE_MANIFEST_SHA256" android:value="${alphaUpdateManifestSha256}" />
   <service android:name=".ElizaAgentService" android:exported="false" android:foregroundServiceType="specialUse">
@@ -96,22 +96,33 @@
    <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="false"/>
   </service>
   <service android:name=".AlphaNoteRecordingService" android:exported="false" android:foregroundServiceType="microphone" />
-  <activity android:name=".AlphaMailPdfActivity" android:exported="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:label="PDF attachment" />
+  <activity android:name=".AlphaMailPdfActivity" android:exported="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:label="@string/alpha_mail_pdf_label" />
   <service android:name=".IsolatedPdfService" android:exported="false" android:isolatedProcess="true" android:process=":isolated_pdf" android:stopWithTask="true" />
   <!-- Release-build data integrity export for pilot updates: per-file HMAC digests only, read-only,
        in its own process, readable only with the platform DUMP permission (adb shell). -->
   <provider android:name=".release.DataIntegrityProvider" android:authorities="${applicationId}.integrity" android:exported="true" android:permission="android.permission.DUMP" android:process=":integrity" android:grantUriPermissions="false" />
   <provider android:name="ai.eliza.plugins.filesystem.browser.ReadOnlyStorageFileProvider" android:authorities="${applicationId}.storage" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/storage_paths"/></provider>
   <provider android:name=".AlphaMailFileProvider" android:authorities="${applicationId}.mailattachments" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/mail_attachment_paths"/></provider>
-  <service android:name=".AlphaNotificationListener" android:label="Alpha Phone selected notifications" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+  <service android:name=".AlphaNotificationListener" android:label="@string/alpha_notification_listener_label" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
    <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
   </service>
   <!-- Alpha's password vault as an Android Autofill provider. The user selects it in Android's own
-       confirmation; Alpha never sets secure settings. The vault lives in the no-backup directory. -->
-  <service android:name="ai.eliza.plugins.passwords.ElizaPasswordAutofillService" android:label="@string/eliza_passwords_service_label" android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+       confirmation; Alpha never sets secure settings. The vault lives in the no-backup directory.
+       The service keeps its installed component name: Android keeps the selected provider by that
+       name and a service has no alias, so renaming it would unselect Alpha on update. It draws only
+       the offer row, from Alpha's string (eliza_passwords.xml points at alpha_passwords.xml). -->
+  <service android:name="ai.eliza.plugins.passwords.ElizaPasswordAutofillService" android:label="@string/alpha_passwords_service_label" android:exported="true" android:permission="android.permission.BIND_AUTOFILL_SERVICE">
    <intent-filter><action android:name="android.service.autofill.AutofillService"/></intent-filter>
-   <meta-data android:name="android.autofill" android:resource="@xml/eliza_passwords_autofill_service"/>
+   <meta-data android:name="android.autofill" android:resource="@xml/alpha_passwords_autofill_service"/>
   </service>
+  <!-- Alpha's own fill picker and save prompt replace the shared screens. The shared names stay as
+       aliases of Alpha's screens: the Autofill service's one-shot fill and save tokens name them. -->
+  <activity android:name="ai.eliza.plugins.passwords.PasswordFillActivity" tools:node="remove" />
+  <activity android:name="ai.eliza.plugins.passwords.PasswordSaveActivity" tools:node="remove" />
+  <activity android:name=".PasswordFillActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density" android:theme="@style/AlphaPasswords.Theme.Dialog" />
+  <activity android:name=".PasswordSaveActivity" android:exported="false" android:excludeFromRecents="true" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density" android:theme="@style/AlphaPasswords.Theme.Dialog" />
+  <activity-alias android:name="ai.eliza.plugins.passwords.PasswordFillActivity" android:targetActivity=".PasswordFillActivity" android:exported="false" />
+  <activity-alias android:name="ai.eliza.plugins.passwords.PasswordSaveActivity" android:targetActivity=".PasswordSaveActivity" android:exported="false" />
   <receiver android:name=".AlphaUpdateStatusReceiver" android:exported="false" />
   <receiver android:name=".ReminderReceiver" android:exported="false">
    <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/><action android:name="android.intent.action.TIME_SET"/><action android:name="android.intent.action.TIMEZONE_CHANGED"/></intent-filter>
@@ -128,7 +139,7 @@
        Cold entry is surface-only; no intent filter or extra can authorize microphone capture. -->
   <activity android:name=".AlphaPowerVoiceActivity" android:enabled="false" android:exported="false" android:permission="android.permission.STATUS_BAR_SERVICE" android:launchMode="singleTask" android:taskAffinity="${applicationId}.assistant" android:excludeFromRecents="true" android:screenOrientation="${appOrientation}" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density|navigation" android:theme="@style/AppTheme.Launch" />
   <!-- Unfinished Reset Alpha data (#409). Own process: none of Alpha's providers or startup initializers run there. -->
-  <activity android:name=".ResetRecoveryActivity" android:exported="false" android:process=":reset_recovery" android:taskAffinity="${applicationId}.reset" android:excludeFromRecents="true" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="Reset Alpha data" />
+  <activity android:name=".ResetRecoveryActivity" android:exported="false" android:process=":reset_recovery" android:taskAffinity="${applicationId}.reset" android:excludeFromRecents="true" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_reset_recovery_label" />
   <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="${appOrientation}" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density|navigation" android:theme="@style/AppTheme.Launch">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
    <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="alphaphone" android:host="cloud-delegation"/></intent-filter>
@@ -143,5 +154,10 @@
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/auth/callback"/></intent-filter>
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/gmail/callback"/></intent-filter>
   </activity>
+  <!-- Cloud returns an in-app checkout or balance top-up to /alphaphone/billing/return (cloud-plans.ts), on every Cloud.
+       Opening the app is the whole job; the renderer then confirms the checkout. -->
+  <activity-alias android:name=".AlphaCloudBillingReturn" android:targetActivity=".MainActivity" android:enabled="true" android:exported="true">
+   <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/billing/return"/></intent-filter>
+  </activity-alias>
  </application>
 </manifest>

@@ -6,12 +6,11 @@ from pathlib import Path
 import re
 import subprocess
 
-REPOSITORY = "eliza-research/alpha"
+REPOSITORY = "alphacompute/alpha"
 REPOSITORY_ID = 1396333361
 WORKFLOW = ".github/workflows/resident-android.yml"
 WORKFLOW_ID = 373209004
 CANDIDATE_PACKAGE = "ai.alphacompute.alphaphone"
-RETAINED_PACKAGE = "ai.elizaresearch.alphaphone"
 CANDIDATE = "github-main-candidate"
 PRIVATE_RUNNER = "root-reviewed-private-runner"
 HOSTED_DISPATCH = "github-dispatch"
@@ -53,6 +52,7 @@ def positive_id(value):
 
 
 def producer_kind(plan):
+    require("rotation" not in plan, "Signing plans carry no signing-key rotation: Alpha signs with one key")
     if "producerKind" not in plan:
         require(plan.get("privateStorage") is None and not CANDIDATE_FIELDS.intersection(plan) and
                 "privateProducerReceiptSHA256" not in plan, "Mixed producer routes")
@@ -76,23 +76,41 @@ def producer_kind(plan):
 
 
 def input_contract(plan):
-    """Bind every immutable archive input, including the retained Cloud pair."""
-    kind = producer_kind(plan)
+    """Bind every immutable archive input: the one launcher APK."""
+    producer_kind(plan)
     pins = plan.get("unsignedApkSHA256")
     require(isinstance(pins, dict), "Missing unsigned APK pins")
-    if kind == PRIVATE_RUNNER and set(pins) == {"standalone", "launcher"}:
-        require(plan.get("applicationId", RETAINED_PACKAGE) == RETAINED_PACKAGE,
-                "Historical Cloud pair requires its retained identity")
-        return {"variants": ("standalone", "launcher"), "runtimeProfile": "cloud",
-                "packageName": RETAINED_PACKAGE}
-    require(set(pins) == {"launcher"}, "Unexpected release variants")
+    require(set(pins) == {"launcher"}, "Unexpected release variants: only the launcher APK is signed")
     package = plan.get("applicationId", CANDIDATE_PACKAGE)
-    require(package == CANDIDATE_PACKAGE or
-            kind == PRIVATE_RUNNER and package == RETAINED_PACKAGE and
-            plan.get("purpose") == "retained-installation-update",
-            "Unsupported native installation identity")
+    require(package == CANDIDATE_PACKAGE, "Unsupported installation identity: Alpha releases only its own app id")
     return {"variants": ("launcher",), "runtimeProfile": "native",
             "packageName": package}
+
+
+class RetiredSignerRecord(ValueError):
+    """android/release-signer.json carries a retired field that must be removed."""
+
+
+def retired_signer_problems(descriptor):
+    """Alpha version 49 phones are wiped, not upgraded in place (owner decision 2026-11-15): one
+    signing key and no rotation. A standalone pin left in an existing approval is inert, since
+    input_contract admits launcher-only plans. scripts/release-signer-record.ts is the same rule."""
+    problems = []
+    if not isinstance(descriptor, dict):
+        return problems
+    if "apkSigningRotation" in descriptor:
+        problems.append("android/release-signer.json still has apkSigningRotation; Alpha no longer rotates its "
+                        "signing key for version 49 phones. Delete the apkSigningRotation object "
+                        "from android/release-signer.json.")
+    return problems
+
+
+def require_current_signer_record(descriptor):
+    """Refuse a signer record with a retired field instead of ignoring it."""
+    problems = retired_signer_problems(descriptor)
+    if problems:
+        raise RetiredSignerRecord(" ".join(problems))
+    return descriptor
 
 
 def release_contract(plan):
@@ -131,8 +149,7 @@ def validate_private_storage(plan):
 
 def apk_member_limit(kind, contract=None):
     private_native = kind == PRIVATE_RUNNER and contract is not None and \
-        contract.get("runtimeProfile") == "native" and \
-        contract.get("packageName") in (CANDIDATE_PACKAGE, RETAINED_PACKAGE)
+        contract.get("runtimeProfile") == "native" and contract.get("packageName") == CANDIDATE_PACKAGE
     return MAX_ARCHIVE_BYTES if kind == CANDIDATE or private_native else LEGACY_APK_MEMBER_BYTES
 
 
@@ -163,7 +180,7 @@ def verify_github_candidate(plan, api, artifact=None):
             run["event"] == "push" and run["head_branch"] == "main" and run["head_sha"] == source and
             run["workflow_id"] == WORKFLOW_ID and run["path"] == WORKFLOW and
             run["status"] == "completed" and run["conclusion"] == "success" and
-            all(run[key]["id"] == REPOSITORY_ID and run[key]["full_name"] == REPOSITORY
+            all(run[key]["id"] == REPOSITORY_ID and run[key]["full_name"].lower() == REPOSITORY
                 for key in ("repository", "head_repository")), "Candidate producer run attempt differs")
     artifact_id = plan["artifactId"]
     if artifact is None:
@@ -227,11 +244,17 @@ def download_github_archive(plan, destination):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("kind", "github", "download"))
+    parser.add_argument("mode", choices=("kind", "github", "download", "signer-record"))
     parser.add_argument("plan", type=Path)
     parser.add_argument("destination", type=Path, nargs="?")
     args = parser.parse_args()
     try:
+        if args.mode == "signer-record":
+            try:
+                require_current_signer_record(decode(args.plan.read_bytes()))
+            except RetiredSignerRecord as error:
+                parser.exit(1, f"Release signer record refused: {error}\n")
+            raise SystemExit(0)
         plan = json.loads(args.plan.read_text())
         kind = producer_kind(plan)
         if args.mode == "kind":

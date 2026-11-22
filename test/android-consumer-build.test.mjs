@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // Alpha's launcher APKs are built by the pinned upstream consumer build orchestration
 // (AP-02). These checks run that orchestration with Alpha's options and a stand-in for Gradle
 // and the verifier; they assemble no APK and are not APK, emulator or device evidence.
@@ -15,6 +16,7 @@ const SIGNING = Object.fromEntries(SIGNING_ENV.map(name => [name, `value-of-${na
 function build(t, {environment = {}, signed = false, release = true} = {}) {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-consumer-build-'));
  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+ fs.copyFileSync(new URL('../app.config.json',import.meta.url),path.join(root,'app.config.json'));
  const env = buildEnv({PATH: process.env.PATH, ...environment});
  const consumer = consumerBuildOptions(env, root, undefined, {release});
  const calls = [], seen = [];
@@ -49,7 +51,7 @@ function build(t, {environment = {}, signed = false, release = true} = {}) {
 
 const gradleCalls = calls => calls.filter(call => call.command === './gradlew');
 
-test('a release build assembles the launcher APKs and instrumentation, lints and verifies them flag-off', t => {
+fixtureTest('a release build assembles the launcher APKs and instrumentation, lints and verifies them flag-off', t => {
  const f = build(t, {environment: {ELIZA_DEV_ALLOW_TEST_MOCKS: '1', VITE_ELIZA_DEV_ALLOW_TEST_MOCKS: '1'}});
  const [gradle] = gradleCalls(f.calls);
  assert.equal(gradleCalls(f.calls).length, 1);
@@ -69,7 +71,7 @@ test('a release build assembles the launcher APKs and instrumentation, lints and
  const {createdAt, ...record} = f.seen[0].record;
  assert.ok(!Number.isNaN(Date.parse(createdAt)));
  const updateChannel={kind:'public',manifestUrlSha256:createHash('sha256').update(JSON.parse(fs.readFileSync('app.config.json','utf8')).updateManifestUrl).digest('hex')};
- assert.deepEqual(record, {testMocks: false, release: true, runtimeProfile: 'native', updateChannel, mapsProvider: 'cloud', signingRequested: false, versionOverride: {code: null, name: null}});
+ assert.deepEqual(record, {testMocks: false, release: true, runtimeProfile: 'native', applicationId: 'ai.alphacompute.alphaphone', updateChannel, mapsProvider: 'cloud', signingRequested: false, versionOverride: {code: null, name: null}});
  assert.deepEqual(f.result.files.map(file => path.basename(file)), ['launcher-debug.apk', 'launcher-release-unsigned.apk']);
 });
 

@@ -21,6 +21,8 @@ final class CloudDeployment {
  static final String STAGING_API_HOST = "api-staging.eliza.app";
  static final String STAGING_WEB_HOST = "staging.eliza.app";
  static final String STAGING_SERVICES_HOST = "cloud-staging.eliza.app";
+ /** Alpha Cloud cutover: in-app plans, the native billing authority, Stripe and referral routes. */
+ static final boolean ALPHA_CLOUD_CUTOVER = false;
  static final String STORAGE_NAMESPACE = "cloud-deployment:897efc6f09b9d4db345c61226d8301a9f1257ad98f0491e8591f63d4f4515874:";
  static String storageSlot(String name) {
   return name != null && (name.startsWith("cloud:") || name.startsWith("cloud-signin:") || name.equals("local-agent-provider:v1")) ? STORAGE_NAMESPACE + name : name;

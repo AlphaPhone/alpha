@@ -14,6 +14,9 @@ const messages = {
   '': '', 'Run started.': 'started', Saved: 'saved',
   'Another run was already in progress.': 'raced', 'Choose a valid time.': 'invalid-time', 'Choose a time and at least one day.': 'invalid-time',
   'This item did not run. Read its current status before trying again.': 'not-run',
+  // Alpha's words for each non-fired kind (ui/workflows/automation-run-messages.ts scheduledFireText).
+  'Your agent couldn’t deliver this item yet. It will try again later.': 'not-run',
+  'Your agent couldn’t deliver this item, so it did not run.': 'not-run',
   Unknown: 'unknown', 'Pick a time and day': 'invalid-time',
   'Scheduled items could not refresh. Retry to check the current records.': 'source-unavailable',
 };
@@ -105,6 +108,9 @@ export async function checkScheduledTaskControls() {
   await scenario('a failed schedule source blocks even a review that was already open', [
     ['open'], ['pick', 'fire'], ['chooseCatalog', 'failed'], ['refresh'], confirm,
     ['chooseCatalog', 'available'], ['refresh'], ['pick', 'fire'], ['cancelReview'],
+  ]);
+  await scenario('releasing one owner\'s unconfirmed request keeps the other owner\'s request', [
+    ...openRun, ['answer', 'wrong-id'], ['switchOwner'], ...openRun, ['answer', 'wrong-id'], ['release', true],
   ]);
   await scenario('a previous owner response cannot acknowledge its retained request', [
     ...openRun, ['switchOwner'], ['answer', 'exact'], ['open'],

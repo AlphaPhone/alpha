@@ -96,8 +96,9 @@ for(const scenario of ['ready','rejected','late','mock-ready','mock-retire-rejec
    await unentered();
    await page.evaluate(()=>(window as any).deliveryFixture.mockReleases.unscoped());await unentered();
    await page.evaluate(()=>(window as any).deliveryFixture.mockReleases.notifications());await unentered();
-   // Only the original active session retirement is still held here.
-   expect(await page.evaluate(()=>(window as any).deliveryFixture.removed)).toEqual([]);
+   // AP-16 retires only the local stage cache here. Connection/account data must
+   // remain untouched while the original active session retirement is held.
+   expect(await page.evaluate(()=>(window as any).deliveryFixture.removed)).toEqual(['stage-session:v1']);
    await page.evaluate(()=>(window as any).deliveryFixture.mockReleases.scoped());
    if(scenario==='mock-retire-rejected'){
     await expect(page.getByText('Live background activity could not be paused. Retry before opening mock mode.',{exact:true})).toBeVisible();await unentered();

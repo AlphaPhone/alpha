@@ -49,6 +49,51 @@ public final class BrowserExternalHandoffInstrumentedTest {
  @Test public void privateHandoffRequiresExplicitReviewAndTransfersNoProfileData()throws Exception{
   org.junit.Assume.assumeTrue("Private tabs need secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true);
  }
+ /** A tapped phone link in a private tab asks "Leave private browsing?" first; the dial pad opens
+  * only after Open app. In a normal tab the same tap opens it at once. The dial pad is intercepted. */
+ @Test public void privateTabPhoneLinkAsksBeforeOpeningTheDialer()throws Exception{
+  org.junit.Assume.assumeTrue("Private tabs need secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));
+  tappedPhoneLink(true);
+ }
+ @Test public void normalTabPhoneLinkOpensTheDialerAtOnce()throws Exception{tappedPhoneLink(false);}
+ private void tappedPhoneLink(boolean priv)throws Exception{
+  String session=UUID.randomUUID().toString(),link="tel:+15550100";AtomicReference<AlphaBrowserPlugin> plugin=new AtomicReference<>();AtomicReference<Object> tab=new AtomicReference<>();AtomicReference<Intent> outgoing=new AtomicReference<>();
+  Instrumentation instrumentation=InstrumentationRegistry.getInstrumentation();
+  Class<?> tabType=Class.forName(AlphaBrowserPlugin.class.getName()+"$Tab");
+  Method handoff=AlphaBrowserPlugin.class.getDeclaredMethod("handoff",tabType,String.class,boolean.class);handoff.setAccessible(true);
+  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   AppNavigation.liveMode();
+   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
+    AlphaBrowserPlugin p=(AlphaBrowserPlugin)activity.getBridge().getPlugin("AlphaBrowser").getInstance();plugin.set(p);
+    Method build=AlphaBrowserPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
+    Object t=build.invoke(p,"phone",priv,priv?AlphaBrowserPlugin.PRIVATE_PREFIX+session.replace("-",""):AlphaBrowserPlugin.PERSISTENT_PROFILE);tab.set(t);
+    set(p,"session",session);set(p,"presentedId","phone");set(t,"url",URL);set(t,"navigation",7L);set(t,"committed",true);set(t,"lastCommittedUrl",URL);
+   }catch(Exception failure){throw new AssertionError(failure);}});
+   Instrumentation.ActivityMonitor monitor=new Instrumentation.ActivityMonitor(){@Override public Instrumentation.ActivityResult onStartActivity(Intent intent){outgoing.set(new Intent(intent));return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null);}};
+   instrumentation.addMonitor(monitor);
+   try{
+    // A link that opened without a tap is blocked in either tab and asks nothing.
+    BoundedActivityScenario.main(()->{try{handoff.invoke(plugin.get(),tab.get(),link,false);assertNull("No question without a tap",get(plugin.get(),"siteDialog"));}catch(Exception failure){throw new AssertionError(failure);}});
+    instrumentation.waitForIdleSync();assertNull(outgoing.get());
+    BoundedActivityScenario.main(()->{try{handoff.invoke(plugin.get(),tab.get(),link,true);}catch(Exception failure){throw new AssertionError(failure);}});
+    instrumentation.waitForIdleSync();
+    if(priv){
+     assertNull("A private tab opens nothing before the owner answers",outgoing.get());
+     AtomicReference<AlertDialog> question=new AtomicReference<>();
+     BoundedActivityScenario.main(()->{try{question.set((AlertDialog)get(plugin.get(),"siteDialog"));}catch(Exception failure){throw new AssertionError(failure);}});
+     assertNotNull("Leave private browsing? is showing",question.get());
+     BoundedActivityScenario.main(()->{assertTrue(question.get().isShowing());question.get().getButton(DialogInterface.BUTTON_NEGATIVE).performClick();});
+     instrumentation.waitForIdleSync();assertNull("Cancel opens nothing",outgoing.get());
+     BoundedActivityScenario.main(()->{try{handoff.invoke(plugin.get(),tab.get(),link,true);question.set((AlertDialog)get(plugin.get(),"siteDialog"));}catch(Exception failure){throw new AssertionError(failure);}});
+     instrumentation.waitForIdleSync();assertNotNull(question.get());assertNull(outgoing.get());
+     BoundedActivityScenario.main(()->question.get().getButton(DialogInterface.BUTTON_POSITIVE).performClick());
+     instrumentation.waitForIdleSync();
+    }
+    Intent dial=outgoing.getAndSet(null);assertNotNull("The dial pad was asked to open",dial);
+    assertEquals(link,dial.getDataString());assertNull("No page data goes with the link",dial.getClipData());
+   }finally{instrumentation.removeMonitor(monitor);}
+  }
+ }
  private void exercise(boolean priv)throws Exception{
   String session=UUID.randomUUID().toString();AtomicReference<AlphaBrowserPlugin> plugin=new AtomicReference<>();AtomicReference<WebView> web=new AtomicReference<>();AtomicReference<Object> tab=new AtomicReference<>();AtomicReference<Intent> outgoing=new AtomicReference<>();
   Instrumentation instrumentation=InstrumentationRegistry.getInstrumentation();CountDownLatch loaded=new CountDownLatch(1);
@@ -56,7 +101,7 @@ public final class BrowserExternalHandoffInstrumentedTest {
    AppNavigation.liveMode();
    WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
     AlphaBrowserPlugin p=(AlphaBrowserPlugin)activity.getBridge().getPlugin("AlphaBrowser").getInstance();plugin.set(p);
-    Method build=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
+    Method build=AlphaBrowserPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
     Object t=build.invoke(p,"handoff",priv,priv?AlphaBrowserPlugin.PRIVATE_PREFIX+session.replace("-",""):AlphaBrowserPlugin.PERSISTENT_PROFILE);tab.set(t);
     web.set((WebView)get(t,"web"));WebViewClient original=web.get().getWebViewClient();
     web.get().setWebViewClient(new WebViewClient(){

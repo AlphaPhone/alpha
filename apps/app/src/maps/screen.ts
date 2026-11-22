@@ -1,1 +1,1 @@
-export * from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/maps-screen.ts';
+export * from '../ui/maps/maps-screen';

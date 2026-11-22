@@ -31,10 +31,10 @@ const picked = picks => Object.fromEntries(Object.entries(picks ?? {})
  * `{action, picks, state}` where `action` is '' for a stuttering step and `state` is the model
  * state after the step. The first entry is the initial state.
  */
-export function modelTraces({family = 'application', module, traces = 40, steps = 30, seed = 20261107, state = 's'}) {
+export function modelTraces({family = 'application', module, traces = 40, steps = 30, seed = 20261107, state = 's', step = 'step'}) {
   const directory = mkdtempSync(join(tmpdir(), 'alpha-quint-replay-'));
   try {
-    const result = spawnSync(process.execPath, [cli, 'run', `specs/quint/${family}/${module}.qnt`, `--main=${module}`,
+    const result = spawnSync(process.execPath, [cli, 'run', `specs/quint/${family}/${module}.qnt`, `--main=${module}`, `--step=${step}`,
       '--backend=typescript', `--seed=${seed}`, `--max-samples=${traces}`, `--n-traces=${traces}`,
       `--max-steps=${steps}`, '--invariant=safety', '--mbt', `--out-itf=${join(directory, 'trace-{seq}.itf.json')}`],
     {cwd: root, encoding: 'utf8', timeout: scaledTimeout(120000)});

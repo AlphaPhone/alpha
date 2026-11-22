@@ -25,12 +25,12 @@ function fixture({DeviceMapsNavigation, MapsController, SavedPlaces}, {granted =
   return {nav, controller, surface, calls, retire() { current = false; nav.retire(); }};
 }
 export async function mapsRefinement() {
-  const sources = ['apps/app/src/maps/device-navigation.ts', '.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts', 'apps/app/src/maps/cloud-provider.ts', '.eliza/client-features/plugins/plugin-maps/src/client/state.ts', 'specs/quint/refinement/services/maps.mjs', 'specs/quint/refinement/services/support.mjs'];
+  const sources = ['apps/app/src/maps/device-navigation.ts', '.eliza/client-features/plugins/plugin-maps/src/client/navigation-fix.ts', 'apps/app/src/maps/cloud-provider.ts', 'apps/app/src/ui/maps/state.ts', 'specs/quint/refinement/services/maps.mjs', 'specs/quint/refinement/services/support.mjs'];
   let driverHashes = captureInputs(sources);
   const capture = inputs => { sources.push(...inputs.filter(input => !sources.includes(input))); const next = captureInputs(sources); for (const [path, hash] of Object.entries(driverHashes)) assert.equal(next[path], hash, `Source changed before import: ${path}`); driverHashes = next; };
   const {DeviceMapsNavigation} = await sourceModule('apps/app/src/maps/device-navigation.ts', {}, capture);
   const {createCloudMaps} = await sourceModule('apps/app/src/maps/cloud-provider.ts', {}, capture);
-  const {MapsController} = await sourceModule('.eliza/client-features/plugins/plugin-maps/src/client/state.ts', {}, capture);
+  const {MapsController} = await sourceModule('apps/app/src/ui/maps/state.ts', {}, capture);
   const {SavedPlaces} = await sourceModule('.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts', {}, capture);
   const classes = {DeviceMapsNavigation, MapsController, SavedPlaces};
   const traces = [];
@@ -44,7 +44,8 @@ export async function mapsRefinement() {
     if (permitted && fresh) actions.push(action('receiveFix', true));
     actions.push(action('requestRoute'));
     if (result.state !== 'awaiting-location') actions.push(action('routeReply', 1, 0, true));
-    if (result.state === 'navigating') actions.push(action('allowDirectStart'), action('agentStart'));
+    // An agent request never starts guidance, even with direct start offered by the host.
+    assert.notEqual(result.state, 'navigating', 'agent navigation leaves Start to the user');
     trace.steps.push({label: 'actual navigation checks permission and fix before planning', action: actions, expect: {'s.guidance': f.surface.guidance() !== null, 's.route': f.controller.snapshot().route.phase === 'ready' ? 1 : 0, 's.phase': result.state === 'awaiting-confirmation' ? 'ready' : result.state}});
     const stopped = await f.nav.stop();
     trace.steps.push({label: 'real Stop releases guidance', action: action('stop'), expect: {'s.phase': stopped.state, 's.guidance': f.surface.guidance() !== null}});

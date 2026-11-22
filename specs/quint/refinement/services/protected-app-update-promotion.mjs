@@ -71,7 +71,7 @@ function checkWorkflows() {
     '$' + '{{ needs.admit-publication.outputs.source_commit }}');
   const reverify = jobs.publish.steps.find(runs('run android:verify --'));
   assert.match(reverify?.run ?? '', /application_id=\$\(jq -er '\.packageName'[\s\S]*export ALPHA_ANDROID_APPLICATION_ID="\$application_id"[\s\S]*cd qualified-product[\s\S]*bun scripts\/android-host\.ts[\s\S]*bun run android:verify --/);
-  assert.ok(reverify?.run.includes('scripts/ci/verify-qualified-cloud-launcher.py'));
+  assert.equal(reverify?.run.includes('verify-qualified-cloud-launcher'), false, 'every publication reverifies with android:verify');
   assert.equal(JSON.parse(read('package.json')).scripts['android:verify'], 'bun scripts/verify-apks.ts');
   const qualifiedRow = jobs.publish.steps.find(step => step.name === 'Require the qualified launcher release row before publication');
   const publication = jobs.publish.steps.find(step => step.name === 'Publish launcher APK first and anonymously verify the stable pointer');
@@ -125,9 +125,9 @@ function publicFixture(directory, launcherBytes, version) {
           wait: async () => {},
           run(args) {
             if (args[0] === 'api') {
-              assert.deepEqual(args, ['api', 'repos/eliza-research/alpha']);
+              assert.deepEqual(args, ['api', 'repos/alphacompute/alpha']);
               return JSON.stringify({id: 1396333361,
-                full_name: 'eliza-research/alpha', private: false});
+                full_name: 'alphacompute/alpha', private: false});
             }
             if (args[0] !== 'release') assert.fail('Unexpected command: ' + args.join(' '));
             if (args[1] === 'view' && args[2] === LEGACY_APP_UPDATE_TAG) {
@@ -212,7 +212,7 @@ export async function checkProtectedAppUpdatePromotion(extraSources = []) {
     fileURLToPath(import.meta.url), python, release, producer, 'package.json',
     'scripts/app-update-candidate.ts', 'scripts/ci/verify-cloud-signing-input.sh',
     'scripts/ci/admit-cloud-signing-input.py', 'scripts/ci/app_update_producer.py', 'scripts/ci/private-apk-storage.py',
-    'scripts/ci/qualified-app-update.py', 'scripts/ci/verify-qualified-cloud-launcher.py', 'scripts/verify-apks.ts', 'scripts/sign-release-apks.ts',
+    'scripts/ci/qualified-app-update.py', 'scripts/verify-apks.ts', 'scripts/sign-release-apks.ts',
     'scripts/deliver-app-update.ts', 'scripts/update-artifact.ts', 'scripts/update-channel.ts', 'scripts/publish-update-manifest.ts',
     'test/cloud-signing-input.test.py', 'test/qualified-app-update.test.py', ...extraSources,
   ];

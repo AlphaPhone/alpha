@@ -16,11 +16,8 @@ for(const legacy of [null,{kind:'remote',origin:'https://agent.example.test'},{k
  await expect(chooser.getByRole('button',{name:'Continue',exact:true})).toBeVisible();
  await expect(page.getByLabel('Pairing code',{exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:/Connect remote|Dedicated|Create agent|Connect personal/})).toHaveCount(0);
- // #406: a saved hosted agent becomes the resident agent; the old choice is moved aside, not deleted.
- if(legacy){
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual({kind:'resident'});
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.legacy-hosted-selection.v1')!))).toEqual([legacy]);
- }
+ // #406: a saved hosted agent is never reconnected; the stored choice is left as it was.
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual(legacy??{kind:'none'});
  expect(await page.evaluate(()=>localStorage.getItem('alpha.connection.conversations.v1'))).toBe(JSON.stringify({'legacy-owner-a':'conversation-a','legacy-owner-b':'conversation-b'}));
  await page.reload();await expect(chooser).toBeVisible();
  expect(outside).toEqual([]);

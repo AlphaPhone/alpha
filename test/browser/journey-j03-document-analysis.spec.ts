@@ -11,7 +11,7 @@ import {openLegacyNotes} from './helpers/legacy-notes';
  *  2. Files -> Internal storage -> open the saved document -> "Ask Alpha" -> review/trim the excerpt ->
  *     "Use in conversation" -> Send.
  *  3. "Review summary note": Cancel saves nothing; then edit and "Save reviewed note".
- *  4. Reload: the note persists once with its source reference; "Open linked source" opens the
+ *  4. Reload: the note persists once with its source reference; tapping the attachment opens the
  *     exact source document.
  *  5. The source bytes change: the reference fails closed and opens nothing.
  *  6. The source file is deleted in Files: the reference fails closed and the note is unchanged.
@@ -43,7 +43,7 @@ test.setTimeout(300_000);
 const contents='Public fact: twelve raised beds.\nPRIVATE OMIT: do not send this line.';
 const excerpt='Public fact: twelve raised beds.';
 const reply='The report says there are twelve raised beds.';
-const failClosed='Source missing';
+const failClosed='Couldn’t open the linked file.';
 
 // READ-ONLY views of persisted state.
 const notes=(page:Page)=>page.evaluate(async()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records as any[]);
@@ -54,12 +54,12 @@ const ready=(page:Page)=>expect(page.getByRole('button',{name:'Settings',exact:t
 async function openLinkedSource(page:Page){
  await returnToApps(page);
  await openLegacyNotes(page);
- await page.getByRole('button',{name:'Open Garden summary',exact:true}).click();
- await page.getByRole('button',{name:'Attachment',exact:true}).click();
- const source=page.getByRole('dialog',{name:'Note source document'});
- await expect(source).toContainText('garden-report.txt');
- await source.getByRole('button',{name:'Open linked source',exact:true}).click();
- return source;
+ const row=page.getByRole('button',{name:'Open Garden summary',exact:true});
+ const attachment=page.getByRole('button',{name:'Attachment',exact:true});
+ await expect(row.or(attachment).first()).toBeVisible();
+ if(!await attachment.isVisible())await row.click();
+ await expect(page.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Garden summary');
+ await attachment.click();
 }
 
 test('J03: an Inbox attachment is saved to Files, analysed, and kept as a reviewed note whose source link opens the source and fails closed when it changes or is deleted',async({page})=>{
@@ -105,8 +105,10 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  await page.getByRole('button',{name:'Files',exact:true}).click();
  await page.getByRole('button',{name:'Internal storage',exact:true}).click();
  await page.getByRole('button',{name:'Open garden-report.txt',exact:true}).click();
- await expect(page.getByText('PRIVATE OMIT: do not send this line.',{exact:true})).toBeVisible();
+ await expect(page.locator('[data-alpha-files-text]')).toHaveText(contents);
+ await page.getByRole('button',{name:'File actions',exact:true}).click();
  await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ await page.getByRole('button',{name:/^Edit excerpt from /}).click();
  const question=page.getByRole('dialog',{name:'Ask about selected content'});
  await expect(question.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(contents);
  await expect(question.getByRole('checkbox',{name:'Link source'})).toBeChecked();
@@ -159,7 +161,7 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  // Storage agrees (secondary check).
  expect(await notes(page)).toEqual(retained);
  expect((await files(page)).map(e=>e.name)).toEqual(['garden-report.txt']);
- let source=await openLinkedSource(page);
+ await openLinkedSource(page);
  const preview=page.getByRole('dialog',{name:'Reviewed attachment'});
  await expect(preview).toContainText('garden-report.txt');
  await expect(preview).toContainText('PRIVATE OMIT: do not send this line.');
@@ -167,16 +169,14 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  await expect(preview.getByRole('button',{name:'Save to Files',exact:true})).toHaveCount(0);
  await preview.getByRole('button',{name:'Done',exact:true}).click();
  await expect(preview).toHaveCount(0);
- await source.getByRole('button',{name:'Done',exact:true}).click();
 
  // ---- 5. The stored source bytes change: the reference fails closed ----
  // External-change simulation (see header): no rendered control edits stored bytes in place.
  await page.evaluate(()=>new Promise<void>((resolve,reject)=>{const open=indexedDB.open('alpha.browser.files.v1');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result,tx=db.transaction('entries','readwrite'),store=tx.objectStore('entries'),all=store.getAll();all.onsuccess=()=>{const row=all.result.find((r:any)=>r.name==='garden-report.txt');row.bytes=new TextEncoder().encode('Public fact: thirteen raised beds.').buffer;row.size=row.bytes.byteLength;store.put(row);};tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};};}));
- source=await openLinkedSource(page);
- await expect(source.getByRole('status')).toHaveText(failClosed);
+ await openLinkedSource(page);
+ await expect(page.getByText(failClosed,{exact:true})).toBeVisible();
  await expect(preview).toHaveCount(0);
  expect(await notes(page)).toEqual(retained);
- await source.getByRole('button',{name:'Done',exact:true}).click();
 
  // ---- 6. The source file is deleted in Files: the reference fails closed ----
  await returnToApps(page);
@@ -191,10 +191,9 @@ test('J03: an Inbox attachment is saved to Files, analysed, and kept as a review
  await page.getByRole('button',{name:'Empty',exact:true}).click();await page.getByRole('dialog',{name:'Empty Trash?',exact:true}).getByRole('button',{name:'Empty',exact:true}).click();
  await expect(page.getByRole('button',{name:'garden-report.txt',exact:true})).toHaveCount(0);
  expect((await files(page)).filter(e=>!e.name.startsWith('.'))).toEqual([]);
- source=await openLinkedSource(page);
- await expect(source.getByRole('status')).toHaveText(failClosed);
+ await openLinkedSource(page);
+ await expect(page.getByText(failClosed,{exact:true})).toBeVisible();
  await expect(preview).toHaveCount(0);
- await source.getByRole('button',{name:'Done',exact:true}).click();
  await page.reload();await ready(page);
  // The note and its recorded provenance survive; only the link's target is gone.
  expect(await notes(page)).toEqual(retained);

@@ -10,12 +10,12 @@ import {pathToFileURL} from 'node:url';
 import {tsImport} from './support/ts-import.mjs';
 const BASE=resolve(import.meta.dirname,'..');
 const temp=await mkdtemp(join(tmpdir(),'alpha-required-onboarding-')),bridge=pathToFileURL(join(temp,'bridge.mjs')).href,connection=pathToFileURL(join(temp,'connection.mjs')).href,style=pathToFileURL(join(temp,'style.mjs')).href;
-await writeFile(new URL(bridge),`export const Capacitor={getPlatform:()=>globalThis.requiredPlatform||'web',get PluginHeaders(){return globalThis.requiredHeaders;}};export function registerPlugin(name){return new Proxy({},{get:(_,method)=>(...args)=>globalThis.requiredPorts[name][method](...args)});}`);
+await writeFile(new URL(bridge),`export const Capacitor={getPlatform:()=>globalThis.requiredPlatform||'web'};export function registerPlugin(name){return new Proxy({},{get:(_,method)=>(...args)=>globalThis.requiredPorts[name][method](...args)});}`);
 await writeFile(new URL(connection),`export const connectionController={subscribe:()=>()=>{},getSnapshot:()=>globalThis.requiredConnection};const listeners=new Set();globalThis.requiredGoogleListeners=listeners;export const googleConnectionController={subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getSnapshot:()=>globalThis.requiredGoogle===true};`);await writeFile(new URL(style),'export{}');
 const hooks=registerHooks({resolve(name,ctx,next){if(name==='@capacitor/core'||name==='./platform-plugins')return {url:bridge,shortCircuit:true};if(/(?:^|\/)(?:google-)?connection-ui(?:\.tsx?)?(?:\?.*)?$/.test(name))return {url:connection,shortCircuit:true};if(name.split('?')[0].endsWith('.css'))return {url:style,shortCircuit:true};return next(name,ctx);}});
 const options={parentURL:import.meta.url,tsconfig:join(BASE,'tsconfig.json')};
 const {StartupPermissions}=await tsImport(pathToFileURL(BASE+'/apps/app/src/startup-permissions.tsx').href,options),{browserStartupPermission}=await tsImport(pathToFileURL(BASE+'/apps/app/src/startup-browser-permissions.ts').href,options),{readStartupPermissionProgress,writeStartupPermissionProgress,startupPermissionProgressKey}=await tsImport(pathToFileURL(BASE+'/apps/app/src/startup-permission-progress.ts').href,options),{STARTUP_PERMISSIONS_REOPEN}=await tsImport(pathToFileURL(BASE+'/apps/app/src/startup-permission-flow.ts').href,options);hooks.deregister();test.after(()=>rm(temp,{recursive:true,force:true}));
-async function fixture(t,{native=false,denied=false,unsupported=false,legacy=null,durable=null,writeFailure=false,badLocation=false,deniedLocation=false,connection={},active=true,deferStatus=false,holdInitialStatus=false}={}){
+async function fixture(t,{native=false,imageDefaults=false,denied=false,unsupported=false,legacy=null,durable=null,writeFailure=false,badLocation=false,deniedLocation=false,connection={},active=true,deferStatus=false,holdInitialStatus=false}={}){
  const dom=new JSDOM('<div id="root"></div>',{url:'https://required.invalid',pretendToBeVisual:true}),saved={};for(const key of ['window','document','localStorage','sessionStorage','Event','CustomEvent','dispatchEvent','navigator','Notification','IS_REACT_ACT_ENVIRONMENT','requiredPlatform','requiredPorts','requiredConnection','requiredGoogle'])saved[key]=Object.getOwnPropertyDescriptor(globalThis,key);
  for(const [key,value]of Object.entries({window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage,sessionStorage:dom.window.sessionStorage,Event:dom.window.Event,CustomEvent:dom.window.CustomEvent,dispatchEvent:e=>dom.window.dispatchEvent(e),IS_REACT_ACT_ENVIRONMENT:true,requiredPlatform:native?'android':'web',requiredGoogle:false,requiredConnection:{cloudAccount:{credentialId:'fixture',email:'owner@example.invalid'},open:false,...connection}}))Object.defineProperty(globalThis,key,{value,writable:true,configurable:true});
  dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
@@ -23,7 +23,7 @@ async function fixture(t,{native=false,denied=false,unsupported=false,legacy=nul
  let holding=holdInitialStatus;const read=value=>holding?new Promise(done=>held.push(()=>done(value))):value;
  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{userAgent:'Alpha required onboarding fixture',permissions:{async query({name}){return {state:state[name==='geolocation'?'location':name]?'granted':'denied'};}},mediaDevices:{async getUserMedia(input){calls.push({kind:'media',input});return {getTracks:()=>[{stop(){calls.push({kind:'track-stop'});}}]};}},geolocation:{getCurrentPosition(ok){calls.push({kind:'location'});ok({coords:{latitude:1,longitude:1}});}}}});
  Object.defineProperty(globalThis,'Notification',{configurable:true,value:unsupported?{}:{get permission(){return typeof state.notifications==='string'?state.notifications:state.notifications?'granted':'denied';},async requestPermission(){calls.push({kind:'notifications-request'});return state.notifications?'granted':'denied';}}});
- globalThis.requiredPorts={AlphaNotifications:{async status(){return read({permissionGranted:state.notifications,appEnabled:state.notifications});}},DailyApps:{async checkPermissions(){return read({camera:state.camera?'granted':'denied'});},async requestPermissions(input){calls.push({kind:'native-request',input});},async addListener(event,fn){if(event==='appResumed')resumed.push(fn);return {async remove(){}};}},AlphaVoiceCloud:{async checkPermissions(){return read({microphone:state.microphone?'granted':'denied'});},async requestPermissions(input){calls.push({kind:'native-request',input});}},ElizaLocation:{async checkPermissions(){return read({location:state.location?'granted':'denied',accuracy:state.location?state.accuracy:'none'});},async requestPermissions(){calls.push({kind:'native-location'});}},AlphaCalendar:{async checkPermissions(){return read({calendar:state.calendar?'granted':'denied'});},async requestAccess(){calls.push({kind:'calendar-access'});}},AlphaPhotoLibrary:{async scope(){return read({scope:state.photos,locked:false});},async requestAccess(){calls.push({kind:'photos-access'});}},AlphaDevice:{async openSettings(input){calls.push({kind:'settings',input});}},AlphaFiles:{async storageState(){return read({status:'ready',access:state.files});},async storageRequestAccess(options){calls.push({kind:'files-access',options});if(state.grantFilesOnReturn)state.files='granted';return read({status:'ready',access:state.files});}}};
+ globalThis.requiredPorts={DeviceApps:{async platformCapabilities(){return {startupPermissionDefaults:imageDefaults};}},AlphaNotifications:{async status(){return read({permissionGranted:state.notifications,appEnabled:state.notifications});}},DailyApps:{async checkPermissions(){return read({camera:state.camera?'granted':'denied'});},async requestPermissions(input){calls.push({kind:'native-request',input});},async addListener(event,fn){if(event==='appResumed')resumed.push(fn);return {async remove(){}};}},AlphaVoiceCloud:{async checkPermissions(){return read({microphone:state.microphone?'granted':'denied'});},async requestPermissions(input){calls.push({kind:'native-request',input});}},ElizaLocation:{async checkPermissions(){return read({location:state.location?'granted':'denied',accuracy:state.location?state.accuracy:'none'});},async requestPermissions(){calls.push({kind:'native-location'});}},AlphaCalendar:{async checkPermissions(){return read({calendar:state.calendar?'granted':'denied'});},async requestAccess(){calls.push({kind:'calendar-access'});}},AlphaPhotoLibrary:{async scope(){return read({scope:state.photos,locked:false});},async requestAccess(){calls.push({kind:'photos-access'});}},AlphaDevice:{async openSettings(input){calls.push({kind:'settings',input});}},AlphaFiles:{async storageState(){return read({status:'ready',access:state.files});},async storageRequestAccess(options){calls.push({kind:'files-access',options});if(state.grantFilesOnReturn)state.files='granted';return read({status:'ready',access:state.files});}}};
  if(denied)state.notifications=false;
  if(legacy)sessionStorage.setItem('alpha:startup-permission-progress:v1',JSON.stringify(legacy));if(durable)localStorage.setItem(startupPermissionProgressKey,JSON.stringify(durable));
  localStorage.setItem('alpha.startup-permissions.v1',JSON.stringify({dismissed:true,attempted:{camera:true}}));
@@ -35,7 +35,7 @@ async function fixture(t,{native=false,denied=false,unsupported=false,legacy=nul
 }
 test('the required permission order leads to Ready and Home without an immediate exit',async t=>{
  const f=await fixture(t);let homes=0;window.addEventListener('launcher-home',()=>homes++);
- for(const title of ['Notifications','Microphone','Camera','Location']){assert.equal(f.heading(),title);assert(![...document.querySelectorAll('button')].some(x=>/Skip|Not now|Back/.test(x.textContent)));assert.equal(document.querySelector('.alpha-startup-header'),null);await f.click('Continue');}
+ for(const title of ['Notifications','Microphone','Camera','Location']){assert.equal(f.heading(),title);assert(![...document.querySelectorAll('button')].some(x=>/Not now|Back/.test(x.textContent)));assert.equal(document.querySelector('.alpha-startup-header'),null);await f.click('Continue');}
  assert.equal(f.heading(),'All set');assert.equal(f.calls.length,0);await f.click('Done');assert.equal(document.querySelector('dialog'),null);assert.equal(homes,1);assert.deepEqual(f.progress(),{version:1,status:'completed',step:4});assert.deepEqual(JSON.parse(localStorage.getItem('alpha.startup-permissions.v1')).attempted,{camera:true});await f.remount();assert.equal(document.querySelector('dialog'),null);
 });
 test('denied native permission stays on required step, blocks dismissal, and settings never repeats its prompt',async t=>{
@@ -108,14 +108,14 @@ test('explicit sign-in Ready preserves a completed legacy installation without f
 });
 
 
-test('blocked access exposes a per-step skip after 20 seconds and completed choices survive refresh and auth',async t=>{
+test('known blocked access exposes skip immediately and completed choices survive refresh and auth',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});
  const f=await fixture(t,{denied:true});
- assert.equal(document.querySelector('.alpha-permission-skip'),null);
+ assert(f.button('Skip'));
  await f.click('Check');assert.match(document.body.textContent,/Still off/);assert.doesNotMatch(document.body.textContent,/skip this step/);
- await React.act(async()=>t.mock.timers.tick(19999));assert.equal(document.querySelector('.alpha-permission-skip'),null);
+ await React.act(async()=>t.mock.timers.tick(19999));assert(f.button('Skip'));
  await React.act(async()=>t.mock.timers.tick(1));await f.click('Skip');
- assert.equal(f.heading(),'Microphone');assert.equal(document.querySelector('.alpha-permission-skip'),null);
+ assert.equal(f.heading(),'Microphone');assert(f.button('Skip'));
  assert.deepEqual(f.progress().choices,['skipped']);
  await f.remount();assert.equal(f.heading(),'Microphone');
  for(let i=0;i<3;i++){await React.act(async()=>t.mock.timers.tick(20000));await f.click('Skip');}
@@ -204,7 +204,7 @@ test('a failed completion write is retried by Done',async t=>{
 const completed={version:1,status:'completed',step:4};
 test('Settings review of completed setup closes at once by button, Escape or back and never rewrites completion',async t=>{
  const f=await fixture(t,{durable:completed});assert.equal(f.dialog(),null);
- await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue','Close']);assert.deepEqual(f.progress(),completed);
+ await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue','Skip','Close']);assert.deepEqual(f.progress(),completed);
  await f.click('Continue');assert.equal(f.heading(),'Microphone');assert.deepEqual(f.progress(),completed);
  await f.click('Close');assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);
  await f.reopen();assert.equal(f.heading(),'Notifications');await f.cancel();assert.equal(f.dialog(),null);
@@ -218,12 +218,12 @@ test('a targeted review of completed setup closes on Escape without rewriting co
  const f=await fixture(t,{durable:completed});await f.reopen('camera');assert.equal(f.heading(),'Camera');assert.equal(f.buttons().includes('Close'),false);await f.cancel();assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);
 });
 test('an unfinished walkthrough reopened from Settings stays required: no Close, Escape and back keep it open',async t=>{
- const f=await fixture(t,{active:false});assert.equal(f.dialog(),null);await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue']);
+ const f=await fixture(t,{active:false});assert.equal(f.dialog(),null);await f.reopen();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.buttons(),['Continue','Skip']);
  await f.cancel();await f.back();assert.equal(f.heading(),'Notifications');assert.deepEqual(f.progress(),{version:1,status:'pending',step:0});
 });
 test('a Settings review with one permission denied stops on it, can be left or skipped, and keeps completion',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});const f=await fixture(t,{durable:completed});f.state.camera=false;
- await f.reopen();for(let i=0;i<2;i++)await f.click('Continue');assert.equal(f.heading(),'Camera');assert.deepEqual(f.buttons(),['Check','Continue','Close']);
+ await f.reopen();for(let i=0;i<2;i++)await f.click('Continue');assert.equal(f.heading(),'Camera');assert.deepEqual(f.buttons(),['Check','Continue','Skip','Close']);
  await f.click('Check');assert.equal(f.heading(),'Camera');assert.deepEqual(f.progress(),completed);
  await f.remount();assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);
  await f.reopen();for(let i=0;i<2;i++)await f.click('Continue');assert.equal(f.heading(),'Camera');
@@ -243,23 +243,40 @@ test('appResumed and visibilitychange together re-read access once each and neve
  f.state.notifications=false;f.state.microphone=false;await f.resume();assert.equal(f.held.length,14);
  await f.settle(f.held.splice(0));assert.equal(f.heading(),'Microphone');assert(f.button('Settings'));assert.deepEqual(f.progress(),before);assert.equal(f.calls.length,0);
 });
-const imageHeaders=[{name:'AlphaTelephony',methods:[{name:'imageCapability'}]}];
-test('Alpha image: access granted at first boot needs no tap and requests nothing',async t=>{
- globalThis.requiredHeaders=imageHeaders;t.after(()=>{delete globalThis.requiredHeaders;});
- const f=await fixture(t,{native:true});let homes=0;window.addEventListener('launcher-home',()=>homes++);
- assert.equal(f.heading(),'All set');assert.equal(document.querySelector('.alpha-permission-rows'),null);assert.equal(f.calls.length,0);
- assert.deepEqual(f.progress(),{version:4,status:'completed',step:7});await f.click('Done');assert.equal(document.querySelector('dialog'),null);assert.equal(homes,1);
+test('Alpha image: first boot with all access granted goes Home without a dialog or a request',async t=>{
+ const f=await fixture(t,{native:true,imageDefaults:true,holdInitialStatus:true,connection:{accountCreated:true,residentInference:'unknown'}});
+ let homes=0;window.addEventListener('launcher-home',()=>homes++);
+ assert.equal(f.dialog(),null);
+ await f.settle(f.held.splice(0));
+ assert.equal(f.dialog(),null);assert.equal(homes,1);assert.equal(f.calls.length,0);
+ const completed={version:4,status:'completed',step:7};
+ assert.deepEqual(f.progress(),completed);
+ await f.reopen();
+ assert.equal(f.heading(),'Notifications');assert(f.button('Continue'));
+ await f.click('Close');assert.equal(f.dialog(),null);assert.deepEqual(f.progress(),completed);assert.equal(homes,1);
 });
 test('Alpha image: a row that is off still stops and asks; the rows before it pass',async t=>{
- globalThis.requiredHeaders=imageHeaders;t.after(()=>{delete globalThis.requiredHeaders;});
- const f=await fixture(t,{native:true,deniedLocation:true});
+ const f=await fixture(t,{native:true,imageDefaults:true,deniedLocation:true});
  assert.equal(f.heading(),'Location');assert(f.button('Settings'));assert.equal(f.calls.length,0);assert.equal(f.progress().step,3);
 });
-
+test('Alpha image: pregranted permissions do not hide sign-in warnings',async t=>{
+ const f=await fixture(t,{native:true,imageDefaults:true,connection:{previousSignInUnconfirmed:true,message:'Signed in · check devices'}});
+ assert.equal(f.heading(),'All set');assert.match(f.dialog().textContent,/Check sign-in/);
+ assert.equal(document.querySelector('.alpha-permission-rows'),null);assert.equal(f.calls.length,0);
+ assert.deepEqual(f.progress(),{version:4,status:'completed',step:7});
+});
+test('Alpha image: a sign-in warning can still arrive after automatic permission setup',async t=>{
+ const f=await fixture(t,{native:true,imageDefaults:true,connection:{busy:true}});
+ assert.equal(f.dialog(),null);
+ globalThis.requiredConnection={...globalThis.requiredConnection,busy:false,error:'Cloud binding could not be verified.'};
+ await f.setActive(true);
+ assert.equal(f.heading(),'All set');assert.match(f.dialog().textContent,/Cloud binding could not be verified/);
+ assert.equal(document.querySelector('.alpha-permission-rows'),null);assert.equal(f.calls.length,0);
+});
 
 test('Alpha image: a stalled first access read exposes Checking and Skip after twenty seconds',async t=>{
- t.mock.timers.enable({apis:['setTimeout']});globalThis.requiredHeaders=imageHeaders;t.after(()=>{delete globalThis.requiredHeaders;});
- const f=await fixture(t,{native:true,denied:true,holdInitialStatus:true});
+ t.mock.timers.enable({apis:['setTimeout']});
+ const f=await fixture(t,{native:true,imageDefaults:true,denied:true,holdInitialStatus:true});
  assert.equal(f.dialog(),null);assert.equal(f.held.length,7);assert.equal(f.calls.length,0);
  await React.act(async()=>t.mock.timers.tick(19999));assert.equal(f.dialog(),null);
  await React.act(async()=>t.mock.timers.tick(1));assert.equal(f.heading(),'Notifications');assert(f.button('Checking').disabled);assert(f.button('Skip'));

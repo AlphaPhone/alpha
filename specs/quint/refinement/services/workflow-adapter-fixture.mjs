@@ -17,8 +17,10 @@ export const wait = async (ready, label = 'The workflow adapter did not settle.'
  * The real workflow adapter in the renderer fixture its own tests use, over a caller-supplied agent
  * client and a storage object that outlives the adapter. `restart()` mounts a new adapter over the
  * same storage, as a new app process does; the earlier one is left where it stopped.
+ * `controller` adds or replaces connection-controller ports (such as the phone-step ports) and
+ * `globals` replaces renderer globals before the adapter is evaluated.
  */
-export async function workflowAdapter({client, storage = {}, rewrite}) {
+export async function workflowAdapter({client, storage = {}, rewrite, account = null, controller: ports = {}, globals = {}}) {
   const {workflowRendererFixture} = await import('../../../../scripts/workflow-renderer-fixture.ts');
   const protocol = await import('../../../../apps/app/src/runtime/workflow-protocol.ts');
   const contract = await import('../../../../apps/app/src/runtime/workflow-device-contract.ts');
@@ -29,24 +31,38 @@ export async function workflowAdapter({client, storage = {}, rewrite}) {
     {ownKeys: () => Object.keys(storage), getOwnPropertyDescriptor: () => ({configurable: true, enumerable: true})});
   const mount = () => {
     const toasts = [];
-    let view = 'workflows';
+    let view = 'workflows', signedIn = account;
+    const connectionListeners = new Set();
     const api = {isActive: () => true, track: () => '', kx: () => 0, toast: message => toasts.push(message), ic: {clock: '', check: ''}};
     class Shell { live = true; renderVals() { return {}; } componentDidMount() {} componentWillUnmount() {} componentDidUpdate() {} S() { return {view}; } vset() {} vget() { return {}; } api() { return api; } openView(next) { view = next; } toast(message) { toasts.push(message); } }
     const views = {workflows: {automationsManaged: true}};
-    const controller = {getWorkflowClient: () => ({sessionId: session.sessionId, scope: 'scope', client}), getSnapshot: () => ({session, open: false, busy: false, startupResolved: true}), subscribe: () => () => {}, open() {}, workflowNoticeActions: async () => [], getWorkflowDeviceTarget: () => null};
+    const controller = {
+      getWorkflowClient: () => ({sessionId: session.sessionId, scope: 'scope', client}),
+      getSnapshot: () => ({session, cloudAccount: signedIn ? {environment: 'production', userId: signedIn} : null,
+        open: false, busy: false, startupResolved: true}),
+      subscribe(listener) { connectionListeners.add(listener); return () => connectionListeners.delete(listener); },
+      open() {}, workflowNoticeActions: async () => [], getWorkflowDeviceTarget: () => null,
+      ...ports,
+    };
     const context = workflowRendererFixture({WorkflowAdmissionRejected: protocol.WorkflowAdmissionRejected, WorkflowMetadataRejected: protocol.WorkflowMetadataRejected, WorkflowLifecycleRejected: protocol.WorkflowLifecycleRejected,
       resolveWorkflowTap: contract.resolveWorkflowTap, readyTapStep: contract.readyTapStep, tapRecheck: contract.tapRecheck,
       Capacitor: {isNativePlatform: () => true, getPlatform: () => 'android'}, connectionController: controller, localStorage, queueMicrotask, AbortController, Date, console});
     // Native plugins stay inert: notices and taps are outside these models.
     context.registerPlugin = () => new Proxy({}, {get: (_target, name) => name === 'addListener' ? async () => ({remove() {}}) : async () => ({})});
+    // A caller may replace fixture globals the adapter reads, such as the foreground document or the alphaClient context.
+    Object.assign(context, globals);
     vm.runInNewContext(stripTypeScriptTypes(source, {mode: 'strip'}), context);
     context.install(Shell, views);
     const shell = new Shell(); shell.componentDidMount();
-    return {render: () => views.workflows.render({}, api), back: () => views.workflows.back(), leave: () => views.workflows.onLeave(), toasts, close: () => shell.componentWillUnmount()};
+    const signIn = next => {
+      signedIn = next;
+      for (const listener of [...connectionListeners]) listener();
+    };
+    return {render: () => views.workflows.render({}, api), signIn, back: () => views.workflows.back(), leave: () => views.workflows.onLeave(), toasts, close: () => shell.componentWillUnmount()};
   };
   let mounted = mount();
   const stopped = [];
-  return {get render() { return mounted.render; }, back: () => mounted.back(), leave: () => mounted.leave(), get toasts() { return mounted.toasts; }, storage, protocol,
+  return {get render() { return mounted.render; }, signIn: next => mounted.signIn(next), back: () => mounted.back(), leave: () => mounted.leave(), get toasts() { return mounted.toasts; }, storage, protocol,
     restart() { stopped.push(mounted); mounted = mount(); },
     /** Unmounts every adapter of this fixture so its timers end. Call once, after the last observation. */
     close() { for (const adapter of [...stopped, mounted]) adapter.close(); }};

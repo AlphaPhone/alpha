@@ -1,3 +1,4 @@
+import {fixtureTest} from './support/fixture-build-context.mjs';
 // Alpha's Android host is data for the pinned upstream generator (AP-02). These checks run the
 // real generator against a temporary copy of the descriptor's inputs; they do not run Gradle and
 // are not APK, emulator or device evidence.
@@ -12,6 +13,8 @@ import {RESIDENT_NOTIFICATION_CLASSES, residentHelperKind, residentHostIdentity,
 import {HOST_DESCRIPTOR, PATCHED_NATIVE_ROOT, hostIdentity, hostProfile, mapReferences, readHostDescriptor, stageOwnerRouteAsset} from '../scripts/android-host.ts';
 
 import {serializeOwnerRouteTable} from '../apps/app/src/product/owner-route-table.ts';
+import {androidIdentity, RETAINED_ANDROID_APP_ID} from '../scripts/android-identity.ts';
+import {verifyAndroidIdentity} from '../scripts/android-identity.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const identity = JSON.parse(fs.readFileSync(path.join(ROOT, 'app.config.json'), 'utf8'));
@@ -61,7 +64,7 @@ function generate(t) {
  return {root, staging, result, profile};
 }
 
-test('the pinned generator accepts the descriptor and owns identity, version and signing policy', t => {
+fixtureTest('the pinned generator accepts the descriptor and owns identity, version and signing policy', t => {
  const {root, profile} = generate(t);
  assert.deepEqual(profile.identity, {appId: identity.appId, appName: identity.appName, version: identity.version, versionCode: identity.versionCode});
  assert.deepEqual(profile.sdk, {min: 29, target: 36, compile: 36});
@@ -85,14 +88,14 @@ test('the pinned generator accepts the descriptor and owns identity, version and
  assert.match(fs.readFileSync(path.join(root, 'android/eliza-consumer-host/res/values/eliza_consumer_identity.xml'), 'utf8'), new RegExp(`name="app_name"[^>]*>"${identity.appName}"<`));
 });
 
-test('no test-mocks source set is attached and product admission runs before every build', t => {
+fixtureTest('no test-mocks source set is attached and product admission runs before every build', t => {
  const {root, staging, profile} = generate(t);
  assert.equal(profile.testMocks, null);
  assert.deepEqual(profile.admission.map(step => [step.name, step.command, step.directory]), [
   ['stageLocalAgentSources', ['bun', 'scripts/stage-local-agent-sources.ts'], fs.realpathSync(root)],
   ['verifyCloudDeployment', ['bun', 'scripts/cloud-deployment.ts', '--check'], fs.realpathSync(root)],
  ]);
- assert.deepEqual(profile.settingsAdmission.map(step => step.command), [['bun', 'scripts/prepare-patched-native.ts']]);
+ assert.deepEqual(profile.settingsAdmission.map(step => step.command), [['bun', 'scripts/android-host.ts', '--check-identity'], ['bun', 'scripts/prepare-patched-native.ts']]);
  assert.deepEqual(profile.assetFiles, [
   {source: fs.realpathSync(path.join(staging, '.source.json')), name: 'native-patches.json'},
   {source: fs.realpathSync(path.join(root, '.eliza/generated-android/owner-routes.json')), name: 'owner-routes.json'},
@@ -101,7 +104,7 @@ test('no test-mocks source set is attached and product admission runs before eve
  assert.deepEqual(profile.generatedSources, [{sourceSet: 'main', kind: 'java', path: 'generated/local-agent/java'}]);
  assert.deepEqual(profile.appScripts, [fs.realpathSync(path.join(root, 'android/app/product.gradle'))]);
  assert.deepEqual(profile.generationInputs.map(input => path.relative(fs.realpathSync(root), input.file)).sort(),
-  ['.eliza/generated-android/owner-routes.json', 'android/consumer-host.json', 'android/upstream-native-sources.json', 'app.config.json', 'apps/app/src/product/owner-route-table.ts', 'scripts/android-host.ts', 'scripts/prepare-patched-native.ts', 'upstream.lock.json']);
+  ['.eliza/generated-android/owner-routes.json', 'android/consumer-host.json', 'android/upstream-native-sources.json', 'app.config.json', 'apps/app/src/product/owner-route-table.ts', 'scripts/android-host.ts', 'scripts/android-identity.ts', 'scripts/prepare-patched-native.ts', 'upstream.lock.json']);
 });
 
 test('the host links its native-only secure store transitively and keeps fixture modules separate', t => {
@@ -134,14 +137,15 @@ test('generated files are build outputs: every one is git-ignored and none is au
 });
 
 test('installed resident identities stay Alpha data-compatibility names', () => {
- const host = residentHostIdentity({packageName: identity.appId, ...descriptor.residentHost});
- assert.deepEqual(host.sockets, {agent: `${identity.appId}.agent.v1`, inference: `${identity.appId}.inference.v1`, secureStore: `${identity.appId}.secure-store`});
+ const selected = androidIdentity(ROOT).appId;
+ const host = residentHostIdentity({packageName: selected, ...descriptor.residentHost});
+ assert.deepEqual(host.sockets, {agent: `${selected}.agent.v1`, inference: `${selected}.inference.v1`, secureStore: `${selected}.secure-store`});
  assert.equal(host.notification.smallIcon, 'notification_icon');
- // The earlier service always offered Stop in its native notification. Keep that policy explicit.
- assert.equal(host.notification.primaryAction, 'stop');
+ // Alpha supervises its resident continuously without a Stop action in the notification.
+ assert.equal(host.notification.primaryAction, 'none');
  const residentSource = fs.readFileSync(path.join(ROOT, 'vendor/eliza/packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaAgentService.java'), 'utf8');
  const generatedResident = rewriteResidentClass('ElizaAgentService', residentSource, host);
- assert.match(generatedResident, /NOTIFICATION_PRIMARY_ACTION = "stop";/);
+ assert.match(generatedResident, /NOTIFICATION_PRIMARY_ACTION = "none";/);
  for (const name of Object.values(host.notification.strings)) assert.ok(generatedResident.includes(`R.string.${name}`), name);
  assert.deepEqual(host.environmentHook, {className: 'AlphaLocalAgentPlugin', method: 'configureEnvironment', unavailableStatus: 'provider-unavailable'});
  assert.deepEqual(host.lifecycleHooks, {rootPublication: {className: 'AlphaLocalAgentPlugin', method: 'publishNotificationRoot'}, ready: {className: 'AlphaCanonicalNotifications', method: 'resumeExisting'}});
@@ -164,4 +168,39 @@ test('patched-native references resolve to the staging or, for scanners, to the 
  assert.deepEqual(canonical.modules.find(module => module.name === 'eliza-system').source, {root: 'upstream', path: 'plugins/plugin-native-system/android'});
  assert.throws(() => hostProfile(ROOT, {patchedNativeRoot: os.tmpdir()}), /inside this checkout/);
  assert.equal(HOST_DESCRIPTOR, 'android/consumer-host.json');
+});
+
+test('the same pinned generator binds a retained installation to its package, sources, sockets and channel', t => {
+ const {root, staging} = consumer(t);
+ for (const variant of ['main', 'launcher']) fs.cpSync(path.join(ROOT, 'android/app/src', variant, 'java'), path.join(root, 'android/app/src', variant, 'java'), {recursive: true});
+ const dependencyRoot = path.join(root, 'dependencies'), capacitor = '@capacitor/android/capacitor';
+ fs.cpSync(fs.realpathSync(path.join(ROOT, 'node_modules', capacitor)), path.join(dependencyRoot, capacitor), {recursive: true});
+ const previous = process.env.ALPHA_ANDROID_APPLICATION_ID;
+ process.env.ALPHA_ANDROID_APPLICATION_ID = RETAINED_ANDROID_APP_ID;
+ try {
+  generateAndroidConsumerHost({consumerRoot: root, upstreamRoot: path.join(ROOT, 'vendor/eliza'), dependencyRoot,
+   output: path.join(root, 'android'), inPlace: true, identity: hostIdentity(root), profile: hostProfile(root, {patchedNativeRoot: staging})});
+  const profile = JSON.parse(fs.readFileSync(path.join(root, 'android/.eliza-consumer-profile.json'), 'utf8'));
+  assert.equal(profile.identity.appId, RETAINED_ANDROID_APP_ID);
+  assert.deepEqual(profile.flavors.map(flavor => flavor.name), ['launcher']);
+  assert.equal(profile.testMocks, null);
+  const receipt = JSON.parse(fs.readFileSync(profile.assetFiles.find(file => file.name === 'android-identity.json').source, 'utf8'));
+  assert.equal(receipt.applicationId, RETAINED_ANDROID_APP_ID);
+  assert.equal(receipt.sourceApplicationId, identity.appId);
+  assert.match(receipt.updateManifestUrl, /alphaphone\/releases\/download\/app-stable\/alpha-update-stable\.json$/);
+  assert.equal(profile.manifest, fs.realpathSync(path.join(root, 'android/app/src/main/AndroidManifest.xml')));
+  const projectedManifest = path.join(path.dirname(profile.assetFiles.find(file => file.name === 'android-identity.json').source), 'android/app/src/main/AndroidManifest.xml');
+  assert.doesNotMatch(fs.readFileSync(projectedManifest, 'utf8'), /ai\.alphacompute\.alphaphone/);
+  assert.ok(profile.sourceSets.main.java.some(directory => fs.existsSync(path.join(directory, 'ai/elizaresearch/alphaphone/MainActivity.java'))));
+  assert.deepEqual(readHostDescriptor(root).residentHost.sockets, {
+   agent: RETAINED_ANDROID_APP_ID + '.agent.v1', inference: RETAINED_ANDROID_APP_ID + '.inference.v1', secureStore: RETAINED_ANDROID_APP_ID + '.secure-store',
+  });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'app.config.json'), 'utf8')).appId, identity.appId);
+  assert.equal(verifyAndroidIdentity(root), RETAINED_ANDROID_APP_ID);
+  fs.appendFileSync(path.join(root, 'android/app/src/main/java', identity.appId.replaceAll('.', '/'), 'AlphaTelephony.java'), '\n// changed input\n');
+  assert.throws(() => verifyAndroidIdentity(root), /identity is stale/);
+ } finally {
+  if (previous === undefined) delete process.env.ALPHA_ANDROID_APPLICATION_ID;
+  else process.env.ALPHA_ANDROID_APPLICATION_ID = previous;
+ }
 });

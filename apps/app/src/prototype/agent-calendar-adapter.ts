@@ -18,10 +18,24 @@ import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {canonicalCalendarRow,canonicalCalendarEditorTiming,calendarFormCreate,calendarFormMinutes,calendarFormPatch,type CanonicalCalendarForm} from '../runtime/agent-calendar-view';
 import {agentReminderLead,homeCalendarValues,homeReadIsStale,overdueAgendaNext,presentHomeAgendaCard,presentHomeAgendaFeed,type HomeAgendaCardInput} from './home-cards';
 import {getZonedDateParts,addDaysToLocalDate} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/internal/time';
-import {eventEditorMutability,cancellationModeForEditorEvent} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy';
+import {eventEditorMutability,cancellationModeForEditorEvent} from '../ui/calendar/event-editor-policy';
 import {calendarDayObservation} from '../runtime/calendar-day-observation';
 import {rememberNoteOrigin} from './note-origin-adapter';
+import {CALENDAR_API_REFUSALS} from '../ui/calendar/calendar-api-messages';
+import {attendeeResponseLabel} from '../ui/calendar/attendee-response';
+import {refusalText} from '../ui/utils/native-refusal';
+import {calendarEventLinks,calendarInvitationPending,calendarRepeatText} from './calendar-event-detail';
+import {DailyApps} from '../daily';
+import {DeferredCalendarDeletes,calendarDeletionHides} from './calendar-deferred-delete';
+import {installCalendarListBack,presentCalendarList} from './calendar-schedule';
+import {accessibilityTimeoutScale} from '../runtime/accessibility-timeout';
+import type {LifeOpsCalendarEvent} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
 type Bag=Record<string,any>;
+/** Opens a checked HTTPS link in the phone's browser; the web build opens a new tab. */
+function openCalendarLink(url:URL,api:Bag){
+ if(!Capacitor.isNativePlatform()){window.open(url.href,'_blank','noopener,noreferrer');return;}
+ void DailyApps.perform({action:'browser',url:url.href}).then(result=>{if(result.status!=='opened')api.toast('Couldn’t open');},()=>api.toast('Couldn’t open'));
+}
 /** A Google calendar reached through Alpha's managed account. The pinned host refuses deletes and declines for it
  * (vendor/eliza/plugins/plugin-calendar/src/mutations/managed.ts: ELIZA_MANAGED_CALENDAR_DELETE_ENABLED, which
  * AlphaLocalAgentPlugin.java removes) and every series write other than one occurrence. The grant pattern is
@@ -35,9 +49,11 @@ const OWNER_ERRORS:[RegExp,string][]=[
  [/^Moving events between sources/,'Can’t move calendars'],
  [/^Review recurring-series changes in Calendar/,'Edit in Google'],
 ];
+/** The shared calendar API client's refusals are worded by Alpha (ui/calendar/calendar-api-messages.ts); a native
+ * rejection Alpha has no words for reads as 'Couldn’t update', and Alpha's own runtime errors keep their message. */
 export function calendarErrorText(error:unknown):string{
  const message=error instanceof Error?error.message:typeof error==='string'?error:'';
- return OWNER_ERRORS.find(([pattern])=>pattern.test(message))?.[1]??(message||'Couldn’t update');
+ return OWNER_ERRORS.find(([pattern])=>pattern.test(message))?.[1]??refusalText(typeof error==='string'?new Error(error):error,CALENDAR_API_REFUSALS,'Couldn’t update');
 }
 const DAY=86400000;
 /** Day offset from today by civil dates, so a DST change never moves a row. Legacy all-day records are stored at
@@ -57,10 +73,17 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
  let retentionAttempt:{abort:AbortController;current:()=>boolean}|undefined;
  const cancelRetention=()=>{const attempt=retentionAttempt;retentionAttempt=undefined;attempt?.abort.abort();};
  const retireRetention=()=>{if(retentionAttempt&&!retentionAttempt.current())cancelRetention();};
+ // Deletion Undo: the same window as the Undo notice (model.js showToast), then the reviewed delete is sent.
+ const deletes=new DeferredCalendarDeletes<LifeOpsCalendarEvent>(()=>10000*accessibilityTimeoutScale());
+ /** Events the owner can see: a deletion waiting for its Undo window, or in flight, hides its event. */
+ const shownEvents=(events:readonly LifeOpsCalendarEvent[]|undefined)=>events?.filter(event=>!deletes.hidden(event));
+ /** The newest deletion's Undo; a dropped deletion closes its notice instead of leaving a stale Undo on screen. */
+ let pendingUndo:(()=>void)|undefined;
  const originalApi=p.api;
  p.api=function(key:string){const api=originalApi.call(this,key);if(key!=='maps')return api;return {...api,checkCanonicalCalendarReturn:async(origin:CanonicalMapsEventOrigin,signal:AbortSignal)=>{const target=port();if(owner!==this||!this.live||!controller||!target?.current()||mapBinding(target)!==origin.binding||deviceCalendarScope(this))return 'unknown';return controller.verifyEventReturn(origin,signal);}};};
  // Source selection is made in Settings and survives the existing view reset.
  views.calendar.persist=Array.from(new Set([...(views.calendar.persist??[]),'calendarAuthority']));
+ installCalendarListBack(views);
  const markerKey=async(ownerKey:string)=>'alpha.calendar.retention.v1.'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(ownerKey)))).map(n=>n.toString(16).padStart(2,'0')).join('');
  const retention=preservation??legacyCalendarPreservation({
   has:async(ownerKey,fingerprint,signal)=>{
@@ -115,14 +138,19 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
    diagnose('restore-finished');
   }catch{diagnose('bootstrap-failed');discard();}
  };
+ // The agent's first start after launch, before any failure: it connects by itself.
+ const agentStarting=()=>{const snapshot=connectionController.getSnapshot();return snapshot.kind==='starting'&&!snapshot.residentRecoveryReason;};
  const zone=()=>Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
  const range=(state:Bag)=>{const today=new Date(),day=new Date(today.getFullYear(),today.getMonth(),today.getDate()+Number(state.day||0));day.setMonth(day.getMonth()+Number(state.month||0));return{side:'owner' as const,timeMin:new Date(day.getFullYear(),day.getMonth()-1,1).toISOString(),timeMax:new Date(day.getFullYear(),day.getMonth()+2,1).toISOString(),timeZone:zone()};};
  const invalidate=(sessionId:string)=>{const target=port();if(!target?.current()||target.sessionId!==sessionId||invalidating)return;invalidating=true;queueMicrotask(()=>{invalidating=false;const current=port();if(owner?.live&&current?.current()&&current.sessionId===sessionId)refresh(true);});};
  const refresh=(force=false)=>{if(!owner?.live||!controller)return;const target=port(),window=range(owner.S?.()?.view==='calendar'?owner.vget('calendar'):{}),key=JSON.stringify([target?.identity,target?.scope,window]);if(!force&&requestKey===key)return;requestKey=key;if(!target?.current()){if(!bootstrapCurrent()||controller.state.savedAt==null)void controller.refresh(window);void restoreBeforeAgent(window);return;}void controller.refresh(window);};
- // One end-time wake plus foreground events; no polling or background reads.
+ // One end-time wake, foreground events, and a one-minute re-read while Calendar is the open, visible view. No background reads.
+ const POLL_MS=60000;let poll:ReturnType<typeof setInterval>|undefined;
+ const pollOpenCalendar=()=>{if(!owner?.live||!controller||document.hidden||owner.S?.()?.view!=='calendar'||deviceCalendarScope(owner)||controller.state.mutating||!port()?.current())return;refresh(true);};
  const readNext=()=>{if(!owner?.live||!controller)return;controller.invalidateNext();if(document.hidden)return;refresh(true);};
  const watchNextEnd=()=>{clearTimeout(nextEnded);const end=Date.parse(controller?.state.next?.event?.endAt??'');if(end>Date.now())nextEnded=setTimeout(readNext,Math.min(end-Date.now()+1000,2147483647));};
- const resumed=()=>{if(document.hidden)cancelRetention();else if(owner?.live)readNext();};
+ const resumed=()=>{if(document.hidden){cancelRetention();deletes.leave();}else if(owner?.live)readNext();};
+ const pageLeft=()=>{cancelRetention();deletes.leave();};
  p.componentDidMount=function(){mount.call(this);cancelRetention();owner=this;
   // The read-only "Previous" calendars source is gone: Google calendars are part of the one Calendar.
   if(this.vget('calendar').calendarAuthority==='legacy-google')this.vset('calendar',{calendarAuthority:'canonical'});
@@ -132,9 +160,12 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
    const bound=()=>{const active=port();return target.current()&&active?.current()&&mapBinding(active)===binding&&connectionController.getCloudClient()?.sessionId===session&&JSON.stringify(readCacheOwner())===identity;};
    const cache=await serviceReadCache(readOwner);if(!bound())return null;
    return {get:async<T>(key:string)=>{if(!bound())return null;const value=await cache.get<T>(key);return bound()?value:null;},put:async(key:string,value:unknown)=>{if(bound())await cache.put(key,value);}};
-  },()=>{const account=readCacheOwner()??bootstrapOwner;return account?JSON.stringify(account):null;},diagnose);this.agentCalendar=controller;this.canonicalCalendarDispose=controller.subscribe(()=>{if(owner!==this)return;retireRetention();watchNextEnd();if(this.live)this.setState({});});this.canonicalCalendarConnection=connectionController.subscribe(()=>{if(owner!==this)return;retireRetention();const target=port(),key=JSON.stringify([target?.identity,target?.scope,readCacheOwner()]);if(key!==boundKey){boundKey=key;const keepSaved=controller?.state.savedAt!=null&&bootstrapCurrent()&&(!target?.current()||controller.state.ownerKey===calendarOwnerKey(target));if(!keepSaved){++bootstrapEpoch;bootstrapOwner=null;controller?.retire();}requestKey='';refresh();}});this.canonicalCalendarInvalidated=(event:Event)=>{const sessionId=(event as CustomEvent<{sessionId?:unknown}>).detail?.sessionId;if(typeof sessionId==='string')invalidate(sessionId);};window.addEventListener('alpha:canonical-calendar-invalidated',this.canonicalCalendarInvalidated);document.addEventListener('visibilitychange',resumed);window.addEventListener('pagehide',cancelRetention);refresh();};
+  },()=>{const account=readCacheOwner()??bootstrapOwner;return account?JSON.stringify(account):null;},diagnose);this.agentCalendar=controller;this.canonicalCalendarDispose=controller.subscribe(()=>{if(owner!==this)return;retireRetention();watchNextEnd();if(controller?.state.savedAt==null&&controller?.state.feed?.state==='complete')deletes.prune(controller.state.feed.events);if(this.live)this.setState({});});this.canonicalCalendarDeletes=deletes.subscribe(()=>{if(owner===this&&this.live)this.setState({});});this.canonicalCalendarConnection=connectionController.subscribe(()=>{if(owner!==this)return;retireRetention();const target=port(),key=JSON.stringify([target?.identity,target?.scope,readCacheOwner()]);if(key!==boundKey){boundKey=key;
+   // A deletion confirmed for another account or session is never sent to this one.
+   if(deletes.waiting){deletes.drop();if(this.live){if(this.toastActive&&pendingUndo&&this.undoFn===pendingUndo)this.closeToast();this.toast('Not deleted');}}
+   const keepSaved=controller?.state.savedAt!=null&&bootstrapCurrent()&&(!target?.current()||controller.state.ownerKey===calendarOwnerKey(target));if(!keepSaved){++bootstrapEpoch;bootstrapOwner=null;controller?.retire();}requestKey='';refresh();}});this.canonicalCalendarInvalidated=(event:Event)=>{const sessionId=(event as CustomEvent<{sessionId?:unknown}>).detail?.sessionId;if(typeof sessionId==='string')invalidate(sessionId);};window.addEventListener('alpha:canonical-calendar-invalidated',this.canonicalCalendarInvalidated);document.addEventListener('visibilitychange',resumed);window.addEventListener('pagehide',pageLeft);clearInterval(poll);poll=setInterval(pollOpenCalendar,POLL_MS);refresh();};
  p.componentDidUpdate=function(...args:any[]){update?.apply(this,args);if(owner===this){retireRetention();refresh();}};
- p.componentWillUnmount=function(){this.canonicalCalendarConnection?.();window.removeEventListener('alpha:canonical-calendar-invalidated',this.canonicalCalendarInvalidated);this.canonicalCalendarDispose?.();if(owner===this){++bootstrapEpoch;bootstrapOwner=null;cancelRetention();clearTimeout(nextEnded);document.removeEventListener('visibilitychange',resumed);window.removeEventListener('pagehide',cancelRetention);controller?.retire();controller=undefined;owner=undefined;}unmount.call(this);};
+ p.componentWillUnmount=function(){this.canonicalCalendarConnection?.();this.canonicalCalendarDeletes?.();window.removeEventListener('alpha:canonical-calendar-invalidated',this.canonicalCalendarInvalidated);this.canonicalCalendarDispose?.();if(owner===this){++bootstrapEpoch;bootstrapOwner=null;cancelRetention();clearTimeout(nextEnded);clearInterval(poll);poll=undefined;document.removeEventListener('visibilitychange',resumed);window.removeEventListener('pagehide',pageLeft);deletes.drop();controller?.retire();controller=undefined;owner=undefined;}unmount.call(this);};
  // A Calendar connection belongs to the exact app-record session that opened it.
  p.calendarConnectionScope=function(){
   const shell=this,calendar=controller,target=port(),ownerKey=calendar?.state.ownerKey;
@@ -218,7 +249,7 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   if(deviceCalendarScope(owner)){const out=render(state,api);out.calendarAuthorityChoices=choices(state,api);out.calendarSourceLabel=testMocksEnabled&&browserCalendarScope(owner)?'Browser calendar (development)':'Android calendars';return out;}
   const model=controller?.state,legacy=state.calendarAuthority==='legacy'||model&&['transition-required','legacy-recovery'].includes(model.status);
   let unresolvedCalendarSources=0;
-  const rows:Bag[]=legacy?(model?.legacy?.readable?calendarRange(model.legacy.records as any[],{begin:Date.parse(range(state).timeMin),end:Date.parse(range(state).timeMax)}).events:[]).map((e:any)=>({id:'legacy-calendar:'+e.id,title:e.title,notes:e.body||'',where:e.location||'',off:legacyDayOffset(e.begin,!!e.allDay),t:new Date(e.begin).getHours()+new Date(e.begin).getMinutes()/60,d:(e.end-e.begin)/3600000,cal:'legacy',who:[],repeat:'none',alert:null,legacyRecord:e,calendarInterval:true,calendarIntervalData:{begin:e.begin,end:e.end},allDay:!!e.allDay,allDayEndOff:legacyDayOffset(e.end,!!e.allDay)})):model?.feed?.events.flatMap(e=>{const row=canonicalCalendarRow(e,zone());const source=controller!.state.calendars.find(c=>c.provider===e.provider&&c.side===e.side&&c.grantId===e.grantId&&c.calendarId===e.calendarId);if(!source){unresolvedCalendarSources++;return [];}return[{...row,calendarInterval:true,calendarIntervalData:{begin:Date.parse(e.startAt),end:Date.parse(e.endAt)},cal:controller!.sourceHandle(calendarSourceKey(source))}];})??[];
+  const rows:Bag[]=legacy?(model?.legacy?.readable?calendarRange(model.legacy.records as any[],{begin:Date.parse(range(state).timeMin),end:Date.parse(range(state).timeMax)}).events:[]).map((e:any)=>({id:'legacy-calendar:'+e.id,title:e.title,notes:e.body||'',where:e.location||'',off:legacyDayOffset(e.begin,!!e.allDay),t:new Date(e.begin).getHours()+new Date(e.begin).getMinutes()/60,d:(e.end-e.begin)/3600000,cal:'legacy',who:[],repeat:'none',alert:null,legacyRecord:e,calendarInterval:true,calendarIntervalData:{begin:e.begin,end:e.end},allDay:!!e.allDay,allDayEndOff:legacyDayOffset(e.end,!!e.allDay)})):shownEvents(model?.feed?.events)?.flatMap(e=>{const row=canonicalCalendarRow(e,zone());const source=controller!.state.calendars.find(c=>c.provider===e.provider&&c.side===e.side&&c.grantId===e.grantId&&c.calendarId===e.calendarId);if(!source){unresolvedCalendarSources++;return [];}return[{...row,calendarInterval:true,calendarIntervalData:{begin:Date.parse(e.startAt),end:Date.parse(e.endAt)},cal:controller!.sourceHandle(calendarSourceKey(source))}];})??[];
   const reminderRows=(state.events??[]).filter((row:Bag)=>!!row.alphaReminderId).map((row:Bag)=>({...row,cal:'alpha-reminders'}));
   rows.push(...reminderRows);
   const cals=legacy?[{id:'legacy',name:'Saved · Read only',sub:'',color:'mut',on:true}]:sourceRows();
@@ -229,9 +260,14 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   const presentation={...state,add:null,events:visibleRows,canonicalCalendars:cals,calendarPresentationSources:presentationSources};
   const out=render(presentation,api);
   presentCalendarIntervals(render,presentation,api,out,legacy?!!model?.legacy?.readable:!!model?.feed);
-  out.calendarSourceLabel=legacy?'Saved · Read only':'Agent Calendar';out.calendarSourceText=!legacy&&model?.savedAt!=null?(controller?.refreshing?'Refreshing':'Couldn’t refresh') : !legacy&&model?.status==='unavailable'?'Unavailable':model?.error??(!model?.ownerKey?'Connect':model?.status==='loading'?'Loading':unresolvedCalendarSources||model?.status==='partial'?'Refresh Calendar':model?.status==='transition-required'?'Review needed':model?.status==='legacy-recovery'?'Needs review':'');
-  out.nativeStatusLabel=model?.status==='ready'&&!unresolvedCalendarSources?'':out.calendarSourceText;out.nativeStatusRetry=()=>refresh(true);out.newEvent=out.addAt=()=>legacy?api.toast('Agent Calendar only'):newForm(api);
+  out.calendarSourceLabel=legacy?'Saved · Read only':'Agent Calendar';out.calendarSourceText=!legacy&&model?.savedAt!=null?(controller?.refreshing?'Refreshing':'Couldn’t refresh') : !legacy&&model?.status==='unavailable'?'Unavailable':model?.error??(!model?.ownerKey?(agentStarting()?'Starting…':'Not connected'):model?.status==='loading'?'Loading':model?.status==='transition-required'?'Review needed':model?.status==='legacy-recovery'?'Needs review':'');
+  // No agent session owns this Calendar: nothing here can be retried, so the action opens Settings › Calendar.
+  const notConnected=!legacy&&out.calendarSourceText==='Not connected',openCalendarSettings=()=>{const shell=owner;if(shell?.live)shell.openView('settings',{page:'calendar'});};
+  out.nativeStatusLabel=model?.status==='ready'&&!unresolvedCalendarSources?'':out.calendarSourceText;out.nativeStatusRetry=notConnected?openCalendarSettings:()=>refresh(true);out.nativeStatusAria=notConnected?'Open Calendar settings':'Retry calendar and reminders';out.nativeStatusOpensSettings=notConnected;out.nativeStatusRetries=!notConnected;out.newEvent=out.addAt=()=>legacy?api.toast('Agent Calendar only'):newForm(api);
   out.calendarAuthorityChoices=choices(state,api);
+  // Schedule and search list the rows already read (calendar-schedule.ts); a date picked from the picker shows that day.
+  Object.assign(out,presentCalendarList(state,api,visibleRows,range(state),legacy?!!model?.legacy?.readable:model?.status==='ready'&&!model.error&&!!model.feed&&!unresolvedCalendarSources,out.calendarSourceText));
+  if(out.scheduleMode&&Array.isArray(out.mdays))out.mdays=out.mdays.map((m:Bag)=>({...m,pick:()=>{api.set({calendarMode:'day'});m.pick?.();}}));
   out.canConfirmCalendarTransition=model?.status==='transition-required';
   if(out.canConfirmCalendarTransition){
    const shell=owner,calendar=controller,target=port(),fingerprint=model?.legacy?.fingerprint,settingsPage=shell?.vget('settings').page;
@@ -259,14 +295,39 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
    else{const target=port(),selected=controller?.selection(chosen.canonicalEventKey),origin=target?.current()?canonicalMapsEventOriginFor(chosen,state.openDay??state.day??chosen.off,mapBinding(target),selected):undefined;
     if(chosen.where&&origin)out.ev.goWhere=()=>{const now=port(),current=controller?.selection(chosen.canonicalEventKey);if(!now?.current()||mapBinding(now)!==origin.binding||current?.revision!==origin.revision||current.sourceRevision!==origin.sourceRevision){api.toast('Event changed');return;}api.open('maps',{query:chosen.where,fromEvent:origin});};
     out.ev.canonicalDraftEntry=true;if(cancellationModeForEditorEvent(chosen.canonicalEvent)==='decline_invitation'){out.ev.deleteLabel='Decline invitation';out.ev.deleteText='Decline';}
-    const e=chosen.canonicalEvent,policy=eventEditorMutability(e),managed=managedGoogleSource(e),recurringEvent=!!(e.recurringEventId||e.recurrence?.length),sourceReadOnly=(cals as Bag[]).find(c=>c.id===chosen.cal)?.writable===false;out.ev.calName=cals.find(c=>c.id===chosen.cal)?.name??'Agent Calendar';out.ev.notes=e.description;out.ev.hasNotes=!!e.description;out.ev.hasPeople=!!e.attendees?.length;out.ev.people=(e.attendees??[]).map((guest:Bag)=>({name:guest.displayName||guest.email||'Guest',ini:String(guest.displayName||guest.email||'G').slice(0,2).toUpperCase(),st:guest.organizer?'Organizer':guest.responseStatus||'',open:null}));if(!e.isAllDay)Object.assign(out.ev,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)));if(e.isAllDay){out.ev.when='All day';const options:Intl.DateTimeFormatOptions={weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'},start=new Date(e.startAt).toLocaleDateString(undefined,options),end=new Date(Date.parse(e.endAt)-86400000).toLocaleDateString(undefined,options);out.ev.day=start+(start===end?'':' – '+end);}out.ev.readOnly=policy.kind!=='editable'||sourceReadOnly;out.ev.readOnlyLabel=model?.savedAt!=null?'Saved':sourceReadOnly?`${out.ev.calName} · Read only`:'Read only';const deleteScope=state.canonicalDeleteScope?.eventKey===calendarEventKey(e)?state.canonicalDeleteScope.scope:undefined;const deleteVerb=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline':'Delete';out.ev.recurrenceScopes=recurringEvent&&!managed?['instance','this_and_following','series'].map(scope=>{const label=scope==='instance'?'This occurrence':scope==='series'?'Entire series':'This and following',text=`${deleteVerb} ${label.toLowerCase()}`;return{label,selected:deleteScope===scope,pick:()=>api.set({canonicalDeleteScope:{eventKey:calendarEventKey(e),scope}}),deleteLabel:text,deleteText:text,del:()=>remove(scope)};}):[];out.ev.edit=()=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}const timing=canonicalCalendarEditorTiming(e,zone());api.set({form:{id:chosen.id,canonicalOwnerKey:model!.ownerKey,canonicalEventKey:calendarEventKey(e),expectedProviderVersion:policy.providerVersion,creationId:crypto.randomUUID(),title:e.title,notes:e.description,where:e.location,off:timing.off,t:timing.t,d:timing.d,zone:zone(),who:(e.attendees??[]).map((guest:Bag)=>calendarGuestEmail(guest.email)).filter(Boolean),canonicalGuestsReviewed:true,video:false,repeat:recurringEvent?'preserve':'none',alert:null,cal:chosen.cal,allDay:e.isAllDay,canonicalAllDay:e.isAllDay?{startDate:e.startAt.slice(0,10),endDateExclusive:e.endAt.slice(0,10)}:undefined,canonicalTiming:[timing.off,timing.t,timing.d,zone(),!!e.isAllDay],recurrenceScope:managed&&recurringEvent?'instance':undefined}});};// A repeating event is deleted from one of its scope actions; the scope is part of the reviewed action.
-    const remove=async(deleteScope?:string)=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}if(recurringEvent&&!deleteScope){api.toast('Pick occurrences');return;}const mode=cancellationModeForEditorEvent(e);if(!mode){api.toast('Couldn’t verify organizer');return;}const shell=owner,calendar=controller,reviewTarget=port(),binding=reviewTarget?mapBinding(reviewTarget):null,bytes=JSON.stringify(e),scope=JSON.stringify(state.canonicalDeleteScope);const selected=()=>{const now=port(),visible=api.get('calendar');return owner===shell&&!!shell?.live&&controller===calendar&&!!now?.current()&&mapBinding(now)===binding&&visible.open===chosen.id&&!visible.form&&JSON.stringify(visible.canonicalDeleteScope)===scope;};const current=()=>selected()&&JSON.stringify(calendar?.state.feed?.events.find(value=>calendarEventKey(value)===calendarEventKey(e)))===bytes;const title=mode==='decline_invitation'?'Decline invitation?':'Delete event?',label=mode==='decline_invitation'?'Decline invitation':'Delete event',occurrences=deleteScope==='series'?'Entire series':deleteScope==='this_and_following'?'This and following':recurringEvent?'This occurrence':'This event';if(!shell||!current()||!await confirmCalendarAction(shell,api,title,[e.title,out.ev.calName,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)).summary,occurrences,'No guest notification will be sent.'].join('\n'),label,current)||!current())return;try{await calendar!.delete(calendarEventKey(e),policy.providerVersion,crypto.randomUUID(),deleteScope as typeof state.canonicalDeleteScope.scope);if(selected()){api.set({open:null,canonicalDeleteScope:null});refresh(true);}}catch(error){if(current())api.toast(calendarErrorText(error));}};
+    const e=chosen.canonicalEvent,policy=eventEditorMutability(e),managed=managedGoogleSource(e),recurringEvent=!!(e.recurringEventId||e.recurrence?.length),sourceReadOnly=(cals as Bag[]).find(c=>c.id===chosen.cal)?.writable===false;out.ev.calName=cals.find(c=>c.id===chosen.cal)?.name??'Agent Calendar';out.ev.notes=e.description;out.ev.hasNotes=!!e.description;out.ev.hasPeople=!!e.attendees?.length;out.ev.people=(e.attendees??[]).map((guest:Bag)=>({name:guest.displayName||guest.email||'Guest',ini:String(guest.displayName||guest.email||'G').slice(0,2).toUpperCase(),st:attendeeResponseLabel(guest),open:null}));if(!e.isAllDay)Object.assign(out.ev,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)));if(e.isAllDay){out.ev.when='All day';const options:Intl.DateTimeFormatOptions={weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'},start=new Date(e.startAt).toLocaleDateString(undefined,options),end=new Date(Date.parse(e.endAt)-86400000).toLocaleDateString(undefined,options);out.ev.day=start+(start===end?'':' – '+end);}out.ev.readOnly=policy.kind!=='editable'||sourceReadOnly;out.ev.readOnlyLabel=model?.savedAt!=null?'Saved':sourceReadOnly?`${out.ev.calName} · Read only`:'Read only';const deleteScope=state.canonicalDeleteScope?.eventKey===calendarEventKey(e)?state.canonicalDeleteScope.scope:undefined;const deleteVerb=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline':'Delete';out.ev.recurrenceScopes=recurringEvent&&!managed?['instance','this_and_following','series'].map(scope=>{const label=scope==='instance'?'This occurrence':scope==='series'?'Entire series':'This and following',text=`${deleteVerb} ${label.toLowerCase()}`;return{label,selected:deleteScope===scope,pick:()=>api.set({canonicalDeleteScope:{eventKey:calendarEventKey(e),scope}}),deleteLabel:text,deleteText:text,del:()=>remove(scope)};}):[];out.ev.edit=()=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}const timing=canonicalCalendarEditorTiming(e,zone());api.set({form:{id:chosen.id,canonicalOwnerKey:model!.ownerKey,canonicalEventKey:calendarEventKey(e),expectedProviderVersion:policy.providerVersion,creationId:crypto.randomUUID(),title:e.title,notes:e.description,where:e.location,off:timing.off,t:timing.t,d:timing.d,zone:zone(),who:(e.attendees??[]).map((guest:Bag)=>calendarGuestEmail(guest.email)).filter(Boolean),canonicalGuestsReviewed:true,video:false,repeat:recurringEvent?'preserve':'none',alert:null,cal:chosen.cal,allDay:e.isAllDay,canonicalAllDay:e.isAllDay?{startDate:e.startAt.slice(0,10),endDateExclusive:e.endAt.slice(0,10)}:undefined,canonicalTiming:[timing.off,timing.t,timing.d,zone(),!!e.isAllDay],recurrenceScope:managed&&recurringEvent?'instance':undefined}});};// A repeating event is deleted from one of its scope actions; the scope is part of the reviewed action.
+    const remove=async(deleteScope?:string)=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}if(recurringEvent&&!deleteScope){api.toast('Pick occurrences');return;}const mode=cancellationModeForEditorEvent(e);if(!mode){api.toast('Couldn’t verify organizer');return;}const shell=owner,calendar=controller,reviewTarget=port(),binding=reviewTarget?mapBinding(reviewTarget):null,bytes=JSON.stringify(e),scope=JSON.stringify(state.canonicalDeleteScope);const selected=()=>{const now=port(),visible=api.get('calendar');return owner===shell&&!!shell?.live&&controller===calendar&&!!now?.current()&&mapBinding(now)===binding&&visible.open===chosen.id&&!visible.form&&JSON.stringify(visible.canonicalDeleteScope)===scope;};const current=()=>selected()&&JSON.stringify(calendar?.state.feed?.events.find(value=>calendarEventKey(value)===calendarEventKey(e)))===bytes;const title=mode==='decline_invitation'?'Decline invitation?':'Delete event?',label=mode==='decline_invitation'?'Decline invitation':'Delete event',occurrences=deleteScope==='series'?'Entire series':deleteScope==='this_and_following'?'This and following':recurringEvent?'This occurrence':'This event';if(!shell||!current()||!await confirmCalendarAction(shell,api,title,[e.title,out.ev.calName,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)).summary,occurrences,'No guest notification will be sent.'].join('\n'),label,current)||!current())return;// The reviewed deletion waits out the Undo window, hidden, and is then sent once (calendar-deferred-delete.ts).
+     const eventKey=calendarEventKey(e),version=policy.providerVersion,operationKey=crypto.randomUUID(),scopeValue=deleteScope as typeof state.canonicalDeleteScope.scope,bound=()=>{const now=port();return controller===calendar&&!!now?.current()&&mapBinding(now)===binding;};
+     const hides=calendarDeletionHides(e,scopeValue),confirmed=new Map((calendar?.state.feed?.events??[]).filter(hides).map(row=>[calendarEventKey(row),row.metadata?.etag]));
+     // The Undo below: while it is shown, held open by focus or queued, the deletion waits for it.
+     let sendStarted=false;const undoDelete=()=>{if(staged.undo())return;if(owner===shell&&shell.live)shell.toast(sendStarted?'Couldn’t undo':'Not deleted');};
+     const offered=()=>owner===shell&&!!shell.live&&(!!shell.toastActive&&shell.undoFn===undoDelete||!!shell.toastQueue?.some((queued:Bag)=>queued.undo===undoDelete));
+     const staged=deletes.stage({hides,offered,unchanged:row=>confirmed.has(calendarEventKey(row))&&confirmed.get(calendarEventKey(row))===row.metadata?.etag,send:async()=>{
+      sendStarted=true;
+      for(let wait=0;wait<40&&(calendar!.refreshing||calendar!.state.mutating);wait++)await new Promise(resolve=>setTimeout(resolve,250));
+      if(!bound())throw Error('Calendar owner or agent changed');
+      await calendar!.delete(eventKey,version,operationKey,scopeValue);if(owner===shell&&shell.live)refresh(true);
+     },failed:error=>{if(owner===shell&&shell.live)shell.toast(calendarErrorText(error));}});
+     pendingUndo=undoDelete;
+     if(selected())api.set({open:null,canonicalDeleteScope:null});
+     api.toast(mode==='decline_invitation'?'Invitation declined':'Event deleted',{undo:undoDelete});};
     out.ev.del=()=>remove(deleteScope);out.ev.scopedDelete=out.ev.recurrenceScopes.length>0;out.ev.singleDelete=!out.ev.scopedDelete;
-    if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice='Open in Google';}}
+    // Read-only details from the feed. Links leave Alpha only on the owner's tap, and only over HTTPS.
+    const links=calendarEventLinks(e),openLink=(url:URL)=>()=>openCalendarLink(url,api);
+    out.ev.hasVideo=!!links.video;out.ev.video=links.videoText;out.ev.join=links.video?openLink(links.video):null;
+    out.ev.repeatText=calendarRepeatText(e);out.ev.inviteNotice=calendarInvitationPending(e)?'You haven’t answered this invitation.':'';
+    out.ev.openProvider=links.provider?openLink(links.provider):null;
+    // The host refuses deletes and declines for a managed Google calendar; say so and offer Google Calendar.
+    if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline this invitation in Google Calendar.':'Delete this event in Google Calendar.';}
+    // Declining is the one answer the pinned Calendar service accepts (its delete route's decline_invitation
+    // mode); Accept and Maybe have no route there. The same reviewed, Undo-able action as the menu item.
+    out.ev.inviteDecline=out.ev.inviteNotice&&out.ev.singleDelete&&!out.ev.readOnly&&cancellationModeForEditorEvent(e)==='decline_invitation'?out.ev.del:null;}
   }
-  if(out.ev){out.ev.canModify=!out.ev.readOnly;out.ev.sourceLabel=out.ev.readOnly?out.ev.readOnlyLabel:out.ev.calName;}
+  if(out.ev){out.ev.canModify=!out.ev.readOnly;out.ev.sourceLabel=out.ev.readOnly?out.ev.readOnlyLabel:out.ev.calName;
+   // Schedule always runs from today: closing an event opened from it returns there.
+   if(out.scheduleMode&&typeof out.ev.close==='function'){const close=out.ev.close;out.ev.close=()=>{close();api.set({day:0});};}}
   if(state.form&&state.form.cal!=='alpha-reminders'&&out.f){const f=state.form;
-   const reminderSource=out.f.cals?.filter((c:Bag)=>c.domain==='reminders')??[];out.f.cals=[...cals.filter((c:Bag)=>c.writable).map(c=>({...c,on:f.cal===c.id,pick:()=>api.set({form:{...f,cal:c.id}})})),...reminderSource];out.f.alerts=null;out.f.video=false;out.f.hasVideo=false;out.f.toggleVideo=()=>api.toast('Use a meeting action');
+   const reminderSource=out.f.cals?.filter((c:Bag)=>c.domain==='reminders')??[];out.f.cals=[...cals.filter((c:Bag)=>c.writable).map(c=>({...c,on:f.cal===c.id,pick:()=>api.set({form:{...f,cal:c.id}})})),...reminderSource];out.f.alerts=null;out.f.alertNote='Alpha won’t alert you about this event.';out.f.video=false;out.f.hasVideo=false;out.f.toggleVideo=()=>api.toast('Use a meeting action');
    const original=model?.feed?.events.find(e=>calendarEventKey(e)===f.canonicalEventKey),recurring=!!(original?.recurringEventId||original?.recurrence?.length),managedSeries=recurring&&managedGoogleSource(original);
    const editorTiming=original?canonicalCalendarEditorTiming(original,f.zone||zone()):undefined;
    // A backward clock change can end earlier on the clock while remaining later in real time. Preserve it.
@@ -303,8 +364,12 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   if(out.empty&&!legacy&&!model?.feed)out.emptyText=out.calendarSourceText;
   else if(!rows.length)out.emptyText=model?.status==='ready'?'No events':out.calendarSourceText;
   // An incomplete window cannot establish that the selected day is free, even if verified rows exist on other days.
-  if(out.empty&&!legacy&&(unresolvedCalendarSources>0||model?.status==='partial'||model?.status==='unavailable')&&out.nativeStatusLabel)out.emptyText=out.nativeStatusLabel;
+  if(out.empty&&!legacy&&(unresolvedCalendarSources>0||model?.status==='partial'||model?.status==='unavailable'))out.emptyText=out.nativeStatusLabel||'Updating…';
   // The header already owns this warning and its retry action; do not repeat it in the grid.
+  // Not connected is the one status the empty grid owns: the text in the centre with the way to Settings under it.
+  if(out.empty&&notConnected){out.nativeStatusLabel='';out.emptyText='Not connected';out.notConnected=true;out.openCalendarSettings=openCalendarSettings;}
+  // Routine agent startup needs no action from the owner: the grid says so and offers nothing to press.
+  else if(out.empty&&!legacy&&out.calendarSourceText==='Starting…'){out.nativeStatusLabel='';out.emptyText='Starting…';}
   if(out.empty&&out.nativeStatusLabel&&out.emptyText===out.nativeStatusLabel)out.empty=false;
   return out;
  };
@@ -317,10 +382,11 @@ export function installAgentCalendarAdapter(Component:any,views:Bag,preservation
   // Canonical feed visibility is authoritative. Keep old device preferences stored, but do not hide its events.
   const now=Date.now(),hidden=new Set<string>();
   const target=port(),model=target?.current()?controller?.state.ownerKey===calendarOwnerKey(target)?controller.state:undefined:bootstrapCurrent()&&controller?.state.savedAt!=null?controller.state:undefined;
-  const home=homeCalendarSelection(model,zone(),hidden,new Date(now)),event=home.event;
+  const shown=model?.feed?{...model,feed:{...model.feed,events:shownEvents(model.feed.events)!}}:model;
+  const home=homeCalendarSelection(shown,zone(),hidden,new Date(now)),event=home.event;
   const syncedAt=Date.parse(model?.feed?.syncedAt??'');
   const confirmedEmpty=home.verified&&!event&&Number.isFinite(syncedAt)&&syncedAt>0&&syncedAt<=now&&!homeReadIsStale(syncedAt,now);
-  // Shared daily-overview states for the agent calendar feed: reading, not connected, failed, stale and fresh.
+  // Daily-overview states (ui/overview/daily-overview.ts) for the agent calendar feed: reading, not connected, failed, stale and fresh.
   // A saved feed may show an upcoming item, but only a current complete read proves empty.
   const failed=!!model?.error||model?.status==='error'||model?.status==='unavailable',unverified=model?.status==='partial';
   // Keep the source in the accessible description of a verified event.

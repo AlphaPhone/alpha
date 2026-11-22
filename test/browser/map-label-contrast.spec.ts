@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 // The illustrated DOM mock map was removed (31f04d4e7); street and place names are now drawn by MapLibre
-// with the host palette's label colour on a land-coloured halo (plugin-maps map-plane "street-names" and
+// with the host palette's label colour on a land-coloured halo (the map-plane "street-names" and
 // "place-names" layers). Resolve those tokens exactly as the app does for MapLibre and keep them readable.
 for(const theme of ['light','dark'] as const)for(const state of ['maps','maps:route','maps:nav'])test(`map labels remain readable ${theme} ${state}`,async({page},info)=>{
  await page.goto(`/?mode=mock&theme=${theme}&start=${state}`);

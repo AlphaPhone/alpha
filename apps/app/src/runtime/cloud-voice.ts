@@ -1,7 +1,7 @@
 import {createCloudStreamingSpeech as createSharedCloudStreamingSpeech, type CloudStreamPort} from '../../../../.eliza/client-features/packages/voice/src/native-cloud-speech.ts';
 import {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
 import {developmentCloudVoiceEnabled} from './development-cloud-voice';
-import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../../../../.eliza/client-features/packages/ui/src/voice/tts-playback-activity.ts';
+import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../ui/voice/tts-playback-activity.ts';
 import { playOwnedSpeech, confirmSpeechRetirement } from '../local-speech-playback';
 import { registerPlugin } from '../platform-plugins';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';

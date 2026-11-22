@@ -32,12 +32,28 @@ html [data-mobile-shell-tile]:active [data-mobile-shell-tile-face]{background:va
 .alpha-phone [data-alpha-toast] { --alpha-toast-row:56px; --alpha-toast-top:max(8px,min(var(--alpha-notice-top),calc(100% - var(--alpha-dock-clearance,102px) - 12px - var(--alpha-toast-row)))); position:absolute; top:var(--alpha-toast-top); left:16px; right:16px; z-index:97; min-height:0; max-height:max(var(--alpha-toast-row),calc(100% - var(--alpha-toast-top) - var(--alpha-dock-clearance,102px) - 12px)); overflow:auto; }
 [data-alpha-toast] { display:flex; align-items:flex-start; justify-content:center; pointer-events:none; }
 [data-alpha-toast] > * { flex-shrink:0; }
+/* Persistent notices (lost work, a privacy state left on) stay in the chat's notice area, in the
+ * page flow so they cover nothing, until dismissed. */
+.alpha-persistent-notice { margin:0 20px 8px; min-height:56px; box-sizing:border-box; padding:4px 4px 4px 16px; border-radius:28px; background:var(--s2); color:var(--fg); font-size:14px; font-weight:600; display:flex; gap:12px; align-items:center; }
+.alpha-persistent-notice > span { flex-grow:1; min-width:0; padding:6px 0; overflow-wrap:anywhere; }
+/* A reply that says to check history carries the way there. */
+.alpha-history-link { align-self:flex-start; min-height:48px; padding:0 16px; margin-left:26px; border-radius:24px; background:var(--s2); color:var(--fg); font:inherit; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:8px; }
+.alpha-history-link .i { width:16px; height:16px; }
+.alpha-persistent-notice > button { flex-shrink:0; min-height:48px; padding:0 16px; border-radius:24px; color:var(--fg); background:var(--s1); font-weight:700; font-size:14px; }
 .alpha-chat-notices { max-height:30%; overflow:auto; flex-shrink:0; }
 .alpha-chat-notices:empty { display:none; }
 /* Full-screen chat on the launcher is drawn under Android's status bar. Its header starts 16
  * screen pixels below the bar and has no Resize chat grabber, so nothing of Alpha's competes
  * with the top-edge band where Android opens its shade. */
 .alpha-phone{--alpha-chat-full-top:max(60px,calc((max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 16px) / var(--phone-scale,1)))}
+/* Messages uses the same scaled canvas as Home. Reserve the new-message action's
+ * row (search and new message) full height on the list and keep the thread and compose headers below the bar. */
+[data-alpha-messages] {
+  --alpha-messages-top-inset:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1));
+  padding-top:calc(var(--alpha-messages-top-inset) + 8px);
+}
+[data-alpha-messages]:has([data-alpha-messages-actions]) { padding-top:calc(var(--alpha-messages-top-inset) + 52px); }
+[data-alpha-messages-actions] { top:calc(var(--alpha-messages-top-inset) + 4px); }
 .voice-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.2);font-family:'Public Sans',sans-serif;display:flex;align-items:end}
 .voice-overlay .dialog-backdrop{width:100%}
 .voice-overlay .dialog{background:var(--alpha-white);color:var(--alpha-black);border-radius:30px 30px 0 0;padding:24px;max-height:85dvh;overflow:auto}
@@ -97,7 +113,7 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
  * line clamp alone, and the card widens with the measured text scale (runtime/text-scale.ts) up
  * to the width of the screen so an ordinary word of the title still fits on one line. */
 [data-alpha-home-layout] { --alpha-card-scale:clamp(1,var(--alpha-text-scale,1),1.3); }
-/* The shared mobile shell's app grid drops a column when its labels stop fitting the measured text size. */
+/* The mobile shell's app grid drops a column when its labels stop fitting the measured text size. */
 [data-alpha-layer="home"] { --mobile-shell-text-scale:var(--alpha-text-scale,1); }
 /* The app grid follows the cards at the grid's own row gap instead of being pushed down by a
  * flexible spacer; the free space collects below the grid, above the dock. */
@@ -195,9 +211,6 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .note-source-dialog footer button { flex:1 1 180px; min-width:0; overflow-wrap:normal; }
 .note-source-content:focus-visible { outline:2px solid currentColor; outline-offset:-2px; }
 /* Document actions scroll with their details; Done remains outside the scroll area. */
-.note-source-document-dialog .note-source-content { min-height:44px; }
-.note-source-options { display:flex; flex-wrap:wrap; gap:8px; }
-.note-source-options button { flex:1 1 180px; min-width:min-content; max-width:100%; overflow-wrap:normal; word-break:normal; }
 /* Keep review actions outside the scrolling details at every text size. The body can shrink
  * within the viewport while retaining its own keyboard-scrollable focus region. */
 .alpha-large-text .note-source-dialog footer button { overflow-wrap:anywhere; }
@@ -287,12 +300,26 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 /* The mark overscans its circle so the rays run off the rim instead of sitting inside a blue ring. */
 .alpha-mark-fill{overflow:hidden}
 .alpha-mark-fill .alpha-compute-mark{width:118%;height:118%;mask-image:url('/logo-symbol.svg');-webkit-mask-image:url('/logo-symbol.svg')}
+/* AP-16 comms surfaces (docs/agentic-comms.md): classes shared by the shell and the three apps. */
+.alpha-mark-18{width:18px;height:18px;border-radius:9px;flex-shrink:0;background:var(--acc);color:var(--alpha-white);display:inline-flex;align-items:center;justify-content:center}
+.alpha-draft-bubble{align-self:flex-end;max-width:84%;box-sizing:border-box;padding:10px 14px;border-radius:20px 20px 6px 20px;border:1.5px dashed var(--acct);background:var(--bg);color:var(--fg);display:flex;flex-direction:column;gap:8px;overflow-wrap:anywhere}
+.alpha-draft-bubble[data-alpha-draft-bubble="owner"]{border-color:var(--mut);background:var(--s2)}
+.alpha-draft-bubble[data-alpha-draft-sent="true"]{border-style:solid;background:var(--fg);color:var(--bg)}
+.alpha-draft-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.alpha-sms-inline-body{width:100%;min-height:66px;max-height:34dvh;field-sizing:content;box-sizing:border-box;resize:vertical;color:inherit;background:transparent;border:0;font:inherit;font-size:16px;line-height:1.35}
+[data-alpha-draft-discard]{min-height:44px;padding:0 12px;border-radius:22px;color:var(--fg)}
+.alpha-draft-actions{position:sticky;bottom:0;display:flex;gap:8px;justify-content:flex-end;background:inherit}
+.alpha-filter-chip{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 0 0 12px;border-radius:16px;background:var(--s2);color:var(--fg);font-size:13px}
+.alpha-filter-chip>button{min-width:44px;min-height:44px;margin:-6px 0;display:inline-flex;align-items:center;justify-content:center}
+.alpha-end-button{width:44px;height:44px;min-width:44px;border-radius:22px;background:var(--alpha-call-red);color:var(--alpha-white);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.alpha-live-dot{width:8px;height:8px;border-radius:4px;background:var(--alpha-call-green);display:inline-block;flex-shrink:0}
+.alpha-stage-header{display:flex;align-items:center;gap:4px;min-height:56px;padding:0 8px;box-sizing:border-box;flex-shrink:0}
 /* Before startup decides between sign-in, access setup and Home: the mark alone, after a pause (main.tsx). */
 .alpha-startup-loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:56px;animation:fade .7s .3s both}
 .alpha-update-startup{position:fixed;inset:0;display:grid;align-content:center;justify-items:center;gap:16px;width:100%;height:100%;max-width:none;max-height:none;box-sizing:border-box;margin:0;border:0;padding:24px;background:var(--alpha-white);color:var(--alpha-black);font:16px 'Public Sans',sans-serif}
 .alpha-update-startup button{min-height:44px;padding:8px 20px;border:0;border-radius:24px;background:var(--alpha-blue);color:var(--alpha-white);font:inherit}
 
-/* Portable block-axis scroll-fade behavior from shared UI shadcn-utilities.css.
+/* Portable block-axis scroll-fade behavior adapted from elizaOS shadcn-utilities.css.
    Only timeline content is masked; Calendar headers and form controls stay clear. */
 @property --calendar-scroll-fade-top { syntax:"<length>"; inherits:false; initial-value:0px; }
 @property --calendar-scroll-fade-bottom { syntax:"<length>"; inherits:false; initial-value:0px; }
@@ -314,7 +341,7 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .app-header-back { display:flex; align-items:center; justify-content:center; width:52px; height:52px; min-width:52px; min-height:52px; flex-shrink:0; color:inherit; border-radius:16px; }
 .app-header-back .i { width:22px; height:22px; }
 .app-header-back:focus-visible { outline:2px solid var(--acct); outline-offset:-2px; }
-.standalone-app [data-screen]:has([data-alpha-app-header]) [data-alpha-app-back-fallback] { display:none!important; }
+.standalone-app [data-screen]:has([data-alpha-app-header], [data-alpha-navigation-header]) [data-alpha-app-back-fallback] { display:none!important; }
 .standalone-app [data-alpha-app-header] { margin-top:0!important; height:52px!important; min-height:52px!important; padding-left:8px!important; padding-right:8px!important; gap:2px!important; box-sizing:border-box; }
 .standalone-app [data-alpha-app-header-overlay] { top:0!important; }
 .standalone-app [data-alpha-app-header] [data-alpha-app-title] { font-family:inherit; font-size:20px!important; line-height:1.2; letter-spacing:normal!important; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -371,6 +398,66 @@ html.alpha-text-xl:not(.standalone-app) [data-alpha-app-header="main"]:not([data
  padding-bottom:calc(var(--alpha-chat-clearance,0px) + 16px)!important;
  scroll-padding-bottom:calc(var(--alpha-chat-clearance,0px) + 16px);
 }
+/* AP-16 stage (docs/agentic-comms.md AC-02/AC-05): with the chat open on a comms view the app is laid
+   out above the sheet, bottom-anchored, never covered. --alpha-sheet-height has one writer at a time:
+   the shell's render at rest, the drag's paint while a finger moves (then nothing animates behind it). */
+[data-alpha-layer="app"][data-alpha-stage="true"]{bottom:var(--alpha-sheet-height,0px)!important;transition:bottom .42s cubic-bezier(.22,1,.36,1)}
+/* The staged app ends at the sheet, so nothing inside it reserves room for the closed bar. */
+[data-alpha-layer="app"][data-alpha-stage="true"]{--alpha-dock-reserve:12px}
+[data-screen][data-alpha-chat-dragging="true"] [data-alpha-layer="app"][data-alpha-stage="true"]{transition:none}
+/* Sheet motion already updates its height each frame. A second transition makes Messages
+ * lag behind the sheet and hides the draft tail during opening and resizing. */
+[data-alpha-layer="app"][data-alpha-stage="true"]:has([data-alpha-messages]){transition:none}
+[data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"][data-alpha-stage="true"] :is([data-alpha-app-scroll],.calendar-timeline,.calendar-draft-fields){padding-bottom:16px!important;scroll-padding-bottom:16px}
+[data-alpha-layer="app"][data-alpha-stage-enter="left"]{animation:alpha-stage-left .42s cubic-bezier(.22,1,.36,1) both}
+[data-alpha-layer="app"][data-alpha-stage-enter="right"]{animation:alpha-stage-right .42s cubic-bezier(.22,1,.36,1) both}
+@keyframes alpha-stage-left{from{transform:translateX(18%);opacity:.4}to{transform:none;opacity:1}}
+@keyframes alpha-stage-right{from{transform:translateX(-18%);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){[data-alpha-layer="app"][data-alpha-stage="true"]{transition:none}[data-alpha-layer="app"][data-alpha-stage-enter]{animation:none}}
+/* AC-09: the field that addresses Alpha has a 1.5dp outline; the person's field is plain. */
+.alpha-bar-field-alpha{box-shadow:inset 0 0 0 1.5px var(--acct)!important}
+.alpha-bar-field-wrap{flex-grow:1;min-width:0;display:flex;align-items:center;position:relative}
+/* A Home send opens chat around the active editor. Its dock ancestors stay
+   mounted and visible to the input method. Only the editor is painted here. */
+[data-alpha-chat-editor-slot] { min-height:44px; }
+[data-alpha-promoted-editor="true"] { inset:0!important;z-index:51!important;pointer-events:none; }
+[data-alpha-promoted-editor="true"] > :not([data-alpha-input-bar]),
+[data-alpha-promoted-editor="true"] [data-alpha-input-bar] > :not(.alpha-bar-field-wrap) { display:none!important; }
+[data-alpha-promoted-editor="true"] [data-alpha-input-bar],
+[data-alpha-promoted-editor="true"] .alpha-bar-field-wrap { display:contents!important; }
+[data-alpha-promoted-editor="true"] textarea[data-alpha-composer] {
+  position:absolute;left:var(--alpha-editor-x);top:var(--alpha-editor-y);width:var(--alpha-editor-width);
+  pointer-events:auto;
+}
+.alpha-chat-composer:has(> [data-alpha-bar-left]){padding-left:6px}
+.alpha-bar-left{width:44px;height:44px;min-width:44px;border-radius:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:var(--s3);color:var(--fg)}
+.alpha-bar-avatar{font-size:14px;font-weight:700;letter-spacing:.02em}
+.alpha-bar-hint{margin:0 0 6px 12px;display:inline-block;padding:4px 10px;border-radius:12px;background:var(--bg);color:var(--fg);font-size:12px;box-shadow:0 4px 14px var(--shc)}
+/* AC-24: one faint suggestion inside the empty field; a tap or a swipe right puts it there, unsent. */
+.alpha-faint{position:absolute;left:8px;top:0;bottom:0;max-width:calc(100% - 16px);display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(--mut);font-size:15px;text-align:left;z-index:2}
+.alpha-faint .alpha-mark-18{width:16px;height:16px;opacity:.75}
+.alpha-faint-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* AC-28: Alpha's 18dp mark beside its chat lines; quiet local notes read muted. */
+[data-alpha-agent-line]{display:flex;gap:10px;align-items:flex-start}
+[data-alpha-agent-line]>[data-alpha-message-text]{flex:1;min-width:0}
+[data-alpha-agent-line]>.alpha-mark-18{margin-top:3px}
+.alpha-agent-line-quiet>[data-alpha-message-text]{font-size:14px!important;color:var(--mut)}
+.alpha-sheet-context{font-size:13px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alpha-stage-return-row{display:flex;padding:0 12px 4px;flex-shrink:0}
+.alpha-stage-return{min-height:44px;padding:0 14px;border-radius:22px;background:var(--s2);color:var(--fg);font-size:14px;font-weight:600}
+/* AC-04: the 52dp live strip at full height. */
+.alpha-strip{display:flex;align-items:center;gap:6px;height:52px;margin:0 12px 6px;padding:0 6px 0 4px;border-radius:18px;background:var(--s2);color:var(--fg);flex-shrink:0;touch-action:none;box-sizing:border-box}
+.alpha-strip-main{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;gap:8px;padding:0 6px;text-align:left;border-radius:14px}
+.alpha-strip-avatar{width:32px;height:32px;border-radius:16px;background:var(--s3);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.alpha-strip-text{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.alpha-strip-text b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alpha-strip-text span{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alpha-strip-action{width:44px;height:44px;min-width:44px;border-radius:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:var(--s3);color:var(--fg)}
+.alpha-strip-action[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.alpha-strip-action.alpha-end-button{background:var(--alpha-call-red);color:var(--alpha-white)}
+.alpha-strip-action.alpha-end-button svg{transform:rotate(135deg)}
+.alpha-answer-button{background:var(--alpha-call-green);color:var(--alpha-white)}
+.alpha-strip-send{background:var(--acc);color:var(--alpha-white)}
 /* An open note's text field and checklist end above the half chat, so the owner keeps typing beside it. */
 [data-screen][data-alpha-chat-half="true"] .note-editor { padding-bottom:calc(var(--alpha-chat-clearance,0px) + 16px)!important; }
 [data-screen][data-alpha-chat-half="true"] .note-editor > .note-checklist-column { padding-bottom:16px!important; }
@@ -412,12 +499,14 @@ html:not(.alpha-landscape) .alpha-phone [data-screen][data-alpha-chat-half="true
  * for scrollers this rule does not name). */
 html:not(.alpha-landscape) .alpha-phone [data-screen]:not([data-alpha-chat-half="true"]) :is([data-alpha-app-scroll],.calendar-timeline,.calendar-draft-fields) { scroll-padding-bottom:calc(var(--alpha-dock-clearance,102px) + 16px); }
 
-/* Existing inline app dialogs own focus above a nonblocking half sheet too. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-layer="conversation"] { visibility:hidden; }
+/* Existing inline app dialogs and Notes popup menus own focus above a nonblocking half sheet too.
+ * Only the Notes menus, which render only while open: other app menus (Inbox's, inside a closed
+ * <details>) stay in the DOM while shut and must not hide the sheet. */
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-layer="conversation"] { visibility:hidden; }
 /* The sheet is hidden behind that dialog, and in landscape it docks beside the app: neither covers
  * anything, so a touch outside it stays the app's. */
-[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-chat-scrim],
-[data-screen]:has([data-alpha-layer="app"] [role="dialog"]) [data-alpha-dock-scrim="true"],
+[data-screen][data-alpha-chat-half="true"]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-chat-scrim],
+[data-screen]:has([data-alpha-layer="app"] :is([role="dialog"],.notes-menu[role="menu"])) [data-alpha-dock-scrim="true"],
 .alpha-landscape .alpha-phone [data-alpha-chat-scrim]:not([data-alpha-dock-scrim="true"]) { pointer-events:none!important; }
 
 /* Assistant owns only its conversation surface. */
@@ -488,6 +577,14 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] [d
 html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] [data-alpha-maps-status] { margin-inline:20px; }
 html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > .alpha-map-credits { margin-inline:16px; align-self:stretch; }
 html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-guidance-controls] { margin-inline:12px; }
+/* Full-bleed Maps keeps the assistant dock and lays its own bottom controls out above it.
+   In guidance Recenter joins the stack above the guidance bar instead of a fixed offset
+   that the bar and a taller dock both covered. On the base map, credits and Recenter
+   follow the dock's measured reserve when a long draft makes the dock taller. */
+[data-alpha-maps-guidance="true"] > [data-alpha-maps-recenter] { position:relative!important; inset:auto!important; flex:none; align-self:flex-end; }
+html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-recenter] { margin-right:16px; }
+html:not(.alpha-landscape) [data-alpha-maps-base="true"] > .alpha-map-credits { bottom:max(124px,calc(var(--alpha-dock-reserve,108px) + 16px))!important; }
+html:not(.alpha-landscape) [data-alpha-maps-base="true"] > [data-alpha-maps-recenter] { bottom:min(max(124px,calc(var(--alpha-dock-reserve,108px) + 16px)),calc(100% - 176px))!important; }
 
 /* Keep the guidance controls and credits in flow on the clear side of the
    landscape assistant. Status and maneuvers share the space above the right dock. */
@@ -518,7 +615,7 @@ html:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > [data-alpha-maps-
 }
 .alpha-landscape [data-alpha-maps-guidance-controls] > button { width:48px!important; height:48px!important; }
 .alpha-landscape [data-alpha-maps-guidance-controls] > div > .serif { font-size:24px!important; overflow-wrap:anywhere; }
-/* The Google credit bar keeps the full row: its sources panel opens from the bar's right edge. */
+/* The Google credit row keeps the full width so the panel the badge opens has room. */
 .alpha-landscape [data-alpha-maps-guidance="true"] > .alpha-map-credits[data-google-maps="true"],
 html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > .alpha-map-credits[data-google-maps="true"] { align-self:stretch; }
 .alpha-landscape [data-alpha-maps-guidance="true"] > .alpha-map-credits:has(details[open]) { z-index:6; }
@@ -533,10 +630,28 @@ html.alpha-large-text:not(.alpha-landscape) [data-alpha-maps-guidance="true"] > 
 }
 
 /* Keep portrait capture controls above the assistant on short windows. */
+/* The Video/Photo switch shows its choice by colour and dot, never a focus box: no ring after a
+ * tap or click; a keyboard user still gets a thin underline under the focused mode's label. */
+[data-alpha-camera-mode]:focus{outline:none}
+[data-alpha-camera-mode]:focus-visible{outline:none;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px}
 html:not(.alpha-landscape) [data-alpha-camera="capture"]{top:min(712px,calc(100% - var(--alpha-dock-clearance,102px) - 106px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="modes"]{top:min(656px,calc(100% - var(--alpha-dock-clearance,102px) - 162px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="zoom"]{top:min(585px,calc(100% - var(--alpha-dock-clearance,102px) - 217px))!important}
 html:not(.alpha-landscape) [data-alpha-camera="viewfinder"]{height:min(549px,calc(100% - var(--alpha-dock-clearance,102px) - 258px))!important}
+/* Camera with the chat open (the sheet stays where it was when Camera opened): Camera is laid out in
+ * the space above the sheet, the way a comms view's stage is (docs/agentic-comms.md AC-02). The live
+ * preview fills that space and the zoom, mode and capture rows sit over its lower edge, so the
+ * viewfinder stays visible and the shutter, mode switch and flip are reachable above the sheet, never
+ * under it. The dock is inside the sheet there, so nothing in Camera reserves room for it. */
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){bottom:var(--alpha-sheet-height,0px)!important;--alpha-dock-clearance:0px;transition:bottom .42s cubic-bezier(.22,1,.36,1)}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-dragging="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){transition:none}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="viewfinder"]{top:0!important;bottom:0!important;height:auto!important}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="capture"]{top:calc(100% - 98px)!important;z-index:2}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="modes"]{top:calc(100% - 146px)!important;z-index:2}
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root] [data-alpha-camera="zoom"]{top:calc(100% - 194px)!important}
+/* A shade under the rows keeps the white controls legible over a bright preview. */
+html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-camera-root]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:160px;background:linear-gradient(transparent,rgba(0,0,0,.55));pointer-events:none}
+@media (prefers-reduced-motion:reduce){html:not(.alpha-landscape) [data-screen][data-alpha-chat-half="true"] [data-alpha-layer="app"]:has([data-alpha-camera-root]){transition:none}}
 
 /* Camera in landscape: the portrait stack (viewfinder, zoom, modes, capture row) is 800px tall and
  * would leave every capture control below the screen. The capture controls move to a column on the
@@ -673,6 +788,9 @@ button[aria-label$=" on or off"][aria-pressed]::before { content:""; position:ab
 .calendar-agenda-event { display:flex; flex-direction:column; gap:4px; width:100%; min-height:48px; padding:12px 16px; margin-bottom:8px; border-radius:14px; background:var(--s2); color:var(--fg); text-align:left; box-sizing:border-box; overflow-wrap:anywhere; }
 .calendar-agenda-event span { font-size:13px; color:var(--mut); }
 .calendar-agenda-event strong { font-size:16px; line-height:1.35; }
+/* Calendar Schedule and search (calendar-schedule.ts): the day layout stays mounted, hidden, under the list. */
+[data-alpha-calendar-list="true"] :is([data-alpha-calendar-week],[data-alpha-calendar-invites],[data-alpha-calendar-all-day],[data-alpha-calendar-day-heads],.calendar-timeline,.calendar-agenda) { display:none!important; }
+.calendar-month-dialog [role="group"] button[aria-pressed="true"] { background:var(--fg)!important; color:var(--bg)!important; }
 /* Large text in a short canvas (200% text, launcher Home): the header, notices and the day strip
  * above the agenda can outgrow the screen and leave the day strip under the dock. The whole list
  * then scrolls as one column whose end clears the dock (runtime/dock-clearance.ts); the agenda
@@ -709,7 +827,7 @@ button[aria-label$=" on or off"][aria-pressed]::before { content:""; position:ab
 .standalone-app [data-screen]:has([data-alpha-maps-guidance="true"]) [data-alpha-app-back-fallback] { background:var(--bg); border-radius:22px; }
 .standalone-app [data-alpha-maps-root] [data-alpha-app-header-overlay] { top:var(--maps-top)!important; }
 [data-alpha-maps-root] input[type="search"]::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; display:none; }
-/* Provider credits stay visible; the compact ⓘ opens the full request disclosure. */
+/* Provider credits stay visible; the compact ⓘ opens the full request disclosure. Google maps show the badge alone. */
 .alpha-map-credits { position:absolute; left:16px; right:76px; z-index:3; display:flex; align-items:center; gap:8px; color:var(--fg); font-size:12px; line-height:1.4; }
 .alpha-map-credit-links { flex:1; min-width:0; padding:6px 8px; border-radius:14px; background:var(--bg); box-shadow:0 2px 12px var(--shc); overflow-wrap:anywhere; }
 .alpha-map-credit-links a { color:inherit; text-decoration:underline; }
@@ -729,29 +847,16 @@ html.alpha-text-xl:not(.alpha-landscape) .alpha-map-credits:not([data-google-map
 .alpha-map-credits[data-google-maps="true"] {
   container:alpha-map-credit / inline-size; right:76px; width:auto; height:auto; display:flex; align-items:center; gap:4px; padding:0; border-radius:0; background:transparent; box-shadow:none;
 }
-.alpha-google-credit { flex:1; min-width:0; display:flex; align-items:center; gap:4px; }
-.alpha-google-mark,.alpha-google-copyright,.alpha-google-map-missing,.alpha-google-sources > summary,
-.alpha-map-credits[data-google-maps="true"] > .alpha-map-privacy > summary {
+/* Google Maps shows its badge alone. The badge opens the viewport's complete copyright and the request
+   disclosure, as Google's attribution policy allows where the full line does not fit the view. */
+.alpha-google-credit { flex:none; min-width:0; }
+.alpha-google-mark,.alpha-google-map-missing {
   border-radius:14px; background:var(--bg); color:var(--fg); box-shadow:0 2px 12px var(--shc);
 }
-.alpha-google-mark { flex:none; display:inline-flex; align-items:center; padding:10px 10px 5px; background:var(--alpha-white); }
+.alpha-google-mark { box-sizing:border-box; display:flex; align-items:center; min-height:44px; padding:10px 10px 5px; background:var(--alpha-white); cursor:pointer; list-style:none; }
+.alpha-google-mark::-webkit-details-marker { display:none; }
 .alpha-google-mark img { display:block; width:auto; height:16px; }
-.alpha-google-copyright,.alpha-google-map-missing { min-width:0; padding:6px 8px; overflow-wrap:anywhere; }
-.alpha-google-sources { display:none; min-width:0; }
-.alpha-google-sources > summary {
-  display:flex; align-items:center; min-height:44px; padding:4px 8px; cursor:pointer; list-style:none;
-}
-.alpha-google-sources > summary::-webkit-details-marker { display:none; }
-.alpha-map-credits .alpha-google-sources > .alpha-map-info {
-  top:auto; left:auto; right:0; bottom:calc(100% + 8px); box-sizing:border-box; max-height:160px; overflow:auto; overflow-wrap:anywhere;
-}
-@container alpha-map-credit (max-width: 375px) {
-  .alpha-google-copyright { display:none; }
-  .alpha-google-sources { display:block; }
-}
-html.alpha-large-text .alpha-google-copyright { display:none; }
-html.alpha-large-text .alpha-google-sources { display:block; }
-.alpha-map-credits[data-google-maps="true"] > .alpha-map-privacy { flex:none; width:44px; height:44px; }
+.alpha-google-map-missing { min-width:0; padding:6px 8px; overflow-wrap:anywhere; }
 .alpha-map-privacy > summary::-webkit-details-marker { display:none; }
 .alpha-map-privacy > summary [data-alpha-icon] { width:20px; height:20px; }
 .alpha-map-info { position:absolute; left:0; bottom:calc(100% + 10px); width:min(300px,calc(100vw - 32px)); box-sizing:border-box; display:grid; gap:10px; max-height:240px; overflow-y:auto; overflow-wrap:anywhere; padding:14px 16px; border-radius:20px; background:var(--bg); color:var(--fg); box-shadow:0 6px 24px var(--shc), 0 0 0 1px var(--line); font-size:14px; line-height:1.35; }
@@ -791,17 +896,24 @@ html.alpha-large-text .alpha-google-sources { display:block; }
 .alpha-pill-voice-stop { background:var(--acc); color:var(--alpha-white); }
 .alpha-pill-voice-controls button:focus-visible { outline:2px solid var(--acct); outline-offset:2px; }
 
-/* Message actions use the same surface press color as the rest of Alpha. */
-[data-alpha-message-actions] [role="menuitem"] { border-radius:10px; transition:background-color 120ms ease-out; }
-[data-alpha-message-actions] [role="menuitem"]:active { background:var(--s3); }
-@media (hover:hover) { [data-alpha-message-actions] [role="menuitem"]:hover { background:var(--s3); } }
+/* Chat and Messages use the same inline message actions. */
+.alpha-message-action-row { display:flex;overflow-x:auto;max-width:100%;box-sizing:border-box;margin-top:8px;padding:4px;border-radius:14px;background:var(--s2); }
+.alpha-message-action-row [role="menuitem"] { display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;font-size:14px;font-weight:600;flex-shrink:0;white-space:nowrap;border-radius:10px;transition:background-color 120ms ease-out; }
+.alpha-message-action-row .alpha-message-copy { width:100px; }
+[data-alpha-sms-actions] { scroll-margin-block:8px; }
+[data-alpha-sms-actions] .alpha-message-copy { width:auto;min-width:100px; }
+.alpha-message-action-row [role="menuitem"]:active { background:var(--s3); }
+@media (hover:hover) { .alpha-message-action-row [role="menuitem"]:hover { background:var(--s3); } }
+.alpha-message-action-row [role="menuitem"]:focus-visible,[data-alpha-message-id][role="button"]:focus-visible { outline:2px solid var(--acct);outline-offset:-2px; }
+[data-alpha-messages-thread] [data-alpha-message-body] a { color:var(--acct);text-decoration:underline;text-underline-offset:2px; }
+[data-alpha-sms-outgoing="true"] [data-alpha-message-body] a { color:color-mix(in srgb,#383bff 65%,var(--bg)); }
 [data-alpha-transcript] { scroll-padding-block:16px; }
 [data-alpha-transcript][data-alpha-scroll-overflow="false"] { -webkit-mask-image:none; mask-image:none; animation:none; }
 
 .mail-sender-avatar{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:44px;height:44px;border-radius:50%;background:var(--s2);font-size:14px;font-weight:700;overflow:hidden}
 .mail-sender-avatar img{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;object-fit:contain;padding:9px;background:var(--s2)}
 
-.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none}
+.calendar-search-input::-webkit-search-cancel-button,.calendar-search-input::-webkit-search-decoration,.mail-search-input::-webkit-search-cancel-button,.mail-search-input::-webkit-search-decoration,.contacts-search-input::-webkit-search-cancel-button,.contacts-search-input::-webkit-search-decoration,.messages-search-input::-webkit-search-cancel-button,.messages-search-input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 
 .content-question-dialog{padding:20px;border-radius:24px;max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px))}
 .content-question-dialog h2{font:600 22px/1.25 'Public Sans',system-ui,sans-serif;margin:0 0 4px;letter-spacing:-.015em}
@@ -838,13 +950,31 @@ html.alpha-large-text .alpha-google-sources { display:block; }
 /* The approval row says what a tap does; rows without a label keep their icon. */
 .alpha-row-label:empty { display:none; }
 .alpha-row-label { flex-shrink:0; min-height:36px; padding:0 16px; border-radius:18px; background:var(--acc); color:var(--alpha-white); font-size:14px; font-weight:600; display:inline-flex; align-items:center; }
+/* Decline is an action with the same target size and quieter emphasis. */
+.alpha-action-review .alpha-row-label[data-alpha-secondary-action="true"] { background:var(--s3); color:var(--fg); }
 .alpha-row-label:not(:empty) + svg { display:none; }
 .alpha-action-review button { min-height:56px; }
+.alpha-action-review button:disabled,[data-alpha-proposal-act]:disabled { opacity:.5; cursor:default; }
+/* A photo waiting for review on Camera's closed bar: compact, above the composer, never over the viewfinder or shutter. */
+/* Above Camera's pill: part of the dock, so the dock clearance lifts the shutter row above it. */
+.alpha-pill-review { position:absolute; left:16px; right:16px; bottom:calc(100% + 8px); pointer-events:auto; }
+/* In landscape it stops at Camera's capture rail (--alpha-camera-rail, 132px) instead of lying across the shutter. */
+.alpha-landscape .alpha-pill-review { right:calc(132px + 16px); }
+.alpha-bar-review { margin-bottom:8px; border-radius:22px; background:var(--s2); color:var(--fg); overflow:hidden; box-shadow:0 14px 40px var(--shc); }
+.alpha-bar-review button { width:100%; display:flex; align-items:center; gap:12px; padding:8px 8px 8px 16px; text-align:left; font:inherit; color:inherit; }
+.alpha-action-review.alpha-bar-review button { min-height:48px; }
+.alpha-bar-review button + button { border-top:1px solid var(--line); }
+.alpha-bar-review button > div { min-width:0; flex-grow:1; }
+.alpha-bar-review-title { font-size:14px; font-weight:600; }
+.alpha-bar-review-text { font-size:13px; color:var(--mut); }
+/* Decline is one short row: its explanation stays in the chat card. */
+.alpha-bar-review button + button .alpha-bar-review-text { display:none; }
+.alpha-bar-review svg { width:14px; height:14px; color:var(--mut); flex-shrink:0; }
 /* What the phone itself reports (done, declined, not completed) is set apart from the assistant's own words. */
 [data-alpha-device-receipt="true"] { align-self:flex-start; max-width:100%; box-sizing:border-box; padding:10px 14px; border-radius:6px 16px 16px 6px; border-left:3px solid var(--acct); background:var(--s2); font-size:14px!important; line-height:1.45!important; overflow-wrap:anywhere; }
 /* Narrow phones keep New chat and History reachable by dropping the assistant's name beside its mark. */
 @media (max-width: 439px) { [data-alpha-chat-lead] [data-alpha-chat-name] { display:none; } }
-.alpha-action-review button > div > div:last-child { white-space:pre-wrap!important; overflow:visible!important; text-overflow:clip!important; overflow-wrap:anywhere; line-height:1.45; }
+.alpha-action-review button > div > div:nth-child(2) { white-space:pre-wrap!important; overflow:visible!important; text-overflow:clip!important; overflow-wrap:anywhere; line-height:1.45; }
 
 /* Older Android WebViews ignore popover; React visibility must still hide the menu. */
 .mail-folder-menu[hidden]{display:none!important}
@@ -932,10 +1062,14 @@ dialog.alarm-page{position:fixed;inset:0 auto auto 0;margin:0;width:100vw;height
 [data-alpha-recorder-actions]{padding-bottom:calc(var(--alpha-dock-reserve,108px) + 16px)!important}
 [data-alpha-view-actions]{bottom:var(--alpha-dock-reserve,108px)!important}
 [data-alpha-photo-actions]>div{padding-bottom:12px!important}
-[data-alpha-popup] [role="dialog"],[data-alpha-album-manager]{bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-popup] [role="dialog"]:not(.attachment-picker-sheet){bottom:var(--alpha-dock-reserve,108px)!important;max-height:calc(100% - var(--alpha-dock-reserve,108px) - 32px)!important;overflow-y:auto;box-sizing:border-box}
+[data-alpha-album-manager]{position:absolute;inset:auto 0 0;z-index:21;max-height:calc(100% - 32px);padding:20px 24px calc(var(--alpha-dock-reserve,108px) + 12px);overflow-y:auto;box-sizing:border-box;background:var(--s1);color:var(--fg);border-radius:28px 28px 0 0}
+.photo-album-choices{display:grid;gap:8px;margin-top:12px}
+.photo-album-choices button{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 16px;border-radius:14px;background:var(--s2);color:var(--fg);text-align:left}
+.photo-album-membership{padding:6px 16px;color:var(--mut);font-size:14px}
 /* The overflow menu is anchored below its header, so a dock bottom must cap,
  * not stretch, its intrinsic height. Keep short screens scrollable. */
-[data-alpha-popup] .notes-menu[role="dialog"]{bottom:auto!important;height:auto;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
+[data-alpha-popup] .notes-menu[role="menu"]{bottom:auto!important;height:auto;overflow-y:auto;box-sizing:border-box;min-width:min(208px,calc(100% - 20px));max-width:calc(100% - 20px);max-height:max(0px,calc(100% - 56px - var(--alpha-dock-reserve,108px) - 8px))!important}
 
 .chat-image-preview{position:absolute;inset:0;z-index:130;background:var(--alpha-black);color:var(--alpha-white);overflow:hidden;touch-action:none}
 .chat-image-preview>[role="dialog"]{height:100%;display:flex;align-items:center;justify-content:center;padding:64px 16px 16px;box-sizing:border-box;overflow:hidden}
@@ -970,9 +1104,12 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
 [data-alpha-clock-page]{padding-bottom:24px!important}
 
 /* Message actions share the existing compact overflow menu. */
-.mail-message-menu > div { min-width:200px; max-width:calc(100vw - 40px); }
-.mail-message-menu > div button { display:flex; align-items:center; gap:12px; }
+:is(.mail-message-menu,.mailbox-options-menu) > div { min-width:200px; max-width:calc(100vw - 40px); }
+:is(.mail-message-menu,.mailbox-options-menu) > div button { display:flex; align-items:center; gap:12px; }
 .mail-message-menu .alpha-compute-mark { width:20px; height:20px; flex-shrink:0; }
+.mail-selection-check{display:grid;place-items:center;flex:none;width:22px;height:22px;margin-top:8px;border:1px solid var(--mut);border-radius:6px;color:var(--bg)}
+.mail-selection-check[data-checked="true"]{background:var(--fg);border-color:var(--fg)}
+.mail-selection-check svg{width:16px;height:16px}
 .mail-thread { margin-bottom:20px; }
 .mail-thread-message { display:flex; flex-direction:column; gap:5px; width:100%; padding:14px 0; text-align:left; border-bottom:1px solid var(--line); }
 .mail-thread-message > span:first-child { display:flex; align-items:baseline; gap:12px; justify-content:space-between; }
@@ -983,9 +1120,9 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
 
 /* The viewer has one secondary-action menu; primary controls stay above the dock. */
 .photo-viewer-menu > div { min-width:208px; max-width:calc(100vw - 40px); }
-.photo-viewer-menu > div button { display:flex; align-items:center; gap:12px; white-space:nowrap; }
-.photo-viewer-menu .alpha-compute-mark { width:20px; height:20px; flex-shrink:0; }
-.photo-viewer-menu .i { width:20px; height:20px; flex-shrink:0; }
+.photo-actions-menu > div button { display:flex; align-items:center; gap:12px; white-space:nowrap; }
+.photo-actions-menu .alpha-compute-mark,.photo-action-icon { width:20px; height:20px; flex-shrink:0; }
+.photo-action-icon {display:block;background:currentColor;mask:var(--photo-icon) center/contain no-repeat}
 [data-alpha-popup] .photo-info-sheet[role="dialog"] { left:8px!important; right:8px!important; bottom:calc(var(--alpha-dock-reserve,108px) + 8px)!important; border-radius:28px!important; padding:12px 24px 24px!important; }
 .alpha-share-panel::backdrop { background:rgba(0,0,0,.35); }
 .alpha-share-panel h2 { margin:0; font-size:1.5em; line-height:1.2; }
@@ -1013,11 +1150,136 @@ html[data-alpha-browser-underlay] [data-alpha-layer="app"]{background:linear-gra
  * the dock (40) and the conversation (50). The inset is screen pixels; the canvas is scaled. */
 .alpha-phone::after { content:""; position:absolute; left:0; right:0; bottom:0; height:calc(var(--native-bottom-inset,0px) / var(--phone-scale,1)); background:var(--bg); z-index:39; pointer-events:none; }
 html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
+/* Match the surface that reaches the bottom of the canvas. */
+.alpha-phone:has([data-alpha-camera-root],[data-alpha-subview="photos-viewer"])::after { background:var(--alpha-black); }
+.alpha-phone:has([data-alpha-album-manager])::after { background:var(--s1); }
 /* Loading placeholder for audio and transcripts in Phone: a shape, not a sentence. */
 :is([data-alpha-contact-editor],[data-alpha-phone],[data-alpha-messages],[data-alpha-contacts-bar]) :is(input,textarea) { border:0; outline:0; font-family:inherit; color:inherit; }
+.alpha-phone-tabs { display:flex; justify-content:center; padding:0 16px 8px; flex-shrink:0; }
+.alpha-phone-tabs > [role="group"] { display:flex; gap:2px; padding:3px; max-width:100%; border-radius:24px; background:var(--s2); }
+.alpha-phone-tabs button { position:relative; display:flex; align-items:center; justify-content:center; width:64px; height:44px; border-radius:22px; background:transparent; color:var(--fg); }
+.alpha-phone-tabs button[aria-pressed="true"] { background:var(--fg); color:var(--bg); }
+.alpha-phone-tabs svg { width:20px; height:20px; }
+.alpha-phone-tabs button > span { position:absolute; top:8px; right:16px; width:8px; height:8px; border-radius:4px; background:var(--acct); }
+[data-alpha-contacts-screen] > :is(.alpha-phone-tabs,[data-alpha-contacts-bar]) { margin-top:52px; }
+[data-alpha-contacts-screen] > .alpha-phone-tabs + [data-alpha-contacts-bar] { margin-top:0; }
 .alpha-keypad { container-type:size; }
 .alpha-keypad > div { --k:clamp(48px,calc((100cqh - var(--alpha-dock-reserve,108px) - 96px) / 5.5),78px); }
 .alpha-pulse { animation: fade 1s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) { .alpha-pulse { animation: none; } }
 /* Read by assistive technology only. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.attachment-picker-backdrop{position:absolute;inset:0;z-index:90;background:rgba(0,0,0,.28);touch-action:none}
+.attachment-picker-sheet{position:absolute;inset:8% 0 0;display:flex;flex-direction:column;min-height:0;box-sizing:border-box;border-radius:28px 28px 0 0;overflow:hidden;background:var(--bg);color:var(--fg)}
+.attachment-picker-sheet[role="dialog"][data-alpha-bottom-sheet]{padding-bottom:0!important}
+.attachment-picker-sheet>header{display:flex;align-items:center;gap:10px;padding:12px 16px;flex-shrink:0}
+.attachment-picker-sheet h2{margin:0;font-size:28px;font-weight:400;flex:1}
+.attachment-picker-confirm{min-height:44px;border:0;border-radius:24px;padding:0 18px;background:var(--acc);color:var(--alpha-white);font:600 15px 'Public Sans',sans-serif}
+.attachment-picker-confirm:disabled{opacity:.38}
+.attachment-picker-search{display:flex;align-items:center;gap:10px;min-height:46px;margin:0 20px 12px;padding:0 14px;border-radius:16px;background:var(--s2);color:var(--mut);flex-shrink:0}
+.attachment-picker-search .i{width:20px;height:20px;flex-shrink:0}
+.attachment-picker-search input{width:100%;min-width:0;min-height:46px;padding:0;border:0;background:transparent;color:var(--fg);font:16px 'Public Sans',sans-serif;outline-offset:3px}
+.attachment-picker-search input::placeholder{color:var(--mut);opacity:1}
+.attachment-picker-tabs{display:flex;gap:4px;margin:0 20px 12px;padding:4px;border-radius:18px;background:var(--s2);flex-shrink:0}
+.attachment-picker-tabs button{display:flex;align-items:center;justify-content:center;text-align:center;flex:1;min-height:42px;border:0;border-radius:14px;background:transparent;color:var(--fg);font:600 15px 'Public Sans',sans-serif}
+.attachment-picker-tabs button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.attachment-picker-location{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 20px 8px;flex-shrink:0;overflow-x:auto}
+.attachment-picker-location strong{font-size:14px;font-weight:600;white-space:nowrap}
+.attachment-picker-location>button:not(.ib){min-height:40px;padding:0 12px;border-radius:20px;background:var(--s2);color:var(--fg);font:inherit;white-space:nowrap}
+.attachment-picker-content{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;padding-bottom:16px}
+.attachment-picker-photos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:0 12px}
+.attachment-picker-photos>button{position:relative;display:block;aspect-ratio:1;border:0;border-radius:8px;overflow:hidden;background:var(--s2);padding:0}
+.attachment-picker-photos img{width:100%;height:100%;object-fit:cover}
+.attachment-picker-photo-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:100%;padding:12px;box-sizing:border-box;color:var(--mut)}
+.attachment-picker-photo-placeholder small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+.attachment-picker-photos>button[aria-pressed=true]{outline:2px solid var(--acc);outline-offset:-2px}
+.attachment-picker-check{display:flex;align-items:center;justify-content:center;width:24px;height:24px;flex-shrink:0;border:1.5px solid var(--line);border-radius:50%;background:var(--bg);color:var(--alpha-white);box-sizing:border-box}
+.attachment-picker-photos .attachment-picker-check{position:absolute;right:8px;top:8px}
+.attachment-picker-check .i{width:16px;height:16px;opacity:0}
+[aria-pressed=true]>.attachment-picker-check{background:var(--acc);border-color:var(--acc)}
+[aria-pressed=true]>.attachment-picker-check .i{opacity:1}
+.attachment-picker-files{padding:0 20px}
+.os .attachment-picker-files>button{display:grid;grid-template-columns:28px minmax(0,1fr) 28px;align-items:center;justify-content:start;gap:14px;min-height:76px;width:100%;padding:12px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--fg);text-align:left;font:inherit}
+.attachment-picker-files>button:disabled{opacity:.45}
+.attachment-picker-files .attachment-picker-file-name{display:flex;grid-column:2;flex-direction:column;gap:4px;min-width:0;width:100%}
+.attachment-picker-files strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:500}
+.attachment-picker-files small{font-size:12px;color:var(--mut)}
+.attachment-picker-files .attachment-picker-file-icon{grid-column:1;justify-self:start;width:26px;height:26px;margin:0}
+.attachment-picker-trailing{grid-column:3;justify-self:end}
+.attachment-picker-sheet>footer{display:flex;align-items:center;gap:12px;min-height:58px;padding:8px 20px max(14px,calc((max(var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px)) + 8px) / var(--phone-scale,1)));border-top:1px solid var(--line);background:var(--bg);flex-shrink:0;font-size:13px}
+.attachment-picker-sheet>footer>span{flex:1;color:var(--mut)}
+.attachment-picker-sheet>footer button,.attachment-picker-access button,.attachment-picker-more{min-height:44px;border:0;border-radius:22px;padding:0 14px;background:var(--s2);color:var(--fg);font:500 14px 'Public Sans',sans-serif}
+.attachment-picker-access{padding:12px 20px}
+.attachment-picker-access p{font-size:14px;line-height:1.5;margin:0 0 10px}
+.attachment-picker-empty{margin:32px 20px;color:var(--mut);font-size:15px;line-height:1.5;text-align:center}
+.attachment-picker-more{display:block;margin:16px auto 0}
+.attachment-picker-loading{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:0 12px}
+.attachment-picker-loading>span{aspect-ratio:1;border-radius:8px;background:var(--s2)}
+.chat-attach-files{position:relative;z-index:1;flex:none;width:44px;height:44px}
+.chat-attach-icon{display:block;width:22px;height:22px;background:currentColor;mask:url(/icons/lucide/paperclip.svg) center/contain no-repeat}
+.chat-attach-files:disabled,.chat-pending-files button:disabled{opacity:.4}
+.chat-pending-files{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px}
+.chat-pending-files button{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:42px;padding:4px 10px;border:1px solid var(--line);border-radius:18px;background:var(--s2);color:var(--fg);overflow-wrap:anywhere;text-align:left}
+.chat-file-chip{display:inline-flex;align-items:center;max-width:100%;background:var(--s2);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.chat-file-chip img{width:26px;height:26px;object-fit:cover;border-radius:6px}
+.chat-file-chip button{border:0;background:transparent;border-radius:0}.chat-file-chip button:last-child{min-width:44px;justify-content:center}
+.chat-pending-files .i{flex:none;width:16px;height:16px}
+
+.chat-tools-backdrop { position:absolute;inset:0;z-index:180;background:transparent; }
+.chat-tools-menu { position:absolute;left:16px;bottom:106px;min-width:220px;padding:8px;background:var(--bg);border-radius:22px;box-shadow:0 10px 35px var(--shc); }
+.chat-tools-menu > button { display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:8px 12px;text-align:left;border-radius:14px;color:var(--fg);font:inherit; }
+.chat-search-panel { position:absolute;inset:0;display:flex;flex-direction:column;padding:20px;background:var(--bg);color:var(--fg);border-radius:28px 28px 0 0; }
+.chat-search-panel header { display:flex;justify-content:space-between;align-items:center;gap:12px; }
+.chat-search-panel h2 { margin:0;font-size:22px; }
+.chat-search-panel input { margin-top:16px;min-height:48px;padding:0 16px;background:var(--s2);color:var(--fg);border:0;border-radius:18px;font:inherit; }
+.chat-search-results { overflow-y:auto;flex:1;min-height:0;margin-top:12px; }
+.chat-search-results > button { display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;padding:16px 0;border-bottom:1px solid var(--line);font:inherit; }
+.chat-search-results small { color:var(--mut); }
+.alpha-search-hit { outline:2px solid var(--acc);outline-offset:6px;border-radius:16px; }
+/* AC-12: dictation occupies the existing dock instead of stacking two composers. */
+[data-alpha-layer="composer"]:has(> [data-alpha-bar-recorder]) > [data-alpha-input-bar]{display:none!important}
+.alpha-bar-recorder{position:relative;display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 6px 6px 16px;border-radius:28px;background:var(--s2);color:var(--fg);box-shadow:0 14px 40px var(--shc)}
+.alpha-bar-recorder-status{flex:1;min-width:0;margin:0;font-size:15px;line-height:1.35;max-height:5.4em;overflow:auto;overflow-wrap:anywhere}
+.alpha-bar-recorder-primary{width:44px;height:44px;border-radius:22px;flex-shrink:0;background:var(--acc);color:var(--alpha-white);display:flex;align-items:center;justify-content:center}
+.alpha-bar-recorder-primary:disabled{opacity:.5}
+
+/* Message actions follow the author of their selected bubble. */
+[data-alpha-message-actions][data-alpha-user-actions="true"]{align-self:flex-end!important}
+/* Owner issue 4: the ongoing-call bar (runtime/ongoing-call.ts) at the top of the phone canvas, below
+   the status bar (the native top inset), on every view but the call screen. It takes layout space and
+   never covers a view: it is outside the screen (template.html, dc-lite.js), and while it shows the
+   whole screen starts below it and is that much shorter, so every header, sheet, dock and notice
+   keeps its place relative to the screen. The bar's band already clears the status bar, so the
+   screen's own layers do not clear it again. White text on the text-safe call green (AC-28, 4.5:1);
+   48px targets. */
+.alpha-phone{--alpha-call-bar-top:6px}
+.native-phone .alpha-phone{--alpha-call-bar-top:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) / var(--phone-scale,1) + 6px)}
+.alpha-phone>[data-screen][data-alpha-call-bar-on="true"]{--alpha-call-bar-space:calc(var(--alpha-call-bar-top) + 58px);top:var(--alpha-call-bar-space)!important;height:calc(var(--phone-height,915px) - var(--alpha-call-bar-space))!important;--native-top-inset:0px}
+.alpha-call-bar{position:absolute;z-index:99;left:12px;right:12px;top:var(--alpha-call-bar-top,48px);display:flex;align-items:center;gap:4px;height:52px;padding:0 2px;box-sizing:border-box;border-radius:26px;background:var(--alpha-call-green-text);color:var(--alpha-white);box-shadow:0 2px 8px var(--shc,rgba(0,0,0,.2))}
+.alpha-call-bar-return{flex:1 1 auto;min-width:0;min-height:48px;display:flex;align-items:center;gap:10px;padding:0 12px;color:inherit;text-align:left;font-size:15px;font-weight:600}
+.alpha-call-bar-status{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.alpha-call-bar .alpha-end-button{width:48px;height:48px;min-width:48px;border-radius:24px}
+/* The ended call's moment: the bar keeps its place and takes the tap; End is hidden but keeps its space. */
+.alpha-call-bar[data-alpha-call-bar-ended="true"]{background:var(--alpha-gray-55)}
+.alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-end-button{visibility:hidden}
+.alpha-call-bar[data-alpha-call-bar-ended="true"] .alpha-call-bar-return{cursor:default}
+
+.files-actions-menu .file-preview-action {
+  display:flex; align-items:center; gap:12px; width:100%; min-height:44px;
+  padding:8px 14px; border-radius:16px; font-size:15px; text-align:start;
+}
+.file-preview-action :is(.i,.alpha-compute-mark) { width:20px; height:20px; flex:none; }
+
+.chat-email-draft { display:grid; gap:8px; width:100%; box-sizing:border-box; padding:14px; border:1px solid var(--line); border-radius:18px; background:var(--bg); }
+.chat-email-draft small,.chat-email-draft label { color:var(--mut); }
+.chat-email-draft strong,.chat-email-draft small,.chat-email-draft-body { overflow-wrap:anywhere; }
+.chat-email-draft-body { margin:0; white-space:pre-wrap; }
+.chat-email-draft-recipients { display:grid; gap:2px; margin:0; padding:0; list-style:none; color:var(--fg); overflow-wrap:anywhere; }
+.chat-email-draft label { display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--line); }
+.chat-email-draft input,.chat-email-draft textarea { min-width:0; width:100%; border:0; background:transparent; color:var(--fg); font:inherit; }
+.chat-email-draft input { min-height:44px; }
+.chat-email-draft > div { display:flex; justify-content:flex-end; gap:8px; }
+.chat-email-draft button { padding:0 14px; min-height:44px; border-radius:22px; background:var(--s2); }
+.chat-email-draft button:last-child { background:var(--fg); color:var(--bg); }
+.chat-email-draft button:disabled { opacity:.45; }

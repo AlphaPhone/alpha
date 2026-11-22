@@ -136,3 +136,52 @@ test('API dictation recovery: a lost Transcribe capture can start again',async({
  expect(await live(page,f=>f.captures.length)).toBe(2);
  await clean(page,foreign);
 });
+
+// AP-16 AC-12: dictation into a comms bar's own field (the text to the person) records on the bar
+// and fills that field; the Alpha sheet does not open and nothing is sent.
+test('API dictation: a comms person draft records on the bar and fills the person field',async({page})=>{
+ const foreign=await setupNative(page);
+ await page.evaluate(async()=>{
+  const {VIEWS}=await import('/src/prototype/model.js'),w=window as any,shell=w.dictationApiFixture;
+  w.personText='Running late';
+  VIEWS.notes.bar=()=>({target:{kind:'thread',app:'Messages',name:'Maya Chen',first:'Maya',initials:'MC'},
+   closed:{kind:'person',placeholder:'Text Maya',value:w.personText,onText:(text:string)=>{w.personText=text;w.dictationApiFixture.setState({});},submit:()=>{w.personSent=true;},canSubmit:true,maxLength:1600,suggestion:null,acceptSuggestion:null},
+   left:{icon:'avatar',label:'Back to texting Maya',initials:'MC',run:null},context:'Maya Chen · Messages',contextKey:'notes:thread:maya',
+   strip:{title:'Maya Chen',subtitle:'Messages',initials:'MC',live:false,actions:[]},end:null,incoming:null,emergency:false,fit:null,briefing:null});
+  shell.openView('notes',null,'input');
+ });
+ await expect(page.locator('[data-alpha-bar-field="person"]')).toHaveValue('Running late');
+ await page.evaluate(()=>(window as any).dictationApiFixture.startTranscription({commsTarget:'person'}));
+ const recorder=page.locator('[data-alpha-bar-recorder]');
+ await expect(recorder).toHaveAttribute('data-voice-state','recording');
+ expect(await page.evaluate(()=>(window as any).dictationApiFixture.S().chat)).not.toMatch(/sheet|full/);
+ await recorder.getByRole('button',{name:'Stop recording',exact:true}).click();
+ await expect(recorder).toHaveCount(0);
+ const value=await page.locator('[data-alpha-bar-field="person"]').inputValue();
+ expect(value.startsWith('Running late ')&&value.length>'Running late '.length).toBe(true);
+ expect(await page.evaluate(()=>(window as any).dictationApiFixture.S().chat)).not.toMatch(/sheet|full/);
+ expect(await page.evaluate(()=>(window as any).personSent)).toBeUndefined();
+ expect(await page.evaluate(()=>(window as any).flagOff.posts)).toEqual([]);
+ await noCloud(page,foreign);
+});
+test('API dictation: a comms list filter is filled by dictation, never sent to Alpha',async({page})=>{
+ const foreign=await setupNative(page);
+ await page.evaluate(async()=>{
+  const {VIEWS}=await import('/src/prototype/model.js'),w=window as any,shell=w.dictationApiFixture;
+  w.filterText='';
+  VIEWS.notes.bar=()=>({target:{kind:'list',app:'Contacts',name:null,first:null,initials:null},
+   closed:{kind:'filter',placeholder:'Search or ask',value:w.filterText,onText:(text:string)=>{w.filterText=text;w.dictationApiFixture.setState({});},submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null},
+   left:null,context:'Contacts',contextKey:'notes:list:',
+   strip:{title:'Contacts',subtitle:'',initials:null,live:false,actions:[]},end:null,incoming:null,emergency:false,fit:null,briefing:null});
+  shell.openView('notes',null,'input');
+ });
+ await page.evaluate(()=>(window as any).dictationApiFixture.startTranscription({commsTarget:'filter'}));
+ const recorder=page.locator('[data-alpha-bar-recorder]');
+ await recorder.getByRole('button',{name:'Stop recording',exact:true}).click();
+ await recorder.getByRole('button',{name:'Use in draft',exact:true}).click();
+ await expect(recorder).toHaveCount(0);
+ await expect(page.locator('[data-alpha-bar-field="filter"]')).not.toHaveValue('');
+ expect(await page.evaluate(()=>(window as any).dictationApiFixture.S().msgs.length)).toBe(0);
+ expect(await page.evaluate(()=>(window as any).flagOff.posts)).toEqual([]);
+ await noCloud(page,foreign);
+});

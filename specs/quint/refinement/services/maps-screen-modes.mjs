@@ -21,7 +21,11 @@
  * Liberties the driver takes, none of which changes model state: a route outcome with no request
  * in flight (leaving and hiding abort it) re-taps the selected travel mode to plan again;
  * choosing a starting point when the candidate rows were cleared presses Enter first to search
- * again; End on a hidden page is the notification's Stop. */
+ * again, and takes the provider's row when a saved place is listed too; End on a hidden page is
+ * the notification's Stop. A swap names the new starting point after the old destination: the
+ * provider place, a dropped pin and the located position read as a chosen name, the saved place
+ * as a saved one. Provider searches made while the route sheet is open are starting-point
+ * searches; any other is a destination search. */
 import assert from 'node:assert/strict';
 import {modelTraces, replayTraces} from './maps-model-traces.mjs';
 import {bundleMapsAdapter, mountMapsAdapter, tick, deferred, providerId, connectionId, providerConfig, attribution} from '../application/maps-adapter-harness.mjs';
@@ -38,37 +42,50 @@ function modeOf(v) {
 }
 
 async function driver(code) {
-  const now = Date.now(), routes = [];
+  const now = Date.now(), routes = [], searches = [];
+  let routeSheetOpen = () => false;
+  let responseMode = 'ready', originRequests = 0;
   const place = {providerId, id: 'cafe-1', name: 'Cafe', coordinate: {latitude: 1.01, longitude: 1.01}, attribution, fetchedAt: now};
   const start = {providerId, id: 'start-1', name: chosenName, coordinate: {latitude: 1.03, longitude: 1.03}, attribution, fetchedAt: now};
   const provider = {
     providerId, connectionId,
-    async search(text) { return text === typedName || text === chosenName ? [start] : [place]; },
+    async search(text) { searches.push({text, origin: routeSheetOpen()});if(responseMode==='error')throw Error('The search failed.');if(responseMode==='pending')return new Promise(()=>{});if(responseMode==='empty')return [];return text === typedName || text === chosenName ? [start] : [place]; },
     async detail(id) { return id === start.id ? start : place; },
     route(from, to, mode, signal) { const request = {...deferred(), from, to, mode, signal, settled: false}; routes.push(request); return request.promise; },
   };
   const m = await mountMapsAdapter(code, {
     storage: {'alpha.maps.saved-places.v1': JSON.stringify({version: 1, items: [{id: 'saved-1', label: 'Home', coordinate: {latitude: 1.02, longitude: 1.02}, savedAt: now}]})},
-    configure: app => app.configureMapsProvider(providerConfig, provider),
+    // The model starts before location is allowed, so opening Maps makes no location request
+    // of its own; the granted actions below allow it. maps-place-route-sheets covers that request.
+    configure: (app, harness) => { harness.locationGranted = false; app.configureMapsProvider(providerConfig, provider); },
   });
   const {harness} = m;
+  routeSheetOpen = () => !!harness.screen?.directions;
   let requests = 0, offered = [];
   const screen = () => harness.screen;
   const data = () => m.render();
   const watch = () => harness.locations.length > 2 ? harness.locations.at(-1) : null;
-  const originText = () => ({'': 'empty', [locatedLabel]: 'location', [hereLabel]: 'coordinates', [typedPoint]: 'coordinates', [typedName]: 'typed', [chosenName]: 'chosen'})[screen().originText];
+  const originText = () => ({'': 'empty', [locatedLabel]: 'location', [hereLabel]: 'coordinates', [typedPoint]: 'coordinates', [typedName]: 'typed', [chosenName]: 'chosen',
+    [place.name]: 'chosen', 'Dropped pin': 'chosen', 'Current location': 'chosen', Home: 'saved'})[screen().originText];
   const act = async run => { await run(); await tick(); };
+  // Count actual provider and location effects created by an origin input control, not a duplicated driver implementation.
+  const originEffects = () => routes.length+searches.filter(search=>search.origin).length+harness.locationStarts;
+  const originInput = async run => { const before=originEffects();await act(run);originRequests+=originEffects()-before; };
+  const originEnter = () => { const bindings = data(); if (bindings.mode === 'origin') bindings.qKey(enter); else bindings.originKey(enter); };
   m.render(); await tick();
   return {
     focusSearch: () => act(() => data().focusQ()),
     typeQuery: () => act(() => data().onQ({target: {value: 'cafe'}})),
     clearQuery: () => act(() => data().clearQ()),
     submitSearch: () => act(() => data().qKey(enter)),
+    debounceInput: () => harness.inspect().originDraft!==undefined ? originInput(() => harness.flushInputTimers()) : act(() => harness.flushInputTimers()),
+    lateInputTimer: () => act(() => harness.flushRetiredInputTimers()),
     pickResult: () => act(() => { const rows = data().results; assert.equal(rows.length, 1, 'one result row'); rows[0].go(); }),
     pickSaved: () => act(() => data().chips[0].go()),
     closePlace: () => act(() => data().pc.close()),
     openDirections: () => act(() => { harness.locationGranted = false; data().pc.dirs(); }),
-    openGrantedDirections: () => act(() => { harness.locationGranted = true; data().pc.dirs(); }),
+    // The model grants location for this action only, so a later show() makes no request on open.
+    openGrantedDirections: async () => { await act(() => { harness.locationGranted = true; data().pc.dirs(); }); harness.locationGranted = false; },
     locate: () => act(() => data().nativeLocation()),
     async fixArrives(usable) {
       const location = watch(), run = location?.run;
@@ -82,13 +99,14 @@ async function driver(code) {
       const bindings = data(), event = {target: {value: coordinates ? typedPoint : typedName}};
       if (bindings.mode === 'origin') bindings.onQ(event); else bindings.onOrigin(event);
     }),
-    searchOrigin: () => act(() => { const bindings = data(); if (bindings.mode === 'origin') bindings.qKey(enter); else bindings.originKey(enter); }),
+    searchOrigin: () => originInput(originEnter),
+    submitLocatedOrigin: () => { assert.equal(screen().originText, locatedLabel, 'the starting point shows the located position'); return originInput(originEnter); },
     async chooseOrigin() {
       const bindings = data();
-      if (bindings.mode !== 'origin') return act(() => bindings.originKey(enter));
-      if (originText() === 'coordinates') return act(() => bindings.qKey(enter));
+      if (bindings.mode !== 'origin') return originInput(() => bindings.originKey(enter));
+      if (originText() === 'coordinates') return originInput(() => bindings.qKey(enter));
       if (!bindings.results.length) await act(() => bindings.qKey(enter));
-      await act(() => { const rows = data().results; assert.equal(rows.length, 1, 'one starting point row'); rows[0].go(); });
+      await act(() => { const rows = data().results.filter(row => row.id.startsWith('place:')); assert.equal(rows.length, 1, 'one starting point row from the provider'); rows[0].go(); });
     },
     async routePlanned(ready) {
       const fresh = () => { const request = routes.at(-1); return request && !request.settled && !request.signal.aborted ? request : null; };
@@ -100,6 +118,7 @@ async function driver(code) {
         geometry: [request.from, request.to], distanceMeters: 100, durationSeconds: 20, attribution, fetchedAt: Date.now(), traffic: 'none',
         steps: [{instruction: 'Arrive', coordinate: request.to, distanceMeters: 100, maneuver: 'arrive'}]}) : request.reject(Error('The route failed.')));
     },
+    swapEnds: () => act(() => { const bindings = data(); assert.ok(bindings.dr.canSwap, 'the route sheet offers the swap'); bindings.dr.swap(); }),
     start: () => act(() => data().dr.start()),
     screenOffStarted: () => act(() => harness.bridge.starts.at(-1).resolve()),
     screenOffRefused: () => act(() => harness.bridge.starts.at(-1).reject(Error('The session could not start.'))),
@@ -112,14 +131,22 @@ async function driver(code) {
     agentShowPlace: () => act(() => { void harness.surface.showPlace(place, true).catch(() => {}); }),
     agentShowDirections: () => act(() => { void harness.surface.showDirections(place, 'drive', true).catch(() => {}); }),
     agentPlanFrom: () => act(() => { void harness.surface.planFrom(here).catch(() => {}); }),
+    providerResponse: outcome => {responseMode=outcome;},
+    providerChanged: () => act(()=>m.app.configureMapsProvider({...providerConfig,revision:'replacement'}, {...provider})),
     crossAppQuery: () => act(() => { requests++; m.mapsState.query = 'Event place'; }),
     offerHandoff: () => act(() => { harness.held = []; m.render({offer: true}); offered.push(...harness.held); harness.held = null; }),
     consumeHandoff: () => act(() => { for (const run of offered.splice(0)) run(); }),
     async observe() {
       const view = m.render(); await tick();
-      const s = screen(), background = harness.host.background, state = s.state, selected = s.selected;
+      const s = screen(), background = harness.host.background, state = s.state, selected = s.selected, input=harness.inspect();
+      const queryAccepted=input.submittedQueryEpoch===input.searchEpoch, originAccepted=input.submittedOriginEpoch===input.searchEpoch;
+      // A submitted located origin fails with its fix, or with the route planned from that fix.
+      const originPhase=input.submittedOriginKind==='search'?state?.originSearch.phase:input.submittedOriginKind==='location'?(state?.position.phase==='ready'?state.route.phase:state?.position.phase):state?.route.phase;
       assert.equal(m.render().mode, view.mode, 'a render changes nothing');
       return {
+        queryAccepted,originAccepted,queryFailed:queryAccepted&&state?.search.phase==='error',originFailed:originAccepted&&originPhase==='error',
+        queryRequests:searches.filter(search=>!search.origin).length,originRequests,
+        pendingInput: harness.inspect().queryDraft!==undefined||harness.inspect().originDraft!==undefined?(screen().directions?'origin':'query'):'none',
         mode: modes[view.mode] ?? view.mode, searching: s.searching, hasQuery: !!s.query, results: state?.search.phase === 'ready',
         selected: !selected ? 'none' : selected.origin === 'location' ? 'location' : selected.origin === 'saved' ? 'saved' : 'place',
         directions: s.directions, originMode: s.originMode, navigating: s.navigating,
@@ -133,7 +160,7 @@ async function driver(code) {
 }
 
 const project = state => {
-  const {lastChoice, ...compared} = state;
+  const {lastChoice, responseMode, originSearch, ...compared} = state;
   return {...compared, mode: modeOf(state)};
 };
 

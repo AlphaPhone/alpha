@@ -14,7 +14,9 @@ const agentNames = {default: '', custom: 'Fixture agent', long: 'a'.repeat(220)}
 const agentClasses = new Map([['Your agent', 'default'], [agentNames.custom, 'custom'], ['a'.repeat(199)+'…', 'long']]);
 const text = {first: 'First retained fixture.', second: 'Second retained fixture.', tie: 'Equal-time fixture.',
   failure: 'Fixture run failed.', long: 'x'.repeat(2100)};
-const textClasses = new Map(Object.entries({...text, long: 'x'.repeat(1999)+'…'}).map(([key, value]) => [value, key]));
+// A failed run's brief is Alpha's sentence (DIGEST_RUN_FAILED), never the agent's error text.
+const textClasses = new Map(Object.entries({...text, long: 'x'.repeat(1999)+'…',
+  failure: 'This digest stopped with an error on your agent. Open execution details to see what ran.'}).map(([key, value]) => [value, key]));
 const empty = {summary: '', time: 0, agent: '', status: ''};
 
 function row(cursor, time, summary, status = 'finished') {
@@ -99,6 +101,7 @@ async function scenario(actual, name, drive) {
 async function checkRetainedHomeBrief(extraSources = []) {
   captureSources([driver, implementation, ...extraSources]);
   const {exports, sources} = await bundledSource(implementation);
+  assert.ok(sources.includes('apps/app/src/ui/digests/hosted-digests.ts'), 'the store and brief selection are Alpha’s own');
   const run = (name, drive) => scenario(exports, name, drive);
   const traces = [
     await run('same-scope-and-equivalent-result-do-not-republish', f => {
@@ -128,7 +131,7 @@ async function checkRetainedHomeBrief(extraSources = []) {
   ];
   return await checkTraces(boundInputs({model, traces, sources: [driver, ...sources, ...extraSources],
     scope: 'bounded-component', assumptions: [
-      'Actual Alpha retained-brief wrapper and pinned shared store execute with synthetic results and an EventTarget observer.',
+      'Actual Alpha retained-brief wrapper and its own retained-brief store execute with synthetic results and an EventTarget observer.',
       'Two scoped owners, one unbound profile and three observers. The store keys only by scope. A caller must fence an old same-scope publication after an ABA owner transition.',
       'Mounted Home rendering and active inbox/provider completion have separate evidence.',
     ]}));

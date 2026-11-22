@@ -6,6 +6,8 @@ import path from 'node:path';
 const storage=await import('../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts');
 const {BrowserStorageVolume}=await import('../.eliza/client-features/plugins/plugin-files/src/browser/storage-volume.ts');
 const contract=await import('../.eliza/client-features/plugins/plugin-files/src/browser/files-agent-contract.ts');
+// What the Files browser shows: Alpha's storage labels (apps/app/src/ui/files).
+const labels=await import('../apps/app/src/ui/files/storage-presentation.ts');
 const TRASH_FOLDER='.Trash-alpha';
 const nativeStorage=path.join(preparePatchedNative().root,'plugins/plugin-native-filesystem/android/src/main/java/ai/eliza/plugins/filesystem/browser');
 /** The browser file library's contract (plugin-files): unique names per folder, a move or
@@ -188,8 +190,8 @@ test('sort is folders first, then name, date or size; breadcrumbs follow the pat
  assert.deepEqual(storage.sortEntries(rows,'name').map(r=>r.name),['Zed','a.pdf','b.pdf','file10.pdf']);
  assert.deepEqual(storage.sortEntries(rows,'date').map(r=>r.name),['Zed','b.pdf','file10.pdf','a.pdf']);
  assert.deepEqual(storage.sortEntries(rows,'size').map(r=>r.name),['Zed','a.pdf','file10.pdf','b.pdf']);
- assert.deepEqual(storage.breadcrumbs('DCIM/Camera'),[{label:'Internal storage',path:''},{label:'DCIM',path:'DCIM'},{label:'Camera',path:'DCIM/Camera'}]);
- assert.equal(storage.formatFree({free:38.2*1024**3,total:128*1024**3}),'38.2 GB free of 128 GB');
+ assert.deepEqual(labels.breadcrumbs('DCIM/Camera'),[{label:'Internal storage',path:''},{label:'DCIM',path:'DCIM'},{label:'Camera',path:'DCIM/Camera'}]);
+ assert.equal(labels.formatFree({free:38.2*1024**3,total:128*1024**3}),'38.2 GB free of 128 GB');
 });
 
 test('the agent filter is read-only, validated, and matches names, kinds, folders and dates (FilterIsReadOnly)',()=>{
@@ -200,7 +202,7 @@ test('the agent filter is read-only, validated, and matches names, kinds, folder
  assert.equal(storage.filterMatches(f,row('Download/bank.pdf','application/pdf',Date.parse('2025-05-01'))),false);
  assert.equal(storage.filterMatches({to:'2026-05-01'},row('x.pdf','application/pdf',Date.parse('2026-05-01T23:00:00Z'))),true,'a date-only end includes that day');
  for(const bad of [{},{text:''},{kind:'exe'},{folder:'../x'},{from:'yesterday'},{from:'2026-02-01',to:'2026-01-01'},{text:'a',extra:1}])assert.throws(()=>storage.validateFilesFilter(bad));
- assert.match(storage.filterLabel(f),/“bank” · PDFs · in Download/);
+ assert.match(labels.filterLabel(f),/“bank” · PDFs · in Download/);
 });
 
 test('Files agent tools: filter and open are direct; share, move, trash and folder creation are reviewed proposals',()=>{

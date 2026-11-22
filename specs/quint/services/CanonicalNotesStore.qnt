@@ -1,7 +1,9 @@
 /// Two physical plain notes, one serialized writer, one independent stale view.
+/// With the three-day Trash enabled, a Trash entry is erased by the owner (one entry or all) or
+/// when it expires; an erased note never returns.
 module CanonicalNotesStore {
   type Document = {revision: int, notes: List[int], trash: Set[int], trashPresent: bool, body: int -> int,
-    order: int -> int, clock: int -> int, seen: Set[int]}
+    order: int -> int, clock: int -> int, seen: Set[int], erased: Set[int]}
   type Reply = {outcome: str, id: int, document: Document, raw: bool}
   type State = {phase: str, handles: int, fenced: bool, cache: Document, durable: Document, pending: Document,
     before: Document, stage: str, kind: str, target: int, raw: bool, stopRequested: bool,
@@ -9,7 +11,7 @@ module CanonicalNotesStore {
   var s: State
   pure val ids = Set(1, 2)
   pure val empty = {revision: 0, notes: [], trash: Set(), trashPresent: false, body: Map(1 -> 0, 2 -> 0),
-    order: Map(1 -> 0, 2 -> 0), clock: Map(1 -> 0, 2 -> 0), seen: Set()}
+    order: Map(1 -> 0, 2 -> 0), clock: Map(1 -> 0, 2 -> 0), seen: Set(), erased: Set()}
   pure val noReply = {outcome: "none", id: 0, document: empty, raw: false}
   pure val initial = {phase: "ready", handles: 1, fenced: false, cache: empty, durable: empty, pending: empty,
     before: empty, stage: "idle", kind: "none", target: 0, raw: false,
@@ -63,6 +65,38 @@ module CanonicalNotesStore {
     s.cache.trash.contains(id), expected == s.cache.revision,
     prepare({...s.cache, revision: s.cache.revision + 1,
       notes: [id].concat(s.cache.notes), trash: s.cache.trash.exclude(Set(id))}, "restore", id, true)
+  }
+  /// Erased Trash entries leave the document with their content; their IDs stay seen, so never reused.
+  pure def erasedFrom(document: Document, gone: Set[int]): Document = {
+    ...document, revision: document.revision + 1, trash: document.trash.exclude(gone),
+    body: ids.mapBy(id => if (gone.contains(id)) 0 else document.body.get(id)),
+    order: ids.mapBy(id => if (gone.contains(id)) 0 else document.order.get(id)),
+    clock: ids.mapBy(id => if (gone.contains(id)) 0 else document.clock.get(id)),
+    erased: document.erased.union(gone)
+  }
+  /// The owner erases one Trash entry they reviewed, at the collection revision they saw.
+  action erase(id: int, expected: int): bool = all {
+    s.phase == "ready", s.stage == "idle", s.cache.revision < 8,
+    s.cache.trash.contains(id), expected == s.cache.revision,
+    prepare(erasedFrom(s.cache, Set(id)), "erase", 0, true)
+  }
+  /// The owner empties Trash. An empty Trash changes nothing and keeps the revision.
+  action eraseAll(expected: int): bool = all {
+    s.phase == "ready", s.stage == "idle", s.cache.revision < 8, expected == s.cache.revision,
+    if (s.cache.trash.size() == 0)
+      s' = {...s, kind: "eraseAll", reply: {outcome: "success", id: 0, document: s.cache, raw: true}}
+    else prepare(erasedFrom(s.cache, s.cache.trash), "eraseAll", 0, true)
+  }
+  /// Entries past three days in Trash are swept on open or read; time is abstracted to which entries are due.
+  action expire(gone: Set[int]): bool = all {
+    s.phase == "ready", s.stage == "idle", s.cache.revision < 8,
+    gone.size() > 0, gone.subseteq(s.cache.trash),
+    prepare(erasedFrom(s.cache, gone), "expire", 0, true)
+  }
+  /// Restoring an erased note finds nothing and changes nothing.
+  action restoreErased(id: int): bool = all {
+    s.phase == "ready", s.stage == "idle", s.cache.erased.contains(id),
+    s' = {...s, reply: {...noReply, outcome: "error"}}
   }
   action clear(expected: int): bool = all {
     s.phase == "ready", s.stage == "idle", s.cache.revision < 8, expected == s.cache.revision,
@@ -133,6 +167,7 @@ module CanonicalNotesStore {
     document.notes.length() == members(document.notes).size(),
     members(document.notes).intersect(document.trash).size() == 0,
     members(document.notes).union(document.trash).subseteq(document.seen),
+    document.erased.subseteq(document.seen),
     ids.forall(id => document.order.get(id).in(0.to(document.revision)) and
       document.clock.get(id).in(0.to(2)) and document.body.get(id).in(0.to(2)))
   }
@@ -158,14 +193,23 @@ module CanonicalNotesStore {
     members(s.cache.notes).contains(id) and members(s.cache.notes).contains(other) and
     s.cache.body.get(id) == s.cache.body.get(other) and s.cache.order.get(id) > s.cache.order.get(other)
       implies not(VisibleNotes.contains(other))))
+  /// No erased note is active or in Trash again, in this view or on disk.
+  val ErasedNeverReturns = Set(s.cache, s.durable).forall(document =>
+    document.erased.intersect(members(document.notes).union(document.trash)).size() == 0)
+  /// Erasing only ever removes what was in Trash: an active note is never erased.
+  val ErasedWereTrashed = s.stage == "prepared" and s.kind.in(Set("erase", "eraseAll", "expire")) implies
+    (members(s.pending.notes) == members(s.cache.notes) and s.pending.erased.exclude(s.cache.erased).subseteq(s.cache.trash))
   val FencedCacheIsUnavailable = s.fenced implies
     (s.phase == "error" and s.handles > 0 and s.stage == "idle" and VisibleNotes == Set())
   val safety = FencedCacheIsUnavailable and TypeOK and RawMembershipDisjoint and VisibleContentUnique and ReplyIdentityPresent and ConfirmedRevisionBounded and NewerOrderWins
+    and ErasedNeverReturns and ErasedWereTrashed
   action commit = write.then(confirmed).then(delivered)
   action step = any {
     create(1, 1, 0, true), create(2, 2, 0, true), create(2, 1, 0, true), create(1, 1, 0, false), create(2, 2, 0, false),
     edit(1, 1, 0, s.cache.revision), edit(1, 2, 0, s.cache.revision), edit(2, 1, 2, s.cache.revision),
     remove(1), remove(2), restore(1, s.cache.revision), restore(2, s.cache.revision), clear(s.cache.revision),
+    erase(1, s.cache.revision), erase(2, s.cache.revision), eraseAll(s.cache.revision),
+    expire(Set(1)), expire(Set(2)), expire(ids), restoreErased(1), restoreErased(2),
     rejectRevision(-1), rejectProjection, write, conflict, refused, lostAcknowledgement, confirmed, delivered,
     holdReply, deliverHeldReply, rivalCreate(1, 1, 1), rivalCreate(2, 2, 2), openShared, closeShared, refuseFenced, requestStop, stopped, restart, failedRestart, s' = s
   }
@@ -200,5 +244,23 @@ module CanonicalNotesStore {
     .then(create(2, 2, 0, true)).then(commit).then(deliverHeldReply).expect(ReplyRevision == 1 and DurableRevision == 2 and safety)
   run firstEmptyClearAddsTrashTest = init.then(clear(0)).then(commit).expect(DurableRevision == 1 and s.reply.outcome == "success" and safety)
   run repeatEmptyClearPreservesRevisionTest = init.then(clear(0)).then(commit).then(clear(1)).expect(DurableRevision == 1 and safety)
+  run erasedEntryCannotBeRestoredTest = init.then(create(1, 1, 0, true)).then(commit).then(create(2, 2, 0, true)).then(commit)
+    .then(remove(1)).then(commit).then(erase(1, 3)).then(commit)
+    .expect(DurableNotes == Set(2) and s.durable.trash == Set() and s.durable.erased == Set(1) and DurableRevision == 4 and safety)
+    .then(restore(1, 4)).fail()
+  run restoreOfErasedNoteIsRefusedTest = init.then(create(1, 1, 0, true)).then(commit).then(remove(1)).then(commit)
+    .then(erase(1, 2)).then(commit).then(restoreErased(1))
+    .expect(s.reply.outcome == "error" and DurableRevision == 3 and DurableNotes == Set() and safety)
+  run erasedIdIsNeverReusedTest = init.then(create(1, 1, 0, true)).then(commit).then(remove(1)).then(commit)
+    .then(erase(1, 2)).then(commit).then(create(1, 1, 0, true)).fail()
+  run activeNoteCannotBeErasedTest = init.then(create(1, 1, 0, true)).then(commit).then(erase(1, 1)).fail()
+  run staleEraseIsRefusedTest = init.then(create(1, 1, 0, true)).then(commit).then(remove(1)).then(commit).then(erase(1, 1)).fail()
+  run expiredEntriesLeaveActiveNotesTest = init.then(create(1, 1, 0, true)).then(commit).then(create(2, 2, 0, true)).then(commit)
+    .then(remove(1)).then(commit).then(expire(Set(1))).then(commit)
+    .expect(DurableNotes == Set(2) and VisibleNotes == Set(2) and s.durable.erased == Set(1) and safety)
+  run activeNoteCannotExpireTest = init.then(create(1, 1, 0, true)).then(commit).then(expire(Set(1))).fail()
+  run emptyTrashEraseKeepsRevisionTest = init.then(create(1, 1, 0, true)).then(commit).then(clear(1)).then(commit)
+    .then(eraseAll(2)).then(commit).expect(DurableNotes == Set() and s.durable.trash == Set() and DurableRevision == 3 and safety)
+    .then(eraseAll(3)).expect(DurableRevision == 3 and s.reply.outcome == "success" and safety)
   run stoppedStoreCannotAdmitTest = init.then(requestStop).then(stopped).then(create(1, 1, 0, true)).fail()
 }

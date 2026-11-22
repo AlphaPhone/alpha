@@ -2,7 +2,8 @@ package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.notifications.MailBackgroundDelivery;
 import ai.eliza.plugins.notifications.MailHistoryReconciliation;
-import ai.eliza.plugins.notifications.MailNoticePoster;
+import android.app.Notification;
+import android.content.Intent;
 import android.content.Context;
 import androidx.work.*;
 import com.getcapacitor.PluginCall;
@@ -81,23 +82,33 @@ public final class GmailBackgroundTraces {
   state=null;
  }
 
- public static void configurePoster(MailNoticePoster.Config config) {
-  if(!config.channel.equals("alpha-gmail")||!config.action.equals("ai.alphacompute.alphaphone.OPEN_GMAIL_NOTICE")
-      ||!config.open.equals("alpha-gmail:")||!config.ask.equals("alpha-gmail-ask:")||!config.tag.equals("alpha-gmail-")
-      ||!config.title.equals("New mail in Gmail")||!config.text.equals("Tap to open Inbox.")
-      ||!config.publicTitle.equals("Alpha Phone")||!config.publicText.equals("Tap to open.")
-      ||config.activity!=MainActivity.class)throw new AssertionError("Unexpected installed notice identity");
+ private static String noticeKey(String tag,int id) {
+  if(id!=0||!tag.matches("alpha-gmail-[a-f0-9]{64}"))throw new AssertionError("Unexpected notice tag or id");
+  return tag.substring("alpha-gmail-".length());
  }
- public static boolean active(String key){return shown.contains(key);}
- public static void post(String key) {
+ private static void route(Intent intent,String uri) {
+  if(!intent.identity().equals(MainActivity.class+"|ai.alphacompute.alphaphone.OPEN_GMAIL_NOTICE|"+uri))
+   throw new AssertionError("Unexpected installed notice route");
+ }
+ public static Set<String> activeKeys(){return Set.copyOf(shown);}
+ public static void post(String tag,int id,Notification posted) {
+  String key=noticeKey(tag,id);
+  if(!"alpha-gmail".equals(posted.channel)||!"New mail in Gmail".equals(posted.title)||!"Tap to open Inbox.".equals(posted.text)
+      ||!"Alpha Phone".equals(posted.publicVersion.title)||!"Tap to open.".equals(posted.publicVersion.text)
+      ||posted.visibility!=Notification.VISIBILITY_PRIVATE||posted.actions.length!=1
+      ||!"Ask Alpha".equals(posted.actions[0].title)||!posted.actions[0].authenticationRequired
+      ||!posted.onlyAlertOnce||!posted.autoCancel||posted.timeout!=86400000L||!"alpha-gmail-".equals(posted.group)
+      ||!Notification.CATEGORY_EMAIL.equals(posted.category))
+   throw new AssertionError("Unexpected installed notice identity");
+  route(posted.contentIntent.intent,"alpha-gmail:"+key);
+  route(posted.actions[0].actionIntent.intent,"alpha-gmail-ask:"+key);
   JSONObject durable=new JSONObject(state),notice=durable.getJSONObject("notices").getJSONObject(key);
   if(!key.matches("[a-f0-9]{64}")||!"dispatching".equals(notice.getString("phase"))||!allowed)
    throw new AssertionError("Unreserved synthetic post");
   posts++;
   if(observable)shown.add(key);
  }
- public static void cancel(String key){shown.remove(key);}
- public static void cancelAll(){shown.clear();}
+ public static void cancel(String tag,int id){shown.remove(noticeKey(tag,id));}
  public static void schedule(String name,String policy,WorkFields work,long interval) {
   if(work.worker!=GmailDeliveryWorker.class||work.constraints.network()!=NetworkType.CONNECTED
       ||work.backoff!=BackoffPolicy.EXPONENTIAL||work.delay!=30||!work.data.values().keySet().equals(Set.of("generation")))

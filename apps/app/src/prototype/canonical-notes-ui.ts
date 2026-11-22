@@ -2,7 +2,7 @@ import {parseNoteFormat} from '../../../../.eliza/client-features/plugins/plugin
 import {authoredNoteText} from '../../../../.eliza/client-features/plugins/plugin-notes/src/note-authored.ts';
 import {nextDefaultNoteTitle} from '../runtime/note-default-title';
 import {projectNoteForModel,reconstructNoteContent,type NoteJson,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
-import {noteScheduleDraft,type NoteScheduleKind} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/note-schedule-draft.ts';
+import {noteScheduleDraft,type NoteScheduleKind} from '../ui/notes/note-schedule-draft.ts';
 import {noteShareText} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/note-share-text.ts';
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {agentPendingText,agentAvailabilityNotice,connectionController} from '../runtime/connection-ui';
@@ -17,6 +17,8 @@ type CanonicalTrashEntry={id:string;title:string;deletedAt:string;revision:numbe
 const UNAVAILABLE='Agent offline';
 /** Device-local handles (a recording, a picked document, a web source) belong to Older notes adapters, never to an agent record's view. */
 const LOCAL_HANDLES=['audio','documentSource','webSource'];
+/** An open note keeps its saved times while edited; its format data never reorders the list. */
+const SAVED_TIMES=['createdAt','updatedAt','modifiedAt'];
 /** View identity and presentation fields, never authored rich metadata. */
 const VIEW_FIELDS=new Set(['id','title','body','kind','canonicalRevision','createdAt','updatedAt','modifiedAt','when','color','bodySeparator','authored']);
 /** Older notes state (device recorder, playback, device Trash, recording deletions) is never read for agent Notes. */
@@ -104,7 +106,7 @@ export class CanonicalNotesUi {
   else if(draft.id&&draft.baseRevision===this.controller.revision){const saved=this.controller.viewNote(draft.id);if(saved)this.draftBase={token:draft.token,print:notePrint(saved)};}
   this.openValue=draft?draft.id??'draft-'+draft.token:null;this.blankCreationValue=draft&&!draft.id?this.openValue:null;
   if(draft){
-   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of LOCAL_HANDLES)delete data[key];
+   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of [...LOCAL_HANDLES,...SAVED_TIMES])delete data[key];
    if(audio&&draft.id)data.audio={...audio,noteId:draft.id,transcript:draft.body};
    const record={...base,...data,id:this.openValue,kind:base?.kind??kind,title:draft.title,body:draft.body,canonicalRevision:draft.baseRevision};
    if(draft.format?.kind==='list'||draft.format?.kind==='text')record.kind=draft.format.kind;
@@ -114,6 +116,10 @@ export class CanonicalNotesUi {
  }
  get current():boolean{return this.controller.current;}
  get pending():boolean{return this.controller.pending;}
+ get listFilterRevision():string|undefined{
+  const revision=this.controller.revision;
+  if(this.current&&!this.pending&&!this.editing&&this.phase==='ready'&&revision!==null)return String(revision);
+ }
  private get defaultOnly():boolean{const draft=this.editor.draft;return !!draft&&!draft.id&&!!this.defaultTitle&&draft.token===this.defaultTitle.token&&draft.title===this.defaultTitle.title&&!draft.body.trim()&&!authoredNoteText(draft.format).trim();}
  get dirty():boolean{return !!this.editor.draft?.version&&!this.defaultOnly;}
  get editing():boolean{return !!this.editor.draft;}
@@ -254,8 +260,16 @@ export class CanonicalNotesUi {
    return await complete(result.note);
   }catch{if(this.controller.current&&!canonicalRecordConfirmed)this.needsReview();return false;}
  }
+ /** Saves complete note text as a record and returns its identity, or null when the save is not
+  * confirmed. Identical text replays the existing record, so a repeated save never duplicates it.
+  * A failed request throws: the record may or may not exist. */
+ async createFromText(content:string):Promise<{id:string;revision:number}|null>{
+  const result=await this.controller.interact('create-note',{content});
+  if(!this.controller.current||!result.target)return null;
+  this.hooks.committed?.(result.target.id);return result.target;
+ }
  async saveCard(content:string,api:Bag):Promise<boolean>{
-  try{const result=await this.controller.interact('create-note',{content});if(!this.controller.current||!result.target)return false;this.hooks.committed?.(result.target.id);return true;}
+  try{return !!await this.createFromText(content);}
   catch{if(this.controller.current){api.toast('Save unconfirmed');this.needsReview();}return false;}
  }
  async discardDraftAndReload():Promise<void>{
@@ -365,7 +379,7 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  prototype.api=function(key:string){
   const value=api.call(this,key);if(key!=='notes')return value;
   if(this.canonicalNotesUi)return this.canonicalNotesUi.api({...value,reviewCalendarDraft:(draft:Bag)=>this.reviewScannedCalendarDraft?.(draft)??false});
-  // Agent Notes are the default source (agent-adapter.ts); Older notes is an explicit choice.
+  // Agent Notes are the default source (agent-adapter.ts); retained notes are an explicit choice.
   if(this.notesSourceMode==='legacy')return value;
   // Waiting for a connection: an attempted action explains why, nothing is drafted.
   return {...value,notesSourceMode:'canonical',notesTrash:undefined,moveNoteToTrash:()=>false,set:(patch:Bag)=>{if(patch.compose||patch.record===true){value.toast(this.vget('notes').storageStatus||agentPendingText(undefined,UNAVAILABLE));return false;}return value.set(patch);}};
@@ -374,10 +388,17 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  notes.render=(state:Bag,value:Bag)=>{
   const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
   if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
-  const olderNotesAction=older&&!older.selected?older.choose:null;
-  if(ui)return {...ui.decorate(render(state,value),value,state),olderNotesAction,listActions:true};
+  const withNotesMenu=(view:Bag)=>{
+   if(view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
+   if(!ui&&(!older||older.selected))return view;
+   const close=()=>value.set({previousNotesMenu:false});
+   return {...view,previousNotesAction:!older?.selected?older?.chooseFromMenu:undefined,previousNotesMenu:!!state.previousNotesMenu,
+    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:close,
+    notesMenuTrash:ui?()=>{close();view.openTrash();}:undefined,notesMenuTrashDisabled:!view.hasDeleted};
+  };
+  if(ui)return withNotesMenu(ui.decorate(render(state,value),value,state));
   // A pending New note request waits for the binding instead of drafting into no collection.
   const waiting={...state,...DEVICE_ONLY_STATE,list:[],open:null,compose:false,trashOpen:false,storageStatus:state.storageStatus||agentAvailabilityNotice(undefined,UNAVAILABLE)};
-  return {...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false,olderNotesAction,listActions:!!olderNotesAction};
+  return withNotesMenu({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
  };
 }

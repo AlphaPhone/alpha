@@ -103,7 +103,7 @@ public class CalendarFlowInstrumentedTest {
  private void chooseDate(java.time.LocalDate date)throws Exception {
   java.time.LocalDate today=java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles"));
   if("true".equals(eval("!!document.querySelector('button[aria-label=\"Today\"]')")))click("Today");
-  click("Month view");
+  click("Choose date");
   int months=(date.getYear()-today.getYear())*12+date.getMonthValue()-today.getMonthValue();
   for(int i=0;i<Math.abs(months);i++)click(months>0?"Next month":"Previous month");
   click(date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE MMMM d",Locale.US)));

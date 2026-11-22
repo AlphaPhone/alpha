@@ -1,13 +1,13 @@
 import {seedCompletedAccessSetup} from './flag-off-android';
-import {completeAccessSetup, openYourAgent} from './flag-off-android';
+import {completeAccessSetup} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
 
 // A Cloud sign-in kept on the phone after a restart, under decision P-43 (resident agent always
 // present). An older build's "local apps without AI" choice is stored; it now reads as the resident.
 // The resident starts by itself at app start and the kept sign-in is tried once to bind inference.
-// An unreachable saved sign-in leaves local use available with no Cloud notice; Settings can
-// reconnect the agent with that same key. A rejected key is reported as no longer valid and is not
+// An unreachable saved sign-in leaves local use available with no Cloud notice; the app can
+// reopen with that same key. A rejected key is reported as no longer valid and is not
 // offered again, while an admitted one binds inference. The agent runs in every case on this device.
 //
 // Flag-off production bundle with the Android bridge stubbed. The stub is not the native plugins,
@@ -82,21 +82,23 @@ const cloudRequests = async (page: Page) => (await calls(page)).filter(call => c
 const agentCalls = async (page: Page) => (await calls(page)).filter(call => call.plugin === 'Agent').map(call => call.method);
 const selection = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('alpha.connection.selection.v1') || 'null'));
 
-test('an unreachable saved sign-in stays available in agent settings and can be retried without replacing its key',async({page})=>{
+test('an unreachable saved sign-in survives a new resident connection without replacing its key',async({page})=>{
   await boot(page,'offline');
   await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
-  const gate=await openYourAgent(page);
-  await expect(gate.getByRole('button',{name:'Reconnect agent',exact:true})).toBeEnabled();
-  await expect(gate).not.toContainText(/Signed in|Credits available/);
-  // Cloud being unreachable shows no banner or status text, and no sign-in is asked for (owner, 2026-11-03).
+  await expect.poll(() => calls(page)).toContainEqual(
+    expect.objectContaining({plugin:'Agent',method:'request',path:'/api/auth/me'}),
+  );
+  // An unreachable Cloud keeps local Home open and asks for no new sign-in.
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('region',{name:'Eliza Cloud plan notice',exact:true})).toHaveCount(0);
-  await expect(page.getByText(/Cloud cannot be reached/)).toHaveCount(0);
-  await expect(gate).not.toContainText('Sign in required');
-  const starts=(await agentCalls(page)).filter(call=>call==='start').length;
-  await gate.getByRole('button',{name:'Reconnect agent',exact:true}).click();
-  await expect.poll(async()=>(await agentCalls(page)).filter(call=>call==='start').length).toBeGreaterThan(starts);
-  await expect(gate).toBeVisible();expect(await agentCalls(page)).not.toContain('configureCloudProvider');
-  expect((await calls(page)).filter(call=>call.plugin==='AlphaConnection'&&call.method==='secureWrite'&&call.slot==='cloud:production')).toEqual([]);
+  await expect(page.getByText(/Cloud cannot be reached|Sign in required/)).toHaveCount(0);
+  await page.reload();
+  await expect.poll(() => agentCalls(page)).toContain('start');
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
+  expect(await agentCalls(page)).not.toContain('configureCloudProvider');
+  const credentialCalls=(await calls(page)).filter(call=>call.plugin==='AlphaConnection'&&call.slot==='cloud:production');
+  expect(credentialCalls.map(call=>call.method)).toContain('secureRead');
+  expect(credentialCalls.filter(call=>call.method!=='secureRead')).toEqual([]);
   expect(await selection(page)).toEqual({kind:'resident'});
 });
 
@@ -121,9 +123,10 @@ test('a kept sign-in Cloud admits binds inference at start and runs the on-devic
   const paths = await cloudRequests(page);
   expect(paths).toEqual(expect.arrayContaining(['/api/v1/user', '/api/v1/billing/limits']));
   expect(paths.filter(path => !['/api/v1/user', '/api/v1/subscription/entitlement', '/api/v1/billing/limits', '/api/v1/eliza/google/accounts', '/api/v1/maps/capabilities'].includes(path))).toEqual([]);
-  const dialog = await openYourAgent(page);
-  await expect(dialog.getByText('Running', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Eliza Cloud',{exact:true}).filter({visible:true})).toBeVisible();
+  await expect.poll(() => calls(page)).toContainEqual(
+    expect.objectContaining({plugin:'Agent',method:'request',path:'/api/auth/me'}),
+  );
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect((await selection(page))?.kind).toBe('resident');
 });
 

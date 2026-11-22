@@ -63,7 +63,7 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
     await expect(bubble(page, `Failing ${kind}`)).toHaveCount(1);
     if (kind === 'insufficient_credits') {
-      // One answer in the chat, and Subscription opens with plan selection and code entry.
+      // One answer in the chat, and Manage plan opens Account with plan selection and code entry.
       // The fixture confirms zero cash and no active plan; neither is inferred from the other.
       const account = page.getByRole('dialog', { name: 'Account', exact: true });
       await expect(account).toBeVisible();
@@ -79,7 +79,7 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await button(page, 'Expand chat').click();
       // No second billing message; the answer carries the one offer, which reopens the same popup.
       await expect(page.getByRole('button', { name: /^Manage billing in Eliza Cloud/ })).toHaveCount(0);
-      const offer = page.getByRole('button', { name: /^Subscription/ });
+      const offer = page.getByRole('button', { name: /^Manage plan/ });
       await expect(offer).toHaveCount(1);
       await offer.click();
       await expect(account).toBeVisible();
@@ -93,7 +93,8 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       // Plan selection opens Cloud billing only after the account check; nothing is bought here.
       await membership.getByRole('button', { name: 'Choose a plan', exact: true }).click();
       // This explicit action opens the existing billing site; it does not purchase a plan.
-      await expect.poll(() => stub(page, s => s.opened)).toEqual(['https://cloud.eliza.app/cloud/billing']);
+      await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plus',{exact:true})).toBeVisible();
+      expect(await stub(page,s=>s.opened)).toEqual([]);
     } else {
       if (kind === 'no_provider') await expect(page.getByRole('button', { name: /^Check Eliza Cloud again/ })).toHaveCount(1);
       else await expect(page.getByRole('button', { name: /^(Manage (plan|billing)|Check Eliza Cloud again|Set up AI)/ })).toHaveCount(0);
@@ -141,9 +142,17 @@ for (const frame of ['done', 'error'] as const) test(`a provider-less turn witho
   await expect(page.getByText(/PRIVATE_PROVIDER_ERROR_CANARY/)).toHaveCount(0);
   const plan = page.getByRole('button', { name: /^Choose plan/ });
   await expect(plan).toHaveCount(1);
+  // The reply opens the conversation sheet, and its opening motion can start after the card is
+  // already laid out and still. Tap the card once the open sheet shows it whole: pressed during
+  // the opening, the press blurs the composer, and the re-render's follow-to-newest scroll moves
+  // the card out from under the pointer before release, so the tap lands on the transcript.
+  await expect.poll(() => plan.evaluate(card => {
+    const list = card.closest('[data-alpha-transcript]')!.getBoundingClientRect(), box = card.getBoundingClientRect();
+    return box.top >= list.top && box.bottom <= list.bottom;
+  })).toBe(true);
   await plan.click();
   // On the phone's own agent the plan action opens the resident account & plan panel (plan headline,
-  // Recheck, Renew); it carries the Subscription controls.
+  // Recheck, Renew); it carries the plan controls.
   const account = page.getByRole('dialog', { name: 'Account', exact: true });
   await expect(account).toBeVisible();
   await expect(account.getByRole('region', { name: 'Balance and membership', exact: true })).toBeVisible();
@@ -198,9 +207,18 @@ for (const mode of ['reject', 'busy'] as const) {
     test.setTimeout(120_000);
     await connected(page);
     await setStub(page, { stream: mode });
+    // The refusal notice is a short toast (about 2 s) that can be gone by the time the draft has
+    // settled on a loaded host, so every toast shown from the send on is recorded.
+    await page.evaluate(() => {
+      const w = window as any; w.shownToasts = [];
+      new MutationObserver(() => {
+        const toast = document.querySelector('[data-alpha-toast] .drop > span'), text = toast?.textContent?.trim();
+        if (text && toast!.checkVisibility() && w.shownToasts.at(-1) !== text) w.shownToasts.push(text);
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
     await sendRefused(page, `Refused by ${mode}`);
     // A 429 refusal names its own reason; a refusal with none says nothing, the text simply comes back.
-    if (mode === 'busy') await expect(page.getByText('Not sent. Busy · not sent', { exact: true })).toBeVisible();
+    if (mode === 'busy') await expect.poll(() => page.evaluate(() => (window as any).shownToasts)).toContain('Not sent. Busy · not sent');
     await expect(page.getByText(NOT_SENT)).toHaveCount(0);
     await expect(bubble(page, `Refused by ${mode}`)).toHaveCount(0);
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
@@ -280,4 +298,33 @@ test('a resident session refusal reconnects without changing Cloud sign-in or re
   expect(await harness(page, f => ({ streams: f.streams, posts: f.posts.length }))).toEqual({ streams: 0, posts: 0 });
   await expect(page.locator('body')).not.toContainText(/pair/i);
   expect(await stub(page, s => s.recoveries)).toEqual([]);
+});
+
+test('a send while the resident cannot start preserves the text and reports runtime readiness, not draft storage',async({page})=>{
+  const foreign=await fenceNetwork(page);
+  await flagOffAndroid(page);
+  await residentStub(page,{accounts:[owner],rejectStart:true});
+  await page.goto('/');
+  await expect.poll(()=>harness(page,f=>f.calls.includes('Agent.start'))).toBe(true);
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
+  await composer(page).fill('Keep these words while Alpha starts');
+  await composer(page).press('Enter');
+  await expect(page.locator('[data-alpha-toast]')).toContainText(/starting|restarting|start|Restart/i);
+  await expect(page.locator('[data-alpha-toast]')).not.toContainText('draft storage');
+  await expect(composer(page)).toHaveValue('Keep these words while Alpha starts');
+  expect(await harness(page,f=>f.posts)).toEqual([]);
+  expect(foreign).toEqual([]);
+});
+
+test('cold startup keeps the logo and hides Send until the saved-account resident is ready',async({page})=>{
+  await flagOffAndroid(page);
+  await residentStub(page,{accounts:[owner]});
+  await page.addInitScript(()=>{const w=window as any,native=w.Capacitor.nativePromise;w.Capacitor.nativePromise=async(plugin:string,method:string,input:any)=>{if(plugin==='Agent'&&method==='start')await new Promise<void>(resolve=>w.releaseStartup=resolve);return native(plugin,method,input);};});
+  await page.goto('/');
+  await expect(page.getByRole('status',{name:'Loading Alpha',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).not.toBeVisible();
+  await expect(composer(page)).not.toBeVisible();
+  await page.evaluate(()=>(window as any).releaseStartup());
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible({timeout:30000});
+  await expect(page.getByRole('status',{name:'Loading Alpha',exact:true})).toHaveCount(0);
 });

@@ -4,14 +4,14 @@ module MapsNavigation {
     owner: int, epoch: int, requestEpoch: int, generation: int, requestGeneration: int,
     phase: str, route: int, previousRoute: int, routeOwner: int,
     locationGranted: bool, fixFresh: bool, guidance: bool, assistant: bool,
-    foreground: bool, directStart: bool, failure: str, rerouting: bool
+    foreground: bool, failure: str, rerouting: bool
   }
   var s: Navigation
   action init = s' = {
     owner: 1, epoch: 0, requestEpoch: 0, generation: 0, requestGeneration: 0,
     phase: "idle", route: 0, previousRoute: 0, routeOwner: 0,
     locationGranted: false, fixFresh: false, guidance: false, assistant: false,
-    foreground: true, directStart: false, failure: "none", rerouting: false }
+    foreground: true, failure: "none", rerouting: false }
   action grantLocation = s' = { ...s, locationGranted: true }
   action receiveFix(fresh: bool): bool = all {
     s.locationGranted, s' = { ...s, fixFresh: fresh }
@@ -35,14 +35,11 @@ module MapsNavigation {
         failure: if (success) "none" else "network" }
     else s' = s
   }
+  /// The user's Start needs a ready route only; guidance then waits for its first fix
+  /// (MapsNavigationGuidanceReadback models that wait). An agent request never starts
+  /// guidance: it shows the route and leaves Start to the user.
   action start = all {
-    s.phase == "ready", s.route != 0, s.locationGranted, s.fixFresh,
-    s' = { ...s, guidance: true, phase: "navigating" }
-  }
-  /// Agent direct start uses a separately read owner preference, defaulting to false.
-  action allowDirectStart = s' = { ...s, directStart: true }
-  action agentStart = all {
-    s.directStart, s.phase == "ready", s.route != 0, s.locationGranted, s.fixFresh,
+    s.phase == "ready", s.route != 0,
     s' = { ...s, guidance: true, phase: "navigating" }
   }
   action beginReroute = all {
@@ -70,7 +67,7 @@ module MapsNavigation {
     grantLocation, receiveFix(true), receiveFix(false), requestRoute, resumeWithFix,
     routeReply(s.generation, s.epoch, true), routeReply(s.generation, s.epoch, false),
     routeReply(0, s.epoch, true), routeReply(s.generation, 3, true), start,
-    allowDirectStart, agentStart, beginReroute, rerouteReply(true), rerouteReply(false),
+    beginReroute, rerouteReply(true), rerouteReply(false),
     showAssistant, dismissAssistant, background, foreground, staleFix, stop, switchOwner, s' = s
   }
   val GuidanceHasRoute = s.guidance implies s.route > 0 and s.routeOwner == s.owner
@@ -91,4 +88,7 @@ module MapsNavigation {
   run accountRetirementTest = init.then(grantLocation).then(receiveFix(true)).then(requestRoute)
     .then(routeReply(1, 0, true)).then(start).then(switchOwner)
     .expect(s.route == 0 and not(s.guidance) and safety)
+  run startWithoutFreshFixTest = init.then(grantLocation).then(receiveFix(true)).then(requestRoute)
+    .then(routeReply(1, 0, true)).then(staleFix).then(start)
+    .expect(s.guidance and not(s.fixFresh) and safety)
 }

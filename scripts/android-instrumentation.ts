@@ -140,6 +140,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   TextScale: { note: "Display and Notes require a phone its owner already signed in; a signed-out APK is inconclusive. Run textScaleProcessRestartPhase separately with bun scripts/test-native-restart.ts text-scale." },
   CloudSignInCallback: { args: { cloudSignInNative: "1" }, note: "Synthetic in-app sign-in returns through MainActivity; a matching return is never delivered, so nothing reaches Steward or Cloud. Not App Link verification (adb shell pm get-app-links) or real-account sign-in" },
   BrowserExternalHandoff: { note: "Synthetic committed HTTPS child and resolver fixture; intercepts chooser dispatch, no external page is opened" },
+  BrowserDownloads: { note: "Scoped MediaStore download fixture; the view intent is intercepted, so no app opens" },
   ResetPolicy: { note: "Non-destructive cancellation, migration refusal and isolated marker checks; not a system reset proof" },
   BrowserCookiePolicy: { note: "Synthetic intercepted HTTPS origins; private method requires scoped WebView deletion support" },
   BrowserSignins: { note: "signinProcessRestartPhase is skipped here; run bun scripts/test-native-restart.ts signin" },
@@ -187,6 +188,8 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   SelectedDocument: { note: "documentProcessRestartPhase is skipped here; run bun scripts/test-native-restart.ts document" },
   PasswordVaultSettings: { args: { passwordVault: "1" }, note: "sets and clears a fixture screen-lock PIN: an owned emulator with no screen lock of its own; the inactivity step waits out the 60 s unlock window" },
   PasswordVaultFill: { args: { passwordVaultFill: "1" }, note: "sets and clears a fixture screen-lock PIN and selects Alpha as the Autofill service, restoring the previous service; the other package is Alpha's own (the instrumentation APK holds one package)" },
+  PasswordEditor: { note: "synthetic UI grant over MainActivity; covers it with Android Settings to check the plugin closes the editor on stop; no vault key or device setting" },
+  PasswordAutofillOffer: {},
   // Round-9 journeys and links (WP2, second pass). Compiled into both instrumentation APKs; no recorded run.
   JourneyJ05: { args: { journeyJ05: "1" }, note: "J05 on the flag-off pair, offline: page -> Ask about page -> native review -> composer -> Send while inference is unavailable (resident present, P-43; nothing dispatched) -> a source note for that page across recreation; needs a WebView provider with isolated-world injection; no agent answer" },
   NoteOrigin: { note: "storage level: a reminder's note link in note-origins:v1:device, read back exactly and across recreation; needs the slot admitted for compare-and-exchange (WP1). The Calendar 'From note' line is not driven" },

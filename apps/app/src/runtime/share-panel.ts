@@ -1,4 +1,4 @@
-export type SharePanelOptions={title:string;current:()=>boolean;external?:()=>unknown|Promise<unknown>;email?:()=>unknown|Promise<unknown>;/** Shown under a disabled email row; null leaves the row out. */emailUnavailable?:string|null;copy?:()=>unknown|Promise<unknown>;copyLabel?:string;save?:()=>unknown|Promise<unknown>};
+export type SharePanelOptions={title:string;current:()=>boolean;external?:()=>unknown|Promise<unknown>;email?:()=>unknown|Promise<unknown>;messages?:()=>unknown|Promise<unknown>;/** Shown under a disabled email row; null leaves the row out. */emailUnavailable?:string|null;copy?:()=>unknown|Promise<unknown>;copyLabel?:string;save?:()=>unknown|Promise<unknown>};
 /** Returns a check that the watched value still equals its content when this was called.
  * `token` is a cheap identity for the value (the object a store replaces on every write);
  * `content` is the full value. While the token is the one last seen nothing is serialised,
@@ -38,14 +38,14 @@ export function openSharePanel(options:SharePanelOptions):Promise<void>{
   const finish=()=>{if(closed)return;closed=true;document.removeEventListener('visibilitychange',hidden);window.removeEventListener('alpha-back',back,true);window.removeEventListener('pagehide',finish);for(const event of retirementEvents)window.removeEventListener(event,finish);clearInterval(selectionWatch);window.removeEventListener('resize',place);if(openPanel===finish)openPanel=undefined;dialog.close();dialog.remove();if(prior?.isConnected&&!document.hidden){const menu=prior.closest('details');(menu&&!menu.open?menu.querySelector<HTMLElement>('summary'):prior)?.focus();}resolve();};
   const hidden=()=>{if(document.hidden)finish();};
   const back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();finish();};
-  const action=(label:string,run?:()=>unknown|Promise<unknown>,reason?:string)=>{
-   const button=document.createElement('button');button.type='button';button.className='share-row';button.style.font='inherit';button.textContent=label;button.style.setProperty('--share-icon',`url('/icons/lucide/${label==='Email'?'mail':label==='Share'?'share-2':label==='Save file'?'download':'copy'}.svg')`);
+  const action=(label:string,icon:string,run?:()=>unknown|Promise<unknown>,reason?:string)=>{
+   const button=document.createElement('button');button.type='button';button.className='share-row';button.style.font='inherit';button.textContent=label;button.style.setProperty('--share-icon',`url('/icons/lucide/${icon}.svg')`);
    if(!run){button.disabled=true;button.style.opacity='.5';if(reason){const hint=document.createElement('p');hint.textContent=reason;hint.style.fontSize='13px';dialog.append(button,hint);return;}}
    button.onclick=()=>{if(closed)return;if(document.hidden||!options.current()){status.textContent='The selection changed. Close and choose it again.';return;}finish();try{void Promise.resolve(run?.()).catch(destinationFailure);}catch(error){destinationFailure(error);}};dialog.append(button);
   };
-  close.onclick=finish;dialog.append(header);if(options.email)action('Email',options.email);if(options.external)action('Share',options.external);
-  if(options.copy)action(options.copyLabel||'Copy text',options.copy);
-  if(options.save)action('Save file',options.save);
+  close.onclick=finish;dialog.append(header);if(options.email)action('Email','mail',options.email);if(options.messages)action('Messages','message-square',options.messages);if(options.external)action('Share','share-2',options.external);
+  if(options.copy)action(options.copyLabel||'Copy text','copy',options.copy);
+  if(options.save)action('Save file','download',options.save);
   dialog.append(status);dialog.addEventListener('click',event=>{if(event.target===dialog){const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)finish();}});dialog.addEventListener('cancel',event=>{event.preventDefault();finish();});dialog.addEventListener('close',finish);
   // Keep keyboard traversal inside the panel; chooser handoff happens only after finish().
   dialog.addEventListener('keydown',event=>{if(event.key!=='Tab')return;const buttons=Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')),first=buttons[0],last=buttons.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}});

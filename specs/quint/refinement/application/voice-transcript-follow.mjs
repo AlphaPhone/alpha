@@ -17,7 +17,17 @@ function compile(source){
  const marker='    var newTurn = voiceTurn ||';
  const methods=source.slice(start,end);
  assert.equal(methods.split(marker).length,2,'one read-only voice snapshot observation');
+ // componentDidMount restores the AP-16 comms stage session; copy the exact members it calls.
+ const member=(open,close)=>{
+  const from=source.indexOf(open,source.indexOf('class Component extends')),to=source.indexOf(close,from);
+  assert.ok(from>=0&&to>from,'exact source boundaries for '+open.trim());
+  return source.slice(from,to);
+ };
+ const restore=member('  restoreStageSession() {','  leave() {');
+ const comms=member('  isCommsView(k) {','  /** The view\'s bar for this render.');
  return `class Shell { constructor(){this.state={chat:'hidden',typing:false,msgs:[{id:'old',from:'user',text:'Earlier',messageBinding:{conversationId:'owned'}}]};this.props={};} S(){return this.state;} preset(){} setState(patch){Object.assign(this.state,patch);}
+ ${comms}
+ ${restore}
  ${methods.replace(marker,'    this.observedVoiceTurn=!!voiceTurn; if(voiceTurn)this.observedVoiceFollows=(this.observedVoiceFollows||0)+1;\n'+marker)}
  };globalThis.Shell=Shell;`;
 }
@@ -28,7 +38,9 @@ function fixture(code){
  Object.defineProperties(list,{scrollHeight:{value:1000},clientHeight:{value:100}});
  list.scrollTop=100;
  const context=vm.createContext({window:dom.window,document,Element:dom.window.Element,structuredClone,
-  setInterval:()=>1,CHAT_PAGE_ROWS:100,CHAT_CLOSED_ROWS:20});
+  setInterval:()=>1,CHAT_PAGE_ROWS:100,CHAT_CLOSED_ROWS:20,
+  // Controlled stage-session port: no saved comms stage, so mount restoration leaves the shell unchanged.
+  stageSessionStore:()=>({read:()=>Promise.resolve(null),write:()=>Promise.resolve()})});
  vm.runInContext(code,context);
  const shell=new context.Shell();shell.componentDidMount();
  const focused=document.getElementById('focus');focused.focus();
@@ -97,7 +109,7 @@ export async function checkVoiceTranscriptFollow(extraSources=[]){
   }
   return await checkTraces({model:'VoiceTranscriptFollow',sources:[...sources,generated],driverHashes,generatedSources:[generated],traces,
    scope:'bounded-component',assumptions:[
-    'Unchanged shell lifecycle, voice-follow and snapshot methods execute in JSDOM. A read-only observer records the actual local voiceTurn result and count; it does not reproduce the predicate.',
+    'Unchanged shell lifecycle, mount stage-session restoration (isCommsView/restoreStageSession with an empty stage-session store port), voice-follow and snapshot methods execute in JSDOM. A read-only observer records the actual local voiceTurn result and count; it does not reproduce the predicate.',
     'Transcript delivery, accepted-final invocation and owner retirement are explicit caller ports. The real mounted reading-input listeners, DOM selection and active element execute. Geometry is controlled; actual React commit scrolling, native input, ASR acceptance/deduplication and whole-session retirement remain separate obligations.',
     'The model projects only observable scroll intent, message identity, selection and focus. Its current/accepted/cancelled lifecycle fields are not independently established by this bounded shell fixture. No model state or expected result drives source execution.',
    ]});

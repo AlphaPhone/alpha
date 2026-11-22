@@ -6,6 +6,7 @@ import {createScanLinkReview} from './scan-link-review';
 import {scanExportTitle,exportScanPdf,scanPdfFailure,scanPdfRetryable,systemPickerActive} from './scan-pdf';
 import {Capacitor} from '@capacitor/core';
 import {recognizeLocalText} from './local-ocr';
+import {localOcrErrorText} from '../ui/documents/local-ocr-messages';
 import type {ScanPageCamera} from './scan-page-camera';
 
 /** A scan is draft text until the user reviews it and receives a Notes commit. */
@@ -58,6 +59,6 @@ export function openScanReview(image:Blob,save:(text:string,id:string)=>Promise<
   dialog.append(heading,content,actions);(document.querySelector('.os')||document.body).append(dialog);dialog.showModal();close.focus();
   void recognizeLocalText(image,controller.signal,value=>{if(!closed)status.textContent=`Reading text… ${Math.round(value.progress*100)}%`;}).then(result=>{
     if(closed)return;field.disabled=false;if(eventReview)eventReview.hidden=false;field.value=result.text;links.update();copy.disabled=!result.text;commit.disabled=!result.text;close.textContent='Close scan';status.textContent=result.text?'':'No text';field.focus();
-  },error=>{if(closed)return;close.textContent='Close scan';status.textContent=error instanceof Error?error.message:'Scan failed';});
+  },error=>{if(closed)return;close.textContent='Close scan';status.textContent=localOcrErrorText(error,'Scan failed');});
   return dispose;
 }

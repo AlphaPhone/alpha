@@ -42,7 +42,7 @@ async function checkHistoricalCalendarNavigation(extraSources = []) {
       const resume = f.button('Resume event draft');
       await f.button('Calendar').click();
       await f.button('New event').waitFor();
-      const month = f.page.locator('button[aria-label="Month view"]');
+      const month = f.page.locator('button[aria-label="Choose date"]');
       async function observe() {
         const s = await f.snapshot();
         assert.equal(s.view, 'calendar');

@@ -72,7 +72,7 @@ public final class CloudSignInCallbackInstrumentedTest {
  /**
   * An expired record with the matching state is never used. A return that starts Alpha has no live
   * sign-in attempt, so the shared client consumes nothing and writes no credential; the record stays
-  * for the next sign-in to replace (CloudSignInPlugin.captureCallback).
+  * for the next sign-in to replace (AlphaCloudSignInClient.captureCallback).
   */
  @Test public void expiredPendingRecordIsNeverUsed() throws Exception {
   gate();

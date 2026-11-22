@@ -255,10 +255,21 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  static final String UPDATE_STATUS="ai.alphacompute.alphaphone.UPDATE_STATUS";
- /** Self-update without a system dialog is supported from Android 12. Android still decides at commit. */
+ /** The image's INSTALL_SELF_UPDATES grant, or the owner's install-unknown-apps consent. Every install read uses this. */
+ static boolean selfUpdateAdmitted(Context context){
+  return context.checkSelfPermission("android.permission.INSTALL_SELF_UPDATES")==PackageManager.PERMISSION_GRANTED
+   ||context.getPackageManager().canRequestPackageInstalls();
+ }
+ /**
+  * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
+  * An image may allow-list INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher. Android then admits
+  * Alpha's update of itself, and only that, without the owner's install-unknown-apps choice. Android grants it to an
+  * update only when the image's own launcher also declares it. The launcher does not declare it yet: the shared image
+  * stager must first admit it to its reviewed privileged set. Until then every install needs that choice once.
+  */
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";
-  if(!context.getPackageManager().canRequestPackageInstalls())return "permission-required";
+  if(!selfUpdateAdmitted(context))return "permission-required";
   // Android's default silent-update policy also throttles a first attempt during early boot.
   return android.os.SystemClock.uptimeMillis()<=30_000L?"starting":"supported";
  }
@@ -787,7 +798,7 @@ public final class AlphaDevicePlugin extends Plugin {
    org.json.JSONObject row=releases.getJSONObject(i);
    String flavor=row.optString("variant"),root=row.optString("signerSha256");
    if(!"alpha-update/v1".equals(row.opt("schema"))||
-      !("launcher".equals(flavor)||"standalone".equals(flavor))||
+      !"launcher".equals(flavor)||
       !root.matches("[0-9a-f]{64}")||!pairs.add(flavor+":"+root))return null;
    if(variant.equals(flavor)&&signer.equals(root))selected=row;
   }
@@ -818,9 +829,9 @@ public final class AlphaDevicePlugin extends Plugin {
   throw new UpdateOfferUnavailable("offer-unavailable",null);
  }
  /**
-  * Manual Install update or an automatic idle-Home attempt. An automatic attempt requires API 31+ and existing
-  * install-unknown-apps consent; it never opens the settings page. A manual tap without that consent opens
-  * only Android's page. Otherwise the HTTPS APK is downloaded to the cache and admitted by size and
+  * Manual Install update or an automatic idle-Home attempt. An automatic attempt requires API 31+ and either the
+  * image's INSTALL_SELF_UPDATES grant or existing install-unknown-apps consent (selfUpdateAdmitted); it never opens
+  * the settings page. A manual tap with neither opens only Android's page. Otherwise the HTTPS APK is downloaded to the cache and admitted by size and
   * SHA-256 (copyVerified), then by Android's reading of the archive: this package at exactly the offered
   * versionCode, above the installed one. API 31+ automatic sessions request USER_ACTION_NOT_REQUIRED through
   * Android's nonprivileged self-update API. Android may still require confirmation; for an automatic session
@@ -841,7 +852,7 @@ public final class AlphaDevicePlugin extends Plugin {
    String status=automaticUpdateStatus(getContext());
    if(!"supported".equals(status)){call.resolve(new JSObject().put("status",status));return;}
   }
-  if(!getContext().getPackageManager().canRequestPackageInstalls()){
+  if(!selfUpdateAdmitted(getContext())){
    // Consent can be revoked between the automatic capability read and this read.
    if(automatic){call.resolve(new JSObject().put("status","permission-required"));return;}
    openInstallSourceSettings(call,null);
@@ -945,7 +956,7 @@ public final class AlphaDevicePlugin extends Plugin {
         requireCurrentUpdateOffer(manifestSha256,apkUrl,sha256,size,versionCode,signer);
         throwIfDestroyed();
         if(!automaticUpdateReady()){keepApk=true;throw new java.io.IOException("Automatic update deferred");}
-        if(!getContext().getPackageManager().canRequestPackageInstalls())throw new UpdateInstallPermissionRequired();
+        if(!selfUpdateAdmitted(getContext()))throw new UpdateInstallPermissionRequired();
        }
        UpdatePause.committing(preparation.id);
        android.content.IntentSender status=AlphaUpdateStatusReceiver.sender(getContext(),preparation.id,id);
@@ -991,6 +1002,12 @@ public final class AlphaDevicePlugin extends Plugin {
  /** Stops an update download too: disconnect only closes the raw socket, which Android allows on this main thread. A session outlives its owner, for a later tap on any bridge. */
  @Override protected void handleOnDestroy(){retireUpdateBridge();UpdateActivation pending=activation;if(pending!=null&&pending.owner==this)pending.ready.complete(false);diagnosticsWorker.shutdown();updateWorker.shutdownNow();javax.net.ssl.HttpsURLConnection active=updateActive;if(active!=null)active.disconnect();getContext().unregisterReceiver(updateStatus);if(updateOwner==this){updateOwner=null;updateDue=false;updateOpen=false;}super.handleOnDestroy();}
  // End of updater methods for host replay.
+ /** Camera's volume-key shutter: while on, MainActivity takes the volume keys as Camera's shutter. */
+ @PluginMethod public void setVolumeShutter(PluginCall call){
+  Boolean enabled=call.getBoolean("enabled");if(enabled==null){call.reject("Choose on or off.");return;}
+  android.app.Activity activity=getActivity();if(!(activity instanceof MainActivity)){call.reject("Alpha view is unavailable");return;}
+  activity.runOnUiThread(()->{((MainActivity)activity).setVolumeShutter(enabled);call.resolve();});
+ }
  /** Status and navigation icon colors follow Alpha's drawn theme, not only Android's night mode. */
  @PluginMethod public void setSystemBarAppearance(PluginCall call){
   Boolean dark=call.getBoolean("dark");if(dark==null){call.reject("Choose light or dark.");return;}
@@ -999,6 +1016,16 @@ public final class AlphaDevicePlugin extends Plugin {
    if(activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
    androidx.core.view.WindowInsetsControllerCompat bars=androidx.core.view.WindowCompat.getInsetsController(activity.getWindow(),activity.getWindow().getDecorView());
    bars.setAppearanceLightStatusBars(!dark);bars.setAppearanceLightNavigationBars(!dark);call.resolve();
+  });
+ }
+ /** Touch feedback for a renderer control (AlphaHaptics). Android skips it when the owner turned touch feedback off. */
+ @PluginMethod public void haptic(PluginCall call){
+  int feedback=AlphaHaptics.constant(call.getString("kind"),Build.VERSION.SDK_INT);if(feedback<0){call.reject("Unknown feedback");return;}
+  android.app.Activity activity=getActivity();if(activity==null||getBridge()==null){call.reject("Alpha view is unavailable");return;}
+  activity.runOnUiThread(()->{
+   android.view.View view=getBridge().getWebView();
+   if(view==null||activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
+   JSObject result=new JSObject();result.put("performed",view.performHapticFeedback(feedback));call.resolve(result);
   });
  }
 }

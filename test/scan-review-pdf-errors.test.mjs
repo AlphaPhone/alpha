@@ -5,16 +5,18 @@ const source=stripTypeScriptTypes(readFileSync('apps/app/src/prototype/scan-pdf.
  .replace("'../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-pdf.ts'",JSON.stringify(url('export const createScanPdf=(...args)=>globalThis.scanPdfTest.create(...args);')))
  .replace("'../platform-plugins'",JSON.stringify(url('export const registerPlugin=()=>({exportPdf:input=>globalThis.scanPdfTest.exportPdf(input)});')))
  .replace("'./files-index'",JSON.stringify(index))
- .replace("'../daily'",JSON.stringify(url('export const DailyApps={forgetSelected:input=>globalThis.scanPdfTest.forget(input)};')));
+ .replace("'../daily'",JSON.stringify(url('export const DailyApps={forgetSelected:input=>globalThis.scanPdfTest.forget(input)};')))
+ .replace("'../ui/documents/scan-pdf-messages'",JSON.stringify(url(stripTypeScriptTypes(readFileSync('apps/app/src/ui/documents/scan-pdf-messages.ts','utf8')))));
 const {exportScanPdf,scanPdfFailure,scanPdfRetryable,ScanPdfExportError,systemPickerActive}=await import(url(source));
 const bytes=new TextEncoder().encode('%PDF-1.7 test');
 
-test('conversion failures show the real reason and keep retry available',async()=>{
- let exported=0;globalThis.scanPdfTest={create:async()=>{throw Error('Page 2 is larger than 32 million pixels');},exportPdf:async()=>{exported++;return {status:'exported',message:'saved'};}};
+test('conversion failures show the reason in Alpha\'s words and keep retry available',async()=>{
+ let exported=0;globalThis.scanPdfTest={create:async()=>{throw Error('Image dimensions are too large.');},exportPdf:async()=>{exported++;return {status:'exported',message:'saved'};}};
  const error=await exportScanPdf(new Blob(['x']),new AbortController().signal,'Alpha scan').then(()=>null,value=>value);
  assert.ok(error instanceof Error);assert.ok(!(error instanceof ScanPdfExportError),'conversion is not export uncertainty');assert.equal(exported,0,'nothing reached the provider');
- const failure=scanPdfFailure(error);assert.equal(failure.retry,true);assert.match(failure.message,/^Page 2 is larger than 32 million pixels$/);
+ const failure=scanPdfFailure(error);assert.equal(failure.retry,true);assert.equal(failure.message,'A page photo is larger than 32 million pixels.');
  assert.equal(scanPdfFailure('opaque').retry,true);assert.equal(scanPdfFailure('opaque').message,'PDF failed');
+ assert.equal(scanPdfFailure(Error('Page 2 is larger than 32 million pixels')).message,'PDF failed','unknown conversion text is never shown');
  assert.equal(scanPdfFailure(new DOMException('stop','AbortError')).retry,true);
 });
 test('only a failed or unknown export call is unconfirmed and locks retry',async()=>{
@@ -62,6 +64,19 @@ test('a searchable export that wrote nothing keeps the review open with the revi
   assert.equal(r.outcome(),'pending',status);assert.ok(r.dialog.isConnected,status);assert.equal(r.status(),`Nothing written (${status}).`);
   assert.equal(r.download.disabled,false,'retry stays available');assert.equal(r.field().disabled,false);assert.equal(r.field().value,'Edited line');
   r.back();assert.equal(await r.result,undefined,'closing after it reports a cancel, not an unconfirmed export');
+ }
+});
+test('a refused searchable conversion shows Alpha\'s reason and keeps retry; unknown text shows PDF failed',async()=>{
+ for(const [thrown,shown] of [
+  ['Searchable PDF supports English and Western European text. Correct unsupported characters or export an image-only PDF.','A searchable PDF supports English and Western European text only. Correct unsupported characters or save a PDF without text.'],
+  ['Invalid scanned line or position.','A text line or its position is invalid.'],
+  ['PDF exceeds the 8 MB export limit.','The PDF is over the 8 MB limit.'],
+  ['Some new upstream sentence.','PDF failed'],
+ ]){
+  const r=await review({create:async()=>{throw Error(thrown);},exportPdf:async()=>({status:'exported',message:'saved'})});
+  r.download.click();await settle();
+  assert.equal(r.status(),shown,thrown);assert.deepEqual(r.calls,[],'nothing reached the provider');
+  assert.equal(r.download.disabled,false,'retry stays available');r.back();assert.equal(await r.result,undefined);
  }
 });
 test('Back while the PDF is still being prepared is a cancel; after the request it is unconfirmed',async()=>{

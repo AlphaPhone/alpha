@@ -30,6 +30,11 @@ import {HELD_OUTSIDE_REPOSITORY, NO_FONT_LICENCE, UNRESOLVED_FONT_LICENCE_BLOCKS
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FONT_FILE = /\.(?:woff2?|ttf|otf)$/i;
 export const FONT_BLOCKER = 'unresolved-font-licence';
+/** The item verify-apks records when the font check could not run. Its result is unknown, so it
+ * blocks distribution under either licence policy (scripts/release-blockers.ts). */
+const FONT_CHECK_FAILED = 'font licence check failed: ';
+export const fontCheckFailedItem = (detail: string) => FONT_CHECK_FAILED + detail;
+export const isFontCheckFailure = (item: string) => item.startsWith(FONT_CHECK_FAILED);
 /** Flag of a font with no record at all. */
 export const FONT_FLAG = 'proprietary-no-licence-recorded';
 /** Flag of a font recorded on the owner's statement that the licence is held outside the repository. */
@@ -145,6 +150,7 @@ export function fontLicenceCheck(publicDir: string, {blocksDistribution = UNRESO
   return {check: FONT_BLOCKER, status: items.length ? 'unresolved' : resolved.length ? RESOLVED_BY_OWNER_STATEMENT : 'clear', blocksDistribution, items, resolved, blockers: blocksDistribution ? items : []};
 }
 
-/** How a font item is printed: a blocker only for an unresolved font while the constant says so. */
+/** How a font item is printed: a blocker only for an unresolved font while the constant says so
+ * (verify-apks records a failed check with blocksDistribution true, so it prints as a blocker). */
 export const fontLicenceLine = (message: string, blocksDistribution: boolean = UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION) =>
   `${blocksDistribution && !message.startsWith(`${FONT_BLOCKER}: ${RESOLVED_BY_OWNER_STATEMENT}: `) ? 'RELEASE BLOCKER' : 'LICENCE FLAG (reported, not blocking)'} ${message}`;

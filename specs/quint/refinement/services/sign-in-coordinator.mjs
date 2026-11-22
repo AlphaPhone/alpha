@@ -18,10 +18,10 @@ const defaultScenarios = [
 export async function runSignInCoordinatorRefinement(scenarios = defaultScenarios, extraSources = []) {
   const base = 'android/app/src/main/java/ai/alphacompute/alphaphone/';
   const prepared = preparePatchedNative({root});
-  const product = ['AlphaCloudSignInPlugin.java','CloudDeployment.java','PluginWorkers.java'].map(name=>base+name)
+  const product = ['AlphaCloudSignInPlugin.java','AlphaCloudSignInClient.java','CloudDeployment.java','PluginWorkers.java'].map(name=>base+name)
     .concat(['CloudCredentialSlots.java','CloudSignInConfig.java','CloudSignInEnvironment.java',
       'CloudSignInFlow.java','CloudSignInReadiness.java','CloudSignInRoutes.java',
-      'CloudSignInPlugin.java','CloudEmailCode.java','CloudSmsCode.java','CloudKeyRenewal.java','CloudKeyRevocation.java']
+      'CloudEmailCode.java','CloudSmsCode.java','CloudKeyRenewal.java','CloudKeyRevocation.java']
       .map(name=>join(prepared.root,'packages/auth/android/src/main/java/ai/eliza/auth/cloud',name)));
   const fixture = [
     'specs/quint/refinement/services/SignInTestPorts.java',
@@ -52,7 +52,7 @@ export async function runSignInCoordinatorRefinement(scenarios = defaultScenario
       traces,
       scope: 'bounded-orchestration',
       assumptions: [
-        'The actual patched shared CloudSignInPlugin and Alpha registration orchestrate callbacks, authorization, HTTP, persistence, acknowledgement, revocation and recovery on its own executors.',
+        'The actual AlphaCloudSignInClient and Alpha registration orchestrate callbacks, authorization, HTTP, persistence, acknowledgement, revocation and recovery on its own executors.',
         'Every HTTPS connection is intercepted at URL.openConnection and unmatched hosts/routes are refused. Android presentation, primitive storage and credential-intent tickets are controlled ports. Preference apply/commit publish in memory with successful commit; disk durability and failed commits remain outside these schedules.',
         'Replacement and receipt-failure scenarios start with a full successful source sign-in. Burn-failure and cancellation-race scenarios begin with a fresh persisted attempt. App Link verification, Keystore and real provider behavior remain installed-integration obligations.',
       ],

@@ -320,6 +320,9 @@ def main(signing_timeout):
         gh.write_text(GH)
         gh.chmod(0o700)
         (scratch / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+        # The signing shell refuses a signer record that carries a retired rotation before any access.
+        (scratch / "android").mkdir()
+        (scratch / "android/release-signer.json").symlink_to(ROOT / "android/release-signer.json")
         def git(*args):
             return subprocess.check_output(["git", "-C", directory, *args], text=True).strip()
         git("init", "-q")

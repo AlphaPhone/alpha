@@ -1,5 +1,8 @@
 /// Actual Notes recording foreground-service command and notification ownership.
 module NativeNoteRecordingService {
+  /// The notification titles, as res/values/alpha-note-recording.xml gives them.
+  pure val RecordingTitle = "Voice note · Recording"
+  pure val PausedTitle = "Voice note · Paused"
   type State = {
     recording: int, phase: str, foreground: bool, owner: int,
     title: str, toggle: str, chronometer: bool, stopRequested: bool,
@@ -25,7 +28,7 @@ module NativeNoteRecordingService {
     val current = ticket != 0 and ticket == s.recording
     s' = if (s.foreground and not(current)) s else if (not(accepted)) { ...s, stopRequested: true, staleStop: false }
       else { ...s, foreground: current, owner: if (current) ticket else 0,
-        title: if (s.phase == "paused") "Paused" else "Recording",
+        title: if (s.phase == "paused") PausedTitle else RecordingTitle,
         toggle: if (s.phase == "paused") "Resume" else "Pause",
         chronometer: s.phase != "paused", stopRequested: not(current), staleStop: false }
   }
@@ -37,7 +40,7 @@ module NativeNoteRecordingService {
     val nextPhase = if (changes) (if (paused) "paused" else "recording") else s.phase
     val refresh = s.foreground and s.owner == s.recording and nextPhase.in(Set("recording", "paused"))
     s' = { ...s, phase: nextPhase,
-      title: if (refresh) (if (nextPhase == "paused") "Paused" else "Recording") else s.title,
+      title: if (refresh) (if (nextPhase == "paused") PausedTitle else RecordingTitle) else s.title,
       toggle: if (refresh) (if (nextPhase == "paused") "Resume" else "Pause") else s.toggle,
       chronometer: if (refresh) nextPhase == "recording" else s.chronometer, staleStop: false }
   }
@@ -86,8 +89,8 @@ module NativeNoteRecordingService {
   run discardedRecordingAcceptsLegacyStopTest = init.then(recordingStarts(1)).then(startService(1, true))
     .then(recordingCloses).then(stopService(0)).expect(safety and not(s.foreground))
   run pausedNotificationCanResumeTest = init.then(recordingStarts(1)).then(startService(1, true))
-    .then(toggle(1, true)).expect(s.title == "Paused" and not(s.chronometer))
-    .then(toggle(1, false)).expect(safety and s.title == "Recording" and s.chronometer)
+    .then(toggle(1, true)).expect(s.title == PausedTitle and not(s.chronometer))
+    .then(toggle(1, false)).expect(safety and s.title == RecordingTitle and s.chronometer)
   run staleToggleCannotChangeNewRecordingTest = init.then(recordingStarts(2)).then(startService(2, true))
     .then(toggle(1, true)).expect(safety and s.phase == "recording")
   run staleStartPreservesCurrentOwnerTest = init.then(recordingStarts(1)).then(startService(1, true))

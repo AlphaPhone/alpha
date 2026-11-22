@@ -1,28 +1,25 @@
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
-import {createAppUpdateScheduler} from '../../../../.eliza/client-features/packages/ui/src/state/app-update-gate.ts';
+import {createAppUpdateScheduler} from '../../../../apps/app/src/ui/state/app-update-gate.ts';
 import {checkClientFeatures} from '../../../../scripts/prepare-client-features.ts';
 import {checkTraces} from '../check-traces.mjs';
 import {boundInputs,captureSources,checkpoint,deferred,read,tick,trace,call} from './support.mjs';
 
 export async function checkAutomaticAppUpdateSchedule() {
   const model='AutomaticAppUpdateSchedule', modelPath='specs/quint/application/'+model+'.qnt';
-  const shared='packages/ui/src/state/app-update-gate.ts';
+  const gate='apps/app/src/ui/state/app-update-gate.ts';
   const sources=[fileURLToPath(import.meta.url),'apps/app/src/prototype/settings-adapter.ts',
-    'apps/app/src/main.tsx','vendor/eliza/'+shared,'.eliza/client-features/'+shared,
-    '.eliza/client-features/.source.json','scripts/prepare-client-features.ts',
+    'apps/app/src/main.tsx',gate,'.eliza/client-features/.source.json','scripts/prepare-client-features.ts',
     'scripts/pinned-upstream-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts','test/support/strip-types.mjs','upstream.lock.json'];
   captureSources([...sources,modelPath]);
   checkClientFeatures();
   const stamp=JSON.parse(read('.eliza/client-features/.source.json'));
-  const digest=createHash('sha256').update(read('.eliza/client-features/'+shared)).digest('hex');
-  const pinned=createHash('sha256').update(read('vendor/eliza/'+shared)).digest('hex');
-  assert.equal(stamp.files[shared],digest);
-  assert.equal(stamp.sourceFiles[shared],pinned);
-  assert.equal(digest,pinned,'the prepared updater is the exact reviewed upstream source');
+  // The updater is Alpha-owned. checkClientFeatures confirms the prepared tree holds exactly the
+  // stamped files, so no upstream UI entry in either record means no upstream updater is prepared.
+  assert.equal(Object.keys(stamp.files).some(file=>file.startsWith('packages/ui/')),false,'no upstream UI is staged');
+  assert.equal(Object.keys(stamp.sourceFiles).some(file=>file.startsWith('packages/ui/')),false,'no upstream UI source is selected');
   assert.equal(Object.hasOwn(stamp,'appUpdateResumePatch'),false,'the retired updater patch has no receipt');
   const traces=[];
   async function run(name,sequence){
@@ -241,7 +238,7 @@ export async function checkAutomaticAppUpdateSchedule() {
     assert.equal(f.cachedOffer(),refreshed);assert.equal(f.persisted(),stored);assert.equal(f.snapshot().wakeAt,1);
   });
   return checkTraces(boundInputs({model,modelPath,sources,traces,scope:'bounded-component',
-    assumptions:['Actual authenticated shared timer scheduler and actual Alpha cache and poll execute with controlled promise cutpoints. Generic scheduler scenarios remain distinct from product-poll scenarios.',
+    assumptions:['Actual authenticated Alpha-owned timer scheduler and actual Alpha cache and poll execute with controlled promise cutpoints. Generic scheduler scenarios remain distinct from product-poll scenarios.',
       'Positive offer identities follow observed cache object identity and a native digest; zero is absent or unbound. The manual row is observed independently. The native staging model owns actual feed byte and selected APK tuple validation.',
       'Cache wall time is controlled separately from the scheduler model clock. Ordinary scenarios advance the cache interval to reach a native check; stale and unbound recovery runs before that interval to prove forced refresh.',
       'Native capability classes are starting, supported, permission-required and unsupported. SDK/consent/uptime ownership belongs to the native admission model; no native boot clock is duplicated here.',

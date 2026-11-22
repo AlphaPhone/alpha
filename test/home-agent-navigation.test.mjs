@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import {tsImport} from './support/ts-import.mjs';
 // Targets resolve through Alpha's product view registry (canonical ids, served ids, availability).
 const {alphaCanonicalViewId,alphaViewKey,alphaViewPaths}=await tsImport('../apps/app/src/product/alpha-product.ts',import.meta.url);
-const paths=['.eliza/client-features/packages/core/src/events.ts','.eliza/client-features/packages/core/src/views/view-interact-protocol.ts','.eliza/client-features/packages/core/src/views/view-action-handoff.ts','.eliza/client-features/packages/core/src/views/completed-action-navigation.ts','apps/app/src/runtime/view-navigation.ts'];
+const paths=['.eliza/client-features/packages/core/src/events.ts','.eliza/client-features/packages/core/src/views/view-interact-protocol.ts','.eliza/client-features/packages/core/src/views/view-action-handoff.ts','apps/app/src/ui/shell/completed-action-navigation.ts','apps/app/src/runtime/view-navigation.ts'];
 const source=paths.map(path=>stripTypeScriptTypes(readFileSync(path,'utf8'),{mode:'strip'}).replace(/^import[\s\S]*?;\n/gm,'').replace(/^export /gm,'')).join('\n');
 function fixture(){const window=new EventTarget();const context=vm.createContext({alphaCanonicalViewId,alphaViewKey,alphaViewPaths,window,document:{hidden:false},crypto:webcrypto,structuredClone,AbortController,AbortSignal,DOMException,Event,CustomEvent,URL,console,localStorage:{getItem(){return null}},setTimeout,clearTimeout});vm.runInContext('class AlphaClientError extends Error{};const browserDevProfile=false;const Capacitor={getPlatform:()=>"web",PluginHeaders:[]};const TELEPHONY_PROFILE_METHOD="imageCapability";const detectTelephonyProfile=()=>false;'+source+';globalThis.Client=ViewNavigationClient;',context);return context;}
 

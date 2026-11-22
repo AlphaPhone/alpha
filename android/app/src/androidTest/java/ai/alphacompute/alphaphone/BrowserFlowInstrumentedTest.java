@@ -85,7 +85,7 @@ public class BrowserFlowInstrumentedTest {
   AtomicReference<String> id=new AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
    Object plugin=main.getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field field=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("presentedId");field.setAccessible(true);id.set((String)field.get(plugin));
+   java.lang.reflect.Field field=AlphaBrowserPlugin.class.getDeclaredField("presentedId");field.setAccessible(true);id.set((String)field.get(plugin));
   }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
   return id.get();
  }
@@ -212,7 +212,7 @@ public class BrowserFlowInstrumentedTest {
  /** The presented native tab of AlphaBrowser, or null. Main thread only. */
  private static Object presentedTabObject(MainActivity main)throws ReflectiveOperationException{
   Object plugin=main.getBridge().getPlugin("AlphaBrowser").getInstance();
-  Class<?> host=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class;
+  Class<?> host=AlphaBrowserPlugin.class;
   Object id=field(host,plugin,"presentedId");
   return id==null?null:((Map<?,?>)field(host,plugin,"tabs")).get(id);
  }
@@ -223,7 +223,7 @@ public class BrowserFlowInstrumentedTest {
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
    Object tab=presentedTabObject(main);if(tab==null)return;Class<?> type=tab.getClass();
    WebView web=(WebView)field(type,tab,"web");
-   java.lang.reflect.Method eligible=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredMethod("canAutofill",type);eligible.setAccessible(true);
+   java.lang.reflect.Method eligible=AlphaBrowserPlugin.class.getDeclaredMethod("canAutofill",type);eligible.setAccessible(true);
    JSONObject state=new JSONObject();
    state.put("url",field(type,tab,"url"));state.put("engineUrl",String.valueOf(web.getUrl()));state.put("committed",field(type,tab,"committed"));state.put("loading",field(type,tab,"loading"));
    state.put("error",field(type,tab,"error"));state.put("shown",web.isShown());state.put("autofillEnabled",field(type,tab,"autofillEnabled"));
@@ -313,6 +313,57 @@ public class BrowserFlowInstrumentedTest {
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    openSameDocument("/head");settled(SAME+"replaced","Head replaceState");
    assertEquals("The replaced page is the fixture document","\"Replaced fixture\"",child("document.title"));
+   click("Tabs");click("Close tab");
+  }
+ }
+ /** Taps the centre of the host control with this aria-label as a finger does: one real DOWN/UP
+  * pair injected at its screen position, so it goes through Alpha's tab input router. */
+ private void tapHost(String label)throws Exception{
+  tapAt("[...document.querySelectorAll('[data-screen] [aria-label]')].find(e=>e.getAttribute('aria-label')==="+JSONObject.quote(label)+")");
+ }
+ /** Taps the centre of the element the host expression {@code q} finds. */
+ private void tapAt(String q)throws Exception{
+  until(q);
+  JSONObject box=new JSONObject(new org.json.JSONTokener(host("(()=>{const r=("+q+").getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,ratio:devicePixelRatio})})()")).nextValue().toString());
+  AtomicReference<int[]> origin=new AtomicReference<>();
+  WebViewTestDriver.withActivity(MainActivity.class,main->{int[] at=new int[2];main.getBridge().getWebView().getLocationOnScreen(at);origin.set(at);});
+  float x=origin.get()[0]+(float)(box.getDouble("x")*box.getDouble("ratio")),y=origin.get()[1]+(float)(box.getDouble("y")*box.getDouble("ratio"));
+  android.app.Instrumentation instrumentation=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation();
+  long down=SystemClock.uptimeMillis();
+  MotionEvent press=MotionEvent.obtain(down,down,MotionEvent.ACTION_DOWN,x,y,0);press.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+  MotionEvent release=MotionEvent.obtain(down,down+60,MotionEvent.ACTION_UP,x,y,0);release.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+  try{instrumentation.sendPointerSync(press);instrumentation.sendPointerSync(release);}finally{press.recycle();release.recycle();}
+  instrumentation.waitForIdleSync();
+ }
+ /** BRW-01: the find bar sits over the page. Real taps on its field and buttons reach Alpha, never the
+  * website, and the tapped field takes focus so the keyboard can open. */
+ @Test public void findBarTapsReachTheFindFieldNotThePage()throws Exception{
+  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   openSameDocument("/");settled(SAME,"Fixture page");
+   List<String> pageTouches=Collections.synchronizedList(new ArrayList<>());
+   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
+    WebView web=(WebView)field(presentedTabObject(main).getClass(),presentedTabObject(main),"web");
+    web.setOnTouchListener((view,event)->{pageTouches.add(MotionEvent.actionToString(event.getActionMasked()));return false;});
+   }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
+   // A tap on the page itself reaches the website: the recorder sees real page input.
+   tapAt("document.querySelector('[data-native-browser-viewport]')");
+   for(int i=0;i<50&&pageTouches.isEmpty();i++)SystemClock.sleep(100);
+   assertTrue("A tap on the page reaches the website",pageTouches.contains("ACTION_DOWN"));
+   click("Menu");click("Find in page");
+   until("document.querySelector('[role=search][aria-label=\"Find in page\"] input')");
+   settled(SAME,"Page shown under the find bar");
+   pageTouches.clear();
+   host("document.activeElement&&document.activeElement.blur();true");
+   tapAt("document.querySelector('[role=search][aria-label=\"Find in page\"] input')");
+   until("document.activeElement===document.querySelector('[role=search][aria-label=\"Find in page\"] input')");
+   AtomicBoolean keyboardTarget=new AtomicBoolean();
+   WebViewTestDriver.withActivity(MainActivity.class,main->keyboardTarget.set(main.getSystemService(android.view.inputmethod.InputMethodManager.class).isActive(main.getBridge().getWebView())));
+   assertTrue("The tapped find field is the keyboard's target",keyboardTarget.get());
+   host("(()=>{const e=document.querySelector('[role=search][aria-label=\"Find in page\"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Section');e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+   tapHost("Next match");
+   tapHost("Close find in page");
+   until("!document.querySelector('[role=search][aria-label=\"Find in page\"]')");
+   assertEquals("No tap on the find bar reached the website",Collections.emptyList(),new ArrayList<>(pageTouches));
    click("Tabs");click("Close tab");
   }
  }

@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 test "$GITHUB_REF" = refs/heads/main
-test "$GITHUB_REPOSITORY" = eliza-research/alpha
+test "$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" = alphacompute/alpha
 test "$GITHUB_REPOSITORY_ID" = 1396333361
 test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 directory=$(mktemp -d "$RUNNER_TEMP/alpha-cloud-input.XXXXXX")
@@ -10,19 +10,8 @@ printf '%s' "$SIGNING_PLAN" > "$directory/pins.json"
 unset SIGNING_PLAN
 source=$(jq -er '.alphaCommit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$directory/pins.json")
 kind=$(python3 -B scripts/ci/app_update_producer.py kind "$directory/pins.json")
-if [[ "$kind" == root-reviewed-private-runner ]]; then
-  # A retained installation keeps its reviewed signer lineage for either the historical
-  # Cloud input pair or the current native launcher; omitting it cannot reach the key.
-  python3 -B - "$directory/pins.json" <<'PY'
-import json, runpy, sys
-from pathlib import Path
-sys.path.insert(0, str(Path('scripts/ci').resolve()))
-admission = runpy.run_path('scripts/ci/admit-cloud-signing-input.py')
-plan = json.loads(Path(sys.argv[1]).read_text())
-if admission['input_contract'](plan)['packageName'] == admission['RETAINED_PACKAGE']:
-    admission['approved_cloud_rotation'](plan, json.loads(Path('android/release-signer.json').read_text()))
-PY
-fi
+# A signer record that carries a signing-key rotation is refused before any key or artifact access.
+python3 -B scripts/ci/app_update_producer.py signer-record android/release-signer.json
 gh api "repos/$GITHUB_REPOSITORY/compare/$source...$GITHUB_SHA" > "$directory/source-comparison.json"
 if ! jq -e --arg source "$source" '
     (.status == "ahead" or .status == "identical") and

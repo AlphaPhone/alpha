@@ -443,6 +443,19 @@ function npmEntries(root: string, templates: Templates, errors: string[]): Notic
   return entries;
 }
 
+/**
+ * The Lucide icon geometry copied into apps/app/public/icons/lucide. It ships as SVG files, not
+ * as an npm package, so its notice comes from the copy's own provenance record and licence.
+ */
+export const LUCIDE_ICONS = 'apps/app/public/icons/lucide';
+function lucideIconEntries(root: string, errors: string[]): NoticeDraft[] {
+  const record: {package?: string; version?: string; repository?: string; licenseSha256?: string} = readJson(root, `${LUCIDE_ICONS}/source.json`);
+  const licence = fs.readFileSync(path.join(root, LUCIDE_ICONS, 'LICENSE.txt'));
+  if (sha256(licence) !== record.licenseSha256) errors.push(`${LUCIDE_ICONS}/LICENSE.txt does not match its sha256 in source.json`);
+  if (!record.package || !record.version || !record.repository) { errors.push(`${LUCIDE_ICONS}/source.json must name its package, version and repository`); return []; }
+  return [{name: record.package, version: record.version, license: 'ISC AND MIT', source: record.repository, text: normalizeText(licence.toString('utf8'))}];
+}
+
 function pdfjsEntries(root: string, errors: string[]): NoticeDraft[] {
   const dir = 'node_modules/pdfjs-dist';
   if (!exists(root, `${dir}/package.json`)) return [];
@@ -604,8 +617,11 @@ export function androidDependencyFingerprint(root: string) {
     .map(module => [module.name, referencePath(module.source)]).sort(([a], [b]) => a.localeCompare(b));
   const toolchain = readJson(root, `${HOST_TEMPLATES}/toolchain.json`);
   const template = read(root, `${HOST_TEMPLATES}/app.gradle`).split('\n').map(line => line.trim()).filter(line => /\b(implementation|add)\b.*(module|dependency)/.test(line));
+  // Unit-test and instrumentation dependencies (testImplementation, androidTestImplementation) are
+  // never on the packaged runtime classpath.
+  const dependencies = profile.dependencies.filter(dependency => !/^(?:test|androidTest)[A-Z]/.test(dependency.configuration));
   const declared = [
-    `${HOST_DESCRIPTOR}:\n${JSON.stringify({dependencies: profile.dependencies, modules})}`,
+    `${HOST_DESCRIPTOR}:\n${JSON.stringify({dependencies, modules})}`,
     `${HOST_TEMPLATES}/toolchain.json:\n${JSON.stringify({androidGradlePlugin: toolchain.androidGradlePlugin, kotlin: toolchain.kotlin, versions: toolchain.versions})}`,
     `${HOST_TEMPLATES}/app.gradle:\n${template.join('\n')}`,
   ];
@@ -915,6 +931,7 @@ export function collectNotices(root = ROOT, {packagedRuntime = false} = {}) {
   const templates = loadTemplates(root);
   const entries = [
     ...npmEntries(root, templates, errors),
+    ...lucideIconEntries(root, errors),
     ...pdfjsEntries(root, errors),
     ...ocrDataEntries(root),
     ...tesseractCoreEntries(root, errors),
@@ -927,8 +944,41 @@ export function collectNotices(root = ROOT, {packagedRuntime = false} = {}) {
     ...mapDataEntries(root),
   ];
   applyReasons(root, entries, warnings, packagedRuntime);
-  const clean = entries.map(finishEntry).sort((a, b) => a.name.localeCompare(b.name, 'en') || a.version.localeCompare(b.version, 'en'));
+  const clean = mergeNotices(entries).map(finishEntry).sort((a, b) => a.name.localeCompare(b.name, 'en') || a.version.localeCompare(b.version, 'en'));
   return {entries: clean, errors, warnings};
+}
+
+/** Combine licence expressions without losing any term: identical ones stay as they are, AND-only
+ *  expressions take the union of their terms, and anything else is conjoined in parentheses. */
+export function mergeLicences(a: string, b: string) {
+  if (a === b) return a;
+  const terms = (value: string) => value.split(/\s+AND\s+/).map(term => term.trim()).filter(Boolean);
+  if (![a, b].some(value => /\bOR\b|\bWITH\b|[()]/.test(value)))
+    return [...new Set([...terms(a), ...terms(b)])].join(' AND ');
+  return `(${a}) AND (${b})`;
+}
+
+/** One notice per component and version: a package reached through more than one source (the
+ *  app, a vendored asset, the packaged runtime) is listed once with every licence term, source,
+ *  text and flag it was found with. */
+export function mergeNotices<T extends NoticeDraft>(entries: readonly T[]): T[] {
+  const merged = new Map<string, T>();
+  for (const entry of entries) {
+    const key = `${entry.name}\0${entry.version}`;
+    const prior = merged.get(key);
+    if (!prior) { merged.set(key, {...entry}); continue; }
+    const join = (left = '', right = '', separator: string) =>
+      !left ? right : !right || left === right || left.split(separator).includes(right) ? left : `${left}${separator}${right}`;
+    merged.set(key, {
+      ...prior,
+      license: mergeLicences(prior.license, entry.license),
+      source: join(prior.source, entry.source, '\n'),
+      text: join(normalizeText(prior.text ?? ''), normalizeText(entry.text ?? ''), '\n\n'),
+      ...(prior.textSource || entry.textSource ? {textSource: join(prior.textSource, entry.textSource, '\n')} : {}),
+      ...(prior._flags || entry._flags ? {_flags: [...new Set([...(prior._flags ?? []), ...(entry._flags ?? [])])]} : {}),
+    });
+  }
+  return [...merged.values()];
 }
 
 /** Public form of an entry: classify its licence, order its flags and state what each obliges. */

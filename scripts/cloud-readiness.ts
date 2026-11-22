@@ -17,6 +17,7 @@
  *   registration      GET  {api}/api/v1/app-auth/mobile/config for this client, environment and return URL (H-11)
  *   sign-in methods   GET  {api}/steward/auth/providers?tenantId=..., and POST {api}/steward/auth/email/code/send
  *                     with an empty body, which Steward refuses as invalid without sending any email (H-12)
+ *   phone sign-in     sms in that providers answer, without an SMS captcha (H-12; never sends an SMS)
  *   native Google     googleNative in that providers answer (H-12)
  *   browser return    GET  {api}/steward/auth/oauth/google/authorize with a fresh state and S256 challenge;
  *                     the tenant allowlist admits the return URL when it redirects to Google (H-12; nothing is followed)
@@ -145,10 +146,15 @@ export async function probe(registration: Registration, { fetchImpl = globalThis
   const offered = object(providers.body), captcha = object(offered.captcha);
   const captchaFor = Array.isArray(captcha.requiredFor) ? captcha.requiredFor : [];
   const emailOffered = providers.status === 200 && offered.email === true && !(captcha.enabled === true && (captchaFor.includes("email_otp") || captchaFor.includes("email")));
+  // Match the pinned Android client's CloudSmsCode.offered: unknown captcha scope is not safe to offer.
+  const smsCaptcha = captcha.enabled === true && (!Array.isArray(captcha.requiredFor) || captchaFor.includes("sms_otp") || captchaFor.includes("sms"));
+  const phoneOffered = providers.status === 200 && offered.sms === true && !smsCaptcha;
   const emailRoute = await request(fetchImpl, `${api}/steward/auth/email/code/send`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const routePresent = emailRoute.status >= 400 && emailRoute.status < 500 && ![404, 405].includes(emailRoute.status);
   gate("email sign-in", "H-12", registered && emailOffered && routePresent,
     `${providers.status === 200 ? `email ${emailOffered ? "offered without a captcha" : "not offered (or behind a captcha)"}` : `providers ${reached(providers)}`}; code route ${routePresent ? "present" : reached(emailRoute)}${registered ? "" : "; needs the registration gate"}`);
+  gate("phone sign-in", "H-12", registered && phoneOffered,
+    `${providers.status !== 200 ? `providers ${reached(providers)}` : offered.sms !== true ? "SMS not offered" : smsCaptcha ? "SMS requires a captcha Alpha cannot complete" : "SMS offered without a captcha; delivery not tested"}${registered ? "" : "; needs the registration gate"}`);
   gate("native Google", "H-12", providers.status === 200 && offered.googleNative === true,
     providers.status === 200 ? `google ${offered.google === true ? "offered" : "not offered"}, googleNative ${offered.googleNative === true ? "advertised" : "not advertised (STEWARD_GOOGLE_NATIVE_CLIENT_IDS has no Android client for an app client of this tenant)"}` : `providers ${reached(providers)}`);
 

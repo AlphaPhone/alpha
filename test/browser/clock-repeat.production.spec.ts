@@ -38,7 +38,7 @@ const handoffs = (page: Page) => page.evaluate(() => (window as any).clockHandof
 async function openClock(page: Page) {
   await residentHome(page);
   await button(page, 'Workflows').click();
-  await button(page, 'New automation').click();
+  await button(page, 'Add to Workflows').click();
   await button(page, 'Clock alarms').click();
   return page.getByRole('dialog', { name: 'Clock alarms', exact: true });
 }
@@ -69,7 +69,7 @@ for (const version of [1, 2]) test(`clockRepeatDaysVersion ${version}: Mon to Fr
   await clock.getByRole('button', { name: 'Confirm Clock request', exact: true }).evaluate(button => {
     (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click();
   });
-  await expect(clock).toContainText('Approved Clock handoff sent. Check Clock; Alpha cannot confirm an alarm was changed.');
+  await expect(clock).toContainText('Sent to Clock. Check the Clock app; Alpha can’t confirm an alarm changed.');
   const sent = await handoffs(page);
   expect(sent).toHaveLength(1);
   expect(sent[0]).toMatchObject({ action: 'set', hour: 6, minute: 30, label: 'Weekday wake', reviewed: true, days: [2, 3, 4, 5, 6] });

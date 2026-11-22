@@ -3,11 +3,12 @@
  * closure, its Back handler, the page actions and the functions it gives the shell.
  *
  * Real code: browser-adapter.ts with the shared tab session, address parser, browsing session and
- * page-reading rules, browser/review.ts, browser-external-handoff.ts, browser-poll.ts and
- * browser-errors.ts. Ports, each a small stand-in the driver controls: the native Browser plugin
- * (every call is recorded and settles when the driver says, or at once for calls listed in
- * `instant`), Capacitor's platform answers, the connection controller, the reading voice, the
- * question review, the web page-text reader and the documents behind the dynamic imports.
+ * page-reading rules, Alpha's page-reading copy (ui/browser/page-reading.ts), browser/review.ts,
+ * browser-external-handoff.ts, browser-poll.ts and browser-errors.ts. Ports, each a small stand-in
+ * the driver controls: the native Browser plugin (every call is recorded and settles when the
+ * driver says, or at once for calls listed in `instant`), Capacitor's platform answers, the
+ * connection controller, the reading voice, the question review, the web page-text reader and the
+ * documents behind the dynamic imports.
  * The shell is a stand-in component holding the Browser view state and the shell state; `sync()`
  * runs the component's render pass as a state change does in the product. */
 import {installDocument, loadBundled, settle} from './browser-model-traces.mjs';
@@ -59,7 +60,7 @@ export async function browserAdapterHost({native = true, instant = ['bookmarks',
     voice: () => undefined, question: () => { throw new Error('No question review port'); }, pageSource: async () => ({text: ''}), readingReview: async () => {}};
   const views = {browser: {state: {editing: false, addr: '', tabsOpen: false, menu: false, lib: null, share: false, ag: null, confirm: null}, render: () => ({})}};
   const shellState = {screen: 'home', view: 'browser', shade: false, chat: 'closed'};
-  const viewOpens = [];
+  const viewOpens = [], presets = [];
   class Component {
     S() { return shellState; }
     vget(view) { return views[view]?.state; }
@@ -67,6 +68,7 @@ export async function browserAdapterHost({native = true, instant = ['bookmarks',
     toast(message) { messages.push(message); }
     api(view) { return api(view); }
     openView(...args) { viewOpens.push(args); }
+    preset(name) { presets.push(name); }
     renderVals() { return {}; }
   }
   const api = view => ({set: patch => Object.assign(views[view].state, patch), get: name => views[name].state, toast: message => messages.push(message), ic: {star: '', clock: ''},
@@ -77,7 +79,7 @@ export async function browserAdapterHost({native = true, instant = ['bookmarks',
   const state = () => views.browser.state;
   const sync = async () => { component.renderVals(); await settle(); };
   await sync();
-  return {state, shellState, component, view: views.browser, listeners, calls, pending, messages, opened, viewOpens, host, page, settle, sync,
+  return {state, shellState, component, view: views.browser, listeners, calls, pending, messages, opened, viewOpens, presets, host, page, settle, sync,
     session: () => calls.find(call => call.input?.session)?.input.session,
     /** The Browser view's rendered values (its closures act on the state they were rendered with). */
     rendered: () => views.browser.render(state(), api('browser')),

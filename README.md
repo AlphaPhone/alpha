@@ -34,7 +34,7 @@ Alpha is a personal AI agent that lives on the phone itself. Tap **Ask Alpha**, 
 ## Quickstart
 
 ```bash
-git clone --recurse-submodules https://github.com/eliza-research/alpha.git
+git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url)"
 ```
 
 ```bash
@@ -80,7 +80,9 @@ flowchart LR
 - **The resident agent** runs on the phone. It plans, calls tools, remembers and
   schedules.
 - **Alpha Compute Cloud** supplies managed services: model inference, your subscription,
-  Gmail, and optional Google Calendar and Maps. It never hosts your agent.
+  Gmail, and optional Google Calendar and Maps. It never hosts your agent. Its own
+  deployment on Cloudflare, the secrets it needs and in-app plan management are in
+  [docs/alpha-cloud.md](docs/alpha-cloud.md).
 
 Local speech does not mean an offline language model: text inference is hosted,
 and Alpha tells you what context a request sends.
@@ -106,6 +108,25 @@ The first command lists anything that is missing. The second prepares the agent
 and builds the debug APK and its instrumentation APK into `artifacts/`; add
 `-- --release` (`bun run android:build:local -- --release`) to build the release
 APK too, as CI does. The third checks their contents and signatures.
+
+While iterating on a phone, rebuild after that first `android:build:local` with:
+
+```bash
+bun run android:build:fast -- --install
+```
+
+It reuses the staged agent runtime and native outputs, runs the web build, sync and
+only `:app:assembleLauncherDebug` on a warm Gradle daemon, and installs
+`artifacts/fast/launcher-debug.apk` with `adb install -r` (drop `--install` to only
+build). On a phone running an Alpha image, where Alpha is the image's system app, `--install`
+refuses before building: a debuggable update over it drops Alpha's Phone and Messages roles. Flash
+an image there, or add `--allow-system-update` deliberately. It skips the input preflight, lint, the instrumentation APK, `verify-apks`,
+licence notices and the SBOM. Add `-- --restage` after changing agent sources. Its
+APK is never distributable: it stays in `artifacts/fast/`, apart from the top-level
+`artifacts/` files that `verify-apks`, signing and archives read, its packaged
+`build-flags.json` records `fastIteration: true`, and the production bundle audit,
+`verify-apks` and every release path refuse it. Use `android:build:local` before
+pushing Android changes. `./gradlew --stop` in `android/` ends the daemon.
 
 The first build downloads the pinned models and toolchain inputs, builds the
 native voice and embedding libraries, and caches the verified outputs. Later

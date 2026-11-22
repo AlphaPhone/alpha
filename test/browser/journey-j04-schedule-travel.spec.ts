@@ -103,11 +103,11 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     expect(await requests(page)).toEqual({queries: [address], routes: []});
   });
 
-  await test.step('explicit destination, explicit origin, explicit route choice', async () => {
+  await test.step('explicit destination, denied automatic location, manual origin and explicit route choice', async () => {
     await page.getByRole('button', {name: /^West entrance/}).first().click();
     await button(page, 'Directions').click();
     const status = page.getByRole('region', {name: 'Maps'}).getByRole('status');
-    await expect(status).toHaveText('Choose a starting point, or use your current location.');
+    await expect(status).toHaveText('Location permission was not granted. You can choose an origin manually.');
     await expect(page.getByText('Choose a starting point to see a route.')).toBeVisible();
     expect((await requests(page)).routes).toEqual([]);
     const origin = page.getByRole('textbox', {name: 'Starting point'});

@@ -37,6 +37,7 @@ async function checkPhotosTrash(extraSources = []) {
     "hidden-failure",
     "old-failure-after-resume",
     "failure",
+    "failure-return",
     "retry",
     "coalesce",
     "more",
@@ -90,8 +91,15 @@ async function checkPhotosTrash(extraSources = []) {
         }
         await reply(0, [rawRow(1)], "", name !== "hidden-failure" && name !== "old-failure-after-resume");
         if (resume) await reply(1, [rawRow(2)]);
-      } else if (name === "failure" || name === "retry") {
+      } else if (name === "failure" || name === "retry" || name === "failure-return") {
         await reply(0, [], "", false);
+        if (name === "failure-return") {
+          // Leaving and returning does not repeat a failed read; the owner's Retry does.
+          await f.leave();
+          step("leave after a failed Trash read", call("leave"));
+          await f.enter();
+          step("return keeps the failure until Retry", call("enter"));
+        }
         if (name === "retry") {
           const out = await f.render();
           out.alb.loadMore();
@@ -135,5 +143,5 @@ test("native Photos Trash reloads after hiding and fences old replies", { timeou
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 14);
+  assert.equal(receipt.traces, 15);
 });

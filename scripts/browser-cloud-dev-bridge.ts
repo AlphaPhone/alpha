@@ -1,3 +1,4 @@
+import {parseCheckout} from '../apps/app/src/runtime/cloud-plans.ts';
 import {mapsTilePath} from '../apps/app/src/runtime/managed-service-routes.ts';
 import {productionCloud, stagingCloud, cloudStorageNamespace} from '../apps/app/src/runtime/cloud-deployment.generated.ts';
 import {createCloudResidentHost,type ProviderSelection,type ProviderKeyEdit,type ProviderKeyRequest} from './cloud-resident-host.ts';
@@ -16,6 +17,17 @@ import type {Plugin} from 'vite';
 // This development transport narrows JSON separately for each operation.
 const object = (value: unknown) => requireObject(value) as Record<string, any>;
 const boundedServiceJson = (response: Response): Promise<any> => readServiceJson(response);
+// Checkout session IDs are payment lookup references, not auth sessions. Project only
+// the exact payment response here; the ordinary service guard still rejects secrets.
+async function checkoutResponse(response:Response,funds:boolean){
+ const reader=response.body?.getReader();if(!reader)throw Error('Empty checkout response');let size=0;const parts:Uint8Array[]=[];
+ try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>16384)throw Error('Checkout response too large');parts.push(part.value);}}finally{await reader.cancel().catch(()=>{});}
+ const value=object(JSON.parse(Buffer.concat(parts).toString('utf8')));
+ if(!funds){const parsed=parseCheckout(value);return {success:true,data:{...parsed,...(parsed.status==='open'?{expiresAt:new Date(parsed.expiresAt).toISOString()}: {})}};}
+ if(Object.keys(value).some(key=>!['url','sessionId'].includes(key))||typeof value.url!=='string'||typeof value.sessionId!=='string'||!/^cs_[A-Za-z0-9_]{1,240}$/.test(value.sessionId))throw Error('Invalid balance checkout response');
+ const url=new URL(value.url);if(url.protocol!=='https:'||url.hostname!=='checkout.stripe.com'||url.username||url.password||url.port)throw Error('Invalid checkout destination');return {url:url.href,sessionId:value.sessionId};
+}
+
 
 export const BROWSER_CLOUD_BRIDGE_PATH='/__alpha-browser-cloud';
 const GOOGLE_BROWSER_START='/alphaphone/auth/browser-start';
@@ -68,16 +80,22 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
  const workspaceReturns=new Map<string,{environment:Environment;reference:string;credentialId:string;origin:string;expiresAt:number}>();
  // This host admits Calendar writes only after an explicit current-owner Sync intent.
  // A resident/source restart requires a fresh intent; renderer load defaults never enable it.
- let calendarGeneration=0,calendarAccess:{credentialId:string;reference:string;generation:number}|null=null;
- const resetCalendarAccess=()=>{calendarAccess=null;return ++calendarGeneration;};
- const calendarAllowed=(binding:{credentialId:string;reference:string},generation:number)=>calendarAccess?.credentialId===binding.credentialId&&calendarAccess.reference===binding.reference&&calendarAccess.generation===generation&&generation===calendarGeneration;
+ type GoogleAccessKind='calendarEdits'|'gmailChanges';
+ type GoogleOwnerIntent={credentialId:string;reference:string;generation:number};
+ let googleGeneration=0;
+ const googleAccess:Record<GoogleAccessKind,GoogleOwnerIntent|null>={calendarEdits:null,gmailChanges:null};
+ const resetGoogleAccess=()=>{googleAccess.calendarEdits=null;googleAccess.gmailChanges=null;return ++googleGeneration;};
+ const googleAllowed=(kind:GoogleAccessKind,binding:{credentialId:string;reference:string},generation:number)=>{
+  const saved=googleAccess[kind];
+  return saved?.credentialId===binding.credentialId&&saved.reference===binding.reference&&saved.generation===generation&&generation===googleGeneration;
+ };
  async function privateFile(file:string){const st=await lstat(file);if(!st.isFile()||st.isSymbolicLink()||st.uid!==process.getuid?.()||(st.mode&0o077))throw Error('Private Cloud file required');return readFile(file,'utf8');}
  async function directory(){await mkdir(profile,{recursive:true,mode:0o700});const st=await lstat(profile);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==process.getuid?.()||(st.mode&0o077))throw Error('Private Cloud directory required');}
  async function load():Promise<Partial<Record<Environment,Credential>>>{
   await directory();try{return object(JSON.parse(await privateFile(stateFile)));}catch(error:any){if(error.code!=='ENOENT')throw error;}
   try{const seed=object(JSON.parse(await privateFile(initialFile))),env=environment(seed.environment);if(!REFERENCE.test(seed.credentialReference)||!UUID.test(seed.credentialId)||typeof seed.credentialFile!=='string'||!path.isAbsolute(seed.credentialFile)||typeof seed.credentialSha256!=='string'||!UUID.test(seed.userId)||!UUID.test(seed.organizationId))throw Error('Invalid initial Cloud binding');return {[env]:seed as Credential};}catch(error:any){if(error.code==='ENOENT')return {};throw error;}
  }
- async function save(value:Partial<Record<Environment,Credential>>){resetCalendarAccess();if(options.resident)await options.resident.clear();await directory();const tmp=stateFile+'.'+randomUUID();await writeFile(tmp,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'});await rename(tmp,stateFile);}
+ async function save(value:Partial<Record<Environment,Credential>>){resetGoogleAccess();if(options.resident)await options.resident.clear();await directory();const tmp=stateFile+'.'+randomUUID();await writeFile(tmp,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'});await rename(tmp,stateFile);}
  function serial<T>(run:()=>Promise<T>):Promise<T>{const result=queue.then(run,run);queue=result.catch(()=>{});return result;}
  async function keyFor(c:Credential){if(c.token)return c.token;if(!c.credentialFile||!c.credentialSha256)throw Error('Cloud credential unavailable');const token=(await privateFile(c.credentialFile)).trim();if(sha256(token)!==c.credentialSha256)throw Error('Cloud credential changed');return token;}
  async function admitted(env:Environment,reference:unknown,id?:unknown){const c=(await load())[env];if(!c)throw refusal(401,'credentials-missing');if(c.credentialReference!==reference||id!==undefined&&c.credentialId!==id)throw refusal(409,'account-changed');if(c.expiresAt!==undefined&&c.expiresAt<=Date.now())throw refusal(401,'expired');return c;}
@@ -159,7 +177,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
   googleAttempt=null;attempt.controller.abort();return {status:'cancelled'};
  }
  async function saveSignInCredential(value:Partial<Record<Environment,Credential>>,attempt:GoogleAttempt|SignInAttempt,current:()=>void){
-  current();resetCalendarAccess();if(options.resident)await options.resident.clear();current();
+  current();resetGoogleAccess();if(options.resident)await options.resident.clear();current();
   await directory();current();const tmp=stateFile+'.'+randomUUID();
   try{
    await writeFile(tmp,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'});current();
@@ -385,19 +403,20 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
      }
      if(data.operation==='residentOwn'){if(!options.resident?.selectOwn||Object.keys(data).some(key=>!['operation','environment','apiKey','cartesiaKey'].includes(key)))throw Error('Own provider setup unavailable');controller.signal.throwIfAborted();return options.resident.selectOwn({apiKey:data.apiKey,...(data.cartesiaKey?{cartesiaKey:data.cartesiaKey}:{})},controller.signal);}
      if(data.operation==='residentCloud'){if(!options.resident?.selectCloud)throw Error('Provider selection unavailable');controller.signal.throwIfAborted();return options.resident.selectCloud(controller.signal);}
-     if(data.operation==='residentClear'){resetCalendarAccess();return options.resident!.clear();}
+     if(data.operation==='residentClear'){resetGoogleAccess();return options.resident!.clear();}
      if(data.operation==='residentStatus')return options.resident!.status(typeof data.credentialId==='string'?data.credentialId:undefined);
-     if(data.operation==='residentGoogleCalendarAccess'){
-      if(env!==agentEnvironment||typeof data.calendarEdits!=='boolean'||!UUID.test(data.credentialId)||Object.keys(data).some(key=>!['operation','environment','credentialId','calendarEdits'].includes(key)))throw Error('Invalid Calendar access intent');
+     if(data.operation==='residentGoogleCalendarAccess'||data.operation==='residentGoogleGmailAccess'){
+      const kind=data.operation==='residentGoogleCalendarAccess'?'calendarEdits':'gmailChanges';
+      if(env!==agentEnvironment||typeof data[kind]!=='boolean'||!UUID.test(data.credentialId)||Object.keys(data).some(key=>!['operation','environment','credentialId',kind].includes(key)))throw Error('Invalid Google access intent');
       const c=(await load())[env];if(!c||c.credentialId!==data.credentialId)throw refusal(409,'account-changed');
-      const generation=calendarGeneration;await current(env,c,controller.signal);if(generation!==calendarGeneration)throw refusal(409,'calendar-owner-access-changed');
-      calendarAccess=data.calendarEdits?{credentialId:c.credentialId,reference:c.credentialReference,generation}:null;
-      return {calendarEdits:data.calendarEdits};
+      const generation=googleGeneration;await current(env,c,controller.signal);if(generation!==googleGeneration)throw refusal(409,'google-owner-access-changed');
+      googleAccess[kind]=data[kind]?{credentialId:c.credentialId,reference:c.credentialReference,generation}:null;
+      return {[kind]:data[kind]};
      }
      if(data.operation!=='residentBind'||!UUID.test(data.credentialId))throw Error('Invalid resident operation');
      const c=(await load())[env];if(!c||c.credentialId!==data.credentialId)throw refusal(409,'account-changed');
      await admitted(env,c.credentialReference,data.credentialId);controller.signal.throwIfAborted();
-     resetCalendarAccess();
+     resetGoogleAccess();
      const result=await options.resident!.bind({token:await keyFor(c),credentialId:c.credentialId,reference:c.credentialReference,expiresAt:c.expiresAt});
      try{await current(env,c,controller.signal);}catch(error){await options.resident!.clear();throw error;}
      return result;
@@ -424,13 +443,17 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
     const route=url.pathname+url.search;const method=input.method;
     const mapsPost=method==='POST'&&['/api/v1/maps/geocode','/api/v1/maps/reverse','/api/v1/maps/places/search','/api/v1/maps/places/details','/api/v1/maps/routes','/api/v1/maps/tiles/viewport'].includes(route);
     const mapsTile=method==='GET'&&input.body===undefined&&mapsTilePath(route);
+    const fundsPost=method==='POST'&&route==='/api/v1/credits/checkout';
     const headers=object(input.headers??{}),identityHeaders=Object.keys(headers).filter(k=>k.toLowerCase()==='idempotency-key');
-    if(Object.keys(headers).some(k=>!['accept','content-type',...((mapsPost||mapsTile)?['idempotency-key']:[])].includes(k.toLowerCase())))throw Error('Unsupported Cloud request header');
+    if(Object.keys(headers).some(k=>!['accept','content-type',...((mapsPost||mapsTile||fundsPost)?['idempotency-key']:[])].includes(k.toLowerCase())))throw Error('Unsupported Cloud request header');
     let mapsRequestId:string|undefined;
     if(mapsPost||mapsTile){mapsRequestId=headers[identityHeaders[0]];if(identityHeaders.length!==1||typeof mapsRequestId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(mapsRequestId)||mapsPost&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>128*1024))throw Error('Invalid Maps request');if(mapsPost)object(JSON.parse(input.body));}
+    if(fundsPost){const key=headers[identityHeaders[0]];if(identityHeaders.length!==1||typeof key!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(key))throw Error('Invalid checkout identity');const body=object(JSON.parse(input.body??'null'));const target=(env==='production'?productionCloud.web:stagingCloud.web)+'/alphaphone/billing/return';if(Object.keys(body).sort().join()!=='amountUsd,cancel_url,success_url'||typeof body.amountUsd!=='number'||body.amountUsd<5||body.amountUsd>1000||!Number.isInteger(body.amountUsd*100)||body.success_url!==target||body.cancel_url!==target+'?cancelled=1')throw Error('Invalid balance checkout');}
     const create=method==='POST'&&route==='/api/auth/cli-session',poll=method==='GET'&&/^\/api\/auth\/cli-session\/[0-9a-f-]{36}$/i.test(route);
     if(create){if(input.credentialReference||Object.keys(object(JSON.parse(input.body??'{}'))).length)throw Error('Invalid login creation');send(res,200,await createCliSession(env,controller.signal));return;}
     if(poll){if(input.credentialReference||input.body!==undefined)throw Error('Invalid login poll');send(res,200,await pollCliSession(env,route.split('/').at(-1)!,controller.signal));return;}
+    // The plan catalogue is public, like the entitlement signing-key catalogue.
+    if(method==='GET'&&route==='/api/v1/subscriptions/plans'&&input.body===undefined){const response=await canonical(env,route,controller.signal);send(res,200,{status:response.status,data:await boundedServiceJson(response)});return;}
     // Public signing keys must work before/without account credentials. No bearer is attached.
     if(method==='GET'&&route==='/api/v1/subscription/entitlement-keys'&&input.body===undefined&&input.credentialReference===undefined){
      const response=await canonical(env,route,controller.signal),result=await boundedServiceJson(response);send(res,200,{status:response.status,data:result});return;
@@ -438,9 +461,11 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
     // Subscription redemption: exactly {code,idempotencyKey}; the code is forwarded, never logged or stored.
     const redeem=method==='POST'&&route==='/api/v1/subscription/redeem';
     if(redeem){const body=object(JSON.parse(input.body??'null'));if(Object.keys(body).sort().join()!=='code,idempotencyKey'||typeof body.code!=='string'||body.code.length>128||typeof body.idempotencyKey!=='string'||!/^[A-Za-z0-9._:-]{8,128}$/.test(body.idempotencyKey))throw Error('Invalid subscription redemption');}
-    const accountRead=method==='GET'&&input.body===undefined&&['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/maps/capabilities'].includes(route);
+    const billingPost=method==='POST'&&!url.search&&typeof input.body==='string'&&['/api/v1/subscriptions/checkout','/api/v1/subscriptions/checkout/confirm','/api/v1/referrals/apply'].includes(route);
+    if(billingPost){const body=object(JSON.parse(input.body));const fields=route.endsWith('/confirm')?['sessionId']:route.endsWith('/apply')?['code']:['planKey','idempotencyKey','presentation'];if(Object.keys(body).some(key=>!fields.includes(key)))throw Error('Invalid billing request');}
+    const accountRead=method==='GET'&&input.body===undefined&&['/api/v1/user','/api/v1/billing/limits','/api/v1/subscription/entitlement','/api/v1/subscription/entitlement-keys','/api/v1/referrals','/api/v1/maps/capabilities'].includes(route);
     const selfRevoke=method==='DELETE'&&route==='/api/v1/api-keys/current'&&input.body===undefined;
-    if(!selfRevoke&&!redeem&&!accountRead&&!mapsPost&&!mapsTile&&!managedGoogleRequest(url,method,input.body))throw Error('Unsupported Cloud route');
+    if(!selfRevoke&&!redeem&&!fundsPost&&!billingPost&&!accountRead&&!mapsPost&&!mapsTile&&!managedGoogleRequest(url,method,input.body))throw Error('Unsupported Cloud route');
     const c=await admitted(env,input.credentialReference);active.get(ownedId)!.credentialId=c.credentialId;if(selfRevoke)await current(env,c,controller.signal);let requestBody=input.body;
     if(method==='POST'&&route==='/api/v1/eliza/google/connect/initiate'){
      for(const [state,attempt] of workspaceReturns)if(attempt.expiresAt<=Date.now()||attempt.credentialId===c.credentialId)workspaceReturns.delete(state);
@@ -448,7 +473,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
      workspaceReturns.set(state,{environment:env,reference:c.credentialReference,credentialId:c.credentialId,origin,expiresAt:Date.now()+600000});
      requestBody=JSON.stringify({...JSON.parse(input.body),redirectUrl:`${origin}${BROWSER_CLOUD_BRIDGE_PATH}/google-return?state=${state}`});
     }
-    const response=await canonical(env,route,controller.signal,{method,headers:{...(input.body===undefined?{}:{'Content-Type':'application/json'}),...(mapsRequestId?{'Idempotency-Key':mapsRequestId}:{})},...(requestBody===undefined?{}:{body:requestBody})},c);if(selfRevoke)options.diagnostic?.({environment:env,operation:route,status:response.status});let result=await boundedServiceJson(response);await current(env,c,controller.signal);if(response.ok&&route==='/api/v1/user'&&result.success===true){const who=object(result.data);result={success:true,data:{id:who.id,organization_id:who.organization_id,...(typeof who.email==='string'?{email:who.email}:{})}};}if(selfRevoke)result={success:result.success,...(typeof result.status==='string'?{status:result.status}:{}),...(typeof result.credentialId==='string'?{credentialId:result.credentialId}:{}),...(typeof result.revokedAt==='string'?{revokedAt:result.revokedAt}:{})};send(res,200,{status:response.status,data:result});return;
+    const response=await canonical(env,route,controller.signal,{method,headers:{...(input.body===undefined?{}:{'Content-Type':'application/json'}),...((mapsRequestId||fundsPost)?{'Idempotency-Key':mapsRequestId||headers[identityHeaders[0]]}:{})},...(requestBody===undefined?{}:{body:requestBody})},c);if(selfRevoke)options.diagnostic?.({environment:env,operation:route,status:response.status});let result=await (response.ok&&(fundsPost||route==='/api/v1/subscriptions/checkout')?checkoutResponse(response,fundsPost):boundedServiceJson(response));await current(env,c,controller.signal);if(response.ok&&route==='/api/v1/user'&&result.success===true){const who=object(result.data);result={success:true,data:{id:who.id,organization_id:who.organization_id,...(typeof who.email==='string'?{email:who.email}:{})}};}if(selfRevoke)result={success:result.success,...(typeof result.status==='string'?{status:result.status}:{}),...(typeof result.credentialId==='string'?{credentialId:result.credentialId}:{}),...(typeof result.revokedAt==='string'?{revokedAt:result.revokedAt}:{})};send(res,200,{status:response.status,data:result});return;
    }
    if(data.operation==='stt'||data.operation==='tts'){
     const c=await admitted(env,data.credentialReference,data.credentialId);active.get(ownedId)!.credentialId=c.credentialId;
@@ -490,14 +515,39 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
    const data=await boundedServiceJson(response);await current(agentEnvironment,c,input.signal);return {status:response.status,data};
  };
 
+ const agentGmailOperation=async(input:Parameters<typeof agentRead>[0],assertSendAccess?:()=>void)=>{
+   const url=new URL(input.url),route=url.pathname,body=input.body===undefined?undefined:JSON.stringify(input.body);
+   const operation=/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations(?:\/[A-Za-z0-9_-]{1,160}(?:\/dispatch)?)?$/.test(route);
+   if(!operation)return agentRead(input);
+   if(url.origin!==authorities[agentEnvironment]||url.username||url.password||url.hash||url.port||!managedGoogleRequest(url,input.method,body))throw refusal(403,'agent-operation-route-refused');
+   if(input.method==='POST'){
+    const kind=JSON.parse(body!).proposal.kind;
+    if(!(assertSendAccess?kind==='send':['send','archive','trash','mark-read','mark-unread'].includes(kind)))throw refusal(403,'agent-operation-kind-refused');
+   }
+   const c=await admitted(agentEnvironment,input.credentialReference);
+   assertSendAccess?.();
+   const response=await canonical(agentEnvironment,route+url.search,input.signal,{method:input.method,...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body})},c);
+   const data=await boundedServiceJson(response);await current(agentEnvironment,c,input.signal);return {status:response.status,data};
+ };
+
  async function startGoogleHost(apiToken:string,binding:{credentialId:string;reference:string}){
-  let retired=false;const generation=resetCalendarAccess();
-  const current=async()=>{if(retired||generation!==calendarGeneration)throw refusal(409,'account-changed');const c=(await load())[agentEnvironment];if(retired||generation!==calendarGeneration||!c||c.credentialId!==binding.credentialId||c.credentialReference!==binding.reference)throw refusal(409,'account-changed');await admitted(agentEnvironment,binding.reference,binding.credentialId);return publicCredential(c);};
+  let retired=false;const generation=resetGoogleAccess();
+  const current=async()=>{if(retired||generation!==googleGeneration)throw refusal(409,'account-changed');const c=(await load())[agentEnvironment];if(retired||generation!==googleGeneration||!c||c.credentialId!==binding.credentialId||c.credentialReference!==binding.reference)throw refusal(409,'account-changed');await admitted(agentEnvironment,binding.reference,binding.credentialId);return publicCredential(c);};
   const read=async(input:Parameters<typeof agentRead>[0])=>{await current();const result=await agentRead(input);await current();return result;};
-  const calendar=async(input:Parameters<typeof agentCalendarOperation>[0])=>{if(!new URL(input.url).pathname.startsWith('/api/v1/eliza/google/calendar/sync-v1/'))return read(input);await current();if(!calendarAllowed(binding,generation))throw refusal(403,'calendar-owner-access-disabled');const result=await agentCalendarOperation(input);await current();if(!calendarAllowed(binding,generation))throw refusal(409,'calendar-owner-access-changed');return result;};
-  const port={agentCredential:current,agentRead:read,agentGmailOperation:read,agentCalendarOperation:calendar};
-  await current();const host=await startManagedGoogleAgentHost({port,apiToken,apiOrigin:authorities[agentEnvironment],access:()=>({gmailChanges:false,calendarEdits:calendarAllowed(binding,generation)})});
-  return {port:host.port,close:()=>{retired=true;if(generation===calendarGeneration)resetCalendarAccess();return host.close();}};
+  const calendar=async(input:Parameters<typeof agentCalendarOperation>[0])=>{if(!new URL(input.url).pathname.startsWith('/api/v1/eliza/google/calendar/sync-v1/'))return read(input);await current();if(!googleAllowed('calendarEdits',binding,generation))throw refusal(403,'calendar-owner-access-disabled');const result=await agentCalendarOperation(input);await current();if(!googleAllowed('calendarEdits',binding,generation))throw refusal(409,'calendar-owner-access-changed');return result;};
+  const assertSendAccess=()=>{if(!googleAllowed('gmailChanges',binding,generation))throw refusal(403,'gmail-owner-access-disabled');};
+  // Off refuses agent writes only. Reads and send receipts stay available, as in the shared host.
+  const gmail=async(input:Parameters<typeof agentGmailOperation>[0])=>{
+   const write=input.method!=='GET';
+   await current();
+   if(write)assertSendAccess();
+   const result=await agentGmailOperation(input,write?assertSendAccess:undefined);
+   await current();
+   return result;
+  };
+  const port={agentCredential:current,agentRead:read,agentGmailOperation:gmail,agentCalendarOperation:calendar};
+  await current();const host=await startManagedGoogleAgentHost({port,apiToken,apiOrigin:authorities[agentEnvironment],access:()=>({gmailChanges:googleAllowed('gmailChanges',binding,generation),calendarEdits:googleAllowed('calendarEdits',binding,generation)})});
+  return {port:host.port,close:()=>{retired=true;if(generation===googleGeneration)resetGoogleAccess();return host.close();}};
  }
  return Object.assign(handler,{
   startGoogleHost,
@@ -505,16 +555,7 @@ export function createBrowserCloudDevHandler(options:{profile:string;request?:ty
   async agentCredential(){const c=(await load()).production;return c?publicCredential(c):null;},
   agentRead,
   agentCalendarOperation,
-  async agentGmailOperation(input:Parameters<typeof agentRead>[0]){
-   const url=new URL(input.url),route=url.pathname,body=input.body===undefined?undefined:JSON.stringify(input.body);
-   const operation=/^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations(?:\/[A-Za-z0-9_-]{1,160}(?:\/dispatch)?)?$/.test(route);
-   if(!operation)return agentRead(input);
-   if(url.origin!==authorities.production||url.username||url.password||url.hash||url.port||!managedGoogleRequest(url,input.method,body))throw refusal(403,'agent-operation-route-refused');
-   if(input.method==='POST'&&!['send','archive','trash','mark-read','mark-unread'].includes(JSON.parse(body!).proposal.kind))throw refusal(403,'agent-operation-kind-refused');
-   const c=await admitted('production',input.credentialReference);
-   const response=await canonical('production',route+url.search,input.signal,{method:input.method,...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body})},c);
-   const data=await boundedServiceJson(response);await current('production',c,input.signal);return {status:response.status,data};
-  }
+  agentGmailOperation,
  });
 }
 export function browserCloudDevBridge():Plugin {
@@ -530,8 +571,7 @@ export function browserCloudDevBridge():Plugin {
   const handler=createBrowserCloudDevHandler({profile,resident:residentPort,...(cloudResident?{environment:selected,diagnostic:(event:unknown)=>console.info('[alpha-cloud-auth]',JSON.stringify(event))}:{})});
   if(cloudResident){
    resident=await createCloudResidentHost({source:path.resolve(process.env.ALPHA_ELIZA_SOURCE!),profile:path.resolve(process.env.ALPHA_REMOTE_PROFILE!),port:Number(process.env.ALPHA_REMOTE_PORT),environment:selected,cloudRealtimeVoice:process.env.ALPHA_DEV_CLOUD_REALTIME_VOICE==='1',
-    // Calendar writes require explicit current-owner intent plus the existing OAuth,
-    // canonical control and write-capability gates. Gmail remains read-only.
+    // Mutations keep the owner switch, Google grant, and the provider's reviewed operation gates.
     startGoogleHost:handler.startGoogleHost});
   }
   if(resident)server.httpServer?.once('close',()=>{void resident.close();});

@@ -1,28 +1,30 @@
-// Alpha's reviewed SMS coordinator and manifest callback boundary.
-// One fixed operation ID, two payloads, two bridge actors and up to four parts.
+// Alpha's card-approved SMS dispatch and manifest callback boundary.
+// One fixed operation ID, two payloads, two approval cards, two bridge actors and up to four parts.
 module NativeSmsDispatch {
   type Record = {
     binding: int, status: str, decision: str, dispatching: bool, submitted: bool, unknown: bool, boot: int,
     sent: Set[int], failed: Set[int], reported: Set[int], delivered: Set[int], deliveryFailed: Set[int], rows: Set[int]
   }
-  type Review = {binding: int, sim: int}
+  // phase: none, open (approved and applying, unclaimed) or claimed (admitted one send).
+  type Card = {binding: int, phase: str, expired: bool}
   type State = {
-    recipients: int, parts: int, reply: str, replyBinding: int, memory: Record, disk: Record, tombstoneBinding: int,
-    attempts: int, accepted: int, reviews: int -> Review, foreground: Set[int], closed: Set[int], listeners: Set[int], events: int -> int,
+    recipients: int, parts: int, reply: str, replyBinding: int, memory: Record, disk: Record, tombstoneBinding: int, claimOwner: int,
+    attempts: int, accepted: int, cards: int -> Card, foreground: Set[int], closed: Set[int], listeners: Set[int], events: int -> int,
     image: bool, send: bool, phone: bool, read: bool, locked: bool, role: bool, sim: int,
     process: int, boot: int, old: bool, candidate: str, providerStatus: str, refuseOutbox: bool,
     outbox: Set[int], sentRows: Set[int], failedRows: Set[int]
   }
   var s: State
   val actors = Set(1, 2)
-  val noReview = {binding:0,sim:0}
+  val cardSlots = Set(1, 2)
+  val noCard = {binding:0,phase:"none",expired:false}
   val noRecord = {binding:0,status:"none",decision:"none",dispatching:false,submitted:false,unknown:false,boot:0,
     sent:Set(),failed:Set(),reported:Set(),delivered:Set(),deliveryFailed:Set(),rows:Set()}
 
   action initWith(recipients: int, parts: int, role: bool): bool = all {
     recipients.in(1.to(2)), parts.in(1.to(2)),
-    s' = {recipients:recipients,parts:parts,reply:"none",replyBinding:0,memory:noRecord,disk:noRecord,tombstoneBinding:0,attempts:0,accepted:0,
-      reviews:actors.mapBy(_actor=>noReview),foreground:actors,closed:Set(),listeners:actors,events:actors.mapBy(_=>0),
+    s' = {recipients:recipients,parts:parts,reply:"none",replyBinding:0,memory:noRecord,disk:noRecord,tombstoneBinding:0,claimOwner:0,attempts:0,accepted:0,
+      cards:cardSlots.mapBy(_=>noCard),foreground:actors,closed:Set(),listeners:actors,events:actors.mapBy(_=>0),
       image:true,send:true,phone:true,read:true,locked:false,role:role,sim:1,process:1,boot:1,old:false,
       candidate:"none",providerStatus:"none",refuseOutbox:false,outbox:Set(),sentRows:Set(),failedRows:Set()}
   }
@@ -66,66 +68,80 @@ module NativeSmsDispatch {
   }
   action simAt(value: int): bool = all { value.in(0.to(3)), s' = { ...s,sim:value } }
   action refuseOutbox(value: bool): bool = s' = { ...s,refuseOutbox:value }
-  action age = all { s.memory.binding!=0, s' = { ...s,old:true } }
+  // Time passes beyond the journal's open window. Every approved card has expired by then.
+  action age = s' = { ...s,old:s.old or s.memory.binding!=0,
+    cards:cardSlots.mapBy(card=>{ ...s.cards.get(card),expired:s.cards.get(card).phase!="none" }) }
   // A successful journal capacity write retires the fixed ID into an exact-binding tombstone.
   action prune = all {
     s.old, s.memory.binding!=0, s.memory.binding==s.disk.binding, not(s.memory.dispatching),
     s' = { ...s,memory:noRecord,disk:noRecord,tombstoneBinding:s.memory.binding }
   }
 
-  action request(actor: int, binding: int, mode: str): bool = all {
-    actors.contains(actor), binding.in(1.to(2)), mode.in(Set("complete","long-number","divide-refused","empty-parts")),
-    if (not(current(s,actor))) s' = response(s,"unavailable",0)
-    else if (mode=="long-number") s' = response(s,"invalid",0)
-    else if (hasRetainedId(s)) s' = retained(s,binding)
-    else if (s.reviews.get(actor).binding!=0) s' = response(s,"busy",0)
-    else if (not(permitted(s,actor)) or mode.in(Set("divide-refused","empty-parts"))) s' = decide(s,binding,"denied")
-    else s' = response({ ...s,reviews:s.reviews.set(actor,{binding:binding,sim:s.sim}) },"pending",0)
+  pure def admits(card: Card, binding: int): bool = card.phase=="open" and not(card.expired) and card.binding==binding
+
+  // The owner's Approve on an agent's SMS card: its action-journal entry is applying for this
+  // operation ID with the exact recipients, text and SIM. Two chat scopes can each hold one.
+  action approveCard(card: int, binding: int): bool = all {
+    cardSlots.contains(card), binding.in(1.to(2)), s.cards.get(card).phase=="none",
+    s' = { ...s,cards:s.cards.set(card,{binding:binding,phase:"open",expired:false}) }
   }
 
-  pure def retireReview(state: State, actor: int): State = {
-    val review=state.reviews.get(actor)
-    if (review.binding==0) state else decide({ ...state,reviews:state.reviews.set(actor,noReview) },review.binding,"cancelled")
+  pure def dispatched(state: State, actor: int, binding: int, request: str, mode: str): State =
+    if (mode.in(Set("cancel-queued","pause-queued"))) {
+      val cancelled=decide(state,binding,"cancelled")
+      if (mode=="pause-queued") { ...cancelled,foreground:cancelled.foreground.exclude(Set(actor)) } else cancelled
+    }
+    else if (not(permitted(state,actor)) or request.in(Set("divide-refused","empty-parts"))) decide(state,binding,"denied")
+    else if (mode=="journal-refused") response(state,"unavailable",0)
+    else if (mode=="begin-before") decide(state,binding,"denied")
+    else {
+      val starting=project({ ...noRecord,binding:binding,dispatching:true,boot:state.boot },state.recipients*state.parts)
+      if (mode=="begin-after-and-deny-before") response({ ...state,disk:starting },"unavailable",0)
+      else if (state.role and state.refuseOutbox) decide(state,binding,"denied")
+      else {
+        val attempted=if (mode.in(Set("guard-change","throw-before","throw-after"))) 1 else state.recipients
+        val accepted=if (mode=="throw-before") 0 else attempted
+        val prepared=if (state.role) Set(1,2).filter(recipient => recipient<=state.recipients) else Set()
+        val outbox=prepared.filter(recipient => recipient<=attempted)
+        val beforeEnd={ ...starting,rows:prepared }
+        val returned=not(mode.in(Set("throw-before","throw-after"))) and (mode!="guard-change" or state.recipients==1)
+        val ended=project({ ...beforeEnd,dispatching:false,submitted:returned,unknown:not(returned) },state.recipients*state.parts)
+        receipt({ ...state,memory:ended,disk:if (mode=="end-before") beforeEnd else ended,
+          attempts:state.attempts+attempted,accepted:state.accepted+accepted,sim:if (mode=="guard-change") 2 else state.sim,outbox:outbox })
+      }
+    }
+
+  // The agent bridge's sendSms naming card `card` (0: no card). A foreign request names other
+  // recipients or another SIM than any card can hold. A retained operation ID answers from the SMS
+  // journal before the card is read. Otherwise only an open, unexpired card for exactly this text
+  // admits it, and the admission claims the card once, before any dispatch check.
+  val requests = Set("complete","long-number","divide-refused","empty-parts","other-sim","other-recipient")
+  val sendModes = Set("complete","claim-before","claim-after","guard-change","throw-before","throw-after","begin-before","journal-refused",
+    "begin-after-and-deny-before","end-before","end-after","cancel-queued","pause-queued")
+  action send(actor: int, card: int, binding: int, request: str, mode: str): bool = all {
+    actors.contains(actor), card.in(0.to(2)), binding.in(1.to(2)), requests.contains(request), sendModes.contains(mode),
+    val foreign=request.in(Set("other-sim","other-recipient"))
+    val approval=if (card==0) noCard else s.cards.get(card)
+    if (not(current(s,actor))) s' = response(s,"unavailable",0)
+    else if (request=="long-number") s' = response(s,"invalid",0)
+    else if (hasRetainedId(s)) s' = retained(s,if (foreign) 0 else binding)
+    else if (foreign or s.claimOwner!=0 or not(admits(approval,binding))) s' = response(s,"not-approved",0)
+    else if (mode=="claim-before") s' = response(s,"not-approved",0)
+    else if (mode=="claim-after") s' = response({ ...s,claimOwner:card },"not-approved",0)
+    else s' = dispatched({ ...s,claimOwner:card,cards:s.cards.set(card,{ ...approval,phase:"claimed" }) },actor,binding,request,mode)
   }
+
+  // A cancellation with nothing queued answers and changes nothing.
   action cancel(actor: int, exact: bool): bool = all {
     actors.contains(actor),
-    s' = if (not(current(s,actor))) response(s,"unavailable",0)
-      else response(if (exact) retireReview(s,actor) else s,"ok",0)
+    s' = if (not(current(s,actor))) response(s,"unavailable",0) else response(s,"ok",0)
   }
   action lifecycle(actor: int, mode: str): bool = all {
     actors.contains(actor), mode.in(Set("pause","resume","screen","destroy")),
-    val stopped=retireReview(s,actor)
-    s' = if (mode=="pause") { ...stopped,foreground:stopped.foreground.exclude(Set(actor)) }
-      else if (mode=="resume") { ...stopped,foreground:stopped.foreground.union(Set(actor)) }
-      else if (mode=="destroy") { ...stopped,closed:stopped.closed.union(Set(actor)),listeners:stopped.listeners.exclude(Set(actor)) }
-      else stopped
-  }
-
-  val dispatchModes = Set("complete","guard-change","throw-before","throw-after","begin-before","begin-after-and-deny-before","end-before","end-after")
-  action approve(actor: int, mode: str): bool = all {
-    actors.contains(actor), dispatchModes.contains(mode),
-    val review=s.reviews.get(actor)
-    all {
-      review.binding!=0,
-      val state={ ...s,reviews:s.reviews.set(actor,noReview) }
-      if (not(permitted(s,actor))) s' = decide(state,review.binding,"denied")
-      else if (hasRetainedId(state)) s' = retained(state,review.binding)
-      else if (review.sim!=s.sim or mode=="begin-before") s' = decide(state,review.binding,"denied")
-      else {
-        val starting=project({ ...noRecord,binding:review.binding,dispatching:true,boot:s.boot },s.recipients*s.parts)
-        if (mode=="begin-after-and-deny-before") s' = response({ ...state,disk:starting },"unavailable",0)
-        else {
-          val attempted=if (mode.in(Set("guard-change","throw-before","throw-after"))) 1 else s.recipients
-          val accepted=if (mode=="throw-before") 0 else attempted
-          val outbox=if (s.role and not(s.refuseOutbox)) Set(1,2).filter(recipient => recipient<=attempted) else Set()
-          val beforeEnd={ ...starting,rows:outbox }
-          val returned=not(mode.in(Set("throw-before","throw-after"))) and (mode!="guard-change" or s.recipients==1)
-          val ended=project({ ...beforeEnd,dispatching:false,submitted:returned,unknown:not(returned) },s.recipients*s.parts)
-          s' = receipt({ ...state,memory:ended,disk:if (mode=="end-before") beforeEnd else ended,
-            attempts:s.attempts+attempted,accepted:s.accepted+accepted,sim:if (mode=="guard-change") 2 else s.sim,outbox:outbox })
-        }
-      }
-    }
+    s' = if (mode=="pause") { ...s,foreground:s.foreground.exclude(Set(actor)) }
+      else if (mode=="resume") { ...s,foreground:s.foreground.union(Set(actor)) }
+      else if (mode=="destroy") { ...s,closed:s.closed.union(Set(actor)),listeners:s.listeners.exclude(Set(actor)) }
+      else s
   }
 
   action readback(actor: int): bool = all {
@@ -225,7 +241,7 @@ module NativeSmsDispatch {
     val interrupted=stored.dispatching or
       (stored.binding!=0 and stored.decision=="none" and stored.boot!=boot and stored.sent.union(stored.failed).size()<s.recipients*s.parts)
     val loaded=if (interrupted) project({ ...stored,dispatching:false,unknown:true },s.recipients*s.parts) else stored
-    val current={ ...s,process:s.process+1,boot:boot,reviews:actors.mapBy(_actor=>noReview),foreground:actors,closed:Set(),
+    val current={ ...s,process:s.process+1,boot:boot,foreground:actors,closed:Set(),
       listeners:Set(1),events:actors.mapBy(_=>0),reply:"none",replyBinding:0,memory:loaded,disk:loaded }
     val recovered=reconciled(current)
     // The fixture drains the first bridge's startup reconcile before loading the second.
@@ -243,8 +259,18 @@ module NativeSmsDispatch {
   val ProviderRowsHaveOnePhase = s.outbox.intersect(s.sentRows.union(s.failedRows)).size()==0 and s.sentRows.intersect(s.failedRows).size()==0
   val LiveBridgeListeners = s.listeners==actors.exclude(s.closed)
   val PerBridgeNoticeCapacity = noticeBudget(s)
+  pure def claimed(state: State): Set[int] = cardSlots.filter(card=>state.cards.get(card).phase=="claimed")
+  pure def journaled(state: State): int = if (state.tombstoneBinding!=0) state.tombstoneBinding else state.disk.binding
+  // Radio only for the text of a card the owner approved and that admission claimed.
+  val RadioNeedsClaimedApproval = s.attempts==0 or claimed(s).exists(card=>s.cards.get(card).binding==journaled(s))
+  // One claim per operation. A claimed card's text is the journaled one, or nothing was journaled
+  // at all (the journal refused every write), in which case the spent claim still admits nothing more.
+  val OneClaimPerOperation = claimed(s).size()<=1 and claimed(s).forall(card=>
+    s.cards.get(card).binding.in(Set(s.memory.binding,s.disk.binding,s.tombstoneBinding))
+      or (s.memory.binding==0 and s.disk.binding==0 and s.tombstoneBinding==0))
   val safety = OneRadioCallPerRecipient and RadioNeedsDurableIntent and TombstoneRetiresLiveRecord
     and DeliveryNeedsSentAndReport and ProviderRowsHaveOnePhase and LiveBridgeListeners and PerBridgeNoticeCapacity
+    and RadioNeedsClaimedApproval and OneClaimPerOperation
 
   action step = any {
     nondet kind=Set("image","send","phone","read","locked","role").oneOf()
@@ -253,19 +279,21 @@ module NativeSmsDispatch {
     nondet sim=0.to(3).oneOf()
     simAt(sim),
     refuseOutbox(true),refuseOutbox(false),age,prune,
-    nondet actor=actors.oneOf()
+    nondet card=cardSlots.oneOf()
     nondet binding=1.to(2).oneOf()
-    nondet mode=Set("complete","long-number","divide-refused","empty-parts").oneOf()
-    request(actor,binding,mode),
+    approveCard(card,binding),
+    nondet actor=actors.oneOf()
+    nondet card=0.to(2).oneOf()
+    nondet binding=1.to(2).oneOf()
+    nondet request=requests.oneOf()
+    nondet mode=sendModes.oneOf()
+    send(actor,card,binding,request,mode),
     nondet actor=actors.oneOf()
     nondet exact=Bool.oneOf()
     cancel(actor,exact),
     nondet actor=actors.oneOf()
     nondet mode=Set("pause","resume","screen","destroy").oneOf()
     lifecycle(actor,mode),
-    nondet actor=actors.oneOf()
-    nondet mode=dispatchModes.oneOf()
-    approve(actor,mode),
     nondet actor=actors.oneOf()
     readback(actor),
     nondet kind=Set("none","wrong","ambiguous","exact").oneOf()
@@ -281,55 +309,76 @@ module NativeSmsDispatch {
     s'=s
   }
 
-  action reviewed=initWith(1,1,false).then(request(1,1,"complete"))
-  action sent=reviewed.then(approve(1,"complete"))
+  action approved=initWith(1,1,false).then(approveCard(1,1))
+  action sent=approved.then(send(1,1,1,"complete","complete"))
 
-  run conflictingReviewCannotClaimAnotherReceiptTest = reviewed.then(request(2,2,"complete"))
-    .then(approve(1,"complete")).then(approve(2,"complete"))
-    .expect(s.reply=="invalid" and s.replyBinding==0 and s.memory.binding==1 and s.attempts==1)
+  run conflictingCardCannotClaimAnotherReceiptTest = approved.then(approveCard(2,2))
+    .then(send(1,1,1,"complete","complete")).then(send(2,2,2,"complete","complete"))
+    .expect(s.reply=="invalid" and s.replyBinding==0 and s.memory.binding==1 and s.attempts==1 and s.cards.get(2).phase=="open")
 
-  run lateReviewUsesTombstoneBindingTest = reviewed.then(request(2,1,"complete"))
-    .then(approve(1,"complete")).then(age).then(prune).then(approve(2,"complete"))
+  run exactReplayUsesFirstReceiptWithoutClaimTest = approved.then(approveCard(2,1))
+    .then(send(1,1,1,"complete","complete")).then(send(2,2,1,"complete","complete"))
+    .expect(s.reply=="submitted" and s.replyBinding==1 and s.attempts==1 and s.cards.get(2).phase=="open")
+
+  run unapprovedOrMismatchedTextSendsNothingTest = approved.then(send(1,0,1,"complete","complete"))
+    .expect(s.reply=="not-approved" and s.cards.get(1).phase=="open")
+    .then(send(1,1,2,"complete","complete")).expect(s.reply=="not-approved")
+    .then(send(1,1,1,"other-sim","complete")).expect(s.reply=="not-approved")
+    .then(send(1,1,1,"other-recipient","complete"))
+    .expect(s.reply=="not-approved" and s.attempts==0 and s.disk.binding==0 and s.cards.get(1).phase=="open")
+
+  run expiredApprovalSendsNothingTest = approved.then(age).then(send(1,1,1,"complete","complete"))
+    .expect(s.reply=="not-approved" and s.attempts==0 and s.disk.binding==0)
+
+  run claimIsSingleUseWhenNothingWasJournaledTest = approved.then(send(1,1,1,"complete","journal-refused"))
+    .expect(s.reply=="unavailable" and s.disk.binding==0 and s.cards.get(1).phase=="claimed")
+    .then(restart(false)).then(send(2,1,1,"complete","complete"))
+    .expect(s.reply=="not-approved" and s.attempts==0)
+    .then(approveCard(2,2)).then(send(2,2,2,"complete","complete"))
+    .expect(s.reply=="not-approved" and s.claimOwner==1 and s.attempts==0)
+
+  run queuedCancellationClosesTheClaimTest = approved.then(send(1,1,1,"complete","cancel-queued"))
+    .expect(s.reply=="cancelled" and s.attempts==0 and s.cards.get(1).phase=="claimed")
+    .then(send(2,1,1,"complete","complete")).expect(s.reply=="cancelled" and s.attempts==0)
+
+  run lateCardUsesTombstoneBindingTest = sent.then(approveCard(2,1)).then(age).then(prune)
+    .then(send(2,2,1,"complete","complete"))
     .expect(s.reply=="expired" and s.replyBinding==0 and s.attempts==1)
-    .then(restart(false)).then(request(1,2,"complete"))
+    .then(restart(false)).then(send(1,2,2,"complete","complete"))
     .expect(s.reply=="invalid" and s.tombstoneBinding==1 and s.attempts==1)
 
-  run exactSecondReviewUsesFirstReceiptWithoutRadioTest = reviewed.then(request(2,1,"complete"))
-    .then(approve(1,"complete")).then(approve(2,"complete"))
-    .then(request(1,1,"complete"))
-    .expect(s.reply=="submitted" and s.replyBinding==1 and s.attempts==1)
-
-  run simChangeAfterFirstRecipientIsUnknownTest = initWith(2,1,false).then(request(1,1,"complete"))
-    .then(approve(1,"guard-change")).expect(s.reply=="unknown" and s.accepted==1 and s.attempts==1)
-    .then(request(2,1,"complete")).expect(s.reply=="unknown" and s.attempts==1)
+  run simChangeAfterFirstRecipientIsUnknownTest = initWith(2,1,false).then(approveCard(1,1))
+    .then(send(1,1,1,"complete","guard-change")).expect(s.reply=="unknown" and s.accepted==1 and s.attempts==1)
+    .then(send(2,1,1,"complete","complete")).expect(s.reply=="unknown" and s.attempts==1)
 
   run callbackMemoryDoesNotImplyDurableEvidenceTest = sent.then(callback(1,"sent",true,"before"))
     .expect(s.memory.status=="sent" and s.disk.status=="submitted")
     .then(restart(false)).then(readback(2)).expect(s.reply=="submitted")
 
-  run dispatchMarkerRefusalRecoversUnknownTest = reviewed.then(approve(1,"end-before"))
+  run dispatchMarkerRefusalRecoversUnknownTest = approved.then(send(1,1,1,"complete","end-before"))
     .expect(s.memory.status=="submitted" and s.disk.dispatching)
-    .then(restart(false)).then(request(2,1,"complete")).expect(s.reply=="unknown" and s.attempts==1)
+    .then(restart(false)).then(send(2,1,1,"complete","complete")).expect(s.reply=="unknown" and s.attempts==1)
 
   run providerReadbackRequiresReportAndUniqueRowTest = sent.then(provider("ambiguous","complete"))
     .then(callback(1,"sent",true,"complete")).then(callback(1,"delivery",false,"complete"))
     .expect(s.memory.status=="sent" and s.memory.rows==Set())
     .then(provider("exact","complete")).then(reconcile).expect(s.memory.status=="delivered")
 
-  run multipartReportDoesNotProveDeliveryTest = initWith(1,2,false).then(request(1,1,"complete")).then(approve(1,"complete"))
+  run multipartReportDoesNotProveDeliveryTest = initWith(1,2,false).then(approveCard(1,1)).then(send(1,1,1,"complete","complete"))
     .then(provider("exact","complete")).then(callback(1,"sent",true,"complete")).then(callback(2,"sent",true,"complete"))
     .then(callback(1,"delivery",true,"complete")).then(callback(2,"delivery",true,"complete"))
     .expect(s.memory.status=="sent" and s.memory.delivered==Set())
-  run emptyDivisionCannotReviveReviewedIdTest = initWith(1,1,false).then(request(1,1,"empty-parts"))
-    .expect(s.reply=="denied" and s.disk.decision=="denied" and s.attempts==0 and s.reviews==actors.mapBy(_=>noReview))
-    .then(request(2,1,"complete")).expect(s.reply=="denied" and s.replyBinding==1 and s.attempts==0)
-    .then(request(2,2,"complete")).expect(s.reply=="invalid" and s.disk.binding==1 and s.attempts==0)
+
+  run emptyDivisionCannotReviveClaimedIdTest = approved.then(send(1,1,1,"empty-parts","complete"))
+    .expect(s.reply=="denied" and s.disk.decision=="denied" and s.attempts==0 and s.cards.get(1).phase=="claimed")
+    .then(send(2,1,1,"complete","complete")).expect(s.reply=="denied" and s.replyBinding==1 and s.attempts==0)
+    .then(send(2,1,2,"complete","complete")).expect(s.reply=="invalid" and s.disk.binding==1 and s.attempts==0)
 
   run bothBridgesReceiveTheSameCallbackTest = sent.then(callback(1,"sent",true,"complete"))
     .expect(safety and s.listeners==actors and s.events==Map(1->1,2->1))
 
   run pausedAndDestroyedBridgesRetireOnlyTheirDeliveryTest = initWith(1,2,false)
-    .then(request(1,1,"complete")).then(approve(1,"complete"))
+    .then(approveCard(1,1)).then(send(1,1,1,"complete","complete"))
     .then(lifecycle(2,"pause")).then(callback(1,"sent",true,"complete"))
     .expect(s.events==Map(1->1,2->0) and s.listeners==actors)
     .then(lifecycle(2,"resume")).then(lifecycle(1,"destroy"))
@@ -337,7 +386,7 @@ module NativeSmsDispatch {
     .expect(safety and s.listeners==Set(2) and s.events==Map(1->1,2->1))
 
   run eightCallbackPublicationsReachBothBridgesTest = initWith(2,2,false)
-    .then(request(1,1,"complete")).then(approve(1,"complete"))
+    .then(approveCard(1,1)).then(send(1,1,1,"complete","complete"))
     .then(callback(1,"sent",true,"complete")).then(callback(2,"sent",true,"complete"))
     .then(callback(3,"sent",true,"complete")).then(callback(4,"sent",true,"complete"))
     .then(callback(1,"delivery",true,"complete")).then(callback(2,"delivery",true,"complete"))

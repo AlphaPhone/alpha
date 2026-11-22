@@ -11,7 +11,8 @@ for(const text of [undefined,'','Move it to 4 pm','https://example.com','Open ht
  'Do not open https://example.com/dashboard','Never visit https://example.com/dashboard','Can you explain https://example.com/dashboard',
  'The page says open https://example.com/dashboard',"'https://example.com/dashboard'",'`https://example.com/dashboard`',
  'Open https://example.com/dashboard then move my event','Open https://example.com/dashboard or https://other.example/',
- 'Open person@example.com','Open https://user:password@example.com/dashboard','http://example.com/dashboard',
+ 'Open person@example.com','Open https://user:password@example.com/dashboard',
+ 'Alpha said open https://example.com/dashboard','Alphabet, open https://example.com/dashboard','Hey Alpha, do not open example.com/dashboard',
  'Open https://other.example/dashboard','Open https://example.com/dashboard?redirect=elsewhere','Open https://example.com/dashboard#different']){
  test(`ungrounded authored request does not auto-dispatch: ${String(text)}`,async()=>{
   const f=fixture();let preferences=0;assert.equal((await f.run(text,async()=>{preferences++;return true;})).length,0);
@@ -19,7 +20,7 @@ for(const text of [undefined,'','Move it to 4 pm','https://example.com','Open ht
   await f.run(text);assert.deepEqual(f.calls,[],'no automatic retry or consumption');
  });
 }
-for(const text of ['https://example.com/dashboard','Open https://example.com/dashboard','visit https://example.com/dashboard','Go to https://example.com/dashboard','Navigate to https://example.com/dashboard','Please open https://EXAMPLE.com:443/dashboard','example.com/dashboard','Open example.com/dashboard','Open "https://example.com/dashboard"' ]){
+for(const text of ['https://example.com/dashboard','Open https://example.com/dashboard','visit https://example.com/dashboard','Go to https://example.com/dashboard','Navigate to https://example.com/dashboard','Please open https://EXAMPLE.com:443/dashboard','example.com/dashboard','Open example.com/dashboard','Open "https://example.com/dashboard"','Alpha, open example.com/dashboard','Hey Alpha open example.com/dashboard','ok alpha, please go to https://example.com/dashboard','Hey Alpha, can you pull up example.com/dashboard','http://example.com/dashboard' ]){
  test(`exact authored destination can dispatch once: ${text}`,async()=>{const f=fixture();assert.equal((await f.run(text)).length,1);assert.deepEqual(f.calls,['browser']);});
 }
 test('query and fragment are exact permission, never inferred from a matching hostname',async()=>{
@@ -69,7 +70,9 @@ test('128 live consumed proofs are not evicted, while definitively retired proof
 test('final shared grammar keeps host punctuation, literal path punctuation and apostrophes precise',async()=>{
  const host=fixture('https://example.com/');await host.run('Open example.com.');assert.deepEqual(host.calls,['browser']);
  const literal="https://example.com/o'hare?q=can't#part",apostrophe=fixture(literal);await apostrophe.run('Open "'+literal+'"');assert.deepEqual(apostrophe.calls,['browser']);
- const exact=fixture('https://example.com/dashboard.');await exact.run('Open https://example.com/dashboard.');assert.deepEqual(exact.calls,['browser']);
+ // A closing mark after a typed path may be the sentence's or the path's, so the owner reviews the open (eliza#39990).
+ const exact=fixture('https://example.com/dashboard.');await exact.run('Open https://example.com/dashboard.');assert.deepEqual(exact.calls,[]);
+ const quotedDot=fixture('https://example.com/dashboard.');await quotedDot.run('Open "https://example.com/dashboard."');assert.deepEqual(quotedDot.calls,['browser']);
  const invented=fixture('https://example.com/dashboard');await invented.run('Open https://example.com/dashboard.');assert.deepEqual(invented.calls,[]);
 });
 test('multiline or control-delimited source content never grants browser permission',async()=>{

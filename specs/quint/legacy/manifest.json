@@ -22,7 +22,7 @@
       "Historical current/proposed design comparison at source ef9fbf7cd7, not a runtime conformance claim.",
       "All original state variables are fields of s; immutable Design selects behavior; record spreads preserve the original frame conditions.",
       "Finite domains and numeric constants are unchanged from the original model configuration.",
-      "Removed implementation links are retained as historicalSourceLinks at the original migration inventory revision. They are not current source owners; current behavior is mapped in the application/service/native families."
+      "The historical CloudSignInFlow.java implementation at revision 875f5a8550935c5ca1797cea4ea38e7c7759ca54 is Git blob 89458db1aa42652a7faca9623d0bde2044a10df6. Current behavior is mapped in the application, service and native families."
     ],
     "constants": {
       "MaxDetours": 2,
@@ -98,13 +98,7 @@
         "fairness": "Fairness",
         "sourceProperty": "ReachesHome"
       }
-    ],
-    "historicalSourceLinks": {
-      "revision": "875f5a8550935c5ca1797cea4ea38e7c7759ca54",
-      "paths": [
-        "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java"
-      ]
-    }
+    ]
   },
   {
     "path": "specs/quint/legacy/GoogleConnect.qnt",
@@ -769,7 +763,8 @@
       "All original finite domains, nondeterministic initial choices, action guards, frame conditions and fairness are retained.",
       "All22 source configurations and their exact property lists are retained in view-refresh-configurations.json.",
       "The implementation entry points are historical links. Current-source conformance remains in the application, service and native families; this translation does not establish that every design action is implemented by the shipping UI.",
-      "The sources array binds the retained Quint configurations and their runner, not current product implementation."
+      "The sources array binds the retained Quint configurations and their runner, not current product implementation.",
+      "Superseded for agent capture: the current-source successor is application CameraAgentCapture, replayed against the mounted camera adapter by test/quint-camera-agent-capture.test.mjs (queued capture settlement included). This design model is kept as a historical comparison only."
     ],
     "constants": {
       "FixFocus": true,
@@ -1001,7 +996,8 @@
       "All original finite domains, nondeterministic initial choices, action guards, frame conditions and fairness are retained.",
       "All22 source configurations and their exact property lists are retained in view-refresh-configurations.json.",
       "The implementation entry points are historical links. Current-source conformance remains in the application, service and native families; this translation does not establish that every design action is implemented by the shipping UI.",
-      "The sources array binds the retained Quint configurations and their runner, not current product implementation."
+      "The sources array binds the retained Quint configurations and their runner, not current product implementation.",
+      "Superseded for agent Notes actions: the current-source successor is application NotesAgentSource, replayed against the installed device executor and the shared Notes store by test/quint-notes-agent-source.test.mjs. Its owner-side view designs remain historical comparisons only."
     ],
     "constants": {
       "Notes": [
@@ -1128,7 +1124,8 @@
       "All22 source configurations and their exact property lists are retained in view-refresh-configurations.json.",
       "FreeName chooses the lowest free numeric name as a deterministic realization of the source CHOOSE; the source specifies no different tie-breaking rule.",
       "The implementation entry points are historical links. Current-source conformance remains in the application, service and native families; this translation does not establish that every design action is implemented by the shipping UI.",
-      "The sources array binds the retained Quint configurations and their runner, not current product implementation."
+      "The sources array binds the retained Quint configurations and their runner, not current product implementation.",
+      "Superseded for agent Files actions: the current-source successor is application FilesAgentActions, replayed against the installed device executor and the Files runner by test/quint-files-agent-actions.test.mjs. Its owner-side browsing designs remain historical comparisons only."
     ],
     "constants": {
       "Budget": 1,

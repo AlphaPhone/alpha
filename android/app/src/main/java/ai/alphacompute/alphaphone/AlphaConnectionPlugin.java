@@ -124,7 +124,9 @@ public final class AlphaConnectionPlugin extends Plugin {
  }
 
  private static final int RESPONSE_LIMIT = ConnectionTransport.RESPONSE_LIMIT;
- private final ExecutorService workers = Executors.newFixedThreadPool(4);
+ /** A map view asks for about 15 tiles at once (MapLibre sends up to 16 in parallel); four workers queued
+  * them four deep behind one another, so a screen of one-second tile reads took over four seconds. */
+ private final ExecutorService workers = Executors.newFixedThreadPool(16);
  private final SerialStorageTasks storageTasks = new SerialStorageTasks();
  private volatile boolean destroyed;
  private final PendingRequests requests = new PendingRequests();
@@ -301,7 +303,7 @@ public final class AlphaConnectionPlugin extends Plugin {
      String name = names.next(), normalized = name.toLowerCase(Locale.ROOT);
      Object raw = headers.get(name); if (!(raw instanceof String)) throw new IllegalArgumentException();
      String value = (String) raw;
-     if (!ConnectionRoutes.admittedHeader(normalized)&&!ConnectionRoutes.mapsRequestIdentity(normalized,value,url.getRawPath(),method)) throw new IllegalArgumentException();
+     if (!ConnectionRoutes.admittedHeader(normalized)&&!ConnectionRoutes.mapsRequestIdentity(normalized,value,url.getRawPath(),method)&&!ConnectionRoutes.billingRequestIdentity(normalized,value,url.getRawPath(),method)) throw new IllegalArgumentException();
      if (!ConnectionTransport.headerValue(value)) throw new IllegalArgumentException();
      if ("x-eliza-device-capabilities".equals(normalized) && !ConnectionRoutes.deviceCapabilities(value)) throw new IllegalArgumentException();
      if ("x-eliza-phone-protocol".equals(normalized) && !"1".equals(value)) throw new IllegalArgumentException();

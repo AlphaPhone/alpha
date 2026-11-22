@@ -7,6 +7,8 @@ module BrowserSession {
   pure val NormalIds = Set(1, 2, 4, 5)
   type State = { normal: Set[int], privateTabs: Set[int], saved: Set[int], active: int,
     epoch: int, captured: int, navigating: bool, committed: bool, pristine: bool,
+    // The tab whose load is in flight. Its commit is that tab's page, whichever tab is shown.
+    navTab: int,
     history: Set[int], privatePage: bool, privateHistory: Set[int],
     order: List[int], savedOrder: List[int], savedActive: int,
     tabsOpen: bool, focusedTab: int, intendedTab: int,
@@ -24,7 +26,7 @@ module BrowserSession {
     tabs.foldl(0, (first, id) => if (first == 0) id else first)
   pure def tabSet(tabs: List[int]): Set[int] = tabs.foldl(Set(), (result, id) => result.union(Set(id)))
   action init = s' = { normal: Set(1), privateTabs: Set(), saved: Set(), active: 1,
-    epoch: 0, captured: 0, navigating: false, committed: false, pristine: true,
+    epoch: 0, captured: 0, navigating: false, committed: false, pristine: true, navTab: 0,
     history: Set(), privatePage: false, privateHistory: Set(), order: List(1),
     savedOrder: List(), savedActive: 0, tabsOpen: false, focusedTab: 0, intendedTab: 0,
     hydrated: true, restorePending: false, clearing: false,
@@ -72,12 +74,15 @@ module BrowserSession {
     s' = { ...s, active: s.focusedTab, privatePage: s.privateTabs.contains(s.focusedTab),
       tabsOpen: false, focusedTab: 0, intendedTab: 0 } }
   action navigate = all { s.epoch < 2, s' = { ...s, epoch: s.epoch + 1,
-    captured: s.epoch + 1, navigating: true, committed: false, pristine: false } }
-  action commit = all { s.navigating, s.captured == s.epoch,
+    captured: s.epoch + 1, navigating: true, navTab: s.active, committed: false, pristine: false } }
+  // History follows the committing tab's own privacy (browser-adapter's stateChanged keys on
+  // the event's tab), not the tab shown when the load finishes. A closed tab's load is ignored.
+  action commit = all { s.navigating, s.captured == s.epoch, open.contains(s.navTab), {
+    val priv = s.privateTabs.contains(s.navTab)
     s' = { ...s, navigating: false, committed: true,
-      history: if (s.privatePage) s.history else s.history.union(Set(s.active)),
-      committedPages: if (s.privatePage) s.committedPages else s.committedPages.union(Set(s.active)),
-      privateHistory: if (s.privatePage) s.privateHistory.union(Set(s.active)) else s.privateHistory } }
+      history: if (priv) s.history else s.history.union(Set(s.navTab)),
+      committedPages: if (priv) s.committedPages else s.committedPages.union(Set(s.navTab)),
+      privateHistory: if (priv) s.privateHistory.union(Set(s.navTab)) else s.privateHistory } } }
   // A load that ends in an error page is not a visit.
   action loadFailed = all { s.navigating, s.captured == s.epoch, s' = { ...s, navigating: false } }
   // Nothing is written before the saved record was read, or while it is being cleared.
@@ -134,7 +139,7 @@ module BrowserSession {
         val active = if (s.privateTabs.contains(s.active)) s.active else firstTab(order)
         { ...s, clearing: false, hydrated: true, normal: if (s.privateTabs.size() == 0) Set(1) else Set(),
           order: order, active: active, privatePage: s.privateTabs.contains(active),
-          navigating: s.navigating and s.privatePage,
+          navigating: s.navigating and s.privateTabs.contains(s.navTab),
           history: Set(), saved: Set(), savedOrder: List(), savedActive: 0, savedHistory: Set(),
           launchSaved: Set(), launchHistory: Set(), owed: Set(),
           focusedTab: if (s.privateTabs.contains(s.focusedTab)) s.focusedTab else 0,
@@ -217,6 +222,14 @@ module BrowserSession {
     .then(clearStart).then(clearDone(true))
     .expect(s.normal.size() == 0 and s.privateTabs == Set(3) and s.active == 3 and
       s.saved.size() == 0 and s.history.size() == 0 and safety)
+  // A private page that finishes loading after the owner switched to a normal tab stays private.
+  run privateCommitAfterSwitchTest = init.then(privateTab).then(navigate).then(showTabs).then(focusTab(1))
+    .then(activateFocusedTab).then(commit)
+    .expect(s.active == 1 and s.privateHistory == Set(3) and s.history.size() == 0 and safety)
+  // A normal page that finishes loading after the owner switched to a private tab is a visit.
+  run normalCommitAfterSwitchTest = init.then(normalTab).then(privateTab).then(showTabs).then(focusTab(2))
+    .then(activateFocusedTab).then(navigate).then(showTabs).then(focusTab(3)).then(activateFocusedTab).then(commit)
+    .expect(s.active == 3 and s.history == Set(2) and s.privateHistory.size() == 0 and safety)
   run closedPrivateTabForgetsPagesTest = init.then(privateTab).then(navigate).then(commit)
     .expect(s.privateHistory == Set(3)).then(closeTab(3)).expect(s.privateHistory.size() == 0 and safety)
 }

@@ -29,7 +29,7 @@ final class KeyboardDictationCloud implements CartesiaSpeech.Guard {
  }
  private JSONObject selection() throws Exception {
   return AlphaLocalAgentPlugin.withCredentialAuthority(authority, () -> {
-   if (cancelled || ai.eliza.plugins.passwords.PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
+   if (cancelled || PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
    return new JSONObject(new AlphaCredentialStore(context).readCredentialSlot("local-agent-provider:v1"));
   });
  }
@@ -43,7 +43,7 @@ final class KeyboardDictationCloud implements CartesiaSpeech.Guard {
  }
  private JSONObject credential() throws Exception {
   return AlphaLocalAgentPlugin.withCredentialAuthority(authority, () -> {
-   if (cancelled || ai.eliza.plugins.passwords.PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
+   if (cancelled || PasswordSurfaces.visible()) throw new IOException("Dictation cancelled");
    AlphaCredentialStore store = new AlphaCredentialStore(context);
    JSONObject saved = new JSONObject(store.readCredentialSlot("cloud:production"));
    String id = saved.getString("credentialId");

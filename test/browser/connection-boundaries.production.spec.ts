@@ -3,7 +3,7 @@ import { cloudStorageSlot } from '../../apps/app/src/runtime/cloud-deployment.ge
 import {seedCompletedAccessSetup} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
-import { openYourAgent, completeAccessSetup, fenceNetwork } from './flag-off-android';
+import { completeAccessSetup, fenceNetwork } from './flag-off-android';
 // Flag-off production bundle only. Android cases stub the Capacitor bridge in a desktop browser and
 // saved remote selections must never reconnect. Nothing here contacts
 // Eliza Cloud, a deployed agent, an Android device or the native AlphaConnection plugin; those
@@ -62,7 +62,7 @@ async function android(page: Page, options: AndroidOptions) {
         if (method === 'clearProvider') { if (w.holdStop) await new Promise<void>(resolve => { w.releaseStop = resolve; }); return { configured: false }; }
         if (method === 'providerStatus') return { provider: 'elizacloud', configured: false };
         // A packaged runtime whose start fails, or that answers but is not running yet.
-        if (method === 'start' && options.start === 'reject') throw Error('Local agent failed to start.');
+        if (method === 'start' && options.start === 'reject') throw Object.assign(Error('Local agent failed to start.'), {code:'start-failed'});
         if (method === 'request') {
           const body = input.path === '/api/auth/me' ? { identity: { id, kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } }
             : input.path === '/api/agents' ? { agents: [{ id, name: 'Alpha', status: options.start === 'starting' ? 'starting' : 'running' }] }
@@ -136,9 +136,8 @@ for (const legacy of [{ name: 'remote agent', selection: { kind: 'remote', origi
     await expect(welcome.getByRole('button', { name: 'Close connection settings', exact: true })).toHaveCount(0);
     expectRemoteUntouched(await nativeCalls(page));
     expect((await secureValues(page))[remoteSlot]).toBe(saved[remoteSlot]);
-    // #406: the saved hosted choice becomes the resident agent and is kept aside, not deleted.
+    // #406: the saved hosted choice is never reconnected; the phone's own agent is selected.
     expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), SELECTION)).toEqual({ kind: 'resident' });
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('alpha.connection.legacy-hosted-selection.v1')!))).toEqual([legacy.selection]);
     await page.reload();
     await expect(page.getByRole('main', { name: 'Alpha',exact:true })).toBeVisible();
     await expect.poll(async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent').map(call => call.method), {timeout:30_000}).toContain('start');
@@ -175,49 +174,40 @@ test('production Android with a Cloud sign-in starts the resident agent instead 
   expect(foreign).toEqual([]);
 });
 
-test('production Android without a packaged agent says so and does not advertise retired routes', async ({ page }) => {
-  await fenceNetwork(page);
+test('production Android without a packaged agent keeps local apps available without starting a remote agent', async ({ page }) => {
+  const foreign = await fenceNetwork(page);
   await android(page, { cloudCredential: true, balance: 5, packaged: false });
   await page.goto('/');
   await completeAccessSetup(page);
-  // A developer build without the runtime opens no gate; Your agent says so, with Retry, never an offline mode.
+  // A developer build without the packaged runtime has no startup to retry.
   await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-  const dialog = await openYourAgent(page);
-  const alert = dialog.getByText('No on-device agent',{exact:true});
-  await expect(alert).toHaveText('No on-device agent');
-  await expect(alert).not.toContainText(/remote agent|pair/i);
-  await expect(dialog.getByText('Off', { exact: true }).last()).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
+  await expect(page.getByRole('button', { name: 'Restart Alpha', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Use local apps without AI', exact: true })).toHaveCount(0);
-  expect((await nativeCalls(page)).filter(call => call.plugin === 'Agent').map(call => call.method)).not.toContain('start');
+  const calls = await nativeCalls(page);
+  expect(calls.filter(call => call.plugin === 'Agent').map(call => call.method)).not.toContain('start');
+  expectRemoteUntouched(calls);
+  expect(foreign).toEqual([]);
 });
 
-for (const [start, text] of [['reject', 'Local agent failed to start.'], ['starting', 'The local agent is still starting. Try again when it is ready.']] as const) {
-  test(`production Android with credits whose resident ${start === 'reject' ? 'fails to start' : 'is still starting'} recovers with a retry, never "no agent"`, async ({ page }) => {
+for (const start of ['reject','starting'] as const) {
+  test(`production Android automatically reattaches when the resident reports ${start}`, async ({ page }) => {
     const foreign = await fenceNetwork(page);
+    await page.clock.install();
     await android(page, { cloudCredential: true, balance: 5, start });
     await page.goto('/');
     await completeAccessSetup(page);
-    await expect.poll(async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent').map(call => call.method), {timeout:30_000}).toContain('start');
-    // P-43: a failed start opens no gate; Status shows Agent Off with Retry and the failure.
     await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-    const dialog = await openYourAgent(page);
-    await expect(dialog.getByText('Off', { exact: true }).last()).toBeVisible();
-    await expect(dialog.getByText(text,{exact:true})).toContainText(text);
-    await expect(dialog.getByText(text,{exact:true})).not.toContainText(/pair/i);
-    await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled();
-    await expect(dialog.getByRole('button', { name: 'Use local apps without AI', exact: true })).toHaveCount(0);
-    const calls = await nativeCalls(page);
-    // The resident is the only selection, and no conversation was created or read.
+    await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Restart Alpha', exact: true })).toHaveCount(0);
     expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), SELECTION)).toEqual({ kind: 'resident' });
-    expect(calls.filter(call => call.path?.startsWith('/api/conversations'))).toEqual([]);
-    // Retry starts once more, on the owner's tap; it fails the same way.
-    const starts = calls.filter(call => call.plugin === 'Agent' && call.method === 'start').length;
-    await dialog.getByRole('button', { name: 'Retry', exact: true }).click();
-    // P-43 may run one scheduled recovery while this explicit retry settles.
-    await expect.poll(async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length).toBeGreaterThan(starts);
-    expect((await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length).toBeLessThanOrEqual(starts + 2);
-    await expect(dialog.getByText(text,{exact:true})).toContainText(text);
+    const starts = async () => (await nativeCalls(page)).filter(call => call.plugin === 'Agent' && call.method === 'start').length;
+    await expect.poll(starts).toBeGreaterThanOrEqual(1);
+    const previous=await starts();
+    await page.clock.fastForward(60_050);
+    await expect.poll(starts).toBeGreaterThan(previous);
     expect((await nativeCalls(page)).filter(call => call.path?.startsWith('/api/conversations'))).toEqual([]);
     expect(foreign).toEqual([]);
   });
@@ -378,10 +368,8 @@ for (const saved of [
     expect(await slotRecords(page)).toEqual(kept);
     expect(await page.evaluate(keys => Object.fromEntries(keys.map(key => [key, localStorage.getItem(key)])), Object.keys(LOCAL_DATA))).toEqual(LOCAL_DATA);
     expect(await page.evaluate(key => localStorage.getItem(key), CLOUD_SERVICE)).toBeNull();
-    // #406: a saved Cloud agent becomes the resident agent and is kept aside; other choices are unchanged.
-    const hostedChoice = (saved.selection as { kind: string }).kind === 'cloud';
-    expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), SELECTION)).toEqual(hostedChoice ? { kind: 'resident' } : saved.selection);
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('alpha.connection.legacy-hosted-selection.v1') || 'null'))).toEqual(hostedChoice ? [saved.selection] : null);
+    // #406: the saved choice is left as it was; a saved Cloud agent is never reconnected.
+    expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), SELECTION)).toEqual(saved.selection);
     await expect(chooser.getByText(/Connected ·/)).toHaveCount(0);
     // A later start changes nothing further, and no request left the page at any point.
     await page.reload();
@@ -411,7 +399,7 @@ test('the web build\'s forced sign-out does not create a secret store in a brows
 // revocation and history tests remain in scripts/test-remote-protocol.ts as explicitly
 // non-product development infrastructure.
 
-test('automatic agent startup stays quiet while local apps remain usable',async({page})=>{
+test('automatic startup holds the shell until the agent is ready',async({page})=>{
   await android(page,{cloudCredential:true,balance:5});
   await page.addInitScript(()=>{
     const w=window as any,bridge=w.Capacitor,original=bridge.nativePromise;
@@ -424,9 +412,8 @@ test('automatic agent startup stays quiet while local apps remain usable',async(
   // Optional setup waits for startup to settle; local apps remain usable meanwhile.
   await expect(page.locator('.alpha-startup-permissions')).toHaveCount(0);
   await expect.poll(()=>page.evaluate(()=>(window as any).agentStartHeld)).toBe(true);
-  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
-  await expect(page.getByText('Your agent is starting…',{exact:true})).toHaveCount(0);
-  await page.getByRole('button',{name:'Notes',exact:true}).click();
+  await expect(page.getByRole('status',{name:'Loading Alpha',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Notes',exact:true})).toHaveCount(0);
   await expect(page.getByText('Your agent is starting…',{exact:true})).toHaveCount(0);
   await page.evaluate(()=>(window as any).releaseAgentStart());
   await completeAccessSetup(page);

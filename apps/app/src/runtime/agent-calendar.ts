@@ -1,5 +1,5 @@
 import type {CreateLifeOpsCalendarEventRequest,LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,LifeOpsCalendarFeed,LifeOpsCalendarSummary,LifeOpsNextCalendarEventContext,GetLifeOpsCalendarFeedRequest,LifeOpsLinkedCalendarControl,LifeOpsLinkedCalendarEventView,UpdateLifeOpsLinkedCalendarControlRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
-import {eventEditorMutability,cancellationModeForEditorEvent} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/components/event-editor-policy';
+import {eventEditorMutability,cancellationModeForEditorEvent} from '../ui/calendar/event-editor-policy';
 import {agentCalendarClient,type AgentCalendarClient,type AppRecordPort} from './agent-calendar-client';
 import type {ServiceReadCache} from './service-read-cache';
 export type AgentCalendarSyncReview={binding:string;control:LifeOpsLinkedCalendarControl;sources:LifeOpsCalendarSummary[];visibleLocalEventIds:string[]};
@@ -214,6 +214,18 @@ export class AgentCalendar {
   if(event.status==='cancelled'||Date.parse(event.startAt)!==input.begin||event.metadata.etag!==input.revision)return 'missing';
   const readable=sources.calendars.filter(source=>source.includeInFeed===true&&['owner','writer','reader'].includes(source.accessRole)&&source.provider===event.provider&&source.side===event.side&&source.grantId===event.grantId&&source.calendarId===event.calendarId&&(!event.connectorAccountId||source.connectorAccountId===event.connectorAccountId));
   return readable.length===1?'found':'missing';
+ }
+ /** One calendar's events at an instant, for a review whose event the loaded window does not verify.
+  * Publishes nothing. Null unless that calendar answered completely for the exact instant. */
+ async readSourceAt(source:{grantId?:string;calendarId:string},at:number,signal:AbortSignal):Promise<{events:LifeOpsCalendarEvent[];calendars:LifeOpsCalendarSummary[]}|null>{
+  const port=this.port();
+  if(!port?.current()||!Number.isSafeInteger(at))return null;
+  const window={side:'owner' as const,...(source.grantId?{grantId:source.grantId}:{}),calendarId:source.calendarId,timeMin:new Date(at-1).toISOString(),timeMax:new Date(at+1).toISOString(),timeZone:'UTC'};
+  const api=this.client(port,signal);
+  const [feed,sources]=await Promise.all([api.getLifeOpsCalendarFeed(window,{signal}),api.getLifeOpsCalendars({},{signal})]);
+  signal.throwIfAborted();
+  if(!port.current()||feed.state!=='complete'||Date.parse(feed.timeMin)!==Date.parse(window.timeMin)||Date.parse(feed.timeMax)!==Date.parse(window.timeMax)||feed.events.some(event=>event.agentId!==port.identity.agentId))return null;
+  return {events:feed.events,calendars:sources.calendars};
  }
  sourceSelection(sourceKey:string){if(this.value.savedAt!==null)return;const c=this.value.calendars.find(c=>calendarSourceKey(c)===sourceKey);if(!c||(!Number.isSafeInteger(c.selectionVersion)||c.selectionVersion<0))return;return{kind:'canonical-calendar-source',id:c.calendarId,revision:String(c.selectionVersion),accountId:c.grantId,sourceRevision:this.sourceRevisions.get(sourceKey)};}
  sourceHandle(key:string){const revision=this.sourceRevisions.get(key);return revision?'agent:'+revision:undefined;}

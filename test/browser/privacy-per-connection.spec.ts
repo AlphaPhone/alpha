@@ -148,8 +148,10 @@ for (const scenario of ['resident', 'remote', 'offline'] as const) test(`current
   await openSettings(page, 'AI provider');
   const provider = page.getByRole('dialog', {name: 'AI connection', exact: true});
   // This dialog reports the phone's saved provider independently of a remote/offline selection.
-  await expect(provider.getByRole('button', {name: 'Own keys', exact: true})).toHaveAttribute('aria-pressed', 'true');
-  await expect(provider.getByText('Voice off', {exact: true})).toBeVisible();
+  await expect(provider.getByRole('button', {name: 'Direct', exact: true})).toHaveAttribute('aria-pressed', 'true');
+  await expect(provider.getByText('Voice off', {exact: true})).toHaveCount(0);
+  // Direct is in use with keys this panel cannot manage: the tab offers the key form, never an empty panel.
+  await expect(provider.getByLabel('Voice key', {exact: true})).toHaveValue('');
   await assertNoInventedActivity(page);
   await provider.getByRole('button', {name: 'Close Account', exact: true}).click();
   // The slim Settings design delegates provider state to its dialog and exposes no old pages.
@@ -178,7 +180,8 @@ test('provider key never reaches current Settings, bridge payloads or test outpu
   const console: string[] = [];
   page.on('console', message => console.push(message.text()));
   await openSettings(page, 'AI provider');
-  await expect(page.getByText('Voice off', {exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog', {name: 'AI connection', exact: true}).getByRole('button', {name: 'Direct', exact: true})).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Voice off', {exact: true})).toHaveCount(0);
   await page.getByRole('button', {name: 'Close Account', exact: true}).click();
   await openSettings(page,'About');
   expect(await privacyContract(page)).toBe(REDACTION.resident);

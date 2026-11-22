@@ -94,6 +94,19 @@ public final class RendererRecoveryBudgetTest {
   Set<String> settingsOnly=Set.of("android.settings.SETTINGS");
   check("android.settings.SETTINGS".equals(RendererRecoveryBudget.homeChoiceAction(settingsOnly::contains)),"then Settings itself");
   check(RendererRecoveryBudget.homeChoiceAction(action->false)==null&&RendererRecoveryBudget.settingsAction(action->false)==null,"no stock handler shows no button");
+  // A native initialization failure is observable even when Capacitor catches it. Its diagnostic
+  // carries types/locations/public resource names, never private messages or source filenames.
+  IllegalStateException root=new IllegalStateException("private-token=https://private.invalid/key #0x7f080111 #0x7f080222");
+  root.setStackTrace(new StackTraceElement[]{new StackTraceElement("android.view.LayoutInflater","inflate","private-token.txt",42),new StackTraceElement("private.owner.PersonalClass","privateMethod","private-file.txt",7)});
+  RuntimeException wrapped=new RuntimeException("private-token and user@example.invalid",root);
+  wrapped.setStackTrace(new StackTraceElement[0]);
+  String report=RendererRecoveryBudget.startupFailure(0x7f0d0011,wrapped,id->{if(id==0x7f080111)return "ai.alphacompute.alphaphone:drawable/app_icon";throw new IllegalArgumentException("private mapper failure");});
+  check(report.contains("java.lang.IllegalStateException")&&report.contains("android.view.LayoutInflater.inflate:42"),"startup cause and framework location retained");
+  check(report.contains("ai.alphacompute.alphaphone:drawable/app_icon"),"only a resolved public resource name retained");
+  for(String secret:new String[]{"private-token","private.invalid","user@example","private-file","PersonalClass","private mapper","7f080222"})check(!report.contains(secret),"startup diagnostic disclosed "+secret);
+  IllegalStateException cycleA=new IllegalStateException(),cycleB=new IllegalStateException();cycleA.initCause(cycleB);cycleB.initCause(cycleA);
+  check(RendererRecoveryBudget.startupFailure(1,cycleA,id->null).length()<2048,"cyclic causes are bounded");
+  check(RendererRecoveryBudget.startupFailure(1,null,id->null).equals("layout=0x1"),"missing startup cause is explicit");
   System.out.println("PASS renderer recovery budget");
  }
 }

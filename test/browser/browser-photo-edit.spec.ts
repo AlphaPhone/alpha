@@ -27,8 +27,14 @@ test('browser photo rotation, crop and filter save a distinct copy with unchange
  const original=await seed(page);await openEditor(page);
  await page.getByRole('button',{name:'Rotate',exact:true}).click();
  await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Center crop',exact:true}).click();
- await expect(page.getByRole('button',{name:'Center crop',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','false');
+ await page.getByRole('button',{name:'Crop',exact:true}).click();
+ // The crop step: shape choices over the whole rotated photo, then Done keeps the area.
+ await page.getByRole('button',{name:'Square crop',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Square crop',exact:true})).toHaveAttribute('aria-pressed','true');
+ await page.screenshot({path:info.outputPath('crop-step.png'),animations:'disabled'});
+ await page.getByRole('button',{name:'Apply crop',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.getByRole('button',{name:'Mono filter',exact:true}).click();
  await expect(page.getByRole('button',{name:'Mono filter',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.screenshot({path:info.outputPath('edit-preview.png'),animations:'disabled'});
@@ -41,8 +47,85 @@ test('browser photo rotation, crop and filter save a distinct copy with unchange
   const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let colorDifference=0;for(let i=0;i<pixels.length;i+=4)colorDifference=Math.max(colorDifference,Math.abs(pixels[i]-pixels[i+1]),Math.abs(pixels[i+1]-pixels[i+2]));
   return {count:rows.length,original:await library.read({id:'1000'}),width:copy.width,height:copy.height,colorDifference};
  });
- expect(result).toMatchObject({count:2,width:92,height:185,original});expect(result.colorDifference).toBeLessThanOrEqual(3);
+ // A square of the 120x240 rotated photo.
+ expect(result).toMatchObject({count:2,width:120,height:120,original});expect(result.colorDifference).toBeLessThanOrEqual(3);
  await page.screenshot({path:info.outputPath('saved-copy.png'),animations:'disabled'});
+});
+/** The saved copy's size and how much of it is red (the seed's left half) versus green (its right half). */
+async function copyColours(page:Page){
+ return page.evaluate(async()=>{
+  const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');const rows=(await library.list()).items;
+  const copy=rows.find(row=>row.id!=='1000')!;const image=new Image();image.src=copy.image;await image.decode();
+  const canvas=document.createElement('canvas');canvas.width=copy.width;canvas.height=copy.height;const ctx=canvas.getContext('2d')!;ctx.drawImage(image,0,0);
+  const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let red=0,green=0;for(let i=0;i<pixels.length;i+=4){if(pixels[i]>150&&pixels[i+1]<120)red++;else if(pixels[i+1]>150&&pixels[i]<120)green++;}
+  const total=pixels.length/4;return {count:rows.length,width:copy.width,height:copy.height,red:red/total,green:green/total};
+ });
+}
+test('dragging a crop corner keeps the chosen area, and Rotate turns it with the photo',async({page},info)=>{
+ const original=await seed(page);await openEditor(page);
+ await page.getByRole('button',{name:'Crop',exact:true}).click();
+ const frame=page.locator('[data-alpha-crop-frame]'),image=page.locator('[data-alpha-crop-image]');
+ await expect(frame).toBeVisible();
+ // The editor's own controls wait while the crop step is open.
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Reset crop',exact:true})).toBeDisabled();
+ const box=(await image.boundingBox())!,corner=(await page.locator('[data-alpha-crop-handle="se"]').boundingBox())!;
+ // Drag the bottom-right corner to the middle: the left (red) half stays.
+ // Grab the handle just inside the photo (its outer half is clipped by the preview box).
+ await page.mouse.move(corner.x+corner.width/2-5,corner.y+corner.height/2-5);await page.mouse.down();
+ await page.mouse.move(box.x+box.width*.75,box.y+box.height*.75,{steps:4});
+ await page.mouse.move(box.x+box.width/2-5,box.y+box.height-5,{steps:4});await page.mouse.up();
+ const kept=await frame.boundingBox();
+ expect(Math.abs(kept!.width-box.width/2)).toBeLessThan(4);expect(Math.abs(kept!.height-box.height)).toBeLessThan(4);
+ await expect(page.getByRole('button',{name:'Reset crop',exact:true})).toBeEnabled();
+ await page.screenshot({path:info.outputPath('crop-dragged.png'),animations:'disabled'});
+ // Android Back closes only the crop step: the editor stays open and the marked area is dropped.
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
+ await expect(frame).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','false');
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Crop',exact:true}).click();await expect(frame).toBeVisible();
+ await page.mouse.move(corner.x+corner.width/2-5,corner.y+corner.height/2-5);await page.mouse.down();
+ await page.mouse.move(box.x+box.width*.75,box.y+box.height*.75,{steps:4});
+ await page.mouse.move(box.x+box.width/2-5,box.y+box.height-5,{steps:4});await page.mouse.up();
+ await page.getByRole('button',{name:'Apply crop',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','true');
+ // Rotate after cropping turns the kept area with the photo: still the red half, now upright.
+ await page.getByRole('button',{name:'Rotate',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Save copy',exact:true}).click();
+ await expect(page.getByText('Copy saved',{exact:true})).toBeVisible();
+ const result=await copyColours(page);
+ // A pointer drag lands within a pixel or two of the middle.
+ expect(result).toMatchObject({count:2,width:120});expect(Math.abs(result.height-120)).toBeLessThanOrEqual(3);
+ expect(result.red).toBeGreaterThan(.95);expect(result.green).toBeLessThan(.03);
+ expect(await page.evaluate(async()=>(await(await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary.read({id:'1000'})))).toEqual(original);
+});
+test('the crop area moves with the keyboard, and Cancel crop or the whole photo leaves no crop',async({page})=>{
+ await seed(page);await openEditor(page);
+ await page.getByRole('button',{name:'Crop',exact:true}).click();
+ // Focus moves into the crop step, and back to Crop when the step closes.
+ await expect(page.getByRole('button',{name:/^Crop area\./})).toBeFocused();
+ await page.getByRole('button',{name:'Square crop',exact:true}).click();
+ // Cancel crop drops the marked area: nothing changed, so there is nothing to save.
+ await page.getByRole('button',{name:'Cancel crop',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','false');
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toBeFocused();
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeDisabled();
+ // Done on the whole photo is no crop either.
+ await page.getByRole('button',{name:'Crop',exact:true}).click();await page.getByRole('button',{name:'Apply crop',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Crop',exact:true})).toHaveAttribute('aria-pressed','false');
+ await expect(page.getByRole('button',{name:'Save copy',exact:true})).toBeDisabled();
+ // Keyboard: a square on the 240x120 photo starts centred; arrow keys move it fully into the right (green) half.
+ await page.getByRole('button',{name:'Crop',exact:true}).click();await page.getByRole('button',{name:'Square crop',exact:true}).click();
+ const frame=page.getByRole('button',{name:/^Crop area\./});await frame.focus();
+ for(let step=0;step<20;step++)await page.keyboard.press('ArrowRight');
+ const box=(await page.locator('[data-alpha-crop-image]').boundingBox())!,kept=(await frame.boundingBox())!;
+ expect(Math.abs(kept.x+kept.width-(box.x+box.width))).toBeLessThan(2);
+ await page.getByRole('button',{name:'Apply crop',exact:true}).click();
+ await page.getByRole('button',{name:'Save copy',exact:true}).click();await expect(page.getByText('Copy saved',{exact:true})).toBeVisible();
+ const result=await copyColours(page);
+ expect(result).toMatchObject({count:2,width:120,height:120});expect(result.green).toBeGreaterThan(.95);expect(result.red).toBeLessThan(.02);
 });
 test('lost photo-copy response and reload recover the same durable receipt without another copy',async({page})=>{
  const original=await seed(page);await openEditor(page);
@@ -58,7 +141,7 @@ test('lost photo-copy response and reload recover the same durable receipt witho
   library.forgetEdit=async input=>{(window as any).copyFixture.acknowledgements++;return forget(input);};
  });
  await page.getByRole('button',{name:'Save copy',exact:true}).click();
- await expect(page.getByText('Copy outcome could not be checked. Use saved-copy recovery; no additional copy was created.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Couldn’t confirm the copy was saved. Check Photos before trying again.',{exact:true})).toBeVisible();
  const request=await page.evaluate(()=>(window as any).savedEdit);
  const unacknowledged=await page.evaluate(async request=>{
   const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');const f=(window as any).copyFixture;
@@ -149,7 +232,7 @@ for(const mode of ['failed','cancelled'])test(`photo copy waits for durable requ
  },mode);
  await page.getByRole('button',{name:'Save copy',exact:true}).click();
  if(mode==='cancelled'){await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseCopyAdmission)).toBe('function');await page.getByRole('button',{name:'Cancel edit',exact:true}).click();await page.getByRole('dialog',{name:'Close photo editor?',exact:true}).getByRole('button',{name:'Close editor',exact:true}).click();await page.evaluate(()=>(window as any).releaseCopyAdmission());}
- else await expect(page.getByText('Copy request could not be retained. Check saved-copy recovery before another save.',{exact:true})).toBeVisible();
+ else await expect(page.getByText('Couldn’t save a copy. Try again.',{exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/media-copy-intent.ts')).readMediaCopyIntent())).toBeNull();expect(await page.evaluate(()=>(window as any).copyDispatches)).toBe(0);expect(await page.evaluate(async()=>(await(await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary.list()).items.length)).toBe(1);
 });
 test('a late pending-request read cannot open an editor after Home',async({page})=>{
@@ -193,20 +276,59 @@ test('dirty edits require a discard decision and cancelled replacement preserves
  await expect(page.getByRole('button',{name:'Edit photo',exact:true})).toBeVisible();
 });
 
-test('viewer zoom, bounded pan, pinch and keyboard controls belong to the current photo',async({page})=>{
+test('photo zoom keeps controls hidden and the actions menu has labeled actions without zoom controls',async({page,browserName},info)=>{
  await seed(page);await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();
  const viewport=page.locator('[data-alpha-photo-viewport]'),image=page.locator('[data-alpha-photo-image]');
+ await page.evaluate(()=>document.documentElement.style.setProperty('--native-bottom-inset','24px'));
+ await expect.poll(()=>viewport.evaluate(element=>{
+  const backing=getComputedStyle(element.closest('.alpha-phone')!,'::after');
+  return {color:backing.backgroundColor,visible:parseFloat(backing.height)>0};
+ })).toEqual({color:'rgb(0, 0, 0)',visible:true});
+ const actions=page.getByLabel('Photo actions',{exact:true}), menu=page.locator('.photo-viewer-menu');
+ await actions.click();
+ await expect(menu.getByRole('button',{name:'Add to album',exact:true})).toHaveText('Add to album');
+ await expect(menu.getByRole('button',{name:/Zoom|Fit photo/})).toHaveCount(0);
+ await expect(menu.getByRole('status')).toHaveCount(0);
+ await page.screenshot({path:info.outputPath('clean-photo-menu.png'),animations:'disabled'});
+ await actions.click();
+ const chrome=page.locator('[data-alpha-photo-actions]');
+ await viewport.click({position:{x:200,y:350}});
+ await expect(chrome).toHaveCSS('opacity','0');
  await viewport.focus();await viewport.press('+');await expect(viewport).toHaveAttribute('aria-label',/Zoom 150 percent/);
  await viewport.press('+');await viewport.press('ArrowRight');await expect(image).toHaveCSS('transform','matrix(2, 0, 0, 2, -48, 0)');
  await viewport.press('0');await expect(image).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');
  await viewport.dblclick({position:{x:200,y:350}});await expect(viewport).toHaveAttribute('aria-label',/Zoom 250 percent/);await viewport.press('0');
- await viewport.dispatchEvent('pointerdown',{pointerId:11,pointerType:'touch',clientX:100,clientY:300,button:0});
- await viewport.dispatchEvent('pointerdown',{pointerId:12,pointerType:'touch',clientX:200,clientY:300,button:0});
- await viewport.dispatchEvent('pointermove',{pointerId:12,pointerType:'touch',clientX:300,clientY:300,button:0});
+ const touch=browserName==='chromium'?await page.context().newCDPSession(page):undefined;
+ if(touch)await touch.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:2});
+ type Contact={id:number;x:number;y:number};
+ let active:Contact[]=[];
+ async function sendTouch(type:'touchStart'|'touchMove'|'touchEnd',points:Contact[]){
+  if(touch){await touch.send('Input.dispatchTouchEvent',{type,touchPoints:points});return;}
+  const event={touchStart:'pointerdown',touchMove:'pointermove',touchEnd:'pointerup'}[type];
+  for(const {id,x,y} of type==='touchEnd'?active:points){
+   await viewport.dispatchEvent(event,{pointerId:id,pointerType:'touch',isPrimary:id===1,
+    button:0,buttons:type==='touchEnd'?0:1,clientX:x,clientY:y});
+  }
+  active=points;
+ }
+ await sendTouch('touchStart',[{id:1,x:150,y:350},{id:2,x:250,y:350}]);
+ await sendTouch('touchMove',[{id:1,x:100,y:350},{id:2,x:300,y:350}]);
+ await sendTouch('touchEnd',[]);
  await expect(viewport).toHaveAttribute('aria-label',/Zoom 200 percent/);
- await viewport.dispatchEvent('pointerup',{pointerId:11,pointerType:'touch',clientX:100,clientY:300,button:0});
- await viewport.dispatchEvent('pointerup',{pointerId:12,pointerType:'touch',clientX:300,clientY:300,button:0});
- await page.getByLabel('Photo actions',{exact:true}).click();await page.getByRole('button',{name:'Fit photo',exact:true}).click();await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
+ await page.clock.install();
+ for(let tap=0;tap<2;tap++){
+  await sendTouch('touchStart',[{id:1,x:200,y:350}]);
+  await sendTouch('touchEnd',[]);
+ }
+ await page.clock.runFor(400);
+ await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
+ await expect(chrome).toHaveCSS('opacity','0');
+ await expect(menu).not.toHaveAttribute('open','');
+ await expect(page.getByRole('dialog',{name:'Add to album',exact:true})).toHaveCount(0);
+ await touch?.detach();
+ await viewport.click({position:{x:200,y:350}});
+ await page.clock.runFor(400);
+ await expect(chrome).toHaveCSS('opacity','1');
  await page.getByRole('button',{name:'Back from photo',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();await expect(viewport).toHaveAttribute('aria-label',/Zoom 100 percent/);
 });
 
@@ -214,6 +336,6 @@ test('unmatched agent photo selection keeps the visible selection and partial se
  await seed(page);await page.getByRole('button',{name:'Photos',exact:true}).click();await expect(page.getByRole('button',{name:/^Photo, /})).toBeVisible();
  const select=(ids:string[])=>page.evaluate(async ids=>{const {deviceLibraryAgent}=await import('/src/prototype/photo-library-adapter.ts');try{return await deviceLibraryAgent()!.runView({type:'photo_library_select',ids} as never,new AbortController().signal);}catch(error){return {refused:(error as Error).message};}},ids);
  expect(await select(['1000'])).toEqual({kind:'photo_library_select',selected:1,missing:0});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
- expect(await select(['9999'])).toEqual({refused:'None of those items are in Photos. The current selection was kept.'});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
+ expect(await select(['9999'])).toEqual({refused:'None of those items are in Photos.'});await expect(page.getByText('1 selected',{exact:true})).toBeVisible();
  expect(await select(['1000','9999'])).toEqual({kind:'photo_library_select',selected:1,missing:1});
 });

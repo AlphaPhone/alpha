@@ -19,6 +19,9 @@ test('Files returns through nested preview and folder without exposing covered c
  await page.goto('/?mode=dev');await page.evaluate(async()=>{const{registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Focus remains with the selected file.'],'focus.txt',{type:'text/plain'}));});
  await page.getByRole('button',{name:'Files',exact:true}).click();const folder=page.getByRole('button',{name:'Internal storage',exact:true});const folderText=(await folder.textContent())!;await folder.click();
  const file=page.getByRole('button',{name:'Open focus.txt',exact:true});await file.click();
- await page.getByRole('button',{name:'Back',exact:true}).click();await expect(file).toBeFocused();
- await page.getByRole('button',{name:'Back',exact:true}).click();await expect(page.getByRole('button',{name:'Internal storage',exact:true}).filter({hasText:folderText})).toBeFocused();
+ const previewBack=page.locator('[data-alpha-subview="files-preview"]').getByRole('button',{name:'Back',exact:true});
+ await expect(previewBack).toBeFocused();
+ await previewBack.click();await expect(file).toBeFocused();
+ const folderBack=page.locator('[data-alpha-subview="files-folder"]').getByRole('button',{name:'Back',exact:true});
+ await folderBack.click();await expect(page.getByRole('button',{name:'Internal storage',exact:true}).filter({hasText:folderText})).toBeFocused();
 });

@@ -6,7 +6,7 @@
  * guest nor change whether an event is all day. The review says so in words, and names the calendar
  * and account that will be written, so the person confirming reads every consequence of Confirm.
  */
-import {formatDeviceRecordDateTime} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/device-record-presentation.ts';
+import {formatDeviceRecordDateTime} from '../ui/device-actions/device-record-presentation';
 type Fields={title:string;description:string;location:string;start:string;end:string;timeZone:string};
 type Existing={allDay?:boolean;who?:string[];seriesId?:string};
 export type CalendarReviewSource={name:string;account:string};

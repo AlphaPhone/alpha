@@ -18,7 +18,7 @@ const model = 'CloudConnectionNotices';
 const modelPath = 'specs/quint/application/'+model+'.qnt';
 const controller = 'apps/app/src/runtime/connection-ui.tsx';
 const style = 'apps/app/src/runtime/connection-ui.css';
-const kinds = ['plan', 'sign-in'];
+const kinds = ['plan'];
 const expect = baseExpect.configure({timeout:15000});
 const region = (page, kind) => page.getByRole('region', {name:'Eliza Cloud '+kind+' notice', exact:true});
 const noticeButton = (page, kind, name) => region(page, kind).getByRole('button', {name, exact:true});
@@ -31,17 +31,29 @@ async function observe(page) {
     return {
       plan: !!snapshot.session && !!snapshot.cloudAccount && snapshot.residentPlanNotice === 'needs-plan',
       signIn: !!snapshot.session && c.residentPlanSettings().keyExpiring,
-      covered: (document.documentElement.dataset.activeView ?? 'home') !== 'home' || !!document.querySelector('[data-alpha-layer="conversation"][aria-hidden="false"]'),
+      accountOpen: snapshot.open,
+      // The Account dialog itself shows the key's expiry with its Renew control.
+      accountExpiry: (() => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node => node.getAttribute('aria-label') === 'Account' || node.querySelector('h1,h2')?.textContent.trim() === 'Account');
+        const shown = node => !!node && node.getClientRects().length > 0;
+        return shown(dialog) && [...dialog.querySelectorAll('*')].some(node => /^Expires /.test(node.textContent.trim()) && shown(node))
+          && [...dialog.querySelectorAll('button')].some(button => button.textContent.trim() === 'Renew' && shown(button));
+      })(),
+      covered: snapshot.open || (document.documentElement.dataset.activeView ?? 'home') !== 'home' || !!document.querySelector('[data-alpha-layer="conversation"][aria-hidden="false"]'),
       compact: innerWidth === 360 && innerHeight === 480,
       largeText: Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale')) >= 1.5,
     };
   });
-  assert.ok(input.plan && input.signIn, 'The resident still requires both notices at the same account boundary');
+  assert.ok(input.plan && input.signIn, 'The plan admission and Account key-expiry requirement both remain active');
   const mounted = notices.map(notice => notice.kind);
   const order = notices.filter(notice => notice.visible).map(notice => notice.kind);
   return {
     's.required': qset(kinds),
-    's.dismissed': qset(kinds.filter(kind => !mounted.includes(kind))),
+    's.keyExpiring': input.signIn,
+    's.accountExpiry': input.accountExpiry,
+    // Account temporarily unmounts Home notices; closing it proves dismissal survived.
+    ...(!input.accountOpen ? {'s.dismissed': qset(kinds.filter(kind => !mounted.includes(kind)))} : {}),
+    's.accountOpen': input.accountOpen,
     's.covered': input.covered,
     's.compact': input.compact,
     's.largeText': input.largeText,
@@ -73,18 +85,20 @@ async function proveHitTargets(page, {short = false} = {}) {
 }
 
 async function settingsRoundTrip(page, t) {
+  const mounted = await region(page, 'plan').count();
   for (const entry of ['Settings', 'Inbox', 'Open conversation']) {
     await page.getByRole('button', {name:entry, exact:true}).click();
     await expect(stack(page)).toBeHidden();
     checkpoint(t, 'Actual '+entry+' suspends passive notices without dismissing them', call('coverScreen'), await observe(page));
     await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable:true})));
-    await expect(stack(page)).toBeVisible();
+    if (mounted) await expect(stack(page)).toBeVisible();
+    else await expect(stack(page)).toHaveCount(0);
     checkpoint(t, 'Actual Back returns Home to the unchanged owned notices', call('returnHome'), await observe(page));
   }
 }
 
 async function exercise(page, short) {
-  const t = trace(short ? 'short_large_text_plan_then_sign_in' : 'settings_sign_in_then_plan', await observe(page));
+  const t = trace(short ? 'short_large_text_plan_account_expiry' : 'settings_plan_account_expiry', await observe(page));
   if (short) {
     await page.setViewportSize({width:360, height:480});
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement)
@@ -103,10 +117,14 @@ async function exercise(page, short) {
     assert.ok(await font() >= normal * 1.49, 'The notice text itself grew');
     checkpoint(t, 'The actual browser display adapter enlarges text', call('largeText'), await observe(page));
     const box = await stack(page).boundingBox();
-    assert.ok(box && await stack(page).evaluate(node => node.scrollHeight > node.clientHeight), 'The shared notice stack has its own scroll room');
-    await page.mouse.move(box.x + box.width / 2, box.y + Math.min(20, box.height / 2));
-    await page.mouse.wheel(0, box.height);
-    await expect.poll(() => stack(page).evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    assert.ok(box, 'The plan notice remains measurable');
+    const overflowing = await stack(page).evaluate(node => node.scrollHeight > node.clientHeight);
+    if (overflowing) {
+      await page.mouse.move(box.x + box.width / 2, box.y + Math.min(20, box.height / 2));
+      await page.mouse.wheel(0, box.height);
+      await expect.poll(() => stack(page).evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    }
+
   }
   await proveHitTargets(page, {short});
   if (!short) {
@@ -126,13 +144,32 @@ async function exercise(page, short) {
     await expect(region(page, kind)).toHaveCount(0);
     checkpoint(t, 'Touch dismisses only the exact '+kind+' notice', call('dismiss', kind), await observe(page));
   };
-  const [first, second] = short ? kinds : kinds.slice().reverse();
-  await dismiss(first);
-  await expect(region(page, second)).toBeVisible();
-  await settingsRoundTrip(page, t);
-  await proveHitTargets(page, {short});
-  await dismiss(second);
+  // Expiry stays in Account rather than publishing a second passive Home banner.
+  await page.evaluate(() => window.quintNoticeController.openPlan());
+  const account = page.getByRole('dialog', {name:'Account', exact:true});
+  await expect(account).toBeVisible();
+  await expect(account.getByText(/^Expires /)).toBeVisible();
+  await expect(account.getByRole('button', {name:'Renew', exact:true})).toBeVisible();
+  checkpoint(t, 'Account owns the live expiry and renewal controls', call('openAccount'), await observe(page));
+  await account.getByRole('button', {name:'Close Account', exact:true}).click();
+  await expect(region(page, 'plan')).toBeVisible();
+  checkpoint(t, 'Closing Account restores only the plan notice', call('closeAccount'), await observe(page));
+  await expect(region(page, 'sign-in')).toHaveCount(0);
+  await dismiss('plan');
   await expect(stack(page)).toHaveCount(0);
+  // Account replaces the chooser's Home branch; the dismissal must survive opening and closing it.
+  await page.evaluate(() => window.quintNoticeController.openPlan());
+  await expect(account).toBeVisible();
+  await expect(account.getByText(/^Expires /)).toBeVisible();
+  checkpoint(t, 'Account opens over the dismissed plan notice', call('openAccount'), await observe(page));
+  await account.getByRole('button', {name:'Close Account', exact:true}).click();
+  await expect(account).toHaveCount(0);
+  await expect(region(page, 'plan')).toHaveCount(0);
+  await expect(stack(page)).toHaveCount(0);
+  checkpoint(t, 'Closing Account keeps the plan notice dismissed', call('closeAccount'), await observe(page));
+  await settingsRoundTrip(page, t);
+  await expect(region(page, 'sign-in')).toHaveCount(0);
+
   return t;
 }
 
@@ -210,7 +247,7 @@ async function checkCloudConnectionNotices(extraSources = []) {
           window.quintNoticeController = connectionController;
         });
         await expect(region(page, 'plan')).toBeVisible({timeout:scaledTimeout(120000)});
-        await expect(region(page, 'sign-in')).toBeVisible();
+        await expect(region(page, 'sign-in')).toHaveCount(0);
         traces.push(await exercise(page, short));
         const effects = await page.evaluate(() => window.planFixture.calls.filter(call =>
           ['configureCloudProvider','openExternal','startEmail','verifyEmail'].includes(call.method) || call.path?.endsWith('/redeem')));
@@ -224,7 +261,7 @@ async function checkCloudConnectionNotices(extraSources = []) {
     assert.deepEqual([...loaded].sort(), [...watched].sort());
     return await checkTraces({model, modelPath, sources, driverHashes, traces, scope:'bounded-orchestration', assumptions:[
       'The real flag-off Alpha, connection chooser, Settings shell and stylesheet run in Chromium with a synthetic signed plan and near-expiry credential. CSS hit owners and scrolling are checked in the actual viewport.',
-      'One stable account and key per trace. Dismissal projects from the exact mounted notice disappearing while its upstream requirement remains. Foreground app or conversation suspension retains the mounted notice, and returning Home restores it.',
+      'One stable account and near-expiry key per trace. Only plan admission publishes a passive Home notice; key expiry and Renew remain in the actual Account dialog. Dismissal removes that exact plan card while both upstream requirements remain. Foreground app, Account or conversation suspension retains its dismissal state.',
       'The short 360×480 viewport uses the actual browser text sizing adapter as a controlled 150% text input. Native WebView text zoom, billing, credential renewal and subscription transitions are separate.',
     ]});
   } finally {
@@ -234,9 +271,9 @@ async function checkCloudConnectionNotices(extraSources = []) {
   }
 }
 
-test('mounted Cloud notices refine independent dismissal and Settings ownership', {timeout:scaledTimeout(600000)}, async () => {
+test('mounted Cloud plan notices preserve Account expiry and Settings ownership', {timeout:scaledTimeout(600000)}, async () => {
   const receipt = await checkCloudConnectionNotices(['test/quint-cloud-connection-notices.test.mjs']);
   assert.equal(receipt.traces, 2);
-  assert.equal(receipt.observedFields.length, 8);
+  assert.equal(receipt.observedFields.length, 11);
   assert.ok(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound);
 });

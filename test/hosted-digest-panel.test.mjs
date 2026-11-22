@@ -18,6 +18,8 @@ out.present=d.digestMissingCalendars(['home'],[{id:'home'},{id:'other'}]);
 out.unbound=[d.digestTapNotice('other-account',false),d.digestTapNotice('unavailable',false)];
 out.bound=[d.digestTapNotice('other-account',true),d.digestTapNotice('unavailable',true)];
 out.discard=[d.digestPendingDiscardable({phase:'review'}),d.digestPendingDiscardable({phase:'dispatched'}),d.digestPendingDiscardable({})];
+out.zones=d.digestZoneChoices('Asia/Tokyo','America/New_York',['Africa/Abidjan','Asia/Tokyo','Not/AZone']);
+out.zonesDefault=d.digestZoneChoices('America/New_York','America/New_York');
 console.log(JSON.stringify(out));`;
 const out=JSON.parse(execFileSync(process.execPath,['-e',script],{cwd:root,encoding:'utf8',timeout:scaledTimeout(60000)}));
 test('pause and resume keep the saved time, zone and source',()=>{
@@ -34,4 +36,8 @@ test('a result tap before the digest binding exists opens nothing',()=>{
 });
 test('only a request still in review can be discarded; dispatched and older records stay Retry-only',()=>{
  assert.deepEqual(out.discard,[true,false,false]);
+});
+test('time zones are a pick list: chosen and device zones first, UTC kept, invalid names dropped',()=>{
+ assert.deepEqual(out.zones,['Asia/Tokyo','America/New_York','Africa/Abidjan','UTC']);
+ assert.equal(out.zonesDefault[0],'America/New_York');assert.ok(out.zonesDefault.includes('UTC'));assert.ok(out.zonesDefault.length>100);
 });

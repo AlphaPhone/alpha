@@ -74,7 +74,7 @@ function setup(number, simpleCore = false) {
   const googleHost='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
   const googleBytes=fs.readFileSync(path.join(root,'vendor/eliza',googleHost)),googleHash=digest(googleBytes);
   write(path.join(root,'.eliza/client-features',googleHost),googleBytes);
-  json(path.join(root,'.eliza/client-features/.source.json'),{baseCommit:pin,projectionVersion:14,
+  json(path.join(root,'.eliza/client-features/.source.json'),{baseCommit:pin,projectionVersion:15,
     sourceFiles:{[googleHost]:googleHash},files:{[googleHost]:googleHash}});
   json(path.join(sdk, '.alpha-runtime-source.json'), {base: pin, patches: []});
   write(source, fixtureSource(1));

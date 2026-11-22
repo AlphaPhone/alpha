@@ -1,6 +1,7 @@
 import {localDraftRow} from './inbox-draft-navigation';
 import {test,expect} from '@playwright/test';
-test.beforeEach(async({context})=>{await context.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));});
+import {restoreOfflineProfileAfterSetup} from './app-navigation';
+test.beforeEach(async({context})=>{await context.addInitScript(restoreOfflineProfileAfterSetup);});
 async function retained(page:any,expected:{body:string;toQ?:string;cc?:string[]},owner='owner-a'){
  await expect.poll(()=>page.evaluate(async owner=>{
   const binding=JSON.stringify(['inbox-unsaved','app',JSON.stringify(['production',owner,'','grant'])]);
@@ -23,6 +24,16 @@ async function setup(page:any,owner='owner-a'){
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
 }
 async function begin(page:any){await setup(page);await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Retained subject');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Unsent local body');await retained(page,{body:'Unsent local body'});}
+async function beginLegacy(page:any){
+ await setup(page);
+ await page.evaluate(()=>{
+  const owner=JSON.stringify(['production','owner-a','','grant']);
+  const draft={version:1,id:'legacy-draft',revision:'legacy-revision',owner,to:[],subject:'Retained subject',body:'Unsent local body'};
+  localStorage.setItem('test-inbox-saved',JSON.stringify({['inbox-drafts:v1:'+owner]:draft}));
+ });
+ await setup(page);
+ await (await localDraftRow(page,'Local draft, Retained subject')).click();
+}
 test('update readback drains a retired Inbox editor without dispatching mail',async({page})=>{
  await page.goto('/');
  const body=await page.evaluate(async()=>{
@@ -45,31 +56,51 @@ test('unsaved body and incomplete address survive reload without provider writes
  await begin(page);await page.getByRole('textbox',{name:'To',exact:true}).fill('still-typing@');await page.getByRole('button', {name: 'Cc and Bcc', exact: true}).click();
   await page.getByRole('textbox', {name: 'Cc', exact: true}).fill('unfinished');await retained(page,{body:'Unsent local body',toQ:'still-typing@',cc:['unfinished']});await setup(page);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');await expect(page.getByRole('textbox',{name:'To',exact:true})).toHaveValue('still-typing@');await expect(page.getByRole('textbox',{name:'Cc',exact:true})).toHaveValue('unfinished');expect(await page.evaluate(()=>(window as any).emailRecoveryFixture.mutations)).toBe(0);
 });
-test('edits after explicit Save recover separately and clear after the next local save',async({page})=>{
- await begin(page);await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Saved locally on this device'})).toBeVisible();await page.getByRole('textbox',{name:'Message',exact:true}).fill('Later unsaved body');await retained(page,{body:'Later unsaved body'});await setup(page);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Later unsaved body');await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Saved locally on this device'})).toBeVisible();await setup(page);await expect(page.getByRole('button',{name:'Resume unsaved email',exact:true})).toHaveCount(0);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Later unsaved body');
+test('edits made to a legacy saved email recover and move to Drafts when the user goes Back',async({page})=>{
+ await beginLegacy(page);await page.getByRole('textbox',{name:'Message',exact:true}).fill('Later unsaved body');await retained(page,{body:'Later unsaved body'});await setup(page);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Later unsaved body');await page.getByRole('button',{name:'Back from draft',exact:true}).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);await setup(page);await expect(page.getByRole('button',{name:'Resume unsaved email',exact:true})).toHaveCount(0);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Later unsaved body');
 });
 test('retained edits remain isolated across Cloud owners',async({page})=>{
  await begin(page);await setup(page,'owner-b');await expect(page.getByRole('button',{name:'Resume unsaved email',exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Compose',exact:true}).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Owner B body');await retained(page,{body:'Owner B body'},'owner-b');await setup(page);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
 });
 test('restored edits cannot replace a newer explicitly saved draft',async({page})=>{
- await begin(page);await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Saved locally on this device'})).toBeVisible();await page.getByRole('textbox',{name:'Message',exact:true}).fill('Older unsaved edit');await retained(page,{body:'Older unsaved edit'});await page.evaluate(()=>{const data=JSON.parse(localStorage.getItem('test-inbox-saved')!);const key=Object.keys(data)[0];data[key].revision=crypto.randomUUID();data[key].body='Newer explicitly saved body';localStorage.setItem('test-inbox-saved',JSON.stringify(data));});await setup(page);await (await localDraftRow(page)).click();await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByRole('button',{name:'Use latest saved draft',exact:true})).toBeVisible();expect(await page.evaluate(()=>Object.values<any>(JSON.parse(localStorage.getItem('test-inbox-saved')!))[0].body)).toBe('Newer explicitly saved body');page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Use latest saved draft',exact:true}).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Newer explicitly saved body');
+ await beginLegacy(page);await page.getByRole('textbox',{name:'Message',exact:true}).fill('Older unsaved edit');await retained(page,{body:'Older unsaved edit'});await page.evaluate(()=>{const data=JSON.parse(localStorage.getItem('test-inbox-saved')!);const key=Object.keys(data)[0];data[key].revision=crypto.randomUUID();data[key].body='Newer explicitly saved body';localStorage.setItem('test-inbox-saved',JSON.stringify(data));});await setup(page);await (await localDraftRow(page)).click();await page.getByRole('button',{name:'Back from draft',exact:true}).click();await expect(page.getByRole('button',{name:'Use latest saved draft',exact:true})).toBeVisible();expect(await page.evaluate(()=>Object.values<any>(JSON.parse(localStorage.getItem('test-inbox-saved')!))[0].body)).toBe('Newer explicitly saved body');await page.getByRole('button',{name:'Use latest saved draft',exact:true}).click();await page.getByRole('dialog',{name:'Discard these email edits?',exact:true}).getByRole('button',{name:'Discard edits',exact:true}).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Newer explicitly saved body');
 });
 test('competing windows require review before replacing retained edits',async({page,context})=>{
  await begin(page);const other=await context.newPage();await setup(other);await (await localDraftRow(other)).click();await other.getByRole('textbox',{name:'Message',exact:true}).fill('Newer retained body');await retained(other,{body:'Newer retained body'});await page.getByRole('textbox',{name:'Message',exact:true}).fill('My conflicting body');await expect(page.getByRole('button',{name:'Restore my edits',exact:true})).toBeVisible();await page.getByRole('button',{name:'Restore my edits',exact:true}).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Newer retained body');
 });
-test('discard removes the retained copy without creating provider effects',async({page})=>{
+test('Back saves the retained email locally without sending or opening a confirmation',async({page})=>{
  await begin(page);
- const discard=page.getByRole('button',{name:'Discard draft',exact:true});
- await discard.focus();
- await discard.press('Enter');
- const review=page.getByRole('dialog',{name:'Discard draft?',exact:true});
- await expect(review).toHaveAttribute('aria-modal','true');
- await expect(review.getByRole('button',{name:'Keep draft',exact:true})).toBeFocused();
+ await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Discard draft?'})).toHaveCount(0);
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);
- await page.keyboard.press('Escape');
- await expect(review).toHaveCount(0);
- await expect(discard).toBeFocused();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');await discard.click();await review.getByRole('button',{name:'Discard draft',exact:true}).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);await setup(page);await expect(page.getByRole('button',{name:'Resume unsaved email',exact:true})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).emailRecoveryFixture.mutations)).toBe(0);
+ await setup(page);
+ await (await localDraftRow(page,'Local draft, Retained subject')).click();
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
+ expect(await page.evaluate(()=>(window as any).emailRecoveryFixture.mutations)).toBe(0);
+});
+test('a saved local draft is deleted from Drafts only after confirmation',async({page})=>{
+ await begin(page);await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ await setup(page);
+ const row=await localDraftRow(page,'Local draft, Retained subject');
+ const action=async(name:string)=>{
+  await page.getByLabel('Mail options',{exact:true}).click();
+  await page.getByRole('menuitem',{name,exact:true}).click();
+ };
+ await expect(row).toBeVisible();
+ await action('Select drafts');
+ await page.getByRole('checkbox',{name:/Retained subject/}).click();
+ await action('Delete drafts');
+ const dialog=page.getByRole('dialog',{name:'Delete 1 draft?',exact:true});
+ await dialog.getByRole('button',{name:'No',exact:true}).click();
+ await expect(dialog).toHaveCount(0);
+ await action('Delete drafts');
+ await dialog.getByRole('button',{name:'Yes',exact:true}).click();
+ await expect(page.getByRole('checkbox',{name:/Retained subject/})).toHaveCount(0);
+ await setup(page);
+ await expect(await localDraftRow(page,'Local draft, Retained subject')).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Resume unsaved email',exact:true})).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).emailRecoveryFixture.mutations)).toBe(0);
 });
 test('damaged recovery copy can reset without deleting the explicitly saved draft',async({page})=>{
- await begin(page);await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Saved locally on this device'})).toBeVisible();await page.getByRole('textbox',{name:'Message',exact:true}).fill('Later edit');await retained(page,{body:'Later edit'});await page.evaluate(async()=>{const owner=JSON.stringify(['production','owner-a','','grant']),binding=JSON.stringify(['inbox-unsaved','app',owner]);const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(binding))),n=>n.toString(16).padStart(2,'0')).join('');const {BrowserJsonDomainDocument}=await import('/src/browser/json-domain-document.ts');await new BrowserJsonDomainDocument('alpha.browser.inbox-drafts:v1:unsaved:'+hash).editJson((row:any)=>({...row,text:'{"damaged":true}'}));});await setup(page);await (await localDraftRow(page,'Local draft, Recover email edits')).click();const recovery=page.getByRole('dialog',{name:'Email edit recovery'});await recovery.getByRole('button',{name:'Reset app email edits',exact:true}).click();await Promise.all([page.waitForEvent('load'),recovery.getByRole('button',{name:'Confirm email edits reset',exact:true}).click()]);await setup(page);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
+ await beginLegacy(page);await page.getByRole('textbox',{name:'Message',exact:true}).fill('Later edit');await retained(page,{body:'Later edit'});await page.evaluate(async()=>{const owner=JSON.stringify(['production','owner-a','','grant']),binding=JSON.stringify(['inbox-unsaved','app',owner]);const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(binding))),n=>n.toString(16).padStart(2,'0')).join('');const {BrowserJsonDomainDocument}=await import('/src/browser/json-domain-document.ts');await new BrowserJsonDomainDocument('alpha.browser.inbox-drafts:v1:unsaved:'+hash).editJson((row:any)=>({...row,text:'{"damaged":true}'}));});await setup(page);await (await localDraftRow(page,'Local draft, Recover email edits')).click();const recovery=page.getByRole('dialog',{name:'Email edit recovery'});await recovery.getByRole('button',{name:'Reset app email edits',exact:true}).click();await Promise.all([page.waitForEvent('load'),recovery.getByRole('button',{name:'Confirm email edits reset',exact:true}).click()]);await setup(page);await (await localDraftRow(page)).click();await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent local body');
 });

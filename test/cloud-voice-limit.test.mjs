@@ -1,7 +1,8 @@
 // Cloud speech HTTP 429 (voice-http-429): the native plugin and the development browser route carry
 // only its retry facts (limit code, wait, reset); cloudVoiceFailure maps them to plan-limit wording
 // with the retry time, keeps the recording, and records the shared lastLimit for the same account.
-// Real cloud-voice source with stub ports; the shared readServiceLimit is the projected SDK.
+// Real cloud-voice source with stub ports; the shared readServiceLimit is the projected SDK and
+// retryDuration is Alpha's subscription presentation (apps/app/src/ui/cloud).
 // This is not Cloud, provider, APK or device evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,6 +13,7 @@ import {tsImport} from './support/ts-import.mjs';
 
 const limitModule=await tsImport(new URL('../apps/app/src/runtime/cloud-voice-limit.ts',import.meta.url).href,{parentURL:import.meta.url});
 const sdk=await tsImport(new URL('../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts',import.meta.url).href,{parentURL:import.meta.url});
+const presentation=await tsImport(new URL('../apps/app/src/ui/cloud/subscription-presentation.ts',import.meta.url).href,{parentURL:import.meta.url});
 const {readCloudVoiceLimit,cloudVoiceLimitOf}=limitModule;
 const now=Date.UTC(2026,9,28,12);
 const SENTINEL='PRIVATE_PROVIDER_BODY_SENTINEL';
@@ -25,7 +27,7 @@ function loadCloudVoice(f={}){
    noteCloudServiceLimit:(limit,sessionId)=>{notes.push({limit,sessionId});return true;}},
   document:{hidden:false,addEventListener(){},removeEventListener(){}},AbortController,DOMException,Date,markTtsPlaybackStarted(){},markTtsPlaybackEnded(){},
   playOwnedSpeech:async(_native,_signal,prepare)=>{await prepare('request');},
-  cloudVoiceLimitOf,readServiceLimit:sdk.readServiceLimit,retryDuration:sdk.retryDuration,cloudServiceName:()=>'Eliza Cloud'};
+  cloudVoiceLimitOf,readServiceLimit:sdk.readServiceLimit,retryDuration:presentation.retryDuration,cloudServiceName:()=>'Eliza Cloud'};
  const source=fs.readFileSync('apps/app/src/runtime/cloud-voice.ts','utf8').replace(/^import [^;]*;\n/gm,'').replaceAll('export async function','async function').replaceAll('export function','function').replaceAll('export type','type');
  vm.runInNewContext('{'+stripTypeScriptTypes(source,{mode:'strip'})+';globalThis.failure=cloudVoiceFailure;globalThis.serviceLimit=cloudVoiceServiceLimit;globalThis.create=createCloudVoice;}',box);
  return {box,notes};

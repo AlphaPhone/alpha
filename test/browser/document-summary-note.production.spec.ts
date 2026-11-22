@@ -17,7 +17,7 @@ import {returnToApps} from './app-navigation';
 // runtime, a model answer, Eliza Cloud or a device, and no document, account or note is real.
 import { test, expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, openYourAgent, type FlagOffDocument } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, type FlagOffDocument } from './flag-off-android';
 
 const contents = 'Public fact: twelve raised beds.\nPRIVATE OMIT: do not send this line.';
 const excerpt = 'Public fact: twelve raised beds.';
@@ -37,10 +37,12 @@ async function askAboutDocument(page: Page) {
   await button(page, 'Files').click();
   await button(page, 'Documents').click();
   await button(page, 'Open garden-report.txt').click();
-  await expect(page.getByText('PRIVATE OMIT: do not send this line.', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-alpha-files-text]')).toHaveText(contents);
   // Documents lists the file from storage; opening it selected that one path, and nothing was sent.
   expect(await harness(page, f => f.documents.picks)).toEqual([{ action: 'files', path: 'Documents/garden-report.txt' }]);
+  await button(page, 'File actions').click();
   await button(page, 'Ask Alpha').click();
+  await page.getByRole('button', { name: /^Edit excerpt from / }).click();
   const question = page.getByRole('dialog', { name: 'Ask about selected content' });
   await expect(question.getByRole('textbox', { name: 'Content excerpt' })).toHaveValue(contents);
   await expect(question.getByRole('checkbox', { name: 'Link source' })).toBeChecked();
@@ -100,13 +102,10 @@ test('J03 on Android: a picked document, a trimmed question and the resident ans
   await expect(page.getByRole('region', { name: 'Notes' }).getByRole('button', { name: /^Open (?!Trash$)/ })).toHaveCount(1);
   await button(page, 'Open Garden summary').click();
   await button(page, 'Attachment').click();
-  const source = page.getByRole('dialog', { name: 'Note source document' });
-  await expect(source).toContainText('garden-report.txt');
-  // The simplified source details show type/size; retained and reopened bytes are checked by SHA below.
-  await expect(source.getByRole('region', { name: 'Source details' })).toContainText('Text file · 1 KB');
-  await source.getByRole('button', { name: 'Open linked source', exact: true }).click();
-  await expect(source.getByRole('status')).toHaveText('Opened garden-report.txt.');
-  expect(await harness(page, f => f.documents.opened)).toEqual([{ reference: saved[0].documentSource.reference, sha256, size: Buffer.byteLength(contents), mimeType: 'text/plain' }]);
+  await expect.poll(() => harness(page, f => f.documents.opened)).toEqual([
+    { reference: saved[0].documentSource.reference, sha256, size: Buffer.byteLength(contents), mimeType: 'text/plain' },
+  ]);
+  await expect(page.getByRole('dialog', { name: 'Note source document' })).toHaveCount(0);
   expect(await savedNotes(page)).toEqual(saved);
   expect(await harness(page, f => f.streams)).toBe(0);
   await expectNoDevelopmentSurface(page);
@@ -125,11 +124,9 @@ test('J03 on Android: a resident session that changes before Save withdraws the 
   await returnToApps(page);
   await askAboutDocument(page);
   await expect(page.getByRole('button', { name: /^Review summary note/ })).toHaveCount(1);
-  // The resident agent is reconnected from Settings: a new verified session.
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  const connection = await openYourAgent(page);
-  await connection.getByRole('button', { name: 'Reconnect agent', exact: true }).click();
-  await expect.poll(() => harness(page, f => f.calls.filter((call: string) => call === 'Agent.start').length), { timeout: 30_000 }).toBe(2);
+  // Reloading opens a new verified session against the retained conversation.
+  await page.reload();
+  await expect.poll(() => harness(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await button(page, 'Open conversation').click();
   // The restored conversation keeps the answer; the review bound to the earlier session is gone.

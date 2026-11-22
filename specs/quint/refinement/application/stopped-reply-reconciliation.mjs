@@ -31,7 +31,7 @@ function compile() {
   const stop = between('const STOPPED_REPLY_CHECK_MS =', 'async function conversationList(').replace(/^export /gm, '');
   const send = between('  async send(text:', '\n  },\n};');
   return new vm.Script(stripTypeScriptTypes(
-    key + '\n' + stop + '\nconst connectionController = {' + send + '\n}};\n' +
+    key + '\n' + stop + '\nconst connectionController = {getAppRecordClient: () => null,' + send + '\n}};\n' +
     'Object.assign(globalThis, {connectionController, conversationKey, scheduleStoppedReply, cancelStoppedReply,' +
     'hasCheck: () => stoppedReply !== null});',
     {mode: 'strip'},
@@ -251,7 +251,7 @@ export async function checkStoppedReplyReconciliation() {
     ],
     extraSources: [path, sourcePath, manifestPath],
     run: async () => {
-      const {findStoppedUserTurn} = await import('../../../../.eliza/client-features/packages/ui/src/api/conversation-turn-controller.ts');
+      const {findStoppedUserTurn} = await import('../../../../apps/app/src/ui/api/conversation-turn-controller.ts');
       const script = compile();
       const traces = modelTraces({path, module: model, scenarios: tests});
       return replayTraces(traces, () => createDriver(script, findStoppedUserTurn), {project});

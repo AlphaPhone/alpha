@@ -50,10 +50,6 @@ export function createFilesIndex(store:Store|undefined=defaultStore(),now:()=>nu
       write(kept);
       return evicted.flatMap(old=>old.selectionId&&!kept.some(k=>k.selectionId===old.selectionId)?[old.selectionId]:[]);
     },
-    /** Refresh display metadata from a confirmed provider listing, never access. */
-    renameTree(treeId:string,name:string){
-      write(read().map(row=>row.kind==='tree'&&row.treeId===treeId?(clean({...row,name})??row):row));
-    },
     revoke(key:string){write(read().map(row=>row.key===key?{...row,status:'revoked' as const}:row));},
     remove(key:string){const rows=read(),gone=rows.find(row=>row.key===key);write(rows.filter(row=>row.key!==key));return gone;},
     /** The selection showing when the app last closed, so a restart restores only that one. */
@@ -69,27 +65,6 @@ export function createFilesIndex(store:Store|undefined=defaultStore(),now:()=>nu
   };
 }
 export const filesIndex=createFilesIndex();
-
-const words=(value:string)=>value.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g,'').split(/[^a-z0-9]+/).filter(Boolean);
-export function typeLabel(mimeType:string,directory=false){
-  if(directory)return 'Folder';
-  if(mimeType==='application/pdf')return 'PDF';
-  if(mimeType.startsWith('image/'))return 'Image';
-  if(mimeType.startsWith('audio/'))return 'Audio';
-  if(mimeType.startsWith('video/'))return 'Video';
-  if(mimeType.startsWith('text/'))return 'Text';
-  if(/word|document|opendocument\.text|rtf/.test(mimeType))return 'Document';
-  if(/sheet|excel|csv/.test(mimeType))return 'Spreadsheet';
-  if(/presentation|powerpoint/.test(mimeType))return 'Presentation';
-  if(/zip|tar|compressed|archive/.test(mimeType))return 'Archive';
-  return 'File';
-}
-/** Every query word must prefix a word of the name or the type label. */
-export function matchesFileQuery(entry:{name:string;mimeType:string;directory?:boolean},query:string){
-  const wanted=words(query);if(!wanted.length)return false;
-  const bag=[...words(entry.name),...words(typeLabel(entry.mimeType,entry.directory))];
-  return wanted.every(word=>bag.some(term=>term.startsWith(word)));
-}
 
 export type SortMode='recent'|'name';
 export type SortableEntry={name:string;directory:boolean;modified?:number};
@@ -107,4 +82,3 @@ export function compareFilesEntries(mode:SortMode){
     return byName(a,b);
   };
 }
-export const sortLabel=(mode:SortMode)=>mode==='name'?'Sorted by name':'Sorted by newest';

@@ -1,19 +1,22 @@
-// CanonicalNotesUi collection projection, draft overlay and navigation waiters.
-// Editor and controller callbacks are inputs with their own source-bound models.
+// CanonicalNotesUi collection projection, draft overlay and navigation waiters, and the order the
+// Notes list shows those rows in (runtime/notes-view sortNotes). Editor and controller callbacks
+// are inputs with their own source-bound models.
 module CanonicalNotesView {
   type Data = {kind: str, title: int, body: int, hasPinned: bool, pinned: bool,
     hasFolder: bool, folder: int, voiceContent: bool, linkUrl: bool, handles: bool}
-  type Note = {id: int, data: Data}
+  // at is the note's update-time class: -1 has no readable time, larger is newer.
+  type Note = {id: int, at: int, data: Data}
   type Draft = {present: bool, id: int, token: int, base: int, data: Data}
-  type Row = {id: int, kind: str, title: int, body: int, revision: int, pinned: bool, folder: int, handles: bool}
+  type Row = {id: int, kind: str, title: int, body: int, revision: int, pinned: bool, folder: int, handles: bool, at: int}
   type State = {current: bool, baseRows: List[Row], rows: List[Row],
     open: int, blank: int, trash: List[int], draft: Draft, waiters: List[int]}
   var s: State
   pure val EmptyData: Data = {kind: "none", title: 0, body: 0, hasPinned: false, pinned: false,
     hasFolder: false, folder: 0, voiceContent: false, linkUrl: false, handles: false}
   pure val EmptyDraft: Draft = {present: false, id: 0, token: 0, base: 0, data: EmptyData}
-  pure val EmptyRow: Row = {id: 0, kind: "text", title: 0, body: 0, revision: 0, pinned: false, folder: 0, handles: false}
+  pure val EmptyRow: Row = {id: 0, kind: "text", title: 0, body: 0, revision: 0, pinned: false, folder: 0, handles: false, at: -1}
   pure val Kinds = Set("none", "text", "list", "voice", "link")
+  pure val Times = (-1).to(2)
   pure def shownKind(data: Data): str =
     if (data.kind == "list") "list"
     else if (data.kind == "voice" and data.voiceContent) "voice"
@@ -21,7 +24,7 @@ module CanonicalNotesView {
   pure def row(note: Note, revision: int): Row = {id: note.id, kind: shownKind(note.data),
     title: note.data.title, body: note.data.body, revision: revision,
     pinned: note.data.hasPinned and note.data.pinned,
-    folder: if (note.data.hasFolder) note.data.folder else 0, handles: false}
+    folder: if (note.data.hasFolder) note.data.folder else 0, handles: false, at: note.at}
   pure def overlay(base: List[Row], draft: Draft): List[Row] =
     if (not(draft.present)) base else {
       val index = base.indices().fold(base.length(), (lowest, i) =>
@@ -33,14 +36,38 @@ module CanonicalNotesView {
       val projected = {id: if (draft.id == 0) draft.token + 2 else draft.id, kind: kind,
         title: draft.data.title, body: draft.data.body, revision: draft.base,
         pinned: if (draft.data.hasPinned) draft.data.pinned else old.pinned,
-        folder: if (draft.data.hasFolder) draft.data.folder else old.folder, handles: false}
+        folder: if (draft.data.hasFolder) draft.data.folder else old.folder, handles: false,
+        // An edit keeps the saved note's time; a new note has none until it is saved.
+        at: old.at}
       if (found) base.replaceAt(index, projected) else List(projected).concat(base)
     }
   pure def validData(data: Data): bool = Kinds.contains(data.kind) and data.title.in(0.to(6))
     and data.body.in(0.to(6)) and data.folder.in(0.to(2))
   pure def validDraft(draft: Draft): bool = draft.id.in(0.to(2)) and draft.token.in(0.to(5))
     and draft.base.in(0.to(4)) and validData(draft.data)
+  // The list order: pinned first, then newest first, ties in stored order. A row with no time
+  // counts as new as the newest time stored after it, so it keeps its stored place.
+  type Ranked = {row: Row, at: int, index: int}
+  pure def effectiveTimes(rows: List[Row]): List[int] =
+    range(0, rows.length()).foldl({times: List(), newest: -1}, (acc, k) => {
+      val at = rows.nth(rows.length() - 1 - k).at
+      {times: List(if (at < 0) acc.newest else at).concat(acc.times),
+       newest: if (at > acc.newest) at else acc.newest}
+    }).times
+  pure def ahead(a: Ranked, b: Ranked): bool = (a.row.pinned and not(b.row.pinned)) or
+    (a.row.pinned == b.row.pinned and (a.at > b.at or (a.at == b.at and a.index < b.index)))
+  pure def insertRanked(sorted: List[Ranked], e: Ranked): List[Ranked] = {
+    val pos = sorted.indices().fold(sorted.length(), (p, j) => if (ahead(e, sorted.nth(j)) and j < p) j else p)
+    sorted.slice(0, pos).append(e).concat(sorted.slice(pos, sorted.length()))
+  }
+  pure def shown(rows: List[Row]): List[Row] = {
+    val times = effectiveTimes(rows)
+    range(0, rows.length()).foldl(List(), (sorted, i) =>
+      insertRanked(sorted, {row: rows.nth(i), at: times.nth(i), index: i}))
+      .foldl(List(), (out, e) => out.append(e.row))
+  }
   val PublicRows = if (s.current) s.rows else List()
+  val PublicShown = shown(PublicRows)
   val PublicOpen = if (s.current) s.open else 0
   action init = s' = {current: true, baseRows: List(), rows: List(), open: 0, blank: 0,
     trash: List(), draft: EmptyDraft, waiters: List()}
@@ -48,7 +75,7 @@ module CanonicalNotesView {
   // editor reconciliation emits its own changed callback.
   action published(notes: List[Note], trash: List[int], revision: int): bool = all {
     s.current, notes.length() <= 2, revision.in(0.to(4)), trash.length() <= 2,
-    notes.indices().forall(i => notes.nth(i).id.in(1.to(2)) and validData(notes.nth(i).data)),
+    notes.indices().forall(i => notes.nth(i).id.in(1.to(2)) and Times.contains(notes.nth(i).at) and validData(notes.nth(i).data)),
     trash.indices().forall(i => trash.nth(i).in(1.to(2))),
     s' = {...s, baseRows: notes.foldl(List(), (rows, note) => rows.append(row(note, revision))), trash: trash}}
   action painted(draft: Draft): bool = all {validDraft(draft),
@@ -68,27 +95,64 @@ module CanonicalNotesView {
       nondet id = 0.to(2).oneOf(); nondet token = 1.to(5).oneOf(); nondet base = 0.to(4).oneOf();
       painted({present: true, id: id, token: token, base: base, data: {...EmptyData, kind: kind, title: title, body: body}})},
     {nondet kind = Kinds.oneOf(); nondet revision = 0.to(4).oneOf();
-      published(List({id: 1, data: {...EmptyData, kind: kind, title: 1, body: 2}}), List(2), revision)}, s' = s}
+      published(List({id: 1, at: 0, data: {...EmptyData, kind: kind, title: 1, body: 2}}), List(2), revision)},
+    {nondet first = Times.oneOf(); nondet second = Times.oneOf(); nondet pinFirst = Bool.oneOf();
+      nondet pinSecond = Bool.oneOf(); nondet revision = 0.to(4).oneOf();
+      published(List({id: 1, at: first, data: {...EmptyData, hasPinned: true, pinned: pinFirst}},
+        {id: 2, at: second, data: {...EmptyData, hasPinned: true, pinned: pinSecond}}), List(), revision)}, s' = s}
   val TypeOK = s.open.in(0.to(7)) and s.blank.in(0.to(7)) and validDraft(s.draft)
     and s.baseRows.length() <= 2 and s.rows.length() <= 3 and s.waiters.length() <= 3
+    and s.rows.indices().forall(i => Times.contains(s.rows.nth(i).at))
   val NoLocalHandles = s.rows.indices().forall(i => not(s.rows.nth(i).handles))
     and s.baseRows.indices().forall(i => not(s.baseRows.nth(i).handles))
   val PrivateWhenInactive = s.current or PublicRows == List() and PublicOpen == 0
   val BlankNamesDraft = s.blank == 0 or s.draft.present and s.draft.id == 0 and s.blank == s.open
-  val safety = TypeOK and NoLocalHandles and PrivateWhenInactive and BlankNamesDraft
-  run newDraftOverlaysFirstTest = init.then(published(List({id: 1, data: EmptyData}), List(), 1))
+  // The shown list holds exactly the rows, pinned rows first, and dated rows newest first.
+  val ShownHoldsEveryRow = PublicShown.length() == PublicRows.length() and
+    PublicRows.indices().forall(i => PublicShown.indices().exists(j => PublicShown.nth(j) == PublicRows.nth(i)))
+  val ShownPinnedFirst = PublicShown.indices().forall(i => PublicShown.indices().forall(j =>
+    i < j implies (PublicShown.nth(i).pinned or not(PublicShown.nth(j).pinned))))
+  val ShownNewestFirst = PublicShown.indices().forall(i => PublicShown.indices().forall(j =>
+    (i < j and PublicShown.nth(i).pinned == PublicShown.nth(j).pinned and PublicShown.nth(i).at >= 0
+      and PublicShown.nth(j).at >= 0) implies PublicShown.nth(i).at >= PublicShown.nth(j).at))
+  // A row with no time is never shown below a row of its group that is stored after it.
+  pure def shownIndex(rows: List[Row], row: Row): int =
+    rows.indices().fold(rows.length(), (p, j) => if (rows.nth(j) == row and j < p) j else p)
+  val UndatedKeepsStoredPlace = PublicRows.indices().forall(i => PublicRows.indices().forall(j =>
+    (i < j and PublicRows.nth(i).at < 0 and PublicRows.nth(i).pinned == PublicRows.nth(j).pinned) implies
+      shownIndex(PublicShown, PublicRows.nth(i)) < shownIndex(PublicShown, PublicRows.nth(j))))
+  val ShownOrder = ShownHoldsEveryRow and ShownPinnedFirst and ShownNewestFirst and UndatedKeepsStoredPlace
+  val safety = TypeOK and NoLocalHandles and PrivateWhenInactive and BlankNamesDraft and ShownOrder
+  run newDraftOverlaysFirstTest = init.then(published(List({id: 1, at: 0, data: EmptyData}), List(), 1))
     .then(painted({present: true, id: 0, token: 1, base: 1, data: {...EmptyData, title: 3}}))
     .expect(s.open == 3 and s.blank == 3 and s.rows.head().id == 3 and s.rows.length() == 2 and safety)
-  run canonicalDraftReplacesInPlaceTest = init.then(published(List({id: 1, data: EmptyData}, {id: 2, data: EmptyData}), List(), 1))
+  run canonicalDraftReplacesInPlaceTest = init.then(published(List({id: 1, at: 0, data: EmptyData}, {id: 2, at: 0, data: EmptyData}), List(), 1))
     .then(painted({present: true, id: 2, token: 1, base: 1, data: {...EmptyData, body: 4}}))
     .expect(s.rows.nth(1).body == 4 and s.rows.head().id == 1 and s.blank == 0 and safety)
-  run localHandlesNeverReachRowsTest = init.then(published(List({id: 1, data: {...EmptyData, handles: true}}), List(), 1))
+  run localHandlesNeverReachRowsTest = init.then(published(List({id: 1, at: 0, data: {...EmptyData, handles: true}}), List(), 1))
     .then(painted({present: true, id: 1, token: 1, base: 1, data: {...EmptyData, handles: true}}))
     .expect(NoLocalHandles and safety)
-  run ownerLossMasksRetainedRowsTest = init.then(published(List({id: 1, data: EmptyData}), List(), 1)).then(painted(EmptyDraft))
+  run ownerLossMasksRetainedRowsTest = init.then(published(List({id: 1, at: 0, data: EmptyData}), List(), 1)).then(painted(EmptyDraft))
     .then(loseOwner).expect(s.rows.length() == 1 and PublicRows == List() and PublicOpen == 0 and safety)
   run phaseDrainsNavigationWaitersTest = init.then(wait(1)).then(wait(2)).then(drained(true))
     .expect(s.waiters == List() and safety)
-  run retirementClearsProjectionTest = init.then(published(List({id: 1, data: EmptyData}), List(2), 1)).then(painted(EmptyDraft)).then(retired)
+  run retirementClearsProjectionTest = init.then(published(List({id: 1, at: 0, data: EmptyData}), List(2), 1)).then(painted(EmptyDraft)).then(retired)
     .expect(s.baseRows == List() and s.rows == List() and s.trash == List() and safety)
+  run pinnedThenNewestFirstTest = init.then(published(List({id: 1, at: 0, data: EmptyData},
+      {id: 2, at: 2, data: EmptyData}), List(), 1)).then(painted(EmptyDraft))
+    .expect(PublicShown.head().id == 2 and PublicShown.nth(1).id == 1 and safety)
+    .then(published(List({id: 1, at: 0, data: {...EmptyData, hasPinned: true, pinned: true}},
+      {id: 2, at: 2, data: EmptyData}), List(), 2)).then(painted(EmptyDraft))
+    .expect(PublicShown.head().id == 1 and PublicShown.nth(1).id == 2 and safety)
+  run undatedRowKeepsItsPlaceTest = init.then(published(List({id: 1, at: -1, data: EmptyData},
+      {id: 2, at: 1, data: EmptyData}), List(), 1)).then(painted(EmptyDraft))
+    .expect(PublicShown.head().id == 1 and effectiveTimes(PublicRows) == List(1, 1) and safety)
+  run newDraftShowsFirstAmongUnpinnedTest = init.then(published(List({id: 1, at: 2, data: EmptyData},
+      {id: 2, at: 0, data: {...EmptyData, hasPinned: true, pinned: true}}), List(), 1))
+    .then(painted({present: true, id: 0, token: 1, base: 1, data: EmptyData}))
+    .expect(PublicShown.nth(0).id == 2 and PublicShown.nth(1).id == 3 and PublicShown.nth(2).id == 1 and safety)
+  run editKeepsSavedTimeTest = init.then(published(List({id: 1, at: 0, data: EmptyData},
+      {id: 2, at: 1, data: EmptyData}), List(), 1))
+    .then(painted({present: true, id: 1, token: 1, base: 1, data: {...EmptyData, title: 3}}))
+    .expect(s.rows.head().at == 0 and PublicShown.head().id == 2 and safety)
 }

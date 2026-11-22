@@ -3,10 +3,14 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.filesystem.browser.StorageBrowser;
 import ai.eliza.plugins.filesystem.browser.StorageCatalog;
 import ai.eliza.plugins.media.DocumentFolderTree;
+import ai.eliza.plugins.media.DocumentBytes;
 import android.app.Activity;
 import android.content.*;
 import android.net.Uri;
 import android.os.FileObserver;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.*;
 import com.getcapacitor.annotation.*;
@@ -129,11 +133,58 @@ public class AlphaFilesPlugin extends Plugin {
   if(!filesReviewVisible())return result("changed","Open Files to review these items.");
   List<String> paths=strings(call,"paths",StorageBrowser.BATCH_MAX);
   JSArray tokens=new JSArray();
-  for(String identity:b.reviewedIdentities(paths)){
+  if(Boolean.TRUE.equals(call.getBoolean("attachment",false))){
+   if(paths.size()!=1)return result("invalid","Choose one file to review.");
+   java.io.File file=b.resolve(paths.get(0),false);
+   String identity=attachmentIdentity(file,Os.lstat(file.getPath()));
    if(identity==null)return result("changed","A file couldn’t be verified. Nothing changed.");
    tokens.put(identity);
+  }else{
+   for(String identity:b.reviewedIdentities(paths)){
+    if(identity==null)return result("changed","A file couldn’t be verified. Nothing changed.");
+    tokens.put(identity);
+   }
   }
   JSObject out=new JSObject();out.put("reviewed",tokens);return out;
+ });}
+ /** A stat receipt both the reviewed path and the opened descriptor can prove.
+  * Include ctime so restoring size and mtime does not restore an old receipt. */
+ private static String attachmentIdentity(java.io.File file,StructStat stat)throws java.security.NoSuchAlgorithmException{
+  if(!OsConstants.S_ISREG(stat.st_mode))return null;
+  String observation=file.getPath()+"\n"+stat.st_dev+"\n"+stat.st_ino+"\n"+stat.st_size+"\n"
+   +stat.st_mtim.tv_sec+"\n"+stat.st_mtim.tv_nsec+"\n"+stat.st_ctim.tv_sec+"\n"+stat.st_ctim.tv_nsec;
+  byte[] digest=java.security.MessageDigest.getInstance("SHA-256")
+   .digest(observation.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+ }
+ /** Reads the bounded bytes of one foreground attachment selected by its reviewed Files identity. */
+ @PluginMethod public void storageReadAttachment(PluginCall call){storage(call,b->{
+  String path=call.getString("path",""),reviewed=call.getString("reviewed","");
+  if(!filesReviewVisible()||reviewed.isEmpty())return result("changed","This file changed. Select it again.");
+  java.io.File file=b.resolve(path,false);
+  if(!reviewed.equals(attachmentIdentity(file,Os.lstat(file.getPath()))))
+   return result("changed","This file changed. Select it again.");
+  String mime=StorageBrowser.mime(file.getName());
+  if(!Set.of("image/jpeg","image/png","image/gif","image/webp","application/pdf","text/plain",
+      "text/csv","text/markdown","application/json").contains(mime))
+   return result("failed","Choose a supported photo or document.");
+  byte[] bytes;
+  var descriptor=Os.open(file.getPath(),OsConstants.O_RDONLY|OsConstants.O_NOFOLLOW|OsConstants.O_NONBLOCK,0);
+  try(java.io.FileInputStream source=new java.io.FileInputStream(descriptor)){
+   StructStat opened=Os.fstat(descriptor);
+   if(!reviewed.equals(attachmentIdentity(file,opened)))return result("changed","This file changed. Select it again.");
+   if(opened.st_size>DocumentBytes.CHAT_MAX_BYTES)return result("failed","Choose a file up to 20 MiB.");
+   bytes=DocumentBytes.read(source,DocumentBytes.CHAT_MAX_BYTES);
+   if(bytes.length!=opened.st_size||!reviewed.equals(attachmentIdentity(file,Os.fstat(descriptor))))
+    return result("changed","This file changed. Select it again.");
+  }finally{
+   if(descriptor.valid())Os.close(descriptor);
+  }
+  if(!filesReviewVisible()||!"granted".equals(StorageCatalog.access(getContext()))||
+     !reviewed.equals(attachmentIdentity(file,Os.lstat(file.getPath()))))
+   return result("changed","This file changed. Select it again.");
+  JSObject out=result("ready","");out.put("name",file.getName());out.put("mimeType",mime);
+  out.put("dataBase64",android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP));return out;
  });}
  @PluginMethod public void storageTransfer(PluginCall call){storage(call,b->{
   List<String> paths=strings(call,"paths",StorageBrowser.BATCH_MAX);boolean copy=Boolean.TRUE.equals(call.getBoolean("copy",false));
@@ -198,6 +249,8 @@ public class AlphaFilesPlugin extends Plugin {
   String id=SelectedDocumentAccess.authorize(getContext(),uri,0);
   String mime=StorageBrowser.mime(f.getName());
   JSObject out=result("selected","");out.put("action","files");out.put("selectionId",id);out.put("name",f.getName());out.put("mimeType",mime);out.put("canRename",false);
+  // The preview's subtitle and File details show these; a zero modified time means unknown.
+  out.put("size",f.length());long modified=f.lastModified();if(modified>0)out.put("modified",modified);
   if(mime.startsWith("image/")||mime.startsWith("audio/")||mime.startsWith("video/"))out.put("uri",uri.toString());
   return out;
  });}

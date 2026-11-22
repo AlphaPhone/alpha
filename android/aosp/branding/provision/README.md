@@ -17,6 +17,27 @@ Development images and devices without
 telephony require Home only. Completed, managed, profile and secondary-user setups are
 ineligible for the first-run assignments.
 
+An existing primary-user setup uses the Permission Controller's serialized default-role
+pass in the Android system process for the package identity transition. Its pending and
+completion markers use Permission's device-protected APEX data directory. The image must
+advertise the canonical features, preinstall the enabled release app and pass Android's normal
+role qualification. Only a role held solely by the former Alpha package is moved. Each role
+records a durable pending
+intent before the grant and a completion marker after readback. A failed grant attempts to restore
+the old holder when Android left the role empty. A later explicit role request retires
+that role's migration before it changes the holder, including a request made while the
+migration is ineligible (setup open, app disabled or suspended), so the choice still holds
+when eligibility returns. Custom choices, managed users and
+secondary users retain their assignments. No credential or application data is copied.
+
+`python3 test/aosp-role-upgrade.test.py` (also run by `bun run test`) compiles the policy
+cases, and the real staging projection, policy and Android adapter over a synthetic controller
+that carries the projection anchors, with Android boundary doubles. That synthetic controller
+test drives owner add, remove and clear requests through the injected hook. The test that
+compiles the pinned AOSP `RoleControllerServiceImpl` runs only when its hash-checked input is in
+`.cache/` (or `ALPHA_FRESH_PRESET_INPUTS`); CI does not fetch it and skips that test. A real
+signed image upgrade remains the device gate.
+
 A rejected request, timeout, unavailable role, or failed readback leaves setup open for
 retry. The recovery button opens Home, Default apps, Input method, or ordinary Settings
 according to the failure. Each callback and timeout belongs to one attempt and one step.

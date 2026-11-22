@@ -18,8 +18,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { button, expectNoDevelopmentSurface, fenceNetwork, flagOffAndroid, harness, residentHome } from './flag-off-android';
 
 /** The resident agent's workflow routes, answered over the Agent.request bridge. */
-async function workflowAgent(page: Page) {
-  await page.addInitScript(() => {
+async function workflowAgent(page: Page, calendarProtocol?: 4 | 5) {
+  await page.addInitScript(calendarProtocol => {
     const w = window as any, bridge = w.Capacitor, previous = bridge.nativePromise;
     const KEY = 'flag-off-workflows', at = (minute: number) => new Date(Date.UTC(2026, 9, 11, 8, minute)).toISOString();
     const digest = (seed: string) => seed.repeat(64).slice(0, 64);
@@ -34,11 +34,19 @@ async function workflowAgent(page: Page) {
     });
     const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY) || 'null') ?? initial(); } catch { return initial(); } };
     const state = w.workflowAgent = load();
+    const maximumProtocol=Number(sessionStorage.getItem('workflow-calendar-protocol')??calendarProtocol);
+    if (calendarProtocol) {
+      state.registrations??=[];
+      for(const name of ['AlphaNotifications','AlphaVoiceCloud']){
+        bridge.PluginHeaders.find((entry:any)=>entry.name===name).methods.push({name:'workflowPresentationCapabilities',rtype:'promise'});
+      }
+    }
+    const sha=async(value:unknown)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)))),byte=>byte.toString(16).padStart(2,'0')).join('');
     const save = () => sessionStorage.setItem(KEY, JSON.stringify(state));
     const receipt = (finished = false) => ({ runId: 'run-approval', workflowId: 'review', workflowVersionId: 'review-v1', finished, cancellationRequested: false, approvals: state.approvals });
     const allRuns = () => Object.values(state.runs).flat() as any[];
     const ok = (data: unknown) => ({ status: 200, data });
-    const route = (method: string, path: string, body: any): { status: number; data: unknown } | 'lost' => {
+    const route = async (method: string, path: string, body: any): Promise<{ status: number; data: unknown } | 'lost'> => {
       if (method === 'GET') state.gets.push(path); else state.posts.push({ path, body });
       if (path === '/api/workflow/status') return ok({ engine: 'smthrs', status: 'ready', manualSubmissionProtocol: 1, approvalReceiptProtocol: 1, lifecycleMutationProtocol: 1 });
       if (path === '/api/automations') return ok({ automations: state.flows.map((f: any) => ({ id: 'workflow:' + f.id, type: 'workflow', workflowId: f.id, title: f.name, description: f.description, enabled: f.active, status: f.active ? 'active' : 'paused', schedules: [] })) });
@@ -49,7 +57,16 @@ async function workflowAgent(page: Page) {
       if (method === 'GET' && path === '/api/lifeops/definitions') return ok({ definitions: [] });
       if (path === '/api/workflow/removed-workflows') return ok({ workflows: [] });
       if (path === '/api/workflow/workflows') return ok({ workflows: state.flows });
-      if (path === '/api/workflow/phone/catalog') return ok({ specVersion: 1, generationProtocol: 1, catalogRevision: 'fixture-v1', compilerRevision: 'fixture-v1', maximumSteps: 32, maximumSpecBytes: 65536, triggers: [{ kind: 'manual', available: true }], palette: [{ kind: 'Read', operations: ['supplied_text', 'selected_notes', 'calendar_range'].map(id => ({ id, available: true })) }, { kind: 'Write', operations: ['compose_draft', 'model_draft', 'save_note'].map(id => ({ id, available: true })) }] });
+      if (path === '/api/workflow/phone/catalog') return ok({ specVersion: 1, generationProtocol: 1, catalogRevision: 'fixture-v1', compilerRevision: 'fixture-v1', maximumSteps: 32, maximumSpecBytes: 65536, triggers: [{ kind: 'manual', available: true }, ...(calendarProtocol?[{kind:'time',available:true}]:[])], palette: [{ kind: 'Read', operations: ['supplied_text', 'selected_notes', 'calendar_range'].map(id => ({ id, available: true })) }, { kind: 'Write', operations: ['compose_draft', 'model_draft', 'save_note'].map(id => ({ id, available: true })) }] });
+      if (calendarProtocol && method==='POST' && path==='/api/workflow/phone/validate') {
+        return ok({spec:body.spec,specDigest:await sha(body.spec),catalogRevision:body.catalogRevision,compilerRevision:body.compilerRevision,active:false});
+      }
+      if (calendarProtocol && method==='POST' && path==='/api/workflow/phone/workflows') {
+        const saved={...flow('calendar-created',body.spec.name,false,['Read Calendar range']),description:body.spec.description,metadata:{elizaPhoneWorkflowSpec:JSON.stringify(body.spec)}};
+        state.flows.push(saved);
+        state.runs[saved.id]=[];
+        return ok({receipt:{workflowId:saved.id,versionId:saved.versionId,previousVersionId:null,operation:'create',mutationId:body.mutationId,specDigest:await sha(body.spec),compilerRevision:body.compilerRevision,appliedAt:at(0)}});
+      }
       let m = /^\/api\/workflow\/workflows\/([^/]+)(\/.*)?$/.exec(path);
       if (m) {
         const f = state.flows.find((row: any) => row.id === m![1]), rest = m[2] || '';
@@ -93,13 +110,20 @@ async function workflowAgent(page: Page) {
     };
     const owned = (path: string) => /^\/api\/(workflow\/(?!hosted\/)|automations$|lifeops\/)/.test(path);
     bridge.nativePromise = async (plugin: string, method: string, input: any) => {
+      if(calendarProtocol && method==='workflowPresentationCapabilities' && (plugin==='AlphaNotifications'||plugin==='AlphaVoiceCloud'))return {protocol:2};
+      if(calendarProtocol && plugin==='Agent' && method==='request' && input?.path==='/api/client-devices/register'){
+        const {workflowProtocol}=JSON.parse(input.body);
+        state.registrations.push(workflowProtocol);
+        save();
+        if(workflowProtocol>maximumProtocol)return {status:409,body:JSON.stringify({error:'Unsupported workflow device protocol'})};
+      }
       if (plugin !== 'Agent' || method !== 'request' || !owned(String(input?.path))) return previous(plugin, method, input);
       w.flagOff.calls.push('Agent.request');
-      const result = route(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : undefined); save();
+      const result = await route(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : undefined); save();
       if (result === 'lost') throw new Error('Connection reset before the agent answered');
       return { status: result.status, body: JSON.stringify(result.data) };
     };
-  });
+  },calendarProtocol);
 }
 const agent = <T>(page: Page, read: (s: any) => T) => page.evaluate(`(${read.toString()})(window.workflowAgent)`) as Promise<T>;
 const posts = (page: Page, suffix: string) => agent(page, s => s.posts).then((rows: Array<{ path: string; body: any }>) => rows.filter(row => row.path.endsWith(suffix)));
@@ -143,21 +167,21 @@ test('the list shows only the agent’s workflows; detail, Run with its receipt,
   // The receipt is the agent's execution: its status and output.
   await expect(page.getByText('Synthetic agenda: two meetings before noon.', { exact: true })).toBeVisible();
   await page.locator('details[aria-label="Workflow execution details"]').filter({has:page.getByText('Finished', {exact:true})}).locator('summary').click();
-  await expect(page.getByText('Finished', { exact: true })).toBeVisible();
+  await expect(page.locator('details[aria-label="Workflow execution details"]').getByText('Finished', { exact: true })).toBeVisible();
   await button(page, 'Back to Agenda digest').click();
-  await expect(button(page, 'finished execution')).toBeVisible();
+  await expect(button(page, 'Finished execution')).toBeVisible();
 
   // Enable takes a second tap; pause is immediate and confirmed by the agent.
-  const toggle = button(page, 'Turn Agenda digest on or off');
+  const toggle = page.getByRole('switch', { name: 'Turn Agenda digest on or off', exact: true });
   await toggle.click();
   await expect(page.getByRole('status').filter({ hasText: /^Confirm$/ })).toBeVisible();
   expect(await posts(page, '/activate')).toEqual([]);
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await expect(runStatus(page)).toHaveText('On');
   expect(await posts(page, '/activate')).toHaveLength(1);
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await expect(runStatus(page)).toHaveText('Paused');
   expect(await posts(page, '/deactivate')).toHaveLength(1);
   expect(await posts(page, '/run')).toHaveLength(1);
@@ -170,7 +194,7 @@ test('an approval waits for a second confirmation to approve or deny, and a runn
   test.setTimeout(150_000);
   const foreign = await start(page);
   await openFlow(page, 'Reviewed note saver');
-  await button(page, 'waiting-approval execution').click();
+  await button(page, 'Waiting for approval execution').click();
   const reviews = page.getByRole('region', { name: 'Workflow approval review' });
   await expect(reviews).toHaveCount(2);
   const save = reviews.filter({ hasText: 'Save the agenda note' }), remove = reviews.filter({ hasText: 'Delete the old note' });
@@ -180,13 +204,13 @@ test('an approval waits for a second confirmation to approve or deny, and a runn
   await expect(save.getByRole('button', { name: 'Confirm approve', exact: true })).toBeVisible();
   expect(await posts(page, '/0')).toEqual([]);
   await save.getByRole('button', { name: 'Confirm approve', exact: true }).click();
-  await expect(save).toContainText('approved');
+  await expect(save).toContainText('Approved');
   // Deny: the same second confirmation.
   await remove.getByRole('button', { name: 'Deny', exact: true }).click();
   await expect(remove.getByRole('button', { name: 'Confirm deny', exact: true })).toBeVisible();
   expect(await posts(page, '/approvals/delete-review/0')).toEqual([]);
   await remove.getByRole('button', { name: 'Confirm deny', exact: true }).click();
-  await expect(remove).toContainText('denied');
+  await expect(remove).toContainText('Denied');
   const decisions = await posts(page, '/0');
   expect(decisions.map(row => [row.path, row.body.approved])).toEqual([['/api/workflow/executions/run-approval/approvals/save-review/0', true], ['/api/workflow/executions/run-approval/approvals/delete-review/0', false]]);
   expect(decisions.map(row => row.body.requestDigest)).toEqual(['a'.repeat(64), 'd'.repeat(64)]);
@@ -196,14 +220,14 @@ test('an approval waits for a second confirmation to approve or deny, and a runn
   // Cancel: a running execution, cancelled only on the confirming tap.
   await button(page, 'Back to workflows').click();
   await openFlow(page, 'Long running watch');
-  await button(page, 'running execution').click();
+  await button(page, 'Running execution').click();
   await button(page, 'Cancel run').click();
   await expect(button(page, 'Confirm cancel')).toBeVisible();
   expect(await posts(page, '/cancel')).toEqual([]);
   await button(page, 'Confirm cancel').click();
   await expect.poll(() => posts(page, '/cancel').then(rows => rows.length)).toBe(1);
   await button(page, 'Back to Long running watch').click();
-  await expect(button(page, 'cancelled execution')).toBeVisible();
+  await expect(button(page, 'Cancelled execution')).toBeVisible();
   expect(await posts(page, '/run')).toEqual([]);
   expect(await agent(page, s => s.unexpected)).toEqual([]);
   expect(foreign).toEqual([]);
@@ -246,7 +270,7 @@ test('a lost Run request stays outcome unknown until the owner sends the same su
   await page.reload();
   await button(page, 'Workflows').click();
   await openFlow(page, 'Agenda digest');
-  await expect(button(page, 'finished execution')).toHaveCount(1);
+  await expect(button(page, 'Finished execution')).toHaveCount(1);
   await expect(runStatus(page)).toHaveText('Paused');
   expect(await agent(page, s => s.runs.agenda.length)).toBe(1);
   expect(await posts(page, '/run')).toHaveLength(2);
@@ -270,4 +294,108 @@ test('an out-of-scope workflow request is refused before anything is sent to the
   await expect(page.getByRole('textbox', { name: 'Workflow name', exact: true })).toHaveValue('Retained original draft');
   expect(await agent(page, s => s.unexpected)).toEqual([]);
   expect(foreign).toEqual([]);
+});
+
+async function startCalendarEditor(page:Page){
+ const foreign=await fenceNetwork(page);
+ await flagOffAndroid(page,{schedules:{native:{calendars:[{id:'owner-calendar',name:'Personal',account:'This phone'}]}}});
+ await workflowAgent(page,5);
+ await residentHome(page);
+ await button(page,'Workflows').click();
+ await expect(list(page).getByText('Agenda digest',{exact:true})).toBeVisible({timeout:20000});
+ await newWorkflow(page);
+ return foreign;
+}
+async function chooseCalendarStep(page:Page){
+ await button(page,'Add Read step').click();
+ await button(page,'Read a Calendar range').click({timeout:10000});
+ await button(page,'Connect calendars').click();
+ await button(page,'Personal · This phone').click({timeout:10000});
+}
+
+test.describe('Calendar range authoring',()=>{
+ test.use({timezoneId:'America/New_York'});
+ test('protocol 5 saves the selected run-day scope without converting it into dates',async({page})=>{
+  test.setTimeout(120000);
+  const foreign=await startCalendarEditor(page);
+  expect(await agent(page,s=>s.registrations)).toEqual([5]);
+  await page.getByRole('textbox',{name:'Workflow name'}).fill('Calendar from run day');
+  await button(page,'Edit When step').click({timeout:10000});
+  await button(page,'Time trigger').click();
+  await button(page,'Close step editor').click();
+  await chooseCalendarStep(page);
+  await expect(button(page,'From run day')).toHaveAttribute('aria-pressed','true');
+  await button(page,'Fixed dates').click({timeout:10000});
+  await expect(page.getByLabel('Range start',{exact:true})).toBeVisible();
+  await button(page,'From run day').click({timeout:10000});
+  await expect(page.getByLabel('Range start',{exact:true})).toHaveCount(0);
+  const days=page.getByRole('combobox',{name:'Days to read'});
+  await expect(days.locator('option')).toHaveCount(7);
+  await expect(days).toHaveValue('1');
+  await days.selectOption('7');
+  await button(page,'Done').click();
+  await button(page,'Save workflow').click();
+  const review=page.getByRole('region',{name:'Workflow save review'});
+  await expect(review).toContainText('From run day · 7 days');
+  await expect(review).toContainText('Calendar time zone: America/New_York');
+  await expect(review).toContainText('Calendars: Personal');
+  expect(await posts(page,'/phone/validate')).toHaveLength(0);
+  await button(page,'Save workflow').click();
+  await expect.poll(()=>posts(page,'/phone/workflows').then(rows=>rows.length)).toBe(1);
+  const [checked]=await posts(page,'/phone/validate');
+  const [saved]=await posts(page,'/phone/workflows');
+  expect(saved.body.spec).toEqual(checked.body.spec);
+  expect(saved.body.spec.trigger.kind).toBe('time');
+  expect(saved.body.spec.steps[0].range).toEqual({calendarIds:['owner-calendar'],days:7,timeZone:'America/New_York',maximumEvents:100});
+  await expect(page.getByRole('switch',{name:'Turn Calendar from run day on or off',exact:true})).toHaveAttribute('aria-checked','false');
+  expect(await agent(page,s=>s.flows.find((flow:any)=>flow.id==='calendar-created')?.active)).toBe(false);
+  expect(await posts(page,'/run')).toEqual([]);
+  expect(await posts(page,'/activate')).toEqual([]);
+  expect(await harness(page,f=>f.unexpected)).toEqual([]);
+  expect(foreign).toEqual([]);
+ });
+
+ test('an older peer retains a run-day draft and can explicitly switch it to fixed dates',async({page})=>{
+  test.setTimeout(120000);
+  const foreign=await startCalendarEditor(page);
+  await page.getByRole('textbox',{name:'Workflow name'}).fill('Retained Calendar draft');
+  await chooseCalendarStep(page);
+  await expect(button(page,'From run day')).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('combobox',{name:'Days to read'}).selectOption('3');
+  await button(page,'Done').click();
+  await expect.poll(()=>page.evaluate(()=>{
+   const slots=JSON.parse(sessionStorage.getItem('flag-off-slots')??'{}');
+   const draft=Object.entries(slots).find(([key])=>key.startsWith('workflow-draft:v1:'))?.[1];
+   return typeof draft==='string'?JSON.parse(draft).spec.steps[0].range.days:null;
+  })).toBe(3);
+  await page.evaluate(()=>sessionStorage.setItem('workflow-calendar-protocol','4'));
+  await page.reload();
+  await button(page,'Workflows').click();
+  await newWorkflow(page);
+  expect(await agent(page,s=>s.registrations)).toEqual([5,5,4]);
+  await expect(page.getByRole('textbox',{name:'Workflow name'})).toHaveValue('Retained Calendar draft');
+  await button(page,'Save workflow').click();
+  await expect(page.getByText(/This agent cannot save a Calendar range from the run day/)).toBeVisible();
+  expect(await posts(page,'/phone/validate')).toEqual([]);
+  await button(page,'Edit Read step').click({timeout:10000});
+  await expect(button(page,'From run day')).toBeDisabled();
+  await expect(page.getByRole('combobox',{name:'Days to read'})).toHaveValue('3');
+  await button(page,'Fixed dates').click();
+  // The fixed range keeps the three days chosen from the run day: local midnight to local midnight three days later.
+  const fixedStart=await page.getByLabel('Range start',{exact:true}).inputValue();
+  const fixedEnd=await page.getByLabel('Range end',{exact:true}).inputValue();
+  expect(fixedStart).toMatch(/T00:00$/);
+  expect((Date.parse(fixedEnd+'Z')-Date.parse(fixedStart+'Z'))/86400000).toBe(3);
+  await page.getByLabel('Range start',{exact:true}).fill('2027-03-14T00:00');
+  await page.getByLabel('Range end',{exact:true}).fill('2027-03-15T00:00');
+  await button(page,'Done').click();
+  await button(page,'Save workflow').click();
+  await expect(page.getByRole('region',{name:'Workflow save review'})).toBeVisible();
+  await button(page,'Save workflow').click();
+  await expect.poll(()=>posts(page,'/phone/workflows').then(rows=>rows.length)).toBe(1);
+  const [saved]=await posts(page,'/phone/workflows');
+  expect(saved.body.spec.steps[0].range).toEqual({calendarIds:['owner-calendar'],start:'2027-03-14T05:00:00.000Z',end:'2027-03-15T04:00:00.000Z',timeZone:'America/New_York',maximumEvents:100});
+  expect(await posts(page,'/run')).toEqual([]);
+  expect(foreign).toEqual([]);
+ });
 });

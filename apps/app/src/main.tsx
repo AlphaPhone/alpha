@@ -1,23 +1,28 @@
 // Register browser implementations before any runtime module claims plugin identity.
 import './browser/register';
+import {installChatTools} from './prototype/chat-tools-adapter';
 import {installCanonicalNotesView} from './prototype/canonical-notes-ui';
 import {installCanonicalCalendarDrafts} from './prototype/canonical-calendar-drafts';
 import {installAgentCalendarAdapter,deviceCalendarScope} from './prototype/agent-calendar-adapter';
 import {Capacitor} from '@capacitor/core';
 import {registerPlugin} from './platform-plugins';
-import {holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates} from '../../../.eliza/client-features/packages/ui/src/state/app-update-gate';
+import {aospImage} from './runtime/aosp-image';
+import {installCallStateWatch,type CallStatePlugin} from './runtime/call-state';
+import {installOngoingCallBar,type OngoingCallPlugin} from './runtime/ongoing-call';
+import {holdAppUpdateStartup,supportsAppUpdateStartup,watchMountedAppUpdates} from './ui/state/app-update-gate';
 import {ownerReminderNotifications} from './runtime/owner-reminder-notification-port';
 import {installCalendarApprovalAdapter} from './prototype/calendar-approval-adapter';
 import {bindBrowserDeletionOwner} from './runtime/deletion-owner';
-import {DEFAULT_PULL_VELOCITY} from "../../../.eliza/client-features/packages/ui/src/gestures/constants";
-import {usePullGesture} from "../../../.eliza/client-features/packages/ui/src/components/shell/use-pull-gesture";
+import {DEFAULT_PULL_VELOCITY} from "./ui/gestures/constants";
+import {usePullGesture} from "./ui/components/shell/use-pull-gesture";
 import {installChatOverlayMotion} from './prototype/chat-overlay-motion-adapter';
 import {installSubviewAccessibility,installReplyAnnouncer,keepFocusOnScreen} from './prototype/subview-accessibility';
 import {installCalendarMonthFocus} from './prototype/calendar-month-focus';
 import {installCalendarEditDraftAdapter} from './prototype/calendar-edit-draft-adapter';
 import {installCalendarFormDraftAdapter} from './prototype/calendar-form-draft-adapter';
 import { browserApps } from './browser/apps';
-import { installSmsAdapter, setSmsReplySuggester } from './prototype/sms-adapter';
+import { installSmsAdapter } from './prototype/sms-adapter';
+import { secureConnectionStore } from './runtime/native-connection';
 import { installContactsAdapter } from './prototype/contacts-adapter';
 import { installPhoneAdapter } from './prototype/phone-adapter';
 import { installTelephonyAttention } from './prototype/telephony-attention';
@@ -66,6 +71,8 @@ import { installPrototypeVoiceAdapter } from './prototype/voice-adapter';
 import { installPrototypeBrowserAdapter } from './prototype/browser-adapter';
 import { installCalendarAdapter } from './prototype/calendar-adapter';
 import { installSystemBarAppearance, type SystemBars } from './prototype/system-bar-appearance';
+import {installPredictiveBack} from './runtime/predictive-back';
+import {installHaptics,type HapticDevice} from './runtime/haptics';
 import { automaticUpdateIdle, hasAppearancePreview, installSettingsAdapter, readAppearanceChoice, resolveAppearance } from './prototype/settings-adapter';
 import { ConnectionChooser, connectionController, connectionChooserVisible, residentAlwaysPresent } from './runtime/connection-ui';
 import { protectedPowerLaunchState } from './runtime/power-launch-state';
@@ -76,6 +83,7 @@ import { installNotesFoldersAdapter } from './prototype/notes-folders-adapter';
 import { installInboxCloudAdapter, inboxAttention, subscribeInboxAttention } from './prototype/inbox-cloud-adapter';
 import { installHomeOverviewCards } from './prototype/home-overview-cards';
 import { installUseInEmailReview } from './prototype/use-in-email-review';
+import {installAgentEmailCards} from './prototype/agent-email-card';
 import { latestRetainedDigest, subscribeRetainedDigest } from './runtime/hosted-digests';
 import { installHomeShell } from './prototype/home-shell';
 import { alphaViews } from './product/alpha-product';
@@ -87,8 +95,10 @@ import { TEXT_SCALE_PROPERTY } from './runtime/text-scale';
 import { installToastLayer } from './runtime/toast-layer';
 import { startAccessibilityTimeout } from './runtime/accessibility-timeout';
 import { installViewFocus } from './runtime/view-focus';
+import { ERROR_TOAST, PERSISTENT_NOTICE } from './runtime/error-notice';
 import './prototype/prototype.css';
 import './prototype/phone.css';
+import { installCommsAlpha } from './prototype/comms-alpha';
 installGlobalErrorRecovery();
 // Registration has completed; this injected source cannot form a register→connection cycle.
 if(!Capacitor.isNativePlatform())ownerReminderNotifications.bind({binding:()=>connectionController.getOwnerReminderNotificationBinding(),subscribeBinding:listener=>connectionController.subscribe(listener)});
@@ -126,9 +136,12 @@ if (!fixture) {
   selected = installSelectedDocumentAdapter(Component, VIEWS);
   installPrototypeCameraAdapter(Component, VIEWS);
   installAgentAdapter(Component, VIEWS);
+  installChatTools(Component);
   installReminderAdapter(Component, VIEWS);
   installCalendarAdapter(Component, VIEWS, {active:deviceCalendarScope});
-  if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS);installPhoneAdapter(Component,VIEWS);}
+  if(isAndroid){installContactsAdapter(Component,VIEWS);installSmsAdapter(Component,VIEWS,secureConnectionStore);installPhoneAdapter(Component,VIEWS);}
+  // AC-19 on the image: Telecom tells the shell when a call that may be an emergency call is live.
+  if(isAndroid&&aospImage)installCallStateWatch(Component,registerPlugin<CallStatePlugin>('AlphaCallState'));
   installCalendarFormDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installCalendarEditDraftAdapter(Component, VIEWS, {active:shell=>deviceCalendarScope(shell)||shell?.vget('calendar').form?.cal==='alpha-reminders'});
   installNoteOriginAdapter(Component, VIEWS);
@@ -153,7 +166,7 @@ if (!fixture) {
   installPrototypeBrowserAdapter(Component, VIEWS);
   installSettingsAdapter(Component, VIEWS);
   if(!isAndroid){if(devSurfacesEnabled)installBrowserDeviceAdapter(Component);else installBrowserCapabilityTiles(Component);}
-  if(!browserDevProfile) {installInboxCloudAdapter(Component, VIEWS);installUseInEmailReview(Component, VIEWS);}
+  if(!browserDevProfile) {installInboxCloudAdapter(Component, VIEWS);installUseInEmailReview(Component, VIEWS);installAgentEmailCards(Component,VIEWS);}
   // Home cards read only the provider summaries: unread count, account label and read time for
   // mail, and the latest retained brief. Nothing here starts a read or a run.
   if(!browserDevProfile){
@@ -175,16 +188,26 @@ if(developmentAgentWorkflows){installWorkflowAdapter(Component,VIEWS);installAut
 installSubviewAccessibility(VIEWS);
 installCalendarMonthFocus(Component, VIEWS);
 installChatOverlayMotion(Component);
+installCommsAlpha(Component, VIEWS);
+// Owner issue 4: a call left in the background keeps a bar over every view: Telecom's calls on the
+// image, the development phone's simulated call elsewhere.
+installOngoingCallBar(Component,VIEWS,isAndroid&&aospImage&&!fixture?registerPlugin<OngoingCallPlugin>('AlphaOngoingCall'):null);
 installReplyAnnouncer(Component);
 installSystemShade(Component,{native:isAndroid});
 installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBars>('AlphaDevice'));
+// Android's held Back gesture previews the layer it closes; switches, confirmed deletes and the Home long press give touch feedback.
+installPredictiveBack();
+installHaptics(isAndroid?registerPlugin<HapticDevice>('AlphaDevice'):null);
 // The shared agenda, mail and brief cards render the final Home values of every adapter above.
 installHomeCardVisibility(Component, () => googleConnectionController.open());
 // Messages and Phone cards exist on the verified image only; elsewhere this installs nothing.
-if(isAndroid&&!fixture){installTelephonyAttention(Component);installTelephonyReview(Component);installVoicemailTranscription();setSmsReplySuggester((thread,signal)=>connectionController.draftSmsReply(thread,signal));}
+if(isAndroid&&!fixture){installTelephonyAttention(Component);installVoicemailTranscription();}
+// The in-card choice of a reviewed action: a contact or number on the image, and on every
+// platform the tab a Browser request names when several are open.
+if(!fixture)installTelephonyReview(Component);
 installHomeOverviewCards(Component);
 installClockAdapter(Component, VIEWS, { simulated: testMocksEnabled && fixture, browser: !isAndroid });
-// Home and its app grid from the shared mobile shell, and Alpha's Apps drawer. Apps reads
+// Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer. Apps reads
 // ElizaSystem on Android; the browser device inventory remains available in test-mocks builds only.
 // Outermost so Home composes with every binding above. App info exists on Android only.
 const appInventory = isAndroid ? 'android' : testMocksEnabled ? 'simulated' : undefined;
@@ -216,8 +239,20 @@ if(isAndroid)try{
  }
 }catch{/* The native bridge supplies missing or invalid cached insets. */}
 let shell: any;
-/** A notice raised while the startup loading screen holds Home unmounted; shown once Home mounts. */
-let pendingNotice: string | undefined;
+/** Notices raised while the startup loading screen holds Home unmounted; shown in order once Home
+ * mounts. A notice the owner must act on is an error: a later notice waits behind it instead of
+ * replacing it unread, here and in the shell's toast. Consecutive passive notices share one slot. */
+type NoticeKind = 'passive' | 'error' | 'persistent';
+let pendingNotices: Array<{text: string; kind: NoticeKind}> = [];
+const noticeOptions = (kind: NoticeKind) => kind === 'error' ? ERROR_TOAST : kind === 'persistent' ? PERSISTENT_NOTICE : undefined;
+function flushNotices(target: any) { const notices = pendingNotices; pendingNotices = []; for (const notice of notices) target.toast(notice.text, noticeOptions(notice.kind)); }
+function showNotice(text: string, kind: NoticeKind = 'passive') {
+  if (shell?.live) { flushNotices(shell); shell.toast(text, noticeOptions(kind)); return; }
+  const last = pendingNotices[pendingNotices.length - 1];
+  if (last && last.text === text && last.kind === kind) return;
+  if (last && last.kind === 'passive' && kind === 'passive') pendingNotices[pendingNotices.length - 1] = {text, kind};
+  else pendingNotices.push({text, kind});
+}
 /** A hosted-notice question may fill only the live conversation of the same verified session. */
 function questionTarget(sessionId:string){const snapshot=connectionController.getSnapshot();return Boolean(shell?.live&&!document.hidden&&!snapshot.open&&snapshot.session?.sessionId===sessionId);}
 let launcherPresentation = false;
@@ -239,16 +274,22 @@ function Phone() {
     onCancel:()=>shell?.cancelChatMotion(),
   });
   const connection = useSyncExternalStore(connectionController.subscribe, connectionController.getSnapshot);
-  // Startup decides whether sign-in or access setup opens first: a verified account, a saved one
-  // that is offline (neither prompt), the sign-in itself or a settled start. Until then a neutral
-  // screen hides an already-mounted, inert shell so its local caches can restore
-  // before Home is revealed. Once shown, Home stays; a start that has not decided in 60 s (a first boot takes about 27 s) shows it as before.
+  // Keep the mounted shell inert until the resident can accept a request. A saved
+  // Cloud account alone is not readiness. Account/recovery controls and explicit
+  // offline use remain available if startup cannot complete.
   const [homeShown, setHomeShown] = useState(fixture || !residentAlwaysPresent);
-  const startupPending = !homeShown && !connection.startupResolved && !connection.cloudAccount && connection.residentPlanNotice !== 'offline' && !connectionChooserVisible(connection);
+  // The chooser can be requested before its DOM commits. Keep Home inert even
+  // behind sign-in; only its layout-commit acknowledgement releases the logo.
+  const [chooserCommitted,setChooserCommitted]=useState(false);
+  // Allow an explicit dismissal into local use. A confirmed sign-in waits for
+  // its resident session after the chooser closes.
+  const [chooserSeen,setChooserSeen]=useState(false);
+  useEffect(()=>{if(chooserCommitted)setChooserSeen(true);},[chooserCommitted]);
+  const chooserVisible=connectionChooserVisible(connection);
+  const chooserDismissedForLocalUse=chooserSeen&&!chooserCommitted&&!chooserVisible&&!connection.cloudAccount&&!connection.residentStarting;
+  const startupPending = !homeShown && !(connection.session && connection.startupResolved && !chooserVisible) && !chooserDismissedForLocalUse && !connection.error && connection.residentPlanNotice !== 'offline' && !connection.residentRecoveryReason;
   useEffect(() => {
-    if (!startupPending) { setHomeShown(true); return; }
-    const timer = setTimeout(() => setHomeShown(true), 60_000);
-    return () => clearTimeout(timer);
+    if (!startupPending) setHomeShown(true);
   }, [startupPending]);
   useEffect(() => {
     if (isAndroid) void DailyApps.surfaceInfo().then(info => {
@@ -331,8 +372,8 @@ function Phone() {
     else if(action==='background'){shell.leave();shell.setState({screen:'off',voice:'off',chat:'input',shade:false});document.documentElement.dataset.devBackground='true';window.dispatchEvent(new Event('blur'));}
     else if(action==='resume'){delete document.documentElement.dataset.devBackground;shell.unlock();window.dispatchEvent(new Event('focus'));}
     if(['power','unlock','boot','background','resume'].includes(action))window.dispatchEvent(new Event('alpha:device-state'));
-  }}/>}{testMocksEnabled && mock && <div className="mock-mode-banner" role="status"><span>Mock mode · simulated data and actions</span><button onClick={() => { void connectionController.offline().then(() => { const url = new URL(location.href); url.searchParams.delete('mode'); url.searchParams.delete('start'); location.assign(url.href); }); }}>Exit mock mode</button></div>}{startupPending && <div className="alpha-startup-loading" role="status" aria-label="Loading Alpha"><span className="alpha-compute-mark"/></div>}<div data-alpha-startup-shell inert={startupPending} aria-hidden={startupPending ? true : undefined} style={{width:'100%',height:'100%',opacity:startupPending ? 0 : 1,pointerEvents:startupPending ? 'none' : undefined}}><Component configureChatPull={(surface:{scale:number})=>setPullScale(surface.scale)} chatPullBinding={chatPullBinding} phoneSurface assistantSurface={assistantSurface} onCloseAssistant={closeAssistant} onReopenStartupAccess={!fixture && !assistantSurface ? reopenStartupPermissions : undefined} systemShell={launcherPresentation} systemShade={systemShade} nativeSystemChrome={isAndroid || !launcherPresentation} initial={testMocksEnabled && fixture ? query.get('start') || 'home' : 'home'} theme={initialTheme} ref={(value: any) => { shell = value; if (value && pendingNotice) queueMicrotask(() => { if (shell === value && value.live && pendingNotice) { value.toast(pendingNotice); pendingNotice = undefined; } }); }} /></div>
-{!fixture && <><ConnectionChooser /><GoogleConnectionsPanel />{!assistantSurface && <><HostedDigestPanel canComposeQuestion={questionTarget} composeQuestion={(draft,sessionId)=>{if(!questionTarget(sessionId))return false;shell.api(shell.S().view).composeContentQuestion(draft);return true;}} /><StartupPermissions active={startupPermissionsActive(connection)} /></>}</>}</>;
+  }}/>}{testMocksEnabled && mock && <div className="mock-mode-banner" role="status"><span>Mock mode · simulated data and actions</span><button onClick={() => { void connectionController.offline().then(() => { const url = new URL(location.href); url.searchParams.delete('mode'); url.searchParams.delete('start'); location.assign(url.href); }); }}>Exit mock mode</button></div>}{startupPending && !chooserCommitted && <div className="alpha-startup-loading" role="status" aria-label="Loading Alpha"><span className="alpha-compute-mark"/></div>}<div data-alpha-startup-shell inert={startupPending} aria-hidden={startupPending ? true : undefined} style={{width:'100%',height:'100%',opacity:startupPending ? 0 : 1,pointerEvents:startupPending ? 'none' : undefined}}><Component configureChatPull={(surface:{scale:number})=>setPullScale(surface.scale)} chatPullBinding={chatPullBinding} phoneSurface assistantSurface={assistantSurface} onCloseAssistant={closeAssistant} onReopenStartupAccess={!fixture && !assistantSurface ? reopenStartupPermissions : undefined} systemShell={launcherPresentation} systemShade={systemShade} nativeSystemChrome={isAndroid || !launcherPresentation} initial={testMocksEnabled && fixture ? query.get('start') || 'home' : 'home'} theme={initialTheme} ref={(value: any) => { shell = value; if (value && pendingNotices.length) queueMicrotask(() => { if (shell === value && value.live) flushNotices(value); }); }} /></div>
+{!fixture && <><ConnectionChooser onPresentation={setChooserCommitted} /><GoogleConnectionsPanel />{!assistantSurface && <><HostedDigestPanel canComposeQuestion={questionTarget} composeQuestion={(draft,sessionId)=>{if(!questionTarget(sessionId))return false;shell.api(shell.S().view).composeContentQuestion(draft);return true;}} /><StartupPermissions active={startupPermissionsActive(connection)} /></>}</>}</>;
 }
 /** Android's locale and 24-hour setting; WebView Intl alone does not follow the latter. */
 async function applyDeviceLocale() {
@@ -353,6 +394,7 @@ async function prepareMountedUpdate(activationCurrent: () => boolean, automatic 
     owner.flushComposerForAppUpdate, owner.flushCalendarForAppUpdate,
     owner.flushNotesForAppUpdate, owner.flushInboxForAppUpdate, owner.flushWorkflowsForAppUpdate,
   ];
+  if (owner.flushMessagesForAppUpdate) flush.push(owner.flushMessagesForAppUpdate);
   if (flush.some(draft => typeof draft !== 'function')) throw Error('A draft owner is unavailable');
   await Promise.all(flush.map(draft => draft.call(owner, current)));
   if (!current()) throw Error('App update changed');
@@ -427,7 +469,7 @@ async function mountPhone() {
   if (isAndroid && !imageSenseAvailable()) void stopWakeListenerForChatOnly().then(stopped => {
     if (stopped) return;
     const notice = 'Wake listening could not be confirmed off. Turn it off in Android settings.';
-    if (shell?.live) { shell.toast(notice); pendingNotice = undefined; } else pendingNotice = notice;
+    showNotice(notice, 'persistent');
   });
   // The image's always-on listener heard the wake phrase: start the on-device voice assistant.
   if (imageSenseAvailable() && assistantSurface) installListenerInvocation(() => shell, { authority: () => { const port=connectionController.getAppRecordClient(); if(!port)return null; try{if(!port.current())return null;return JSON.stringify([port.sessionId,port.scope??null,port.identity.ownerId,port.identity.agentId,port.identity.sessionId,port.identity.origin]);}catch{return null;} }, initialRestorePending: () => protectedPowerLaunchState(connectionController.getSnapshot()).initialRestorePending, powerAccountRef: () => protectedPowerLaunchState(connectionController.getSnapshot()).accountRef, connectionOpen: () => connectionController.getSnapshot().open, connected: () => !!connectionController.getSnapshot().session && !connectionController.getSnapshot().busy, voiceActive: () => !!document.querySelector('[data-alpha-chat-recorder]'), subscribe: listener => connectionController.subscribe(listener) });
@@ -436,6 +478,6 @@ async function mountPhone() {
 window.addEventListener('alpha:connection-toast', event => {
   const notice = (event as CustomEvent<unknown>).detail;
   if (typeof notice !== 'string' || !notice) return;
-  if (shell?.live) { shell.toast(notice); pendingNotice = undefined; } else pendingNotice = notice;
+  showNotice(notice);
 });
 void mountPhone();

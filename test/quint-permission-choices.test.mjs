@@ -16,11 +16,10 @@ const reactKey = '__alphaPermissionChoicesReact';
 const progressKey = 'alpha:startup-permission-walkthrough:v1';
 const memoryKey = 'alpha.startup-permissions.v1';
 const permissionKeys = ['notifications', 'microphone', 'camera', 'location', 'calendar', 'photos', 'files'];
-const imageHeaders=[{name:'AlphaTelephony',methods:[{name:'imageCapability'}]}];
 
 async function compileComponent() {
   const ports = `const fixture=()=>globalThis.${fixtureKey};
-export const Capacitor={getPlatform:()=>fixture().platform,isNativePlatform:()=>fixture().platform==='android',get PluginHeaders(){return fixture().pluginHeaders;}};
+export const Capacitor={getPlatform:()=>fixture().platform,isNativePlatform:()=>fixture().platform==='android'};
 export function registerPlugin(name){return new Proxy({},{get:(_,method)=>(...args)=>fixture().ports[name][method](...args)});}
 export const connectionController={subscribe:fn=>fixture().connection.subscribe(fn),getSnapshot:()=>fixture().connection.snapshot};
 export const googleConnectionController={subscribe:fn=>fixture().google.subscribe(fn),getSnapshot:()=>fixture().google.snapshot};`;
@@ -36,7 +35,7 @@ export const useEffect=(effect,deps)=>{
 };
 export const {useLayoutEffect,useSyncExternalStore}=React;`;
   const built = await build({
-    absWorkingDir:root, stdin:{contents:`export {StartupPermissions} from './apps/app/src/startup-permissions.tsx';export {readStartupPermissionProgress} from './apps/app/src/startup-permission-progress.ts';export {detectTelephonyProfile} from './.eliza/client-features/packages/contracts/src/native-telephony.ts';`,resolveDir:root,loader:'ts'},
+    absWorkingDir:root, stdin:{contents:`export {StartupPermissions} from './apps/app/src/startup-permissions.tsx';export {readStartupPermissionProgress} from './apps/app/src/startup-permission-progress.ts';`,resolveDir:root,loader:'ts'},
     bundle:true,write:false,format:'cjs',platform:'node',metafile:true,
     external:['react/jsx-runtime'], define:{'import.meta.env':'undefined'},
     plugins:[{name:'coordinator-observation-ports',setup(plugin) {
@@ -104,7 +103,7 @@ async function fixture(component, options = {}) {
   const holdStatus=key=>{let release,reject;const promise=new Promise((yes,no)=>{release=yes;reject=no;});heldStatus.set(key,{promise,release,reject});};
   for(const key of options.holdStatus??[])holdStatus(key);
   let instance = 0;
-  const runtime = {platform:options.native===false?'web':'android',pluginHeaders:options.headers??(options.image?imageHeaders:undefined),hooks:{states:[],refs:[]},pauseInvalidation:false,deferredEffects:[],
+  const runtime = {platform:options.native===false?'web':'android',hooks:{states:[],refs:[]},pauseInvalidation:false,deferredEffects:[],
     connection:observable({cloudAccount:options.signedOut?null:{credentialId:'owner-a',environment:'production'},open:false}),
     google:observable(false),ports:{},captured:null,flows:new Map(),
     observeFlow(key,inspect){this.flows.set(key,{ticket:this.captured?.ticket,inspect});}};
@@ -126,6 +125,7 @@ async function fixture(component, options = {}) {
     AlphaCalendar:{async checkPermissions(){return read('calendar',()=>({calendar:state.calendar}));},async requestAccess(){await request('calendar');}},
     AlphaPhotoLibrary:{async scope(){return read('photos',()=>({scope:state.photos,locked:false}));},async requestAccess(){await request('photos');}},
     AlphaDevice:{openSettings:settings},
+    DeviceApps:{async platformCapabilities(){return {startupPermissionDefaults:options.image===true};}},
     AlphaFiles:{async storageState(){return read('files',()=>({access:state.files}));},async storageRequestAccess(input){if(input?.settings)return settings({page:'files'});await request('files');return {access:state.files};}},
   };
   if(options.native===false){
@@ -168,7 +168,7 @@ async function fixture(component, options = {}) {
   await React.act(async()=>render());
   function snapshot() {
     const states=runtime.hooks.states,refs=runtime.hooks.refs;
-    assert.equal(states.length,13,'Component state-hook layout changed');
+    assert.equal(states.length,14,'Component state-hook layout changed');
     assert.equal(refs.length,12,'Component ref-hook layout changed');
     const panel=document.querySelector('dialog'),primary=panel?.querySelector('button');
     const stored=localStorage.getItem(progressKey),memory=localStorage.getItem(memoryKey);
@@ -178,11 +178,11 @@ async function fixture(component, options = {}) {
       ui:{visible:!!panel?.open,heading,
         primary:primary?.textContent??null,disabled:primary?.disabled??false,
         status:[...document.querySelectorAll('[role="status"],[role="alert"]')].map(node=>node.textContent)},
-      component:{reopened:states[0],ready:states[1],progress:states[4],active:states[5],target:states[6],
-        review:states[7],states:states[8],busy:states[9],progressError:states[10],canSkip:states[11],checkNotice:states[12]},
-      refs:{locationDescription:refs[0]?.current,photoDescription:refs[1]?.current,completedReady:!!states[1]&&states[4]===null,actionPending:refs[6]?.current,sequence:refs[7]?.current},
+      component:{reopened:states[0],ready:states[1],progress:states[5],active:states[6],target:states[7],
+        review:states[8],states:states[9],busy:states[10],progressError:states[11],canSkip:states[12],checkNotice:states[13]},
+      refs:{locationDescription:refs[0]?.current,photoDescription:refs[1]?.current,completedReady:!!states[1]&&states[5]===null,actionPending:refs[6]?.current,sequence:refs[7]?.current},
       controller:{credentialId:runtime.connection.snapshot.cloudAccount?.credentialId??null,open:runtime.connection.snapshot.open,
-        googleOpen:runtime.google.snapshot,native:runtime.platform==='android',image:component.detectTelephonyProfile(runtime.platform,runtime.pluginHeaders,'AlphaTelephony'),enabled,
+        googleOpen:runtime.google.snapshot,native:runtime.platform==='android',image:states[3]===true,enabled,
         setupRevision:runtime.connection.snapshot.setupRevision,accountCreated:runtime.connection.snapshot.accountCreated},
       durable:{progress:stored?JSON.parse(stored):null,memory:memory?JSON.parse(memory):null,
         effectiveProgress:component.readStartupPermissionProgress(localStorage,runtime.platform==='android'),writeWorks:!writeFailure&&!dropWrite},
@@ -434,6 +434,11 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
     await f.click('Settings');record('settings readback',[action('begin'),action('result',false)]);
     f.state.notifications=true;await f.click('Settings');record('granted readback',advance);
   });
+  await scenario('known-choice-skips-without-timer',{native:false,permissions:{notifications:false}},async(f,record)=>{
+    await f.click('Skip');record('owner defers known permission',action('skip'));
+    assert.equal(f.snapshot().component.progress.step,1);
+    assert.equal(f.snapshot().calls.filter(call=>call.kind==='request').length,0);
+  });
   await scenario('required-flow-dismissal-is-blocked',{},async(f,record)=>{
     await f.dismiss();record('cancel and back',action('blockedDismiss'));
     assert.equal(f.snapshot().ui.heading,'Notifications');
@@ -557,22 +562,23 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
     assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
   });
   await scenario('image-all-ready-completes-without-prompts',{image:true},async(f,record)=>{
-    assert.equal(f.snapshot().ui.heading,'All set');assert.equal(f.snapshot().durable.effectiveProgress.status,'completed');
-    assert.equal(f.calls.filter(call=>call.kind==='request').length,0);assert.equal(f.snapshot().homes,0);
-    await f.click('Done');record('owner acknowledges image completion',action('finish'));
+    assert.equal(f.snapshot().ui.visible,false);assert.equal(f.snapshot().durable.effectiveProgress.status,'completed');
+    assert.equal(f.calls.filter(call=>call.kind==='request').length,0);assert.equal(f.snapshot().homes,1);
     await f.remount();record('completed image stays completed',restart);
     assert.equal(f.snapshot().ui.visible,false);assert.equal(f.snapshot().homes,1);
   });
-  await scenario('browser-image-header-does-not-auto-continue',{native:false,image:true},async(f,record)=>{
+  await scenario('browser-image-defaults-do-not-auto-continue',{native:false,image:true},async(f,record)=>{
     assert.equal(f.snapshot().controller.image,false);assert.equal(f.snapshot().ui.heading,'Notifications');
     assert.equal(f.snapshot().component.progress.step,0);await f.click('Continue');record('browser permission remains explicit',advance);
     assert.equal(f.snapshot().component.progress.step,1);
   });
   await scenario('image-denied-row-stops-auto-continuation',{image:true,permissions:{location:'denied'}},async(f,record)=>{
     assert.equal(f.snapshot().ui.heading,'Location');assert.equal(f.snapshot().component.progress.step,3);
-    assert.equal(f.snapshot().durable.effectiveProgress.status,'pending');assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
+    assert.equal(f.snapshot().durable.effectiveProgress.status,'pending');assert.equal(f.snapshot().homes,0);
+    assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
     f.state.location='granted';await f.resume();record('fresh platform grant continues remaining image rows',observation=>[...statuses(observation),...imageAdvances(3,7)]);
-    assert.equal(f.snapshot().ui.heading,'All set');assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
+    assert.equal(f.snapshot().ui.visible,false);assert.equal(f.snapshot().homes,1);
+    assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
   });
   await scenario('image-unknown-read-stops-without-a-grant',{image:true,holdStatus:['notifications']},async(f,record)=>{
     assert.equal(f.snapshot().ui.visible,false);assert.equal(f.snapshot().component.progress.step,0);
@@ -596,7 +602,8 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
     await f.releaseStatuses();record('platform readiness while suspended',statuses);
     assert.equal(f.snapshot().component.progress.step,0);assert.equal(f.snapshot().ui.visible,false);
     await f.connection('owner-b',true);record('current owner resumes image setup',[action('signIn'),...imageAdvances(0,7)]);
-    assert.equal(f.snapshot().ui.heading,'All set');assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
+    assert.equal(f.snapshot().ui.visible,false);assert.equal(f.snapshot().homes,1);
+    assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
   });
   await scenario('image-overlays-defer-ready-rows',{image:true,holdStatus:permissionKeys},async(f,record)=>{
     await f.overlays(true,false);record('connection overlay suspends setup',action('overlays',true,false));
@@ -605,7 +612,8 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
     await f.overlays(false,true);record('Google overlay still suspends setup',action('overlays',false,true));
     assert.equal(f.snapshot().component.progress.step,0);
     await f.overlays(false,false);record('overlays close before image rows continue',[action('overlays',false,false),...imageAdvances(0,7)]);
-    assert.equal(f.snapshot().ui.heading,'All set');assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
+    assert.equal(f.snapshot().ui.visible,false);assert.equal(f.snapshot().homes,1);
+    assert.equal(f.calls.filter(call=>call.kind==='request').length,0);
   });
   await scenario('image-failed-progress-reloads-from-durable-marker',{image:true,writeFailure:true,permissions:{location:'denied'}},async(f,record)=>{
     assert.equal(f.snapshot().component.progress.step,3);assert.equal(f.snapshot().component.progressError,true);
@@ -632,7 +640,7 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
   const receipt=await checkTraces({model:'PermissionChoices',id:'PermissionChoicesCoordinator',batchSize:8,sources:component.sources,
     driverHashes:component.driverHashes,traces,scope:'bounded-orchestration',assumptions:[
       'Actual React component, staged shared permission-flow implementation and progress helpers execute in JSDOM.',
-      'Seven native bridges and four browser permission APIs are controlled ports. No device permission or real provider action occurs.',
+      'Seven native bridges and four browser permission APIs are controlled ports, with DeviceApps reporting the image provisioning marker. Account attention is absent in the automatic completion traces.',
       'Hook observers forward every call to React. Read-only compile-time observers capture the component local ticket/key/state and the shared flow pending ownership, without changing guards or return values.',
       'The model bounds generations to twelve, with seven native or four browser permission identities. These traces exercise finite owner, callback, lifecycle and storage schedules.',
       'Progress writes may fail or silently drop. Permission-attempt marker writes succeed in these traces. Native OS ownership, browser provider implementation and arbitrary callback schedules are separate obligations.',
@@ -660,7 +668,7 @@ test('actual permission coordinator traces refine the bounded walkthrough model'
     'same-turn-setup-revision-fences-completion', 'browser-four-ready-completion-and-remount',
     'native-location-and-photo-disclosures', 'signed-out-explicit-reopen',
     'direct-provider-setup-without-cloud-account', 'same-credential-environment-change-fences-callback',
-    'image-all-ready-completes-without-prompts', 'browser-image-header-does-not-auto-continue', 'image-denied-row-stops-auto-continuation',
+    'image-all-ready-completes-without-prompts', 'browser-image-defaults-do-not-auto-continue', 'image-denied-row-stops-auto-continuation',
     'image-unknown-read-stops-without-a-grant', 'image-checking-timeout-offers-skip-and-retires-late-read',
     'image-owner-suspension-defers-ready-rows', 'image-overlays-defer-ready-rows',
     'image-failed-progress-reloads-from-durable-marker', 'image-settings-review-keeps-every-row-explicit']) {

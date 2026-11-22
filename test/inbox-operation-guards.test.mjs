@@ -2,15 +2,19 @@
 // No account, network, OAuth consent or mail.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {join, resolve} from 'node:path';
 import {build} from 'esbuild';
+import {agentEmailSend} from '../apps/app/src/ui/mailbox/agent-email-draft.ts';
 import {editCoalescer} from '../apps/app/src/runtime/inbox-edit-coalescer.ts';
 import {ServiceReadCache} from '../apps/app/src/runtime/service-read-cache.ts';
 
-/** Bundles one source with named ports replaced; the last path segment selects the replacement. */
+/** Bundles one source with named ports replaced; the last path segment selects the replacement,
+ * given as JavaScript text or as an esbuild load result ({contents, loader, resolveDir}). */
 async function bundle(entry, mocks = {}) {
   const result = await build({entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'esm', logLevel: 'silent', plugins: [{name: 'ports', setup(b) {
     b.onResolve({filter: /.*/}, args => { const name = args.path.split('/').at(-1).replace(/\.ts$/, ''); if (name in mocks) return {path: name, namespace: 'fixture'}; });
-    b.onLoad({filter: /.*/, namespace: 'fixture'}, args => ({contents: mocks[args.path], loader: 'js'}));
+    b.onLoad({filter: /.*/, namespace: 'fixture'}, args => typeof mocks[args.path] === 'string' ? {contents: mocks[args.path], loader: 'js'} : mocks[args.path]);
   }}]});
   return import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
 }
@@ -34,7 +38,10 @@ function device(owner = 'owner') {
     },
     gmailDispatchOperation: async (_grant, requestId, reviewDigest, proposal) => {
       remote.dispatches++; if (remote.dispatchFails) throw new TypeError('Failed to fetch');
-      const receipt = {requestId, kind: proposal.kind, state: remote.dispatchState, reviewDigest, providerResult: remote.dispatchState === 'succeeded' ? {messageId: proposal.messageId, historyId: 'history-2'} : null, rejectionCode: null};
+      const providerResult = proposal.kind === 'send'
+        ? {messageId: 'sent-' + requestId, threadId: 'thread-1'}
+        : {messageId: proposal.messageId, historyId: 'history-2'};
+      const receipt = {requestId, kind: proposal.kind, state: remote.dispatchState, reviewDigest, providerResult: remote.dispatchState === 'succeeded' ? providerResult : null, rejectionCode: null};
       remote.receipts.set(requestId, receipt); return receipt;
     },
     gmailOperation: async (_grant, requestId) => ({...remote.receipts.get(requestId), ...(remote.answer ? {state: remote.answer, providerResult: null} : {})}),
@@ -106,11 +113,288 @@ test('an unsent review is still refreshed and confirmed through the guarded read
 });
 
 // The real controls over the fixture of the running test; the ports read it on every call.
-let controlsModule;
-const controls = () => controlsModule ??= bundle('apps/app/src/prototype/inbox-provider-controls.ts', {
+const controlPorts = {
   'inbox-local-store': `const f=()=>globalThis.inboxControlsFixture.store;export const inboxLocalStore={read:key=>f().read(key),compareExchange:(key,before,next)=>f().compareExchange(key,before,next)};`,
   'connection-ui': `const f=()=>globalThis.inboxControlsFixture.controller;export const connectionController={getCloudClient:()=>f().getCloudClient(),getSnapshot:()=>f().getSnapshot()};`,
   'inbox-attachment': attachmentPort,
+};
+let controlsModule;
+const controls = () => controlsModule ??= bundle('apps/app/src/prototype/inbox-provider-controls.ts', controlPorts);
+
+// The shared journal the controls run on. `pinned` is the journal as pinned, whose prepare keeps a
+// requested ID first (elizaOS/eliza#39921), as a chat draft's Send needs; `names` records a fresh
+// UUID of its own instead, as an earlier journal did, and review-controller.ts refuses that Send.
+const journalDirectory = resolve('.eliza/client-features/plugins/plugin-inbox/src/mailbox');
+function journalVariant(name) {
+  const source = readFileSync(join(journalDirectory, 'operation-journal.ts'), 'utf8');
+  const start = source.indexOf('\n  async prepare('), end = source.indexOf('\n  async reloadReview(', start);
+  const prepare = start < 0 || end < 0 ? '' : source.slice(start, end), line = /^([ \t]*)requestId: (.+),$/gm;
+  const recorded = [...prepare.matchAll(line)];
+  assert.equal(recorded.length, 1, 'The journal prepare records one request ID');
+  assert.equal(recorded[0][2], 'source?.requestId ?? crypto.randomUUID()', 'The pinned journal prepare keeps a requested ID');
+  const contents = name === 'pinned' ? source : source.slice(0, start) + prepare.replace(line, '$1requestId: crypto.randomUUID(),') + source.slice(end);
+  return {contents, loader: 'ts', resolveDir: journalDirectory};
+}
+const variantControls = new Map();
+const controlsWith = name => {
+  if (!variantControls.has(name)) variantControls.set(name, bundle('apps/app/src/prototype/inbox-provider-controls.ts', {...controlPorts, 'operation-journal': journalVariant(name)}));
+  return variantControls.get(name);
+};
+
+/**
+ * A chat draft's one-tap Send, bound as inbox-cloud-adapter.ts binds it: while it runs the
+ * composer is the chat email, prepared under the request ID its turn and content name. Cloud
+ * binds a request ID to the first operation prepared under it and refuses it for any other; a
+ * positive `d.lose` drops that many answers to prepares Cloud made, so nothing is dispatched.
+ */
+const chatTurn = 'fda73825-d24c-4bf8-b188-52287e34c4c4', chatSender = {grant: 'grant-a', from: 'owner@example.invalid'};
+const crewEmail = body => agentEmailSend(chatTurn, chatSender, {to: ['crew@example.invalid'], subject: 'Shoot plan', body});
+async function withChatSend(journal, run) {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const d = device(JSON.stringify(['production', 'owner-1', ''])), prepared = [], dispatched = [], bound = new Map();
+  const {gmailPrepareOperation: prepare, gmailDispatchOperation: dispatch} = d.client;
+  d.lose = 0;
+  d.client.gmailPrepareOperation = async (grant, requestId, proposal, signal) => {
+    prepared.push(requestId);
+    const content = JSON.stringify(proposal);
+    if ((bound.get(requestId) ?? content) !== content) throw Error('Request ID is already bound to a different reviewed operation');
+    bound.set(requestId, content);
+    const answer = await prepare(grant, requestId, proposal, signal);
+    if (d.lose > 0) { d.lose--; throw new TypeError('Failed to fetch'); }
+    return answer;
+  };
+  d.client.gmailDispatchOperation = async (grant, requestId, digest, proposal, signal) => {
+    dispatched.push([requestId, proposal.bodyText]);
+    return dispatch(grant, requestId, digest, proposal, signal);
+  };
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controlsWith(journal);
+    const provider = inboxProviderControls(() => {}, () => {});
+    let email;
+    provider.setComposer(() => email ? {draftId: email.draftId, proposal: email.proposal} : null);
+    const send = async body => {
+      email = crewEmail(body);
+      try {
+        return await provider.prepare({kind: 'send', ...email.proposal}, {draftId: email.draftId, requestId: email.requestId}, 'send-from-composer');
+      } finally { email = undefined; }
+    };
+    await run({d, provider, send, prepared, dispatched});
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+}
+
+test('a chat draft Send is refused, and nothing is dispatched, while the journal names its own request ID', async () => {
+  await withChatSend('names', async ({d, provider, send, prepared, dispatched}) => {
+    await provider.bind('grant-a');
+    assert.deepEqual(await send('Pack the tripod.'), {state: 'unsent', detail: 'Update Alpha before sending this email.'});
+    assert.equal(prepared.length, 1);
+    assert.notEqual(prepared[0], crewEmail('Pack the tripod.').requestId);
+    assert.deepEqual(dispatched, []);
+    assert.equal(d.slot(), null, 'the refused review is not kept');
+  });
+});
+
+for (const journal of ['names', 'pinned'])
+  test(`a chat draft Send prepares again over its unsent review saved under another request ID (${journal === 'pinned' ? 'pinned journal' : 'journal naming its own IDs'})`, async () => {
+    await withChatSend(journal, async ({d, provider, send, prepared, dispatched}) => {
+      // An earlier Alpha prepared this exact email under its own request ID, and nothing was sent.
+      const earlier = d.make(), email = crewEmail('Pack the tripod.');
+      await earlier.prepare({kind: 'send', ...email.proposal}, {draftId: email.draftId});
+      const earlierId = earlier.snapshot().requestId;
+      assert.equal(d.slot().phase, 'review');
+      await provider.bind('grant-a');
+      const result = await send('Pack the tripod.');
+      // The saved review is not reused under its old ID: the email is prepared once more.
+      assert.equal(prepared.length, 1);
+      assert.notEqual(prepared[0], earlierId);
+      assert.equal(d.remote.receipts.get(earlierId).state, 'prepared', 'the earlier review was never dispatched');
+      if (journal === 'names') {
+        assert.deepEqual(result, {state: 'unsent', detail: 'Update Alpha before sending this email.'});
+        assert.deepEqual(dispatched, []);
+      } else {
+        assert.equal(result.state, 'sent');
+        assert.deepEqual(prepared, [email.requestId]);
+        assert.deepEqual(dispatched, [[email.requestId, 'Pack the tripod.']]);
+      }
+    });
+  });
+
+for (const [change, body] of [['retried unchanged', 'Pack the tripod.'], ['edited', 'Pack the tripod and the blue notebook.']])
+  test(`with the pinned journal, a chat email ${change} after an undispatched prepare is sent once under the ID its content names`, async () => {
+    await withChatSend('pinned', async ({d, provider, send, prepared, dispatched}) => {
+      await provider.bind('grant-a');
+      const first = crewEmail('Pack the tripod.'), next = crewEmail(body);
+      // Cloud prepares the first Send, but its answer never arrives, so nothing is dispatched.
+      d.lose = 1;
+      assert.equal((await send('Pack the tripod.')).state, 'unsent');
+      assert.deepEqual(prepared, [first.requestId]);
+      assert.deepEqual(dispatched, []);
+      const result = await send(body);
+      assert.equal(result.state, 'sent');
+      assert.deepEqual(prepared, [first.requestId, next.requestId]);
+      assert.deepEqual(dispatched, [[next.requestId, body]]);
+      if (change === 'edited') {
+        assert.notEqual(next.requestId, first.requestId);
+        // One request ID per turn would have been refused for the edited email.
+        await assert.rejects(d.client.gmailPrepareOperation('grant-a', first.requestId, {kind: 'send', ...next.proposal}), /already bound to a different reviewed operation/);
+      } else assert.equal(next.requestId, first.requestId);
+    });
+  });
+
+test('restore clears a rejected legacy chat prepare and retains a valid prepare', async () => {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const owner = JSON.stringify(['production', account.userId, '']);
+  const d = device(owner);
+  const key = 'inbox-operation:v1:' + await sha(JSON.stringify([owner, 'grant-a']));
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    for (const version of ['0', '5']) {
+      const requestId = `00000000-0000-${version}000-8000-000000000001`;
+      const draftId = `agent-email:${requestId}`;
+      const record = {
+        version: 1, owner, grantId: 'grant-a',
+        requestId, proposal: {kind: 'send'}, phase: 'preparing', review: null, receipt: null,
+        source: {draftId}, composer: {draftId},
+      };
+      d.slots.set(key, record);
+      await inboxProviderControls(() => {}, () => {}).bind('grant-a');
+      assert.deepEqual(d.slot(), version === '0' ? null : record);
+    }
+    assert.equal(d.remote.receipts.size, 0);
+    assert.equal(d.remote.dispatches, 0);
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+});
+
+test('a manual Send never dispatches a composer that changed during preparation', async () => {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const d = device(JSON.stringify(['production', 'owner-1', '']));
+  const toasts = [];
+  const started = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  const prepare = d.client.gmailPrepareOperation;
+  d.client.gmailPrepareOperation = async (...args) => {
+    started.resolve();
+    await released.promise;
+    return prepare(...args);
+  };
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    const provider = inboxProviderControls(() => {}, text => toasts.push(text));
+    const proposal = {kind: 'send', mode: 'compose', to: ['reader@example.invalid'], cc: [], bcc: [], subject: 'Approved email', bodyText: 'First version', attachments: []};
+    let composer = {draftId: 'draft-1', proposal};
+    provider.setComposer(() => composer);
+    await provider.bind('grant-a');
+    const send = provider.prepare(proposal, {draftId: 'draft-1'}, 'send-from-composer');
+    await started.promise;
+    composer = {...composer, proposal: {...proposal, bodyText: 'Edited version'}};
+    released.resolve();
+    await send;
+    assert.equal(d.remote.dispatches, 0);
+    assert.equal(d.slot(), null);
+    assert.equal(provider.render().providerReview, false);
+    assert.equal(toasts.at(-1), 'Email changed before sending. Check it and tap Send again.');
+  } finally {
+    released.resolve();
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+});
+
+async function directSendAfter(earlier) {
+  const account = {environment: 'production', userId: 'owner-1'};
+  const d = device(JSON.stringify(['production', 'owner-1', '']));
+  const toasts = [];
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    const provider = inboxProviderControls(() => {}, text => toasts.push(text));
+    const proposal = {kind: 'send', mode: 'compose', to: ['reader@example.invalid'], cc: [], bcc: [], subject: 'Hello', bodyText: 'Body', attachments: []};
+    provider.setComposer(() => ({draftId: 'draft-1', proposal}));
+    await provider.bind('grant-a');
+    await earlier(provider, d);
+    const before = d.remote.dispatches;
+    await provider.prepare(proposal, {draftId: 'draft-1'}, 'send-from-composer');
+    await until(() => !provider.render().provider.busy, 'the send');
+    return {d, toasts, provider, sent: d.remote.dispatches - before};
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+}
+
+for (const kind of ['archive', 'trash']) {
+  test(`one-tap Send after a settled ${kind} receipt clears the receipt and dispatches once`, async () => {
+    const {d, toasts, provider, sent} = await directSendAfter(async (provider, d) => {
+      await provider.prepare({...archive, kind});
+      provider.render().provider.confirm();
+      await until(() => d.slot()?.phase === 'observed' && !provider.render().provider.busy, 'the confirmed ' + kind);
+    });
+    assert.equal(sent, 1, 'the email is dispatched exactly once');
+    assert.equal(d.slot().proposal.kind, 'send');
+    assert.equal(d.slot().receipt.state, 'succeeded');
+    assert.deepEqual(toasts, ['Sent.']);
+    assert.equal(provider.render().providerReview, false);
+  });
+}
+
+test('checking a restored Gmail draft send receipt keeps the review open and reports Sent once', async () => {
+  const account = {environment: 'production', userId: 'owner-1'}, owner = JSON.stringify(['production', 'owner-1', '']);
+  const d = device(owner), toasts = [];
+  globalThis.inboxControlsFixture = {store: d.store, controller: {getCloudClient: () => ({client: d.client, sessionId: 'session-1'}), getSnapshot: () => ({cloudAccount: account})}};
+  globalThis.document = {documentElement: {dataset: {connectionMode: 'live'}}};
+  try {
+    const {inboxProviderControls} = await controls();
+    const provider = inboxProviderControls(() => {}, text => toasts.push(text));
+    const proposal = {kind: 'send', mode: 'compose', to: ['reader@example.invalid'], cc: [], bcc: [], subject: 'Hello', bodyText: 'Body', attachments: []};
+    const source = {draftId: 'draft-1', providerDraft: {draftId: 'gmail-draft-1', providerDigest: 'a'.repeat(64)}};
+    provider.setComposer(() => ({draftId: 'draft-1', proposal}));
+    await provider.bind('grant-a');
+    await provider.prepare(proposal, source, 'send-from-composer');
+    await until(() => !provider.render().provider.busy, 'the send');
+    assert.equal(d.remote.dispatches, 1);
+    assert.deepEqual(toasts, ['Sent.']);
+    assert.equal(provider.render().providerReview, false);
+    // After a restart the receipt is reopened from its chip and checked again.
+    const restarted = inboxProviderControls(() => {}, text => toasts.push(text));
+    await restarted.bind('grant-a');
+    assert.equal(restarted.render().providerReview, false);
+    const chips = restarted.chips((label, action) => ({label, action}));
+    assert.deepEqual(chips.map(chip => chip.label), ['Mail review / receipt']);
+    chips[0].action();
+    assert.equal(restarted.render().providerReview, true);
+    restarted.render().provider.check();
+    await until(() => !restarted.render().provider.busy, 'the check');
+    assert.deepEqual(toasts, ['Sent.'], 'the earlier send is not reported again');
+    assert.equal(restarted.render().providerReview, true, 'the checked receipt stays on view');
+    assert.equal(d.remote.dispatches, 1);
+  } finally {
+    delete globalThis.inboxControlsFixture;
+    delete globalThis.document;
+  }
+});
+
+test('one-tap Send behind an unsent review of another change opens the review sheet and sends nothing', async () => {
+  const {d, toasts, provider, sent} = await directSendAfter(async provider => {
+    await provider.prepare(archive);
+  });
+  assert.equal(sent, 0, 'nothing is dispatched');
+  assert.equal(d.slot().proposal.kind, 'archive', 'the saved review is kept for the owner');
+  assert.equal(d.slot().phase, 'review');
+  assert.equal(provider.render().providerReview, true, 'the review sheet is shown so the owner can resolve it');
+  assert.deepEqual(toasts, [], 'the open review is the only notice');
+  assert.equal(provider.render().provider.status, 'Review the saved email action before starting another.');
 });
 
 test('the review sheet keeps a confirmed receipt when Check gets a regressed answer, and never dispatches again', async () => {
@@ -130,8 +414,14 @@ test('the review sheet keeps a confirmed receipt when Check gets a regressed ans
     // The provider regresses; the owner taps Check, then Confirm, twice.
     d.remote.answer = 'prepared';
     provider.render().provider.check();
-    await until(() => toasts.length > 0 && !provider.render().provider.busy, 'the refused check');
+    await until(() => {
+      const review = provider.render().provider;
+      return review.status === regressedReceiptRefusal && !review.busy;
+    }, 'the refused check');
     const shown = provider.render().provider;
+    // The owner is told, in Alpha's words, that nothing changed and not to repeat it.
+    assert.deepEqual(toasts, [], 'the open review is the only notice');
+    assert.equal(shown.status, regressedReceiptRefusal, 'the review status keeps the guard’s guidance');
     assert.equal(shown.canConfirm, false, 'Confirm is not offered again');
     assert.equal(d.slot().phase, 'observed'); assert.equal(d.slot().receipt.state, 'succeeded');
     shown.confirm(); await new Promise(resolve => setTimeout(resolve, 20)); provider.render().provider.confirm();

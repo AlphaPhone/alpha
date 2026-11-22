@@ -39,9 +39,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  });}
  private static final Set<AlphaVoiceCloudPlugin> activeVoices=new java.util.concurrent.CopyOnWriteArraySet<>();
  private static final Set<Streaming> activeStreams=new java.util.concurrent.CopyOnWriteArraySet<>();
- private final ai.eliza.plugins.passwords.PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
- @Override protected void handleOnDestroy(){activeVoices.remove(this);ai.eliza.plugins.passwords.PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
- @Override protected boolean sensitiveSurfaceActive(){return ai.eliza.plugins.passwords.PasswordSurfaces.visible();}
+ private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
+ @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+ @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
  static void retireProviderAuthority(){
   for(AlphaVoiceCloudPlugin voice:activeVoices)voice.mainHandler().post(voice::retireSpeechAuthority);
   for(Streaming stream:activeStreams)stream.retireProvider();
@@ -84,7 +84,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private volatile boolean noteForeground=true;
  /** The shared bridge's refusal code for an active call, so the renderer shows its one call line. */
  private static final String CALL_ACTIVE_CODE="call-active";
- @Override public void load(){super.load();activeVoices.add(this);ai.eliza.plugins.passwords.PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
+ @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
  @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();}
  @Override protected void handleOnPause(){noteForeground=false;super.handleOnPause();}
  private boolean callActive(){android.media.AudioManager audio=(android.media.AudioManager)getContext().getSystemService(android.content.Context.AUDIO_SERVICE);int mode=audio==null?android.media.AudioManager.MODE_NORMAL:audio.getMode();return mode==android.media.AudioManager.MODE_IN_CALL||mode==android.media.AudioManager.MODE_IN_COMMUNICATION||mode==android.media.AudioManager.MODE_RINGTONE;}
@@ -114,6 +114,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   }
   catch(RuntimeException error){call.reject("Microphone could not start","capture");}
  });}
+ /** A tap on the recording notification, taken once by the launcher renderer when it can show Notes. */
+ @PluginMethod public void consumeNoteRecordingOpen(PluginCall call){JSObject result=new JSObject();result.put("open",AlphaNoteRecordingService.consumeShowNotes());call.resolve(result);}
+ @PluginMethod public void clearNoteRecordingOpen(PluginCall call){AlphaNoteRecordingService.clearShowNotes();call.resolve();}
  @PluginMethod public void noteRecordingStatus(PluginCall call){mainHandler().post(()->call.resolve(noteRecorder().status()));}
  @PluginMethod public void pauseNoteRecording(PluginCall call){mainHandler().post(()->{try{call.resolve(noteRecorder().pause(noteRecordingId(call)));}catch(RuntimeException error){call.reject("Recording changed");}});}
  @PluginMethod public void resumeNoteRecording(PluginCall call){
@@ -202,13 +205,9 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   c.setInstanceFollowRedirects(false);c.setConnectTimeout(20000);c.setReadTimeout(120000);c.setUseCaches(false);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Authorization","Bearer "+token);
   requireCloudSpeechAuthority(call,epoch);if(request.cancelled)throw new IOException();return c;
  }
- private RecordingWindow savedRecording(PluginCall call,SpeechRequestGate.Request request)throws Exception{
-  if(!call.getData().has("savedNoteId"))return null;
-  return RecordingWindow.open(AlphaNoteAudioPlugin.recordings(getContext()),getContext().getCacheDir(),"noteId",call.getString("recordingId"),call.getString("savedNoteId"),call.getLong("offsetMs"),call.getLong("savedDurationMs"),()->request.cancelled||destroyed());
- }
  @PluginMethod public void transcribeRecording(PluginCall call){final long epoch=AlphaLocalAgentPlugin.credentialAuthorityEpoch();submit(call,request->{
   requireCloudSpeechAuthority(call,epoch);
-  try(RecordingWindow saved=savedRecording(call,request)){
+  try(RecordingWindow saved=SavedNoteRecordingWindow.open(getContext(),call,()->request.cancelled||destroyed())){
   if(saved!=null&&saved.empty){saved.check();JSObject silence=new JSObject();silence.put("text","");silence.put("local",false);silence.put("emptyWindow",true);request.result=silence;return;}
   CloudSpeechTimings.Record timing=cloudTimings.begin("stt");boolean completed=false;try{
   request.failureCode="voice-stt-decode";cloudTimings.mark(timing,"decode-start");
@@ -250,7 +249,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   public void opened(HttpURLConnection connection)throws Exception{request.connection=connection;check();}
  }
  @PluginMethod public void transcribeOwnRecording(PluginCall call){submit(call,request->{
-  OwnSpeech own=new OwnSpeech(call,request);try(RecordingWindow saved=savedRecording(call,request)){
+  OwnSpeech own=new OwnSpeech(call,request);try(RecordingWindow saved=SavedNoteRecordingWindow.open(getContext(),call,()->request.cancelled||destroyed())){
   if(saved!=null&&saved.empty){saved.check();JSObject silence=new JSObject();silence.put("text","");silence.put("local",false);silence.put("emptyWindow",true);request.result=silence;return;}String recordingId=required(call.getString("recordingId"),256);File file=saved==null?recording().selected(recordingId):saved.file;if(file==null)throw new IOException("Recording unavailable");
   byte[] wav=RecordingPcm.decode(file,()->request.cancelled||destroyed());
   try{if(saved!=null)saved.check();String text=CartesiaSpeech.transcribe(own.key,wav,own,CartesiaSpeech.HTTPS);own.check();if(saved!=null)saved.check();JSObject result=new JSObject();result.put("text",text);result.put("local",false);result.put("provider","cartesia");result.put("route","direct");request.result=result;}finally{Arrays.fill(wav,(byte)0);}
@@ -309,10 +308,10 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  @CapacitorPlugin(name="AlphaCloudSpeechStream",permissions={@Permission(alias="microphone",strings={android.Manifest.permission.RECORD_AUDIO})})
  public static final class Streaming extends SpeechStreamBridgePlugin {
   private void retireProvider(){new android.os.Handler(android.os.Looper.getMainLooper()).post(this::retireSpeechAuthority);}
-  private final ai.eliza.plugins.passwords.PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
-  @Override public void load(){super.load();activeStreams.add(this);ai.eliza.plugins.passwords.PasswordSurfaces.addListener(secretSurface);}
-  @Override protected void handleOnDestroy(){activeStreams.remove(this);ai.eliza.plugins.passwords.PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
-  @Override protected boolean sensitiveSurfaceActive(){return ai.eliza.plugins.passwords.PasswordSurfaces.visible();}
+  private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
+  @Override public void load(){super.load();activeStreams.add(this);PasswordSurfaces.addListener(secretSurface);}
+  @Override protected void handleOnDestroy(){activeStreams.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+  @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
   @Override protected long authorityEpoch(){return AlphaLocalAgentPlugin.credentialAuthorityEpoch();}
   @Override protected String cloudOrigin(String environment)throws Exception{return "https://"+CloudSpeechPolicy.host(false,environment);}
   @Override protected String diagnosticFormat(){return "alpha-cloud-stream-timing-v1";}

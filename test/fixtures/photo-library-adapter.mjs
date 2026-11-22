@@ -90,9 +90,13 @@ function fakeHost(){
   ['complete',()=>({status:'complete',outcomes:[{id:'lib:i:3:30',status:'trashed'}]}),/^$/,['lib:i:3:30']],
   ['partial',()=>({status:'partial',outcomes:[{id:'lib:i:3:30',status:'stale'}]}),/^0\/1 ✓ · 1 skipped$/,[]],
   ['unverified',()=>({status:'partial',outcomes:[{id:'lib:i:3:30',status:'unverified'}]}),/^0\/1 ✓$/,[]],
-  ['declined',rejection('Photo change cancelled. No change was dispatched.','LIBRARY_DECLINED'),/^Nothing changed\.$/,[]],
-  ['stale',rejection('Selected media changed or is unavailable. Refresh Photos.','LIBRARY_STALE'),/^Item changed$/,[]],
-  ['other',rejection('Finish the current photo review first.','LIBRARY_BUSY'),/^Failed$/,[]],
+  // The review's own sentence reads in Alpha's words (PHOTOS_MESSAGES); one Alpha has no words for keeps its code's line.
+  ['declined',rejection('Photo change cancelled. No change was dispatched.','LIBRARY_DECLINED'),/^Photo change cancelled\. Nothing changed\.$/,[]],
+  ['stale',rejection('Selected media changed or is unavailable. Refresh Photos.','LIBRARY_STALE'),/^A selected item changed or isn’t available\. Refresh Photos\. Nothing changed\.$/,[]],
+  ['busy',rejection('Finish the current photo review first.','LIBRARY_BUSY'),/^Finish the open photo review first\.$/,[]],
+  ['unknown declined',rejection('A newer review sentence','LIBRARY_DECLINED'),/^Nothing changed\.$/,[]],
+  ['unknown stale',rejection('A newer review sentence','LIBRARY_STALE'),/^Item changed$/,[]],
+  ['other',rejection('A newer review sentence','LIBRARY_BUSY'),/^Failed$/,[]],
  ]){
   const {state,port}=fakePort(),host=fakeHost(),library=createDeviceLibrary(port,()=>true);
   const signal=new AbortController().signal,search=await library.agent.run({type:'photo_library_search',limit:1},signal);
@@ -174,5 +178,21 @@ function fakeHost(){
   assert.deepEqual(host.trashed,['lib:i:3:30'],'Android\'s own dialog hides the page; the confirmed change still completes');
   library.dispose();host.release();
  }finally{delete globalThis.document;}
+}
+// 5. Agent-named items older than the loaded window are read before they count as missing.
+{
+ const {resolveRequestedRows}=await import('../../apps/app/src/prototype/photo-library-adapter.ts');
+ const loaded=[{id:'m:3'},{id:'m:2'}],reads=[];
+ const read=async id=>{reads.push(id);if(id==='m:1')return {id:'m:1'};if(id==='m:7')return undefined;if(id==='m:8')return {id:'m:9'};throw Object.assign(Error('missing'),{code:'LIBRARY_MISSING'});};
+ const signal=new AbortController().signal;
+ const result=await resolveRequestedRows(loaded,['m:2','m:1','m:7','m:8','m:404'],row=>row.id,read,signal);
+ assert.deepEqual(result.rows.map(row=>row.id),['m:2','m:1'],'the loaded row, then the older row read from the library');
+ assert.equal(result.missing,3,'unreadable, deleted and mismatched reads are missing');
+ assert.deepEqual(reads,['m:1','m:7','m:8','m:404'],'loaded rows are not read again');
+ const none=await resolveRequestedRows(loaded,['m:3'],row=>row.id,async()=>{throw Error('no read expected');},signal);
+ assert.deepEqual(none,{rows:[{id:'m:3'}],missing:0});
+ const stop=new AbortController();let started=0;
+ const pending=resolveRequestedRows(loaded,['m:5','m:6'],row=>row.id,async id=>{started++;stop.abort();return {id};},stop.signal);
+ await assert.rejects(pending,error=>error?.name==='AbortError');assert.equal(started,1,'a cancelled request reads nothing more');
 }
 console.log('PASS photo library adapter');

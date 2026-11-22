@@ -1,6 +1,9 @@
 /** Replays PendingActionRecovery model traces against `recoverPendingActions` and the review
  * cards it builds (`proposalCard`), evaluated from apps/app/src/prototype/agent-adapter.ts.
  *
+ * `activeCommsSpec` (apps/app/src/prototype/comms-alpha.ts) is evaluated too; the shell shows no
+ * view, so no comms screen is active and `isMvpView`/`views` are never consulted.
+ *
  * Controlled ports: the connection snapshot (the binding is its history revision; `blocked` is
  * connection work in progress), the pending-action read, the expiry timer and the clock.
  *
@@ -25,7 +28,13 @@ export function compile() {
   const source = readFileSync(`${repositoryRoot}/apps/app/src/prototype/agent-adapter.ts`, 'utf8');
   const between = (start, end) => { const a = source.indexOf(start), b = source.indexOf(end, a); if (a < 0 || b <= a) throw Error(`missing source anchor ${start}`); return source.slice(a, b); };
   const card = between('  function proposalCard(', '  p.cancelReadReplyCompletions=function'), recover = between('  function recoverPendingActions(', '  /** The stopped-reply');
-  return transformSync(`${card}\n${recover}`, {loader: 'ts', format: 'cjs'}).code + ';return recoverPendingActions;';
+  // AP-16: recovery asks the real `activeCommsSpec` whether a comms screen is on top; the replay's
+  // shell shows no view, so it is not one and recovery builds the action review card.
+  const comms = readFileSync(`${repositoryRoot}/apps/app/src/prototype/comms-alpha.ts`, 'utf8');
+  const commsStart = comms.indexOf('export function activeCommsSpec('), commsEnd = comms.indexOf('\n}\n', commsStart);
+  if (commsStart < 0 || commsEnd <= commsStart) throw Error('missing source anchor activeCommsSpec');
+  const spec = comms.slice(commsStart + 'export '.length, commsEnd + 3);
+  return transformSync(`${spec}\n${card}\n${recover}`, {loader: 'ts', format: 'cjs'}).code + ';return recoverPendingActions;';
 }
 
 export function project(state) {
@@ -44,10 +53,11 @@ export function createDriver(code) {
     getSnapshot: () => ({session, history: {revision}, phoneActionsAvailable: true, open: false, busy}),
     pendingActions(_context, signal) { return new Promise((resolve, reject) => { reads.push({resolve, reject, signal, revision, pending: true}); }); },
   };
-  const recover = new Function('connectionController', 'alphaClient', 'document', 'setTimeout', 'clearTimeout', 'retainReadReply', 'crypto', 'Date', code)(
+  const isMvpView = () => { throw Error('the replay shell shows no view'); }, views = {};
+  const recover = new Function('connectionController', 'alphaClient', 'document', 'setTimeout', 'clearTimeout', 'retainReadReply', 'crypto', 'Date', 'isMvpView', 'views', code)(
     connectionController, {getState: () => ({context})}, {hidden: false},
     (run, delay) => { const timer = {run, delay, revision, live: true}; timers.push(timer); return timer; },
-    timer => { if (timer) timer.live = false; }, () => {}, {randomUUID: () => `card-${++uuid}`}, {now: () => clock});
+    timer => { if (timer) timer.live = false; }, () => {}, {randomUUID: () => `card-${++uuid}`}, {now: () => clock}, isMvpView, views);
   const keyOf = value => value ? JSON.parse(value)[1] : -1;
   const expiring = () => msgs.filter(message => message.card?.proposalId && !message.card.done && !message.card.reviewUnavailable && Number.isFinite(message.card.expiresAt));
   const marks = () => msgs.filter(message => message.card?.proposalId?.startsWith('read-'));

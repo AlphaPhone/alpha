@@ -9,7 +9,8 @@ import {boundInputs, call, captureSources, checkpoint, deferred, root, tick, tra
 import {resolve} from 'node:path';
 
 const driver = fileURLToPath(import.meta.url);
-const source = '.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts';
+const source = 'apps/app/src/ui/mobile-shell/installed-launcher.ts';
+const bridgeSource = '.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts';
 const readIds = Array.from({length: 8}, (_, i) => i + 1), launchIds = [1, 2, 3, 4];
 const apps = [null,
   {packageName: 'org.example.app', activityName: 'Main', user: '0', label: 'Example'},
@@ -24,19 +25,23 @@ const emptyRead = {listDone: false, listOk: false, entries: [], dialDone: false,
 const emptyLaunch = {lifetime: 0, target: 0, resolvedDial: 0};
 
 function compile(extraSources) {
-  const sources = [source, driver, ...extraSources];
+  const sources = [source, bridgeSource, driver, ...extraSources];
   captureSources(sources);
   const text = readFileSync(resolve(root, source), 'utf8'), marker = '  let lifetime = 0;';
   assert.equal(text.split(marker).length, 2, 'One launcher generation observation seam');
   const code = transformSync(text.replace(marker, marker + '\n  __port.inspect=()=>({state,generation,lifetime});'),
     {loader: 'ts', format: 'cjs', target: 'es2022'}).code;
-  return {code, sources};
+  const bridgeCode = transformSync(readFileSync(resolve(root, bridgeSource), 'utf8'), {loader: 'ts', format: 'cjs', target: 'es2022'}).code;
+  return {code, bridgeCode, sources};
 }
 
 function fixture(compiled) {
   const port = {}, module = {exports: {}};
   new Function('module', 'exports', '__port', compiled.code)(module, module.exports, port);
-  const {appKey, createLauncher, createSystemLauncherBridge} = module.exports;
+  const {appKey, createLauncher} = module.exports;
+  const bridgeModule = {exports: {}};
+  new Function('module', 'exports', compiled.bridgeCode)(bridgeModule, bridgeModule.exports);
+  const {createSystemLauncherBridge} = bridgeModule.exports;
   const reads = new Map(), launches = [];
   const keys = new Map(apps.slice(1).map((app, index) => [appKey(app), index + 1]));
   const appId = value => {
@@ -78,7 +83,8 @@ function fixture(compiled) {
   const error = value => {
     if (!value) return '';
     if (value.endsWith('is no longer installed.')) return 'stale-app';
-    if (value.endsWith('Fixture refusal.')) return value.startsWith('Example') ? 'launch-failed' : 'dial-failed';
+    // A refusal is worded by Alpha after the app name (installed-launcher.ts LAUNCH_REFUSALS).
+    if (value.endsWith('could not be opened. Android didn’t open it. Try again.')) return value.startsWith('Example') ? 'launch-failed' : 'dial-failed';
     return assert.fail('Unexpected launcher result: ' + value);
   };
   return {
@@ -123,7 +129,7 @@ function fixture(compiled) {
       assert.ok(launch && !launch.settled);
       launch.settled = true;
       if (ok) launch.task.resolve();
-      else launch.task.reject(Error('Fixture refusal.'));
+      else launch.task.reject(Error('App could not be opened'));
     },
     cancelPending() {launcher.cancelPending();},
     clearError() {launcher.clearError();},
@@ -185,7 +191,7 @@ async function checkLauncherOwnership(extraSources = []) {
     } finally {await f.close();}
   }
   return checkTraces(boundInputs({model: 'LauncherOwnership', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
-    'Actual prepared createLauncher and createSystemLauncherBridge execute against held system list, default resolution and launch promises. A read-only observer exposes native handoff lifetime and inventory generation.',
+    'Actual Alpha createLauncher and prepared createSystemLauncherBridge execute against held system list, default resolution and launch promises. A read-only observer exposes native handoff lifetime and inventory generation.',
     'Three exact package/activity/profile app identities, two default-handler readbacks, eight generations and four launches. Failed/malformed reads, invalid entries, duplicate identities and retired promises are concrete input classes.',
     'No builtins, favorites mutation or host watch scheduling in this projection. Actual Android package effects and open-default execution remain controlled system ports.',
   ]}));

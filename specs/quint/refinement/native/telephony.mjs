@@ -37,23 +37,23 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
   const seen = state => ({'s.draft': state.draft, 's.suggest': state.suggest, 's.draftBase': state.draft === 'agent' ? number(state.base) : -1, 's.declined': number(state.declined)});
   /** One thread driven through the draft module; `latest` is the newest inbound message while unanswered. */
   function thread(name) {
-    let state = D.emptyDraft(), inbound = 0, answered = 0;
+    let state = D.emptyDraft(), inbound = 0, answered = 0, ready = false;
     const latest = () => inbound > answered ? `m${inbound}` : null;
     const t = trace(name, seen(state)), on = (action, change) => { if (change) state = change(state); t.step(action, seen(state)); return api; };
     const api = {
-      ready: () => on(act('becomeReady')),
+      ready: () => { ready = true; return on(act('becomeReady')); },
       open: () => on(act('openThread')),
       receive: () => { inbound++; return on(act('receive'), s => D.threadChanged(s, latest())); },
-      request: () => { must(D.canSuggest(state, latest(), true), 'a suggestion is due'); return on(act('requestSuggestion'), s => D.suggestionRequested(s, latest(), true)); },
-      noRequest: () => { must(!D.canSuggest(state, latest(), true), 'no suggestion is due'); must(D.suggestionRequested(state, latest(), true) === state, 'a refused request changes nothing'); return on(refused('requestSuggestion')); },
-      reply: (ticket, ok) => on(act('suggestionReply', ticket, ok), s => D.suggestionReplied(s, `m${ticket}`, latest(), true, ok ? 'Yes, see you at 7' : null)),
+      request: () => { must(D.canSuggest(state, latest(), ready), 'a suggestion is due'); return on(act('requestSuggestion'), s => D.suggestionRequested(s, latest(), ready)); },
+      noRequest: () => { must(!D.canSuggest(state, latest(), ready), 'no suggestion is due'); must(D.suggestionRequested(state, latest(), ready) === state, 'a refused request changes nothing'); return on(refused('requestSuggestion')); },
+      reply: (ticket, ok) => on(act('suggestionReply', ticket, ok), s => D.suggestionReplied(s, `m${ticket}`, latest(), ready, ok ? 'Yes, see you at 7' : null)),
       type: () => on(act('typeText'), s => D.typed(s, 'On my way')),
       dismiss: () => on(act('dismissSuggestion'), s => D.suggestionDismissed(s)),
-      asked: () => on(act('placeAskedDraft'), s => D.askedDraftPlaced(s, 'Ten minutes away', true)),
-      noAsked: () => { must(D.askedDraftPlaced(state, 'Ten minutes away', true) === state, 'a refused asked draft changes nothing'); return on(refused('placeAskedDraft')); },
+      asked: () => on(act('placeAskedDraft'), s => D.askedDraftPlaced(s, 'Ten minutes away', ready)),
+      noAsked: () => { must(D.askedDraftPlaced(state, 'Ten minutes away', ready) === state, 'a refused asked draft changes nothing'); return on(refused('placeAskedDraft')); },
       tap: () => on(act('tapSend')),
       confirm: result => { if (result === 'sent') answered = inbound; return on(act('confirmReview', result), s => D.reviewFinished(s, result)); },
-      lose: () => on(act('loseReady'), s => D.readinessLost(s)),
+      lose: () => { ready = false; return on(act('loseReady'), s => D.readinessLost(s)); },
       done: () => t.done(),
     };
     return api;
@@ -70,7 +70,8 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
     thread('losing readiness stops a running suggestion').ready().receive().request().lose().done(),
     thread('an edited suggestion becomes the owner draft and is not suggested again').ready().receive().request().reply(1, true).open().type().done(),
     thread('an asked draft is sent only after the owner tap and survives a newer message').ready().open().asked().receive().tap().confirm('sent').done(),
-    thread('an asked draft never replaces the owner text').ready().open().type().noAsked().done(),
+    thread('an asked draft replaces the owner text and is still only a draft').ready().open().type().asked().done(),
+    thread('an asked draft never lands without readiness').ready().open().type().lose().noAsked().done(),
     thread('an asked draft replaces a suggestion, which is then not offered again').ready().receive().request().reply(1, true).open().asked().dismiss().noRequest().done(),
     thread('typing over an asked draft makes it the owner draft').ready().open().asked().type().done(),
     thread('a dismissal is remembered past a send').ready().receive().request().reply(1, true).dismiss().open().type().tap().confirm('sent').done(),
@@ -79,6 +80,7 @@ export async function checkTelephonyMessageThreads(extraSources = []) {
     'The actual message-draft.ts transitions run with controlled thread events. Draft owner, suggestion state, the answered message and the dismissed message are observed.',
     'Inbound and answered counts, the open thread, read state, the native review and the send counters are driver inputs here; the SMS adapter and the native reviewed send own them.',
     'The reply text is one fixed string; the model abstracts text to two identities.',
+    'The Undo slot an asked draft fills (AC-14) is not observed; the model does not include Undo.',
   ]});
 }
 

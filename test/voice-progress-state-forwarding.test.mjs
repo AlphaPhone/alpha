@@ -33,7 +33,7 @@ for(const own of [false,true])test(`the real ${own?'own-key':'development'} adap
     ['./development-cloud-voice', 'export const developmentCloudRealtimeVoiceEnabled=false;'],
     ['./development-cartesia-flag', 'export const developmentCartesiaVoiceEnabled=!globalThis.__alphaVoiceProgressFixture.own;'],
     ['../browser/device-preferences', 'export async function readDevicePreferences(){return {askBeforeAgentActions:true};}'],
-    ['@elizaos/ui/voice/voice-session-client', 'export function createVoiceSessionClient(options){globalThis.__alphaVoiceProgressFixture.options=options;return globalThis.__alphaVoiceProgressFixture.client;}'],
+    ['../ui/voice/voice-session-client-core.ts', 'export function createVoiceSessionClient(options){globalThis.__alphaVoiceProgressFixture.options=options;return globalThis.__alphaVoiceProgressFixture.client;}'],
   ]);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-progress-forwarding-'));
   const target = path.join(directory, 'adapter.cjs');

@@ -19,7 +19,7 @@ test('an agent filter from Home opens Files on its first visit and leaves the re
  expect(await execute(page,{type:'files_filter',text:'statement'})).toEqual({status:'succeeded',summary:'Showing 1 item in Files.'});
  const row=page.getByRole('button',{name:'Open bank statement.pdf',exact:true});
  await expect(row).toBeVisible();
- await expect(page.getByText('No results to show',{exact:true})).toHaveCount(0);
+ await expect(page.getByText('No files match.',{exact:true})).toHaveCount(0);
  // Not stuck busy: the row opens the file.
  await row.click();
  await expect(page.getByRole('region',{name:'Files'}).getByRole('button',{name:'Rename',exact:true})).toHaveText('bank statement.pdf');
@@ -27,7 +27,7 @@ test('an agent filter from Home opens Files on its first visit and leaves the re
 
 test('a zero-match Files filter shows an accessible empty result that clears with the filter',async({page})=>{
  expect(await execute(page,{type:'files_filter',text:'no-fixture-match'})).toEqual({status:'succeeded',summary:'Showing 0 items in Files.'});
- const empty=page.locator('[data-alpha-subview="files-list"]').getByRole('status').filter({hasText:'No results to show'});
+ const empty=page.locator('[data-alpha-subview="files-list"]').getByRole('status').filter({hasText:'No files match.'});
  await expect(empty).toBeVisible();
  await page.getByRole('button',{name:'Clear filter',exact:true}).click();
  await expect(empty).toHaveCount(0);
@@ -47,7 +47,7 @@ test('a held or failed Files query does not report an empty result',async({page}
  await page.getByRole('button',{name:'Files',exact:true}).click();
  await expect(page.getByRole('button',{name:'All files',exact:true})).toBeVisible();
  const results=page.locator('[data-alpha-subview="files-list"]');
- const empty=results.getByRole('status').filter({hasText:'No results to show'});
+ const empty=results.getByRole('status').filter({hasText:'No files match.'});
  const pending=execute(page,{type:'files_filter',text:'held-query'});
  try {
   await expect.poll(()=>page.evaluate(()=>(window as any).filesQueryStarted)).toBe(true);
@@ -69,7 +69,7 @@ test('an older Files port without a completeness marker shows an incomplete sear
  expect((await execute(page,{type:'files_filter',text:'unknown-completeness'})).status).toBe('failed');
  const results=page.locator('[data-alpha-subview="files-list"]');
  await expect(results.getByRole('status').filter({hasText:'Search incomplete.'})).toBeVisible();
- await expect(results.getByText('No results to show',{exact:true})).toHaveCount(0);
+ await expect(results.getByText('No files match.',{exact:true})).toHaveCount(0);
 });
 test('an agent open waits for the first Files render and opens the requested file',async({page})=>{
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Review this text'],'notice.txt',{type:'text/plain'}));});

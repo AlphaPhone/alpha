@@ -75,7 +75,7 @@ async function openAccountProvider(page:import('@playwright/test').Page){
   });
   await page.getByRole('button',{name:'Account',exact:true}).click();
   const account=page.getByRole('dialog',{name:'Account',exact:true});await expect(account).toBeVisible();
-  await account.getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
+  await account.getByRole('button',{name:/^AI(?: Cloud| Direct)?$/}).click();
   return page.getByRole('dialog',{name:'AI connection',exact:true});
 }
 
@@ -93,7 +93,7 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   await page.evaluate(() => { (window as any).providerFixture.reject = 'Cerebras did not accept this key. It was not saved.'; });
   await chooser.getByLabel('Cerebras API key').fill('synthetic-rejected-key');
   await chooser.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(chooser.getByRole('alert')).toContainText('Cerebras did not accept this key');
+  await expect(chooser.getByRole('alert')).toHaveText('Cerebras didn’t accept this key. Nothing was saved.');
   await expect(chooser.getByText('Not set', { exact: true })).toBeVisible();
 
   await page.evaluate(() => { (window as any).providerFixture.reject = ''; });
@@ -127,7 +127,7 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   expect(await page.evaluate(() => { const f = (window as any).providerFixture; return { clears: f.clears, stops: f.stops }; })).toEqual({ clears: 1, stops: 1 });
   await page.getByRole('button', { name: 'Back to Settings', exact: true }).click();
   const aiConnection = await openAccountProvider(page);
-  await expect(aiConnection.getByRole('button', { name: 'Own keys', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(aiConnection.getByRole('button', { name: 'Direct', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(aiConnection.getByRole('button', { name: 'Cloud', exact: true })).toBeVisible();
   await aiConnection.getByRole('button', { name: 'Close Account', exact: true }).click();
   await page.getByRole('button', { name: 'About', exact: true }).click();
@@ -171,7 +171,7 @@ test('Settings uses its normalized provider status read and keeps the retained M
   await page.getByRole('button', {name: 'Settings', exact: true}).click();
   await page.getByRole('button', {name: 'About', exact: true}).click();
   await expect(page.getByRole('button', {name: 'Status', exact: true})).toBeVisible();
-  await expect(page.getByText('Inference model', {exact: true})).toHaveCount(0);
+  await expect(page.getByText('AI model', {exact: true})).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as any).providerFixture.settingsRefreshes)).toBeGreaterThan(0);
   const reads = await page.evaluate(() => {
     const fixture = (window as any).providerFixture;
@@ -187,7 +187,7 @@ test('Settings uses its normalized provider status read and keeps the retained M
     while (fiber && typeof fiber.stateNode?.vset !== 'function') fiber = fiber.return;
     fiber.stateNode.vset('settings', {page: 'models'});
   });
-  const model = page.getByText('Inference model', {exact: true}).locator('..');
+  const model = page.getByText('AI model', {exact: true}).locator('..');
   await expect(model).toContainText('Eliza Cloud · qwen-3.8-27b (Cerebras)');
   async function refreshModel(value: string, unavailable = false) {
     return page.evaluate(async ({value, unavailable}) => {
@@ -203,7 +203,7 @@ test('Settings uses its normalized provider status read and keeps the retained M
   await expect.soft(model).toContainText('Cerebras · qwen-current-fixture', {timeout: 2000});
   expect(await refreshModel('qwen-current-fixture', true)).toBe(before.sessionId);
   await expect.soft(model).toContainText('Not reported', {timeout: 2000});
-  await expect(page.getByText('Inference provider', {exact: true}).locator('..')).toContainText('—');
+  await expect(page.getByText('AI service', {exact: true}).locator('..')).toContainText('—');
   expect(await refreshModel('unsafe model label')).toBe(before.sessionId);
   await expect.soft(model).toContainText('Not reported', {timeout: 2000});
   expect(await refreshModel('qwen-recovered-fixture')).toBe(before.sessionId);
@@ -219,7 +219,7 @@ for(const cloud of [false,true])test(`native AI connection keeps the selected Cl
  const provider=await openAccountProvider(page);await expect(provider).toBeVisible();
  // Account selects the Cloud route independently of whether the resident admitted inference.
  await expect(provider.getByRole('button',{name:'Cloud',exact:true})).toHaveAttribute('aria-pressed','true');
- await expect(provider.getByRole('button',{name:'Own keys',exact:true})).toHaveAttribute('aria-pressed','false');
+ await expect(provider.getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','false');
  expect(await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().providerStatus?.configured)).toBe(cloud);
  expect(await page.evaluate(()=>(window as any).providerFixture.statusReads)).toBeGreaterThan(0);
  expect(await page.evaluate(()=>(window as any).providerFixture.configures)).toEqual([]);

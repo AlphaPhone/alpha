@@ -91,7 +91,7 @@ async function openHandoffDayInCalendar(page:Page,titles:string){
  expect(event).toBeTruthy();
  const date=new Date(event.begin);
  const label=date.toLocaleDateString('en-US',{weekday:'long'})+' '+date.toLocaleDateString('en-US',{month:'long'})+' '+date.getDate();
- await page.getByRole('button',{name:'Month view',exact:true}).click();
+ await page.getByRole('button',{name:'Choose date',exact:true}).click();
  await page.getByRole('dialog',{name:'Choose calendar date',exact:true}).getByRole('button',{name:label,exact:true}).click();
  await expect(page.getByRole('region',{name:'Calendar timeline'})).toBeVisible();
 }
@@ -359,13 +359,13 @@ test('Journey B: a calendar proposal for a changed source is refused, and leavin
   await expect.poll(async()=>(await phoneContext(page)).selectedObject?.kind).toBe('calendar-source');
   return phoneContext(page);
  };
- const propose=async(operation:unknown,message:string)=>{
+ const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ const prepareProposal=async(operation:unknown,message:string)=>{
   await page.getByRole('button',{name:'Back to calendar',exact:true}).last().click();
   await queueAction(page,operation);
   await openSource();
   await page.getByRole('button',{name:'Open conversation',exact:true}).click();
-  await page.getByRole('textbox',{name:'Message Alpha',exact:true}).fill(message);
-  await page.getByRole('textbox',{name:'Message Alpha',exact:true}).press('Enter');
+  await composer.fill(message);
  };
  const source=await openSource();
  const review=page.getByRole('dialog',{name:'Review calendar change'});
@@ -373,7 +373,8 @@ test('Journey B: a calendar proposal for a changed source is refused, and leavin
  // ---- A source revision that is not the one on screen ----
  const stale=source.selectedObject.revision.split('').reverse().join('');
  expect(stale).not.toBe(source.selectedObject.revision);
- await propose({type:'calendar_create',source:{sourceId:source.selectedObject.id,sourceRevision:stale},fields:fields('Stale source event',source.timeZone)},'Review my stale calendar action');
+ await prepareProposal({type:'calendar_create',source:{sourceId:source.selectedObject.id,sourceRevision:stale},fields:fields('Stale source event',source.timeZone)},'Review my stale calendar action');
+ await composer.press('Enter');
  // The reply arrives, and the proposal for another source revision is not offered for approval at all.
  await expect(page.getByRole('button',{name:/^Message actions: Development reply/})).toHaveCount(1);
  await expect(page.getByRole('button',{name:/^Create event/})).toHaveCount(0);
@@ -384,9 +385,20 @@ test('Journey B: a calendar proposal for a changed source is refused, and leavin
 
  // ---- A current proposal whose review is left open, then abandoned with Back ----
  await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
- await propose({type:'calendar_create',source:{sourceId:source.selectedObject.id,sourceRevision:source.selectedObject.revision},fields:fields('Abandoned review event',source.timeZone)},'Review my calendar action');
+ await prepareProposal({type:'calendar_create',source:{sourceId:source.selectedObject.id,sourceRevision:source.selectedObject.revision},fields:fields('Abandoned review event',source.timeZone)},'Review my calendar action');
  const approve=page.getByRole('button',{name:/^Create event/});
- await expect(approve).toHaveCount(1);
+ await expect(approve).toBeEnabled();
+ const releaseReply=await page.evaluateHandle(()=>new Promise<()=>void>(ready=>{
+  const lock=JSON.stringify(['browser-document','alpha.browser.documents.v1','alpha.browser.agent.local.v1']);
+  void navigator.locks.request(lock,()=>new Promise<void>(release=>ready(release)));
+ }));
+ try{
+  await composer.press('Enter');
+  await expect(approve).toBeDisabled();
+ }finally{
+  await releaseReply.evaluate(release=>release());
+  await releaseReply.dispose();
+ }
  await approve.click();
  await expect(review).toContainText('“Abandoned review event”');
  // With the event in the phone's own zone the review does not repeat the zone as a difference.

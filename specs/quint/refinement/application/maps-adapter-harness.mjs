@@ -1,7 +1,7 @@
-/** The Maps adapter with the shared Maps screen, mounted over controlled ports.
+/** The Maps adapter with its Maps screen, mounted over controlled ports.
  *
  * What runs: installPrototypeMapsAdapter of apps/app/src/prototype/maps-adapter.ts bundled with
- * the code it composes: the shared MapsScreenController, MapsController, saved places,
+ * the code it composes: the MapsScreenController, MapsController, saved places,
  * BackgroundNavigation, bindAgentNavigation and DeviceMapsNavigation, the provider runtime and
  * the Calendar return helpers. Ports: the native plugins, the location owners, the Cloud Maps
  * read, the connection controller, the map plane, the guidance voice, the share sheet, the
@@ -29,20 +29,20 @@ const ports = new Map(Object.entries({
   'native.ts': 'export const isAndroid=false;',
   'maps/navigation-voice.ts': 'export class NavigationVoice{enabled=false;update(){}pause(){}toggle(){this.enabled=!this.enabled;}}',
   'maps/share.ts': 'export const shareMap=async()=>"closed";',
-  'maps/map-plane.ts': 'export class MapPlane{update(){}destroy(){}}',
+  'maps/map-plane.ts': 'export class MapPlane{constructor(...args){globalThis.mapsHarness.plane=args;}update(){}resetNorth(){globalThis.mapsHarness.northUps++;}destroy(){}}',
   'maps/regional-provider.ts': 'export const regionalMapsConfigured=false,regionalMap=()=>undefined,regionalDiagnostics=()=>({configured:false,error:""}),initializeRegionalMaps=async()=>{};',
   'maps/cloud-maps.ts': 'const cloud=globalThis.mapsHarness.cloud;export const initializeCloudMaps=()=>cloud.initialize(),cloudMapsCoverage=()=>cloud.coverage,cloudMapsDiagnostics=()=>cloud.diagnostics,cloudMapsBasemap=()=>undefined;',
   'maps/native-location.ts': `const harness=globalThis.mapsHarness;
     export class NativeMapsLocation{
       constructor(){this.run=null;harness.locations.push(this);}
       awaitingPermission(){return false;}
-      start(oneShot,onFix,onError){this.run={oneShot,onFix,onError};return Promise.resolve();}
+      start(oneShot,onFix,onError){harness.locationStarts++;this.run={oneShot,onFix,onError};return Promise.resolve();}
       stop(){this.run=null;return Promise.resolve();}
     }
     export const locationPermissionGranted=async()=>harness.locationGranted;`,
   'runtime/connection-ui.ts': 'export const connectionController=globalThis.mapsHarness.connection;',
   'runtime/cloud-protocol.ts': 'export const cloudServiceName="Cloud";',
-  'maps/screen.ts': `import {MapsScreenController as Shared} from ${JSON.stringify(join(repositoryRoot, '.eliza/client-features/plugins/plugin-maps/src/client/maps-screen.ts'))};
+  'maps/screen.ts': `import {MapsScreenController as Shared} from ${JSON.stringify(app('ui/maps/maps-screen.ts'))};
     const harness=globalThis.mapsHarness;
     export class MapsScreenController extends Shared{
       constructor(host){super(host);harness.screen=this;harness.host=host;}
@@ -67,7 +67,7 @@ export async function bundleMapsAdapter() {
         return ports.has(path) ? {path, namespace: 'port'} : undefined;
       });
       builder.onLoad({filter: /.*/, namespace: 'port'}, args => ({
-        contents: args.path === 'capacitor' ? 'export const Capacitor={isNativePlatform:()=>true,isPluginAvailable:()=>true};'
+        contents: args.path === 'capacitor' ? 'export const Capacitor={isNativePlatform:()=>true,isPluginAvailable:()=>true,getPlatform:()=>"android",PluginHeaders:globalThis.mapsHarness.pluginHeaders};'
           : args.path === 'asset' ? 'export default "fixture-asset.svg";' : ports.get(args.path),
         loader: 'js', resolveDir: repositoryRoot,
       }));
@@ -76,8 +76,10 @@ export async function bundleMapsAdapter() {
         const source = readFileSync(args.path, 'utf8');
         assert.equal(source.split(latch).length, 2, 'one hand-off latch declaration to observe');
         return {loader: 'ts', contents: source
-          .replace(latch, latch + '\n  globalThis.mapsHarness.inspect = () => ({pendingHandoff, shell, disposed});')
-          .replaceAll('queueMicrotask(', 'globalThis.mapsHarness.microtask(')};
+          .replace(latch, latch + '\n  globalThis.mapsHarness.inspect = () => ({pendingHandoff, shell, disposed, queryDraft, originDraft, searchEpoch, submittedQueryEpoch, submittedOriginEpoch, submittedOriginKind});')
+          .replaceAll('queueMicrotask(', 'globalThis.mapsHarness.microtask(')
+          .replaceAll('setTimeout(', 'globalThis.mapsHarness.setTimeout(')
+          .replaceAll('clearTimeout(', 'globalThis.mapsHarness.clearTimeout(')};
       });
     }}],
   });
@@ -95,11 +97,12 @@ let mounts = 0;
  * Mounts the adapter. `storage` seeds localStorage; `configure(app, harness)` runs after the
  * bundle is evaluated and before the adapter is installed; `view` is the launcher view in front;
  * `onSet(patch)` is told every Maps view state write, as the shell that renders on one would be.
+ * `pluginHeaders` are the native plugin headers Capacitor injects (none by default: not the image).
  */
-export async function mountMapsAdapter(code, {storage = {}, configure, view = 'maps', onSet} = {}) {
+export async function mountMapsAdapter(code, {storage = {}, configure, view = 'maps', onSet, pluginHeaders} = {}) {
   const saved = {document: globalThis.document, window: globalThis.window, localStorage: globalThis.localStorage};
   const document = globalThis.document = Object.assign(new EventTarget(), {
-    hidden: false, querySelector: () => null,
+    hidden: false, querySelector: () => null, querySelectorAll: () => [],
     documentElement: {classList: {contains: () => false}},
   });
   const window = globalThis.window = Object.assign(new EventTarget(), {open() {}});
@@ -107,8 +110,12 @@ export async function mountMapsAdapter(code, {storage = {}, configure, view = 'm
   globalThis.localStorage = {getItem: key => stored.has(key) ? stored.get(key) : null, setItem: (key, value) => { stored.set(key, String(value)); }};
   const bridgeListeners = new Set();
   const harness = globalThis.mapsHarness = {
-    locations: [], locationGranted: true, handoffs: 0, screen: null, host: null, surface: null, inspect: null,
-    held: null,
+    locations: [], locationStarts: 0, locationGranted: true, handoffs: 0, screen: null, host: null, surface: null, inspect: null,
+    pluginHeaders, plane: null, northUps: 0, copied: [], held: null, inputTimers: new Set(), retiredInputTimers: [],
+    setTimeout(run,delay) { if(delay!==350)return setTimeout(run,delay);const timer={run};this.inputTimers.add(timer);return timer; },
+    clearTimeout(timer) { if(this.inputTimers.delete(timer))this.retiredInputTimers.push(timer);else clearTimeout(timer); },
+    flushInputTimers() { for(const timer of [...this.inputTimers]){this.inputTimers.delete(timer);timer.run();} },
+    flushRetiredInputTimers() { for(const timer of this.retiredInputTimers.splice(0))timer.run(); },
     /** Runs the adapter's microtasks at once, or keeps them while `held` is a list. */
     microtask(run) { if (harness.held) harness.held.push(run); else queueMicrotask(run); },
     cloud: {coverage: undefined, diagnostics: {configured: true, error: ''}, initialize: async () => {}},
@@ -126,9 +133,11 @@ export async function mountMapsAdapter(code, {storage = {}, configure, view = 'm
       startNavigation(input) { const start = {...deferred(), sessionId: input.sessionId}; this.starts.push(start); return start.promise; },
       updateNavigation: async () => ({active: true}),
       stopNavigation: async input => { harness.bridge.stops.push(input.sessionId); return {stopped: true}; },
+      /** The arrival notice asked of native while Maps is off screen. */
+      arrivals: [], navigationArrived: async input => { harness.bridge.arrivals.push(input); return {shown: true}; },
       stopped(reason) { const sessionId = this.starts.at(-1)?.sessionId; for (const listener of [...bridgeListeners]) listener({sessionId, reason}); },
     },
-    plugin: name => name === 'AlphaMapsTransport' ? harness.bridge : name === 'AlphaCalendar' ? {list: async () => ({status: 'unknown'})} : {openSettings: async () => {}},
+    plugin: name => name === 'AlphaMapsTransport' ? harness.bridge : name === 'AlphaCalendar' ? {list: async () => ({status: 'unknown'})} : {openSettings: async () => {}, copyText: async input => { harness.copied.push(input.text); }},
   };
   const app = await import('data:text/javascript;base64,' + Buffer.from(code + `\n//${++mounts}`).toString('base64'));
   await configure?.(app, harness);

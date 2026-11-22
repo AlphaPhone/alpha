@@ -9,16 +9,18 @@ import {checkTraces} from '../specs/quint/refinement/check-traces.mjs';
 import {boundInputs, call, captureSources, checkpoint, deferred, root, tick, trace} from '../specs/quint/refinement/application/support.mjs';
 
 const driver = fileURLToPath(import.meta.url);
-const source = '.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts';
+const source = 'apps/app/src/ui/mobile-shell/installed-launcher.ts';
+const bridgeSource = '.eliza/client-features/plugins/plugin-native-system/src/client/launcher.ts';
 function compile(extraSources) {
-  const sources = [source, driver, ...extraSources];
+  const sources = [source, bridgeSource, driver, ...extraSources];
   captureSources(sources);
   const input = readFileSync(resolve(root, source), 'utf8'), marker = '  let pending: ReturnType<typeof setTimeout> | null = null;';
   assert.equal(input.split(marker).length, 2, 'One launcher watch observation seam');
   const instrumented = 'const {setTimeout,clearTimeout}=__port;\n' + input.replace(marker,
     marker + '\n  __port.inspect=()=>({active,pending});');
   const code = transformSync(instrumented, {loader: 'ts', format: 'cjs', target: 'es2022'}).code;
-  return {code, sources};
+  const bridgeCode = transformSync(readFileSync(resolve(root, bridgeSource), 'utf8'), {loader: 'ts', format: 'cjs', target: 'es2022'}).code;
+  return {code, bridgeCode, sources};
 }
 
 function fixture(compiled, mode) {
@@ -36,7 +38,10 @@ function fixture(compiled, mode) {
   };
   const module = {exports: {}};
   new Function('module', 'exports', '__port', 'document', compiled.code)(module, module.exports, port, document);
-  const {observeLauncher, createSystemLauncherBridge} = module.exports;
+  const {observeLauncher} = module.exports;
+  const bridgeModule = {exports: {}};
+  new Function('module', 'exports', compiled.bridgeCode)(bridgeModule, bridgeModule.exports);
+  const {createSystemLauncherBridge} = bridgeModule.exports;
   const system = {
     ...(mode === 'missing' ? {} : {addListener(event, listener) {
       assert.equal(event, 'launcherAppsChanged');
@@ -118,7 +123,7 @@ async function checkLauncherObserver(extraSources = []) {
     } finally {await f.close();}
   }
   return checkTraces(boundInputs({model: 'LauncherObserver', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
-    'Actual prepared observeLauncher and system launcher bridge execute with native listener promises, a real EventTarget and a controlled 120ms timer port.',
+    'Actual Alpha observeLauncher and prepared system launcher bridge execute with native listener promises, a real EventTarget and a controlled 120ms timer port.',
     'The model distinguishes registration and removal settlement from observer retirement. Source checkpoints count actual timeout, refresh and cleanup calls. Rejected cleanup remains a port outcome even after the observer has stopped.',
     'Inventory refresh and native package effects use separate contracts. This campaign does not assert an OS-level listener was removed after a failed cleanup acknowledgement.',
   ]}));

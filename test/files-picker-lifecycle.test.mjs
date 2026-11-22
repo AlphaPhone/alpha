@@ -1,30 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
-import {stripTypeScriptTypes} from './support/strip-types.mjs';
-const source=stripTypeScriptTypes(fs.readFileSync('.eliza/client-features/plugins/plugin-files/src/browser/files-browser-adapter.ts','utf8').replace(/^import[\s\S]*?;\n/gm,'').replace(/^export /gm,''),{mode:'transform'});
-const rules=stripTypeScriptTypes(fs.readFileSync('.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts','utf8').replace(/^export /gm,''),{mode:'transform'});
+import {build} from 'esbuild';
+// Alpha's Files browser bundled with what it imports: its storage labels and the shared storage
+// rules and agent contract.
+const {outputFiles:[bundle]}=await build({entryPoints:['apps/app/src/ui/files/files-browser-adapter.ts'],bundle:true,platform:'browser',format:'iife',globalName:'filesBrowser',write:false});
 async function harness({volumes=[]}={}){
  let resolve,active=true,agent;const doc=Object.assign(new EventTarget(),{hidden:false}),toasts=[];let failForget=false;
- const result=new Promise(done=>{resolve=done;}),accepted=[],forgotten=[],calls=[],state={};
+ const result=new Promise(done=>{resolve=done;}),accepted=[],results=[],forgotten=[],calls=[],state={};
  const entry={path:'Documents/fixture.txt',name:'fixture.txt',mimeType:'text/plain',directory:false,size:7,modified:1};
  const api={ic:{},get:()=>state,set:patch=>Object.assign(state,patch),isActive:()=>active,toast:message=>toasts.push(message)};
  const storage={storageSelect:input=>{calls.push(input);return result;},storageState:async()=>({status:'ready',access:'granted',volumes}),storageCategory:async()=>({status:'ready',entries:[entry]}),storageTrashList:async()=>({status:'ready',items:[]}),storageWatch:async()=>({status:'ready'}),storageUnwatch:async()=>({status:'ready'}),addListener:async()=>({remove:async()=>{}})};
  const view={render:()=>({}),onLeave(){}};
  const ctx=vm.createContext({setTimeout,clearTimeout,queueMicrotask,window:new EventTarget(),CustomEvent:class{},HTMLElement:class{},document:doc});
- vm.runInContext(rules+';'+source+';globalThis.install=installFilesBrowserAdapter',ctx);
- agent=ctx.install(view,async(_module,value)=>accepted.push(value.selectionId),()=>{},{
+ vm.runInContext(bundle.text+';globalThis.install=filesBrowser.installFilesBrowserAdapter',ctx);
+ agent=ctx.install(view,async(_module,value)=>{accepted.push(value.selectionId);results.push({...value});},()=>{},{
   storage, createInlineModal:()=>({}), menuFocus:()=>null,
   async forgetSelected(selectionId){forgotten.push(selectionId);if(failForget)throw Error('release failed');},
  });
  const settle=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
  view.render(state,api);await settle();view.render(state,api).browse.cats.find(row=>row.name==='Documents').go();await settle();
- return {render:()=>view.render(state,api),accepted,forgotten,calls,toasts,doc,failRelease(){failForget=true;},pick(){view.render(state,api).fd.items[0].tap();},agentOpen(){return agent.run({type:'files_open',path:entry.path},new AbortController().signal);},release:value=>resolve(value),leave(){active=false;view.onLeave(api);},return(){active=true;view.render(state,api);},settle};
+ return {render:()=>view.render(state,api),accepted,results,forgotten,calls,toasts,doc,failRelease(){failForget=true;},pick(){view.render(state,api).fd.items[0].tap();},agentOpen(){return agent.run({type:'files_open',path:entry.path},new AbortController().signal);},release:value=>resolve(value),leave(){active=false;view.onLeave(api);},return(){active=true;view.render(state,api);},settle};
 }
 const selected={status:'selected',action:'files',selectionId:'owned-selected-fixture',name:'fixture.txt',mimeType:'text/plain'};
 test('an active storage selection accepts its result once',async()=>{
  const h=await harness();h.pick();h.release(selected);await h.settle();assert.deepEqual(h.accepted,[selected.selectionId]);assert.deepEqual(h.forgotten,[]);
+});
+test('a file opened from the listing carries the size the listing showed when the selection lacks one',async()=>{
+ const h=await harness();h.pick();h.release(selected);await h.settle();assert.deepEqual(h.results,[{...selected,size:7}]);
+});
+test('a file opened from the listing keeps the size the storage reported for it',async()=>{
+ const h=await harness();h.pick();h.release({...selected,size:9});await h.settle();assert.deepEqual(h.results,[{...selected,size:9}]);
 });
 test('leaving Files while a storage selection is pending rejects the late result and releases only its grant',async()=>{
  const h=await harness();h.pick();h.leave();h.release(selected);await h.settle();assert.deepEqual(h.accepted,[]);assert.deepEqual(h.forgotten,[selected.selectionId]);

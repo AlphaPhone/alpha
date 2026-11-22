@@ -3,7 +3,7 @@
 // service, real coverage, a live route or physical navigation.
 import assert from 'node:assert/strict';
 import { createCloudMaps, cloudMapsFailure, insideCloudCoverage, type CloudMapsRequest } from '../apps/app/src/maps/cloud-provider.ts';
-import { MapsController } from '../.eliza/client-features/plugins/plugin-maps/src/client/state.ts';
+import { MapsController } from '../apps/app/src/ui/maps/state.ts';
 import { SavedPlaces } from '../.eliza/client-features/plugins/plugin-maps/src/client/saved-places.ts';
 import { MapsFailure } from '../.eliza/client-features/plugins/plugin-maps/src/client/contracts.ts';
 import { captureMapsSession } from '../apps/app/src/maps/cloud-session.ts';

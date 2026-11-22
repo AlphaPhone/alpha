@@ -1,0 +1,92 @@
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+
+/** Compiles the production AlphaFilesPlugin.storageSelect and DailyAppsPlugin.pickedDetails bodies
+ * over closed ports, and prints what the preview subtitle receives. */
+public class AlphaFileDetailsTest {
+ static final class JSObject {
+  final Map<String,Object> values=new TreeMap<>();
+  void put(String key,Object value){values.put(key,value);}
+  @Override public String toString(){StringBuilder out=new StringBuilder();for(String key:List.of("status","size","modified"))out.append(key).append('=').append(values.getOrDefault(key,"-")).append(';');return out.toString();}
+ }
+ static final class PluginCall {
+  final String path;JSObject result;
+  PluginCall(String path){this.path=path;}
+  String getString(String key,String fallback){return "path".equals(key)?path:fallback;}
+ }
+ static final class Uri {}
+ static final class StorageBrowser {
+  final Path root;
+  StorageBrowser(Path root){this.root=root;}
+  File resolve(String path,boolean allowRoot){return root.resolve(path).toFile();}
+  static String mime(String name){return "text/plain";}
+ }
+ static final class SelectedDocumentAccess {static String authorize(Object context,Uri uri,int flags){return "selection";}}
+ static final class OpenableColumns {static final String SIZE="_size";}
+ static final class DocumentsContract {static final class Document {static final String COLUMN_LAST_MODIFIED="last_modified";}}
+ /** A provider row: a column the provider does not know throws, as some providers do. */
+ static final class Cursor implements AutoCloseable {
+  final Long value;
+  Cursor(Long value){this.value=value;}
+  boolean moveToFirst(){return true;}
+  boolean isNull(int column){return value==null;}
+  long getLong(int column){return value;}
+  @Override public void close(){}
+ }
+ /** The production code names android.content.ContentResolver; this nested class takes that name. */
+ static final class android {static final class content {static final class ContentResolver {
+  final Map<String,Long> columns;final Set<String> refused;
+  ContentResolver(Map<String,Long> columns,Set<String> refused){this.columns=columns;this.refused=refused;}
+  Cursor query(Uri uri,String[] projection,String selection,String[] args,String order){
+   if(refused.contains(projection[0]))throw new IllegalArgumentException("unknown column");
+   return new Cursor(columns.get(projection[0]));
+  }
+ }}}
+
+ private final StorageBrowser browser;
+ AlphaFileDetailsTest(Path root){browser=new StorageBrowser(root);}
+ private static JSObject result(String status,String message){JSObject out=new JSObject();out.put("status",status);return out;}
+ private interface StorageWork {JSObject run(StorageBrowser browser)throws Exception;}
+ private void storage(PluginCall call,StorageWork work){
+  try{call.result=work.run(browser);}
+  catch(FileNotFoundException missing){call.result=result("missing","This item is no longer there.");}
+  catch(Exception error){throw new AssertionError(error);}
+ }
+ private Object getContext(){return null;}
+ private Uri contentUri(File file){return new Uri();}
+ /* production select */
+ /* production picked */
+
+ public static void main(String[] args)throws Exception{
+  switch(args[0]){
+   case "select":{
+    Path root=Files.createTempDirectory("alpha-file-details-");
+    try{
+     Path file=root.resolve("notes.txt");Files.writeString(file,"twelve bytes");
+     file.toFile().setLastModified(1600000000000L);
+     AlphaFileDetailsTest fixture=new AlphaFileDetailsTest(root);
+     PluginCall call=new PluginCall("notes.txt");fixture.storageSelect(call);System.out.println(call.result);
+     PluginCall gone=new PluginCall("gone.txt");fixture.storageSelect(gone);System.out.println(gone.result);
+    }finally{
+     try(java.util.stream.Stream<Path> entries=Files.walk(root)){for(Path entry:entries.sorted(Comparator.reverseOrder()).toArray(Path[]::new))Files.delete(entry);}
+    }
+    break;
+   }
+   case "picked":{
+    Map<String,Long> both=new HashMap<>();both.put("_size",2048L);both.put("last_modified",1600000000000L);
+    Map<String,Long> unknown=new HashMap<>();unknown.put("_size",null);unknown.put("last_modified",0L);
+    for(android.content.ContentResolver resolver:List.of(
+      new android.content.ContentResolver(both,Set.of()),
+      new android.content.ContentResolver(unknown,Set.of()),
+      new android.content.ContentResolver(both,Set.of("last_modified")))){
+     JSObject value=new JSObject();value.put("status","selected");pickedDetails(resolver,new Uri(),value);System.out.println(value);
+    }
+    break;
+   }
+   default:throw new AssertionError(args[0]);
+  }
+ }
+}

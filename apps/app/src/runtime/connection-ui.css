@@ -25,7 +25,7 @@
 .alpha-google-switch small{color:var(--connection-mut,#6b6b6b)}
 .alpha-google-switch input{flex:none;width:22px;height:22px;accent-color:var(--connection-acc,#0000ff)}
 
-/* Plan and sign-in notices share the space between the header and the dock. */
+/* The plan notice stack shares the space between the header and the dock. */
 .alpha-plan-notices {
   --alpha-plan-notices-top:max(calc(48px * var(--phone-scale,1)),calc((var(--alpha-header-clearance,0px) + 8px) * var(--phone-scale,1)),calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 12px));
   position:fixed;left:12px;right:12px;top:calc(var(--phone-top,0px) + var(--alpha-plan-notices-top));z-index:9000;
@@ -64,10 +64,9 @@ body:has([data-alpha-layer="conversation"][aria-hidden="false"]) .alpha-plan-not
 .alpha-connection input[aria-invalid=true]{border-color:var(--connection-danger,#a32121)}
 .alpha-form-actions{display:flex;flex-direction:column;gap:8px;margin-top:20px}
 
-/* The production signed-out route is a page, never an agent status sheet. The content is
-   top-aligned so the brand and heading stay in one place on every step. */
-.alpha-auth-page{position:fixed;inset:0;z-index:10000;display:flex;align-items:stretch;background:var(--bg,#fff);color:var(--fg,#000);font:15px/1.45 'Public Sans',system-ui,sans-serif}
-.alpha-auth-page .alpha-auth-content{width:100%;max-width:none;min-height:100%;display:flex;flex-direction:column;justify-content:flex-start;padding:max(calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 32px),8vh) max(env(safe-area-inset-right),24px) calc(max(var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px)) + 32px) max(env(safe-area-inset-left),24px);border-radius:0;box-shadow:none}
+/* Keep the transparent navigation bar outside the sign-in scroll area. */
+.alpha-auth-page{position:fixed;inset:0;z-index:10000;display:flex;box-sizing:border-box;padding-bottom:max(var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px));background:var(--bg,#fff);color:var(--fg,#000);font:15px/1.45 'Public Sans',system-ui,sans-serif}
+.alpha-auth-page .alpha-auth-content{width:100%;max-width:none;align-self:stretch;display:flex;flex-direction:column;justify-content:flex-start;padding:max(calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 32px),8vh) max(env(safe-area-inset-right),24px) 32px max(env(safe-area-inset-left),24px);border-radius:0;box-shadow:none}
 .alpha-auth-page .alpha-cloud-sign-in{width:min(100%,32rem);margin-inline:auto}
 .alpha-auth-brand{display:flex;align-items:center;margin:0 0 24px;color:var(--connection-fg,#000)}
 .alpha-auth-mark{display:block;width:44px;height:44px;flex:none;background:var(--connection-acc,#0000ff);mask:url('/logo-mark.svg') center/contain no-repeat;-webkit-mask:url('/logo-mark.svg') center/contain no-repeat}
@@ -82,6 +81,10 @@ body:has([data-alpha-layer="conversation"][aria-hidden="false"]) .alpha-plan-not
 .alpha-cloud-sign-in>header{display:block}
 .alpha-cloud-sign-in h1{margin:0 0 28px}
 .alpha-auth-methods,.alpha-own-keys{display:flex;flex-direction:column;gap:var(--alpha-gap)}
+.alpha-auth-network{margin-bottom:var(--alpha-gap);padding:12px 16px;border:1px solid var(--connection-line,#dedede);border-radius:12px}
+.alpha-auth-network p{margin:0}
+.alpha-auth-network .alpha-btn{width:auto;padding-inline:0}
+.alpha-auth-method-note{margin:0;font-size:.875rem;line-height:1.35}
 .alpha-cloud-sign-in form{display:flex;flex-direction:column;gap:var(--alpha-gap);margin:0}
 /* The own-keys form is the same form on the sign-in page and in Settings › AI provider. */
 .alpha-cloud-sign-in label,.alpha-connection .alpha-own-keys label{font-size:14px;font-weight:500;margin:0;gap:8px;color:var(--connection-fg,#000)}

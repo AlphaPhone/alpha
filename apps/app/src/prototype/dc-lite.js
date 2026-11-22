@@ -7,6 +7,7 @@ import templateHtml from "./template-source";
   var EVENTS = { onsubmit:"onSubmit", onerror:"onError", onload:"onLoad", onfocuscapture: "onFocusCapture", onfocus: "onFocus", onblur: "onBlur", onclick: "onClick", oncontextmenu: "onContextMenu", onpointermove: "onPointerMove", onpointerdown: "onPointerDown", onpointerup: "onPointerUp", onpointerleave: "onPointerLeave", onpointercancel: "onPointerCancel", onlostpointercapture: "onLostPointerCapture", onchange: "onChange", onkeydown: "onKeyDown", oninput: "onInput" };
   var HOLE = /\{\{\s*([^}]+?)\s*\}\}/g;
   var WHOLE = /^\{\{\s*([^}]+?)\s*\}\}$/;
+  var UNAVAILABLE_CONTROL = Symbol.for("alpha.unavailableControl");
 
   function lookup(path, scope) {
     if (path === "true") return true;
@@ -171,8 +172,10 @@ import templateHtml from "./template-source";
     }
     var isSvg = n.namespaceURI === "http://www.w3.org/2000/svg";
     var tname = isSvg ? n.localName : tag;
-    var c = kids(n.childNodes, scope);
     var built = props(n, scope, key);
+    // A control whose handler only says it is unavailable (native-adapter.ts) is not shown.
+    for (var name in built) if (/^on[A-Z]/.test(name) && built[name] && built[name][UNAVAILABLE_CONTROL]) return null;
+    var c = kids(n.childNodes, scope);
     // A drawing with no name of its own is decoration for the control or text beside it. Without
     // this it is announced as an unlabelled image (uncatalogued icon paths, the map drawing).
     if (tag === "svg" && !built["aria-label"] && !built["aria-labelledby"] && !built.role && built["aria-hidden"] === undefined) built["aria-hidden"] = "true";
@@ -188,6 +191,8 @@ import templateHtml from "./template-source";
   const phoneRoot = phoneTpl.ownerDocument.importNode(tpl.querySelector('.os'), false);
   phoneRoot.classList.add('alpha-phone');
   phoneRoot.appendChild(phoneTpl.ownerDocument.importNode(tpl.querySelector('[data-screen]'), true));
+  // Phone chrome beside the screen rather than in it (the ongoing-call bar): the screen moves below it.
+  tpl.querySelectorAll('[data-alpha-screen-chrome]').forEach(function (chrome) { phoneRoot.appendChild(phoneTpl.ownerDocument.importNode(chrome, true)); });
   phoneTpl.appendChild(phoneRoot);
   export class DCLogic extends React.Component {
     constructor(p) { super(p); this.state = {}; }

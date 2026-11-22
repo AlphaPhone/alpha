@@ -103,7 +103,7 @@ async function audioJourney(page:Page,info:TestInfo,unsupported=false){
  await expect(page.getByRole('button',{name:'Stop recording playback',exact:true})).toBeVisible();
  // Input cadence determines the captured clip's length; await its actual decoded duration.
  await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible({timeout:Math.ceil(stored.decodedSeconds*1000)+5000});
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>({notes:(window as any).canonicalNotesFixture.state.notes.length,trash:(window as any).canonicalNotesFixture.state.trash.length}))).toEqual({notes:0,trash:1});

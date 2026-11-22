@@ -11,9 +11,15 @@ function member(source, regex) {
   return value;
 }
 
-export function smsMembers(plugin, mms, provider) {
+export const actionJournalSources=['ActionJournal','ActionJournalConfiguration']
+  .map(name=>'vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/'+name+'.java');
+
+export function smsMembers(plugin, mms, provider, {includeMms=false, appOwned=false}={}) {
+  const namespace=appOwned?'ai.alphacompute.alphaphone':'ai.eliza.plugins.messages';
+  const name=appOwned?'AlphaTelephonyBase':'TelephonyPlugin';
   return {
-    'ai/eliza/plugins/messages/TelephonyPlugin.java': `package ai.eliza.plugins.messages;
+    [namespace.replaceAll('.','/')+'/'+name+'.java']: `package ${namespace};
+${appOwned?'import ai.eliza.plugins.messages.*;\nimport ai.eliza.plugins.actionjournal.ActionJournal;\nimport org.json.JSONObject;':''}
 import android.telephony.*;
 import android.content.Intent;
 import com.getcapacitor.*;
@@ -22,9 +28,11 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
-public abstract class TelephonyPlugin extends Plugin {
+public abstract class ${name} extends Plugin {
  ${between(plugin,' public static final Pattern NUMBER',' /** Runs a request that launches')}
- ${between(plugin,' private android.app.AlertDialog review;',' // ---- Reviewed native MMS')}
+ ${appOwned?between(plugin,' /** Every queued send keeps its own',' // ---- Reviewed native MMS')
+   :between(plugin,' private android.app.AlertDialog review;',' // ---- Reviewed native MMS')}
+ ${includeMms?'':'protected final void sendOwnerApprovedMms(PluginCall call,SmsTelephony.DispatchGuard guard){throw new AssertionError("MMS outside SMS fixture");}'}
  ${member(plugin,/^ @Override protected void handleOnDestroy\(\)[^\n]+/m)}
  private void stopObserving(){}
  private void resumeObserving(){}
@@ -34,19 +42,23 @@ public abstract class TelephonyPlugin extends Plugin {
  protected final void fencedRead(PluginCall call,String alias,String name,ReadTask work){throw new AssertionError("Unrelated Contacts read");}
 }`,
     'ai/eliza/plugins/messages/MmsStore.java': `package ai.eliza.plugins.messages;
+import android.app.role.RoleManager;
 import android.content.*;
 import android.net.Uri;
 import android.provider.Telephony;
 import java.io.File;
 import java.util.List;
 public final class MmsStore {
+ ${appOwned?'static final int NOTICE_ID=1;':''}
  ${between(mms,' public static boolean isDefaultSmsApp',' /** Inserts one incoming SMS')}
  ${between(mms,' public static long persistOutgoingSms',' /**\n  * Marks one conversation')}
  static String newFileName(){throw new AssertionError("MMS outside SMS fixture");}
+ ${appOwned&&!includeMms?'static boolean validFileName(String name){throw new AssertionError("MMS download outside SMS fixture");}':''}
  static File file(Context c,String name){throw new AssertionError("MMS outside SMS fixture");}
  static Uri fileUri(String authority,String name){throw new AssertionError("MMS outside SMS fixture");}
  static void delete(Context c,String name){throw new AssertionError("MMS outside SMS fixture");}
  static long persistOutgoingMms(Context c,String[] to,List<MmsPdu.Part> parts,String txn,int sim,long at){throw new AssertionError("MMS outside SMS fixture");}
+ static void discardOutgoingMms(Context c,long row,String transactionId){throw new AssertionError("MMS outside SMS fixture");}
  static void settleOutgoingMms(Context c,long row,boolean success){throw new AssertionError("MMS outside SMS fixture");}
 }`,
     'ai/eliza/plugins/messages/SmsProviderReader.java': `package ai.eliza.plugins.messages;
@@ -57,6 +69,46 @@ final class SmsProviderReader {
   };
 }
 
+/** The authenticated historical SDK predates Alpha's manual composer. Keep its host on the
+ * original reviewed entry points with the same Alpha configuration and callback receiver. */
+export const historicalTelephonyHost={
+ 'ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java': `package ai.alphacompute.alphaphone;
+import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
+import ai.eliza.plugins.messages.TelephonyPlugin;
+import android.Manifest;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+@CapacitorPlugin(name="AlphaTelephony",permissions={
+ @Permission(alias="contacts",strings={Manifest.permission.READ_CONTACTS}),
+ @Permission(alias="phoneState",strings={Manifest.permission.READ_PHONE_STATE}),
+ @Permission(alias="sms",strings={Manifest.permission.READ_SMS}),
+ @Permission(alias="sendSms",strings={Manifest.permission.SEND_SMS}),
+ @Permission(alias="callLog",strings={Manifest.permission.READ_CALL_LOG})
+})
+public final class AlphaTelephonyPlugin extends TelephonyPlugin {
+ @Override protected SmsTelephonyConfiguration configuration(){return AlphaTelephony.CONFIGURATION;}
+ @Override protected String unavailableMessage(){return AlphaImageCapability.UNAVAILABLE;}
+}`,
+};
+
+
+/** Downloaded-message receivers never run in the confirmed send campaigns. */
+export const appOwnedTelephonyReadPorts={
+  'ai/eliza/plugins/messages/MmsWapPushReceiver.java': `package ai.eliza.plugins.messages;
+final class MmsWapPushReceiver {
+ static final String EXTRA_FILE="eliza.mms.file",EXTRA_TRANSACTION="eliza.mms.transaction",
+  EXTRA_LOCATION="eliza.mms.location",EXTRA_SUBSCRIPTION="eliza.mms.subscription";
+}`,
+  'ai/eliza/plugins/messages/MmsResultReceiver.java': `package ai.eliza.plugins.messages;
+final class MmsResultReceiver {
+ static final String ACTION_MARK_READ="ai.eliza.plugins.messages.action.MARK_THREAD_READ",
+  EXTRA_THREAD="thread",EXTRA_THROUGH="through",EXTRA_NOTICE="notice";
+ static void respond(android.content.Context context,SmsRoleConfiguration config,String transaction,int sub) {
+  throw new AssertionError("MMS download outside dispatch fixture");
+ }
+}`,
+};
+
 export const smsPlatform={
   'android/Manifest.java': `package android;
 public final class Manifest {public static final class permission {
@@ -64,6 +116,19 @@ public final class Manifest {public static final class permission {
 }}`,
   'android/os/Build.java': `package android.os;
 public final class Build {public static final class VERSION {public static final int SDK_INT=35;}}`,
+  'android/os/SystemClock.java': `package android.os;
+public final class SystemClock {
+ public static long elapsedRealtime(){throw new AssertionError("Notification receipt clock outside dispatch fixture");}
+}`,
+  'android/app/role/RoleManager.java': `package android.app.role;
+import java.util.function.BooleanSupplier;
+public final class RoleManager {
+ public static final String ROLE_SMS="android.app.role.SMS";
+ private final BooleanSupplier held;
+ public RoleManager(BooleanSupplier held){this.held=held;}
+ public boolean isRoleAvailable(String role){return ROLE_SMS.equals(role);}
+ public boolean isRoleHeld(String role){return isRoleAvailable(role)&&held.getAsBoolean();}
+}`,
   'android/os/Looper.java': `package android.os;
 public final class Looper {
  private static final Looper main=new Looper();private static final ThreadLocal<Looper> active=new ThreadLocal<>();
@@ -146,14 +211,43 @@ public final class KeyguardManager {public boolean locked;public boolean isDevic
   'android/app/Activity.java': `package android.app;
 import java.util.*;
 import android.content.Context;
-public final class Activity {
+public class Activity {
  public static final int RESULT_OK=-1;
  public final Context context;
  public final List<AlertDialog> dialogs=new ArrayList<>();
  public boolean closing, destroyed;
  public Activity(Context context){this.context=context;}
+ public boolean hasWindowFocus(){return true;}
  public boolean isFinishing(){return closing;}
  public boolean isDestroyed(){return destroyed;}
+}`,
+  // The AC-20 number lookup is not part of the SMS dispatch contract: it names nobody here.
+  'ai/alphacompute/alphaphone/AlphaContactLookup.java': `package ai.alphacompute.alphaphone;
+final class AlphaContactLookup {
+ static String name(android.content.Context context, String number, android.os.CancellationSignal cancel) { return null; }
+ static org.json.JSONArray searchRows(org.json.JSONArray contacts,java.util.function.Function<String,String> clip) {
+  throw new AssertionError("Contacts outside SMS fixture");
+ }
+}`,
+  // The chat's approval journal: the pinned shared ActionJournal over a synthetic durable store.
+  // Alpha's result policy only settles entries, which the send path never does.
+  'ai/alphacompute/alphaphone/AlphaActionJournal.java': `package ai.alphacompute.alphaphone;
+import ai.eliza.plugins.actionjournal.ActionJournal;
+import ai.eliza.plugins.actionjournal.ActionJournalConfiguration;
+public final class AlphaActionJournal {
+ public static final java.util.Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
+ private static final ActionJournal instance=new ActionJournal(ActionJournalConfiguration.standard("action-journal:v1"),new ActionJournal.Storage(){
+  public String read(String slot){return slots.get(slot);}
+  public void write(String slot,String value){slots.put(slot,value);}
+ },ActionJournal.BOUNDED_RESULTS);
+ public static ActionJournal get(android.content.Context context){return instance;}
+}`,
+  'ai/alphacompute/alphaphone/MainActivity.java': `package ai.alphacompute.alphaphone;
+import android.app.Activity;
+import android.content.Context;
+public final class MainActivity extends Activity {
+ public MainActivity(Context context){super(context);}
+ public boolean isAssistantSurface(){throw new AssertionError("Notification handoff outside dispatch fixture");}
 }`,
   'android/view/WindowManager.java': `package android.view;
 public interface WindowManager {final class LayoutParams{public static final int FLAG_SECURE=8192;}}`,
@@ -289,6 +383,15 @@ public final class ContentResolver {
   if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[0])||!Objects.equals(row.get(Sms.CREATOR),args[1]))return 0;
   row.putAll(value);return 1;
  }
+ public int delete(Uri uri,String where,String[] args){
+  if(!uri.equals(Sms.CONTENT_URI)||!context.role||
+   !(Sms._ID+" = ? AND "+Sms.TYPE+" = ? AND "+Sms.CREATOR+" = ?").equals(where)||
+   args.length!=3||!args[1].equals("4")||!args[2].equals(context.getPackageName()))
+   throw new AssertionError("Only exact app-owned outbox row may be discarded");
+  long id=Long.parseLong(args[0]);ContentValues row=rows.get(id);
+  if(row==null||!String.valueOf(row.get(Sms.TYPE)).equals(args[1])||!Objects.equals(row.get(Sms.CREATOR),args[2]))return 0;
+  rows.remove(id);return 1;
+ }
  public Cursor query(Uri uri,String[] fields,String where,String[] args,String order){
   List<ContentValues> result=new ArrayList<>();
   if(uri.equals(Sms.CONTENT_URI)){
@@ -322,15 +425,18 @@ public final class ContentResolver {
 }`,
   'android/content/Context.java': `package android.content;
 import android.app.KeyguardManager;
+import android.app.role.RoleManager;
 import android.os.UserManager;
 import android.telephony.*;
 import java.io.File;
 import java.util.*;
 public final class Context {
+ public String claimFault="";
  public boolean admitted=true,send=true,phone=true,read=true,role;
  public int boot=1;
  public final Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
  public final KeyguardManager lock=new KeyguardManager();
+ public final RoleManager roles=new RoleManager(()->role);
  public final UserManager users=new UserManager();
  public final SubscriptionManager subscriptions=new SubscriptionManager();
  public final TelephonyManager telephony=new TelephonyManager();
@@ -350,7 +456,7 @@ public final class Context {
  }
  public <T>T getSystemService(Class<T> type){
   Object value=type==KeyguardManager.class?lock:type==UserManager.class?users:type==SubscriptionManager.class?subscriptions:
-   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:null;
+   type==TelephonyManager.class?telephony:type==SmsManager.class?radio:type==RoleManager.class?roles:null;
   return type.cast(value);
  }
  public void unregisterReceiver(BroadcastReceiver receiver){dynamicReceivers.remove(receiver);}
@@ -378,6 +484,9 @@ public abstract class Plugin {
  public PermissionState getPermissionState(String alias){return context.checkSelfPermission(alias)==0?PermissionState.GRANTED:PermissionState.DENIED;}
  public void load(){}
  protected void handleOnPause(){}protected void handleOnResume(){}protected void handleOnDestroy(){activity.destroyed=true;}
+ public final void fixturePause(){handleOnPause();}
+ public final void fixtureResume(){handleOnResume();}
+ public final void fixtureDestroy(){handleOnDestroy();}
  protected void notifyListeners(String event,JSObject body){
   if(!event.equals("smsSendUpdated")||!body.keySet().equals(Set.of("operationId")))throw new AssertionError("Only opaque SMS update may cross bridge");
   notices.add(body);
@@ -432,6 +541,15 @@ final class AlphaCredentialStore {
  private final Context context;
  AlphaCredentialStore(Context context){this.context=context;}
  String readCredentialSlot(String slot){return context.slots.get(slot);}
+ boolean compareExchangeCredentialSlot(String slot,String expected,String value)throws Exception{
+  if(expected!=null)throw new AssertionError("Device operation claims must be write-once");
+  synchronized(context.slots){
+   if(context.claimFault.equals("claim-before"))throw new java.io.IOException("Synthetic claim refusal");
+   if(context.slots.putIfAbsent(slot,value)!=null)return false;
+   if(context.claimFault.equals("claim-after"))throw new java.io.IOException("Synthetic lost claim acknowledgement");
+   return true;
+  }
+ }
  void writeCredentialSlot(String slot,String value)throws Exception{ai.eliza.plugins.messages.SmsDispatchTraces.write(context,slot,value);}
 }`,
   'ai/eliza/plugins/messages/SmsFixtureSupport.java': `package ai.eliza.plugins.messages;

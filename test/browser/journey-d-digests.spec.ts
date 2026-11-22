@@ -72,14 +72,12 @@ async function connect(page:Page){
  await dialog.getByRole('button',{name:'Connect development profile'}).click();
  await expect(dialog).toHaveCount(0);
 }
-/** Workflows -> Scheduled digests is the rendered entry point, including when its list is empty. */
+/** The Workflows list no longer carries a Scheduled digests row; the panel opens from its own event. */
 async function openDigests(page:Page){
  await returnToApps(page);
  await page.getByRole('button',{name:'Workflows',exact:true}).click();
- // The management rows can move when the removed-workflows inventory arrives.
- const entry=page.getByRole('button',{name:'Scheduled digests',exact:true});
- await expect(entry).toBeEnabled();
- await entry.click();
+ await expect(page.getByRole('button',{name:'Scheduled digests',exact:true})).toHaveCount(0);
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));
  const panel=panelOf(page);await expect(panel).toBeVisible();return panel;
 }
 async function createSchedules(page:Page){
@@ -91,8 +89,8 @@ async function createSchedules(page:Page){
  await panel.getByRole('button',{name:'Review snapshot',exact:true}).click();
  await expect(panel.getByText(/^Share this tasks snapshot with the connected agent\./)).toBeVisible();
  await panel.getByRole('button',{name:'Confirm',exact:true}).click();
- await panel.getByRole('combobox',{name:'Reviewed source',exact:true}).selectOption({index:1});
- await panel.getByLabel('Time zone',{exact:true}).fill('UTC');
+ await panel.getByRole('combobox',{name:'Source',exact:true}).selectOption({index:1});
+ await panel.getByRole('combobox',{name:'Time zone',exact:true}).selectOption('UTC');
  for(const [template,label,time] of [['morning','Morning','07:00'],['evening','Evening','19:00']] as const){
   await panel.getByLabel(label,{exact:true}).fill(time);
   await panel.getByRole('button',{name:`Review ${template} schedule`,exact:true}).click();
@@ -133,7 +131,7 @@ test('journey D: morning and evening digests run once each, are retained and ack
  await expect.poll(async()=>(await digests(page)).results.length).toBe(1);
  await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(panel.getByRole('article')).toHaveCount(1);
- await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · Completed',{exact:true})).toHaveCount(1);
  await expect(panel.getByRole('article').first()).toContainText(OUTPUT);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([1]);
  state=await digests(page);
@@ -160,8 +158,8 @@ test('journey D: morning and evening digests run once each, are retained and ack
  panel=await openDigests(page);
  await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(panel.getByRole('article')).toHaveCount(2);
- await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · completed',{exact:true})).toHaveCount(1);
- await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 PM · completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 AM · Completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 3, 2026, 7:00 PM · Completed',{exact:true})).toHaveCount(1);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([2]);
  state=await digests(page);
  expect(state.results[0]).toEqual(first);
@@ -192,7 +190,8 @@ test('journey D: morning and evening digests run once each, are retained and ack
  const missedArticle=panel.getByRole('article').filter({hasText:'Oct 4, 2026, 7:00 AM'});
  await expect(missedArticle).toHaveCount(1);
  await expect(missedArticle).toContainText('Missed — not run');
- await expect(missedArticle).toContainText(MISSED.text);
+ // The agent's recorded text (DIGEST_MISSED_TEXT) is shown in Alpha's words.
+ await expect(missedArticle).toContainText('This digest missed its scheduled time, so it didn’t run. Nothing runs late.');await expect(missedArticle).not.toContainText(MISSED.text);
  await expect(missedArticle).not.toContainText(OUTPUT);
  await expect(panel.getByRole('article').filter({hasText:'Missed — not run'})).toHaveCount(1);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([3]);
@@ -220,7 +219,7 @@ test('journey D: morning and evening digests run once each, are retained and ack
  await expect.poll(async()=>(await digests(page)).results.length).toBe(4);
  await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(panel.getByRole('article')).toHaveCount(4);
- await expect(panel.getByRole('article').getByText('Oct 4, 2026, 7:00 PM · completed',{exact:true})).toHaveCount(1);
+ await expect(panel.getByRole('article').getByText('Oct 4, 2026, 7:00 PM · Completed',{exact:true})).toHaveCount(1);
  await expect.poll(async()=>(await digests(page)).acks).toEqual([4]);
  const afterMissed=state.results;
  state=await digests(page);

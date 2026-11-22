@@ -78,7 +78,7 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  @PluginMethod public void describeSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.describe(call,()->SelectedDocumentAccess.documents(getContext())));}
  @PluginMethod public void readSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.read(call,()->SelectedDocumentAccess.documents(getContext())));}
  @PluginMethod public void openSelected(PluginCall call){Activity activity=getActivity();documents(call,()->SelectedDocumentCalls.open(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
- @PluginMethod public void shareSelected(PluginCall call){Activity activity=getActivity();documents(call,()->SelectedDocumentCalls.share(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
+ @PluginMethod public void shareSelected(PluginCall call){Activity activity=getActivity();documents(call,()->AlphaShareSheet.shareSelected(call,()->SelectedDocumentAccess.documents(getContext()),activity));}
  @PluginMethod public void forgetSelected(PluginCall call){documents(call,()->SelectedDocumentCalls.forget(call,()->SelectedDocumentAccess.documents(getContext())));}
  private void documents(PluginCall call,Runnable task){PluginWorkers.submit(worker,task,()->call.reject("Saved document access is unavailable"));}
  private Integer clockInteger(JSObject data,String key) {
@@ -225,9 +225,20 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
    try (Cursor cursor = getContext().getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
     if (cursor != null && cursor.moveToFirst()) value.put("name", cursor.getString(0));
    }
+   pickedDetails(getContext().getContentResolver(), uri, value);
    value.put("selectionId", selectedId);
    resolveResult(call, value);
   } catch (RuntimeException error) { if(selectedId!=null)try{SelectedDocumentAccess.forget(selectedId);}catch(RuntimeException ignored){} finish(call, "failed", "The document provider could not grant access or read this selection"); }
+ }
+ /** Size and last change of a picked document for the preview's subtitle, when its provider
+  *  reports them. Each is optional: a provider without a column leaves the type alone. */
+ static void pickedDetails(android.content.ContentResolver resolver, Uri uri, JSObject value) {
+  try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.SIZE}, null, null, null)) {
+   if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0) && cursor.getLong(0) >= 0) value.put("size", cursor.getLong(0));
+  } catch (RuntimeException ignored) { /* The subtitle shows the type without a size. */ }
+  try (Cursor cursor = resolver.query(uri, new String[]{DocumentsContract.Document.COLUMN_LAST_MODIFIED}, null, null, null)) {
+   if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0) && cursor.getLong(0) > 0) value.put("modified", cursor.getLong(0));
+  } catch (RuntimeException ignored) { /* Non-document providers may not report it. */ }
  }
  private void resolveResult(PluginCall call, JSObject value) {
   if (PluginCall.CALLBACK_ID_DANGLING.equals(call.getCallbackId())) notifyListeners("restoredResult", value, true);

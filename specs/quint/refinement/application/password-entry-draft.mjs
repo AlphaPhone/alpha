@@ -25,8 +25,9 @@ const stubs = {
   '../browser/dev-profile': 'export const browserDevProfile=true;',
   './dev-vault': 'export function createDevelopmentVault(){return globalThis.__passwordEntryVault;}',
 };
-const typedSecret = 'typed-secret-value', refusal = 'Use an HTTPS website address';
-const errors = {'Enter a name.': 'details', 'Add a website': 'details', 'Type the new password again.': 'retype', 'Password needed': 'password', [refusal]: 'refused'};
+// The vault refuses with its own validation text; the form shows Alpha's wording of it.
+const typedSecret = 'typed-secret-value', refusal = 'Use an HTTPS website address', shownRefusal = 'Use an HTTPS website address.';
+const errors = {'Enter a name.': 'details', 'Add a website': 'details', 'Type the new password again.': 'retype', 'Password needed': 'password', [shownRefusal]: 'refused'};
 
 export async function passwordEntryDraftDriver() {
   const load = await loadBundled('apps/app/src/passwords/password-manager.ts', stubs);

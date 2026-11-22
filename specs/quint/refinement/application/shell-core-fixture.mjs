@@ -9,7 +9,7 @@ import {root} from './shell-model-traces.mjs';
  * The shell's own state methods from prototype/model.js, compiled as a class without React or a
  * DOM: state reads (S), timer groups, toasts, per-view state, navigation, Back, the shade entry
  * points, the pull context and scripted voice. Timers are held, not run, so a driver
- * fires exactly the one a model step stands for. The shared navigation reducer is the pinned one.
+ * fires exactly the one a model step stands for. The navigation reducer is Alpha's own (apps/app/src/ui).
  */
 const model = readFileSync(join(root, 'apps/app/src/prototype/model.js'), 'utf8');
 function between(from, to) {
@@ -21,7 +21,7 @@ const methods = between('\n  S() {', '\n  /* ---- gestures ---- */');
 const voice = between('\n  startVoice() {', '\n  showHeads() {');
 const pullContext = between('\n  pullContext() {', '\n  sw(fn, opts) {');
 const base = between('\nvar BASE = {', '\n};') + '\n};';
-const {navigateMobileShell} = await tsImport(join(root, '.eliza/client-features/packages/ui/src/mobile-shell/navigation.ts'), import.meta.url);
+const {navigateMobileShell} = await tsImport(join(root, 'apps/app/src/ui/mobile-shell/navigation.ts'), import.meta.url);
 
 /**
  * `views` are the registered view definitions (their `chat`, `back`, `onLeave`); `globals` adds
@@ -33,7 +33,7 @@ export function shellCore({views, globals = {}}) {
   const arm = kind => (run, delay) => { timers.set(++nextTimer, {run, delay, kind}); return nextTimer; };
   const disarm = id => { timers.delete(id); };
   const context = vm.createContext({
-    VIEWS: views, DEFERRED_MVP_VIEWS: new Set(), isMvpView: key => key in views, navigateMobileShell,
+    VIEWS: views, DEFERRED_MVP_VIEWS: new Set(), isMvpView: key => key in views, navigateMobileShell, deviceEmergencyLive: () => false,
     accessibilityTimeoutScale: () => 1, shadeFallback: outcome => `shade:${outcome}`, externalVoiceInvocationEnabled: true,
     VOICE: {locked: 'ab', fallback: 'cd', lockedAnswer: 'locked answer'}, QUICK_SETTINGS: {mic: true},
     ALPHA_PRODUCT: {identity: {characterName: 'Alpha'}}, IC: {}, PEOPLE: [], person: () => null,

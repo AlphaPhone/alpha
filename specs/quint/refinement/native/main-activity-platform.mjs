@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
-import {app, root} from './java.mjs';
+import {app, directory as refinementDirectory, root} from './java.mjs';
 
-export const navigationRequestSource=app+'NavigationOpenRequest.java';
 export const navigationActionSource=app+'AlphaNavigationService.java';
+export const mainActivitySources = [
+  ...['MainActivity', 'CloudDeployment', 'RendererRecoveryBudget', 'NavigationOpenRequest', 'SmsNoticeOpenRequest']
+    .map(name => app + name + '.java'),
+  join(refinementDirectory, 'MainActivityPorts.java'),
+];
 
 /** Android/Capacitor primitives. MainActivity owns all product recovery and hand-off decisions. */
 export function mainActivityPlatform() {
@@ -152,6 +156,7 @@ public class PackageManager {
 public class Configuration {}`,
     'android/content/res/Resources.java': `package android.content.res;
 public class Resources {
+  public String getResourceName(int id) {throw new AssertionError("Unexercised resource-name lookup");}
   public android.util.DisplayMetrics getDisplayMetrics() {
     return new android.util.DisplayMetrics();
   }
@@ -194,11 +199,18 @@ public class View {
   }
   public ViewGroup parent;
   public int left, top, right, bottom;
+  private boolean filterObscuredTouches;
   public OnClickListener click;
   public View() {}
   public View(Object context) {}
   public Object getParent() {
     return parent;
+  }
+  public void setFilterTouchesWhenObscured(boolean value) {
+    filterObscuredTouches = value;
+  }
+  public boolean getFilterTouchesWhenObscured() {
+    return filterObscuredTouches;
   }
   public void setPadding(int l, int t, int r, int b) {
     left = l;
@@ -358,6 +370,18 @@ public class ActivityManager {
 public abstract class OnBackPressedCallback {
   public OnBackPressedCallback(boolean enabled) {}
   public abstract void handleOnBackPressed();
+  public void handleOnBackStarted(BackEventCompat backEvent) {}
+  public void handleOnBackProgressed(BackEventCompat backEvent) {}
+  public void handleOnBackCancelled() {}
+}`,
+    // androidx.activity 1.8.0 (the pinned androidxActivityVersion): the held predictive Back gesture.
+    'androidx/activity/BackEventCompat.java': `package androidx.activity;
+public final class BackEventCompat {
+  public static final int EDGE_LEFT = 0, EDGE_RIGHT = 1;
+  private final float progress; private final int edge;
+  public BackEventCompat(float touchX, float touchY, float progress, int swipeEdge) { this.progress = progress; edge = swipeEdge; }
+  public float getProgress() { return progress; }
+  public int getSwipeEdge() { return edge; }
 }`,
     'androidx/activity/OnBackPressedDispatcher.java': `package androidx.activity;
 public class OnBackPressedDispatcher {
@@ -436,12 +460,15 @@ public class Bridge {
 }`,
     'com/getcapacitor/android/R.java': `package com.getcapacitor.android;
 public class R {
+  public static class layout {public static final int capacitor_bridge_layout_main=2;}
   public static class id {
     public static final int webview = 1;
   }
 }`,
     'com/getcapacitor/BridgeActivity.java': `package com.getcapacitor;
 public class BridgeActivity {
+  public void setContentView(int layout) {throw new AssertionError("Unexercised layout inflation");}
+  public void dump(String prefix,java.io.FileDescriptor descriptor,java.io.PrintWriter out,String[] args) {throw new AssertionError("Unexercised activity dump");}
   protected Bridge bridge;
   public boolean finishing, destroyed, removedTask;
   public int recreates, loads;
@@ -514,8 +541,9 @@ public class BridgeActivity {
   public android.view.Window getWindow() {
     return window;
   }
-  public android.view.View findViewById(int id) {
-    return inflated;
+  @SuppressWarnings("unchecked")
+  public <T extends android.view.View> T findViewById(int id) {
+    return id == com.getcapacitor.android.R.id.webview ? (T) inflated : null;
   }
   public void setContentView(android.view.View value) {
     content = value;
@@ -541,7 +569,16 @@ public class BridgeActivity {
 }`,
     'ai/alphacompute/alphaphone/BuildConfig.java': `package ai.alphacompute.alphaphone;
 public class BuildConfig {
+  public static final int VERSION_CODE=1;
   public static boolean DEBUG = false;
+}`,
+    // The composer port's actual WebView listener is covered by messages-composer-port.test.mjs.
+    'ai/alphacompute/alphaphone/AlphaMessagesComposerPort.java': `package ai.alphacompute.alphaphone;
+final class AlphaMessagesComposerPort {
+  static void install(MainActivity activity, android.webkit.WebView view) {
+    if (!view.getFilterTouchesWhenObscured())
+      throw new AssertionError("Configure obscured-touch filtering before installing the composer");
+  }
 }`,
     'ai/alphacompute/alphaphone/AlphaImageCapability.java': `package ai.alphacompute.alphaphone;
 public class AlphaImageCapability {

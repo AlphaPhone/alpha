@@ -371,7 +371,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         try{
           const operation={type:action==='done'?'reminder_complete' as const:'reminder_snooze' as const,target:renderedDecisionTarget};
           const pending=Object.values(await pendingReminderDeletions()).find(input=>Object.keys(renderedDecisionTarget).every(key=>input.operation.target[key as keyof typeof input.operation.target]===renderedDecisionTarget[key]));
-          if(pending&&pending.operation.type!==operation.type)throw Error('Another action on this revision is unconfirmed');
+          if(pending&&pending.operation.type!==operation.type)throw Error('Still saving your last change. Try again in a moment.');
           let input=pending;
           if(!input){
             const current=await DailyApps.selectedReminder({id:event.alphaReminderId});
@@ -421,7 +421,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         try{
           const operation={type:'reminder_update' as const,target:renderedDecisionTarget,fields:{title:event.title,body:event.reminderBody||'',schedule}};
           const pending=Object.values(await pendingReminderDeletions()).find(input=>Object.keys(renderedDecisionTarget).every(key=>input.operation.target[key as keyof typeof input.operation.target]===renderedDecisionTarget[key]));
-          if(pending&&JSON.stringify(pending.operation)!==JSON.stringify(operation))throw Error('Another action on this revision is unconfirmed');
+          if(pending&&JSON.stringify(pending.operation)!==JSON.stringify(operation))throw Error('Still saving your last change. Try again in a moment.');
           let input=pending;
           if(!input){
             const current=await DailyApps.selectedReminder({id:event.alphaReminderId});
@@ -466,7 +466,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         deleteOwner.reminderSaving=true;
         try {
           const pending=Object.values(await pendingReminderDeletions()).find(input=>Object.keys(renderedTarget).every(key=>input.operation.target[key as keyof typeof input.operation.target]===renderedTarget[key]));
-          if(pending&&pending.operation.type!=='reminder_cancel')throw Error('Another action on this revision is unconfirmed');
+          if(pending&&pending.operation.type!=='reminder_cancel')throw Error('Still saving your last change. Try again in a moment.');
           if(!pending){
             const reviewed=await deletions.reviewReminder({target:renderedTarget});
             if(reviewed.status==='queued'){if(stillSelected())api.set({open:null});refreshDeletionViews();api.toast('Paused');return;}
@@ -484,6 +484,9 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
           if(stillSelected())api.set({open:null});
           if(owner===deleteOwner&&deleteOwner.live){await deleteOwner.refreshReminders();api.toast('Reminder deleted');}
         }catch{
+          // A lost admission response may still have staged the deletion: re-read now so its
+          // Undo appears at once, not at the notice's next idle poll inside the 10 s window.
+          refreshDeletionViews();
           if(owner===deleteOwner&&deleteOwner.live){
             api.set({reminderDeleteUnknown:Object.keys(await pendingReminderDeletions()).length});
             api.toast('Unconfirmed');

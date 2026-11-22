@@ -113,3 +113,15 @@ for(const available of [false,true])test(`BrowserSurface shares only an admitted
  expect(await page.evaluate(()=>(window as any).shareCalls)).toEqual(available?[{url}]:[]);
  expect(await page.evaluate(()=>(window as any).copiedUrls)).toEqual([]);
 });
+test('a new tab has one search field, and page arrows look different from leaving Browser',async({page})=>{
+ await page.getByRole('button',{name:'Browser',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Edit address',exact:true})).toContainText('New tab');
+ await expect(page.getByText('Search or address',{exact:true})).toHaveCount(0);
+ await expect(page.getByText('Search or type address',{exact:true})).toHaveCount(1);
+ // Every glyph comes from the one icon pack, so a glyph is its pack asset plus how it is turned.
+ const glyph=(name:string)=>page.locator('[data-alpha-browser-header]').getByRole('button',{name,exact:true}).locator('[data-alpha-icon]').evaluate(icon=>({asset:icon.getAttribute('data-alpha-icon'),transform:getComputedStyle(icon).transform}));
+ const [leave,previous,next]=await Promise.all([glyph('Back to apps'),glyph('Previous page'),glyph('Next page')]);
+ expect(leave.asset).toBe('/icons/lucide/chevron-left.svg');
+ for(const arrow of [previous,next])expect(arrow.asset).toBe('/icons/lucide/arrow-up.svg');
+ expect(previous).not.toEqual(leave);expect(next).not.toEqual(previous);
+});

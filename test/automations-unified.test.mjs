@@ -35,7 +35,7 @@ test('unified read uses all four canonical sources and keeps stable source ident
 test('missing capability and denied owner remain distinct while other sources stay usable',async()=>{const f=await fixture(call=>call.path.includes('scheduled-tasks')?{status:404,body:{}}:call.path.includes('/reminders')?{status:403,body:{}}:read(call));try{const snapshot=await f.client.list(signal());assert.equal(snapshot.rows.length,2);assert.deepEqual(snapshot.issues.map(issue=>[issue.source,issue.unavailable]),[['schedules',true],['reminders',false]]);assert.match(snapshot.issues[1].message,/owner/);}finally{await f.close();}});
 test('unlisted scheduled rows and malformed identities fail their source instead of leaking into a healthy empty list',async()=>{const f=await fixture(call=>call.path.includes('scheduled-tasks')?{tasks:[{...schedule,ownerVisible:false}]}:read(call));try{const snapshot=await f.client.list(signal());assert.equal(snapshot.rows.some(row=>row.kind==='schedule'),false);assert.equal(snapshot.issues[0].source,'schedules');for(const id of ['../other','a/b','a%2fb','a?x=1',' a','a..b'])assert.throws(()=>protocol.automationId(id));}finally{await f.close();}});
 for(const conversation of [undefined,'00000000-0000-4000-8000-000000000010'])test(`prompt creation is paused and preserves its delivery conversation: ${conversation||'legacy'}`,async()=>{const f=await fixture(call=>({trigger:{id:'prompt',...call.body},...(call.body.deliveryConversationId?{deliveryConversationId:call.body.deliveryConversationId}:{})}));if(conversation)f.client=new AutomationsProtocol(f.request,conversation);try{const draft={title:'  Draft review  ',instructions:'Read only the supplied document',triggerType:'once',scheduledAt:future(),cron:'',eventKind:'',timezone:'UTC'};await f.client.savePrompt(draft,signal());assert.equal(f.calls[0].method,'POST');assert.equal(f.calls[0].body.enabled,false);assert.equal(f.calls[0].body.wakeMode,'inject_now');assert.equal(f.calls[0].body.deliveryConversationId,conversation);await f.client.savePrompt({...draft,triggerType:'cron',cron:'0 9 * * 1'},signal(),'prompt');assert.equal(f.calls[1].method,'PUT');assert.equal(Object.hasOwn(f.calls[1].body,'enabled'),false);assert.equal(Object.hasOwn(f.calls[1].body,'wakeMode'),false);await assert.rejects(f.client.savePrompt({...draft,scheduledAt:'2020-01-01T12:00'},signal()),/future/);assert.equal(f.calls.length,2);}finally{await f.close();}});
-test('scheduled Run uses fire rather than acknowledgment and reports a non-fired outcome',async()=>{const f=await fixture(()=>({fire:{kind:'skipped',reason:'Owner paused this item',task:schedule}}));try{await assert.rejects(f.client.scheduledVerb('scheduled-task','fire',signal()),/Owner paused/);assert.deepEqual(f.calls.map(call=>call.path),['/api/lifeops/scheduled-tasks/scheduled-task/fire']);}finally{await f.close();}});
+test('scheduled Run uses fire rather than acknowledgment and reports a non-fired outcome',async()=>{const f=await fixture(()=>({fire:{kind:'skipped',reason:'Owner paused this item',task:schedule}}));try{await assert.rejects(f.client.scheduledVerb('scheduled-task','fire',signal()),{message:'This item was skipped. Read its current status before trying again.'});assert.deepEqual(f.calls.map(call=>call.path),['/api/lifeops/scheduled-tasks/scheduled-task/fire']);}finally{await f.close();}});
 test('LifeOps reminders use the existing in-app definition/idempotency contract and preserve unchanged past due dates',async()=>{const f=await fixture(call=>call.path.includes('/occurrences/')?{occurrence:{id:'occurrence',state:'pending'}}:{definition:{id:call.method==='POST'?'created':'definition',...call.body}});try{await f.client.createReminder({message:'Review this draft',due:future(),timezone:'UTC',idempotencyKey:'same-owned-key'},signal());assert.equal(f.calls[0].body.idempotencyKey,'same-owned-key');assert.equal(f.calls[0].body.metadata.nativeProjection,'in_app_only');assert.equal(f.calls[0].body.reminderPlan.steps[0].channel,'in_app');const row=(await new AutomationsProtocol(async()=>({reminders:[reminder],automations:[],tasks:[]})).list(signal())).rows[0];await f.client.editReminder(row,'Changed message',protocol.automationLocalDateInput(reminder.definition.cadence.dueAt),signal());assert.deepEqual(f.calls[1].body,{title:'Changed message'});await f.client.snoozeReminder('occurrence',signal());await f.client.cancelReminder('definition',signal());assert.deepEqual(f.calls.slice(1).map(call=>[call.path,call.method]),[['/api/lifeops/definitions/definition','PUT'],['/api/lifeops/occurrences/occurrence/snooze','POST'],['/api/lifeops/definitions/definition','PUT']]);}finally{await f.close();}});
 
 const routine={definition:{id:'routine',kind:'routine',title:'Stretch',description:'',status:'active',timezone:'UTC',cadence:{kind:'daily'},metadata:{ownerSurface:'OWNER_ROUTINES'}}};
@@ -50,26 +50,26 @@ const {homeReadIsStale,presentHomeWorkflowFreshness}=await import('../apps/app/s
 const transformed=file=>stripTypeScriptTypes(fs.readFileSync(file,'utf8').replace(/^import .*;\n/gm,'').replace(/export /g,''),{mode:'transform'});
 function adapterFixture(request,storage={},options={}){
  const listeners=new Set(),events=new Map(),session={sessionId:'session',origin:'https://synthetic.invalid',ownerId:'owner',agentId:'agent'};
- const controller={getAutomationsClient:()=>({sessionId:session.sessionId,request}),getSnapshot:()=>({session,open:false,kind:options.agentKind}),subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},open:()=>{throw Error('Unexpected account chooser');}};
- const showAgentStatus=()=>{throw Error('Unexpected agent status route');};
+ const controller={getAutomationsClient:()=>options.unbound?null:({sessionId:session.sessionId,request}),getSnapshot:()=>({session:options.unbound?undefined:session,open:false,kind:options.agentKind}),subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},open:()=>{throw Error('Unexpected account chooser');}};
+ const showWorkflowAgentUnavailable=()=>{throw Error('Unexpected agent status route');};
  const localStorage=new Proxy({getItem:key=>storage[key]??null,setItem:(key,value)=>storage[key]=value,removeItem:key=>delete storage[key]},{ownKeys:()=>Object.keys(storage),getOwnPropertyDescriptor:()=>({configurable:true,enumerable:true})});
  let view=options.view===undefined?'workflows':options.view,workflowOpened='',deviceOpened='',newWorkflow=0;
  class Shell{live=true;renderVals(){return options.homeFallback||{};}componentDidMount(){}componentWillUnmount(){}S(){return {view};}vset(){}vget(){return {};}api(){return api;}openView(next){view=next;}refreshReminders(id){deviceOpened=id;}newDeviceReminderDraft(){deviceOpened='new-draft';}}
  const api={ic:{bell:'bell',spark:'sparkles',cal:'calendar',flow:'workflow'},track:()=>'',kx:()=>0,isActive:()=>true};
- const views={workflows:{render:()=>({cards:[],managementCards:[],openWorkflow:id=>workflowOpened=id,newFlow:()=>newWorkflow++,detail:false,builder:false,runOpen:false}),back:()=>false,onLeave(){},refreshManagement:options.refreshManagement}};
+ const views={workflows:{render:()=>({cards:[],managementCards:options.managementCards?.()??[],removedAvailable:options.removedAvailable,openWorkflow:id=>workflowOpened=id,newFlow:()=>newWorkflow++,detail:!!options.workflowDetail?.(),builder:false,runOpen:false}),back:()=>false,onLeave(){},refreshManagement:options.refreshManagement}};
  const windowEvents=new Map();
  const reviews={asked:[],answer:false};
  const dom=options.dom?new JSDOM('<div class="os"><button id="origin">Filters</button></div>',{pretendToBeVisual:true}):null;
  if(dom){dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.document.querySelector('.os').inert=false;}
- const context={...protocol,homeReadIsStale,presentHomeWorkflowFreshness,connectionController:controller,showAgentStatus,DailyApps:{listReminders:async()=>({reminders:options.deviceReminders??[{id:'device',title:'On-device reminder',body:'Existing phone row',at:Date.now()+10000,status:'scheduled'}]})},Capacitor:{getPlatform:()=> 'android',isNativePlatform:()=>options.native!==false},localStorage,window:dom?.window||{dispatchEvent(event){for(const fn of windowEvents.get(event.type)||[])fn(event);},addEventListener(name,fn){const f=windowEvents.get(name)||new Set();f.add(fn);windowEvents.set(name,f);},removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}},document:dom?.window.document||{hidden:false,addEventListener:(name,fn)=>events.set(name,fn),removeEventListener(){}},getComputedStyle:dom?.window.getComputedStyle,innerWidth:400,innerHeight:800,catalog:JSON.parse(fs.readFileSync('apps/app/src/icon-catalog.json','utf8')),queueMicrotask,AbortController,Date:options.now?class extends Date{static now(){return options.now();}}:Date,crypto,Event,console,
+ const context={...protocol,homeReadIsStale,presentHomeWorkflowFreshness,connectionController:controller,showWorkflowAgentUnavailable,agentAvailabilityNotice:()=>'Agent offline',agentPendingText:()=>'Agent offline',DailyApps:{listReminders:async()=>({reminders:options.deviceReminders??[{id:'device',title:'On-device reminder',body:'Existing phone row',at:Date.now()+10000,status:'scheduled'}]})},Capacitor:{getPlatform:()=> 'android',isNativePlatform:()=>options.native!==false},localStorage,window:dom?.window||{dispatchEvent(event){for(const fn of windowEvents.get(event.type)||[])fn(event);},addEventListener(name,fn){const f=windowEvents.get(name)||new Set();f.add(fn);windowEvents.set(name,f);},removeEventListener(name,fn){windowEvents.get(name)?.delete(fn);}},document:dom?.window.document||{hidden:false,addEventListener:(name,fn)=>events.set(name,fn),removeEventListener(){}},getComputedStyle:dom?.window.getComputedStyle,innerWidth:400,innerHeight:800,catalog:JSON.parse(fs.readFileSync('apps/app/src/icon-catalog.json','utf8')),queueMicrotask,AbortController,Date:options.now?class extends Date{static now(){return options.now();}}:Date,crypto,Event,console,
   // The in-app review is rendered by apps/app/src/browser/review.ts; this fixture answers it.
   BrowserReviews:class{confirm(id,title,details,label,choice){reviews.asked.push({id,title,details,label});const answer=typeof reviews.answer==='function'?reviews.answer():reviews.answer;return Promise.resolve(answer).then(value=>value&&choice?.current?.()!==false);}cancel(){}cancelAll(){}}};
  vm.runInNewContext('(()=>{'+transformed('.eliza/client-features/packages/contracts/src/workflow-intents.ts')+'\nglobalThis.SharedWorkflowIntentStore=WorkflowIntentStore;globalThis.sharedWorkflowIntentKey=workflowIntentKey;globalThis.emptyWorkflowIntentArchive=emptyWorkflowIntentArchive;globalThis.storageWorkflowIntentBackend=storageWorkflowIntentBackend;globalThis.workflowIntentOwnerPrefix=workflowIntentOwnerPrefix;})();',context);
  vm.runInNewContext(transformed('apps/app/src/runtime/workflow-intents.ts')+'\nglobalThis.WorkflowIntentStore=WorkflowIntentStore;globalThis.workflowIntentKey=workflowIntentKey;',context);
- vm.runInNewContext(transformed('.eliza/client-features/packages/ui/src/utils/automation-feed-filter.ts')+'\nglobalThis.FEED_FILTERS=FEED_FILTERS;globalThis.passesFilter=passesFilter;',context);
+ vm.runInNewContext(transformed('apps/app/src/ui/utils/automation-feed-filter.ts')+'\nglobalThis.FEED_FILTERS=FEED_FILTERS;globalThis.passesFilter=passesFilter;',context);
  for(const [file,names] of [
-  ['.eliza/client-features/packages/ui/src/utils/cron-format.ts',['CRON_PRESETS','formatSchedule']],
-  ['.eliza/client-features/packages/ui/src/utils/reminder-presentation.ts',['canSnoozeReminder','reminderDeliveryLabel','reminderDue']],
+  ['apps/app/src/ui/utils/cron-format.ts',['CRON_PRESETS','formatSchedule']],
+  ['apps/app/src/ui/utils/reminder-presentation.ts',['canSnoozeReminder','reminderDeliveryLabel','reminderDue']],
   ['apps/app/src/icon-style.ts',['iconStyle']],
   ['apps/app/src/runtime/modal-inert.ts',['holdPhoneInert']],
   ['apps/app/src/prototype/workflow-filters.ts',['openWorkflowFilters','workflowFilterLabel']],
@@ -83,19 +83,18 @@ function adapterFixture(request,storage={},options={}){
 const wait=async fn=>{for(let count=0;count<300;count++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error('Unified automation UI did not settle.');};
 test('busy management rows refuse taps and stale callbacks until the current refresh settles',async()=>{
  let release;let held=new Promise(resolve=>release=resolve),opened=0;
- const app=adapterFixture(async path=>read({path}),{},{refreshManagement:()=>held});
- app.window.addEventListener('alpha:hosted-digests',()=>opened++);
+ const app=adapterFixture(async path=>read({path}),{},{refreshManagement:()=>held,managementCards:()=>[{id:'held-row',name:'Held row',short:'',open:()=>opened++}]});
  try{
   app.render();await wait(()=>app.render().automation.busy);
-  const pending=app.render().automation.managementCards.find(card=>card.name==='Scheduled digests');
+  const pending=app.render().automation.managementCards.find(card=>card.name==='Held row');
   assert.equal(pending.busy,true);pending.open();assert.equal(opened,0,'A row announced disabled must not open');
   release();await wait(()=>!app.render().automation.busy&&!app.render().automation.loading);
-  const ready=app.render().automation.managementCards.find(card=>card.name==='Scheduled digests');
+  const ready=app.render().automation.managementCards.find(card=>card.name==='Held row');
   assert.equal(ready.busy,false);ready.open();assert.equal(opened,1,'The settled row still opens normally');
   held=new Promise(resolve=>release=resolve);app.render().automation.refresh();
   assert.equal(app.render().automation.busy,true);ready.open();assert.equal(opened,1,'A prior render cannot bypass the new refresh');
   release();await wait(()=>!app.render().automation.busy&&!app.render().automation.loading);
-  app.render().automation.managementCards.find(card=>card.name==='Scheduled digests').open();
+  app.render().automation.managementCards.find(card=>card.name==='Held row').open();
   assert.equal(opened,2,'The new settled callback works once');
  }finally{release();app.close();}
 });
@@ -131,12 +130,12 @@ test('unified Workflows keeps browser request recovery in its management control
 
 
 
-test('unknown mutation stays locked in the existing owner request journal after adapter recreation',async()=>{let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}return read(call);});const storage={};let app=adapterFixture(f.request,storage);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();assert.equal(writes,0);app.render().automation.confirm();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}});
+test('unknown mutation stays locked in the existing owner request journal after adapter recreation',async()=>{let writes=0;const f=await fixture((call,_req,res)=>{if(call.method!=='GET'){writes++;res.destroy();return;}return read(call);});const storage={};let app=adapterFixture(f.request,storage);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.powerLabel,'Enable');app.render().automation.togglePower();assert.equal(writes,0);app.render().automation.confirm();await wait(()=>writes===1&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(storage).length,1);app.close();app=adapterFixture(f.request,storage);app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.powerDisabled,true);assert.equal(writes,1);}finally{app.close();await f.close();}});
 test('retiring an owner while a detail read waits cannot open an editor or dispatch a late mutation',async()=>{let release;const paused=new Promise(resolve=>release=resolve);let detailStarted=false;const f=await fixture(async call=>{if(call.path==='/api/triggers/prompt'){detailStarted=true;await paused;}return read(call);});const app=adapterFixture(f.request);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Edit prompt').run();await wait(()=>detailStarted);app.retire();assert.equal(app.home().homeWorkflowHasRows,undefined);release();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(app.render().automation.editing,false);assert.equal(f.calls.filter(call=>call.method!=='GET').length,0);}finally{release();app.close();await f.close();}});
 
 
 const openPrompt=async app=>{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();};
-const reviewed=(app,label)=>{app.render().automation.actions.find(action=>action.label===label).run();app.render().automation.confirm();};
+const reviewed=(app,label)=>{const shown=app.render().automation;if(shown.powerLabel===label)shown.togglePower();else shown.actions.find(action=>action.label===label).run();app.render().automation.confirm();};
 test('an unknown enable or delete settles when the refreshed row shows it applied',async()=>{
  let enabled=false,deleted=false;const f=await fixture((call,_req,res)=>{if(call.method==='PUT'){enabled=true;return {status:408,body:{}};}if(call.method==='DELETE'){deleted=true;res.destroy();return;}if(call.path==='/api/automations')return {automations:[workflow,...(deleted?[]:[{...prompt,enabled,status:enabled?'active':'paused'}])]};return read(call);});const app=adapterFixture(f.request);
  try{await openPrompt(app);reviewed(app,'Enable');await wait(()=>enabled&&!app.render().automation.busy&&!app.render().automation.loading);assert.equal(app.render().automation.locked,false);assert.equal(Object.keys(app.storage).length,0);
@@ -179,7 +178,7 @@ test('resident prompt reviews disclose the timed window without applying it to e
  const timing='Keep this phone on. Android may delay scheduled runs. If the agent was stopped at the scheduled time, runs more than 30 minutes late are marked missed.';
  try{
   await openPrompt(app);
-  app.render().automation.actions.find(action=>action.label==='Enable').run();
+  assert.equal(app.render().automation.powerLabel,'Enable');app.render().automation.togglePower();
   assert.ok(app.render().automation.reviewDetails.endsWith(timing));
   app.render().automation.cancelReview();
   app.render().automation.createPrompt();
@@ -192,7 +191,7 @@ test('resident prompt reviews disclose the timed window without applying it to e
 
 test('a structured unknown outcome is retained even when its HTTP status normally rejects input',async()=>{
  const f=await fixture(call=>call.method==='GET'?read(call):{status:400,body:{code:'AUTOMATION_OUTCOME_UNKNOWN'}}),app=adapterFixture(f.request);
- try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();app.render().automation.actions.find(action=>action.label==='Enable').run();app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='PUT')&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(app.storage).length,1);}finally{app.close();await f.close();}
+ try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Owner prompt').open();assert.equal(app.render().automation.powerLabel,'Enable');app.render().automation.togglePower();app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='PUT')&&!app.render().automation.busy);assert.equal(app.render().automation.locked,true);assert.equal(Object.keys(app.storage).length,1);}finally{app.close();await f.close();}
 });
 
 test('nonexistent local DST time is rejected before either prompt or reminder mutation',async()=>{
@@ -211,7 +210,7 @@ test('unchanged repeated local times keep the original later offset and sub-minu
 });
 
 
-const presentationBundle=await build({entryPoints:['.eliza/client-features/packages/ui/src/utils/reminder-presentation.ts'],bundle:true,write:false,format:'esm',platform:'neutral',logLevel:'silent'});
+const presentationBundle=await build({entryPoints:['apps/app/src/ui/utils/reminder-presentation.ts'],bundle:true,write:false,format:'esm',platform:'neutral',logLevel:'silent'});
 const presentation=await import('data:text/javascript;base64,'+Buffer.from(presentationBundle.outputFiles[0].text).toString('base64'));
 test('shared canonical reminder labels and snooze policy cover delivery, terminal and acknowledged states',()=>{
  const row=(status='active',state='pending',outcome=null,metadata={})=>({definition:{status,cadence:{kind:'once',dueAt:'2030-01-01T12:00:00Z'}},occurrence:state?{state,metadata}:null,latestAttempt:outcome?{outcome}:null});
@@ -248,14 +247,14 @@ test('retired-owner list replies and completion events cannot repopulate old rem
  try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);second=true;app.notify();app.render();await new Promise(resolve=>setTimeout(resolve,10));app.retire();app.setView('home');release();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(app.home().homeWorkflowHasRows,undefined);assert.equal(app.render().cards.length,0);app.notify('session');assert.equal(app.render().cards.length,0);assert.equal(writes.length,0);assert.equal(Object.keys(app.storage).length,0);}finally{release();app.close();}
 });
 
-test('Alpha reminder status text follows current canonical English labels',async()=>{
- const strings=JSON.parse(fs.readFileSync('vendor/eliza/packages/ui/src/i18n/locales/en.json','utf8'));
+test('Alpha reminder status text uses its English labels',async()=>{
+ const strings={'automationsreminders.status.blocked':'Delivery blocked','automationsreminders.status.duplicate':'Duplicate skipped'};
  const cases=[['unscheduled',null,null],['blocked',{id:'occurrence',state:'visible'},{outcome:'blocked_channel'}],['duplicate',{id:'occurrence',state:'visible'},{outcome:'skipped_duplicate'}],['unknown',{id:'occurrence',state:'unrecognized'},null]];
  for(const [status,occurrence,latestAttempt] of cases){const f=await fixture(call=>call.path==='/api/lifeops/reminders'?{reminders:[{...reminder,occurrence,latestAttempt}]}:read(call)),app=adapterFixture(f.request);try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);assert.equal(app.render().cards.find(card=>card.name==='Check the draft').statusLabel,({unscheduled:'—',unknown:'Unknown'})[status]??strings['automationsreminders.status.'+status]);}finally{app.close();await f.close();}}
 });
 test('a routine row offers Pause and Delete behind the owner review',async()=>{
  const f=await fixture(call=>call.method==='DELETE'?{deleted:true}:readDefinitions(call));const app=adapterFixture(f.request);
- try{app.render();await wait(()=>app.render().cards.length===7&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Stretch').open();assert.deepEqual(Array.from(app.render().automation.actions,action=>action.label),['Pause','Delete routine']);app.render().automation.actions.find(action=>action.label==='Delete routine').run();assert.equal(f.calls.some(call=>call.method!=='GET'),false);assert.equal(app.render().automation.review,true);app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='DELETE')&&!app.render().automation.busy);assert.deepEqual(f.calls.filter(call=>call.method!=='GET').map(call=>call.method+' '+call.path),['DELETE /api/lifeops/definitions/routine']);}finally{app.close();await f.close();}
+ try{app.render();await wait(()=>app.render().cards.length===7&&!app.render().automation.loading);app.render().cards.find(card=>card.name==='Stretch').open();assert.deepEqual(Array.from(app.render().automation.actions,action=>action.label),['Delete routine']);assert.deepEqual([app.render().automation.power,app.render().automation.powerOn,app.render().automation.powerLabel],[true,true,'Pause']);app.render().automation.actions.find(action=>action.label==='Delete routine').run();assert.equal(f.calls.some(call=>call.method!=='GET'),false);assert.equal(app.render().automation.review,true);app.render().automation.confirm();await wait(()=>f.calls.some(call=>call.method==='DELETE')&&!app.render().automation.busy);assert.deepEqual(f.calls.filter(call=>call.method!=='GET').map(call=>call.method+' '+call.path),['DELETE /api/lifeops/definitions/routine']);}finally{app.close();await f.close();}
 });
 
 
@@ -307,10 +306,65 @@ test('an in-flight automation stays protected without showing an unknown outcome
   assert.equal(app.render().automation.busy,true);
   assert.equal(app.render().automation.locked,false);
   assert.notEqual(app.render().cards.find(card=>card.name==='Owner prompt').statusLabel,'Outcome unknown');
-  assert.equal(app.render().automation.actions.find(action=>action.label==='Enable').disabled,true);
+  assert.equal(app.render().automation.powerDisabled,true);
   assert.equal(Object.keys(app.storage).length,1);
   release();await wait(()=>!app.render().automation.busy&&!app.render().automation.loading);
   assert.equal(app.render().automation.locked,false);
   assert.equal(Object.keys(app.storage).length,0);
  }finally{release();app.close();await f.close();}
+});
+
+test('with no agent connected the empty list shows one status line, not a notice and an empty label',async()=>{
+ const app=adapterFixture(async()=>{throw Error('Unexpected agent request');},{},{unbound:true,deviceReminders:[]});
+ try{app.render();await wait(()=>!app.render().automation.loading&&app.render().automation.itemCount);
+  const list=app.render().automation;
+  assert.equal(list.message,'Agent offline');assert.equal(list.empty,false);assert.deepEqual(Array.from(list.shownIssues),[]);
+ }finally{app.close();}
+});
+test('opening a prompt reads its run history without a refresh tap',async()=>{
+ const f=await fixture(read);const app=adapterFixture(f.request);
+ try{await openPrompt(app);await wait(()=>app.render().automation.history.length===1);
+  assert.equal(f.calls.filter(call=>call.path==='/api/triggers/prompt/runs').length,1);
+  assert.equal(f.calls.some(call=>call.method!=='GET'),false);
+  assert.ok(app.render().automation.actions.some(action=>action.aria==='Refresh execution history'),'the manual refresh stays');
+ }finally{app.close();await f.close();}
+});
+test('Complete and Dismiss say how they differ before anything is sent',async()=>{
+ const f=await fixture(read);const app=adapterFixture(f.request);
+ try{const title=(await f.client.list(signal())).rows.find(row=>row.kind==='schedule').title;f.calls.length=0;
+  app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().cards.find(card=>card.name===title).open();
+  const run=label=>app.render().automation.scheduleMore.find(action=>action.label===label).run();
+  run('Complete');assert.equal(app.render().automation.review,true);const complete=app.render().automation.reviewDetails;assert.match(complete,/done/);app.render().automation.cancelReview();
+  run('Dismiss');assert.match(app.render().automation.reviewDetails,/without marking it done/);assert.notEqual(app.render().automation.reviewDetails,complete);app.render().automation.cancelReview();
+  assert.equal(f.calls.some(call=>call.method!=='GET'),false);
+ }finally{app.close();await f.close();}
+});
+
+test('the Removed filter lists removed workflows, opens one for Restore and reads the list again on return',async()=>{
+ const f=await fixture(read);let removedReads=0,workflowDetail=false,removed=[{id:'gone',name:'Old flow',description:'',active:false,removed:true,versionId:'v1',steps:[]}];
+ const app=adapterFixture(f.request,{},{dom:true,removedAvailable:true,workflowDetail:()=>workflowDetail,refreshManagement:async(_signal,_valid,listRemoved)=>{if(!listRemoved)return undefined;removedReads++;return removed;}});
+ try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);assert.equal(removedReads,0,'removed workflows are read only on request');
+  app.render().automation.openFilters();const dialog=app.document.querySelector('dialog');const choose=label=>Array.from(dialog.querySelectorAll('button')).find(button=>button.textContent===label).click();
+  choose('Removed');choose('Done');await wait(()=>{const view=app.render();return removedReads===1&&!view.automation.loading&&view.cards.length===1;});
+  const card=app.render().cards[0];assert.equal(card.name,'Old flow');assert.equal(card.statusLabel,'Removed');assert.equal(app.render().automation.filterLabel,'All workflows · Removed');
+  card.open();assert.equal(app.workflowOpened,'gone');
+  // The workflow detail's own load publishes before its detail is shown; that render must not spend the re-read.
+  app.render();await new Promise(resolve=>setTimeout(resolve,20));assert.equal(removedReads,1,'nothing is re-read before the detail opens');
+  workflowDetail=true;app.render();removed=[];workflowDetail=false;await wait(()=>{const view=app.render();return removedReads===2&&!view.automation.loading;});assert.equal(app.render().cards.length,0);assert.equal(app.render().automation.emptyLabel,'No removed workflows');
+  assert.equal(f.calls.some(call=>call.method!=='GET'),false);
+ }finally{app.close();await f.close();}
+});
+test('the Removed status is offered only when the agent keeps removed workflows',async()=>{
+ const f=await fixture(read),app=adapterFixture(f.request,{},{dom:true});
+ try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);app.render().automation.openFilters();
+  assert.equal(Array.from(app.document.querySelector('dialog').querySelectorAll('button')).some(button=>button.textContent==='Removed'),false);
+ }finally{app.close();await f.close();}
+});
+test('the add sheet opens the scheduled digest panel and closes itself, sending nothing',async()=>{
+ const f=await fixture(read);const app=adapterFixture(f.request);let opened=0;app.window.addEventListener('alpha:hosted-digests',()=>opened++);
+ try{app.render();await wait(()=>app.render().cards.length===5&&!app.render().automation.loading);
+  app.render().newFlow();assert.equal(app.render().automation.creating,true);
+  app.render().automation.createDigest();assert.equal(opened,1);assert.equal(app.render().automation.creating,false);assert.equal(app.render().automation.detail,false);
+  assert.equal(f.calls.some(call=>call.method!=='GET'),false);
+ }finally{app.close();await f.close();}
 });

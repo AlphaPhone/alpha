@@ -2,12 +2,13 @@ import {test,expect,type Page} from '@playwright/test';
 const composer=(page:Page)=>page.getByRole('textbox',{name:'Message Alpha',exact:true});
 async function ready(page:Page){
  await page.goto('/?mode=dev');await page.evaluate(async()=>{
-  const fixture=(window as any).explicitSend={sent:[],rows:[],room:''};
+  const fixture=(window as any).explicitSend={sent:[],rows:[],room:'',forks:0};
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');await c.initialize();await c.startDevelopment('local');
   const {LocalAgentProtocol:P}=await import('/src/runtime/local-agent.ts'),{Component}=await import('/src/prototype/model.js');
   P.prototype.send=async(room,text)=>{fixture.room=room;fixture.sent.push(text);const u=crypto.randomUUID(),a=crypto.randomUUID();fixture.rows.push({id:u,role:'user',text},{id:a,role:'assistant',text:'Reply '+fixture.sent.length});return {text:'Reply '+fixture.sent.length,agentName:'Alpha',userMessageId:u,messageId:a};};
   P.prototype.messages=async()=>({messages:structuredClone(fixture.rows)});P.prototype.listConversations=async()=>[{id:fixture.room,title:'Owned conversation'}];
-  P.prototype.truncateMessages=async()=>{throw Error('No truncation expected');};
+  // Edit and resend changes history only by forking; no test here expects a fork.
+  P.prototype.forkConversation=async()=>{fixture.forks++;throw Error('No fork expected');};
   const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){fixture.shell=this;return render.call(this);};
  });
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Original request');await input.press('Enter');await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Reply 1'})).toBeVisible();
@@ -30,4 +31,5 @@ test('an explicit prompt while a message edit is open is refused with a toast an
  expect(await sent(page)).toEqual(['Original request']);
  await expect(bubbles(page,'Suggested prompt')).toHaveCount(0);await expect(composer(page)).toHaveValue('Edited request');
  expect(await page.evaluate(()=>!!(window as any).explicitSend.shell.messageEditTarget)).toBe(true);
+ expect(await page.evaluate(()=>(window as any).explicitSend.forks)).toBe(0);
 });

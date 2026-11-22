@@ -67,5 +67,5 @@ export async function workflowNoticeReceipt(id:string,title:string,text:string,b
  const {raw,recovery,state}=await workflowNoticeHistory(signal),row=state.rows.find(item=>item.id==='workflow:'+id),archived=state.archived?.find(item=>item.id==='workflow:'+id);
  const receipt=row||archived;if(!receipt||receipt.bindingHash===undefined)return {status:'unknown'};
  if(receipt.bindingHash!==bindingHash||receipt.title!==title||(row?row.text!==text:archived!.digest!==await digest(text)))throw Error('Saved notification receipt does not match this action');
- signal.throwIfAborted();const current=await workflowNoticesDocument.capture(signal);if(current.snapshot?.revision!==recovery.snapshot?.revision||current.raw!==raw||current.legacyChanged)throw Error('Notification history changed. Refresh its receipt.');return {status:'succeeded'};
+ signal.throwIfAborted();const current=await workflowNoticesDocument.capture(signal);if(current.snapshot?.revision!==recovery.snapshot?.revision||current.raw!==raw||current.legacyChanged)throw Error('Notification history changed. Close and reopen history.');return {status:'succeeded'};
 }

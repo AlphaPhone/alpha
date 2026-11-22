@@ -41,12 +41,12 @@ export function noteInstant(note:Note):number{
 }
 /**
  * Pinned notes first, then newest first; ties keep their stored order. A note with no time (an
- * older device note) is placed by its stored position, which is newest first: it counts as at
- * least as new as every note stored after it.
+ * older device note) is placed by its stored position, which is newest first: it takes the time
+ * of the newest note stored after it (specs/quint/application/CanonicalNotesView.qnt).
  */
 export function sortNotes<N extends Note>(list:readonly N[]):N[]{
  const at=list.map(noteInstant);
- for(let i=at.length-2;i>=0;i--)if(at[i]<0)at[i]=Math.max(at[i],at[i+1]);
+ for(let i=at.length-1,newest=-1;i>=0;i--){const own=at[i];if(own<0)at[i]=newest;else newest=Math.max(newest,own);}
  return list.map((note,index)=>({note,index,at:at[index]})).sort((a,b)=>Number(!!b.note.pinned)-Number(!!a.note.pinned)||b.at-a.at||a.index-b.index).map(x=>x.note);
 }
 /** The two-line preview: body text, checklist items with their state, a voice transcript or a link's domain. */
@@ -65,4 +65,14 @@ export function noteDateLabel(note:Note,now:number,locale?:string,timeZone?:stri
  if(at<now&&now-at<6*24*60*60*1000)return new Intl.DateTimeFormat(locale,{timeZone,weekday:'short'}).format(at);
  const sameYear=new Intl.DateTimeFormat('en',{timeZone,year:'numeric'}).format(at)===new Intl.DateTimeFormat('en',{timeZone,year:'numeric'}).format(now);
  return new Intl.DateTimeFormat(locale,sameYear?{timeZone,month:'short',day:'numeric'}:{timeZone,year:'numeric',month:'short',day:'numeric'}).format(at);
+}
+const CHECK_MARK=/^\[([ xX])\]\s/;
+/** A checklist as text: a checked item becomes an "[x] " line. An unchecked item whose text starts
+ * like a mark gets "[ ] ", so checklistItems reads every item back as it was. */
+export function checklistText(items:unknown):string{
+ return (Array.isArray(items)?items:[]).map(item=>{const it=item as {t?:unknown;done?:unknown}|null;const t=typeof it?.t==='string'?it.t:'';return it?.done?'[x] '+t:CHECK_MARK.test(t)?'[ ] '+t:t;}).join('\n');
+}
+/** Text as a checklist: one item per non-blank line; "[x] " marks it checked and "[ ] " unchecked. */
+export function checklistItems(body:unknown):{t:string;done:boolean}[]{
+ return String(body??'').split('\n').filter(line=>line.trim()).map(line=>{const text=line.trim(),mark=CHECK_MARK.exec(text);return mark?{t:text.slice(mark[0].length).trim(),done:mark[1]!==' '}:{t:text,done:false};});
 }

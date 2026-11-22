@@ -1,6 +1,6 @@
-import type {MobileProductRegistration} from '@elizaos/ui/mobile-shell/core';
+import type {MobileProductRegistration} from '../ui/mobile-shell/core.ts';
 
-// Alpha's registration for the shared mobile shell. The agent and build tools also read it.
+// Alpha's registration for its mobile shell (apps/app/src/ui/mobile-shell). The agent and build tools also read it.
 export const ALPHA_PRODUCT_REGISTRATION = {
   schema: "elizaos.mobile-product",
   schemaVersion: 1,
@@ -64,8 +64,9 @@ export const ALPHA_PRODUCT_REGISTRATION = {
       "--alpha-blue": "#0000FF",
       "--alpha-blue-deep": "#0000B8",
       "--alpha-blue-glow": "#3D47FF",
-      "--alpha-call-accent": "#8A93FF",
       "--alpha-call-green": "#1E9E4A",
+      // AC-28: call green behind white text (5.4:1); the lighter green is for icons and dots (3:1).
+      "--alpha-call-green-text": "#157A38",
       "--alpha-call-red": "#E5383B",
       "--alpha-desktop-backdrop": "#E9E9ED",
       "--alpha-gray-05": "#050505",

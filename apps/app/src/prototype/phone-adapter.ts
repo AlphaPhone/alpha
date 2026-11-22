@@ -1,3 +1,4 @@
+import {createElement} from 'react';
 import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createAospTelephony,normalizePhoneNumber,type AlphaTelephonyPlugin,type AospTelephony} from '../runtime/aosp-telephony';
@@ -6,7 +7,9 @@ import {audioReplied,audioRequested,callStarted,closed,closedVoicemail,deleteAsk
 import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {formatDateTime} from './locale-time';
-import {callRow,clockLength,displayNumber,initials,numberKey,shortWhen} from './telephony-presenters';
+import {callKind,callRow,callsBriefing,clockLength,displayNumber,initials,matchesCallQuery,numberKey,shortWhen} from './telephony-presenters';
+import {placeOwnerCall} from './place-owner-call';
+import {clearListFilter,setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 type Bag=Record<string,any>;
 type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
 const CALL_TYPE:Record<TelephonyCallLogEntry['type'],string>={incoming:'Incoming',outgoing:'Outgoing',missed:'Missed',voicemail:'Voicemail',rejected:'Declined',blocked:'Blocked',answered_externally:'Other device',unknown:'Call'};
@@ -38,6 +41,28 @@ const KEYS:[string,string][]=[['1',''],['2','ABC'],['3','DEF'],['4','GHI'],['5',
 const TAB_ICON={recents:'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 7v5l3 2',keypad:'M6 6h.01M12 6h.01M18 6h.01M6 12h.01M12 12h.01M18 12h.01M6 18h.01M12 18h.01M18 18h.01',
  voicemail:'M6.5 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM17.5 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM6.5 16h11',contacts:'M16 8a4 4 0 1 1-8 0a4 4 0 1 1 8 0zM4 21a8 8 0 0 1 16 0'};
 const ARROW={in:'M17 7L7 17M7 9v8h8',out:'M7 17L17 7M9 7h8v8',missed:'M17 7L7 17M7 9v8h8'};
+type PhoneTab = 'recents' | 'keypad' | 'voicemail';
+type PhoneTabKey = PhoneTab | 'contacts';
+const TAB_LABEL: Record<PhoneTabKey, string> = {
+  recents: 'Recents', keypad: 'Keypad', voicemail: 'Voicemail', contacts: 'Contacts',
+};
+function phoneTabs(selected: PhoneTabKey, showVoicemail: boolean, showContacts: boolean,
+  unreadVoicemail: boolean, select: (key: PhoneTabKey) => void) {
+  const keys: PhoneTabKey[] = ['recents', 'keypad'];
+  if (showVoicemail) keys.push('voicemail');
+  if (showContacts) keys.push('contacts');
+  return keys.map(key => ({key, label: TAB_LABEL[key], on: selected === key,
+    pick: () => select(key), dot: key === 'voicemail' && unreadVoicemail}));
+}
+function phoneTabSelector(tabs: ReturnType<typeof phoneTabs>) {
+  return createElement('div', {className: 'alpha-phone-tabs'},
+    createElement('div', {role: 'group', 'aria-label': 'Phone'}, tabs.map(tab =>
+      createElement('button', {key: tab.key, type: 'button', 'data-alpha-phone-tab': tab.key,
+        'aria-label': tab.label, 'aria-pressed': tab.on, onClick: tab.pick},
+      createElement('svg', {className: 'i', 'aria-hidden': true, viewBox: '0 0 24 24'},
+        createElement('path', {d: TAB_ICON[tab.key]})),
+      tab.dot ? createElement('span', {'aria-hidden': true}) : null))));
+}
 const bytesOf=(base64:string)=>Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
 const base64Of=(bytes:Uint8Array)=>{let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(binary);};
 /** Splits one mono 16 kHz PCM16 WAV into complete WAVs of at most fifty seconds each. */
@@ -51,6 +76,10 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
   chunk.set(wav.subarray(data+start,data+start+length),44);out.push(chunk);}
  return out;
 }
+let keypadOpener:((number?:string)=>(()=>void)|null)|null=null;
+/** The step that brings the Phone keypad in front, `number` filled in when given; null when Phone
+ * is not mounted or not admitted. It never dials: only the owner's Call tap there calls. */
+export const openKeypadStep=(number?:string)=>keypadOpener?.(number)??null;
 /**
  * Phone on the verified Alpha image only (P-36, AP-08), through the shared telephony profile.
  * Recents and voicemail are its bounded, unlocked, foreground-only reads, kept in memory for the
@@ -63,7 +92,9 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
 export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true):null){
  if(!client)return;
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
- let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:'recents'|'keypad'|'voicemail'='recents';
+ let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:PhoneTab='recents';
+ /* AC-22: the bar's query over Recents, held for the visit only; an Alpha filter also shows a chip. */
+ let filter:CommsListFilter|null=null;
  let voicemails:Voicemail[]=[],carrier:'ready'|'unconfigured'|'unsupported'|null=null,vm:OpenVoicemail=closedVoicemail();
  type Observation={session:number;stop:(()=>Promise<void>)|null;ready:Promise<void>};
  let observation:Observation|null=null,observationTail:Promise<void>=Promise.resolve();
@@ -71,6 +102,15 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  let pendingDelete:{current:()=>void;answer:(result:DeleteResult)=>void;detach:()=>void}|null=null,deleting=false;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
  const busy=()=>reading||dialing;
+ keypadOpener=keypadNumber=>{
+  const shell=owner;
+  if(!shell||!isMvpView('phone'))return null;
+  return ()=>{
+   if(owner!==shell||document.hidden)return;
+   const chat=shell.S().chat;
+   shell.openView('phone',{tab:'keypad',...(keypadNumber?{prefill:keypadNumber}:{})},chat==='sheet'||chat==='full'?chat:undefined);
+  };
+ };
  const changed=()=>owner?.setState({phoneNativeRevision:Date.now()});
  const available=()=>!!owner&&owner.S().view==='phone'&&!document.hidden;
  // The native observer is one switch. Its replacement waits until the prior lease retires.
@@ -93,7 +133,7 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  const releaseAudio=()=>{work?.abort();work=null;if(audio){audio.pause();audio.removeAttribute('src');audio=null;}if(audioUrl){URL.revokeObjectURL(audioUrl);audioUrl='';}wav?.fill(0);wav=null;position=0;};
  const cancelDelete=()=>{const pending=pendingDelete;pendingDelete=null;pending?.detach();pending?.answer('cancelled');vm=deleteCancelled(vm);};
  const closeVoicemail=()=>{cancelDelete();releaseAudio();vm=closed(vm);};
- const clear=()=>{epoch++;session++;calls=[];voicemails=[];carrier=null;number='';status='';notice='';reading=false;dialing=false;needsAccess=false;retryRecents=false;names.clear();people.length=0;closeVoicemail();retireObservation();changed();};
+ const clear=()=>{epoch++;session++;filter=null;calls=[];voicemails=[];carrier=null;number='';status='';notice='';reading=false;dialing=false;needsAccess=false;retryRecents=false;names.clear();people.length=0;closeVoicemail();retireObservation();changed();};
  const sync=()=>{const next=available();if(next===active)return;active=next;if(next)void refresh();else clear();};
  async function refresh(request=false){
   const token=++epoch;if(!available())return;reading=true;retryRecents=false;changed();
@@ -127,10 +167,12 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   if(busy()||!available())return;const target=normalizePhoneNumber(raw);
   if(!target){notice='Invalid number';changed();return;}
   const token=session;dialing=true;notice='';changed();
-  try{const result=await client!.placeCall(target);if(token!==session)return;if(result.status==='placed'){number='';inCall=true;vm=callStarted(vm);audio?.pause();}else notice=result.message;}
-  catch(error){if(token!==session)return;const code=(error as {code?:string})?.code;
-   if(code==='role-required'||code==='permission-required'){try{const handoff=await client!.dial(target);if(token===session)notice=handoff.message;}catch{if(token===session)notice='Couldn’t open';}}
-   else notice='Call unconfirmed';}
+  try{
+   const result=await placeOwnerCall(client!,target,()=>token===session&&available());
+   if(token!==session)return;
+   if(result.placed){number='';inCall=true;vm=callStarted(vm);audio?.pause();}
+   else notice=result.notice;
+  }
   finally{if(token===session){dialing=false;changed();}}
  }
  const ready=()=>active&&available();
@@ -198,27 +240,76 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  views.phone.reply=()=>null;
  views.phone.suggestions=()=>[];
  views.phone.status=()=>undefined;
+ /* AP-16 bar. Recents, Keypad and Voicemail only: on the image the system call screen owns calls and
+    ringing. The WebView learns only whether a call is live and whether it may be an emergency call
+    (runtime/call-state.ts, AlphaCallState), which holds AC-19 shell-wide; this bar draws no call. */
+ views.phone.bar=():CommsBarSpec=>{
+  const now=Date.now(),missed=calls.filter(entry=>entry.isNew&&callKind(entry.type)==='missed').map(entry=>({name:who(entry),date:entry.date}));
+  return {target:{kind:'recents',app:'Phone',name:null,first:null,initials:null},
+   closed:{kind:'filter',placeholder:'Call or ask',value:filter?.by==='owner'?filter.query:'',submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null,
+    onText:text=>{if(!text&&filter?.by==='alpha')return;filter=text?{query:text,label:'',by:'owner'}:null;changed();}},
+   left:null,
+   context:'Phone',contextKey:'phone:recents:',strip:{title:'Phone',subtitle:'',initials:null,live:false,actions:[]},
+   end:null,incoming:null,emergency:false,fit:null,
+   briefing:callsBriefing(missed,voicemails.filter(row=>row.isNew).map(row=>({name:who(row)})),now)};
+ };
+ function selectPhoneTab(next: PhoneTab) {
+   if (tab === next) return;
+   if (tab === 'voicemail') closeVoicemail();
+   tab = next;
+   notice = '';
+   changed();
+ }
+ function returnFromContacts(next: PhoneTab) {
+   const state = owner?.S();
+   if (state?.view !== 'contacts' || state.stack.at(-1) !== 'phone' || !isMvpView('phone')) return;
+   selectPhoneTab(next);
+   // Replace the Contacts tab with Phone, using the same history pop as the shell's Back.
+   owner.setState({stack: state.stack.slice(0, -1)});
+   owner.openView('phone', null, null, {restore: true, keepStack: true});
+ }
+ const renderContacts = views.contacts?.render;
+ if (renderContacts) views.contacts.render = function (state: Bag, viewApi: Bag) {
+   const model = renderContacts.call(this, state, viewApi);
+   if (state.fromPhoneTabs === true && viewApi.S?.stack?.at(-1) === 'phone' &&
+       !model.detail && !model.ed?.open) {
+     model.phoneTabSelector = phoneTabSelector(phoneTabs('contacts', state.phoneHasVoicemail === true,
+       true, false, key => { if (key !== 'contacts') returnFromContacts(key); }));
+   }
+   return model;
+ };
  views.phone.render=(st:Bag,viewApi:Bag)=>{
  api=viewApi;
- /* A number handed over from Contacts or Messages fills the keypad once; only the owner's Call tap calls. */
- if(typeof st?.prefill==='string'&&st.prefill){if(!busy()){number=st.prefill.slice(0,40);notice='';tab='keypad';}queueMicrotask(()=>viewApi.set?.({prefill:null}));}
+ /* A number handed over from Contacts fills the keypad once; only the owner's Call tap calls.
+    While a read or a dial handoff is busy the request stays pending and lands when it clears.
+    Leaving Voicemail closes the open one, as the owner's own tab tap does: its audio and an
+    armed delete confirmation never carry on behind the keypad. */
+ if(typeof st?.prefill==='string'&&st.prefill&&!busy()){number=st.prefill.slice(0,40);notice='';if(tab==='voicemail')closeVoicemail();tab='keypad';queueMicrotask(()=>viewApi.set?.({prefill:null}));}
+ /* The agent's phone_keypad opens the keypad, with or without a number (prefill above); it never calls. */
+ if(st?.tab==='keypad'&&!busy()){if(tab==='voicemail')closeVoicemail();tab='keypad';queueMicrotask(()=>viewApi.set?.({tab:null}));}
  /* Home's Phone card names the tab it leads to. */
  if(st?.tab==='recents'||st?.tab==='voicemail'){if(st.tab==='recents'||carrier==='ready')tab=st.tab;if(carrier!==null||st.tab==='recents')queueMicrotask(()=>viewApi.set?.({tab:null}));}
  const now=Date.now(),hasVoicemail=carrier==='ready',digits=number.replace(/\D/g,'');
- const pick=(next:typeof tab)=>()=>{if(tab===next)return;if(tab==='voicemail')closeVoicemail();tab=next;notice='';changed();};
- const tabs=[{key:'recents',label:'Recents',on:tab==='recents',pick:pick('recents'),dot:false},{key:'keypad',label:'Keypad',on:tab==='keypad',pick:pick('keypad'),dot:false},
-  ...(hasVoicemail?[{key:'voicemail',label:'Voicemail',on:tab==='voicemail',pick:pick('voicemail'),dot:voicemails.some(row=>row.isNew)}]:[]),
-  ...(isMvpView('contacts')?[{key:'contacts',label:'Contacts',on:false,pick:()=>viewApi.open?.('contacts'),dot:false}]:[])]
-  .map(item=>({...item,d:TAB_ICON[item.key as keyof typeof TAB_ICON],bg:item.on?'var(--fg)':'transparent',fg:item.on?'var(--bg)':'var(--fg)'}));
+ const showContacts = isMvpView('contacts');
+ const openContacts = () => showContacts
+   ? viewApi.open?.('contacts', {fromPhoneTabs: true, phoneHasVoicemail: hasVoicemail})
+   : viewApi.toast?.('Unavailable');
+ const tabs = phoneTabs(tab, hasVoicemail, showContacts, voicemails.some(row => row.isNew),
+   key => key === 'contacts' ? openContacts() : selectPhoneTab(key));
+ setListFilterHandler('phone',{current:()=>filter,clear:()=>{filter=null;changed();},
+  apply:next=>{filter=next;if(next.by==='alpha'&&tab!=='recents'){if(tab==='voicemail')closeVoicemail();tab='recents';}changed();return true;}});
+ const rows=calls.map(entry=>({entry,row:callRow(entry,names,now)})).filter(({row})=>matchesCallQuery(row,filter?.query??''));
+ const chip=filter?.by==='alpha'?filter.label||filter.query:'';
  const match=digits.length>=3?people.find(person=>person.number.replace(/\D/g,'').includes(digits)):undefined;
  const openRow=voicemails.find(row=>row.id===vm.id),length=openRow?openRow.durationSeconds:0;
  return {nativeManaged:true,nativePrototype:false,nativeStatus:status,nativeStatusDot:!status?'':status==='Couldn’t load'?'err':needsAccess?'warn':'',nativeBusy:busy(),nativeAccess:needsAccess,nativeNumber:number,nativeNotice:notice,hasNotice:!!notice,
   nativeRows:phoneRows(calls,value=>void call(value)),
   nativeOnNumber:(event:Event)=>{if(busy())return;number=(event.target as HTMLInputElement).value;notice='';changed();},
   nativeDial:()=>void call(number),nativeRefresh:()=>void refresh(),nativeRequest:()=>void refresh(true),
-  nativeContacts:()=>isMvpView('contacts')?viewApi.open?.('contacts'):viewApi.toast?.('Unavailable'),
-  tabs,isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
-  recents:calls.map(entry=>{const row=callRow(entry,names,now);return {...row,color:row.missed?'var(--alpha-call-red)':'var(--fg)',d:ARROW[row.kind],noCall:!row.canCall||busy(),call:()=>{if(entry.number)void call(entry.number);}};}),
+  nativeContacts:openContacts, tabs, phoneTabSelector:phoneTabSelector(tabs),
+  isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
+  filterChip:chip?{label:chip,clearLabel:`Clear filter ${chip}`}:null,clearFilter:()=>clearListFilter('phone'),
+  recents:rows.map(({entry,row},index)=>{return {...row,last:index===0||undefined,color:row.missed?'var(--alpha-call-red)':'var(--fg)',d:ARROW[row.kind],noCall:!row.canCall||busy(),call:()=>{if(entry.number)void call(entry.number);}};}),
   showRecentStatus:!!status&&!busy()&&!calls.length,retryRecents,
   shown:displayNumber(number),hasNumber:!!number,cannotCall:busy()||!number,
   keys:KEYS.map(([key,letters])=>({key,letters,press:()=>{if(busy()||number.length>=40)return;number+=key;notice='';changed();},plus:key==='0'?()=>{if(busy()||number)return;number='+';changed();}:undefined})),

@@ -28,6 +28,7 @@ import path from 'node:path';
  *        in licenses/font-licenses.json is recorded distributable:false and the check is a
  *        named release blocker in every gate. A font recorded on the owner's statement
  *        (resolved-by-owner-statement) is reported, not blocked, under either setting.
+ * Under either setting a font check that could not run (no result) blocks distribution.
  * Change it only on the owner's word.
  */
 export const UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION = false;

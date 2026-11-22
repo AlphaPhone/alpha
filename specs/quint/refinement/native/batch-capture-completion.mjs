@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {transformSync} from 'esbuild';
 import {captureInputs,checkTraces,qmap} from '../check-traces.mjs';
+import {VOICE_CALL_ENDED} from '../../../../apps/app/src/runtime/voice-call-pause.ts';
 
 const model='BatchCaptureCompletion';
 const modelPath='specs/quint/native/BatchCaptureCompletion.qnt';
@@ -51,7 +52,7 @@ function extractImplementation(){
         cancelling, published:clip, mediaUnconfirmed});
  `);
  const code=transformSync(text.slice(header,headerEnd)+observed,{loader:'ts',target:'es2022'}).code;
- return new Function('fixture',`
+ return new Function('fixture','VOICE_CALL_ENDED',`
   let stopping=Promise.resolve(),mediaUnconfirmed,startingCapture,recordingId,started,conversationLevels,clip;
   const {setTimeout,clearTimeout,batchRecordingEnded,refresh}=fixture;
   ${code}
@@ -84,7 +85,7 @@ async function fixture(make){
    return {peak:.5};
   }
  };
- const acquiring=make(hooks)(port,()=>{},{
+ const acquiring=make(hooks,VOICE_CALL_ENDED)(port,()=>{},{
   signal:owner.signal,onActivity(){},onEnd(failure){endSignals.push(kind(failure));}
  }).then(value=>{capture=value;acquisition='acquired';},failure=>{acquisition=kind(failure);});
  const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
@@ -147,7 +148,7 @@ async function generate(make,name){
  return {name,init:{name:'init'},expect,steps};
 }
 export async function checkBatchCaptureCompletion(extraSources=[]){
- const sources=[modelPath,source,'apps/app/src/runtime/cloud-voice.ts','bun.lock',fileURLToPath(import.meta.url),...extraSources];
+ const sources=[modelPath,source,'apps/app/src/runtime/cloud-voice.ts','apps/app/src/runtime/voice-call-pause.ts','bun.lock',fileURLToPath(import.meta.url),...extraSources];
  const driverHashes=captureInputs(sources);
  const make=extractImplementation(),traces=[];
  for(const name of batchCaptureScenarios)traces.push(await generate(make,name));

@@ -14,8 +14,11 @@ import {
 	type CalendarSyncSettingsStore,
 	type CalendarSyncTarget,
 	calendarSyncSettingsSlot,
-	createCalendarSyncHost,
 } from "../../../../.eliza/client-features/plugins/plugin-calendar/src/linked-sync/sync-host.ts";
+import {
+	CalendarSyncNotice,
+	createCalendarSyncHost,
+} from "../ui/calendar/sync-host.ts";
 import { calendarLinkStorage } from "./calendar-linked-storage";
 import {
 	ALPHA_CALENDAR_SYNC_NAMESPACE,
@@ -61,11 +64,11 @@ function owner() {
 		cloud = connectionController.getCloudClient(),
 		account = state.cloudAccount;
 	if (!cloud || !account?.organizationId || !state.session)
-		throw Error(
+		throw new CalendarSyncNotice(
 			"Connect your Cloud account and agent before enabling Calendar sync.",
 		);
 	if (native() && account.environment !== "production")
-		throw Error(
+		throw new CalendarSyncNotice(
 			"Device Calendar sync requires the production Cloud account; no other environment was used.",
 		);
 	const selection = readGoogleCalendarSelection({
@@ -73,7 +76,7 @@ function owner() {
 		userId: account.userId,
 		organizationId: account.organizationId,
 	});
-	if (!selection) throw Error("Choose a Google calendar for sync first.");
+	if (!selection) throw new CalendarSyncNotice("Choose a Google calendar for sync first.");
 	return {
 		account,
 		cloud,
@@ -127,7 +130,7 @@ export async function googleCalendarSyncDestinations(
 ): Promise<GoogleCalendarSelection[]> {
 	const cloud = connectionController.getCloudClient();
 	if (!cloud)
-		throw Error("Connect your Cloud account before choosing a Google calendar.");
+		throw new CalendarSyncNotice("Connect your Cloud account before choosing a Google calendar.");
 	const accounts = (
 		await createGoogleAccounts(cloud, () =>
 			connectionController.getCloudClient(),
@@ -165,8 +168,9 @@ const nativeSelection = (value: CalendarSyncTarget) => ({
 	calendarId: value.calendarId,
 });
 
-/** Explicit local-first Google Calendar sync (@elizaos/plugin-calendar/linked-sync) on Alpha's
- * installed settings, checkpoints and device Calendar bridge. */
+/** Explicit local-first Google Calendar sync on Alpha's own foreground host (../ui/calendar/sync-host.ts)
+ * over @elizaos/plugin-calendar/linked-sync, with Alpha's installed settings, checkpoints and device
+ * Calendar bridge. */
 export const calendarSyncHost = createCalendarSyncHost({
 	async prepare(signal, { interactive }) {
 		const selected = owner(),
@@ -192,7 +196,7 @@ export const calendarSyncHost = createCalendarSyncHost({
 				binding.connectionId !== selected.selection.connectionId ||
 				binding.calendarId !== selected.selection.providerCalendarId
 			)
-				throw Error(
+				throw new CalendarSyncNotice(
 					"Device and Google Calendar account bindings differ. Nothing was enabled.",
 				);
 			const local = nativeCalendarSync.port(source, current, signal);
