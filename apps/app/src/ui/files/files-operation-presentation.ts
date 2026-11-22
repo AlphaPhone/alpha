@@ -42,6 +42,8 @@ export function describeFilesOperation(op: FilesAgentOperation): {
   title: string;
   description: string;
 } {
+  if (op.type !== "files_open" && "shown" in op)
+    return { title: "File names required", description: "Choose files by name for this request." };
   switch (op.type) {
     case "files_filter":
       return { title: "Show files", description: filesFilterLabel(op) };

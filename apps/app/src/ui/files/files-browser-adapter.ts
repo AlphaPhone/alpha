@@ -1277,6 +1277,8 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         status: "failed" as const,
         summary: "Nothing changed because these files changed after review.",
       };
+      if (op.type !== "files_open" && "shown" in op)
+        return { status: "failed", summary: "Choose files by name for this request." };
       if (
         (op.type === "files_move" || op.type === "files_trash") &&
         (!op.reviewed || !reviewingPrimary())
