@@ -8,7 +8,7 @@ import {loadBrowserModule} from './fixtures/browser-source.mjs';
 
 const [{NetworkLocationClient,NETWORK_FIX_REUSE_MS,NETWORK_FIX_UNCHANGED_MS,NETWORK_FIX_RETRY_MS},{PhoneLocationReader}]=await loadBrowserModule(['apps/app/src/runtime/network-location.ts','apps/app/src/runtime/phone-location.ts']);
 
-test('the query sends only allowed identifiers and never asks for an IP guess',()=>{
+test('the query sends only allowed identifiers, and unknown networks fall back to a city-level answer',()=>{
  assert.match(runJvm([nativeSource('NetworkLocationQuery.java'),fixture('NetworkLocationQueryTest.java')],'ai.alphacompute.alphaphone.NetworkLocationQueryTest'),/^PASS network location query/);
 });
 

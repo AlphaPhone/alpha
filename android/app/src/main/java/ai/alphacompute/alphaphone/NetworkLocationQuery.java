@@ -57,8 +57,12 @@ final class NetworkLocationQuery {
   for(Cell cell:cells)ids.add(cell.radio+cell.mcc+"-"+cell.mnc+"-"+cell.area+"-"+cell.cellId);
   java.util.Collections.sort(ids);return String.join(",",ids);
  }
+ /**
+  * When the service knows none of these networks it may fall back to a city-level estimate from
+  * the request's own address (about 25 km), which it receives with every request anyway.
+  */
  String json(){
-  StringBuilder out=new StringBuilder("{\"considerIp\":false,\"fallbacks\":{\"ipf\":false,\"lacf\":true}");
+  StringBuilder out=new StringBuilder("{\"considerIp\":true,\"fallbacks\":{\"ipf\":true,\"lacf\":true}");
   if(!wifi.isEmpty()){
    out.append(",\"wifiAccessPoints\":[");
    for(int i=0;i<wifi.size();i++){Wifi w=wifi.get(i);if(i>0)out.append(',');

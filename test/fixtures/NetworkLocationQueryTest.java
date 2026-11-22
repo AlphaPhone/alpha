@@ -20,7 +20,7 @@ public final class NetworkLocationQueryTest {
   check(!query.addCell("nr",310,260,1,1,-90),"5G cells are outside the service's radio types");
   check(!query.addCell("lte",310,260,0,5,-90),"an incomplete cell is dropped");
   String json=query.json();
-  check(json.startsWith("{\"considerIp\":false,\"fallbacks\":{\"ipf\":false,\"lacf\":true}"),"the request never asks for an IP-based guess: "+json);
+  check(json.startsWith("{\"considerIp\":true,\"fallbacks\":{\"ipf\":true,\"lacf\":true}"),"unknown networks may still give a city-level answer: "+json);
   check(json.contains("{\"macAddress\":\"a0:b1:c2:d3:e4:f5\",\"signalStrength\":-61,\"age\":1200}"),"access point record: "+json);
   check(json.contains("\"age\":0}"),"a negative age is clamped: "+json);
   check(json.contains("{\"radioType\":\"lte\",\"mobileCountryCode\":310,\"mobileNetworkCode\":260,\"locationAreaCode\":12345,\"cellId\":123456789,\"signalStrength\":-95}"),"cell record: "+json);
@@ -30,6 +30,8 @@ public final class NetworkLocationQueryTest {
   check(reordered.fingerprint().equals(query.fingerprint()),"the same visible set has the same fingerprint whatever the order or signal");
   double[] fix=NetworkLocationQuery.parse("{\"location\": {\"lat\": 37.7764, \"lng\": -122.4258}, \"accuracy\": 42.5}");
   check(fix!=null&&fix[0]==37.7764&&fix[1]==-122.4258&&fix[2]==42.5,"a success answer is parsed");
+  double[] city=NetworkLocationQuery.parse("{\"accuracy\":25000,\"fallback\":\"ipf\",\"license\":\"IP geolocation data sourced from IP to City Lite by DB-IP, licensed under CC BY 4.0.\",\"location\":{\"lat\":37.77,\"lng\":-122.42}}");
+  check(city!=null&&city[2]==25000,"a city-level fallback answer keeps its 25 km accuracy");
   check(NetworkLocationQuery.parse("{\"error\":{\"code\":404,\"message\":\"Not found\"}}")==null,"a not-found body is not a fix");
   check(NetworkLocationQuery.parse("{\"location\":{\"lat\":91,\"lng\":0},\"accuracy\":5}")==null,"an out-of-range answer is refused");
   check(NetworkLocationQuery.parse("{\"location\":{\"lat\":1,\"lng\":2},\"accuracy\":0}")==null,"a zero accuracy is refused");
