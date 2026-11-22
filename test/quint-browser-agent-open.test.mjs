@@ -8,7 +8,7 @@ import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 test('Browser agent opens and renderer commands match the real adapter and coordinator', {timeout:scaledTimeout(120000)}, async () => {
   const receipt = await checkBrowserAgentOpen([fileURLToPath(import.meta.url)]);
   assert.equal(receipt.traces, 12);
-  assert.equal(receipt.checkpoints, 56);
+  assert.equal(receipt.checkpoints, 57);
   assert.equal(receipt.passed && receipt.inputsUnchanged && receipt.driverInputsBound, true);
   assert.equal(verifyRefinementReceiptInputs(receipt), true);
   assert.equal(receipt.actions.presentSkipped, 1);
