@@ -64,6 +64,8 @@ export interface ResidentStubOptions {
   /** Conversations carry a room, so Stop reaches upstream's turn abort route; the agent answers
    * that no turn was running (`aborted: false`), so the reply may still finish. */
   abortRoute?: boolean;
+  /** Optional observation fields the agent's /api/status declares (absent: no status route). */
+  observationSupport?: string[];
 }
 
 export async function residentStub(page: Page, options: ResidentStubOptions = {}) {
@@ -118,6 +120,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     };
     const room = 'c0ffee00-1111-4222-8333-444455556666';
     const conversations = async (method: string, path: string, body: any): Promise<{ status: number; data: unknown } | null> => {
+      if (path === '/api/status' && method === 'GET' && options.observationSupport) return { status: 200, data: { serverInstanceId: '5a5e5a5e-0000-4000-8000-00000000a11a', clientTurnObservationSupport: { version: 1, optionalFields: options.observationSupport } } };
       if (path === '/api/conversations' && method === 'POST') { const row = { id: 'resident-chat-' + (agent.conversations.length + 1), title: String(body.title || 'Alpha Phone') }; agent.conversations.push(row); agent.history[row.id] = []; sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); return { status: 200, data: { conversation: row } }; }
       if (path === '/api/conversations') {
         s.lists++; if (s.holdReads) await new Promise<void>(resolve => { s.heldList = resolve; });
