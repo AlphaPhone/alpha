@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {loadBrowserModule} from './fixtures/browser-source.mjs';
 // The agent gets the phone's position through the launcher's own location permission:
 // read with checkPermissions, never requested, and sent only to a peer that declares the field.
-const [{PhoneLocationReader,PHONE_LOCATION_REUSE_MS,PHONE_LOCATION_STALE_MS,PHONE_LOCATION_WAIT_MS},{sanitizePhoneContext},{ClientObservationSupportCache,ClientObservationSupportSession,contextForObservationSupport}]=await loadBrowserModule(['phone-location','phone-context','client-observation-support'].map(name=>`apps/app/src/runtime/${name}.ts`));
+const [{PhoneLocationReader,PHONE_LOCATION_REUSE_MS,PHONE_LOCATION_RETRY_MS,PHONE_LOCATION_STALE_MS},{sanitizePhoneContext},{ClientObservationSupportCache,ClientObservationSupportSession,contextForObservationSupport}]=await loadBrowserModule(['phone-location','phone-context','client-observation-support'].map(name=>`apps/app/src/runtime/${name}.ts`));
 
 const fix={latitude:37.774929,longitude:-122.419416,accuracy:8.6,timestamp:1_795_000_000_000};
 function ports({granted=true,available=true,coords=fix,now=fix.timestamp+1000,hang=false}={}){
@@ -17,51 +17,55 @@ function ports({granted=true,available=true,coords=fix,now=fix.timestamp+1000,ha
 }
 const signal=()=>new AbortController().signal;
 
+const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
+
 test('a granted launcher reports a rounded, canonical last known position',async()=>{
  const {ports:p,calls}=ports(),reader=new PhoneLocationReader(p);
- assert.deepEqual(await reader.read(signal()),{latitude:37.77493,longitude:-122.41942,accuracyMeters:9,capturedAt:fix.timestamp});
+ assert.deepEqual(await reader.warm(signal()),{latitude:37.77493,longitude:-122.41942,accuracyMeters:9,capturedAt:fix.timestamp});
  assert.equal(calls.request,0);
  assert.equal(calls.options[0].maxAge>0,true,'the platform may answer from its cached fix');
  // A fresh fix is reused without another platform read.
- await reader.read(signal());assert.equal(calls.read,1);
+ assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);await settle();assert.equal(calls.read,1);
 });
 
-test('a native-cached fix does not start another location read on the next turn',async()=>{
- const {ports:p,calls,state}=ports({now:fix.timestamp+2*PHONE_LOCATION_REUSE_MS});
- const reader=new PhoneLocationReader(p);
- assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);
- assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);
- assert.equal(calls.read,1);
- state.now+=PHONE_LOCATION_REUSE_MS+1;
- await reader.read(signal());
- assert.equal(calls.read,2);
+test('a chat turn never waits for the platform: it sends the cache and refreshes behind it',async()=>{
+ const {ports:p,calls,state}=ports({hang:true}),reader=new PhoneLocationReader(p);
+ const started=Date.now();
+ assert.equal(await reader.read(signal()),undefined,'a cold reader has nothing yet');
+ assert.ok(Date.now()-started<100,'the turn did not wait on the hanging GPS read');
+ await reader.read(signal());await settle();
+ assert.equal(calls.read,1,'concurrent turns share one background read');
+ const cancelled=new AbortController();cancelled.abort();
+ await assert.rejects(reader.read(cancelled.signal),{name:'AbortError'});
+ state.hang=false;
+});
+
+test('a cached fix is reused for a while, and a failed read is not retried on every turn',async()=>{
+ const {ports:p,calls,state}=ports(),reader=new PhoneLocationReader(p);
+ await reader.warm(signal());
+ state.now+=PHONE_LOCATION_REUSE_MS-1;await reader.read(signal());await settle();assert.equal(calls.read,1);
+ state.now+=2;state.coords=undefined;await reader.read(signal());await settle();assert.equal(calls.read,2);
+ for(let turn=0;turn<5;turn++){await reader.read(signal());await settle();}
+ assert.equal(calls.read,2,'an empty GPS read (indoors) backs off instead of running every turn');
+ state.now+=PHONE_LOCATION_RETRY_MS+1;await reader.read(signal());await settle();assert.equal(calls.read,3);
+ assert.equal((await reader.read(signal())).capturedAt,fix.timestamp,'the earlier fix stands in while it is recent');
+ state.now=fix.timestamp+PHONE_LOCATION_STALE_MS+1;
+ assert.equal(await reader.read(signal()),undefined,'an old fix eventually stops being reported');
 });
 
 test('without the permission or the native plugin nothing is read or prompted',async()=>{
  for(const options of [{granted:false},{available:false}]){
-  const {ports:p,calls}=ports(options);
-  assert.equal(await new PhoneLocationReader(p).read(signal()),undefined);
+  const {ports:p,calls}=ports(options),reader=new PhoneLocationReader(p);
+  assert.equal(await reader.warm(signal()),undefined);
+  assert.equal(await reader.read(signal()),undefined);await settle();
   assert.equal(calls.read,0);assert.equal(calls.request,0);
  }
  // Revoking the permission forgets an earlier fix.
  const {ports:p,state}=ports(),reader=new PhoneLocationReader(p);
- assert.ok(await reader.read(signal()));
- state.granted=false;assert.equal(await reader.read(signal()),undefined);
- state.granted=true;state.coords=undefined;state.now+=PHONE_LOCATION_REUSE_MS+1;
+ assert.ok(await reader.warm(signal()));
+ state.granted=false;state.now+=PHONE_LOCATION_REUSE_MS+1;
+ await reader.warm(signal());
  assert.equal(await reader.read(signal()),undefined);
-});
-
-test('a slow fix never holds the turn, and an old fix eventually stops being reported',async()=>{
- const {ports:p,state}=ports(),reader=new PhoneLocationReader(p);
- assert.ok(await reader.read(signal()));
- state.hang=true;state.now+=PHONE_LOCATION_REUSE_MS+1;
- const started=Date.now(),earlier=await reader.read(signal());
- assert.ok(Date.now()-started<PHONE_LOCATION_WAIT_MS+1000);
- assert.equal(earlier.capturedAt,fix.timestamp,'the earlier fix stands in while it is recent');
- state.now=fix.timestamp+PHONE_LOCATION_STALE_MS+1;
- assert.equal(await reader.read(signal()),undefined);
- const cancelled=new AbortController();cancelled.abort();
- await assert.rejects(reader.read(cancelled.signal),{name:'AbortError'});
 });
 
 test('the sanitizer keeps only a valid position',()=>{
@@ -96,16 +100,15 @@ test('a cold fix that outlasts one turn is ready for the next',async()=>{
   checkPermissions:async()=>({location:'granted'}),
   getCurrentPosition:()=>{calls.read++;return new Promise(resolve=>{deliver=()=>resolve({coords:fix,cached:false});});},
  }});
- // The warm-up read at connection gives up after the turn budget; the platform request keeps going.
- assert.equal(await reader.read(signal()),undefined);
- deliver();await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(await reader.read(signal()),undefined,'the first turn goes out without waiting');
+ await settle();deliver();await settle();
  assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);
  assert.equal(calls.read,1);
 });
 
 test('turning off location forgets both a cached fix and one still pending',async()=>{
  const {ports:p,state,calls}=ports(),reader=new PhoneLocationReader(p);
- assert.ok(await reader.read(signal()));
+ assert.ok(await reader.warm(signal()));
  state.enabled=false;
  assert.equal(await reader.read(signal()),undefined);
  assert.equal(calls.read,1);
@@ -114,12 +117,12 @@ test('turning off location forgets both a cached fix and one still pending',asyn
 
  let deliver;
  p.bridge.getCurrentPosition=()=>new Promise(resolve=>{deliver=resolve;});
- const waiting=reader.read(signal());
- await Promise.resolve();
+ reader.clear();
+ const waiting=reader.warm(signal());
+ await settle();
  state.enabled=false;reader.clear();
  deliver({coords:fix});
  assert.equal(await waiting,undefined);
  state.enabled=true;
- p.bridge.getCurrentPosition=async()=>{throw Error('no fix');};
  assert.equal(await reader.read(signal()),undefined);
 });
