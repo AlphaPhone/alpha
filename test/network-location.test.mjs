@@ -50,7 +50,7 @@ test('the agent gets the network position when GPS has none, and only the warm-u
  const reader=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('no GPS fix');}}});
  const signal=new AbortController().signal;
  assert.equal(await reader.read(signal),undefined);assert.equal(looked,0,'a chat turn never looks up');
- assert.equal(await reader.warm(signal),undefined);await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(await reader.warm(signal),{latitude:37.7764,longitude:-122.4258,accuracyMeters:36,capturedAt:clock.now},'the warm-up, off the messaging path, waits for its lookup');
  assert.equal(looked,1,'the connection warm-up looks up once when GPS has nothing');
  assert.deepEqual(await reader.read(signal),{latitude:37.7764,longitude:-122.4258,accuracyMeters:36,capturedAt:clock.now});
  const off=new PhoneLocationReader({enabled:()=>false,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('x');}}});
@@ -58,8 +58,8 @@ test('the agent gets the network position when GPS has none, and only the warm-u
  assert.equal(await off.warm(signal),undefined);assert.equal(looked,1,'and nothing is looked up');
 
  const cancelled=new AbortController();
- const retired=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('no GPS fix');}}});
- retired.read=async()=>{cancelled.abort();return undefined;};
+ // The connection is retired while the warm-up's GPS read is still running.
+ const retired=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{cancelled.abort();throw Error('no GPS fix');}}});
  await assert.rejects(retired.warm(cancelled.signal),{name:'AbortError'});
  assert.equal(looked,1,'a retired connection cannot start a network lookup');
 });
@@ -98,4 +98,15 @@ test('Maps uses a network position as approximate only when GPS gives nothing',a
  await leaving.start(false,()=>assert.fail('no fix after stop'),()=>{});
  await leaving.stop();await wait(60);
  assert.equal(lookups,0,'leaving Maps before the grace period cancels the lookup');
+});
+
+test('a cached network answer is shown at once, with no lookup and no grace wait',async()=>{
+ let lookups=0;const known={latitude:37.7764,longitude:-122.4258,accuracyMeters:40,timestamp:Date.now()};
+ const network={cached:()=>known,locate:async()=>{lookups++;return known;}};
+ const bridge=gpsBridge(),fixes=[];
+ const maps=new NativeMapsLocation(network,10_000,bridge,platform);
+ await maps.start(true,position=>fixes.push(position),()=>{});
+ assert.deepEqual(fixes.map(fix=>fix.precision),['approximate']);
+ await wait(20);
+ assert.equal(lookups,0);assert.equal(bridge.cleared,1,'the one-shot request finished at once');
 });

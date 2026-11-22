@@ -8,11 +8,12 @@ export type { Position } from '../../../../.eliza/client-features/plugins/plugin
 const location = registerPlugin<LocationBridge>('ElizaLocation');
 /** How long Maps waits for GPS before asking for a Wi-Fi/cell position. */
 export const GPS_GRACE_MS = 4000;
-type NetworkSource = { locate(): Promise<NetworkFix | undefined> };
+type NetworkSource = { locate(): Promise<NetworkFix | undefined>; cached?(): NetworkFix | undefined };
 /**
- * GPS first. When it gives no fix within GPS_GRACE_MS (indoors, or an image without a network
- * location provider), one network lookup stands in as an approximate position until GPS answers.
- * A one-shot request (a locate card, "near me") then finishes with it.
+ * GPS first. A recent network answer already in the cache is shown at once as an approximate
+ * position; otherwise, when GPS gives no fix within GPS_GRACE_MS (indoors, or an image without a
+ * network location provider), one network lookup stands in until GPS answers. A one-shot request
+ * (a locate card, "near me") finishes with the approximate position.
  */
 export class NativeMapsLocation extends SharedLocation {
  private attempt = 0;
@@ -28,12 +29,17 @@ export class NativeMapsLocation extends SharedLocation {
   // The shared start() stops any earlier session first; read the attempt once the watch is set up.
   const mine = this.attempt;
   if (failed || gps || this.awaitingPermission()) return;
+  const approximate = (network: NetworkFix) => {
+   onFix({ coordinate: { latitude: network.latitude, longitude: network.longitude }, accuracyMeters: network.accuracyMeters, timestamp: network.timestamp, precision: 'approximate' });
+   if (oneShot) void this.stop().catch(onError);
+  };
+  const known = this.network.cached?.();
+  if (known) { approximate(known); if (oneShot) return; }
   setTimeout(() => {
    if (mine !== this.attempt || gps || failed) return;
    void this.network.locate().then(network => {
-    if (!network || mine !== this.attempt || gps || failed) return;
-    onFix({ coordinate: { latitude: network.latitude, longitude: network.longitude }, accuracyMeters: network.accuracyMeters, timestamp: network.timestamp, precision: 'approximate' });
-    if (oneShot) void this.stop().catch(onError);
+    if (!network || network === known || mine !== this.attempt || gps || failed) return;
+    approximate(network);
    }, () => {});
   }, this.graceMs);
  }

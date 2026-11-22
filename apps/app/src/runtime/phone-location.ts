@@ -17,12 +17,12 @@ export interface PhoneLocationPorts {
  /** Wi-Fi/cell position for when GPS has none; read from its cache except at warm-up. */
  network?:{cached(now:number):NetworkFix|undefined;locate():Promise<NetworkFix|undefined>};
 }
-/** Reuse a successful native read for this long, even when it returned a cached fix. */
-export const PHONE_LOCATION_REUSE_MS=60_000;
+/** Reuse a successful native read for this long; rough location is enough for the agent and Maps. */
+export const PHONE_LOCATION_REUSE_MS=5*60_000;
+/** After a failed or empty GPS read (indoors, no network provider), wait this long before another. */
+export const PHONE_LOCATION_RETRY_MS=2*60_000;
 /** The platform may answer from a fix this old, which is immediate. */
 export const PHONE_LOCATION_PLATFORM_MAX_AGE_MS=5*60_000;
-/** A chat turn waits at most this long for a fresh fix. */
-export const PHONE_LOCATION_WAIT_MS=1_500;
 /** Without a fresh fix, an earlier one is still reported up to this age. */
 export const PHONE_LOCATION_STALE_MS=30*60_000;
 
@@ -36,8 +36,11 @@ function observation(coords:{latitude:number;longitude:number;accuracy?:number;t
 }
 
 /**
- * Cache the last fix for the resident agent while Alpha's setting and Android's
- * permission allow it. Concurrent turns and warm-up share the location request.
+ * The phone's position for the resident agent while Alpha's setting and Android's permission
+ * allow it. A chat turn never waits for it: it sends the last fix (GPS, or else the last network
+ * answer) and at most starts one shared background refresh. Rough location is enough, so a GPS
+ * read happens at most every PHONE_LOCATION_REUSE_MS, and a failed one waits
+ * PHONE_LOCATION_RETRY_MS before the next try.
  */
 export class PhoneLocationReader {
  private generation=0;
@@ -45,19 +48,27 @@ export class PhoneLocationReader {
  private last:ClientLocationObservation|undefined;
  private pending:Promise<ClientLocationObservation|undefined>|undefined;
  constructor(private readonly ports:PhoneLocationPorts){}
+ /** For a chat turn: the cached position at once, never a wait on the platform. */
  async read(signal:AbortSignal):Promise<ClientLocationObservation|undefined>{
   signal.throwIfAborted();
   if(!this.ports.enabled()){this.clear();return undefined;}
-  const generation=this.generation;
-  let granted=false;
-  try{granted=(await this.ports.bridge.checkPermissions()).location==='granted';}catch{granted=false;}
-  signal.throwIfAborted();
-  if(generation!==this.generation)return undefined;
-  if(!granted||!this.ports.enabled()){this.clear();return undefined;}
+  void this.refresh();
+  return this.cachedFix(this.ports.now());
+ }
+ /** One shared permission check and GPS read, when the last one is due. */
+ private refresh():Promise<ClientLocationObservation|undefined>{
+  if(this.pending)return this.pending;
   const now=this.ports.now();
-  if(now<this.refreshAfter)return this.cachedFix(now);
-  const pending=this.pending??=this.ports.bridge.getCurrentPosition({accuracy:'high',maxAge:PHONE_LOCATION_PLATFORM_MAX_AGE_MS,timeout:10_000})
-   .then(result=>{
+  if(now<this.refreshAfter)return Promise.resolve(this.cachedFix(now));
+  const generation=this.generation;
+  this.refreshAfter=now+PHONE_LOCATION_RETRY_MS;
+  const pending=this.pending=(async()=>{
+   let granted=false;
+   try{granted=(await this.ports.bridge.checkPermissions()).location==='granted';}catch{granted=false;}
+   if(generation!==this.generation)return undefined;
+   if(!granted||!this.ports.enabled()){this.clear();return undefined;}
+   try{
+    const result=await this.ports.bridge.getCurrentPosition({accuracy:'high',maxAge:PHONE_LOCATION_PLATFORM_MAX_AGE_MS,timeout:10_000});
     if(generation!==this.generation||!this.ports.enabled())return undefined;
     const fix=observation(result.coords);
     if(fix){
@@ -65,15 +76,9 @@ export class PhoneLocationReader {
      this.refreshAfter=this.ports.now()+PHONE_LOCATION_REUSE_MS;
     }
     return fix;
-   },()=>undefined)
-   .finally(()=>{if(this.pending===pending)this.pending=undefined;});
-  let timer:ReturnType<typeof setTimeout>|undefined,abort:(()=>void)|undefined;
-  try{
-   await Promise.race([pending,new Promise<void>(resolve=>{timer=setTimeout(resolve,PHONE_LOCATION_WAIT_MS);abort=()=>resolve();signal.addEventListener('abort',abort,{once:true});})]);
-  }finally{if(timer!==undefined)clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
-  signal.throwIfAborted();
-  if(generation!==this.generation||!this.ports.enabled())return undefined;
-  return this.cachedFix(this.ports.now());
+   }catch{return undefined;}
+  })().finally(()=>{if(this.pending===pending)this.pending=undefined;});
+  return pending;
  }
  private cachedFix(now:number){
   const fix=this.last;
@@ -83,16 +88,19 @@ export class PhoneLocationReader {
   return network?observation({latitude:network.latitude,longitude:network.longitude,accuracy:network.accuracyMeters,timestamp:network.timestamp}):undefined;
  }
  /**
-  * The connection warm-up: a GPS read, and only when that has nothing, one network lookup in the
-  * background so the next turn carries a position. Chat turns themselves never look up.
+  * The connection warm-up, off the messaging path: it waits for the GPS read, and only when that
+  * has nothing makes one network lookup, so the next turn carries a position.
   */
  async warm(signal:AbortSignal):Promise<ClientLocationObservation|undefined>{
-  const generation=this.generation;
-  const fix=await this.read(signal);
   signal.throwIfAborted();
-  if(fix||generation!==this.generation||!this.ports.network||!this.ports.enabled())return fix;
-  void this.ports.network.locate().catch(()=>undefined);
-  return undefined;
+  if(!this.ports.enabled()){this.clear();return undefined;}
+  const generation=this.generation;
+  await this.refresh();
+  signal.throwIfAborted();
+  const fix=this.cachedFix(this.ports.now());
+  if(fix||!this.ports.network||!this.ports.enabled()||generation!==this.generation)return fix;
+  await this.ports.network.locate().catch(()=>undefined);
+  return generation===this.generation&&this.ports.enabled()?this.cachedFix(this.ports.now()):undefined;
  }
  clear(){this.generation++;this.refreshAfter=Number.NEGATIVE_INFINITY;this.last=undefined;this.pending=undefined;}
 }
