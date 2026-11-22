@@ -49,6 +49,10 @@ export const BROWSER_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["This Android WebView cannot clear site data.", "This phone’s WebView can’t clear a site’s data."],
   ["Site data could not be cleared.", "This site’s data couldn’t be cleared."],
   ["Load a visible HTTPS page before reading", "Load an HTTPS page before reading."],
+  // Browser page for Alpha: a turn without the page goes on; these explain why if they surface.
+  ["Browser page changed", "The page changed. Alpha didn’t get it with this message."],
+  ["Private tabs are never shared", "Private tabs aren’t shared with Alpha."],
+  ["Only public HTTPS pages are shared", "Only public HTTPS pages are shared with Alpha."],
   ["The visible HTTPS page changed. Review it again before leaving Alpha.", "The page changed. Review it again before leaving Alpha."],
   [
     "No other installed browser can open this page. Use a password or another sign-in method.",
