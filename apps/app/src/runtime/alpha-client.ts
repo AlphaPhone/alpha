@@ -238,9 +238,11 @@ export class AlphaClient {
    * A request that started meanwhile is waited for too, so the step never cancels it.
    */
   afterRequestSettles(show: () => void): void {
-    if (!this.active) { show(); return; }
+    // A background workflow generation is never cancelled by a view change (setViewContext), so it
+    // does not hold the step; only a chat request the change would abort does.
+    if (!this.active || this.activeWorkflow) { show(); return; }
     const stop = this.subscribe(() => {
-      if (this.active) return;
+      if (this.active && !this.activeWorkflow) return;
       stop();
       setTimeout(() => { try { this.afterRequestSettles(show); } catch { /* A retired view keeps its journaled receipt. */ } }, 0);
     });

@@ -84,3 +84,13 @@ test('a request that starts before the step runs is waited for too, and is never
  await tick();
  assert.deepEqual(shown,['phone']);
 });
+
+test('an automatic workflow generation does not hold the step, and the view change leaves it running',async()=>{
+ const client=new AlphaClient(),agent=held();client.attachVerifiedTransport(agent.value);client.setViewContext(view('workflows'));
+ const started=agent.started(),generation=client.generateWorkflowText('Summarise','input text',new AbortController().signal,true);await started;
+ const shown=[];
+ client.afterRequestSettles(showPhone(client,shown));
+ assert.deepEqual(shown,['phone']);
+ agent.finish('A summary.');
+ assert.equal(await generation,'A summary.');
+});
