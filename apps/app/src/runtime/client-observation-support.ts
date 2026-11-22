@@ -1,4 +1,4 @@
-import {readClientTurnObservationPeerSupport,type ClientTurnObservationOptionalField,type ClientTurnObservationSupport} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
+import {readClientTurnObservationPeerSupport,type ClientBrowserPageObservation,type ClientTurnObservationOptionalField,type ClientTurnObservationSupport} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {normalizeRemoteAgentPairingInstanceId} from '../../../../.eliza/client-features/packages/contracts/src/contracts/remote-agent-pairing.ts';
 import type {VerifiedSession,ContextEnvelope} from './alpha-client';
 
@@ -79,9 +79,12 @@ export class ClientObservationSupportSession {
   }catch{this.known=undefined;this.cache.clear();this.check(signal);}
  }
  /** An old/unreadable peer omits only the optional fields; ordinary context remains intact. */
- async context(context:ContextEnvelope,signal:AbortSignal):Promise<ContextEnvelope>{
-  const ordinary=contextForObservationSupport(context,this.cache,undefined);
-  const wanted=OPTIONAL_FIELDS.filter(field=>context[field]!==undefined);
+ async context(context:ContextEnvelope,signal:AbortSignal):Promise<ContextEnvelope>{return (await this.turn(context,undefined,signal)).context;}
+ /** The observation and the open Browser page (sent beside it), each optional field only to a
+  * peer whose fresh status still declares it. */
+ async turn(context:ContextEnvelope,browserPage:ClientBrowserPageObservation|undefined,signal:AbortSignal):Promise<{context:ContextEnvelope;browserPage?:ClientBrowserPageObservation}>{
+  const ordinary={context:contextForObservationSupport(context,this.cache,undefined)};
+  const wanted:ClientTurnObservationOptionalField[]=[...OPTIONAL_FIELDS.filter(field=>context[field]!==undefined),...(browserPage?['browserPage' as const]:[])];
   this.check(signal);if(!wanted.length)return ordinary;
   await this.joined(signal);this.check(signal);
   const binding=this.known;
@@ -89,7 +92,7 @@ export class ClientObservationSupportSession {
   try{
    const status=await this.status(signal);this.check(signal);
    if(!this.cache.admit(status,binding)){this.known=undefined;return ordinary;}
-   return contextForObservationSupport(context,this.cache,binding);
+   return {context:contextForObservationSupport(context,this.cache,binding),...(browserPage&&this.cache.supports(binding,'browserPage')?{browserPage}:{})};
   }catch{this.known=undefined;this.cache.clear();this.check(signal);return ordinary;}
  }
 }

@@ -39,6 +39,8 @@ import { chatNotesFolders } from './notes-folders';
 import { registerWorkflowDevice, workflowDeviceProtocol, type WorkflowDeviceProtocol } from './workflow-presentation';
 import {ClientObservationSupportSession} from './client-observation-support';
 import {clearPhoneLocation,phoneLocationEnabled,phoneLocationReader} from './phone-location';
+import {browserPageEnabled,browserPageForTurn,observedBrowserTab} from './browser-page-context';
+import type {ClientBrowserPageObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {developmentIdentity,readDevelopmentIdentity,verifyDevelopmentIdentity,developmentOwnerRecovery,assertDevelopmentIdentity,developmentProfiles,type DevelopmentProfile} from '../browser/development-identity';
 import {developmentCloudKey} from '../browser/development-cloud';
 import {DevelopmentCloudSetup} from '../browser/development-cloud-ui';
@@ -3542,12 +3544,14 @@ export const connectionController = {
       }
       const observationSession=clientObservationSession;
       // Legacy text/alphaPhone projections remain day- and position-free; plain-v1 alone never admits a field.
+      // The open Browser page rides beside the observation, bound to its tab and revision.
+      let browserPage:ClientBrowserPageObservation|undefined;
       if(selected.userTextFormatVersion===1&&observationSession){
-        const location=isAndroid&&!context.sensitive?await phoneLocationReader().read(requestSignal):undefined;assertCurrent();
+        const [location,page]=await Promise.all([isAndroid&&!context.sensitive?phoneLocationReader().read(requestSignal):undefined,browserPageForTurn(context,requestSignal)]);assertCurrent();
         const observed={...context,location};
-        if(observed.calendarDay||observed.location){
-          const admitted=await observationSession.context(observed,requestSignal);assertCurrent();
-          message=turnMessage(admitted);
+        if(observed.calendarDay||observed.location||page){
+          const admitted=await observationSession.turn(observed,page,requestSignal);assertCurrent();
+          message=turnMessage(admitted.context);browserPage=admitted.browserPage;
         }
       }
       const id=await ensureSelectedConversation(selected,session,requestSignal,assertCurrent);
@@ -3570,7 +3574,8 @@ export const connectionController = {
       const notesFolders=this.getAppRecordClient()?await chatNotesFolders():{};
       requestSignal.throwIfAborted();assertCurrent();
       if(message.context.location&&!phoneLocationEnabled())message=turnMessage({...message.context,location:undefined});
-      const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
+      if(browserPage&&(!browserPageEnabled()||observedBrowserTab(message.context)?.id!==browserPage.tabId||observedBrowserTab(message.context)?.revision!==browserPage.revision))browserPage=undefined;
+      const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(browserPage?{browserPage}:{}),...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
       const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');onText?.(value,frame);};
       const replyReady=(results:readonly unknown[]|undefined)=>{assertCurrent();onReplyReady?.(results);};
