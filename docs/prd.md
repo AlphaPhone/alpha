@@ -55,7 +55,7 @@ Clef end-of-turn runs in Eliza Cloud (P-60). Production Maps uses Google Maps Pl
 Local speech does not imply an offline language model. Hosted inference receives disclosed selected context.
 Location for Alpha is on by default. When Android allows access, ordinary chats
 include the phone's last known location. Hosted inference can receive this
-location. The owner can turn off Location for Alpha in Settings.
+location. The owner can turn off Location for Alpha under Settings → Privacy.
 Full photo access is local permission scope, not bulk Cloud upload authorization.
 
 Passkeys, Telegram, Discord and Wallet are outside MVP. The Alpha Compute
