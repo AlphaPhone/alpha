@@ -13,4 +13,6 @@ export const CALENDAR_API_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Calendar event deletion requires expectedProviderVersion.", "Refresh this event before deleting it. Nothing was deleted."],
   ["Calendar event deletion requires a stable idempotencyKey.", "This deletion couldn’t be sent safely. Nothing was deleted; try again."],
   ["Calendar event deletion requires an explicit cancellationMode.", "Choose how to cancel this event before deleting it. Nothing was deleted."],
+  ["Calendar invitation response requires expectedProviderVersion.", "Refresh this invitation before replying. No response was sent."],
+  ["Calendar invitation response requires a stable idempotencyKey.", "Your response couldn’t be sent safely. Try again."],
 ]);
