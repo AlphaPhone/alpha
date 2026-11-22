@@ -1,10 +1,10 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Alpha's functional feature manifest, emitted by the mobile-shell emitter
 // (apps/app/src/ui/mobile-shell/feature-manifest.ts) from apps/app/src/product/alpha-product-registration.ts,
 // and the exact inventory of Alpha's behavioural source modules (test/support/module-inventory.mjs).
 //
-//   bun scripts/feature-manifest.ts            print Alpha's manifest
-//   bun scripts/feature-manifest.ts --modules  print the behavioural modules as they are now
+//   node scripts/feature-manifest.ts            print Alpha's manifest
+//   node scripts/feature-manifest.ts --modules  print the behavioural modules as they are now
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';

@@ -29,15 +29,15 @@ export function projectAndroidPackage(source: string, from: string, to: string):
  return source.replace(new RegExp(`(?<![A-Za-z0-9_$])${token}(?![A-Za-z0-9_$])`, 'g'), () => to);
 }
 
-/** The existing host descriptor with its installed socket identities selected together. */
+/** The host descriptor (schema 2) with its installed resident socket identities projected together. */
 export function readHostDescriptor(root = ROOT): HostDescriptor {
  const descriptor: HostDescriptor = JSON.parse(fs.readFileSync(path.join(root, HOST_DESCRIPTOR), 'utf8'));
- if (descriptor?.schema !== 1 || descriptor.profile?.schema !== 1 || !descriptor.residentHost)
+ if (descriptor?.schema !== 2 || descriptor.profile?.schema !== 2 || !descriptor.residentSockets)
   throw new Error(`${HOST_DESCRIPTOR}: unsupported host descriptor`);
  const source: AppConfig = JSON.parse(fs.readFileSync(path.join(root, 'app.config.json'), 'utf8'));
  const identity = androidIdentity(root);
  for (const key of ['agent', 'inference', 'secureStore'] as const)
-  descriptor.residentHost.sockets[key] = projectAndroidPackage(descriptor.residentHost.sockets[key], source.appId, identity.appId);
+  descriptor.residentSockets[key] = projectAndroidPackage(descriptor.residentSockets[key], source.appId, identity.appId);
  return descriptor;
 }
 
@@ -97,7 +97,7 @@ export function stageAndroidIdentity(root = ROOT, identity = androidIdentity(roo
   for (const file of files)
    if (!fs.readFileSync(path.join(output, file.name)).equals(file.bytes)) throw new Error('Generated Android identity source changed');
  } else {
-  if (existingOnly) throw new Error('Generated Android identity is stale; run bun scripts/android-host.ts');
+  if (existingOnly) throw new Error('Generated Android identity is stale; run node scripts/android-host.ts');
   fs.mkdirSync(path.dirname(output), {recursive: true});
   const temporary = fs.mkdtempSync(path.join(path.dirname(output), 'stage-'));
   try {
@@ -116,10 +116,10 @@ export function verifyAndroidIdentity(root = ROOT) {
  root = path.resolve(root);
  const identity = androidIdentity(root);
  const profile = JSON.parse(fs.readFileSync(path.join(root, 'android/.eliza-consumer-profile.json'), 'utf8'));
- if (profile.identity.appId !== identity.appId) throw new Error('Generated Android identity differs from the selected package; run bun scripts/android-host.ts');
+ if (profile.identity.appId !== identity.appId) throw new Error('Generated Android identity differs from the selected package; run node scripts/android-host.ts');
  const asset = profile.assetFiles.find((file: {name: string}) => file.name === 'android-identity.json');
  const expected = stageAndroidIdentity(root, identity, true);
  if (expected ? !asset || fs.realpathSync(asset.source) !== fs.realpathSync(path.join(expected.root, 'identity.json')) : asset)
-  throw new Error('Generated Android identity binding changed; run bun scripts/android-host.ts');
+  throw new Error('Generated Android identity binding changed; run node scripts/android-host.ts');
  return identity.appId;
 }

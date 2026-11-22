@@ -1,0 +1,7 @@
+// spec/telephony/drafts.md, "Story: Write to someone, in my own words or Alpha's"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
+import { CloudSession } from "../account/layer.vibe"
+
+/** The stored key of one of telephony's machines, under the signed-in account's owner namespace. */
+export effect function telephonyKey(name: string) {
+  return try (try CloudSession).ownerKey(`telephony/${name}`)
+}

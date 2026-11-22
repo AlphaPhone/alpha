@@ -1,0 +1,432 @@
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"
+import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type TurnResult } from "@elizaos/agent/client"
+import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
+import { Machine as SendsMachine, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
+import { Machine as ReplyMachine, machine as replyMachine, refusedBeforeOutput, offersManagePlan, type ReplyView } from "../../gen/assistant__reply.effect.vibe"
+import { Machine as StoppedMachine, recentTurnMs, type ReadKind } from "../../gen/assistant__stoppedReply.effect.vibe"
+import { Machine as ClientMachine } from "../../gen/assistant__conversation.effect.vibe"
+import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
+import { observes } from "../../gen/assistant.effect.vibe"
+import { ChatAttachments } from "./attachments.vibe"
+import { Conversations } from "./conversations.vibe"
+import { AssistantHost, type AgentIdentity } from "./host.vibe"
+import { PhoneLocation } from "./location.vibe"
+import { copy, failureKindOf, failureText, planActionOf } from "./presentation.vibe"
+import { DeviceReview } from "./review.vibe"
+import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
+import { moveFirstDraft } from "./first-send.vibe"
+import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vibe"
+import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
+import { turnTransport } from "./transport.vibe"
+import { bindingOf, textOf, unitsOf } from "./units.vibe"
+
+/** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
+export type Target = { readonly kind: "reply"; readonly quote: Quote } | { readonly kind: "edit"; readonly messageId: string; readonly text: string; readonly requestId: string }
+
+/** The composer and the open conversation of the assistant. */
+export service Composer {
+  readonly transcript: Stream.Stream<Transcript>
+  readonly target: Stream.Stream<Target | undefined>
+  /** The owner typed. */
+  edit(text: string): void!!
+  /** Send the composer's text, or a prompt handed over from elsewhere that leaves the composer alone. */
+  send(handed?: string): void!!
+  /** Stop the reply being written. */
+  stop(): void!!
+  /** Open a conversation the owner chose, or one the phone reopened by itself; null starts a new chat. */
+  open(conversation: string | null, automatic: boolean, around?: string): void!!
+  /** Older messages of the open conversation. */
+  older(): void!!
+  /** Quote a message in the next reply, or correct my own. */
+  aim(target: Target | undefined): void!!
+  /** Replace a row, such as a card after a tap. */
+  replaceRow(row: Row): void!!
+}
+
+const stoppedCheckMs = 2000
+
+effect function holdReply() {
+  provide replyMachine() {
+    return try ReplyMachine
+  }
+}
+
+/** The composer over the upstream turn controller, the draft, send, reply and stopped-reply machines. */
+export const composerLayer = Layer.effect(Composer, effect {
+  const host = try AssistantHost
+  const drafts = try DraftsMachine
+  const sends = try SendsMachine
+  const stopped = try StoppedMachine
+  const client = try ClientMachine
+  const conversations = try Conversations
+  const attachments = try ChatAttachments
+  const location = try PhoneLocation
+  const review = try DeviceReview
+  const transport = try turnTransport()
+  const transcript = try SubscriptionRef.make<Transcript>(emptyTranscript)
+  const target = try SubscriptionRef.make<Target | undefined>(undefined)
+  let session: { readonly key: string; readonly controller: TurnController; records: Map<string, ConversationRecord> } | undefined
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+
+  effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
+    try SubscriptionRef.update(transcript, (t) => ({ ...t, rows: collapseSystemNotices(change(t.rows)) }))
+  }
+  effect function typing() {
+    const state = try sends.get()
+    try SubscriptionRef.update(transcript, (t) => ({ ...t, typing: state.typing }))
+  }
+  effect function controllerFor(identity: AgentIdentity) {
+    const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+    if (session?.key === key) return session
+    if (session !== undefined) {
+      promise(() => session?.controller.reset() ?? Promise.resolve()) catch () => undefined
+      try quiet(sends.send({ type: "sessionSwitch" }))
+      try quiet(client.send({ type: "detach", keepConsumed: false }))
+      try SubscriptionRef.set(transcript, emptyTranscript)
+    }
+    session = { key, controller: new TurnController(transport), records: new Map() }
+    try quiet(client.send({ type: "attach", session: (try client.get()).session + 1 }))
+    return session
+  }
+  effect function binding(identity: AgentIdentity, conversation: string | null) {
+    return bindingOf(identity.origin, identity.owner, identity.agent, conversation)
+  }
+  effect function load(conversation: string | null, around?: string) {
+    if (conversation === null) {
+      try SubscriptionRef.set(transcript, emptyTranscript)
+      return
+    }
+    const page = conversations.history(conversation) catch () => undefined
+    const near = around === undefined ? undefined : (conversations.around(conversation, around) catch () => undefined)
+    const messages = near ?? page?.messages ?? []
+    const restored = historyRows(messages)
+    const withFiles: Row[] = []
+    for (const row of restored) {
+      if (row.kind !== "user") {
+        withFiles.push(row)
+        continue
+      }
+      const identity = try host.identity()
+      const files = identity === undefined ? [] : try attachments.savedFor([identity.origin, identity.owner, identity.agent, conversation, row.clientMessageId ?? row.id])
+      withFiles.push({ ...row, files })
+    }
+    try SubscriptionRef.set(transcript, { conversation, rows: collapseSystemNotices(withFiles), hasMore: page?.hasMore ?? false, typing: false })
+    if (!(try sends.get()).typing) try recoverCards()
+    const last = messages.at(-1)
+    const now = try Clock.currentTimeMillis
+    if (last?.role === "user" && last.createdAt !== undefined && now - Date.parse(last.createdAt) < recentTurnMs) {
+      if (try quiet(stopped.send({ type: "restoredUnanswered" }))) try check(conversation, last.clientMessageId)
+    }
+  }
+  effect function expireLater(card: ProposalCard) {
+    const now = try Clock.currentTimeMillis
+    try sleep(Math.min(timerCeilingMs, Math.max(0, card.expiresAt - now + 1)))
+    const rowsNow = (try SubscriptionRef.get(transcript)).rows
+    const still = rowsNow.find((row) => row.kind === "card" && row.card.proposalId === card.proposalId)
+    if (still === undefined || still.kind !== "card" || (still.card.state !== "LiveCard" && still.card.state !== "RecoveredCard")) return
+    const expired = try review.expire(still.card)
+    try rows((list) => list.map((row) => row.kind === "card" && row.card.proposalId === card.proposalId ? { ...row, card: expired } : row))
+    try recoverCards()
+  }
+  effect function watch(cards: readonly ProposalCard[]) {
+    for (const card of cards) fork.detached expireLater(card)
+  }
+  effect function recoverCards() {
+    const pending = try review.pending()
+    const shown = (try SubscriptionRef.get(transcript)).rows
+    const listed = new Set(pending.map((card) => card.proposalId))
+    const fresh = pending.filter((card) => !shown.some((row) => row.kind === "card" && row.card.proposalId === card.proposalId))
+    try rows((list) => [
+      ...list.map((row) => row.kind === "card" && (row.card.state === "LiveCard" || row.card.state === "RecoveredCard") && !listed.has(row.card.proposalId)
+        ? { ...row, card: { ...row.card, state: "UnavailableCard" as const } } : row),
+      ...fresh.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
+    ])
+    try watch(fresh)
+  }
+  effect function bind(identity: AgentIdentity, conversation: string) {
+    const current = try controllerFor(identity)
+    const known = current.records.get(conversation)
+    const record = known ?? (conversations.list() catch () => []).map((row) => ({ id: row.id, roomId: row.roomId })).find((row) => row.id === conversation)
+    if (record === undefined) return
+    current.records.set(conversation, record)
+    promise(() => current.controller.bind(record)) catch () => undefined
+  }
+  effect function stoppedNotice() {
+    const state = try stopped.get()
+    const text = state.notice === "CheckPending" || state.notice === "CancelledPending" ? copy.stoppedPending
+      : state.notice === "LookLater" ? copy.stoppedLookLater : state.notice === "NotRecorded" ? copy.stoppedNotRecorded
+      : state.message === "ConfirmedStopped" ? copy.stoppedConfirmed : ""
+    try rows((list) => {
+      const without = list.filter((row) => row.id !== "stopped-reply-notice")
+      return text === "" ? without : [...without, { kind: "notice", id: "stopped-reply-notice", text, system: false } satisfies Row]
+    })
+  }
+  effect function check(conversation: string, clientMessageId: string | undefined) {
+    try stoppedNotice()
+    try sleep(stoppedCheckMs)
+    if (!(try quiet(stopped.send({ type: "timerFires" })))) return
+    try stoppedNotice()
+    if ((try stopped.get()).check !== "Reading") return
+    const page = conversations.history(conversation) catch () => undefined
+    let kind: ReadKind = "ReadFailed"
+    if (page !== undefined) {
+      const found = clientMessageId === undefined ? undefined : findStoppedUserTurn(page.messages, clientMessageId as ClientMessageId)
+      const at = found === undefined ? -1 : page.messages.indexOf(found)
+      kind = found === undefined ? "Unrecorded" : page.messages.slice(at + 1).some((row) => row.role === "assistant") ? "Finished" : "Unfinished"
+      if (kind === "Finished") try load(conversation)
+    }
+    try quiet(stopped.send({ type: "readSettles", kind }))
+    try stoppedNotice()
+  }
+  effect function settleView(id: string, view: ReplyView, text: string) {
+    try rows((list) => list.map((row) => row.id === id ? withReply(row, text, view, false) : row))
+  }
+  effect function classify(result: TurnResult, attempt: number, streamed: boolean) {
+    const sent = (event: SendsEvent) => quiet(sends.send(event))
+    switch (result.kind) {
+      case "Replied":
+      case "AgentFailed":
+        if (!streamed) try sent({ type: "serverReceives", id: attempt })
+        try sent({ type: "reply", id: attempt })
+        return "dispatched" as const
+      case "MaybeAccepted":
+        if (!streamed) try sent({ type: "serverReceives", id: attempt })
+        try sent({ type: "transportFails", id: attempt })
+        return "dispatched" as const
+      case "StoppedByOwner":
+        try sent({ type: "cancel", id: attempt })
+        try sent({ type: "settleTimeout", id: attempt })
+        return (try sends.get()).attempts.find((a) => a.id === attempt)?.outcome === "Restored" ? "restored" as const : "dispatched" as const
+      case "NotAccepted":
+      case "ConversationLost":
+      case "RefusedBusy":
+      case "RefusedStopUnconfirmed":
+        try sent({ type: "transportRefuses", id: attempt })
+        return "restored" as const
+    }
+  }
+  effect function send(handed?: string) {
+    const identity = try host.identity()
+    if (identity === undefined) {
+      try host.toast(copy.noAgent)
+      return
+    }
+    const current = try controllerFor(identity)
+    const draftState = try drafts.get()
+    const composed = handed ?? textOf(shown(draftState))
+    const files = try attachments.pending()
+    if (composed.trim() === "" && files.length === 0) return
+    const aimed = try SubscriptionRef.get(target)
+    const sendsBefore = try sends.get()
+    if (!(try quiet(sends.send({ type: "send", handed: handed !== undefined, fresh: true, prompt: unitsOf(handed ?? "") })))) {
+      try host.toast(copy.busy)
+      return
+    }
+    const attempt = sendsBefore.nextId
+    try typing()
+    const heldBinding = draftState.active
+    const durable = handed === undefined && (try quiet(drafts.send({ type: "hold" })))
+    try quiet(stopped.send({ type: "sendStart" }))
+    try stoppedNotice()
+    let conversation = (try SubscriptionRef.get(transcript)).conversation
+    if (aimed?.kind === "edit" && conversation !== null) {
+      try quiet(drafts.send({ type: "edit", text: [] }))
+      const forked = conversations.branch(conversation, aimed.messageId, aimed.requestId, aimed.text) catch () => undefined
+      if (forked === undefined) {
+        try quiet(sends.send({ type: "transportCall", id: attempt }))
+        try quiet(sends.send({ type: "transportRefuses", id: attempt }))
+        if (durable) try quiet(drafts.send({ type: "release", binding: heldBinding }))
+        try typing()
+        try host.toast("Couldn’t open the edited conversation. Nothing was sent.")
+        return
+      }
+      current.records.set(forked.id, { id: forked.id, roomId: forked.roomId })
+      promise(() => current.controller.bind({ id: forked.id, roomId: forked.roomId })) catch () => undefined
+      try load(forked.id)
+      conversation = forked.id
+    }
+    const pendingSlot = [identity.origin, identity.owner, identity.agent, conversation ?? "new", `pending-${attempt}`]
+    if (!(try attachments.hold(pendingSlot, composed))) {
+      try host.toast(copy.attachmentSaveFailed)
+    }
+    const screen = try host.screen()
+    const observed = observes(screen.exposure)
+    const peer = try host.peer()
+    const place = try location.forTurn(observed, peer.takesLocation)
+    const observation = observed ? { ...screen.observation, ...(place === undefined ? {} : { location: place }) } : undefined
+    const context = encodeTurnContext(observation === undefined ? {} : { observation }, { optionalFields: peer.optionalFields })
+    const userId = `local-user-${attempt}`
+    const replyId = `local-reply-${attempt}`
+    const quote = aimed?.kind === "reply" ? aimed.quote : undefined
+    try rows((list) => [...list,
+      { kind: "user", id: userId, text: composed, files, status: "pending", ...(quote === undefined ? {} : { quote }) } satisfies Row,
+      pendingReply(replyId)])
+    if (aimed !== undefined) try SubscriptionRef.set(target, undefined)
+    const view = try holdReply()
+    let streamed = false
+    let shownText = ""
+    const pushView = (text: string) => runFork(effect {
+      shownText = text
+      try settleView(replyId, try view.get(), text)
+    })
+    try quiet(sends.send({ type: "transportCall", id: attempt }))
+    const result = try promise(() => current.controller.send(
+      { text: composed, metadata: { ...context }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { stream: {
+        onPreview: (text, provisional) => {
+          if (!streamed) {
+            streamed = true
+            runFork(effect { try quiet(sends.send({ type: "serverReceives", id: attempt })); try quiet(sends.send({ type: "streamChunk", id: attempt })) })
+          }
+          runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
+          pushView(text)
+        },
+        onStatus: (activity) => runFork(rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, label: activity.slice(0, 160) } : row))),
+        onTool: () => runFork(effect {
+          const before = try view.get()
+          if (before.shown > 0 && before.acks === 0) try quiet(view.send({ type: "acknowledge", units: Math.min(120, before.shown) }))
+          else try quiet(view.send({ type: "workStarts" }))
+          pushView("")
+        }),
+      } },
+    ))
+    const outcome = try classify(result, attempt, streamed)
+    try typing()
+    if (outcome === "restored") {
+      if (durable) try quiet(drafts.send({ type: "release", binding: heldBinding }))
+      try attachments.restore()
+      try rows((list) => list.filter((row) => row.id !== userId && row.id !== replyId))
+      const attemptState = (try sends.get()).attempts.find((a) => a.id === attempt)
+      const restoredHere = handed === undefined && attemptState?.session === (try sends.get()).session
+      if (restoredHere && !durable) try quiet(drafts.send({ type: "edit", text: unitsOf(composed) }))
+      try host.toast(handed !== undefined ? "Not sent." : restoredHere ? copy.backInComposer : copy.notRestored)
+      try quiet(stopped.send({ type: "sendSettled", dispatched: false }))
+      try stoppedNotice()
+      return
+    }
+    if (durable) try quiet(drafts.send({ type: "commit", binding: heldBinding }))
+    const userMessageId = result.kind === "Replied" ? result.reply.userMessageId : result.kind === "AgentFailed" ? result.reply?.userMessageId : undefined
+    if (userMessageId !== undefined && conversation !== null) try attachments.recorded(pendingSlot, [identity.origin, identity.owner, identity.agent, conversation, userMessageId])
+    try attachments.clear()
+    if (result.kind === "StoppedByOwner") {
+      try quiet(view.send({ type: "stop" }))
+      try settleView(replyId, try view.get(), shownText === "" ? "" : `${shownText}\n\n${copy.stopped}`)
+      try quiet(stopped.send({ type: "sendStopped", dispatched: true, withCancel: true }))
+      const answer = promise(() => current.controller.interrupt()) catch () => ({ kind: "Uncertain" as const })
+      try quiet(stopped.send({ type: "cancelOutcome", aborted: answer.kind === "Stopped" }))
+      const open = (try SubscriptionRef.get(transcript)).conversation ?? current.controller.conversation?.id ?? null
+      if (open !== null) fork.detached check(open, result.clientMessageId)
+      return
+    }
+    try quiet(stopped.send({ type: "sendSettled", dispatched: true }))
+    try stoppedNotice()
+    if (result.kind === "MaybeAccepted") {
+      try quiet(view.send({ type: "failReply", kind: "OtherFailure" }))
+      try settleView(replyId, try view.get(), `${shownText}${shownText === "" ? "" : "\n\n"}${copy.replyFailed} ${copy.maybeSent}`)
+      try rows((list) => list.map((row) => row.id === userId && row.kind === "user" ? { ...row, status: "unconfirmed" } : row))
+      return
+    }
+    const reply = result.kind === "Replied" ? result.reply : result.kind === "AgentFailed" ? result.reply : undefined
+    if (result.kind === "AgentFailed") {
+      const kind = failureKindOf(result.code)
+      try quiet(view.send({ type: "failReply", kind }))
+      const said = refusedBeforeOutput(kind) ? failureText(kind) : `${reply?.text ?? shownText}\n\n${failureText(kind)}`
+      try settleView(replyId, try view.get(), said)
+      try rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" && offersManagePlan(kind) ? { ...row, plan: "Funding" } : row))
+    } else if (reply !== undefined) {
+      try quiet(view.send({ type: "done", units: reply.text.length }))
+      try settleView(replyId, try view.get(), reply.text)
+    }
+    if (reply === undefined) return
+    const live = current.controller.conversation
+    if (live !== null) current.records.set(live.id, live)
+    try SubscriptionRef.update(transcript, (t) => ({ ...t, conversation: live?.id ?? t.conversation }))
+    if (conversation === null && live !== null) {
+      const destination = try binding(identity, live.id)
+      try quiet(drafts.send({ type: "select", binding: destination }))
+      fork.detached Effect.provideService(moveFirstDraft(heldBinding, destination), DraftsMachine, drafts)
+    }
+    const plan = planActionOf((reply as { readonly planAction?: unknown }).planAction)
+    const notices = replyNotices((reply as { readonly notices?: unknown }).notices)
+    const pass = try review.directPass(reply.userMessageId, composed)
+    const staged = emailDraftOf(reply.actionResults)
+    const emailRows: Row[] = staged === undefined || !(live !== null && live.id === (try SubscriptionRef.get(transcript)).conversation) ? []
+      : [{ kind: "email", id: `email:${reply.messageId}`, card: { ...emailStart, recipients: staged.to.trim() !== "", body: staged.body.trim() !== "" }, ...staged }]
+    try rows((list) => [
+      ...list.map((row) =>
+        row.id === userId && row.kind === "user" ? { ...row, id: reply.userMessageId, status: "recorded" as const }
+        : row.id === replyId && row.kind === "agent" ? { ...row, id: reply.messageId, recorded: true, notices, ...(plan === undefined || plan === "Funding" ? {} : { plan }),
+            cutOff: cutOffLabel(result.kind === "AgentFailed", pass.receipts.filter((r) => r.card.state === "DoneCard").length, 0, false) }
+        : row),
+      ...pass.notices.map((text, at): Row => ({ kind: "notice", id: `device-notice:${reply.userMessageId}:${at}`, text, system: false })),
+      ...pass.receipts.flatMap((done): Row[] => done.receipt === undefined ? [] : [{ kind: "receipt", id: `device-receipt:${done.card.proposalId}`, proposalId: done.card.proposalId, title: done.receipt.title, summary: done.receipt.summary }]),
+      ...pass.cards.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
+      ...emailRows,
+    ])
+    try watch(pass.cards)
+    try quiet(client.send({ type: "send" }))
+    try quiet(client.send({ type: "replyWith", withProposal: pass.cards.length > 0 }))
+  }
+  return {
+    transcript: SubscriptionRef.changes(transcript),
+    target: SubscriptionRef.changes(target),
+    edit: (text: string) => effect {
+      try quiet(drafts.send({ type: "edit", text: unitsOf(text) }))
+      try quiet(sends.send({ type: "typeText", text: unitsOf(text) }))
+    },
+    send,
+    stop: () => effect {
+      const current = session
+      if (current === undefined) return
+      promise(() => current.controller.interrupt()) catch () => undefined
+    },
+    open: (conversation: string | null, automatic: boolean, around?: string) => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return
+      const pending = try attachments.pending()
+      const open = (try SubscriptionRef.get(transcript)).conversation
+      if (!automatic && pending.length > 0 && conversation !== open) {
+        try host.toast(conversation === null ? copy.attachmentNewChat : copy.attachmentChangesChat)
+        return
+      }
+      if (!(try quiet(client.send({ type: "restoreHistory", automatic })))) try quiet(client.send({ type: "attach", session: (try client.get()).session }))
+      try quiet(stopped.send({ type: "explicitReload" }))
+      try quiet(drafts.send({ type: "select", binding: try binding(identity, conversation) }))
+      try SubscriptionRef.set(target, undefined)
+      if (!automatic) try attachments.retire("conversation")
+      if (conversation !== null) try bind(identity, conversation)
+      else {
+        const current = try controllerFor(identity)
+        promise(() => current.controller.reset()) catch () => undefined
+      }
+      try load(conversation, around)
+    },
+    older: () => effect {
+      const t = try SubscriptionRef.get(transcript)
+      if (t.conversation === null || !t.hasMore) return
+      const first = t.rows.find((row) => row.kind === "user" || row.kind === "agent")
+      const page = conversations.history(t.conversation, { before: t.rows.length, ...(first === undefined ? {} : { beforeId: first.id }) }) catch () => undefined
+      if (page === undefined || page.messages.length === 0) return
+      try SubscriptionRef.update(transcript, (now) => ({ ...now, rows: [...historyRows(page.messages), ...now.rows], hasMore: page.hasMore }))
+    },
+    aim: (next: Target | undefined) => effect {
+      if (next?.kind === "edit" && textOf(shown(try drafts.get())).trim() !== "") {
+        try host.toast(copy.editFirst)
+        return
+      }
+      try SubscriptionRef.set(target, next)
+      if (next?.kind === "edit") try quiet(drafts.send({ type: "handOver", text: unitsOf(next.text) }))
+    },
+    replaceRow: (row: Row) => rows((list) => list.map((each) => each.id === row.id ? row : each)),
+  }
+})
+
+/** The text of the active draft, for a component that only reads it. */
+export function draftText(state: Parameters<typeof shown>[0]): string {
+  return textOf(shown(state))
+}
+
+/** Whether the active draft may already have been sent and waits for review. */
+export function draftUnsettled(state: Parameters<typeof shown>[0]): boolean {
+  return slotOf(state, state.active).unsettled
+}

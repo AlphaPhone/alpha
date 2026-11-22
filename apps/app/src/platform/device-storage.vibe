@@ -1,0 +1,67 @@
+// spec/platform/storage.md, "Story: Reset Alpha's data"; spec/platform/storage.md, "A pending reset blocks startup until it has cleared the owner's namespace"; spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"; spec/platform/index.md, "Every stored key of an owner lies in that owner's namespace, and a reset removes exactly those keys"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as Device, stored as storedDevice, type Storage } from "../../gen/platform__storage.effect.vibe"
+import { ownerKey } from "./storage.vibe"
+
+/** The device's storage could not do what was asked. */
+export error StorageRefused { message: string }
+
+/** The owner namespaces of the WebView's storage: startup admission, the bound owner, held values and reset. */
+export service DeviceStorage {
+  /** The storage state as spec/platform/storage.md keeps it, then each change of it. */
+  readonly changes: Stream.Stream<Storage>
+  /** Admits startup, first finishing a reset an earlier process left pending. */
+  admitStartup(): void!StorageRefused
+  /** Binds the signed-in owner, whose namespace the areas' stored keys use. */
+  bindOwner(owner: string): void!StorageRefused
+  /** The owner signed out: their namespace stays for their return. */
+  signedOut(): void!!
+  /** Holds a stored value that is not a state for the owner's review. */
+  hold(key: string): void!!
+  /** The owner reviewed a held value. */
+  resolve(key: string): void!!
+  /** Removes everything kept in the bound owner's namespace; startup waits until it has. */
+  reset(): void!StorageRefused
+}
+
+const DEVICE_KEY = "alpha/device/storage"
+
+/** Device storage over the KeyValueStore the program provides. */
+export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const device = try mapError(Effect.provide(effect { return try Device }, storedDevice(DEVICE_KEY)), () => new StorageRefused({ message: "Device storage could not be read." }))
+  const refused = (message: string) => () => new StorageRefused({ message })
+
+  effect function finishReset() {
+    const now = try device.get()
+    if (!now.resetPending) return
+    if (now.owner !== "") try mapError(store.clearPrefix(ownerKey(now.owner, "")), refused("Reset could not be confirmed. Try again."))
+    try mapError(device.send({ type: "resetCleared" }), refused("Reset could not be confirmed. Try again."))
+  }
+
+  return {
+    changes: device.changes,
+    effect admitStartup() {
+      try finishReset()
+      if ((try device.get()).startupAdmitted) return
+      try mapError(device.send({ type: "admitStartup" }), refused("Startup is waiting for a reset."))
+    },
+    effect bindOwner(owner: string) {
+      if ((try device.get()).owner === owner) return
+      try mapError(device.send({ type: "bindOwner", owner }), refused("Storage is not ready for this account."))
+    },
+    effect signedOut() {
+      device.send({ type: "signedOut" }) catch () => undefined
+    },
+    effect hold(key: string) {
+      device.send({ type: "corruptFound", key }) catch () => undefined
+    },
+    effect resolve(key: string) {
+      device.send({ type: "reviewResolved", key }) catch () => undefined
+    },
+    effect reset() {
+      try mapError(device.send({ type: "requestReset" }), refused("Nothing to reset."))
+      try finishReset()
+    },
+  }
+})

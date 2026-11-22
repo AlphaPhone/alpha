@@ -1,0 +1,146 @@
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"; spec/cloud/deployment.md, "Story: Answer only the deployment's own callers"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import { alphaModel, type EnvironmentInputs } from "./profile.vibe"
+import { registryVariable, type SeedClient } from "./registration.vibe"
+
+/** cloud/resources.json: one environment's Cloudflare account, zone and resource ids. */
+export interface CloudResources {
+  readonly workerName: string
+  readonly accountId: string
+  readonly zone: string
+  readonly hyperdriveId: string
+  readonly [key: string]: unknown
+}
+
+/** A resource id is missing, still a placeholder, or a host lies outside the zone. */
+export error RenderRefused { problem: string }
+
+/** The secrets the API Worker reads from Wrangler's secret store, never from a rendered file. */
+export const apiWorkerSecrets: ReadonlyArray<string> = [
+  "EMAIL_CODE_SECRET", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY",
+  "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "INFERENCE_API_KEY", "CARTESIA_API_KEY",
+]
+
+/** Hosts of a deployed Eliza Cloud; a rendered Alpha Cloud configuration that names one is a leaked dependency. */
+export const elizaHost = /(?:^|[^a-z0-9-])((?:[a-z0-9-]+\.)*(?:eliza\.app|elizacloud\.ai))(?![a-z0-9.-])/i
+
+/** The first deployed Eliza Cloud host the text names, if any. */
+export function leakedElizaHost(text: string): string | undefined {
+  return elizaHost.exec(text)?.[1]
+}
+
+const placeholder = /^0{30}[0-9]{2}$/
+
+/** Whether a Cloudflare id was provisioned: 32 lower-case hex characters that are not a placeholder. */
+export function provisioned(value: unknown): boolean {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value) && !placeholder.test(value)
+}
+
+function hostOf(origin: string): string {
+  return URL.parse(origin)?.host ?? origin
+}
+
+function inZone(host: string, zone: string): boolean {
+  return host === zone || host.endsWith("." + zone)
+}
+
+/** The plain variables of the API Worker of one environment: origins, database receipt, registry, models and prices. */
+export function apiVars(profile: CloudProfile, environment: CloudEnvironment, inputs: EnvironmentInputs, client: SeedClient): Readonly<Record<string, string>> {
+  const settings = profile.environments[environment]
+  const worker = inputs.worker
+  const plans = inputs.billing.plans
+  const plan = worker?.plan ?? "plus_monthly"
+  return {
+    CLOUD_ENVIRONMENT: environment,
+    PUBLIC_API_ORIGIN: settings.api,
+    WEB_ORIGIN: settings.web,
+    CLOUD_IDENTITY_DIGEST: settings.databaseIdentity,
+    NATIVE_CLIENT_REGISTRY: registryVariable(client, environment),
+    NATIVE_CLIENT_ID: client.clientId,
+    NATIVE_AUTH_CALLBACK: client.signInReturn,
+    EMAIL_FROM: `${settings.name} <${settings.mailSender}>`,
+    GOOGLE_CLIENT_ID: inputs.google.clientId,
+    GOOGLE_CONNECT_CLIENT_ID: inputs.google.serverClientId,
+    INFERENCE_BASE_URL: settings.inference?.providers[0]?.baseUrl ?? "",
+    CHAT_MODEL: alphaModel,
+    CHAT_UPSTREAM_MODEL: alphaModel,
+    EMBEDDING_MODEL: worker?.embeddingModel ?? "",
+    EMBEDDING_UPSTREAM_MODEL: worker?.embeddingUpstreamModel ?? "",
+    CHAT_INPUT_MICROS_PER_1K: String(worker?.chatInputMicrosPer1k ?? 0),
+    CHAT_OUTPUT_MICROS_PER_1K: String(worker?.chatOutputMicrosPer1k ?? 0),
+    EMBEDDING_INPUT_MICROS_PER_1K: String(worker?.embeddingInputMicrosPer1k ?? 0),
+    MAX_COMPLETION_TOKENS: String(worker?.maxCompletionTokens ?? 0),
+    CARTESIA_VOICE_ID: inputs.speech.defaultVoiceId,
+    SPEECH_STT_MICROS_PER_SECOND: String(inputs.speech.microsPerSecond),
+    SPEECH_TTS_MICROS_PER_CHARACTER: String(inputs.speech.microsPerCharacter),
+    SPEECH_DAILY_SESSION_LIMIT: String(worker?.speechDailySessionLimit ?? 0),
+    STRIPE_PLAN: plan,
+    STRIPE_PRICE_ID: plans[plan].priceId,
+    STRIPE_PRODUCT_ID: plans[plan].productId,
+  }
+}
+
+/** The plain variables of the web host Worker: the same registry and origins as its environment's API Worker. */
+export function edgeVars(profile: CloudProfile, environment: CloudEnvironment, client: SeedClient): Readonly<Record<string, string>> {
+  const settings = profile.environments[environment]
+  return {
+    CLOUD_ENVIRONMENT: environment,
+    PUBLIC_API_ORIGIN: settings.api,
+    WEB_ORIGIN: settings.web,
+    CLOUD_NAME: settings.name,
+    NATIVE_CLIENT_REGISTRY: registryVariable(client, environment),
+  }
+}
+
+/** Why the inputs cannot be rendered for a deployment, in order; empty when they can. */
+export function renderProblems(profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources, inputs: EnvironmentInputs): ReadonlyArray<string> {
+  const settings = profile.environments[environment]
+  const problems: string[] = []
+  for (const field of ["workerName", "accountId", "zone", "hyperdriveId"] as const)
+    if (typeof resources[field] !== "string" || resources[field].trim() === "") problems.push(`resources.${environment}.${field} is required`)
+  for (const field of ["accountId", "hyperdriveId"] as const)
+    if (!provisioned(resources[field])) problems.push(`resources.${environment}.${field} is not provisioned; run provision first`)
+  for (const origin of [settings.api, settings.web]) {
+    const host = hostOf(origin)
+    if (!inZone(host, resources.zone)) problems.push(`${host} is not in zone ${resources.zone}`)
+  }
+  if (inputs.worker === undefined) problems.push(`the ${environment} operator inputs have no worker block (plan, embedding model, prices, completion and speech limits)`)
+  return problems
+}
+
+function filled(value: unknown, tokens: Readonly<Record<string, unknown>>): unknown {
+  if (typeof value === "string") {
+    const whole = /^\{\{(\w+)\}\}$/.exec(value)
+    if (whole && Object.hasOwn(tokens, whole[1])) return tokens[whole[1]]
+    return value.replace(/\{\{(\w+)\}\}/g, (match, name: string) => Object.hasOwn(tokens, name) ? String(tokens[name]) : match)
+  }
+  if (Array.isArray(value)) return value.map((item) => filled(item, tokens))
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, filled(item, tokens)]))
+  return value
+}
+
+/** A Wrangler template with its `{{token}}` strings replaced; a whole-string token takes the value itself. */
+export function fillTemplate(template: unknown, tokens: Readonly<Record<string, unknown>>): unknown {
+  return filled(template, tokens)
+}
+
+/** Both Workers' configurations for one environment. */
+export interface RenderedEnvironment {
+  readonly api: unknown
+  readonly edge: unknown
+}
+
+/** Renders both Workers of one environment from their templates, refused while a resource is unprovisioned or an Eliza host leaks in. */
+export effect function renderEnvironment(templates: { readonly api: unknown; readonly edge: unknown }, profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources, inputs: EnvironmentInputs, client: SeedClient): RenderedEnvironment!RenderRefused {
+  const problems = renderProblems(profile, environment, resources, inputs)
+  if (problems.length > 0) throw new RenderRefused({ problem: problems.join("; ") })
+  const settings = profile.environments[environment]
+  const shared = { workerName: resources.workerName, accountId: resources.accountId, hyperdriveId: resources.hyperdriveId, apiHost: hostOf(settings.api), webHost: hostOf(settings.web) }
+  const rendered = {
+    api: fillTemplate(templates.api, { ...shared, vars: apiVars(profile, environment, inputs, client) }),
+    edge: fillTemplate(templates.edge, { ...shared, vars: edgeVars(profile, environment, client) }),
+  }
+  const leak = leakedElizaHost(JSON.stringify(rendered))
+  if (leak !== undefined) throw new RenderRefused({ problem: `the rendered ${environment} configuration names ${leak}` })
+  return rendered
+}

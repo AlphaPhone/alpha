@@ -1,0 +1,51 @@
+// spec/account/plan.md, "Only an admitting plan binds inference, and nothing stops the agent"; spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"
+import { Native, NativeFailed, NativeUnavailable } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
+
+const agent = "Agent"
+
+/** The resident's provider as the native host reports it. */
+schema ProviderStatus {
+  mode?: "cloud" | "direct" | "none"
+  revision?: string
+}
+
+/** A provider request the host prepared. */
+schema Prepared {
+  requestId: string
+}
+
+/** The resident's current provider; own keys are never replaced by a Cloud binding. */
+effect function providerStatus() {
+  const native = try Native
+  const raw = try native.invoke(agent, "providerStatus")
+  return try Schema.decodeUnknownEffect(ProviderStatus)(raw)
+}
+
+/** Binds Eliza Cloud inference into the resident agent, unless the owner chose their own keys. */
+export effect function bindInference(): void!(NativeUnavailable | NativeFailed) {
+  const native = try Native
+  const status = providerStatus() catch () => ({ mode: "none" as const, revision: "" })
+  if (status.mode === "direct" || status.mode === "cloud") return
+  const prepared = Effect.flatMap(native.invoke(agent, "prepareProviderConfiguration"), Schema.decodeUnknownEffect(Prepared)) catch effect () => {
+    throw new NativeFailed({ plugin: agent, method: "prepareProviderConfiguration", message: "unreadable" })
+  }
+  native.invoke(agent, "selectProvider", { mode: "cloud", expectedRevision: status.revision ?? "", requestId: prepared.requestId }) catch effect (error) => {
+    native.invoke(agent, "cancelProviderConfiguration", { requestId: prepared.requestId }) catch () => undefined
+    throw error
+  }
+}
+
+/** Removes Cloud inference from the resident; own keys keep AI on. */
+export effect function unbindInference(): void!(NativeUnavailable | NativeFailed) {
+  const native = try Native
+  const status = providerStatus() catch () => ({ mode: "cloud" as const, revision: "" })
+  if (status.mode === "direct") return
+  try native.invoke(agent, "clearProvider", { onlyIfPresent: true })
+}
+
+/** The resident agent always runs: ensured after every account change, whatever its outcome (P-43). */
+export effect function ensureResident() {
+  const resident = try Resident
+  resident.ensureRunning() catch () => undefined
+}

@@ -1,6 +1,7 @@
 // What Bombadil checks on every state it reaches while it drives the page served by `pnpm start`
 // (SPEC.md, "Exploring the page"): its defaults and each area's properties, from test/bombadil/<area>.ts.
 export * from "@antithesishq/bombadil/browser/defaults";
+export * from "./bombadil/platform.ts";
 export * from "./bombadil/shell.ts";
 export * from "./bombadil/assistant.ts";
 export * from "./bombadil/voice.ts";

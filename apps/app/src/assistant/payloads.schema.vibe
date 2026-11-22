@@ -1,0 +1,83 @@
+// spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"
+
+/** A conversation as the resident lists it. */
+export schema ConversationRow {
+  readonly id: Schema.NonEmptyString
+  readonly roomId: Schema.NonEmptyString
+  readonly title?: string
+  readonly updatedAt?: string
+}
+
+/** The resident's conversation list. */
+export schema ConversationList { readonly conversations: readonly ConversationRow[] }
+
+/** A created or forked conversation. */
+export schema CreatedConversation { readonly conversation: ConversationRow }
+
+/** One stored message of a conversation. */
+export schema HistoryRow {
+  readonly id: Schema.NonEmptyString
+  readonly role: "user" | "assistant" | "system"
+  readonly text: string
+  readonly createdAt?: string
+  readonly clientMessageId?: string
+  readonly source?: string
+}
+
+/** A page of history, newest last. */
+export schema HistoryPage { readonly messages: readonly HistoryRow[]; readonly hasMore?: boolean }
+
+/** One search hit across the owner's conversations. */
+export schema SearchHit {
+  readonly id: Schema.NonEmptyString
+  readonly conversationId: Schema.NonEmptyString
+  readonly text: string
+  readonly snippet?: string
+  readonly createdAt?: string
+}
+
+/** A page of search hits. */
+export schema SearchPage { readonly messages: readonly SearchHit[] }
+
+/** A device action the agent proposed, as the pending listing gives it. */
+export schema PendingProposal {
+  readonly id: Schema.NonEmptyString
+  readonly digest: string
+  readonly state: string
+  readonly expiresAt: string
+  readonly title?: string
+  readonly description?: string
+  readonly operation: Schema.Unknown
+  readonly requestMessageId?: string
+  readonly workflow?: Schema.Unknown
+}
+
+/** The pending device actions of this device. */
+export schema PendingListing { readonly proposals: readonly PendingProposal[] }
+
+/** What Android says about an assist invocation it handed to the renderer. */
+export schema AssistInvocation {
+  readonly origin: "assist" | "listener" | "system" | "power" | "none"
+  readonly cold?: boolean
+}
+
+/** The location permission as `ElizaLocation.checkPermissions` reports it. */
+export schema LocationPermission { readonly location: string }
+
+/** The coordinates of one position fix. */
+export schema Coordinates { readonly latitude: number; readonly longitude: number; readonly accuracy: number }
+
+/** A position fix of `ElizaLocation.getCurrentPosition`. */
+export schema PositionFix { readonly coords: Coordinates; readonly timestamp: number }
+
+/** One file saved beside a sent message, its bytes as base64. */
+export schema SavedFile { readonly id: string; readonly name: string; readonly mimeType: string; readonly data: string }
+
+/** The chat attachments saved beside one sent message. */
+export schema SavedAttachments { readonly requestText: string; readonly displayText?: string; readonly files: readonly SavedFile[] }
+
+/** The open comms card kept on the phone. */
+export schema OpenSuggestion { readonly text: string; readonly title: string; readonly detail: string }
+
+/** The comms suggestion kept on the phone across a restart. */
+export schema StoredSuggestion { readonly v: 1; readonly briefed: string | null; readonly open: OpenSuggestion | null }

@@ -2,9 +2,9 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { androidEnv } from "./toolchain.ts";
-import { requireHostedFixtureEnvironment } from "../vendor/eliza/packages/app/scripts/mobile/android/hosted-fixture/ci-emulator-display.mjs";
-import { createHostedWebViewProvisioner } from "../vendor/eliza/packages/app/scripts/mobile/android/hosted-fixture/webview-provider.mjs";
-export { candidate } from "../vendor/eliza/packages/app/scripts/mobile/android/hosted-fixture/webview-provider.mjs";
+import { requireHostedFixtureEnvironment } from "./os-ported/app/android/hosted-fixture/ci-emulator-display.mjs";
+import { createHostedWebViewProvisioner } from "./os-ported/app/android/hosted-fixture/webview-provider.mjs";
+export { candidate } from "./os-ported/app/android/hosted-fixture/webview-provider.mjs";
 
 const provisioner = createHostedWebViewProvisioner({
 	forbiddenPackagePrefixes: ["ai.alphacompute."],

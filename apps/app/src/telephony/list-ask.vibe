@@ -1,0 +1,57 @@
+// spec/telephony/common.md, "Typing filters locally; Alpha's filter shows a chip and survives an emptied field"; spec/telephony/phone.md, "The bar's query filters Recents on the phone, and Alpha's filter returns to Recents"; spec/telephony/messages.md, "The list filters over each conversation's title and snippet with no request"
+import { Machine as MessagesMachine, type ThreadRow } from "../../gen/telephony__messages.effect.vibe"
+import { Machine as PhoneMachine, type Recent } from "../../gen/telephony__phone.effect.vibe"
+
+/** A question about one person's calls: "calls from Maya", "did Maya call", "has Maya called". */
+const CALLS_WITH = /\b(calls? (from|with|to)|did .+ (call|ring)|ha(s|ve) .+ called)\b/i
+/** A search of texts: "find texts about rent", "search for messages from Maya". */
+const TEXTS_ABOUT = /(?:find|search(?: for)?|look for)\s+(?:my\s+)?(?:texts?|messages)\s+(?:about|from|with|mentioning)\s+(.+)/i
+
+/** The person a Recents question names: the recent caller whose name's words appear in it. */
+export function personIn(text: string, recents: readonly Recent[]): string | undefined {
+  const words = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  return recents.map((r) => r.title).find((title) => title !== "" && title.toLowerCase().split(/\s+/).some((name) => name.length > 1 && words.includes(name)))
+}
+
+/** Whether a conversation matches a text search over its title, addresses and snippet. */
+export function threadMatches(thread: ThreadRow, query: string): boolean {
+  return thread.complete && `${thread.title} ${thread.addresses.join(" ")} ${thread.snippet}`.toLowerCase().includes(query.toLowerCase())
+}
+
+const first = (title: string) => title.split(/\s+/)[0] ?? title
+
+/** Alpha's own answer to a list question on Phone and Messages: it filters the list on screen with a chip, never by a request. */
+export service ListAsk {
+  /** Alpha's one line when it answered by filtering the list, or null when the question is for the assistant. */
+  ask(app: "phone" | "messages", text: string): string | null!!
+}
+
+/** The list answers over the Phone and Messages machines. */
+export const listAskLayer = Layer.effect(ListAsk, effect {
+  const phone = try PhoneMachine
+  const messages = try MessagesMachine
+  return {
+    effect ask(app: "phone" | "messages", text: string) {
+      if (app === "phone") {
+        if (!CALLS_WITH.test(text)) return null
+        const p = try phone.get()
+        const person = personIn(text, p.recents)
+        if (person === undefined) return null
+        const count = p.recents.filter((r) => r.title === person).length
+        const filtered = try (phone.send({ type: "alphaFiltered", query: person, label: person }) catch () => undefined)
+        if (filtered === undefined) return null
+        return count === 0 ? `No calls with ${first(person)}.` : count === 1 ? `One call with ${first(person)}.` : `${count} calls with ${first(person)}.`
+      }
+      const asked = TEXTS_ABOUT.exec(text)
+      if (asked === null) return null
+      const query = asked[1]!.replace(/[?.]$/, "").trim()
+      const m = try messages.get()
+      if (m.view.tag !== "ThreadList") return null
+      const hits = m.threads.filter((t) => threadMatches(t, query)).length
+      if (hits === 0) return `No texts match “${query}”.`
+      const filtered = try (messages.send({ type: "alphaFiltered", query, label: query }) catch () => undefined)
+      if (filtered === undefined) return null
+      return hits === 1 ? "One conversation." : `${hits} conversations.`
+    },
+  }
+})

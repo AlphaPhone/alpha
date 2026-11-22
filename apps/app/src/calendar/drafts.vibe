@@ -1,0 +1,214 @@
+// spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/drafts.md, "Story: Save an event from its draft exactly once"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"; spec/calendar/drafts.md, "Story: Recover a draft whose storage cannot be read"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type EditorDraft, type Event as DraftEvent, type DraftReview, type DraftOrigin, type SlotOutcome, Machine as DraftMachine } from "../../gen/calendar__drafts.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { type DraftFieldsRecord, type DraftSlotRecord, MAX_DRAFT_BYTES, decodeDraftFields, decodeDraftSlot } from "./drafts.schema.vibe"
+
+/** The retained slot was replaced by another window, or storage refused. */
+export error DraftRefused { reason: "stale" | "blocked" | "storage" | "conflict" }
+
+/** One editor's retained draft, over the owner's slot in durable storage. */
+export service CalendarDrafts {
+  readonly changes: Stream.Stream<EditorDraft>
+  get(): EditorDraft!!
+  bind(owner: string): void!!
+  /** Open an editor for an event (its key and revision) or for a new event (empty target); its slot is read at once. */
+  open(target: string, eventRevision: string): void!!
+  /** The fields typed: retained when they fit and nothing is offered or saving. */
+  edit(fields: DraftFieldsRecord): void!!
+  /** The fields Restore puts into the form. */
+  restore(): DraftFieldsRecord | undefined!!
+  openReview(kind: DraftReview): void!!
+  answerReview(confirmed: boolean): void!!
+  retry(): void!!
+  /** Begin saving the event: refused for edits typed against an older revision or while anything waits for review. */
+  beginSave(): DraftFieldsRecord!DraftRefused
+  /** The event save ended; a saved event clears the slot next. */
+  saved(ok: boolean): void!!
+  close(): void!!
+  /** A note or scan asks for a draft. */
+  handoff(origin: DraftOrigin, fields: DraftFieldsRecord): void!!
+  /** What the owner's slot for a target holds now, if anything. */
+  retained(target: string): DraftFieldsRecord | undefined!!
+  openRecovery(): void!!
+  captureRecovery(): string | undefined!!
+  confirmReset(): void!!
+  closeRecovery(): void!!
+}
+
+function slotName(target: string): string {
+  return target === "" ? "calendar/draft/new" : `calendar/draft/event/${target.length > 200 ? target.slice(0, 200) : target}`
+}
+
+/** The drafts service over the KeyValueStore and an in-memory editor machine. */
+export const draftsLayer = Layer.effect(CalendarDrafts, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const machine = try DraftMachine
+  const build = try Build
+  const sequence = try Ref.make(0)
+  const captured = try Ref.make<string | undefined>(undefined)
+
+  effect function send(event: DraftEvent) { return machine.send(event) catch () => undefined }
+
+  effect function key(target: string) {
+    const state = try machine.get()
+    return ownerKey(state.owner, slotName(target))
+  }
+
+  effect function readSlot(target: string): DraftSlotRecord | undefined | "error" {
+    return effect {
+      const raw = try store.get(try key(target))
+      if (raw === undefined) return undefined
+      const parsed = try Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => "error" as const })
+      const slot = try decodeDraftSlot(parsed)
+      const state = try machine.get()
+      return slot.owner === state.owner && slot.target === target ? slot : ("error" as const)
+    } catch () => "error" as const
+  }
+
+  function copyOf(slot: DraftSlotRecord | undefined): { copy: string; copyRevision: string } {
+    return slot === undefined ? { copy: "", copyRevision: "" } : { copy: JSON.stringify(slot.fields), copyRevision: slot.eventRevision }
+  }
+
+  effect function writeSlot(fields: DraftFieldsRecord, revision: string): "saved" | "conflict" | "error" {
+    const state = try machine.get()
+    const current = try readSlot(state.target)
+    if (current === "error") return "error"
+    const known = try Ref.get(sequence)
+    if ((current?.sequence ?? 0) !== known) return "conflict"
+    const next: DraftSlotRecord = { version: 1, owner: state.owner, target: state.target, eventRevision: revision, fields, sequence: known + 1 }
+    return effect {
+      try store.set(try key(state.target), JSON.stringify(next))
+      try Ref.set(sequence, known + 1)
+      return "saved" as const
+    } catch () => "error" as const
+  }
+
+  effect function clearSlot(expected: string): SlotOutcome {
+    const state = try machine.get()
+    const current = try readSlot(state.target)
+    if (current === "error") return "SlotError"
+    if (current !== undefined && (current.sequence !== (try Ref.get(sequence)) || JSON.stringify(current.fields) !== expected)) return "SlotConflict"
+    return effect {
+      try store.remove(try key(state.target))
+      try Ref.set(sequence, 0)
+      return "SlotCleared" as SlotOutcome
+    } catch () => "SlotError" as SlotOutcome
+  }
+
+  effect function load(kind: "openDone" | "retryDone") {
+    const state = try machine.get()
+    const slot = try readSlot(state.target)
+    if (slot !== "error") try Ref.set(sequence, slot?.sequence ?? 0)
+    const ok = slot !== "error"
+    const copy = copyOf(slot === "error" ? undefined : slot)
+    try send({ type: kind, ok, ...copy })
+  }
+
+  function decoded(text: string): DraftFieldsRecord | undefined {
+    if (text === "") return undefined
+    try {
+      return JSON.parse(text) as DraftFieldsRecord
+    } catch {
+      return undefined
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    effect get() { return try machine.get() },
+    effect bind(owner: string) {
+      const state = try machine.get()
+      if (state.owner !== owner) try send({ type: "changeOwner", nextOwner: owner })
+    },
+    effect open(target: string, eventRevision: string) {
+      if ((try send({ type: "open", target, eventRevision })) !== undefined) try load("openDone")
+    },
+    effect edit(fields: DraftFieldsRecord) {
+      const text = JSON.stringify(fields)
+      const valid = text.length <= MAX_DRAFT_BYTES && (decodeDraftFields(fields) catch () => undefined) !== undefined
+      const after = try send({ type: "edit", fields: text, valid })
+      if (after === undefined || !valid || after.conflict || after.storageError) return
+      const result = try writeSlot(fields, after.eventRevision)
+      if (result === "conflict") {
+        const current = try readSlot(after.target)
+        const copy = copyOf(current === "error" ? undefined : current)
+        try send({ type: "reportConflict", ...copy })
+      } else if (result === "error") try send({ type: "reportStorageError" })
+    },
+    effect restore() {
+      const after = try send({ type: "restore" })
+      return after === undefined ? undefined : decoded(after.text)
+    },
+    effect openReview(kind: DraftReview) { try send({ type: "openReview", kind }) },
+    effect answerReview(confirmed: boolean) {
+      const before = try machine.get()
+      const after = try send({ type: "answerReview", confirmed })
+      if (after === undefined) return
+      if (after.stage === "StageDiscarding") {
+        try send({ type: "discardDone", outcome: try clearSlot(before.text) })
+      } else if (before.review === "ReplaceReview" && confirmed && !after.conflict) {
+        const fields = decoded(after.text)
+        if (fields !== undefined) {
+          const current = try readSlot(after.target)
+          if (current !== "error") try Ref.set(sequence, current?.sequence ?? 0)
+          const result = try writeSlot(fields, after.textRevision)
+          if (result === "error") try send({ type: "reportStorageError" })
+        }
+      }
+    },
+    effect retry() {
+      if ((try send({ type: "retry" })) !== undefined) try load("retryDone")
+    },
+    effect beginSave() {
+      const before = try machine.get()
+      const after = try send({ type: "save" })
+      if (after === undefined) throw new DraftRefused({ reason: "blocked" })
+      if (after.saveResult === "StaleRefused") throw new DraftRefused({ reason: "stale" })
+      const fields = decoded(before.text)
+      if (fields === undefined) throw new DraftRefused({ reason: "blocked" })
+      return fields
+    },
+    effect saved(ok: boolean) {
+      const before = try machine.get()
+      const after = try send({ type: "commitDone", ok })
+      if (after?.stage === "StageClearing") try send({ type: "clearDone", outcome: try clearSlot(before.text) })
+    },
+    effect close() { try send({ type: "close" }) },
+    effect handoff(origin: DraftOrigin, fields: DraftFieldsRecord) {
+      const current = try readSlot("")
+      const text = JSON.stringify(fields)
+      const after = try send({ type: "admitHandoff", origin, slotEmpty: current === undefined, fields: text })
+      if (after?.notice === "HandoffAdmitted") {
+        try Ref.set(sequence, 0)
+        const result = try writeSlot(fields, "")
+        if (result !== "saved") try send({ type: "reportStorageError" })
+      }
+    },
+    effect retained(target: string) {
+      const slot = try readSlot(target)
+      return slot === "error" || slot === undefined ? undefined : slot.fields
+    },
+    effect openRecovery() { try send({ type: "openRecovery", development: build.info.testMocks }) },
+    effect captureRecovery() {
+      const state = try machine.get()
+      const raw = store.get(try key(state.target)) catch () => undefined
+      try Ref.set(captured, raw)
+      try send({ type: "recoveryCaptured", ok: raw !== undefined })
+      return raw === undefined ? undefined : JSON.stringify({ saved: raw, current: state.text })
+    },
+    effect confirmReset() {
+      const state = try machine.get()
+      if (state.recovery === "RecoveryReady") try send({ type: "requestReset" })
+      const confirmed = try send({ type: "confirmReset" })
+      if (confirmed === undefined) return
+      const expected = try Ref.get(captured)
+      const now = store.get(try key(state.target)) catch () => undefined
+      if (now !== expected) try send({ type: "recoverySuperseded" })
+      const ok = now === expected && (effect { try store.remove(try key(state.target)); return true } catch () => false)
+      try send({ type: "recoverySettled", ok })
+    },
+    effect closeRecovery() { try send({ type: "closeRecovery" }) },
+  }
+})

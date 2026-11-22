@@ -1,20 +1,7 @@
 import path from 'node:path';
-import {fileURLToPath, pathToFileURL} from 'node:url';
-import {upstreamNativeSource} from './upstream-native-source.ts';
+import {fileURLToPath} from 'node:url';
+import {prepareListenerSystemui as prepare, verifyListenerSystemui as verify} from './os-ported/os/sense-systemui.mjs';
 
-const root=fileURLToPath(new URL('../',import.meta.url));
-const modulePath='packages/os/scripts/android/sense-systemui.mjs';
-const testPath='packages/os/scripts/android/sense.test.mjs';
-const upstream=upstreamNativeSource(root);
-
-function importPinnedSystemui(filename: string) {
- upstream.read(filename);
- return import(pathToFileURL(path.join(upstream.directory,filename)).href);
-}
-
-const {prepareListenerSystemui:prepare,verifyListenerSystemui:verify}=await importPinnedSystemui(modulePath);
-/** Run the shared tests against the same pinned SystemUI source as this CLI. */
-export const loadListenerSystemuiTests=()=>importPinnedSystemui(testPath);
 export function prepareListenerSystemui(source: string,output: string,bundle='ops'){return prepare(source,output,bundle);}
 export function verifyListenerSystemui(source: string,state='before',bundle='ops'){return verify(source,state,bundle);}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {

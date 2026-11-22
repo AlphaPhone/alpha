@@ -1,0 +1,31 @@
+// spec/browser/autofill.md, "Story: Know whether this phone can fill logins in Browser"; spec/browser/autofill.md, "Filling is offered only when the native host reports attested fields available"
+import { type FillSupport, fillSupport } from "../../gen/browser__autofill.effect.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { BrowserTabs } from "./session.vibe"
+import { TabHost } from "./tabHost.vibe"
+import { Support } from "./tabHost.schema.vibe"
+
+/** Whether this phone's Browser can fill attested login fields, and the way to the password provider. */
+export service BrowserAutofill {
+  /** Asks the native host; an unanswered query is unknown, never available. */
+  status(): FillSupport!!
+  /** The menu's Passwords: Settings at the password provider. */
+  openPasswords(): void!!
+}
+
+/** BrowserAutofill over the tab host. */
+export const autofillLayer = Layer.effect(BrowserAutofill, effect {
+  const host = try TabHost
+  const tabs = try BrowserTabs
+  const apps = try Navigation
+  return {
+    effect status() {
+      const answer = effect { return try Schema.decodeUnknownEffect(Support)(try host.call("loginFillStatus")) } catch () => undefined
+      return fillSupport(answer !== undefined, answer?.available === true)
+    },
+    effect openPasswords() {
+      try tabs.dispatch({ type: "closeMenu" })
+      try apps.open("settings", "password-provider")
+    },
+  }
+})

@@ -1,0 +1,27 @@
+// spec/shell/overview.md, "Rows read on an earlier day are read again at midnight, and a failed read hides them"; spec/shell/overview.md, "The brief card shows the newest retained brief, and says when it failed or did not run"
+
+/** One attendee of a feed event; only its name is used, for initials. */
+export schema FeedAttendee { readonly displayName?: string | null; readonly email?: string | null }
+
+/** One event of the agent's calendar feed. */
+export schema FeedEvent {
+  readonly id: string
+  readonly title: string
+  readonly startAt: string
+  readonly endAt: string
+  readonly isAllDay: boolean
+  readonly conferenceLink?: string | null
+  readonly attendees?: FeedAttendee[]
+}
+
+/** `GET /api/lifeops/calendar/feed`: the events, and whether every source answered. */
+export schema CalendarFeed {
+  readonly events: FeedEvent[]
+  readonly state: "complete" | "partial" | "unavailable"
+}
+
+/** One automation of `GET /api/automations`; it counts as on when it says so. */
+export schema AutomationRow { readonly enabled?: boolean; readonly status?: string }
+
+/** `GET /api/automations`. */
+export schema AutomationList { readonly automations: AutomationRow[] }

@@ -1,0 +1,123 @@
+// spec/clock/index.md
+// The phone Clock's journeys run against: its plugins faked once, at the Native boundary, and the other areas' services.
+import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Build } from "../../src/platform/build.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { CloudSession } from "../../src/account/session.vibe"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
+import { WorkflowRuns } from "../../src/workflows/runs.vibe"
+import { NotesOrigins } from "../../src/notes/origins.vibe"
+import { initial as navInitial } from "../../gen/shell__navigation.ts"
+import { initial as sessionInitial } from "../../gen/account__session.ts"
+import { machine as facts } from "../../gen/settings__facts.effect.vibe"
+import { machine as ringer } from "../../gen/clock__ringer.effect.vibe"
+import { machine as alarms } from "../../gen/clock__alarms.effect.vibe"
+import { machine as timers } from "../../gen/clock__timers.effect.vibe"
+import { machine as stopwatch } from "../../gen/clock__stopwatch.effect.vibe"
+import { machine as world } from "../../gen/clock__worldClock.effect.vibe"
+import { machine as handoff } from "../../gen/clock__handoff.effect.vibe"
+import { machine as history } from "../../gen/clock__handoffHistory.effect.vibe"
+import { machine as reminders } from "../../gen/clock__reminders.effect.vibe"
+import { machine as journal } from "../../gen/clock__reminderJournal.effect.vibe"
+import { machine as taps } from "../../gen/clock__reminderTaps.effect.vibe"
+import { machine as shade } from "../../gen/clock__notifications.effect.vibe"
+import { machine as canonical } from "../../gen/clock__canonicalTaps.effect.vibe"
+import { machine as workflow } from "../../gen/clock__workflowNotices.effect.vibe"
+import { machine as deletions } from "../../gen/clock__deletions.effect.vibe"
+import { machine as mirror } from "../../gen/clock__mirror.effect.vibe"
+import { machine as notices } from "../../gen/clock__notices.effect.vibe"
+
+/** One plugin call the phone received. */
+export interface Call {
+  readonly plugin: string
+  readonly method: string
+  readonly args: unknown
+}
+
+/** What a plugin method answers: a reply, or a refusal the plugin raises. */
+export type Handler = (args: unknown) => unknown
+
+/** A handler's answer that makes the plugin refuse the call, as a lost answer looks to Alpha. */
+export interface Refusal {
+  readonly refused: string
+}
+
+/** Refuses the call with `message`. */
+export const refuse = (message: string): Refusal => ({ refused: message })
+
+function refusal(value: unknown): value is Refusal {
+  return typeof value === "object" && value !== null && "refused" in value && typeof value.refused === "string"
+}
+
+/** A phone whose plugins answer from `handlers`, keyed `Plugin.method`, and that records every call. */
+export function fakePhone(handlers: Record<string, Handler>) {
+  const calls: Call[] = []
+  const layer = Layer.succeed(Native, {
+    available: (plugin: string) => succeed(Object.keys(handlers).some((key) => key.startsWith(`${plugin}.`))),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      calls.push({ plugin, method, args })
+      const handler = handlers[`${plugin}.${method}`]
+      if (handler === undefined) throw new NativeUnavailable({ plugin, method })
+      const answer = try Effect.try({ try: () => handler(args), catch: (error) => new NativeFailed({ plugin, method, message: String(error) }) })
+      if (refusal(answer)) throw new NativeFailed({ plugin, method, message: answer.refused })
+      return answer
+    },
+    listen: () => Stream.empty,
+  })
+  return { calls, layer }
+}
+
+/** The build Clock runs in. */
+export const build = (variant: "launcher" | "aosp" | "browser", testMocks = false) => Layer.succeed(Build, { info: { version: "0.1.0", variant, testMocks } })
+
+/** The shell's navigation, remembering where it was sent; only the members Clock uses answer. */
+export function fakeNavigation() {
+  const opened: Array<{ readonly app: string; readonly route?: string }> = []
+  const nav = () => {
+    const last = opened.at(-1)
+    return last === undefined ? navInitial : { ...navInitial, app: last.app, places: [{ app: last.app, route: last.route ?? "", inner: false }] }
+  }
+  const shape = {
+    open: (app: string, route?: string) => sync(() => { opened.push({ app, route }); return true }),
+    get: () => sync(nav),
+  }
+  return { opened, layer: Layer.succeed(Navigation, shape as unknown as Navigation.Shape) }
+}
+
+/** The assistant: a composer that is quiet unless `busy`, and the drafts reviewed questions opened. */
+export function fakeAssistant(busy = false) {
+  const asked: string[] = []
+  const composer = { transcript: Stream.make({ conversation: null, rows: [], hasMore: false, typing: busy }) }
+  const assistant = { openWith: (draft: string) => sync(() => { asked.push(draft) }) }
+  return {
+    asked,
+    layer: Layer.merge(Layer.succeed(Composer, composer as unknown as Composer.Shape), Layer.succeed(Assistant, assistant as unknown as Assistant.Shape)),
+  }
+}
+
+/** The signed-in Cloud account `organization:user`, or none. */
+export function session(ownerId: string | undefined) {
+  const [organizationId, userId] = (ownerId ?? ":").split(":")
+  const current = ownerId === undefined ? sessionInitial : { ...sessionInitial, phase: "SignedIn", generation: 1, account: { ...sessionInitial.account, organizationId, userId } }
+  return Layer.succeed(CloudSession, { current: () => succeed(current) } as unknown as CloudSession.Shape)
+}
+
+/** The workflows area's runs, remembering each run it opened and answering the route Workflows shows it under. */
+export function fakeRuns() {
+  const opened: string[] = []
+  const shape = { open: (runId: string) => sync(() => { opened.push(runId); return `run/${runId}` }) }
+  return { opened, layer: Layer.succeed(WorkflowRuns, shape as unknown as WorkflowRuns.Shape) }
+}
+
+/** The notes area's back-links, remembering each record it was told to forget. */
+export function fakeOrigins() {
+  const forgotten: Array<{ readonly kind: string; readonly id: string }> = []
+  const shape = { forget: (kind: string, id: string) => sync(() => { forgotten.push({ kind, id }) }) }
+  return { forgotten, layer: Layer.succeed(NotesOrigins, shape as unknown as NotesOrigins.Shape) }
+}
+
+/** Every Clock machine, in memory. */
+export const machines = Layer.mergeAll(
+  facts(), ringer(), alarms(), timers(), stopwatch(), world(), handoff(), history(), reminders(), journal(), taps(), shade(), canonical(), workflow(), deletions(), mirror(), notices(),
+)

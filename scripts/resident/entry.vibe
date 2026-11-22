@@ -1,0 +1,39 @@
+// spec/agent/plugins/bundle.md, "A bundle is built only when every listed plugin and the product plugin ship as packages and the load smoke loaded them"; spec/agent/host/process.md
+import { runAgentCli } from "@elizaos/agent/cli"
+import { InferenceEngine, localInferenceModule, localInferencePluginName } from "@elizaos/plugin-local-inference"
+import { androidInferenceLayer } from "@elizaos/os/inference"
+import * as assistant from "@elizaos/plugin-personal-assistant"
+import * as calendar from "@elizaos/plugin-calendar"
+import * as inbox from "@elizaos/plugin-inbox"
+import * as notes from "@elizaos/plugin-notes"
+import * as files from "@elizaos/plugin-files"
+import * as workflow from "@elizaos/plugin-workflow"
+import * as maps from "@elizaos/plugin-maps"
+import * as browser from "@elizaos/plugin-browser"
+
+type PluginModule = { readonly default?: unknown; readonly plugin?: unknown }
+
+function entry(packageName: string, module: PluginModule) {
+  return { packageName, plugin: module.default ?? module.plugin }
+}
+
+/** The on-device InferenceEngine over the os InferenceHost whose socket the launch environment names (ELIZA_INFERENCE_SOCKET). */
+const engine = await runPromise(effect {
+  const socket = try Config.String("ELIZA_INFERENCE_SOCKET")
+  return try Effect.provide(InferenceEngine.asEffect(), androidInferenceLayer(socket))
+})
+
+/** Alpha's resident agent: the bundled plugins, with local inference hosted over the device's own engine. */
+runAgentCli({
+  bundled: [
+    entry("@elizaos/plugin-personal-assistant", assistant),
+    entry("@elizaos/plugin-calendar", calendar),
+    entry("@elizaos/plugin-inbox", inbox),
+    entry("@elizaos/plugin-notes", notes),
+    entry("@elizaos/plugin-files", files),
+    entry("@elizaos/plugin-workflow", workflow),
+    entry("@elizaos/plugin-maps", maps),
+    entry("@elizaos/plugin-browser", browser),
+  ],
+  hostModules: new Map([[localInferencePluginName, localInferenceModule(engine)]]),
+})

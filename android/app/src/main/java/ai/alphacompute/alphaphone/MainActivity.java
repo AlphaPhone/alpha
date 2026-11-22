@@ -379,6 +379,10 @@ public class MainActivity extends BridgeActivity {
    }
   }
   registerPlugin(AlphaSystemPlugin.class);
+  registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
+  registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
+  registerPlugin(ElizaNetworkPolicyPlugin.class);
+  registerPlugin(ElizaSecureStorePlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaDeviceAppsPlugin.class);
   registerPlugin(AlphaContactsPlugin.class);

@@ -1,0 +1,17 @@
+// spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"
+const safeText = (value: string) => value.isWellFormed() && !/[\p{Cc}‪-‮⁦-⁩]/u.test(value)
+const Query = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(128), Schema.makeFilter(safeText))
+const PhoneNumber = Schema.String.check(Schema.isPattern(/^\+?[0-9]{2,20}$/))
+
+/** Alpha's keypad request: Phone's keypad in front, filled in at most; it never dials. */
+export const KeypadOpen = Schema.Struct({ type: Schema.Literal("phone_keypad"), number: Schema.optionalKey(PhoneNumber) })
+/** Alpha's request to show Contacts filtered to a search. */
+export const ContactShow = Schema.Struct({ type: Schema.Literal("contact_show"), query: Query })
+/** Alpha's request to read the contact the owner has open. */
+export const ContactReadSelected = Schema.Struct({ type: Schema.Literal("contact_read_selected") })
+
+/** The operations Alpha's renderer runs beside the agent's telephony family. */
+export const AlphaOperation = Schema.Union([KeypadOpen, ContactShow, ContactReadSelected])
+
+/** The owner's own request the proposal came from, which grounds a written number. */
+export const OwnerRequest = Schema.Struct({ text: Schema.String.check(Schema.isMaxLength(8000)) })

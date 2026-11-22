@@ -1,0 +1,18 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "{{workerName}}",
+  "account_id": "{{accountId}}",
+  "main": "../dist/src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "{{apiHost}}", "custom_domain": true }],
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "{{hyperdriveId}}" }],
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "SPEECH_RELAY_SESSIONS", "class_name": "SpeechRelayCoordinator" }] },
+  "migrations": [{ "tag": "speech-relay-v1", "new_sqlite_classes": ["SpeechRelayCoordinator"] }],
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "observability": { "enabled": true },
+  "vars": "{{vars}}"
+}

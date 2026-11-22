@@ -157,19 +157,11 @@ jobs:
           grep -Eq '^Pkg.Revision *= *28\.2\.13676358[[:space:]]*$' "$ANDROID_NDK_HOME/source.properties"
           python3 -c 'import shutil; free=shutil.disk_usage(".").free; print("freshCapacityAfterBytes="+str(free)); assert free >= 32*1024**3, "Fresh runner needs at least 32GiB for resident archive headroom"'
           df -h "$GITHUB_WORKSPACE"
-      # Archive host fixtures need genuine Node; native/SDK producers still use Bun.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26.13.0"
-      - name: Capture genuine Node for archive host tests before Bun aliases
-        run: |
-          ALPHA_NODE="$(node -p 'process.versions.bun ? "" : process.execPath')"
-          test -n "$ALPHA_NODE"
-          test "$("$ALPHA_NODE" --version)" = 'v26.13.0'
-          echo "ALPHA_ARCHIVE_HOST_NODE=$ALPHA_NODE" >> "$GITHUB_ENV"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.4.2"
+      - name: Install pnpm
+        run: npm install --global pnpm@10.24.0
       - name: Validate dispatched build version
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -178,22 +170,9 @@ jobs:
           value = os.environ['ELIZAOS_VERSION_CODE']
           assert re.fullmatch(r'[1-9][0-9]{0,9}', value) and 25 <= int(value) <= 2100000000, 'Dispatched candidate requires versionCode > retained V24'
           PYCODE
-      - name: Verify acquisition target and transport contracts
-        run: python3 -B scripts/ci/test-acquire-resident-bun.py
-      - name: Admit exact tools and fresh source paths
-        run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(bun --version)" = "1.4.2"
-          python3 -c 'import shutil; assert shutil.disk_usage(".").free >= 10*1024**3'
-          mkdir -p test-results/resident-ci
-          {
-            echo "ALPHA_LOCAL_AGENT_SOURCE_DIR=$GITHUB_WORKSPACE/artifacts/resident-ci-92fc"
-            echo "ALPHA_WORKFLOW_WORKER_OUTPUT=$GITHUB_WORKSPACE/artifacts/worker-ci-92fc"
-            echo "XDG_CACHE_HOME=$RUNNER_TEMP/alpha-cache"
-            echo "ALPHA_BUN=$(command -v bun)"
-          } >> "$GITHUB_ENV"
-      - run: bun install --frozen-lockfile
-        timeout-minutes: 10
+      - run: pnpm install --frozen-lockfile
+      - name: Verify the pinned upstream source
+        run: pnpm upstream:verify
       - name: Prepare archive host-test prerequisites in the selected cache
         run: |
           bash scripts/ci/install-playwright-browser.sh chromium
@@ -201,11 +180,10 @@ jobs:
       - name: Check embedding artifact contract
         run: |
           python3 test/embedding-artifact-inputs.test.py
-          bun test --timeout=120000 test/native-build-inputs.test.mjs
       - name: Resolve the current native build recipe
         id: native-recipe
         run: |
-          echo "sha256=$(bun -e 'import {nativeRecipe,nativeRecipeDigest} from "./scripts/native-build-inputs.ts"; process.stdout.write(nativeRecipeDigest(nativeRecipe(process.cwd())))')" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(node --conditions=eliza-source --import vibelang/register --input-type=module -e 'import {nativeRecipe,nativeRecipeDigest} from "./scripts/native-build-inputs.ts"; process.stdout.write(nativeRecipeDigest(nativeRecipe(process.cwd())))')" >> "$GITHUB_OUTPUT"
       - name: Cache verified native source and model inputs
         id: native-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -219,8 +197,8 @@ jobs:
       - name: Build and stage native voice and embeddings from verified inputs
         timeout-minutes: 95
         run: |
-          bun run agent:build-embedding-host
-          bun scripts/voice-host.ts --verify
+          pnpm agent:build-embedding-host
+          node --conditions=eliza-source --import vibelang/register scripts/voice-host.ts --verify
       - name: Retain verified native build cache
         if: steps.native-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -232,121 +210,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bun scripts/app-update-candidate.ts version test-results/resident-ci-candidate/version.json
-          echo "ELIZAOS_VERSION_CODE=$(bun -p 'require("./test-results/resident-ci-candidate/version.json").versionCode')" >> "$GITHUB_ENV"
-      - name: Prepare pinned JSON dependency for host contract tests
-        shell: bash
-        run: bash scripts/ci/prepare-host-test-json.sh
-      - name: Verify source metadata and voice contracts before resident preparation
-        timeout-minutes: 5
-        run: |
-          bun run upstream:prepare-client
-          bun test \
-            test/embedding-host-admission.test.mjs \
-            test/upstream-reachability.test.mjs \
-            test/voice-host-record.test.mjs \
-            test/cloud-voice-profile.test.mjs
-      - run: bun test --timeout=600000 vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
-      - name: Prepare and qualify fresh resident source with normal hooks
-        timeout-minutes: 60
-        env:
-          RUN_TURBO_CONCURRENCY: "1"
-        run: bun run agent:prepare
-      - name: Capture the hydrated SDK lock and graph
-        if: github.event_name == 'workflow_dispatch' || env.ALPHA_APP_UPDATE_CANDIDATE == '1'
-        run: |
-          source="$ALPHA_LOCAL_AGENT_SOURCE_DIR"
-          mkdir -p test-results/resident-ci
-          sha256sum "$source/bun.lock" > test-results/resident-ci/sdk-lock.sha256
-          (cd "$source" && bun --no-env-file pm ls --all) > test-results/resident-ci/sdk-graph-before.txt
-          python3 -c 'from pathlib import Path; assert Path("test-results/resident-ci/sdk-graph-before.txt").stat().st_size <= 16*1024**2'
-      - name: Verify the hydrated SDK graph with OS-network-denied frozen install
-        if: github.event_name == 'workflow_dispatch'
-        timeout-minutes: 10
-        run: |
-          source="$ALPHA_LOCAL_AGENT_SOURCE_DIR"
-          bun_executable="$(command -v bun)"
-          # sudo only creates the fresh network namespace. unshare drops to the
-          # runner UID/GID BEFORE the pinned Bun process; no token is forwarded.
-          # shellcheck disable=SC2016
-          sudo unshare --net --setgid "$(id -g)" --setuid "$(id -u)" -- \
-            env -i HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" NO_COLOR=1 \
-            BUN_INSTALL_CACHE_DIR="${BUN_INSTALL_CACHE_DIR:-$HOME/.bun/install/cache}" \
-            BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
-            /bin/sh -c 'cd "$1" && shift && exec "$@"' sh "$source" \
-            "$bun_executable" --no-env-file install --offline --frozen-lockfile --ignore-scripts
-          sha256sum --check test-results/resident-ci/sdk-lock.sha256
-          (cd "$source" && "$bun_executable" --no-env-file pm ls --all) > test-results/resident-ci/sdk-graph-after.txt
-          cmp test-results/resident-ci/sdk-graph-before.txt test-results/resident-ci/sdk-graph-after.txt
-          bun scripts/prepare-local-agent.ts --source-only
-      - name: Qualify the prepared resident source
-        timeout-minutes: 50
-        env:
-          RUN_TURBO_CONCURRENCY: "1"
-        run: |
-          bun run agent:test-device-timing
-          bun run agent:build-workflow-worker
-          bun scripts/test-native-cloud-runtime-config.ts
-          bun run agent:test-workflow-compiler
-          bun run agent:test-workflow-worker
-      - name: Acquire hash-pinned Android Bun with step-only authentication
-        timeout-minutes: 12
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/acquire-resident-bun.py
-      - name: Stage qualified resident runtime
+          node --conditions=eliza-source --import vibelang/register scripts/app-update-candidate.ts version test-results/resident-ci-candidate/version.json
+          echo "ELIZAOS_VERSION_CODE=$(node -p 'require("./test-results/resident-ci-candidate/version.json").versionCode')" >> "$GITHUB_ENV"
+      - name: Build the resident agent bundle from the pinned source
         timeout-minutes: 30
-        env:
-          RUN_TURBO_CONCURRENCY: "1"
-          ALPHA_NODE: ${{ env.ALPHA_ARCHIVE_HOST_NODE }}
-          ALPHA_REQUIRE_PREPARED_SDK: '1'
-          ALPHA_ELIZA_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
-          ALPHA_CLOUD_COLLECTOR_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
-        run: |
-          bun run agent:stage-android
-          bun scripts/stage-embedding-host.ts --verify
-      - name: Qualify the staged mobile workflow bundle
-        timeout-minutes: 5
-        env:
-          RUN_TURBO_CONCURRENCY: "1"
-          ALPHA_NODE: ${{ env.ALPHA_ARCHIVE_HOST_NODE }}
-          ALPHA_REQUIRE_PREPARED_SDK: '1'
-          ALPHA_ELIZA_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
-          ALPHA_CLOUD_COLLECTOR_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
-        run: |
-          bun run agent:test-mobile-workflow-bundle
+        run: pnpm agent:bundle
+      - name: Stage the resident runtime payload (pinned Node, agent bundle)
+        timeout-minutes: 20
+        run: pnpm agent:stage-android
       - name: Generate notices for the packaged runtime
         timeout-minutes: 2
         env:
           RUN_TURBO_CONCURRENCY: "1"
-          ALPHA_NODE: ${{ env.ALPHA_ARCHIVE_HOST_NODE }}
-          ALPHA_REQUIRE_PREPARED_SDK: '1'
-          ALPHA_ELIZA_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
-          ALPHA_CLOUD_COLLECTOR_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
         run: |
-          bun scripts/generate-licenses.ts --packaged-runtime
+          node --conditions=eliza-source --import vibelang/register scripts/generate-licenses.ts --packaged-runtime
       - name: Archive the flag-off launcher distribution
         timeout-minutes: 50
         env:
           RUN_TURBO_CONCURRENCY: "1"
-          ALPHA_NODE: ${{ env.ALPHA_ARCHIVE_HOST_NODE }}
-          ALPHA_REQUIRE_PREPARED_SDK: '1'
-          ALPHA_ELIZA_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
-          ALPHA_CLOUD_COLLECTOR_SOURCE: ${{ env.ALPHA_LOCAL_AGENT_SOURCE_DIR }}
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
         run: |
-          bun scripts/build-archive.ts test-results/resident-ci-distribution
+          node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/resident-ci-distribution
       - name: Retain bounded distribution producer evidence
         if: github.event_name == 'workflow_dispatch' || env.ALPHA_APP_UPDATE_CANDIDATE == '1'
         run: |
-          bun scripts/runtime-profile.ts --verify-native
-          bun scripts/prepare-local-agent.ts --source-only
-          sha256sum --check test-results/resident-ci/sdk-lock.sha256
-          (cd "$ALPHA_LOCAL_AGENT_SOURCE_DIR" && bun --no-env-file pm ls --all) > test-results/resident-ci/sdk-graph-final.txt
-          cmp test-results/resident-ci/sdk-graph-before.txt test-results/resident-ci/sdk-graph-final.txt
+          pnpm upstream:verify
           python3 - <<'PYCODE'
           import hashlib, json, os, shutil, stat
           from pathlib import Path
@@ -396,8 +285,10 @@ jobs:
               ('android/app/src/main/jniLibs', 'android/app/src/main/jniLibs'),
               (generated_manifest, 'native-source-manifest.json'),
               ('.eliza/native-inputs/receipt.json', 'native-build-receipt.json'),
-              (str(Path(os.environ['ALPHA_LOCAL_AGENT_SOURCE_DIR']) / '.alpha-runtime-source.json'), 'prepared-source-stamp.json'),
-              (str(Path(os.environ['ALPHA_WORKFLOW_WORKER_OUTPUT']) / 'manifest.json'), 'worker-manifest.json'),
+              ('android/app/src/main/assets/agent/alpha-source.json', 'staged-source-stamp.json'),
+              ('.eliza/agent-bundle/manifest.json', 'agent-bundle-manifest.json'),
+              ('upstream.lock.json', 'upstream.lock.json'),
+              ('pnpm-lock.yaml', 'pnpm-lock.yaml'),
           ]
           files, total = {}, 0
           for source, destination in inputs:
@@ -435,7 +326,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp .eliza/native-inputs/receipt.json test-results/resident-ci-distribution/native-input-admission.json
-          bun scripts/app-update-candidate.ts receipt test-results/resident-ci-candidate/version.json test-results/resident-ci-distribution
+          node --conditions=eliza-source --import vibelang/register scripts/app-update-candidate.ts receipt test-results/resident-ci-candidate/version.json test-results/resident-ci-distribution
       - name: Retain the unsigned native update candidate
         if: env.ALPHA_APP_UPDATE_CANDIDATE == '1'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -451,7 +342,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ALPHA_CANDIDATE_ARTIFACT_ID: ${{ steps.native-candidate.outputs.artifact-id }}
           ALPHA_CANDIDATE_ARTIFACT_SHA256: ${{ steps.native-candidate.outputs.artifact-digest }}
-        run: bun scripts/app-update-candidate.ts archive-size test-results/resident-ci/native-candidate-artifact.json test-results/resident-ci-distribution
+        run: node --conditions=eliza-source --import vibelang/register scripts/app-update-candidate.ts archive-size test-results/resident-ci/native-candidate-artifact.json test-results/resident-ci-distribution
       # Preserve the dispatched artifact name for existing reviewed signing plans.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'workflow_dispatch'

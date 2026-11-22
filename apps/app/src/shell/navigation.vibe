@@ -1,0 +1,146 @@
+// spec/shell/navigation.md, "Story: Open an app and find it where I left it"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/navigation.md, "Story: Keep sheets and dialogs above the phone"; spec/shell/navigation.md, "Story: Let the agent switch my screen only while I am still looking"; spec/shell/navigation.md, "Story: Leave an app Alpha may no longer show"
+import { Machine as NavigationMachine, backTaken, type Event as NavigationEvent, type Host, type LayerKind, type Nav, type Detent } from "../../gen/shell__navigation.effect.vibe"
+import type { AppId } from "../web/app-screen.ts"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { admittedApps } from "./apps.vibe"
+import { BuildFacts, LaunchFacts, StatusFacts } from "./native.schema.vibe"
+import { pageEvents, pageHidden, setRootData } from "./page.ts"
+
+/** The shell's navigation for every area: open an app, go back or Home, list a layer, move the assistant. */
+export service Navigation {
+  /** Every state the navigation machine reaches. */
+  readonly changes: Stream.Stream<Nav>
+  /** The navigation as it is now. */
+  get(): Nav!!
+  /** One navigation event; false where the rules refuse it now, which changes nothing. */
+  send(event: NavigationEvent): boolean!!
+  /** Opens an app at a route, keeping the app in front as the way back. */
+  open(app: AppId, route?: string): boolean!!
+  /** Android's Back, as the page takes it. */
+  back(): boolean!!
+  /** Returns to Home, closing what is open above it. */
+  home(): boolean!!
+  /** Lists a sheet, menu or dialog the caller draws; it is open while listed. */
+  openLayer(id: string, kind: LayerKind, covers: boolean): boolean!!
+  /** Removes a layer the caller closed. */
+  closeLayer(id: string): boolean!!
+  /** Moves the assistant to a detent. */
+  moveChat(detent: Detent): boolean!!
+  /** The agent's navigation: captured, claimed and committed on the screen in front; true when its app is now shown. */
+  switchForAgent(app: AppId, route: string): boolean!!
+}
+
+/** Which surface this activity is, as Android reports it. */
+export effect function hostOf() {
+  const native = try Native
+  const build = try Build
+  if (build.info.variant === "browser" || !(try native.available("ElizaSystem"))) return "Standalone" as Host
+  const launch = effect { return try Schema.decodeUnknownEffect(LaunchFacts)(try native.invoke("ElizaSystem", "getLaunchInfo")) } catch () => ({ assistant: false })
+  if (launch.assistant) return "AssistantSurface" as Host
+  const facts = effect { return try Schema.decodeUnknownEffect(BuildFacts)(try native.invoke("ElizaSystem", "getBuildInfo")) } catch () => ({ launcher: false })
+  if (!facts.launcher) return "Standalone" as Host
+  const status = effect { return try Schema.decodeUnknownEffect(StatusFacts)(try native.invoke("ElizaSystem", "getStatus")) } catch () => ({ roles: [] })
+  return (status.roles.some((row) => row.role === "home" && row.held) ? "HomeApp" : "LauncherApp") as Host
+}
+
+effect function sendTo(machine: NavigationMachine.Shape, event: NavigationEvent) {
+  const sent = machine.send(event) catch () => undefined
+  return sent !== undefined
+}
+
+effect function publishBack(machine: NavigationMachine.Shape) {
+  for try (const state of machine.changes) {
+    try sync(() => setRootData("alphaCanGoBack", backTaken(state) ? "true" : "false"))
+  }
+}
+
+let appBack: (app: string) => (() => Promise<boolean>) | undefined = () => undefined
+
+/** Names each app's own Back (`AppScreen.back`), asked before the shell's while the app is the top layer. */
+export function setAppBack(resolve: (app: string) => (() => Promise<boolean>) | undefined): void {
+  appBack = resolve
+}
+
+/** One Back: the front app's own first while nothing lies above it, then the shell's order. */
+export effect function backOnce(machine: NavigationMachine.Shape) {
+  const state = try machine.get()
+  const front = state.app !== "" && state.layers.length === 0 && state.holds.length === 0 && !state.voice && !state.shade &&
+    state.chat !== "ChatSheet" && state.chat !== "ChatFull"
+  const own = front ? appBack(state.app) : undefined
+  if (own !== undefined) {
+    const handled = tryPromise(own) catch () => false
+    if (handled) return true
+  }
+  return try sendTo(machine, { type: "nativeBack" })
+}
+
+effect function followBack(machine: NavigationMachine.Shape) {
+  for try (const _ of pageEvents("alpha-back")) {
+    try backOnce(machine)
+  }
+}
+
+effect function followHome(machine: NavigationMachine.Shape) {
+  for try (const _ of pageEvents("launcher-home")) {
+    try sendTo(machine, { type: "goHome" })
+  }
+}
+
+effect function followVisibility(machine: NavigationMachine.Shape, admitted: string[]) {
+  for try (const _ of pageEvents("visibilitychange", "document")) {
+    if (pageHidden()) try sendTo(machine, { type: "hide" })
+    else {
+      try sendTo(machine, { type: "show" })
+      try sendTo(machine, { type: "refreshAdmission", admitted })
+    }
+  }
+}
+
+const DEV_COMMANDS: Readonly<Record<string, NavigationEvent>> = {
+  home: { type: "goHome" },
+  back: { type: "nativeBack" },
+  shade: { type: "openShade" },
+  assistant: { type: "moveChat", detent: "ChatFull" },
+  background: { type: "hide" },
+  resume: { type: "show" },
+}
+
+effect function followDevCommands(machine: NavigationMachine.Shape) {
+  for try (const detail of pageEvents("alpha:dev-command")) {
+    const command = typeof detail === "object" && detail !== null && "command" in detail ? (detail as { command?: unknown }).command : detail
+    if (typeof command === "string" && Object.hasOwn(DEV_COMMANDS, command)) try sendTo(machine, DEV_COMMANDS[command])
+  }
+}
+
+/** The navigation service over the navigation machine, after booting it for this host and build. */
+export const navigationLive = Layer.effect(Navigation, effect {
+  const machine = try NavigationMachine
+  const build = try Build
+  const admitted = admittedApps(build.info)
+  try sendTo(machine, { type: "boot", host: try hostOf(), admitted })
+  fork.scoped publishBack(machine)
+  fork.scoped followBack(machine)
+  fork.scoped followHome(machine)
+  fork.scoped followVisibility(machine, admitted)
+  if (build.info.testMocks) fork.scoped followDevCommands(machine)
+  const send = (event: NavigationEvent) => sendTo(machine, event)
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    send,
+    open: (app: AppId, route?: string) => send({ type: "openApp", app, route: route ?? "", push: true }),
+    back: () => backOnce(machine),
+    home: () => send({ type: "goHome" }),
+    openLayer: (id: string, kind: LayerKind, covers: boolean) => send({ type: "openLayer", id, kind, covers }),
+    closeLayer: (id: string) => send({ type: "closeLayer", id }),
+    moveChat: (detent: Detent) => send({ type: "moveChat", detent }),
+    effect switchForAgent(app: AppId, route: string) {
+      const claimed = (try send({ type: "captureClaim" })) && (try send({ type: "claimView", app })) && (try send({ type: "commitClaim", route }))
+      if (!claimed) return false
+      const shown = (try machine.get()).app === app
+      try send(shown ? { type: "acknowledge" } : { type: "loseAcknowledgement" })
+      return shown
+    },
+  }
+})

@@ -1,0 +1,368 @@
+// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/screen.md, "Story: Keep my place while I step away"; spec/maps/screen.md, "A handed-over query is applied once, and any newer action discards it before it applies"; spec/maps/location.md, "A start is admitted one at a time and retires the session before it"
+import { type Actor, type Event, type OriginKind, type Phase, type Screen, Machine as ScreenMachine, debounceMs, resumable } from "../../gen/maps__screen.effect.vibe"
+import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
+import { offers, restricted, type Travel } from "../../gen/maps__vocabulary.effect.vibe"
+import { MapsProvider } from "./cloud.vibe"
+import { MapsContent, type MapsContentState, remembered, type Shown } from "./content.vibe"
+import type { MapsFailure } from "./failure.vibe"
+import { coordinateLabel, parseCoordinates } from "./geometry.vibe"
+import { MapsLocation } from "./location.vibe"
+import type { Coordinate, Place } from "./maps.schema.vibe"
+import { SavedPlacesStore } from "./saved.vibe"
+
+const VIEWPORT_BIAS_ZOOM = 9
+
+/** A request kind; a new request retires the one of its kind before it. */
+type Kind = "search" | "origin" | "route" | "details" | "locate" | "debounce"
+
+/** The Maps screen's actions: each sends the owner's or a flow's event, then fetches what the run it opened needs. */
+export service MapsScreen {
+  open(): void!!
+  typeQuery(text: string): void!!
+  submitSearch(by?: Actor): void!!
+  clearQuery(): void!!
+  pickResult(index: number): void!!
+  pickSaved(id: number): void!!
+  dropPin(coordinate: Coordinate, label?: string): void!!
+  closePlace(): void!!
+  locate(by?: Actor): void!!
+  openDirections(by?: Actor): void!!
+  editOrigin(text: string, by?: Actor): void!!
+  submitOrigin(by?: Actor): void!!
+  chooseOrigin(index: number): void!!
+  chooseSavedOrigin(id: number): void!!
+  setTravel(travel: Travel, by?: Actor): void!!
+  chooseRoute(index: number): void!!
+  swapEnds(): void!!
+  back(): boolean!!
+  setHidden(hidden: boolean): void!!
+  leave(): void!!
+  setViewport(center: Coordinate, zoom: number): void!!
+  handoff(text: string, fromEvent: boolean, near?: Coordinate): void!!
+  showAgentPlace(place: Place, lookup: boolean, directions?: Travel): void!!
+  planFrom(origin: Coordinate): void!!
+  providerChanged(): void!!
+  /** Forget the recent searches, which live only in memory. */
+  clearRecent(): void!!
+  readonly states: Stream.Stream<Screen>
+}
+
+/** Whether a travel mode is offered by the installed provider. */
+export function offered(content: MapsContentState, travel: Travel): boolean {
+  return content.coverage !== undefined && offers(content.coverage.offer, travel)
+}
+
+function phaseOf(found: number): Phase {
+  return found > 0 ? "Ready" : "Empty"
+}
+
+/** The screen over its machine, the provider and the content it fetched. */
+export const screenLayer = Layer.effect(MapsScreen, effect {
+  const screen = try ScreenMachine
+  const connection = try ConnectionMachine
+  const content = try MapsContent
+  const provider = try MapsProvider
+  const location = try MapsLocation
+  const saved = try SavedPlacesStore
+  const running = new Map<Kind, Fiber.Fiber<void>>()
+
+  effect function run(kind: Kind, work: void!!) {
+    const old = running.get(kind)
+    if (old) try Fiber.interrupt(old)
+    running.set(kind, fork.detached work)
+  }
+
+  effect function cancel(kind: Kind) {
+    const old = running.get(kind)
+    running.delete(kind)
+    if (old) try Fiber.interrupt(old)
+  }
+
+  effect function tell(message: string) {
+    try content.update((c) => ({ ...c, message }))
+  }
+
+  effect function send(event: Event, by: Actor = "Owner") {
+    const before = try screen.get()
+    const after = screen.send(event, by) catch () => undefined
+    if (after === undefined) return undefined
+    try follow(before, after)
+    return after
+  }
+
+  /** Whatever run the event opened is fetched; a retired locate or debounce is cancelled. */
+  effect function follow(before: Screen, after: Screen) {
+    if (after.queryRun !== before.queryRun) try run("search", search(after.queryRun, after.searched))
+    if (after.originRun !== before.originRun) try run("origin", searchOrigin(after.originRun, after.originText))
+    if (after.routeRun !== before.routeRun) try run("route", plan(after.routeRun))
+    if (after.details === "Loading" && (before.details !== "Loading" || before.choiceId !== after.choiceId)) try run("details", details(after.choiceId))
+    if (after.pending !== "NoPending" && (after.query !== before.query || after.originText !== before.originText)) try run("debounce", debounced())
+    if (after.pending === "NoPending") try cancel("debounce")
+    if (after.locating && !before.locating) try run("locate", located())
+    if (!after.locating && before.locating) try cancel("locate")
+  }
+
+  effect function debounced() {
+    try sleep(debounceMs)
+    const s = try screen.get()
+    try send({ type: "debounce", length: s.query.trim().length }, "Flow")
+  }
+
+  effect function near() {
+    const c = try content.get()
+    if (c.searchNear) {
+      try content.update((x) => ({ ...x, searchNear: undefined }))
+      return c.searchNear
+    }
+    if (c.viewport && c.viewport.zoom >= VIEWPORT_BIAS_ZOOM) return c.viewport.center
+    return c.position?.coordinate ?? c.origin?.coordinate ?? c.shown?.coordinate
+  }
+
+  effect function search(run: number, query: string) {
+    const point = try near()
+    const coordinates = parseCoordinates(query) !== undefined
+    try content.update((c) => ({ ...c, recent: remembered(c.recent, query, coordinates) }))
+    const places = provider.search(query, point) catch effect (error) => {
+      try tell(error.message)
+      screen.send({ type: "searchSettles", run, outcome: "Failed" }, "Flow") catch () => undefined
+      return undefined
+    }
+    if (places === undefined) return
+    try content.update((c) => ({ ...c, results: { run, places }, message: "" }))
+    screen.send({ type: "searchSettles", run, outcome: phaseOf(places.length) }, "Flow") catch () => undefined
+  }
+
+  effect function searchOrigin(run: number, text: string) {
+    const c = try content.get()
+    const places = provider.search(text, c.position?.coordinate ?? c.origin?.coordinate) catch effect (error) => {
+      try tell(error.message)
+      screen.send({ type: "originSettles", run, outcome: "Failed" }, "Flow") catch () => undefined
+      return undefined
+    }
+    if (places === undefined) return
+    try content.update((x) => ({ ...x, originResults: { run, places }, message: `Choose a starting point for the route to ${x.shown?.label ?? "the place"}.` }))
+    screen.send({ type: "originSettles", run, outcome: phaseOf(places.length) }, "Flow") catch () => undefined
+  }
+
+  effect function details(id: number) {
+    const shown = (try content.get()).shown
+    if (!shown || shown.id !== id || !shown.providerPlaceId) {
+      screen.send({ type: "detailsSettle", id, outcome: "Ready" }, "Flow") catch () => undefined
+      return
+    }
+    const place = provider.details(shown.providerPlaceId) catch effect (error) => {
+      try tell(error.message)
+      return null
+    }
+    if (place === null) {
+      screen.send({ type: "detailsSettle", id, outcome: "Failed" }, "Flow") catch () => undefined
+      return
+    }
+    try content.update((c) => c.shown?.id === id ? { ...c, shown: { ...c.shown, place, label: place?.name ?? c.shown.label, coordinate: place?.coordinate ?? c.shown.coordinate } } : c)
+    screen.send({ type: "detailsSettle", id, outcome: place ? "Ready" : "Empty" }, "Flow") catch () => undefined
+  }
+
+  effect function plan(run: number) {
+    const s = try screen.get()
+    const c = try content.get()
+    const from = s.originKind === "LocatedOrigin" ? c.position?.coordinate : c.origin?.coordinate
+    const to = c.shown?.coordinate
+    if (!from || !to) {
+      screen.send({ type: "routeSettles", run, outcome: "Failed", count: 0 }, "Flow") catch () => undefined
+      return try tell("Choose a starting point, or use your current location.")
+    }
+    const routes = provider.routes(from, to, s.travel, true) catch effect (error: MapsFailure) => {
+      try tell(error.message)
+      screen.send({ type: "routeSettles", run, outcome: "Failed", count: 0 }, "Flow") catch () => undefined
+      return undefined
+    }
+    if (routes === undefined) return
+    try content.update((x) => ({ ...x, routes: { run, routes }, message: "" }))
+    screen.send({ type: "routeSettles", run, outcome: routes.length > 0 ? "Ready" : "Empty", count: routes.length }, "Flow") catch () => undefined
+  }
+
+  effect function located() {
+    const fix = location.once("OwnerFix") catch effect (error) => {
+      try tell(error.message)
+      return undefined
+    }
+    const id = try content.issue()
+    if (fix) {
+      try content.update((c) => ({
+        ...c, position: fix, message: fix.precision === "precise" ? "" : "Approximate location",
+        origin: { label: "Your location", coordinate: fix.coordinate },
+      }))
+      const s = try screen.get()
+      if (!s.directions) try content.update((c) => ({ ...c, shown: { id, label: "Current location", coordinate: fix.coordinate, kind: "NoProvider" } }))
+    }
+    screen.send({ type: "located", ok: fix !== undefined, id }, "Flow") catch () => undefined
+  }
+
+  effect function show(shown: Omit<Shown, "id">, choice: "ResultChoice" | "SavedChoice" | "PinChoice") {
+    const id = try content.issue()
+    try content.update((c) => ({ ...c, shown: { ...shown, id } }))
+    try send({ type: "pick", choice, id })
+  }
+
+  effect function quietLocate() {
+    const s = try screen.get()
+    if (s.choice !== "NoChoice" || s.directions || !(try location.granted())) return
+    const fix = location.once("QuietFix") catch () => undefined
+    if (fix) try content.update((c) => ({ ...c, position: fix }))
+  }
+
+  return {
+    effect open() {
+      connection.send({ type: "openMaps" }) catch () => undefined
+      try location.newVisit()
+      const before = try screen.get()
+      if (before.hidden) try send({ type: "showScreen" }, "Flow")
+      fork.detached quietLocate()
+    },
+    effect typeQuery(text: string) {
+      const s = try screen.get()
+      if (s.directions) return try send({ type: "editOrigin", text, coordinates: parseCoordinates(text) !== undefined })
+      try send({ type: "typeQuery", text })
+    },
+    effect submitSearch(by: Actor = "Owner") {
+      const s = try screen.get()
+      const point = parseCoordinates(s.query)
+      if (point) return try show({ label: "Dropped pin", coordinate: point, kind: "NoProvider" }, "PinChoice")
+      if (s.query.trim().length > 300) return try tell("Use a search of at most 300 characters.")
+      const c = try content.get()
+      if (!c.coverage) try tell("Connecting Maps…")
+      try send({ type: "submitSearch", length: s.query.trim().length }, by)
+    },
+    clearQuery: () => map(send({ type: "clearQuery" }), () => undefined),
+    effect pickResult(index: number) {
+      const c = try content.get()
+      const s = try screen.get()
+      const place = c.results.run === s.queryRun ? c.results.places[index] : undefined
+      if (!place || !c.coverage) return
+      try show({ label: place.name, coordinate: place.coordinate, kind: c.coverage.kind, place, providerId: place.providerId, providerPlaceId: place.id }, "ResultChoice")
+    },
+    effect pickSaved(id: number) {
+      const item = (try saved.list()).find((i) => i.id === id)
+      if (!item) return
+      try show({ label: item.label, coordinate: { latitude: item.lat / 1e6, longitude: item.lng / 1e6 }, kind: item.provider ? "OpenProvider" : "NoProvider", savedId: id,
+        ...(item.provider ? { providerId: item.provider, providerPlaceId: item.providerPlaceId } : {}) }, "SavedChoice")
+    },
+    effect dropPin(coordinate: Coordinate, label?: string) {
+      const s = try screen.get()
+      if (s.directions) return
+      try show({ label: label ?? "Dropped pin", coordinate, kind: "NoProvider" }, "PinChoice")
+    },
+    closePlace: () => map(send({ type: "closePlace" }), () => undefined),
+    locate: (by: Actor = "Owner") => map(send({ type: "locate" }, by), () => undefined),
+    effect openDirections(by: Actor = "Owner") {
+      const s = try screen.get()
+      const c = try content.get()
+      if (!c.coverage) return try tell("Connect a Maps provider to plan a route. No route has been calculated.")
+      const after = try send({ type: "openDirections", offered: offered(c, s.travel) }, by)
+      if (!after) return
+      if (!after.origin) try tell("Choose a starting point, or use your current location.")
+      if (!after.origin && after.originKind === "NoOrigin" && (try location.granted())) try send({ type: "locate" }, "Flow")
+    },
+    effect editOrigin(text: string, by: Actor = "Owner") {
+      const point = parseCoordinates(text)
+      if (point) try content.update((c) => ({ ...c, origin: { label: text, coordinate: point } }))
+      const after = try send({ type: "editOrigin", text, coordinates: point !== undefined }, by)
+      if (after && text !== "") try tell("Press Enter to search for this starting point.")
+    },
+    effect submitOrigin(by: Actor = "Owner") {
+      const s = try screen.get()
+      if (s.originText.trim() === "") return try tell("Enter a starting place, a saved place or latitude, longitude.")
+      if (/^(my|your) location$/i.test(s.originText.trim())) return try send({ type: "locate" }, by)
+      const point = parseCoordinates(s.originText)
+      if (s.originKind === "CoordinateOrigin" && !point) return try tell("That starting point is not a valid latitude, longitude.")
+      if (point) try content.update((c) => ({ ...c, origin: { label: coordinateLabel(point), coordinate: point } }))
+      try send({ type: "submitOrigin" }, by)
+    },
+    effect chooseOrigin(index: number) {
+      const c = try content.get()
+      const s = try screen.get()
+      const place = c.originResults.run === s.originRun ? c.originResults.places[index] : undefined
+      if (!place) return
+      try content.update((x) => ({ ...x, origin: { label: place.name, coordinate: place.coordinate } }))
+      try send({ type: "chooseOrigin", kind: "ChosenOrigin" as OriginKind, label: place.name })
+    },
+    effect chooseSavedOrigin(id: number) {
+      const item = (try saved.list()).find((i) => i.id === id)
+      if (!item) return
+      try content.update((x) => ({ ...x, origin: { label: item.label, coordinate: { latitude: item.lat / 1e6, longitude: item.lng / 1e6 } } }))
+      try send({ type: "chooseOrigin", kind: "SavedOrigin" as OriginKind, label: item.label })
+    },
+    effect setTravel(travel: Travel, by: Actor = "Owner") {
+      const c = try content.get()
+      if (!offered(c, travel)) {
+        return try tell(travel === "Transit" ? "Transit schedules are not available for this region."
+          : `${travel === "Bicycle" ? "Bike" : travel} directions are not available from this Maps provider.`)
+      }
+      try send({ type: "setTravel", travel, offered: true }, by)
+    },
+    chooseRoute: (index: number) => map(send({ type: "chooseRoute", index }), () => undefined),
+    effect swapEnds() {
+      const c = try content.get()
+      if (!c.origin || !c.shown) return
+      const id = try content.issue()
+      const destination = c.shown
+      try content.update((x) => ({
+        ...x, origin: { label: destination.label, coordinate: destination.coordinate },
+        shown: { id, label: c.origin?.label === "Your location" ? "Current location" : c.origin?.label ?? "Dropped pin", coordinate: c.origin!.coordinate, kind: "NoProvider" },
+      }))
+      try send({ type: "swapEnds", id, label: destination.label })
+    },
+    effect back() {
+      const s = try screen.get()
+      const after = try send({ type: "back" })
+      return after !== undefined && !(s.handoffFromEvent && !after.handoffFromEvent && after.choice === "NoChoice" && !after.directions)
+    },
+    effect setHidden(hidden: boolean) {
+      try location.setHidden(hidden)
+      try send(hidden ? { type: "hideScreen" } : { type: "showScreen" }, "Flow")
+    },
+    effect leave() {
+      for (const kind of [...running.keys()]) try cancel(kind)
+      try location.stop()
+      try send({ type: "leaveScreen" }, "Flow")
+    },
+    effect setViewport(center: Coordinate, zoom: number) {
+      try content.update((c) => ({ ...c, viewport: zoom >= VIEWPORT_BIAS_ZOOM ? { center, zoom } : undefined }))
+    },
+    effect handoff(text: string, fromEvent: boolean, near?: Coordinate) {
+      const query = text.trim()
+      if (!query) return
+      try content.update((c) => ({ ...c, searchNear: near }))
+      const queued = try send({ type: "handoffArrives", text: query, fromEvent }, "Flow")
+      if (queued) try send({ type: "applyHandoff", length: query.length }, "Flow")
+    },
+    effect showAgentPlace(place: Place, lookup: boolean, directions?: Travel) {
+      const c = try content.get()
+      const id = try content.issue()
+      try content.update((x) => ({ ...x, origin: undefined, shown: { id, label: place.name, coordinate: place.coordinate, kind: lookup ? c.coverage?.kind ?? "NoProvider" : "NoProvider",
+        place: lookup ? undefined : place, providerId: lookup ? place.providerId : undefined, providerPlaceId: lookup ? place.id : undefined } }))
+      if (directions) {
+        try send({ type: "agentShowDirections", id, lookup, travel: directions }, "Flow")
+        try tell("Your agent asked for directions. Use your location or enter a starting point to plan the route, then tap Start.")
+      } else try send({ type: "agentShowPlace", id, lookup }, "Flow")
+    },
+    effect planFrom(origin: Coordinate) {
+      try content.update((c) => ({ ...c, origin: { label: coordinateLabel(origin), coordinate: origin } }))
+      try send({ type: "agentPlanFrom", label: coordinateLabel(origin) }, "Flow")
+    },
+    effect providerChanged() {
+      for (const kind of [...running.keys()]) try cancel(kind)
+      try content.update((c) => ({ ...c, results: { run: 0, places: [] }, originResults: { run: 0, places: [] }, routes: { run: 0, routes: [] }, shown: undefined, origin: undefined, recent: [] }))
+      try send({ type: "providerChanged" }, "Flow")
+      const s = try screen.get()
+      if (resumable(s)) try send({ type: "submitSearch", length: s.query.trim().length }, "Flow")
+    },
+    effect clearRecent() { try content.update((c) => ({ ...c, recent: [] })) },
+    states: screen.changes,
+  }
+})
+
+/** Whether the shown place is restricted by Google's terms. */
+export function restrictedShown(shown: Shown | undefined): boolean {
+  return shown !== undefined && restricted(shown.kind)
+}

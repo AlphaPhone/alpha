@@ -1,0 +1,45 @@
+// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"
+import { Machine, initial, machine } from "../../gen/workflows__clockDraft.effect.vibe"
+import { Build } from "../platform/build.vibe"
+
+/** The Clock draft Workflows opens over itself, handed to Clock once the owner approves it. */
+export service WorkflowClockDraft {
+  enter(): void!!
+  leave(): void!!
+  /** Remember that this visit opened the draft, so a retained draft may reopen. */
+  remember(): void!!
+  open(retained: boolean): boolean!!
+  close(): void!!
+  visibility(hidden: boolean): void!!
+  prepare(): boolean!!
+  /** Approve the reviewed draft: "dispatch" when the screen may now hand it to Clock, once. */
+  approve(): "dispatch" | "failed" | "refused"!!
+  /** What Clock answered the handoff the screen made. */
+  handedOver(opened: boolean): void!!
+}
+
+export const clockDraft = Layer.unwrap(effect {
+  const build = try Build
+  const start = { ...initial, browser: build.info.variant === "browser", mock: build.info.testMocks && build.info.variant === "browser" }
+  return Layer.provideMerge(Layer.effect(WorkflowClockDraft, effect {
+    const held = try Machine
+    const sent = (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
+    return {
+      enter: effect () => { try sent({ type: "enter" }) },
+      leave: effect () => { try sent({ type: "leave" }) },
+      remember: effect () => { try sent({ type: "remember" }) },
+      effect open(retained: boolean) { return (try sent({ type: "openClock", retained })) !== undefined },
+      close: effect () => { try sent({ type: "closeClock" }) },
+      effect visibility(hidden: boolean) { try sent({ type: "visibility", hidden }) },
+      effect prepare() { return (try sent({ type: "prepare" })) !== undefined },
+      effect approve() {
+        const approved = try sent({ type: "approve" })
+        if (approved === undefined || (try held.get()).phase !== "DraftSaving") return "refused"
+        try sent({ type: "savedDraft" })
+        const after = try held.get()
+        return after.phase === "DraftDispatching" ? "dispatch" : "failed"
+      },
+      effect handedOver(opened: boolean) { try sent({ type: "finishHandoff", opened }) },
+    }
+  }), machine(start))
+})

@@ -1,0 +1,56 @@
+// spec/platform/index.md, "A plugin method is called only when the native bridge lists it"; spec/platform/index.md, "A capability is offered only on a variant whose build registers its plugin"; spec/platform/index.md, "The build is the browser page off the phone, the AOSP image where the image says so, and the launcher otherwise"
+import { mayCall, reachable, variantOf, type Header, type Variant } from "../../gen/platform.effect.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "./native.vibe"
+import { capacitor, rejectionOf, type CapacitorPort } from "./native-capacitor.ts"
+import { reachOf } from "./native-plugins.ts"
+import { PlatformCapabilities } from "./native.schema.vibe"
+
+const UNIMPLEMENTED = "UNIMPLEMENTED"
+
+function headerOf(port: CapacitorPort, plugin: string, method: string): Header {
+  return port.registered(plugin) ? { tag: "Listed", hasMethod: port.listed(plugin, method) } : { tag: "NoHeader" }
+}
+
+/** Which variant the device behind `port` is: it asks `DeviceApps` whether the image is Alpha's verified AOSP image. */
+export effect function detectVariant(port: CapacitorPort): Variant!! {
+  if (!port.onDevice || !port.registered("DeviceApps") || !port.listed("DeviceApps", "platformCapabilities")) return variantOf(port.onDevice, false)
+  const said = tryPromise(() => port.invoke("DeviceApps", "platformCapabilities", {})) catch () => undefined
+  const facts = Schema.decodeUnknownEffect(PlatformCapabilities)(said) catch () => undefined
+  return variantOf(true, facts?.aospImage === true)
+}
+
+/** The Native service over `port` on a device of `variant`: a plugin outside its variant, or a method its header does not list, is unavailable. */
+export function nativeOver(port: CapacitorPort, variant: Variant): Native.Shape {
+  function offered(plugin: string): boolean {
+    const reach = reachOf(plugin)
+    return port.registered(plugin) && (reach === undefined || reachable(reach, variant))
+  }
+  return {
+    available: (plugin: string) => sync(() => offered(plugin)),
+    effect invoke(plugin: string, method: string, args?: unknown) {
+      if (!offered(plugin) || !mayCall(port.registered(plugin), headerOf(port, plugin, method))) throw new NativeUnavailable({ plugin, method })
+      return try tryPromise({
+        try: () => port.invoke(plugin, method, args ?? {}),
+        catch: (cause) => {
+          const said = rejectionOf(cause)
+          return said.code === UNIMPLEMENTED
+            ? new NativeUnavailable({ plugin, method })
+            : new NativeFailed({ plugin, method, message: said.message, ...(said.code === undefined ? {} : { code: said.code }), ...(said.data === undefined ? {} : { data: said.data }) })
+        },
+      })
+    },
+    listen: (plugin: string, event: string) => Stream.callback<unknown, NativeUnavailable>((queue) => effect {
+      if (!offered(plugin)) throw new NativeUnavailable({ plugin, method: event })
+      const remove = try tryPromise({
+        try: () => port.listen(plugin, event, (value) => { Queue.offerUnsafe(queue, value) }),
+        catch: () => new NativeUnavailable({ plugin, method: event }),
+      })
+      try addFinalizer(() => promise(() => remove().catch(() => undefined)))
+    }),
+  }
+}
+
+/** The phone's own Capacitor bridge, gated by the variant this device is. */
+export const nativeLive = Layer.effect(Native, effect {
+  return nativeOver(capacitor, try detectVariant(capacitor))
+})

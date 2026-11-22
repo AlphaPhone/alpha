@@ -1,0 +1,66 @@
+// spec/notes/audio.md, "Story: Generate a transcript of a saved recording when I ask"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
+import type { NoteJson } from "@elizaos/plugin-notes/types"
+import { mayUploadWindow, transcriptSaved, windowAllowed, windowCount, windowMs } from "../../gen/notes__audio.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { contentOf, type NoteRow } from "./list.vibe"
+import { decodeAudioDescription, decodeTranscribe } from "./notes.schema.vibe"
+import { randomId } from "./platform.ts"
+
+/** What Generate transcript did: saved, heard nothing and kept the recording, or could not run. */
+export type TranscriptOutcome = "saved" | "no-speech" | "unavailable" | "not-saved"
+
+/** Explicit transcription of a saved voice note's recording. */
+export service NotesAudio {
+  transcribe(row: NoteRow): TranscriptOutcome!!
+}
+
+/** The transcription service over the device's recording store and speech route. */
+export const audioLayer = Layer.effect(NotesAudio, effect {
+  const native = try Native
+  const collection = try NotesCollection
+
+  effect function exactAt(row: NoteRow, offset: number): boolean!! {
+    const audio = row.audio
+    if (audio === undefined) return false
+    const described = try (effect {
+      return try decodeAudioDescription(try native.invoke("AlphaNoteAudio", "describe", { audioId: audio.audioId }))
+    } catch () => undefined)
+    const owner = (try collection.current())?.snapshot.notes.some((note) => note.id === row.id) ?? false
+    return owner && described !== undefined && windowAllowed({
+      validIds: /^[A-Za-z0-9_-]{1,128}$/.test(audio.audioId), exactAudio: described.audioId === audio.audioId, exactNote: described.noteId === row.id,
+      duration: audio.durationMs, recordedDuration: described.durationMs, offset, deletedKeyPresent: described.deletedAt !== undefined, liveFilePresent: true,
+    })
+  }
+
+  return {
+    effect transcribe(row: NoteRow) {
+      const audio = row.audio
+      if (audio === undefined || !Number.isSafeInteger(audio.durationMs) || audio.durationMs <= 0) return "unavailable"
+      const parts: string[] = []
+      for (let index = 0; index < windowCount(audio.durationMs); index += 1) {
+        const offset = index * windowMs
+        const exact = try exactAt(row, offset)
+        if (!mayUploadWindow(true, exact, true, false)) return "unavailable"
+        const text = try (effect {
+          return (try decodeTranscribe(try native.invoke("AlphaVoiceCloud", "transcribeRecording", {
+            recordingId: audio.audioId, savedNoteId: row.id, savedDurationMs: audio.durationMs, offsetMs: offset, requestId: randomId(),
+          }))).text
+        } catch () => undefined)
+        if (text === undefined) return "unavailable"
+        if (text.trim() !== "") parts.push(text.trim())
+      }
+      const owned = try exactAt(row, 0)
+      if (!transcriptSaved(parts.length, owned)) return parts.length === 0 ? "no-speech" : "unavailable"
+      const current = try collection.current()
+      const note = current?.snapshot.notes.find((item) => item.id === row.id)
+      if (current === undefined || note === undefined || note.format?.kind !== "voice") return "not-saved"
+      const words = parts.join("\n")
+      const data: Record<string, NoteJson> = { ...note.format.data, lines: [{ s: "me", at: 0, t: words }] }
+      const saved = try (collection.interact("update-note", {
+        id: row.id, expectedRevision: current.snapshot.revision, content: contentOf(row.title, "\n", words), color: note.color, format: { kind: "voice", data },
+      }) catch () => undefined)
+      return saved?.target?.id === row.id ? "saved" : "not-saved"
+    },
+  }
+})

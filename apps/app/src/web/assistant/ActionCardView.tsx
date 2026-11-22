@@ -1,0 +1,54 @@
+// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"
+import { Check, Clock, X } from "lucide-react";
+import { canTapApprove, canTapDecline, initial } from "../../../gen/assistant__approvals.ts";
+import { approvalExpiryText, copy } from "../../assistant/presentation.vibe";
+import type { ProposalCard } from "../../assistant/transcript.vibe";
+import { Button, Card, CardFooter, CardTitle } from "../components/ui/index.ts";
+
+export type ActionCardViewProps = {
+  /** The card as the transcript holds it. */
+  card: ProposalCard;
+  /** Whether an emergency call is live, which holds Approve but never Decline. */
+  emergency: boolean;
+  /** Whether another card's approval or decline is in flight. */
+  busy: boolean;
+  /** The time the expiry is shown against. */
+  now: number;
+  onApprove: (card: ProposalCard) => void;
+  onDecline: (card: ProposalCard) => void;
+  /** Open the view a navigation-only card names. */
+  onOpen?: (card: ProposalCard) => void;
+};
+
+const settledTitles: Partial<Record<ProposalCard["state"], string>> = {
+  DoneCard: "Completed", UnconfirmedCard: "Not confirmed", DeclinedCard: "Declined", ExpiredCard: copy.reviewExpiredTitle,
+  UnavailableCard: copy.reviewUnavailableTitle, ReplacedCard: copy.reviewUnavailableTitle,
+};
+
+/**
+ * One action the agent proposed: Approve, or Decline as a visible second button; settled cards say what happened.
+ * @model spec/assistant/approvals.md
+ */
+export function ActionCardView({ card, emergency, busy, now, onApprove, onDecline, onOpen }: ActionCardViewProps) {
+  const routes = { ...initial, card: card.state, emergency };
+  const approvable = canTapApprove(routes) && !busy;
+  const declinable = canTapDecline(routes) && !busy;
+  const settled = settledTitles[card.state];
+  const expiry = approvalExpiryText(card.expiresAt, now, undefined);
+  const detail = card.state === "ExpiredCard" ? copy.reviewExpired : card.state === "UnavailableCard" || card.state === "ReplacedCard" ? copy.reviewUnavailable : card.summary ?? card.detail;
+  return (
+    <Card className="gap-2 p-4" aria-busy={busy || undefined}>
+      <CardTitle>{settled ?? card.title}</CardTitle>
+      <p className="text-sm whitespace-pre-wrap text-muted-foreground">{detail}</p>
+      {settled === undefined && expiry !== "" && <p className="flex items-center gap-1 font-mono text-xs uppercase text-muted-foreground"><Clock aria-hidden className="size-3" />{expiry}</p>}
+      {settled === undefined && (
+        <CardFooter className="gap-2">
+          {card.destination !== undefined
+            ? <Button onClick={() => onOpen?.(card)} disabled={busy}>Open</Button>
+            : <Button onClick={() => onApprove(card)} disabled={!approvable} aria-label={emergency ? copy.emergency : `Approve ${card.title}`}><Check aria-hidden className="size-4" />Approve</Button>}
+          <Button variant="outline" onClick={() => onDecline(card)} disabled={!declinable} aria-label={`Decline ${card.title}`}><X aria-hidden className="size-4" />Decline</Button>
+        </CardFooter>
+      )}
+    </Card>
+  );
+}

@@ -2,12 +2,12 @@
  * Fast iteration build: rebuild and reinstall the launcher debug APK from an already prepared
  * checkout, without the checks a distributable build runs.
  *
- *   bun run android:build:fast              web build, sync and :app:assembleLauncherDebug only
- *   bun run android:build:fast -- --restage also re-run the agent prepare/stage chain first
- *   bun run android:build:fast -- --install then `adb install -r` the APK (refused over the image's
+ *   pnpm android:build:fast              web build, sync and :app:assembleLauncherDebug only
+ *   pnpm android:build:fast -- --restage also re-run the agent prepare/stage chain first
+ *   pnpm android:build:fast -- --install then `adb install -r` the APK (refused over the image's
  *                                           system app unless --allow-system-update is also given)
  *
- * It reuses what `bun run android:build:local` already prepared and staged (the resident runtime,
+ * It reuses what `pnpm android:build:local` already prepared and staged (the resident runtime,
  * on-device voice and embedding outputs); without them it exits 2 and names that command. It
  * skips the input preflight, upstream verification, Android lint, the instrumentation APK, the
  * release APK, verify-apks, the licence notices and the SBOM, and keeps a Gradle daemon warm.
@@ -34,13 +34,13 @@ export const PACKAGED_FLAGS = path.posix.join(ANDROID_PUBLIC, "build-flags.json"
 /** Where PACKAGED_FLAGS and the staged runtime land inside the APK. */
 export const APK_FLAGS_ENTRY = "assets/public/build-flags.json";
 export const APK_RUNTIME_ENTRY = "assets/agent/agent-bundle.js";
-/** What `bun run agent:stage-android` leaves behind; the same marker the SBOM uses (build-android.ts). */
+/** What `pnpm agent:stage-android` leaves behind; the same marker the SBOM uses (build-android.ts). */
 export const STAGED_RUNTIME = "android/app/src/main/assets/agent/agent-bundle.js";
 /** The prepare/stage chain of `android:build:local`, without its preflight and Gradle build. */
 export const RESTAGE_SCRIPTS = Object.freeze([
-  "agent:build-embedding-host", "agent:prepare", "agent:build-workflow-worker", "agent:stage-android", "licenses:packaged-runtime",
+  "agent:build-embedding-host", "agent:bundle", "agent:stage-android", "licenses:packaged-runtime",
 ]);
-const USAGE = "Usage: bun run android:build:fast [-- --restage] [-- --install [--allow-system-update]]";
+const USAGE = "Usage: pnpm android:build:fast [-- --restage] [-- --install [--allow-system-update]]";
 
 export function parseFastArgs(argv: readonly string[]) {
   const options = { restage: false, install: false, inspect: false, allowSystemUpdate: false };
@@ -106,10 +106,10 @@ export function fastBuildOptions(env: NodeJS.ProcessEnv, root: string) {
         androidTest: false,
         verified: false,
         applicationId: androidIdentity(root, env.ALPHA_ANDROID_APPLICATION_ID || "").appId,
-        note: "bun run android:build:fast: a developer APK that skipped lint, tests and verify-apks. Never distribute it; build with bun run android:build:local.",
+        note: "pnpm android:build:fast: a developer APK that skipped lint, tests and verify-apks. Never distribute it; build with pnpm android:build:local.",
       },
     },
-    verify: { command: "bun", args: ["scripts/build-android-fast.ts", "--inspect"] },
+    verify: { command: process.execPath, args: ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/build-android-fast.ts", "--inspect"] },
     archive: null,
   };
 }
@@ -133,9 +133,9 @@ export function inspect(root: string) {
  * build-flags.json, so the marker has to follow the last sync and precede Gradle.
  */
 export function syncMarkAndBuild(root: string, run: (cmd: string, args: string[]) => unknown, build: () => unknown) {
-  run("bun", ["scripts/android-host.ts"]);
-  run("bun", ["run", "android:sync"]);
-  run("bun", ["scripts/android-host.ts"]);
+  run(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/android-host.ts"]);
+  run("pnpm", ["android:sync"]);
+  run(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/android-host.ts"]);
   markFastIteration(path.join(root, PACKAGED_FLAGS));
   return build();
 }
@@ -158,13 +158,13 @@ async function main() {
     const refusal = systemUpdateRefusal(appId, systemPackageInstalled(systemList, appId), options.allowSystemUpdate);
     if (refusal) { console.error(refusal); process.exit(2); }
   }
-  if (options.restage) for (const script of RESTAGE_SCRIPTS) run("bun", ["run", script]);
+  if (options.restage) for (const script of RESTAGE_SCRIPTS) run("pnpm", [script]);
   if (!fs.existsSync(path.join(root, STAGED_RUNTIME))) {
-    console.error(`No staged resident runtime (${STAGED_RUNTIME}). Run bun run android:build:local once, or bun run android:build:fast -- --restage.`);
+    console.error(`No staged resident runtime (${STAGED_RUNTIME}). Run pnpm android:build:local once, or pnpm android:build:fast -- --restage.`);
     process.exit(2);
   }
   console.log(`Android fast build: launcher debug only, no lint/tests/verify-apks, NOT distributable -> ${FAST_OUTPUT}/`);
-  const { buildAndroidConsumer } = await import("../vendor/eliza/packages/app/scripts/mobile/android/build-consumer.mjs");
+  const { buildAndroidConsumer } = await import("../vendor/eliza/packages/os/android/build-consumer.mjs");
   syncMarkAndBuild(root, run, () => (buildAndroidConsumer as unknown as (o: ReturnType<typeof fastBuildOptions>) => unknown)(fastBuildOptions(env, root)));
   const apk = path.join(FAST_OUTPUT, FAST_APK);
   console.log(`Fast build done in ${((Date.now() - started) / 1000).toFixed(0)}s: ${apk} (developer APK, not distributable)`);

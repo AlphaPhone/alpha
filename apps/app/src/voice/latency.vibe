@@ -1,0 +1,111 @@
+// spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice"; spec/voice/latency.md, "The offset between the phone's clock and the renderer's is read once, when the trial is bound"; spec/voice/latency.md, "A trial records its endpoint path and outcome, never what was said"
+import { Native } from "../platform/native.vibe"
+import { Machine, type Event, type Mark, type MarkClock, type Outcome, type Path, type Trial } from "../../gen/voice__latency.effect.vibe"
+import { newId } from "./ids.ts"
+import { NativeTurnMarked, NativeTurnTiming } from "./native.schema.vibe"
+
+/** The diagnostics export's format name for voice timing. */
+export const VOICE_TIMING_FORMAT = "alpha-native-voice-timing-v3"
+
+/** One mark of a turn, on the clock that stamped it. */
+export interface VoiceTimingMark {
+  readonly mark: Mark
+  readonly clock: MarkClock
+  readonly atMs: number
+}
+
+/** One recorded voice turn for the diagnostics export: ids, marks and outcome only, never text. */
+export interface VoiceTimingEntry {
+  readonly format: typeof VOICE_TIMING_FORMAT
+  readonly turnId: string
+  readonly path: Path
+  readonly outcome: Outcome
+  /** The last input to the first audible sound, or null when the turn had no audible reply or no input mark. */
+  readonly lastInputToAudibleMs: number | null
+  /** The renderer's clock minus the phone's monotonic clock, read once when the trial was bound; null when the phone did not answer. */
+  readonly clockOffsetMs: number | null
+  readonly marks: readonly VoiceTimingMark[]
+}
+
+/** Timing of each voice turn from the last input to the first audible reply. */
+export service Latency {
+  /** The trial now and after each change. */
+  readonly changes: Stream.Stream<Trial>
+  /** Start the trial of a new turn, before its reply is synthesized, and bind it on the phone; its random id. */
+  begin(): string!!
+  /** Stamp a mark of the open trial now, on the renderer's clock. */
+  mark(which: Mark): void!!
+  /** Record how the turn's end was decided. */
+  endpointed(path: Path): void!!
+  /** Record the turn, adding the phone's own marks on its clock. */
+  finish(outcome: Outcome): void!!
+  /** Every recorded turn, oldest first, for the diagnostics export. */
+  entries(): readonly VoiceTimingEntry[]!!
+}
+
+const MAX_ENTRIES = 200
+const decodeTiming = Schema.decodeUnknownOption(NativeTurnTiming)
+const decodeMarked = Schema.decodeUnknownOption(NativeTurnMarked)
+
+function wholeMs(value: number | undefined): number | undefined {
+  return value === undefined || !Number.isFinite(value) || value < 0 ? undefined : Math.round(value)
+}
+
+/** The latency service over the trial Machine it is given. */
+export const latencyService = Layer.effect(Latency, effect {
+  const held = try Machine
+  const native = try Native
+  const recorded: VoiceTimingEntry[] = []
+  let turnId = ""
+  let turns = 0
+  let marks: VoiceTimingMark[] = []
+
+  effect function send(event: Event) {
+    const after = held.send(event) catch () => undefined
+    return after !== undefined
+  }
+
+  effect function markAt(which: Mark, atMs: number, clock: MarkClock) {
+    if (try send({ type: "mark", which, at: atMs, clock })) marks = [...marks, { mark: which, clock, atMs }]
+  }
+
+  return {
+    changes: held.changes,
+    effect begin() {
+      if ((try held.get()).open) try send({ type: "finish", outcome: "Abandoned" })
+      turns += 1
+      turnId = newId()
+      marks = []
+      try send({ type: "begin", turn: turns })
+      const raw = native.invoke("AlphaVoiceCloud", "markVoiceTurn", { turnId }) catch () => undefined
+      const bound = raw === undefined ? undefined : Option.getOrUndefined(decodeMarked(raw))
+      const phoneNow = wholeMs(bound?.turnId === turnId ? bound.monotonicMs : undefined)
+      if (phoneNow !== undefined) try send({ type: "bindOffset", offset: Math.round(try Clock.currentTimeMillis) - phoneNow })
+      return turnId
+    },
+    effect mark(which: Mark) {
+      try markAt(which, Math.round(try Clock.currentTimeMillis), "OnRenderer")
+    },
+    effect endpointed(path: Path) { try send({ type: "endpointed", path }) },
+    effect finish(outcome: Outcome) {
+      if (!(try held.get()).open) return
+      const raw = native.invoke("AlphaVoiceCloud", "nativeVoiceTiming", { turnId }) catch () => undefined
+      const timing = raw === undefined ? undefined : Option.getOrUndefined(decodeTiming(raw))
+      if (timing !== undefined && timing.turnId === turnId) {
+        const input = wholeMs(timing.lastUserAudioMs)
+        const firstPcm = wholeMs(timing.firstPcmMs)
+        const audible = wholeMs(timing.audibleMs)
+        if (input !== undefined) try markAt("LastUserAudio", input, "OnPhone")
+        if (firstPcm !== undefined) try markAt("FirstPcm", firstPcm, "OnPhone")
+        if (audible !== undefined) try markAt("Audible", audible, "OnPhone")
+      }
+      const final: Outcome = outcome === "Answered" && (try held.get()).audible ? "Answered" : "Abandoned"
+      try send({ type: "finish", outcome: final })
+      const trial = try held.get()
+      recorded.push({ format: VOICE_TIMING_FORMAT, turnId, path: trial.path, outcome: final,
+        lastInputToAudibleMs: trial.waitMs >= 0 ? trial.waitMs : null, clockOffsetMs: trial.offsetKnown ? trial.offset : null, marks })
+      if (recorded.length > MAX_ENTRIES) recorded.splice(0, recorded.length - MAX_ENTRIES)
+    },
+    effect entries() { return [...recorded] },
+  }
+})

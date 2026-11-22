@@ -1,0 +1,442 @@
+// spec/camera/library.md, "Story: See my whole permitted library, newest first"; spec/camera/library.md, "Story: Find what I deleted"; spec/camera/library.md, "Story: Stop reading when Photos is not in front"; spec/camera/browse.md, "Story: Select what I see"; spec/camera/browse.md, "Story: Look at one photo"; spec/camera/browse.md, "Story: Change my photos in batches I confirm"; spec/camera/browse.md, "Story: Let the assistant narrow what Photos shows"; spec/camera/albums.md, "Story: Keep my photos in albums"
+import { Machine as CatalogMachine, type Access, type Catalog, type Event as CatalogEvent, type Row } from "../../gen/camera__library.effect.vibe"
+import { Machine as BrowseMachine, favoriteTarget, type Browse, type Change, type Event as BrowseEvent, type Tab } from "../../gen/camera__browse.effect.vibe"
+import { Machine as AlbumMachine, type Event as AlbumEvent } from "../../gen/camera__albums.effect.vibe"
+import { photosObservation, shownPhotoFor, type ShownItem } from "./agentContext.vibe"
+import { photosText } from "./messages.vibe"
+import { CameraNotices } from "./notices.vibe"
+import { changeBatches, dragRange, filterLabel, filterMatches, type PhotosFilter } from "./photoGrid.vibe"
+import { PhotosFailed, PhotoStore, type AlbumChange, type Reviewed } from "./photos.vibe"
+
+/** One media item as the bridge lists it, before it is a catalog row. */
+interface Listed {
+  readonly id: string
+  readonly kind: "image" | "video"
+  readonly date: number
+  readonly revision: string
+  readonly width: number
+  readonly height: number
+  readonly size: number
+  readonly mutationRevision?: string
+  readonly taken?: number
+  readonly takenAt?: number
+  readonly duration?: number
+  readonly favorite?: boolean
+  readonly image?: string
+  readonly folder?: string
+  readonly expiresAt?: number
+}
+
+/** A listed item as the catalog row the grid and the viewer show. */
+export function rowOf(item: Listed): Row {
+  const taken = item.taken ?? item.takenAt ?? 0
+  return {
+    id: item.id, rank: Math.round(taken > 0 ? taken : item.date), revision: item.mutationRevision ?? item.revision, video: item.kind === "video",
+    favorite: item.favorite === true, image: item.image ?? "", width: Math.round(item.width), height: Math.round(item.height),
+    duration: Math.round(item.duration ?? 0), size: Math.round(item.size), folder: item.folder ?? "", expiresAt: Math.round(item.expiresAt ?? 0),
+  }
+}
+
+function accessOf(scope: string): Access {
+  return scope === "full" ? "ScopeFull" : scope === "partial" ? "ScopePartial" : scope === "selected" ? "ScopeSelected" : "ScopeDenied"
+}
+
+/** Built-in album keys the grid filters on. */
+export type AlbumKey = "favorites" | "videos" | "camera" | "screenshots" | `custom:${string}`
+
+/** The Photos library: the catalog, the grid over it, albums, and the observation the assistant reads. */
+export service PhotoLibrary {
+  readonly catalog: Stream.Stream<Catalog>
+  enter(): void!!
+  leave(): void!!
+  visibility(hidden: boolean): void!!
+  dispose(): void!!
+  refresh(): void!!
+  more(): void!!
+  moreTrash(): void!!
+  retryTrash(): void!!
+  requestAccess(): void!!
+  openSettings(): void!!
+  openAlbum(album: AlbumKey | undefined): void!!
+  switchTab(tab: Tab): void!!
+  startSelection(id: string): void!!
+  toggle(id: string): void!!
+  dragTo(anchor: string, id: string): void!!
+  selectAll(): void!!
+  cancelSelection(): void!!
+  openViewer(id: string): void!!
+  swipe(id: string): void!!
+  closeViewer(): void!!
+  pinch(wider: boolean): void!!
+  favorite(): void!!
+  trash(): void!!
+  restore(): void!!
+  undo(): void!!
+  share(): void!!
+  shareOne(id: string): void!!
+  prepareDelete(): void!!
+  confirmDelete(): void!!
+  cancelDelete(): void!!
+  setFilter(filter: PhotosFilter): number!!
+  clearFilter(): void!!
+  openAlbumDialog(target: string, forSelection: boolean): void!!
+  albumEvent(event: AlbumEvent): void!!
+  /** The rows the open list shows, in grid order. */
+  rows(): readonly Row[]!!
+  /** The item the viewer shows. */
+  shown(): ShownItem | undefined!!
+  /** The Photos observation for the assistant's turn. */
+  observation(sensitive: boolean): ReturnType<typeof photosObservation>!!
+  /** "This photo" under the capabilities the assistant named. */
+  shownTarget(header: string | undefined): ReturnType<typeof shownPhotoFor>!!
+  /** Read one item, in the window or in the library. */
+  find(id: string): Row | undefined!!
+}
+
+/** The library service over the catalog, browse and album Machines and the photo store. */
+export const photoLibrary = Layer.effect(PhotoLibrary, effect {
+  const catalog = try CatalogMachine
+  const browse = try BrowseMachine
+  const albums = try AlbumMachine
+  const store = try PhotoStore
+  const notices = try CameraNotices
+  const reading = try Semaphore.make(1)
+  const trashReading = try Semaphore.make(1)
+  let filter: PhotosFilter | undefined
+  let album: AlbumKey | undefined
+  let members = new Map<string, readonly string[]>()
+  let revision = 0
+  let pendingDelete: string | undefined
+
+  effect function say(text: string) {
+    try notices.say(text, false)
+  }
+
+  function membersOf(key: string): readonly string[] | undefined {
+    return members.get(key)
+  }
+
+  function pool(c: Catalog, b: Browse): Row[] {
+    if (b.tab === "TrashTab") return c.trash.rows
+    if (b.tab === "AlbumsTab") return album === undefined ? [] : c.main.rows.filter((row) => filterMatches(row, { album }, membersOf, Date.now()))
+    return c.main.rows.filter((row) => filterMatches(row, filter, membersOf, Date.now()))
+  }
+
+  effect function publishPool() {
+    const c = try catalog.get()
+    const b = try browse.get()
+    const rows = pool(c, b)
+    let gone = false
+    if (b.viewer !== "" && !rows.some((row) => row.id === b.viewer)) {
+      const found = store.read(b.viewer, true) catch () => undefined
+      gone = found === undefined
+    }
+    browse.send({ type: "showPool", pool: rows.map((row) => row.id), favorites: rows.filter((row) => row.favorite).map((row) => row.id), gone }) catch () => undefined
+    revision++
+  }
+
+  effect function sendCatalog(event: CatalogEvent) {
+    const after = catalog.send(event) catch () => undefined
+    try publishPool()
+    return after
+  }
+
+  effect function sendBrowse(event: BrowseEvent) {
+    const after = browse.send(event) catch () => undefined
+    if (after !== undefined) revision++
+    return after
+  }
+
+  effect function readMain() {
+    try reading.withPermit(effect {
+      while ((try catalog.get()).read !== "ReadIdle") {
+        const now = try catalog.get()
+        if (now.read === "ReadAccess") {
+          const access = store.libraryAccess() catch () => undefined
+          try sendCatalog({ type: "accessReply", scope: access === undefined ? "ScopeDenied" : accessOf(access.scope), ok: access !== undefined })
+        } else {
+          const page = store.list({ ...(now.cursor === "" ? {} : { before: now.cursor }), thumbnails: true }) catch () => undefined
+          const rows = page === undefined ? [] : page.items.map(rowOf).filter((row) => !now.pending.some((p) => p.id === row.id))
+          const sent = try sendCatalog({ type: "pageReply", rows: rows.filter((row, at) => rows.findIndex((other) => other.id === row.id) === at), cursor: page?.next ?? "", ok: page !== undefined })
+          if (sent === undefined) try sendCatalog({ type: "pageReply", rows: [], cursor: "", ok: false })
+        }
+      }
+    })
+    const settled = try catalog.get()
+    if (settled.main.failed) try say("Couldn’t load")
+  }
+
+  effect function readTrash() {
+    try trashReading.withPermit(effect {
+      while ((try catalog.get()).trash.loading) {
+        const now = try catalog.get()
+        const page = store.list({ trashed: true, thumbnails: true, ...(now.trash.paging && now.trash.continueAt !== "" ? { before: now.trash.continueAt } : {}) }) catch () => undefined
+        try sendCatalog({ type: "trashReply", rows: page === undefined ? [] : page.items.map(rowOf), cursor: page?.next ?? "", ok: page !== undefined })
+      }
+    })
+  }
+
+  effect function loadAlbums() {
+    const list = store.albums() catch () => undefined
+    if (list === undefined) return
+    members = new Map(list.items.map((row) => [`custom:${row.id}`, row.memberIds] as const))
+    albums.send({ type: "albumsLoaded", albums: list.items.map((row) => ({ id: row.id, name: row.name, revision: row.revision })) }) catch () => undefined
+    try publishPool()
+  }
+
+  effect function reload() {
+    try sendCatalog({ type: "refresh", paging: false })
+    try forkDetach(readMain())
+    try forkDetach(loadAlbums())
+  }
+
+  effect function selected(): Reviewed[]!! {
+    const c = try catalog.get()
+    const b = try browse.get()
+    const rows = [...c.main.rows, ...c.trash.rows]
+    return rows.filter((row, at) => b.selection.includes(row.id) && rows.findIndex((other) => other.id === row.id) === at).map((row) => ({ id: row.id, revision: row.revision }))
+  }
+
+  effect function change(change: Change, operation: "favorite" | "unfavorite" | "trash" | "restore", items: Reviewed[]) {
+    const groups = changeBatches(items)
+    const began = try sendBrowse({ type: "beginChange", change, count: groups.length })
+    if (began === undefined) return
+    let verified = 0, stale = 0
+    for (const group of groups) {
+      const report = try exit(store.changeMany(operation, group))
+      if (Exit.isSuccess(report)) {
+        const done = report.value.outcomes.filter((row) => row.status !== "stale" && row.status !== "unverified" && row.status !== "unsupported")
+        verified += done.length
+        stale += report.value.outcomes.filter((row) => row.status === "stale").length
+        try sendBrowse({ type: "batchSettled", declined: false, changed: done.map((row) => row.id) })
+      } else {
+        const failure = Cause.squash(report.cause)
+        const declined = failure instanceof PhotosFailed && failure.code === "LIBRARY_DECLINED"
+        try sendBrowse({ type: "batchSettled", declined, changed: [] })
+        if (declined) {
+          try say("Nothing changed.")
+          break
+        }
+        try say(photosText(failure instanceof PhotosFailed ? failure.message : undefined, "Failed"))
+      }
+    }
+    if (operation === "trash" && verified > 0) try notices.say(verified === items.length ? `${verified} moved to Recently deleted` : `${verified}/${items.length} ✓${stale > 0 ? ` · ${stale} skipped` : ""}`, false)
+    else if (verified > 0 && verified !== items.length) try say(`${verified}/${items.length} ✓${stale > 0 ? ` · ${stale} skipped` : ""}`)
+    try reload()
+    try sendCatalog({ type: "requestTrash", paging: false })
+    try forkDetach(readTrash())
+  }
+
+  effect function share(items: Reviewed[]) {
+    if (items.length === 0) return
+    const began = try sendBrowse({ type: "beginShare" })
+    if (began === undefined && items.length > 1) return try say("Max 100")
+    const opened = items.length === 1 ? (store.share(items[0]!) catch (failure) => failure) : (store.shareMany(items) catch (failure) => failure)
+    if (opened instanceof PhotosFailed) try say(photosText(opened.message, "Share failed"))
+    try sendBrowse({ type: "shareSettled" })
+  }
+
+  try forkDetach(Stream.runForEach(store.changed, () => effect {
+    const c = try catalog.get()
+    if (!c.hidden && c.active && !c.disposed) try reload()
+  }))
+
+  return {
+    catalog: catalog.changes,
+    effect enter() {
+      try sendCatalog({ type: "enter" })
+      store.watch(true) catch () => undefined
+      try reload()
+      try forkDetach(readTrash())
+      albums.send({ type: "enter" }) catch () => undefined
+    },
+    effect leave() {
+      try sendCatalog({ type: "leave" })
+      store.watch(false) catch () => undefined
+      albums.send({ type: "leave" }) catch () => undefined
+      try sendBrowse({ type: "closeViewer" })
+      try sendBrowse({ type: "cancelSelection" })
+    },
+    effect visibility(hidden: boolean) {
+      try sendCatalog({ type: hidden ? "hide" : "show" })
+      albums.send({ type: "visibility", shown: !hidden }) catch () => undefined
+      store.watch(!hidden) catch () => undefined
+      if (!hidden) {
+        try forkDetach(readMain())
+        try forkDetach(readTrash())
+      }
+    },
+    effect dispose() {
+      try sendCatalog({ type: "dispose" })
+      albums.send({ type: "dispose" }) catch () => undefined
+      store.watch(false) catch () => undefined
+    },
+    refresh: reload,
+    effect more() {
+      try sendCatalog({ type: "refresh", paging: true })
+      try forkDetach(readMain())
+    },
+    effect moreTrash() {
+      try sendCatalog({ type: "requestTrash", paging: true })
+      try forkDetach(readTrash())
+    },
+    effect retryTrash() {
+      try sendCatalog({ type: "requestTrash", paging: false })
+      try forkDetach(readTrash())
+    },
+    effect requestAccess() {
+      store.requestLibraryAccess() catch effect () => { try say("Couldn’t open settings") }
+      try reload()
+    },
+    effect openSettings() {
+      store.openLibrarySettings() catch effect () => { try say("Couldn’t open settings") }
+    },
+    effect openAlbum(key: AlbumKey | undefined) {
+      album = key
+      try publishPool()
+    },
+    effect switchTab(tab: Tab) {
+      try sendBrowse({ type: "switchTab", tab })
+      if (tab !== "AlbumsTab") album = undefined
+      if (tab === "TrashTab") {
+        try sendCatalog({ type: "requestTrash", paging: false })
+        try forkDetach(readTrash())
+      }
+      try publishPool()
+    },
+    startSelection: (id: string) => effect { try sendBrowse({ type: "startSelection", id }) },
+    toggle: (id: string) => effect { try sendBrowse({ type: "toggle", id }) },
+    effect dragTo(anchor: string, id: string) {
+      const rows = pool(try catalog.get(), try browse.get())
+      try sendBrowse({ type: "selectRange", ids: dragRange(rows, anchor, id) })
+    },
+    selectAll: () => effect { try sendBrowse({ type: "selectAll" }) },
+    cancelSelection: () => effect { try sendBrowse({ type: "cancelSelection" }) },
+    openViewer: (id: string) => effect { try sendBrowse({ type: "openViewer", id }) },
+    swipe: (id: string) => effect { try sendBrowse({ type: "swipe", id }) },
+    closeViewer: () => effect { try sendBrowse({ type: "closeViewer" }) },
+    pinch: (wider: boolean) => effect { try sendBrowse({ type: "pinch", wider }) },
+    effect favorite() {
+      const b = try browse.get()
+      const target = favoriteTarget(b.selection, b.favorites)
+      try change(target, target === "FavoriteChange" ? "favorite" : "unfavorite", try selected())
+    },
+    trash: () => effect { try change("TrashChange", "trash", try selected()) },
+    restore: () => effect { try change("RestoreChange", "restore", try selected()) },
+    effect undo() {
+      const b = try browse.get()
+      const c = try catalog.get()
+      const items = [...c.trash.rows, ...c.main.rows].filter((row) => b.undo.includes(row.id)).map((row) => ({ id: row.id, revision: row.revision }))
+      const began = try sendBrowse({ type: "undoTrash" })
+      if (began === undefined) return
+      const report = store.changeMany("restore", items) catch () => undefined
+      try sendBrowse({ type: "batchSettled", declined: report === undefined, changed: report?.outcomes.filter((row) => row.status === "restored").map((row) => row.id) ?? [] })
+      try say(report === undefined ? "Unconfirmed" : "Restored")
+      try reload()
+    },
+    share: () => effect { try share(try selected()) },
+    effect shareOne(id: string) {
+      const row = [...(try catalog.get()).main.rows].find((item) => item.id === id)
+      if (row !== undefined) {
+        const opened = store.share({ id: row.id, revision: row.revision }) catch (failure) => failure
+        if (opened instanceof PhotosFailed) try say(photosText(opened.message, "Share failed"))
+      }
+    },
+    effect prepareDelete() {
+      const items = try selected()
+      const prepared = store.prepareDeleteTrash(items) catch (failure) => failure
+      if (prepared instanceof PhotosFailed) return try say(photosText(prepared.message, "Select deleted items again."))
+      pendingDelete = prepared.confirmation
+      try sendBrowse({ type: "prepareDelete" })
+    },
+    effect confirmDelete() {
+      const confirmation = pendingDelete
+      if (confirmation === undefined) return
+      pendingDelete = undefined
+      const receipt = store.deletePreparedTrash(confirmation) catch () => undefined
+      try sendBrowse({ type: "deleteSettled", changed: receipt === undefined ? [] : [...receipt.deletedIds] })
+      try say(receipt === undefined ? "Unconfirmed" : receipt.status === "deleted" ? "Deleted" : `${receipt.deletedIds.length} deleted · ${receipt.skippedIds.length + receipt.failedIds.length} not deleted`)
+      try sendCatalog({ type: "requestTrash", paging: false })
+      try forkDetach(readTrash())
+    },
+    effect cancelDelete() {
+      if (pendingDelete !== undefined) store.cancelDeleteTrash(pendingDelete) catch () => undefined
+      pendingDelete = undefined
+      try sendBrowse({ type: "cancelDelete" })
+    },
+    effect setFilter(next: PhotosFilter) {
+      const listed = (try albums.get()).albums
+      const label = filterLabel(next, (key) => listed.find((row) => `custom:${row.id}` === key)?.name)
+      const before = filter
+      filter = next
+      const after = try sendBrowse({ type: "setFilter", label })
+      if (after === undefined) {
+        filter = before
+        return -1
+      }
+      try publishPool()
+      return (try browse.get()).pool.length
+    },
+    effect clearFilter() {
+      filter = undefined
+      try sendBrowse({ type: "clearFilter" })
+      try publishPool()
+    },
+    effect openAlbumDialog(target: string, forSelection: boolean) {
+      const items = forSelection ? try selected() : []
+      const first = items[0]
+      albums.send({ type: "openDialog", target, media: first?.id ?? "", mediaRevision: first?.revision ?? "" }) catch () => undefined
+    },
+    effect albumEvent(event: AlbumEvent) {
+      const before = try albums.get()
+      const after = albums.send(event) catch () => undefined
+      if (after === undefined || !after.busy || before.busy) return
+      const write = after.writes[after.writes.length - 1]!
+      const items = after.forSelection ? try selected() : []
+      const changeOf = (): AlbumChange =>
+        write.operation === "CreateOp" ? { operation: "create", name: write.name, ...(write.media === "" ? {} : { mediaId: write.media, mediaRevision: write.mediaRevision }) }
+        : write.operation === "RenameOp" ? { operation: "rename", id: write.album, revision: write.revision, name: write.name }
+        : write.operation === "DeleteOp" ? { operation: "delete", id: write.album, revision: write.revision }
+        : { operation: "add", id: write.album, revision: write.revision, mediaId: write.media, mediaRevision: write.mediaRevision }
+      const written = store.changeAlbum(changeOf()) catch (failure) => failure
+      let ok = !(written instanceof PhotosFailed)
+      if (ok && write.operation === "AddOp" && items.length > 1 && !(written instanceof PhotosFailed)) {
+        let revisionNow: string = written.revision
+        for (const item of items.slice(1)) {
+          const added = store.changeAlbum({ operation: "add", id: write.album, revision: revisionNow, mediaId: item.id, mediaRevision: item.revision }) catch () => undefined
+          if (added === undefined) continue
+          revisionNow = added.revision
+        }
+      }
+      if (written instanceof PhotosFailed) try say(photosText(written.message, "The album couldn’t be saved."))
+      else if (write.operation === "DeleteOp") try say("Album deleted")
+      else if (write.media !== "") try say(`Added to album`)
+      albums.send({ type: "finish", ok }) catch () => undefined
+      try loadAlbums()
+    },
+    rows: () => effect { return pool(try catalog.get(), try browse.get()) },
+    effect shown() {
+      const b = try browse.get()
+      if (b.viewer === "") return undefined
+      const row = pool(try catalog.get(), b).find((item) => item.id === b.viewer)
+      return row === undefined ? undefined : { id: row.id, revision: row.revision, video: row.video }
+    },
+    effect observation(sensitive: boolean) {
+      const b = try browse.get()
+      const row = b.viewer === "" ? undefined : pool(try catalog.get(), b).find((item) => item.id === b.viewer)
+      return photosObservation(row === undefined ? undefined : { id: row.id, revision: row.revision, video: row.video }, revision, sensitive)
+    },
+    effect shownTarget(header: string | undefined) {
+      const b = try browse.get()
+      const row = b.viewer === "" ? undefined : pool(try catalog.get(), b).find((item) => item.id === b.viewer)
+      return shownPhotoFor(row === undefined ? undefined : { id: row.id, revision: row.revision, video: row.video }, revision, false, header)
+    },
+    effect find(id: string) {
+      const c = try catalog.get()
+      const row = [...c.main.rows, ...c.trash.rows].find((item) => item.id === id)
+      if (row !== undefined) return row
+      const read = store.read(id, false) catch () => undefined
+      return read === undefined ? undefined : rowOf(read)
+    },
+  }
+})

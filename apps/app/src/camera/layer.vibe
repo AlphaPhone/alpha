@@ -1,0 +1,50 @@
+// spec/camera/index.md
+import { Build } from "../platform/build.vibe"
+import { machine as viewfinderMachine } from "../../gen/camera__viewfinder.effect.vibe"
+import { machine as focusMachine } from "../../gen/camera__focus.effect.vibe"
+import { machine as recorderMachine } from "../../gen/camera__recorder.effect.vibe"
+import { machine as captureMachine } from "../../gen/camera__agentCapture.effect.vibe"
+import { machine as catalogMachine } from "../../gen/camera__library.effect.vibe"
+import { machine as browseMachine } from "../../gen/camera__browse.effect.vibe"
+import { machine as albumMachine } from "../../gen/camera__albums.effect.vibe"
+import { machine as hostMachine } from "../../gen/camera__agentLibrary.effect.vibe"
+import { machine as reviewMachine } from "../../gen/camera__libraryReview.effect.vibe"
+import { machine as editMachine } from "../../gen/camera__edit.effect.vibe"
+import { stored as storedIntents } from "../../gen/camera__copyIntent.effect.vibe"
+import { machine as videoMachine } from "../../gen/camera__videoEdit.effect.vibe"
+import { machine as scanMachine } from "../../gen/camera__scan.effect.vibe"
+import { machine as dialogMachine } from "../../gen/camera__scanDialogs.effect.vibe"
+import { machine as mediaMachine } from "../../gen/camera__media.effect.vibe"
+import { machine as noticeMachine } from "../../gen/camera__notices.effect.vibe"
+import { cameraActions } from "./actions.vibe"
+import { agentCamera } from "./agentCapture.vibe"
+import { agentPhotos } from "./agentPhotos.vibe"
+import { cameraBridge } from "./bridge.vibe"
+import { browserPhotoStore } from "./browserPhotos.vibe"
+import { mediaEditor } from "./editor.vibe"
+import { photoLibrary } from "./library.vibe"
+import { mediaReview } from "./mediaReview.vibe"
+import { cameraNotices } from "./notices.vibe"
+import { nativePhotoStore } from "./photos.vibe"
+import { scanner } from "./scanner.vibe"
+import { viewfinder } from "./viewfinder.vibe"
+
+/** The photo store the build needs: the browser's own for the browser build, Android's otherwise. */
+export const photoStore = Layer.unwrap(effect {
+  const build = try Build
+  return build.info.variant === "browser" ? browserPhotoStore : nativePhotoStore
+})
+
+const machines = Layer.mergeAll(
+  viewfinderMachine(), focusMachine(), recorderMachine(), captureMachine(), catalogMachine(), browseMachine(), albumMachine(),
+  hostMachine(), reviewMachine(), editMachine(), storedIntents("alpha/camera/copy-intent"), videoMachine(), scanMachine(), dialogMachine(),
+  mediaMachine(), noticeMachine(),
+)
+
+const devices = Layer.provideMerge(Layer.mergeAll(cameraBridge, photoStore, cameraNotices), machines)
+const camera = Layer.provideMerge(viewfinder, devices)
+const library = Layer.provideMerge(photoLibrary, camera)
+const agents = Layer.provideMerge(Layer.mergeAll(agentCamera, agentPhotos, mediaEditor, scanner, mediaReview), library)
+
+/** Every Camera and Photos service and Machine, needing only the platform's Native, Build and KeyValueStore. */
+export const layer = Layer.provideMerge(cameraActions, agents)

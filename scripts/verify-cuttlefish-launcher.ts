@@ -1,7 +1,7 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Read-only Alpha Cuttlefish image checks through the shared launcher image verifier
- * (vendor/eliza/packages/os/scripts/android/verify-launcher-image.mjs), plus Alpha's own check that
+ * (scripts/os-ported/os/verify-launcher-image.mjs), plus Alpha's own check that
  * the launcher holds every first-boot runtime grant its descriptor names
  * (scripts/stage-aosp.ts LAUNCHER_DEFAULT_PERMISSIONS). No install, role change, alarm, or runtime request.
  */
@@ -10,7 +10,7 @@ import {sha256} from './sha256.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {parseArgs as parseShared, validateExpectation as validateShared, verifyLauncherImage} from '../vendor/eliza/packages/os/scripts/android/verify-launcher-image.mjs';
+import {parseArgs as parseShared, validateExpectation as validateShared, verifyLauncherImage} from './os-ported/os/verify-launcher-image.mjs';
 
 const PACKAGE: string = JSON.parse(fs.readFileSync(new URL('../app.config.json', import.meta.url), 'utf8')).appId;
 

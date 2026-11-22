@@ -1,0 +1,118 @@
+// spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/phone.md, "Only the latest read publishes, and rows already shown stay until it answers"; spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"; spec/telephony/common.md, "A call is reported started only when Telecom accepted it, and a lost answer is never \"not called\""
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
+import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone"
+import { callOutcome, type CallOutcome, type HandoffAnswer, type PlaceAnswer } from "../../gen/telephony__common.effect.vibe"
+import { Machine as PhoneMachine, type Event as PhoneEvent, type Recent, type RecentsAnswer } from "../../gen/telephony__phone.effect.vibe"
+import { bridgeCall, callerOf, displayNames, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+
+/** The longest number the keypad holds. */
+export const KEYPAD_MAX = 40
+/** The largest recent-calls page Phone reads. */
+export const RECENTS_LIMIT = 50
+
+/** Phone's effects: the showing's reads and the owner's own dial. */
+export service PhoneView {
+  /** One showing of Phone, opened at `route` (`keypad:<number>`, `recents`, `voicemail`): it starts a read, and leaving (the effect's end) forgets what it read. */
+  visit(route?: string): void!!
+  /** Read again; `request` is the owner's Allow, the only read that may ask for call-log access. */
+  refresh(request: boolean): void!!
+  /** A keypad key: a digit, `*` or `#`, and `+` only as the first character. */
+  press(key: string): void!!
+  /** Take the last character off the keypad number. */
+  erase(): void!!
+  /** The owner's Call on the keypad number, a recent row or a match. */
+  dial(number: string): void!!
+}
+
+const PLACED: Record<string, PlaceAnswer> = {
+  CallPlaced: "TelecomPlaced", CallEmergencyHandoff: "TelecomEmergency", CallBusy: "TelecomBusy", CallUnavailable: "TelecomUnavailable",
+  CallRefused: "TelecomUnavailable", CallFailed: "TelecomFailed", CallRoleRequired: "RoleRequired", CallPermissionRequired: "GrantRequired",
+}
+const DIALED: Record<string, HandoffAnswer> = { DialHandedOff: "HandoffOpened", DialUnavailable: "HandoffMissing", DialRefused: "HandoffMissing", DialFailed: "HandoffFailed" }
+
+/** The owner's tap places the call through Telecom; without the dialer role or the call grant the number opens in the system dial screen. */
+export effect function placeOwnerCall(number: string) {
+  const placed = try (bridgeCall("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => failure)
+  const answer: PlaceAnswer = placed instanceof TelephonyRefused
+    ? (placed.code === undefined ? "PlaceLost" : "TelecomUnavailable")
+    : "placeStatus" in placed ? PLACED[placed.placeStatus] ?? "TelecomFailed" : "TelecomUnavailable"
+  if (answer !== "RoleRequired" && answer !== "GrantRequired") return callOutcome(answer, "NoHandoff")
+  const dialed = try (bridgeCall("dial", (c) => c.phone.dial(number)) catch () => undefined)
+  return callOutcome(answer, dialed === undefined || !("dialStatus" in dialed) ? "HandoffFailed" : DIALED[dialed.dialStatus] ?? "HandoffFailed")
+}
+
+/** One recent call as Phone shows it: the name Telecom cached, the arrow and red for a call not taken. */
+export function recentOf(entry: TelephonyCallLogEntry): Recent {
+  const kind = entry.type === "outgoing" ? "OutboundCall" : entry.type === "missed" || entry.type === "rejected" || entry.type === "blocked" ? "MissedCall" : "InboundCall"
+  return { id: entry.id, number: entry.number, title: entry.cachedName ?? "", kind, date: entry.date, fresh: entry.isNew, seconds: entry.durationSeconds }
+}
+
+/** What a refused call-log read means for the owner: not declared, access needed, or unreadable. */
+export function refusedRecents(failure: unknown): RecentsAnswer {
+  if (!(failure instanceof TelephonyRefused) || refusalTag(failure) !== "RecentCallsRefused") return { tag: "RecentsUnreadable" }
+  const refusal = (failure.cause as { refusal?: { tag?: string; admission?: string } }).refusal
+  if (refusal?.tag === "CallLogUnavailable") return { tag: "RecentsNotDeclared" }
+  if (refusal?.tag === "CallLogNotAdmitted" && refusal.admission === "PermissionRequired") return { tag: "RecentsNotGranted" }
+  return { tag: "RecentsUnreadable" }
+}
+
+/** The keypad number after a key, within the keypad's bounds. */
+export function pressed(number: string, key: string): string {
+  if (key === "+") return number === "" ? "+" : number
+  return /^[0-9*#]$/.test(key) && number.length < KEYPAD_MAX ? number + key : number
+}
+
+/** Phone's view over its machine and the image's phone bridge. */
+export const phoneViewLayer = Layer.effect(PhoneView, effect {
+  const bridges = try TelephonyBridges
+  const bridgeCall = callerOf(bridges)
+  const phone = try PhoneMachine
+  const tell = (event: PhoneEvent) => phone.send(event) catch () => undefined
+
+  effect function readRecents(request: boolean) {
+    let status = try bridgeCall("status", (c) => c.phone.status())
+    if (status.permissions.callLog === undefined) return { tag: "RecentsNotDeclared" } satisfies RecentsAnswer
+    if (request && status.permissions.callLog !== "granted") status = try bridgeCall("requestAccess", (c) => c.phone.requestAccess("callLog"))
+    if (status.permissions.callLog !== "granted") return { tag: "RecentsNotGranted" } satisfies RecentsAnswer
+    const page = try bridgeCall("recentCalls", (c) => c.phone.recentCalls({ limit: RECENTS_LIMIT }))
+    const names = try displayNames(bridgeCall, page.calls.filter((call) => !call.cachedName).map((call) => call.number))
+    return { tag: "RecentsRead", calls: page.calls.map((call) => ({ ...recentOf(call), title: call.cachedName || names[call.number] || "" })) } satisfies RecentsAnswer
+  }
+
+  effect function read() {
+    const { epoch, askAccess } = try phone.get()
+    const answer: RecentsAnswer = try (readRecents(askAccess) catch (failure) => refusedRecents(failure))
+    try tell({ type: "recentsAnswered", ticket: epoch, answer, at: try Clock.currentTimeMillis })
+  }
+
+  return {
+    effect visit(route?: string) {
+      try ensuring(effect {
+        if ((try tell({ type: "phoneShown" })) === undefined) return
+        if (route?.startsWith("keypad:") === true) try tell({ type: "keypadAsked", number: route.slice("keypad:".length).slice(0, KEYPAD_MAX) })
+        else if (route === "recents") try tell({ type: "tabChosen", tab: "RecentsTab" })
+        try read()
+        if (route === "voicemail") try tell({ type: "tabChosen", tab: "VoicemailTab" })
+        try Effect.never
+      }, tell({ type: "phoneHidden" }))
+    },
+    effect refresh(request: boolean) {
+      if ((try tell({ type: "refreshed", request })) !== undefined) try read()
+    },
+    effect press(key: string) {
+      const { number } = try phone.get()
+      try tell({ type: "numberTyped", number: pressed(number, key) })
+    },
+    effect erase() {
+      const { number } = try phone.get()
+      try tell({ type: "numberTyped", number: number.slice(0, -1) })
+    },
+    effect dial(number: string) {
+      const target = normalizePhoneNumber(number)
+      const { session } = try phone.get()
+      if ((try tell({ type: "dialStarted", valid: target !== null })) === undefined || target === null) return
+      const outcome: CallOutcome = try Effect.provideService(placeOwnerCall(target), TelephonyBridges, bridges)
+      try tell({ type: "dialAnswered", session, outcome })
+    },
+  }
+})

@@ -1,0 +1,123 @@
+// spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"; spec/voice/conversation.md, "A busy Cloud is retried quietly at most twice in a row; a long wait pauses voice; own keys and other failures are shown"
+import { boundedWaitSeconds, type LimitKind, type Route } from "../../gen/voice__route.effect.vibe"
+import { NativeRefusal, RefusalData } from "./native.schema.vibe"
+
+/** What a refusal says, by code only: never a provider's text. */
+export interface RefusalFacts {
+  readonly code: string
+  readonly name: string
+  readonly status?: number
+  readonly retryAfterSeconds?: number
+  readonly limitCode?: string
+  readonly resetAt?: number
+}
+
+const MAX_RESET_AHEAD_MS = 400 * 86_400_000
+const LIMIT_CODE = /^[a-z][a-z0-9_]{0,39}$/
+const HTTP_CODE = /^(?:voice|cloud)-http-([1-5][0-9]{2})$/
+
+const decodeRefusal = Schema.decodeUnknownOption(NativeRefusal)
+const decodeData = Schema.decodeUnknownOption(RefusalData)
+
+/** The code, name, status and bounded retry facts of a native or network refusal. */
+export function refusalOf(cause: unknown, now: number): RefusalFacts {
+  const raw = Option.getOrUndefined(decodeRefusal(cause))
+  const data = raw?.data === undefined ? undefined : Option.getOrUndefined(decodeData(raw.data))
+  const code = raw?.code ?? ""
+  const http = HTTP_CODE.exec(code)
+  const wait = data?.retryAfterSeconds
+  const bounded = typeof wait === "number" && Number.isSafeInteger(wait) ? boundedWaitSeconds(wait) : 0
+  const limitCode = data?.limitCode
+  const resetAt = data?.resetAt
+  return {
+    code,
+    name: raw?.name ?? "",
+    ...(http ? { status: Number(http[1]) } : {}),
+    ...(bounded > 0 ? { retryAfterSeconds: bounded } : {}),
+    ...(typeof limitCode === "string" && LIMIT_CODE.test(limitCode) ? { limitCode } : {}),
+    ...(typeof resetAt === "number" && Number.isSafeInteger(resetAt) && resetAt > now && resetAt - now <= MAX_RESET_AHEAD_MS ? { resetAt } : {}),
+  }
+}
+
+/** Which Cloud limit a 429 names, from its short code. */
+export function limitKindOf(facts: RefusalFacts): LimitKind {
+  const code = facts.limitCode ?? ""
+  if (code.includes("allowance")) return "AllowanceUsed"
+  if (code.includes("subscription") || code.includes("plan")) return "PlanRequired"
+  if (code.includes("billing") || code.includes("payment")) return "BillingRefused"
+  return "RateLimit"
+}
+
+/** Whether a failure is a call taking the microphone or the speaker. */
+export function callCaused(facts: RefusalFacts): boolean {
+  return facts.code === "call-active" || facts.code === "capture-call-active"
+}
+
+/** Said once when a call ends a voice conversation or a dictation. */
+export const VOICE_CALL_ENDED = "Voice paused for a phone call."
+/** Said when voice is asked for while a call holds the microphone. */
+export const VOICE_CALL_ACTIVE = "Voice is paused during a phone call."
+/** Said when Alpha could not confirm speech or the microphone stopped. */
+export const MEDIA_UNCONFIRMED = "Speech could not be stopped. Restart Alpha."
+/** Said when a reply stopped partway and the rest is in the chat. */
+export const REST_UNREAD = "Couldn't read the rest aloud. The full reply is above."
+/** Said when a spoken request waits for the owner's review in the chat. */
+export const REVIEW_IN_CHAT = "Review it in the chat. The microphone is off."
+/** Said once a start when the reply cannot be interrupted by speaking. */
+export const CANNOT_INTERRUPT = "Voice can't interrupt a reply here. Tap Stop speaking to cut it short."
+/** Said when quiet retries ran out or Cloud asked for a long wait. */
+export const VOICE_PAUSED = "Voice paused. Cloud is busy; start again in a moment."
+
+/** The name of whoever handles network speech on this route. */
+export function serviceName(route: Route): string {
+  return route === "Direct" ? "Cartesia" : "Eliza Cloud"
+}
+
+/** A short, coded explanation of a failed network speech request, or undefined when it has none. */
+export function failureMessage(facts: RefusalFacts, route: Route, context: { readonly recording: boolean; readonly conversation: boolean }): string | undefined {
+  const status = facts.status
+  const kept = context.recording ? " Your recording is kept." : ""
+  const after = kept || (context.conversation ? " Your message was not sent. Say it again." : "")
+  if (route === "Direct" && status !== undefined && status >= 400) {
+    return status < 500 ? "Cartesia refused voice. Check your key and Cartesia plan." : "Cartesia isn't responding. Try again later."
+  }
+  const name = serviceName(route)
+  if (status === 401) return `${name} sign-in expired. Sign in again in Settings, then retry voice.`
+  if (status === 403) return `${name} refused voice for this account. Check your account in Settings.`
+  if (status === 402) return `${name} declined voice for billing. Check your account in Settings.${kept}`
+  if (status === 429) {
+    const kind = limitKindOf(facts)
+    if (kind === "AllowanceUsed") return `Your ${name} plan's voice allowance is used up.${kept}`
+    if (kind === "PlanRequired") return `${name} voice needs an active ${name} plan. Manage your plan in Settings.${kept}`
+    if (kind === "BillingRefused") return `${name} declined voice for billing. Check your account in Settings.${kept}`
+    const wait = facts.retryAfterSeconds === undefined ? "Wait a moment, then try again." : `Try again in ${facts.retryAfterSeconds} seconds.`
+    return `${name} voice reached your plan's request limit. ${wait}${kept}`
+  }
+  if (status !== undefined && status >= 400) return `${name} voice couldn't complete this request. Try again later.`
+  if (facts.code === "voice-stt-decode") return "This recording could not be prepared for transcription. Choose Record again."
+  if (facts.code === "voice-stt-connect") return `${name} voice could not use your saved account. Sign in again in Settings.${after}`
+  if (facts.code === "voice-tts-connect") return `${name} voice could not use your saved account. Sign in again in Settings.`
+  if (facts.code === "voice-stt-upload") return `The recording upload could not be confirmed. Check your connection.${after}`
+  if (facts.code === "voice-stt-response") return `${name} voice returned no usable transcript.${after || " Try again later."}`
+  if (facts.code === "speech-cleanup-unconfirmed") return MEDIA_UNCONFIRMED
+  return undefined
+}
+
+/** What a refused microphone says, on the phone or in a browser; nothing was recorded either way. */
+export function microphoneMessage(facts: RefusalFacts, browser: boolean): string | undefined {
+  const denied = facts.code === "permission-denied" || facts.name === "NotAllowedError" || facts.name === "SecurityError"
+  if (denied) {
+    return browser
+      ? "Microphone access is blocked. Allow the microphone for this site in your browser's site settings, then try again, or use the keyboard instead. Nothing was recorded."
+      : "Microphone access is off. Open app settings to allow it. Nothing was recorded."
+  }
+  if (facts.name === "NotFoundError" || facts.name === "NotReadableError" || facts.name === "OverconstrainedError") {
+    return "No usable microphone was found. Connect or enable a microphone, then try again."
+  }
+  return undefined
+}
+
+/** What a transcription with no words says. */
+export function nothingHeardMessage(route: Route): string {
+  return route === "Device" ? "No speech was detected in this recording. Record again, or type instead." : `${serviceName(route)} heard no speech. Your recording is kept.`
+}

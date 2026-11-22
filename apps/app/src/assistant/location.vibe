@@ -1,0 +1,85 @@
+// spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it"
+import { Machine as LocatorMachine, type Event as LocatorEvent, ageOf, needsRead, sendsLocation, platformMaxAgeMs, platformTimeoutMs, precision, waitMs } from "../../gen/assistant__context.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { LocationPermission, PositionFix } from "./payloads.schema.vibe"
+
+/** The location a turn carries, as the observation's `location` field (assumed in @elizaos/agent/client, #1418). */
+export interface TurnLocation { readonly latitude: number; readonly longitude: number; readonly accuracyMeters: number; readonly capturedAt: string }
+
+const plugin = "ElizaLocation"
+
+/** The phone's last known location for chat turns, read only with consent and never asked for. */
+export service PhoneLocation {
+  /** Settings › Privacy › Location for Alpha changed; the next turn also reads it from Preferences. */
+  setEnabled(on: boolean): void!!
+  /** Read the permission as it is now, forgetting the fix when it was revoked. */
+  refresh(): void!!
+  /** The location for a turn from a screen that is or is not observed, to a peer that does or does not take it. */
+  forTurn(observed: boolean, peerTakesIt: boolean): (TurnLocation | undefined)!!
+}
+
+function rounded(value: number): number {
+  return Math.round(value * precision) / precision
+}
+
+/** The phone location over `ElizaLocation` and the Locator machine. */
+export const locationLayer = Layer.effect(PhoneLocation, effect {
+  const native = try Native
+  const locator = try LocatorMachine
+  const preferences = try Preferences
+  let last: TurnLocation | undefined
+  let fixedAt = 0
+  const send = (event: LocatorEvent) => map(locator.send(event), () => undefined) catch () => undefined
+  effect function permission() {
+    if (!(try native.available(plugin))) return false
+    const raw = native.invoke(plugin, "checkPermissions") catch () => undefined
+    const read = Schema.decodeUnknownOption(LocationPermission)(raw)
+    return Option.isSome(read) && read.value.location === "granted"
+  }
+  effect function refresh() {
+    const on = try preferences.sharesLocation()
+    if ((try locator.get()).enabled !== on) try send({ type: "toggle", on })
+    if (!on) last = undefined
+    const granted = try permission()
+    const current = try locator.get()
+    if (current.granted !== granted) try send({ type: "permissionChanges", granted })
+    if (!granted) last = undefined
+  }
+  effect function age() {
+    const current = try locator.get()
+    if (current.fix.tag === "NoFix") return
+    const now = try Clock.currentTimeMillis
+    const elapsed = Math.floor((now - fixedAt) / 1000) - ageOf(current.fix)
+    if (elapsed >= 1) try send({ type: "elapse", seconds: elapsed })
+  }
+  effect function readFix() {
+    try send({ type: "read" })
+    const raw = timeout(native.invoke(plugin, "getCurrentPosition", { accuracy: "high", maxAge: platformMaxAgeMs, timeout: platformTimeoutMs }), waitMs) catch () => undefined
+    const fix = Schema.decodeUnknownOption(PositionFix)(raw)
+    if (Option.isNone(fix)) return
+    const now = try Clock.currentTimeMillis
+    const ageS = Math.max(0, Math.floor((now - fix.value.timestamp) / 1000))
+    fixedAt = now - ageS * 1000
+    const capturedAt = Effect.try(() => new Date(fix.value.timestamp).toISOString()) catch () => ""
+    last = {
+      latitude: rounded(fix.value.coords.latitude), longitude: rounded(fix.value.coords.longitude),
+      accuracyMeters: Math.round(fix.value.coords.accuracy), capturedAt,
+    }
+    try send({ type: "fixArrives", ageS: Math.min(ageS, platformMaxAgeMs / 1000) })
+  }
+  return {
+    setEnabled: (on: boolean) => effect {
+      const current = try locator.get()
+      if (current.enabled !== on) try send({ type: "toggle", on })
+      if (!on) last = undefined
+    },
+    refresh,
+    forTurn: (observed: boolean, peerTakesIt: boolean) => effect {
+      try refresh()
+      try age()
+      if (needsRead(try locator.get())) try readFix()
+      return sendsLocation(try locator.get(), observed, peerTakesIt) ? last : undefined
+    },
+  }
+})

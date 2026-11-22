@@ -1,0 +1,39 @@
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Use Cloud only for managed services"
+import { GoogleAgentAccess, agentAccessLayer } from "./agentAccess.vibe"
+import { Membership, billingLayer } from "./billing.vibe"
+import { CloudDelegation, delegationLayer } from "./delegation.vibe"
+import { devLayer } from "./devBridge.vibe"
+import { Entitlement, entitlementLayer } from "./entitlement.vibe"
+import { GoogleAccounts, googleLayer } from "./google.vibe"
+import { limitsLayer } from "./limits.vibe"
+import { CloudSession, sessionLayer } from "./session.vibe"
+import { AccountSheet, sheetLayer } from "./sheet.vibe"
+import { SignInScreen, signInLayer } from "./signIn.vibe"
+
+export { CloudSession, ownerOf } from "./session.vibe"
+export { Entitlement } from "./entitlement.vibe"
+export { GoogleAccounts, type GoogleAccount } from "./google.vibe"
+export { VoiceLimit, type LimitFacts } from "./limits.vibe"
+
+/** Every account service, needing only Native, Resident, Cloud, Build and a KeyValueStore. */
+export const layer = Layer.mergeAll(
+  agentAccessLayer,
+  limitsLayer,
+  Layer.provideMerge(
+    Layer.mergeAll(signInLayer, billingLayer, googleLayer, sheetLayer, delegationLayer, devLayer),
+    Layer.provideMerge(entitlementLayer, sessionLayer)
+  )
+)
+
+/** The account area's long-running work: the session, sign-in, plan, billing, Google, delegation, sheet and agent access. */
+export effect function run() {
+  const session = try CloudSession
+  const signIn = try SignInScreen
+  const entitlement = try Entitlement
+  const membership = try Membership
+  const google = try GoogleAccounts
+  const sheet = try AccountSheet
+  const delegation = try CloudDelegation
+  const access = try GoogleAgentAccess
+  try.all [session.run(), signIn.run(), entitlement.run(), membership.run(), google.run(), sheet.run(), delegation.run(), access.run()]
+}

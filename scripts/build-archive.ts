@@ -2,7 +2,7 @@ import {androidIdentity} from './android-identity.ts';
 /**
  * Verify, build the launcher APKs and retain immutable matching app/test artifacts.
  *
- *   bun scripts/build-archive.ts test-results/<new-archive>
+ *   node scripts/build-archive.ts test-results/<new-archive>
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import {buildEnv as androidBuildEnv} from './build-android.ts';
 import {publicUpdateChannel} from './update-channel.ts';
 const cli=process.argv.slice(2);
 const runtimeProfile='native';
-assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: bun scripts/build-archive.ts test-results/<new-archive>');
+assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node scripts/build-archive.ts test-results/<new-archive>');
 const [destination]=cli;
 // Full verification compiles Calendar host tests which run real SQLite queries.
 // Check this before preparation or model verification starts.
@@ -35,8 +35,7 @@ const snapshot=()=>JSON.parse(execFileSync(process.execPath,['scripts/source-sna
 const nativeStageLog=fs.openSync(path.join(destination,'native-source-prestage.log'),'wx');
 try{
  // The generated Gradle host is a build input too; android:build regenerates identical bytes.
- execFileSync(process.execPath,['scripts/android-host.ts'],{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
- execFileSync(process.execPath,['scripts/stage-local-agent-sources.ts'],{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
+ execFileSync(process.execPath,['--conditions=eliza-source','--import','vibelang/register','scripts/android-host.ts'],{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(nativeStageLog);}
 // Capacitor generates res/xml/config.xml, an authenticated native build input.
@@ -44,7 +43,7 @@ finally{fs.closeSync(nativeStageLog);}
 // below still rejects drift in this file or any other captured input.
 const capacitorStageLog=fs.openSync(path.join(destination,'capacitor-prestage.log'),'wx');
 try{
- execFileSync('bun',['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
+ execFileSync(process.execPath,['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
  execFileSync(process.execPath,['scripts/android-host.ts'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(capacitorStageLog);}
@@ -56,7 +55,7 @@ for(const command of ['verify','android:build']){
  // Full verification includes the real staged JVM/runtime campaigns. Retain a
  // finite two-hour verification budget and the existing twenty-minute APK budget.
  // An archive retains the release APK, so the Android build is never debug-only here.
- try{execFileSync('bun',['run',command,...(command==='android:build'?['--release']:[])],{stdio:['ignore',log,log],timeout:command==='verify'?7200000:1200000,env:command==='verify'?verifyEnv:buildEnv});}
+ try{execFileSync(process.execPath,['run',command,...(command==='android:build'?['--release']:[])],{stdio:['ignore',log,log],timeout:command==='verify'?7200000:1200000,env:command==='verify'?verifyEnv:buildEnv});}
  finally{fs.closeSync(log);}
  console.log(command+': passed');
 }

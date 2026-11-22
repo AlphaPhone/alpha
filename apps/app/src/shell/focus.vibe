@@ -1,0 +1,119 @@
+// spec/shell/focus.md, "Story: Keep my place when the screen changes under me"
+import { Machine as FocusMachine, type Event as FocusEvent, type Target } from "../../gen/shell__focus.effect.vibe"
+import type { Nav } from "../../gen/shell__navigation.effect.vibe"
+import { Navigation } from "./navigation.vibe"
+import { activeShown, focusKey, focusTarget, focusable, focusedKey, layoutChanges, nextFrame, pageEvents, resizes } from "./page.ts"
+
+/** Focus custody for lists that render their rows again. */
+export service Focus {
+  /** A list is about to render again with this row focused. */
+  captureRow(list: string, row: string): void!!
+  /** The list rendered: whether the row is still shown, and whether a dialog is open. */
+  rowRendered(list: string, found: boolean, dialog: boolean): void!!
+}
+
+function screenOf(nav: Nav): string {
+  return nav.app !== "" ? `app:${nav.app}` : nav.library ? "library" : "home"
+}
+
+function targetOf(nav: Nav): Target {
+  return nav.app !== "" ? "TargetTitle" : nav.library ? "TargetSearch" : "TargetHome"
+}
+
+effect function sendTo(machine: FocusMachine.Shape, event: FocusEvent) {
+  const sent = machine.send(event) catch () => undefined
+  return sent
+}
+
+effect function settleFrames(machine: FocusMachine.Shape) {
+  while (true) {
+    const state = try machine.get()
+    if (state.cause === "Idle") return
+    try nextFrame
+    const shownNow = activeShown() && focusedKey() !== ""
+    const heldShown = focusable(state.held)
+    const allowed = state.cause === "ScreenChange" || !heldShown
+    const found = !shownNow && allowed && state.frames < 12 && focusTarget(state.target === "TargetNone" ? "TargetRegion" : state.target)
+    try sendTo(machine, { type: "frame", activeShown: shownNow, targetFound: found, heldShown })
+  }
+}
+
+effect function restoreIfMoved(machine: FocusMachine.Shape, restores: number) {
+  const state = try machine.get()
+  if (state.restores > restores && state.lastRestore !== "") try sync(() => focusKey(state.lastRestore))
+}
+
+/** The focus service and the focus machine, followed from the navigation, focus events and the layout. */
+export const focusLive = Layer.effect(Focus, effect {
+  const machine = try FocusMachine
+  const navigation = try Navigation
+  let screen = screenOf(try navigation.get())
+  let layers: readonly string[] = (try navigation.get()).layers.map((layer) => layer.id)
+  fork.scoped (effect {
+    for try (const nav of navigation.changes) {
+      const next = screenOf(nav)
+      if (next !== screen) {
+        screen = next
+        if (nav.layers.length === 0) {
+          try sendTo(machine, { type: "screenChanged", target: targetOf(nav) })
+          try settleFrames(machine)
+        }
+      }
+      const ids = nav.layers.map((layer) => layer.id)
+      for (const id of ids) if (!layers.includes(id)) try sendTo(machine, { type: "modalOpened", modal: id, opener: focusedKey() })
+      for (const id of layers) {
+        if (ids.includes(id)) continue
+        const before = (try machine.get()).restores
+        try nextFrame
+        const opener = (try machine.get()).openers.find((each) => each.modal === id)?.opener ?? ""
+        try sendTo(machine, { type: "modalClosed", modal: id, openerReady: focusable(opener) })
+        try restoreIfMoved(machine, before)
+      }
+      layers = ids
+    }
+  })
+  fork.scoped (effect { for try (const _ of pageEvents("focusin", "document")) { const key = focusedKey(); if (key !== "") try sendTo(machine, { type: "focused", key }) } })
+  fork.scoped (effect {
+    for try (const _ of pageEvents("focusout", "document")) {
+      try nextFrame
+      if (!activeShown()) try sendTo(machine, { type: "blurred" })
+    }
+  })
+  fork.scoped (effect {
+    for try (const _ of layoutChanges()) {
+      const state = try machine.get()
+      if (state.waiting === "") continue
+      const before = state.restores
+      if (focusable(state.waiting)) {
+        try sendTo(machine, { type: "openerReturned", opener: state.waiting })
+        try restoreIfMoved(machine, before)
+      }
+    }
+  })
+  fork.scoped (effect {
+    for try (const state of machine.changes) {
+      if (state.waiting === "") continue
+      const waited = state.waiting
+      try sleep(Duration.seconds(1))
+      if ((try machine.get()).waiting === waited) try sendTo(machine, { type: "waitEnds" })
+    }
+  })
+  fork.scoped (effect {
+    for try (const _ of resizes()) {
+      const nav = try navigation.get()
+      const state = try machine.get()
+      if (state.held !== "" && !focusable(state.held) && !activeShown()) {
+        try sendTo(machine, { type: "resizeLost", target: targetOf(nav) })
+        try settleFrames(machine)
+      }
+    }
+  })
+  return {
+    effect captureRow(list: string, row: string) { try sendTo(machine, { type: "captureRow", listId: list, row }) },
+    effect rowRendered(list: string, found: boolean, dialog: boolean) {
+      const before = (try machine.get()).lastRow
+      const after = try sendTo(machine, { type: "rowRendered", listId: list, found, dialog })
+      if (after !== undefined && after.lastRow !== "" && after.lastRow !== before) try sync(() => focusKey(after.lastRow))
+    },
+  }
+})

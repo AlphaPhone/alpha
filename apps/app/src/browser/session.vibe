@@ -1,0 +1,256 @@
+// spec/browser/session.md, "Story: Browse in tabs"; spec/browser/session.md, "Story: Keep my normal tabs and history across restarts"; spec/browser/session.md, "Story: Clear my browsing data"; spec/browser/persistence.md, "Story: Save my tabs without ever losing the saved record"; spec/browser/downloads.md, "Show in Files opens Files at Downloads only for this Browser session's list"
+import { type AgentSettled, type Event, type NativeReport, type Session, type SessionEffect, Machine, curTab, machine, mayPersist, snapshotOf, tabOf } from "../../gen/browser__session.effect.vibe"
+import { type WriterEffect, Machine as WriterMachine, machine as writerMachine } from "../../gen/browser__persistence.effect.vibe"
+import type { SavedSession, TabPage } from "../../gen/browser__page.ts"
+import { Navigation } from "../shell/navigation.vibe"
+import { Toasts } from "../shell/toasts.vibe"
+import { cleanTitle, insecureHttp, newTabId, now, pageFacts } from "./address.ts"
+import { PROFILE_UNSUPPORTED_NATIVE, SESSION_NOTICES, noticeText, refusalText } from "./messages.ts"
+import { BrowserReviews } from "./reviews.vibe"
+import { BrowserCallFailed, TabHost, ours } from "./tabHost.vibe"
+import { Cleared, FindResult, Fullscreen, SavedRecord, ShowDownloads, SiteCleared, StateChanged, TabEvent, TabNotice, TabOpened } from "./tabHost.schema.vibe"
+
+/** What one event did: whether the rules allowed it, the agent requests it settled, and whether Back was left to the shell. */
+export interface Dispatched {
+  readonly accepted: boolean
+  readonly settled: readonly AgentSettled[]
+  readonly unhandledBack: boolean
+  readonly failed: boolean
+}
+
+/** Browser's tabs: the session machine, the native calls its effects ask for, and the saved session. */
+export service BrowserTabs {
+  readonly changes: Stream.Stream<Session>
+  /** Fires when a page surface resumed and its geometry must be sent again. */
+  readonly resumed: Stream.Stream<void>
+  get(): Session!!
+  /** One session event and every native call it leads to. */
+  dispatch(event: Event): Dispatched!!
+  /** Starts the host's Browser: the first tab, the native events, the restore and the saver. Never returns. */
+  run(): void!!
+  /** A keystroke in the find bar, searched natively after a short pause. */
+  typeFind(query: string): void!!
+  /** Back: closes a layer or goes back in the page; false when the shell should handle it. */
+  back(): boolean!!
+  /** Clear browsing data after the owner confirms it. */
+  clearBrowsingData(): void!!
+  /** Clear the selected site's data after the owner confirms it. */
+  clearSiteData(): void!!
+  /** The native host's Downloads list. */
+  openDownloads(): void!!
+}
+
+const FIND_DELAY = "150 millis"
+const nothing: Dispatched = { accepted: false, settled: [], unhandledBack: false, failed: false }
+
+const commandName = { GoBack: "back", GoForward: "forward", Reload: "reload", StopLoading: "stop" } as const
+
+function pageOf(event: StateChanged, prior: TabPage): TabPage {
+  const url = event.url ?? prior.url
+  return {
+    url,
+    title: cleanTitle(event.title, url),
+    navigation: event.navigation ?? prior.navigation,
+    sequence: event.sequence,
+    loading: event.loading === true,
+    committed: event.committed === true,
+    failed: (event.error ?? "") !== "",
+    canBack: event.canBack === true,
+    canForward: event.canForward === true,
+    externalOnly: event.externalOnly === true,
+    problem: event.error ?? "",
+    ...pageFacts(url),
+  }
+}
+
+function savedOf(record: SavedRecord): SavedSession {
+  return { history: [...record.history], tabs: record.tabs.map((t) => ({ id: t.id, url: t.url, title: t.title })), cur: record.cur }
+}
+
+/** BrowserTabs over the session and writer machines in memory: neither ever stores a private tab. */
+export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
+  const tabs = try Machine
+  const writer = try WriterMachine
+  const host = try TabHost
+  const toasts = try Toasts
+  const apps = try Navigation
+  const reviews = try BrowserReviews
+  const resumed = try PubSub.unbounded<void>()
+
+  effect function toast(text: string) { try toasts.show(text) }
+  effect function refused(error: BrowserCallFailed) { try toast(refusalText(error.message)) }
+
+  effect function perform(out: SessionEffect, done: { settled: AgentSettled[]; unhandledBack: boolean; failed: boolean }) {
+    match (out) {
+      when { tag: "CreateNative", let id, let profile }: {
+        const created = host.call("create", { id, private: profile === "Private" }) catch (error) => error
+        const failure = created instanceof BrowserCallFailed ? created : undefined
+        const next = try dispatch({ type: "createSettled", id, ok: failure === undefined, unsupported: failure?.message === PROFILE_UNSUPPORTED_NATIVE })
+        done.settled.push(...next.settled)
+      }
+      when { tag: "LoadNative", let id, let url }: {
+        const loaded = host.call("navigate", { id, url }) catch (error) => error
+        const failure = loaded instanceof BrowserCallFailed ? loaded : undefined
+        if (failure !== undefined && (try tabs.get()).cur === id) try refused(failure)
+        const next = try dispatch({ type: "loadSettled", id, ok: failure === undefined })
+        done.settled.push(...next.settled)
+      }
+      when { tag: "CloseNative", let id }: host.call("close", { id }) catch () => undefined
+      when { tag: "CommandNative", let id, let command, let navigation }: {
+        const sent = host.call("command", { id, command: commandName[command], navigation }) catch (error) => error
+        if (sent instanceof BrowserCallFailed) {
+          done.failed = true
+          try refused(sent)
+        }
+      }
+      when { tag: "SearchFind", let id, let query }: host.call("find", { id, query }) catch effect (error) => { try refused(error) }
+      when { tag: "MoveFind", let id, let forward }: host.call("findNext", { id, forward }) catch effect (error) => { try refused(error) }
+      when { tag: "ClearFind", let id }: host.call("clearFind", { id }) catch () => undefined
+      when { tag: "Settle", let request, let tab, let outcome }: done.settled.push({ request, tab, outcome })
+      when { tag: "Say", let notice }: try toast(SESSION_NOTICES[notice])
+      when { tag: "ShowBrowser" }: try apps.open("browser")
+      when { tag: "BackUnhandled" }: done.unhandledBack = true
+    }
+  }
+
+  effect function dispatch(event: Event) {
+    const change = tabs.send(event) catch () => undefined
+    if (change === undefined) return nothing
+    const done = { settled: [] as AgentSettled[], unhandledBack: false, failed: false }
+    for (const out of change.out) try perform(out, done)
+    return { accepted: true, ...done }
+  }
+
+  effect function write(out: readonly WriterEffect[]) {
+    for (const effectOut of out) {
+      match (effectOut) {
+        when { tag: "Write", let snapshot }: {
+          const ok = (host.call("saveBrowsingState", snapshot) catch () => undefined) !== undefined
+          const next = writer.send({ type: "writeSettled", ok, now: now() }) catch () => undefined
+          if (next !== undefined) try write(next.out)
+        }
+        when { tag: "WarnSaveFailed" }: try toast("Tabs and history couldn’t be saved. Alpha will try again shortly.")
+      }
+    }
+  }
+
+  effect function save(state: Session) {
+    if (!mayPersist(state)) return
+    const change = writer.send({ type: "offer", snapshot: snapshotOf(state), now: now() }) catch () => undefined
+    if (change !== undefined) try write(change.out)
+  }
+
+  effect function restore() {
+    const started = try dispatch({ type: "restoreStarted" })
+    if (!started.accepted) return
+    const read = effect {
+      const raw = try host.call("browsingState")
+      return savedOf(try Schema.decodeUnknownEffect(SavedRecord)(raw))
+    } catch (error) => error
+    if (read instanceof BrowserCallFailed || read instanceof Error) {
+      try dispatch({ type: "restoreFailed", silent: read instanceof BrowserCallFailed && read.unavailable })
+      return
+    }
+    const restored = try dispatch({ type: "restoreRead", saved: read })
+    if (restored.accepted) writer.send({ type: "prime", snapshot: snapshotOf(try tabs.get()) }) catch () => undefined
+  }
+
+  effect function decoded<A>(name: Parameters<typeof host.events>[0], decode: (input: unknown) => A!unknown, handle: (event: A) => void!!) {
+    for try (const raw of host.events(name)) {
+      if (!ours(host.session, raw)) continue
+      const event = decode(raw) catch () => undefined
+      if (event !== undefined) try handle(event)
+    }
+  }
+
+  effect function listen() {
+    try.all [
+      decoded("stateChanged", Schema.decodeUnknownEffect(StateChanged), effect (event) => {
+        if (event.surfaceResumed === true) try PubSub.publish(resumed, undefined)
+        const prior = tabOf(try tabs.get(), event.id).page
+        const page = pageOf(event, prior)
+        const report: NativeReport = { id: event.id, page, insecureHttp: page.failed && insecureHttp(page.url), at: now() }
+        try dispatch({ type: "nativeReport", report })
+      }),
+      decoded("tabOpened", Schema.decodeUnknownEffect(TabOpened), effect (event) => {
+        try dispatch({ type: "nativeOpened", id: event.id, opener: event.opener ?? "", priv: event.private === true })
+      }),
+      decoded("tabClosed", Schema.decodeUnknownEffect(TabEvent), effect (event) => {
+        try dispatch({ type: "nativeClosed", id: event.id, fallback: newTabId() })
+      }),
+      decoded("notice", Schema.decodeUnknownEffect(TabNotice), (event) => toast(noticeText(event.message))),
+      decoded("findResult", Schema.decodeUnknownEffect(FindResult), effect (event) => {
+        try dispatch({ type: "findResult", id: event.id, cleared: event.cleared === true, count: Math.trunc(event.count ?? 0), index: Math.trunc(event.index ?? 0), done: event.done === true })
+      }),
+      decoded("fullscreen", Schema.decodeUnknownEffect(Fullscreen), effect (event) => { try dispatch({ type: "fullscreenChanged", active: event.active }) }),
+      decoded("showDownloads", Schema.decodeUnknownEffect(ShowDownloads), () => apps.open("files", "downloads")),
+      effect { for try (const state of tabs.changes) { try save(state) } },
+    ]
+  }
+
+  return {
+    changes: tabs.changes,
+    resumed: Stream.fromPubSub(resumed),
+    get: () => tabs.get(),
+    dispatch,
+    effect run() {
+      try dispatch({ type: "startBrowser", onDevice: host.onDevice, id: newTabId() })
+      try.all [listen(), restore()]
+    },
+    effect typeFind(query: string) {
+      const cleaned = query.replace(/[\u0000-\u0008\u000a-\u001f\u007f]/g, "")
+      const typed = try dispatch({ type: "typeFind", query: cleaned })
+      if (!typed.accepted) return
+      const id = (try tabs.get()).find.tab
+      fork.detached effect {
+        try sleep(FIND_DELAY)
+        try dispatch({ type: "searchFind", id, query: cleaned })
+      }
+    },
+    effect back() {
+      const result = try dispatch({ type: "back" })
+      return result.accepted && !result.unhandledBack
+    },
+    effect clearBrowsingData() {
+      const state = try tabs.get()
+      if (state.clearing) return
+      const approved = try reviews.confirm("browser-clear-data", "ClearBrowsingData", host.onDevice ? "history, cookies and tabs" : "history and tabs")
+      if (!approved) return
+      const started = try dispatch({ type: "clearStarted" })
+      if (!started.accepted) return
+      writer.send({ type: "clearStarted" }) catch () => undefined
+      try Stream.runHead(Stream.filter(writer.changes, (w) => w.clearing && !w.inflight.held))
+      const cleared = effect {
+        return try Schema.decodeUnknownEffect(Cleared)(try host.call("clearBrowsingData"))
+      } catch (error) => error
+      if (cleared instanceof BrowserCallFailed || cleared instanceof Error) {
+        try dispatch({ type: "clearFailed" })
+        writer.send({ type: "clearSettled", ok: false, snapshot: snapshotOf(try tabs.get()) }) catch () => undefined
+        return
+      }
+      try dispatch({ type: "clearFinished", closed: [...(cleared.closed ?? [])], fallback: newTabId() })
+      writer.send({ type: "clearSettled", ok: true, snapshot: snapshotOf(try tabs.get()) }) catch () => undefined
+    },
+    effect clearSiteData() {
+      const state = try tabs.get()
+      const page = curTab(state).page
+      const site = URL.parse(page.url)?.hostname ?? ""
+      if (!host.onDevice || site === "" || !page.committed || page.failed) {
+        try toast("Load a website before clearing its data.")
+        return
+      }
+      const approved = try reviews.confirm("browser-clear-site", "ClearSiteData", site)
+      if (!approved) return
+      const cleared = effect {
+        return try Schema.decodeUnknownEffect(SiteCleared)(try host.call("clearSiteData", { id: state.cur, url: page.url }))
+      } catch (error) => error
+      if (cleared instanceof BrowserCallFailed) try refused(cleared)
+      else if (cleared instanceof Error) try toast(refusalText("Site data could not be cleared."))
+      else try toast(`Cleared ${cleared.site ?? site}`)
+    },
+    effect openDownloads() {
+      try dispatch({ type: "closeMenu" })
+      host.call("downloads") catch effect (error) => { try refused(error) }
+    },
+  }
+}), Layer.merge(machine(), writerMachine()))

@@ -26,6 +26,8 @@ export interface AppScreen {
   readonly icon: LucideIcon;
   readonly availability: Availability;
   readonly Screen: ComponentType<ScreenProps>;
+  /** Hardware or gesture Back while this app is in front: true when the app took it, false when Back is the shell's. */
+  readonly back?: () => Promise<boolean>;
 }
 
 /** Where the shell mounts an always-present surface, above every screen. */

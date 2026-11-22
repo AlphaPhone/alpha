@@ -1,0 +1,79 @@
+// spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"
+import { AssistantHost, type AgentIdentity, type ScreenFacts } from "../assistant/host.vibe"
+import { DeviceExecutors, type OperationPorts } from "../assistant/review.vibe"
+import { CloudSession } from "../account/session.vibe"
+import { CallWatch } from "../telephony/call-bar.vibe"
+import { Resident } from "../platform/resident.vibe"
+import type { AppId } from "../web/app-screen.ts"
+import { appOfKey } from "./apps.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+
+/** Apps whose screen the assistant never observes. */
+export const PRIVATE_APPS: ReadonlySet<string> = new Set(["passwords", "account"])
+
+/** The shell's side of the assistant: the signed-in session, the screen in front, the views it opens and its toasts. */
+export const assistantHostLive = Layer.effect(AssistantHost, effect {
+  const navigation = try Navigation
+  const notices = try Notices
+  const session = try CloudSession
+  const calls = try CallWatch
+  const resident = try Resident
+  return {
+    effect identity() {
+      const current = try session.current()
+      if (current.phase !== "SignedIn" || (try resident.status()) !== "running") return undefined
+      const account = current.account
+      return {
+        origin: "resident", owner: account.userId, agent: account.organizationId, session: account.credentialId,
+        installationId: account.organizationId, enrollmentId: account.credentialId,
+      } satisfies AgentIdentity
+    },
+    effect screen() {
+      const nav = try navigation.get()
+      const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
+      const privateView = PRIVATE_APPS.has(nav.app)
+      const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
+      return {
+        exposure: { privateView, locked: false, hidden: nav.hidden, connectionDialog: nav.layers.some((layer) => layer.id.startsWith("account")) },
+        observation: { view, revision: nav.revision, sensitive: privateView },
+        onCalendar: nav.app === "calendar",
+        contextKey: `${view}:${route}`,
+      } satisfies ScreenFacts
+    },
+    peer: () => sync(() => ({ optionalFields: false, takesLocation: false })),
+    effect inference() {
+      const current = try session.current()
+      return current.phase === "SignedIn" ? { where: "CloudHosted" as const, provider: "Eliza Cloud" } : { where: "OwnKeyHosted" as const, provider: "Your provider" }
+    },
+    effect emergency() { return !(try calls.allowed()) },
+    effect openView(app: string, route?: string) {
+      const known = appOfKey(`alpha:${app}`)
+      if (known === undefined) return false
+      const before = (try navigation.get()).chat
+      const opened = try navigation.open(known as AppId, route)
+      if (opened && (before === "ChatSheet" || before === "ChatFull")) try navigation.moveChat(before)
+      return opened
+    },
+    toast: (text: string) => notices.show(text),
+  }
+})
+
+/** The executors of every area as one: each operation belongs to the first family that validates it. */
+export function composeExecutors(families: readonly OperationPorts[]): OperationPorts {
+  const owner = (operation: unknown) => families.find((family) => family.validate(operation) !== undefined)
+  return {
+    validate: (operation) => owner(operation)?.validate(operation),
+    execute: (operation, call) => owner(operation)?.execute(operation, call) ?? Promise.resolve({ kind: "refused", code: "unsupported" }),
+    readBack: (operation, call) => owner(operation)?.readBack(operation, call) ?? Promise.resolve({ kind: "refused", code: "unsupported" }),
+    describe: (operation) => owner(operation)?.describe(operation) ?? { title: "Action", detail: "" },
+    classOf: (operation) => (owner(operation) ?? families[0]).classOf(operation),
+    target: (operation, text) => (owner(operation) ?? families[0]).target(operation, text),
+    summarize: (operation, result) => owner(operation)?.summarize(operation, result) ?? "",
+  }
+}
+
+/** The device executors the shell gathers from the areas that run device operations. */
+export function deviceExecutorsLive(families: readonly OperationPorts[]) {
+  return Layer.succeed(DeviceExecutors, { ports: composeExecutors(families) })
+}

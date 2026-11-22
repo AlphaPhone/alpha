@@ -43,16 +43,18 @@ in the app, and the API Worker hosts both Durable Objects itself. Staging uses `
 
 | Path | Role |
 |---|---|
-| `cloud/policy.json` | Public identity per environment: API, web and services origins, tenant, entitlement audience. The same shape as the app's Cloud policy. |
+| `cloud/` (`@alphacompute/alpha-cloud`) | The workspace package that runs upstream `@elizaos/cloud` as Alpha Cloud. |
+| `cloud/src/profile.vibe` | Alpha's deployment profile, as data upstream's profile schema accepts: hosts, audience, capabilities, providers, plans and secret names. The operator's reviewed public inputs (database receipts, Terms and Privacy, entitlement public keys, provider ids) complete it. |
+| `cloud/src/registration.vibe` | Alpha Phone's native client registration: returns on the web host, Android package and release signers, as a `--seed` document, a Worker registry and `elizaos-cloud client register` arguments. |
+| `cloud/src/deployment.vibe`, `cloud/deployment.json` | The app's client deployment (shipped Eliza Cloud rows, Alpha Cloud hosts, credential namespaces) and the `ALPHA_CLOUD_CUTOVER` outputs it writes. |
+| `cloud/src/worker.vibe`, `cloud/src/edge.vibe`, `cloud/wrangler/*.template.json` | The API Worker (upstream's Cloud Worker) and the web-host Worker (asset links and return pages), and their Wrangler templates. |
 | `cloud/resources.json` | Cloudflare account, zone, worker names and resource ids. Zero ids are placeholders until `provision`. |
-| `cloud/edge/worker.ts` | The web-host Worker (about 40 lines). |
-| `scripts/cloud-worker.ts` (`bun run cloud:worker`) | The operator tool: `prepare`, `check`, `secrets`, `provision`, `migrate`, `seed`, `deploy`, `tenant`, `smoke`. |
-| `scripts/cloud-registration.ts`, `scripts/cloud-seed-registration.ts` | The app's native client as upstream reads it: an `apps` row and a `mobile_app_auth_clients` row (callback, package, release signer fingerprints). |
-| `scripts/local-cloud.ts` (`bun run cloud:local`) | The same Cloud on this computer, for development and contract checks. |
+| `scripts/cloud-worker.ts` (`pnpm cloud:worker`) | The operator tool: `profile`, `secrets`, `provision`, `preflight`, `migrate`, `seed`, `prices`, `render`, `check`, `deploy`, `smoke`. |
+| `scripts/local-cloud.ts` (`pnpm cloud:local`) | The same Cloud on this computer, for development and contract checks. |
 | `.github/workflows/cloud-deploy.yml` | Manual, main-only deploy per environment. |
 | `apps/app/src/runtime/cloud-plans.ts`, `cloud-plan-ui.tsx` | In-app plans, checkout, plan change, cancellation and referrals. |
 | `android/.../AlphaBillingAuthorityPlugin.java`, `BillingAuthorityRoutes.java` | Native account session for plan changes and cancellation. |
-| `scripts/update-channel-status.ts` (`bun scripts/update-channel-status.ts`) | Live OTA channel check. |
+| `scripts/update-channel-status.ts` (`node scripts/update-channel-status.ts`) | Live OTA channel check. |
 
 ## 3. Secrets: what to get, and from where
 
@@ -89,20 +91,22 @@ and `ALPHA_CLOUD_ENV` (the whole completed env file).
 ## 4. First deployment (per environment)
 
 ```bash
-bun run cloud:worker -- prepare                       # export, install and build the pin (about 2 GB, once per pin)
-bun run cloud:worker -- secrets --environment staging --env-file ~/.config/alpha-cloud/staging.env
-# add the provider values, report and verify the database receipts, then rerun `secrets`
-bun run cloud:worker -- database-identity --environment staging --env-file ~/.config/alpha-cloud/staging.env
-CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- provision --environment staging --env-file ~/.config/alpha-cloud/staging.env --write
-bun run cloud:worker -- check --environment staging   # render and bundle, no network
-CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- preflight --environment staging --env-file ~/.config/alpha-cloud/staging.env
-bun run cloud:worker -- migrate --environment staging --env-file ~/.config/alpha-cloud/staging.env
-bun run cloud:worker -- seed --environment staging --env-file ~/.config/alpha-cloud/staging.env
-CLOUDFLARE_API_TOKEN=… bun run cloud:worker -- deploy --environment staging --env-file ~/.config/alpha-cloud/staging.env
-bun run cloud:worker -- tenant --environment staging --env-file ~/.config/alpha-cloud/staging.env
-bun run cloud:worker -- pricing --environment staging --env-file ~/.config/alpha-cloud/staging.env
-bun run cloud:worker -- smoke --environment staging
+I=~/.config/alpha-cloud/inputs.json E=~/.config/alpha-cloud/staging.env
+pnpm cloud:worker secrets --environment staging --env-file $E
+# add the provider values and the printed entitlement public key to the operator inputs ($I), then rerun `secrets`
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… pnpm cloud:worker provision --environment staging --env-file $E --write
+pnpm cloud:worker check --environment staging --inputs $I         # render and bundle, no network
+CLOUDFLARE_API_TOKEN=… pnpm cloud:worker preflight --environment staging --env-file $E
+pnpm cloud:worker migrate --environment staging --inputs $I --env-file $E
+pnpm cloud:worker seed --environment staging --inputs $I --env-file $E   # elizaos-cloud client register
+pnpm cloud:worker prices --environment staging --inputs $I --env-file $E # elizaos-cloud prices check
+CLOUDFLARE_API_TOKEN=… pnpm cloud:worker deploy --environment staging --inputs $I --env-file $E
+pnpm cloud:worker smoke --environment staging
 ```
+
+The profile has no tenant, services origin or credential namespace: upstream's deployment rules
+forbid them. Steward is not deployed; sign-in is part of the Cloud API. The database receipt is the
+profile's `databaseIdentity` per environment, and an instance refuses another environment's database.
 
 `deploy` uploads each Worker's secrets with its version using `wrangler deploy --secrets-file`.
 `secrets --apply` pushes them alone for a rotation. `provision` verifies the account's zone, KV
@@ -131,7 +135,7 @@ compatibility barrier before 0282, resolve it with the database owner before con
 requires explicit migration completion before the workflow proceeds.
 
 - In Stripe, send a test webhook and check that it returns 200.
-- `bun run cloud:worker -- pricing --environment staging --env-file …` fills the model price
+- `pnpm cloud:worker pricing --environment staging --env-file …` fills the model price
   catalogue (the deploy workflow runs it). Inference refuses requests until it exists, and upstream
   schedules no refresh.
 - Mint launch grant codes with upstream's
@@ -165,7 +169,7 @@ funds (subscription allowances only). A top-up surface is a separate change.
 
 Installed `ai.alphacompute.alphaphone` builds read the channel in `app.config.json` (`updateManifestUrl`,
 currently `https://github.com/alphacompute/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json`).
-`bun scripts/update-channel-status.ts` checks that channel the way a phone does. As of 2026-11-15 it fails: nothing
+`node scripts/update-channel-status.ts` checks that channel the way a phone does. As of 2026-11-15 it fails: nothing
 has been published there. The only published channel is the legacy package's `app-stable`
 (versionCode 75). Version 78 of `ai.alphacompute.alphaphone` was signed on 2026-11-15 (Release
 `sign`, run 43700907933) with the current release certificate and delivered only to private QA.
@@ -176,7 +180,7 @@ To make OTA work:
 2. Run **Release** with `operation: publish`, `workflow_commit` = the reviewed main commit, and the
    reviewed `alpha-qualified-app-update/v1` JSON. That publishes the APK first, checks the anonymous
    download, then moves the stable pointer on `app-stable-alphacompute`.
-3. Run `bun scripts/update-channel-status.ts --download` until every gate passes. Then check a real phone's
+3. Run `node scripts/update-channel-status.ts --download` until every gate passes. Then check a real phone's
    Settings → Update. Channel evidence is not device acceptance.
 
 The version must exceed 75, the retained legacy floor; v78 does. OS (A/B image) OTA is a separate,
@@ -185,9 +189,9 @@ disabled path; see the README.
 ## 7. Local Cloud and validation
 
 ```bash
-bun run cloud:local -- prepare
-ELIZA_DEV_ALLOW_TEST_MOCKS=1 bun run cloud:local -- start      # separate terminal
-ELIZA_DEV_ALLOW_TEST_MOCKS=1 bun run cloud:local -- check
+ELIZA_DEV_ALLOW_TEST_MOCKS=1 pnpm cloud:local start      # separate terminal: elizaos-cloud serve, staging, PGlite, loopback mail
+ELIZA_DEV_ALLOW_TEST_MOCKS=1 pnpm cloud:local check
+pnpm --filter @alphacompute/alpha-cloud test             # profile, registration, deployment, edge, wrangler, runtime config
 ```
 
 Validated 2026-11-15 at the main pin `f86b5038f8`, on this computer, not deployed:
@@ -212,10 +216,10 @@ Alpha would be its first production user); the plan manager on a device.
 
 ## 8. Cutover flag (shipped app → Alpha Cloud)
 
-Alpha Cloud is merged dormant. One flag decides whether a build uses it: `ALPHA_CLOUD_CUTOVER` in
-`scripts/cloud-deployment-policy.ts`, derived from the deployment rows (`"alphaCloud": true` in
-`cloud/policy.json`; absent in the shipped Eliza Cloud rows). `scripts/cloud-deployment.ts` writes it
-into every build output: `alphaCloudCutover` (renderer, `cloud-deployment.generated.ts`),
+Alpha Cloud is merged dormant. One flag decides whether a build uses it: `ALPHA_CLOUD_CUTOVER`, derived from the deployment rows
+(`alphaCloud: true` on the Alpha Cloud rows of `cloud/src/deployment.vibe`; absent in the shipped
+Eliza Cloud rows of `cloud/deployment.json`). `pnpm cloud:deployment` writes it into every build
+output: `alphaCloudCutover` (renderer, `@alphacompute/alpha-cloud/client-deployment`),
 `CloudDeployment.ALPHA_CLOUD_CUTOVER` (Java) and `alphaCloudCutover` (Gradle).
 
 **Off (default; every distributed build).** The app uses the shipped Eliza Cloud and behaves as
@@ -225,16 +229,16 @@ Stripe page is admitted by either transport; the native billing authority plugin
 (and refuses if called); the `/alphaphone/billing/return` App Link alias (`AlphaCloudBillingReturn`)
 is declared disabled, so it resolves no intent; `scripts/verify-apks.ts` requires exactly that.
 
-**On.** The deployment is `cloud/policy.json` (Alpha Cloud hosts and its own credential namespace),
+**On.** The deployment is `cloud/deployment.json` (Alpha Cloud hosts and its own credential namespace),
 the plan manager, native billing authority, Stripe pages, referral routes and the billing App Link
 are live.
 
 Enable it for a development, test or validation build (never a distribution):
 
 ```bash
-ALPHA_CLOUD_CUTOVER=1 bun scripts/cloud-deployment.ts        # regenerate the build outputs for Alpha Cloud
-ALPHA_CLOUD_CUTOVER=1 bun run android:build -- --allow-unpackaged-runtime   # or dev:ui / build:only
-git checkout -- apps/app/src/runtime/cloud-deployment.generated.ts \
+ALPHA_CLOUD_CUTOVER=1 pnpm cloud:deployment        # regenerate the build outputs for Alpha Cloud
+ALPHA_CLOUD_CUTOVER=1 pnpm android:build -- --allow-unpackaged-runtime   # or dev:ui / build:only
+git checkout -- cloud/generated/client-deployment.ts \
   android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java android/app/cloud-deployment.generated.gradle
 ```
 
@@ -242,7 +246,7 @@ Keep `ALPHA_CLOUD_CUTOVER=1` set for every command of that build: the build chec
 (`cloud-deployment.ts --check`, Vite) compare the outputs with the selected deployment. A flag-on
 build is a candidate deployment: it has its own credential namespace (phones sign in again) and
 `scripts/audit-production-bundle.ts` refuses it, so it cannot be distributed by accident.
-`ALPHA_CLOUD_DEPLOYMENT_FILE` can name another Alpha Cloud rows file instead of `cloud/policy.json`.
+`ALPHA_CLOUD_DEPLOYMENT_FILE` can name another Alpha Cloud rows file instead of `cloud/deployment.json`.
 
 Validate: `test/cloud-candidate-deployment.test.mjs` (flag values and generated outputs),
 `test/cloud-plans.test.mjs` and `test/connection-routes.test.mjs` (routes and hosts in both states),
@@ -254,7 +258,7 @@ checkout return, plan change with the emailed code, and voice.
 The cutover release itself, once staging and production pass `smoke` and a flag-on build passes the
 checks above:
 
-1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/policy.json`'s rows (with `"alphaCloud": true`), which
+1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/deployment.json`'s rows (with `"alphaCloud": true`), which
    turns the flag on for every build. The App Link host becomes `cloud.alphacompute.ai`.
 2. Append the new storage namespace to `STORAGE_NAMESPACES` and add the namespace migration. Users
    sign in again; Eliza Cloud accounts, subscriptions and Google grants do not move by themselves.

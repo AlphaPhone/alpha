@@ -1,0 +1,27 @@
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/listener.md, "Story: Use the listener only on the image that admits it"
+import { speechRouting } from "@elizaos/plugin-local-inference/speech-route"
+import { machine as captureMachine } from "../../gen/voice__capture.effect.vibe"
+import { machine as conversationMachine } from "../../gen/voice__conversation.effect.vibe"
+import { machine as dictationMachine } from "../../gen/voice__dictation.effect.vibe"
+import { machine as latencyMachine } from "../../gen/voice__latency.effect.vibe"
+import { machine as listenerMachine } from "../../gen/voice__listener.effect.vibe"
+import { machine as speechMachine } from "../../gen/voice__speech.effect.vibe"
+import { captureService } from "./capture.vibe"
+import { conversationService } from "./conversation.vibe"
+import { dictationService } from "./dictation.vibe"
+import { latencyService } from "./latency.vibe"
+import { listenerService } from "./listener.vibe"
+import { routeService } from "./route.vibe"
+import { speechService } from "./speech.vibe"
+
+const foundation = Layer.mergeAll(
+  Layer.provide(routeService, speechRouting()),
+  Layer.provideMerge(captureService, captureMachine()),
+  Layer.provideMerge(latencyService, latencyMachine()),
+  Layer.provideMerge(listenerService, listenerMachine()),
+)
+const speaking = Layer.provideMerge(Layer.provideMerge(speechService, speechMachine()), foundation)
+const dictating = Layer.provideMerge(Layer.provideMerge(dictationService, dictationMachine()), speaking)
+
+/** Voice: VoiceRoute, Microphone, Speech, Dictation, VoiceConversation, Listener and Latency, with each one's Machine for the interface; needs Native, Resident, Cloud and Build. */
+export const layer = Layer.provideMerge(Layer.provideMerge(conversationService, conversationMachine()), dictating)

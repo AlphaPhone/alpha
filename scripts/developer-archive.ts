@@ -1,14 +1,14 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Assemble the folder the archive-based campaigns read (`ALPHA_BUILD_ARCHIVE`) from a build that
  * verify-apks has already recorded. It builds nothing.
  *
- *   bun scripts/developer-archive.ts [--apk-dir artifacts] test-results/<new-folder>
+ *   node scripts/developer-archive.ts [--apk-dir artifacts] test-results/<new-folder>
  *
  * `scripts/build-archive.ts` is the qualified route: it verifies, builds and proves its inputs did
- * not change. This script reuses an existing `bun run android:build`: it copies the launcher
+ * not change. This script reuses an existing `pnpm android:build`: it copies the launcher
  * debug APK and the instrumentation APK built with it, each admitted against
- * `apk-manifest.json` exactly as `bun run test:android:instrumentation` admits them, under the
+ * `apk-manifest.json` exactly as `pnpm test:android:instrumentation` admits them, under the
  * names the campaigns expect, with their name-to-SHA-256 `apk-manifest.json`.
  * `archive-source.json` records the commit and that this is a developer archive. Results taken
  * from it are emulator-class evidence for those exact APKs, never a qualified-archive result.
@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { admitApks } from "./android-instrumentation.ts";
 
-const USAGE = "Use: bun scripts/developer-archive.ts [--apk-dir <dir>] test-results/<new-folder>";
+const USAGE = "Use: node scripts/developer-archive.ts [--apk-dir <dir>] test-results/<new-folder>";
 
 export function parseDeveloperArchiveArgs(argv: readonly string[]) {
   const options: {apkDir: string | null; destination: string | null} = { apkDir: null, destination: null };

@@ -1,0 +1,73 @@
+// spec/calendar/agent.md, "The port reports the current agent binding; a usable port always names an owner"; spec/calendar/presentation.md, "Agent rows belong to the owner they were read for, and a changed owner clears them"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"; spec/calendar/drafts.md, "Changing owner closes the editor; the old owner's slot keeps its edits"
+import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
+import { AgentCalendar, type AgentBinding, type CalendarWindow } from "./agent.vibe"
+import { ApprovalReviews } from "./approvals.vibe"
+import { HeldDeletions } from "./deletions.vibe"
+import { DeviceCalendar } from "./device.vibe"
+import { CalendarDrafts } from "./drafts.vibe"
+import { readWindow } from "./model.vibe"
+import { LegacyCalendar } from "./preservation.vibe"
+import { CalendarSync } from "./sync.vibe"
+import { deviceZone } from "./time.ts"
+
+/** Tell Calendar which account and agent session it serves; the account area calls this on every change. */
+export effect function bindCalendar(binding: AgentBinding) {
+  const presentation = try PresentationMachine
+  const agent = try AgentCalendar
+  const before = try agent.view()
+  const changed = before.state.portOwner !== binding.owner || before.state.portSession !== binding.session
+  if (changed) {
+    try (try HeldDeletions).retire()
+    try (try ApprovalReviews).retire()
+  }
+  try agent.bind(binding)
+  const owner = binding.usable ? binding.owner : ""
+  presentation.send({ type: "changeOwner", nextOwner: owner }) catch () => undefined
+  try (try CalendarDrafts).bind(owner)
+  try (try LegacyCalendar).bind(owner, binding.session)
+  const drafts = try (try CalendarDrafts).get()
+  try (try CalendarSync).bind(binding, drafts.alive)
+}
+
+/** The window Calendar reads for what is on screen now. */
+export effect function currentWindow(): CalendarWindow {
+  const state = try (try PresentationMachine).get()
+  const now = try Clock.currentTimeMillis
+  const zone = deviceZone()
+  return { range: readWindow(state.day, state.view === "MonthView" || state.datePicker ? state.month : 0, now, zone), timeZone: zone }
+}
+
+/** Read what is on screen: the agent window and the device range, then publish the rows under the newest read token. */
+export effect function readCalendar(force: boolean, requestAccess: boolean) {
+  const presentation = try PresentationMachine
+  const requested = presentation.send({ type: "request", force }) catch () => undefined
+  if (requested === undefined) return
+  const window = try currentWindow()
+  const agent = try AgentCalendar
+  const device = try DeviceCalendar
+  const [, read] = try.all [agent.refresh(window), device.read(window.range, requestAccess, force)]
+  const view = try agent.view()
+  presentation.send({ type: "reply", token: requested.readToken, replyOwner: requested.requestOwner,
+    truncated: read.truncated || view.feed?.state === "partial" }) catch () => undefined
+  try (try HeldDeletions).readBack(
+    (view.feed?.events ?? []).map((event) => ({ id: event.id, source: event.calendarId, series: event.recurringEventId ?? event.externalId, start: Date.parse(event.startAt) })),
+    (target) => (view.feed?.events ?? []).some((event) => event.id === target && event.status !== "cancelled"),
+  )
+}
+
+/** While Calendar is the visible view: read now, then once a minute, never while a write runs. */
+export effect function whileVisible() {
+  try readCalendar(false, false)
+  while (true) {
+    try sleep("60 seconds")
+    const view = try (try AgentCalendar).view()
+    if (view.state.write.id === 0 && view.state.read.id === 0) try readCalendar(false, false)
+  }
+}
+
+/** Calendar was left or hidden: its overlays close and a waiting deletion is sent at once. */
+export effect function leaveCalendar() {
+  (try PresentationMachine).send({ type: "leave" }) catch () => undefined
+  try (try HeldDeletions).leave()
+  try (try CalendarDrafts).close()
+}

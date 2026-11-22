@@ -1,0 +1,288 @@
+// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"
+import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type ExecutorCall, type JournalEntry } from "@elizaos/agent/client"
+import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
+import { Machine as CustodyMachine, canDirect, contradicts, type Event as CustodyEvent, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
+import { titleOf, type Result } from "../../gen/assistant__receipts.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { AssistantHost, type AgentIdentity } from "./host.vibe"
+import { PendingListing, type PendingProposal } from "./payloads.schema.vibe"
+import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
+import type { ProposalCard } from "./transcript.vibe"
+import { ask } from "./transport.vibe"
+import { writtenNumbers } from "./grounding.vibe"
+import { WithdrawableRequests } from "./withdrawable.vibe"
+import { withFiles } from "./files-bridge.vibe"
+
+/** How the phone describes and carries out one operation family; the shell composes every area's executors (assumed: `DeviceExecutors` from src/web/shell). */
+export interface OperationPorts {
+  /** The operation as a typed value, or undefined when this phone cannot run it. */
+  validate(operation: unknown): unknown | undefined
+  /** Run an approved operation once; `{ kind: "applied" | "refused", result?, code? }`. */
+  execute(operation: unknown, call: ExecutorCall): Promise<unknown>
+  /** Read back whether an earlier call took effect; `{ kind: "found" | "refused", result? }`. */
+  readBack(operation: unknown, call: ExecutorCall): Promise<unknown>
+  /** The card's title, detail and navigation destination. */
+  describe(operation: unknown): { readonly title: string; readonly detail: string; readonly destination?: "home" | "notes" | "calendar" }
+  /** The operation class the direct pass reasons about. */
+  classOf(operation: unknown): Op
+  /** What the operation targets against the owner's words, for a call, dial, text or contact. */
+  target(operation: unknown, text: string): Target
+  /** The receipt sentence for a settled result. */
+  summarize(operation: unknown, result: Result): string
+}
+
+/** The executors of every area, provided by the shell. */
+export service DeviceExecutors {
+  readonly ports: OperationPorts
+}
+
+/** The outcome of one approval, as the transcript shows it. */
+export interface Approval { readonly card: ProposalCard; readonly receipt?: { readonly title: string; readonly summary: string } }
+
+/** Device action review: cards, their two approval routes, decline and the direct pass of one message. */
+export service DeviceReview {
+  /** The cards of what is pending for this device, under the current screen. */
+  pending(): readonly ProposalCard[]!!
+  /** Approve a card the owner tapped. */
+  approve(card: ProposalCard): Approval!!
+  /** Decline a card; nothing runs. */
+  decline(card: ProposalCard): ProposalCard!!
+  /** Mark a card whose review time passed. */
+  expire(card: ProposalCard): ProposalCard!!
+  /** Run the direct pass over the proposals of the owner's message; what still needs review is returned as cards. */
+  directPass(messageId: string, text: string): { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] }!!
+  /** Upload every settled receipt the journal still holds. */
+  sync(): void!!
+}
+
+effect function holdRoutes(start: Routes) {
+  provide routesMachine(start) {
+    return try RoutesMachine
+  }
+}
+
+function expiryOf(raw: string): number {
+  const at = Date.parse(raw)
+  return Number.isFinite(at) ? at : 0
+}
+
+/** Device review over DeviceExecution, the native action journal and the resident's proposal routes. */
+export const reviewLayer = Layer.effect(DeviceReview, effect {
+  const native = try Native
+  const resident = try Resident
+  const host = try AssistantHost
+  const custody = try CustodyMachine
+  const { ports: shellPorts } = try DeviceExecutors
+  const ports = try withFiles(shellPorts)
+  const preferences = try Preferences
+  const requests = try WithdrawableRequests
+  const run = <A, E>(work: Effect.Effect<A, E, Resident>) => Effect.provideService(work, Resident, resident)
+  const cards = new Map<string, RoutesMachine.Shape>()
+  const proposals = new Map<string, PendingProposal>()
+  const consumed = new Set<string>()
+  let executions: { readonly key: string; readonly execution: DeviceExecution<unknown> } | undefined
+  const post = (path: string, body: unknown) => runPromise(run(ask("POST", path, body)))
+  const journalCall = (method: string, args: unknown) => runPromise(native.invoke("AlphaActionJournal", method, args))
+  const agent: DeviceAgent = {
+    decide: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/decision`, body),
+    claim: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/claim`, body),
+    receipt: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/receipt`, body),
+    reconcile: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/reconciliation`, body),
+  }
+  const journal: DeviceJournal = {
+    get: (proposalId) => journalCall("get", { proposalId }),
+    edit: async (proposalId, expectedRevision, next: JournalEntry) => (await journalCall("edit", { proposalId, expectedRevision, next })) === true,
+    list: async () => {
+      const listed = await journalCall("list", {})
+      return Array.isArray(listed) ? listed : []
+    },
+  }
+  effect function executionFor(identity: AgentIdentity) {
+    const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.installationId, identity.enrollmentId])
+    if (executions?.key === key) return executions.execution
+    const execution = new DeviceExecution<unknown>({
+      identity: { ownerId: identity.owner, agentId: identity.agent, origin: identity.origin, installationId: identity.installationId, enrollmentId: identity.enrollmentId },
+      journal, agent, validate: (operation) => ports.validate(operation), execute: (operation, call) => ports.execute(operation, call),
+      readBack: (operation, call) => ports.readBack(operation, call),
+    })
+    executions = { key, execution }
+    return execution
+  }
+  effect function preference() {
+    const value: Preference = (try preferences.asksBeforeActions()) ? "PreferenceOn" : "PreferenceOff"
+    return value
+  }
+  effect function listing() {
+    const data = requests.ask("GET", "/api/client-devices/proposals") catch () => undefined
+    const decoded = Schema.decodeUnknownOption(PendingListing)(data)
+    return Option.isSome(decoded) ? decoded.value.proposals : []
+  }
+  effect function routesOf(card: ProposalCard) {
+    const known = cards.get(card.proposalId)
+    if (known !== undefined) return known
+    const made = try holdRoutes({ ...routesStart, card: card.recovered ? "RecoveredCard" : "LiveCard", consumed: consumed.has(card.proposalId), clientProposal: !consumed.has(card.proposalId) })
+    cards.set(card.proposalId, made)
+    return made
+  }
+  effect function step(routes: RoutesMachine.Shape, event: RoutesEvent) {
+    const done = try exit(routes.send(event))
+    return Exit.isSuccess(done)
+  }
+  effect function cardOf(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
+    const described = ports.describe(proposal.operation)
+    proposals.set(proposal.id, proposal)
+    return {
+      proposalId: proposal.id, digest: proposal.digest, title: proposal.title ?? described.title, detail: proposal.description ?? described.detail,
+      expiresAt: expiryOf(proposal.expiresAt), state: recovered ? "RecoveredCard" : "LiveCard", recovered, session,
+      ...(described.destination === undefined ? {} : { destination: described.destination }),
+    }
+  }
+  effect function stateOf(routes: RoutesMachine.Shape): CardState {
+    return (try routes.get()).card
+  }
+  effect function screenCheck(reviewed: boolean, requestEligible: boolean, forceReview: boolean) {
+    const screen = try host.screen()
+    return { live: !screen.exposure.hidden, nonsensitive: !(screen.exposure.privateView || screen.exposure.locked || screen.exposure.connectionDialog), exact: true, forceReview, requestEligible, reviewed }
+  }
+  effect function receiptOf(proposal: PendingProposal, result: ApproveResult) {
+    const outcome: Result = result.kind !== "settled" ? (result.kind === "history" ? "Unknown" : "NotStarted")
+      : result.result.tag === "Applied" ? "Applied" : result.result.tag === "Unknown" ? "Unknown" : "NotStarted"
+    const said = actionResultText(outcome === "NotStarted" && result.kind !== "settled" ? copy.notDispatched : ports.summarize(proposal.operation, outcome))
+    const summary = result.kind === "settled" && !result.synced && outcome !== "NotStarted" ? unsyncedSummary(said) : said
+    return { outcome, title: receiptTitle(titleOf(outcome)), summary }
+  }
+  effect function execute(proposal: PendingProposal, reviewed: boolean, requestEligible: boolean, forceReview: boolean) {
+    const identity = try host.identity()
+    if (identity === undefined) return { kind: "invalid" } satisfies ApproveResult
+    const execution = try executionFor(identity)
+    const check = try screenCheck(reviewed, requestEligible, forceReview)
+    const device: DeviceProposal = { id: proposal.id, digest: proposal.digest, expiresAt: expiryOf(proposal.expiresAt), operation: proposal.operation }
+    return try promise(() => execution.approve(device, check))
+  }
+  effect function approve(card: ProposalCard) {
+    const routes = try routesOf(card)
+    if (try host.emergency()) return { card: { ...card, state: try stateOf(routes) } }
+    const identity = try host.identity()
+    if (card.recovered && identity?.session !== card.session) {
+      try host.toast(copy.agentChanged)
+      return { card: { ...card, state: try stateOf(routes) } }
+    }
+    if (!(try step(routes, { type: "tapApprove" }))) return { card: { ...card, state: try stateOf(routes) } }
+    if ((try routes.get()).tap === "Fetching") {
+      const listed = try listing()
+      const still = listed.find((proposal) => proposal.id === card.proposalId && proposal.state === "pending")
+      if (still === undefined) try step(routes, { type: "agentWithdraws" })
+      else proposals.set(still.id, still)
+      try step(routes, { type: "fetchSettles" })
+    }
+    const proposal = proposals.get(card.proposalId)
+    if ((try routes.get()).tap !== "ExecutingTap" || proposal === undefined) return { card: { ...card, state: try stateOf(routes) } }
+    consumed.add(card.proposalId)
+    const result = try execute(proposal, true, false, true)
+    const receipt = try receiptOf(proposal, result)
+    if (receipt.outcome === "Applied") {
+      try step(routes, { type: "agentExecutes" })
+      try step(routes, { type: "receiptArrives" })
+    } else try step(routes, { type: "unconfirmedArrives" })
+    return { card: { ...card, state: try stateOf(routes), summary: receipt.summary }, receipt: { title: receipt.title, summary: receipt.summary } }
+  }
+  effect function decline(card: ProposalCard) {
+    const routes = try routesOf(card)
+    const identity = try host.identity()
+    if (card.recovered && identity?.session !== card.session) {
+      try host.toast(copy.agentChanged)
+      return card
+    }
+    if (!(try step(routes, { type: "tapDecline" }))) return { ...card, state: try stateOf(routes) }
+    const answered = requests.ask("POST", `/api/client-devices/proposals/${encodeURIComponent(card.proposalId)}/decision`, { digest: card.digest, approved: false }) catch () => undefined
+    const accepted = answered !== undefined
+    try step(routes, { type: "declineSettles", accepted })
+    if (!accepted) try host.toast(copy.declineFailed)
+    const after = try host.identity()
+    if (after?.session !== identity?.session) try host.toast(copy.agentChangedHistory)
+    return { ...card, state: try stateOf(routes), ...(accepted ? { title: "Declined", summary: copy.declined } : {}) }
+  }
+  effect function custodyStep(event: CustodyEvent) {
+    const done = try exit(custody.send(event))
+    return Exit.isSuccess(done)
+  }
+  effect function directOne(proposal: PendingProposal, text: string, messageId: string) {
+    const op = ports.classOf(proposal.operation)
+    const bound = proposal.requestMessageId === messageId
+    const grounded = op !== "BrowserNavigate" || ports.target(proposal.operation, text).tag !== "NoTarget"
+    try custodyStep({ type: "prefer", value: try preference() })
+    try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })
+    try custodyStep({ type: "review", visible: true })
+    if (!canDirect(try custody.get())) return undefined
+    try custodyStep({ type: "begin", byRequest: true })
+    try custodyStep({ type: "reserve", exact: true })
+    try custodyStep({ type: "decide" })
+    try custodyStep({ type: "claim" })
+    try custodyStep({ type: "markApplying" })
+    const result = try execute(proposal, false, true, false)
+    if (result.kind !== "settled") {
+      try custodyStep({ type: "abandon" })
+      return try receiptOf(proposal, result)
+    }
+    if (result.result.tag !== "NoEffect" || result.result.proof !== "NeverCalled") try custodyStep({ type: "dispatch" })
+    const receipt = try receiptOf(proposal, result)
+    try custodyStep({ type: "settle", outcome: receipt.outcome === "Applied" ? "Succeeded" : receipt.outcome === "Unknown" ? "UnknownResult" : "FailedResult" })
+    try custodyStep({ type: "upload" })
+    try custodyStep({ type: "finish", synced: result.synced })
+    return receipt
+  }
+  return {
+    pending: () => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return []
+      const listed = try listing()
+      const now = try Clock.currentTimeMillis
+      const open = listed.filter((proposal) => proposal.state === "pending" && expiryOf(proposal.expiresAt) > now && proposal.workflow === undefined && ports.validate(proposal.operation) !== undefined)
+      const made: ProposalCard[] = []
+      for (const proposal of open) made.push(try cardOf(proposal, true, identity.session))
+      return made
+    },
+    approve,
+    decline,
+    expire: (card: ProposalCard) => effect {
+      const routes = try routesOf(card)
+      try step(routes, { type: "expires" })
+      return { ...card, state: try stateOf(routes) }
+    },
+    directPass: (messageId: string, text: string) => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return { receipts: [], cards: [], notices: [] }
+      const listed = (try listing()).filter((proposal) => proposal.state === "pending" && proposal.requestMessageId === messageId)
+      try custodyStep({ type: "startPass", sameMessage: false })
+      const receipts: Approval[] = []
+      const left: ProposalCard[] = []
+      const notices: string[] = []
+      for (const proposal of listed) {
+        if (proposal.workflow !== undefined || ports.validate(proposal.operation) === undefined) {
+          notices.push(`${copy.notShownHere}: ${proposal.title ?? copy.notAvailableHere}`)
+          continue
+        }
+        const target = ports.target(proposal.operation, text)
+        if (contradicts(writtenNumbers(text).length, target)) {
+          requests.ask("POST", `/api/client-devices/proposals/${encodeURIComponent(proposal.id)}/decision`, { digest: proposal.digest, approved: false }) catch () => undefined
+          notices.push(target.tag === "ContactTarget" ? copy.wrongNumberContact : copy.wrongNumber)
+          continue
+        }
+        const card = try cardOf(proposal, false, identity.session)
+        const done = try directOne(proposal, text, messageId)
+        if (done === undefined) left.push(card)
+        else receipts.push({ card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } })
+      }
+      return { receipts, cards: left, notices }
+    },
+    sync: () => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return
+      const execution = try executionFor(identity)
+      promise(() => execution.sync()) catch () => undefined
+    },
+  }
+})
+

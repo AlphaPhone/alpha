@@ -1,0 +1,87 @@
+// spec/files/storage.md, "A row names one file or folder of one volume by a key unique in its listing"; spec/files/filter.md, "Only the newest filter's own query shows rows, and only rows of its kind"
+import type { FileKind, Row } from "../../gen/files__storage.ts"
+import type { Criteria, FilterKind } from "../../gen/files__filter.ts"
+
+import { DOCUMENT_MIME_TYPES, baseName, filterTime, parentOf, within } from "@elizaos/plugin-files/client"
+
+export { DOCUMENT_MIME_TYPES, baseName, breadcrumbs, filterTime, joinPath, parentOf, validName, validPath, within } from "@elizaos/plugin-files/client"
+
+/** The kind an owner recognises, from a MIME type. */
+export function kindOf(mimeType: string, directory: boolean): FileKind {
+  if (directory) return "KindFolder"
+  if (mimeType === "application/pdf") return "KindPdf"
+  if (mimeType.startsWith("image/")) return "KindImage"
+  if (mimeType.startsWith("video/")) return "KindVideo"
+  if (mimeType.startsWith("audio/")) return "KindAudio"
+  return DOCUMENT_MIME_TYPES.includes(mimeType) ? "KindDocument" : "KindOther"
+}
+
+/** The types the preview shows itself; every other type opens in another app when one can. */
+export function previewable(mimeType: string): boolean {
+  return mimeType === "application/pdf" || mimeType === "application/json" || mimeType === "application/xml" ||
+    mimeType.startsWith("text/") || mimeType.startsWith("image/") || mimeType.startsWith("video/") || mimeType.startsWith("audio/")
+}
+
+/** The key of a path on a volume, unique across volumes: a path never holds a line break. */
+export function rowKey(volume: string, path: string): string {
+  return `${volume || "primary"}\n${path}`
+}
+
+/** The path and volume a row key names; the primary volume is `""`. */
+export function keyPath(key: string): { readonly volume: string; readonly path: string } {
+  const at = key.indexOf("\n")
+  const volume = at < 0 ? "primary" : key.slice(0, at)
+  return { volume: volume === "primary" ? "" : volume, path: at < 0 ? key : key.slice(at + 1) }
+}
+
+/** A device listing entry as a row of `volume`. */
+export function toRow(volume: string, entry: { path: string; name: string; directory: boolean; mimeType: string; size: number; modified: number; children?: number }): Row {
+  return {
+    key: rowKey(volume, entry.path), path: entry.path, folder: parentOf(entry.path), name: entry.name,
+    kind: kindOf(entry.mimeType, entry.directory), mimeType: entry.mimeType,
+    size: Number.isSafeInteger(entry.size) && entry.size >= 0 ? entry.size : -1,
+    modified: Number.isSafeInteger(entry.modified) && entry.modified > 0 ? entry.modified : 0,
+    children: Number.isSafeInteger(entry.children) ? entry.children ?? -1 : -1,
+  }
+}
+
+const words = (value: string) =>
+  value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter(Boolean)
+
+/** Whether a row matches a filter's text, folder and dates; its kind is matched by the spec. */
+export function criteriaMatch(criteria: Criteria, row: Row): boolean {
+  if (criteria.within && !within(row.folder, criteria.within)) return false
+  if (criteria.since && row.modified < filterTime(criteria.since)) return false
+  if (criteria.until && row.modified > filterTime(criteria.until, true)) return false
+  if (!criteria.text) return true
+  const name = words(row.name)
+  return words(criteria.text).every((word) => name.some((part) => part.startsWith(word)))
+}
+
+/** The device query a filter's kind asks for. */
+export function kindQuery(kind: FilterKind): { readonly mimePrefix?: string; readonly documents?: boolean; readonly folders?: boolean } {
+  switch (kind) {
+    case "ImageKind": return { mimePrefix: "image/" }
+    case "VideoKind": return { mimePrefix: "video/" }
+    case "AudioKind": return { mimePrefix: "audio/" }
+    case "PdfKind": return { mimePrefix: "application/pdf" }
+    case "DocumentKind": return { documents: true }
+    case "FolderKind": return { folders: true }
+    case "AnyKind": return {}
+  }
+}
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
+
+/** Folders first, then by name, newest first or largest first; `reverse` turns the order of files and folders around. */
+export function sortRows(rows: readonly Row[], sort: "ByName" | "ByDate" | "BySize", reverse: boolean): Row[] {
+  const byName = (a: Row, b: Row) => collator.compare(a.name, b.name)
+  const sign = reverse ? -1 : 1
+  return [...rows].sort((a, b) => {
+    const folders = Number(b.kind === "KindFolder") - Number(a.kind === "KindFolder")
+    if (folders !== 0) return folders
+    if (a.kind === "KindFolder") return sign * byName(a, b)
+    const order = sort === "ByDate" ? b.modified - a.modified : sort === "BySize" ? b.size - a.size : 0
+    return sign * (order || byName(a, b))
+  })
+}

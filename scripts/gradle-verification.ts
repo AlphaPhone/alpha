@@ -1,10 +1,10 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import {HOST_DESCRIPTOR, readHostDescriptor, type HostReference} from './android-host.ts';
 /**
  * Gradle dependency verification metadata (android/gradle/verification-metadata.xml).
  *
- *   bun scripts/gradle-verification.ts --check                 # offline; also run by `bun run test`
- *   bun scripts/gradle-verification.ts --write                 # bun run android:deps:write-verification
+ *   node scripts/gradle-verification.ts --check                 # offline; also run by `pnpm test`
+ *   node scripts/gradle-verification.ts --write                 # pnpm android:deps:write-verification
  *
  * While the file exists Gradle refuses any plugin or dependency artifact whose SHA-256 is not
  * listed in it, in every build of the generated android/ host: nothing has to opt in and no
@@ -46,7 +46,7 @@ export const ALLOWED_REPOSITORY_URLS = ['https://repo.maven.apache.org/maven2', 
  */
 export const MIRROR_PROPERTY = 'mavenCentralMirrorUrl';
 /** The pinned upstream templates the generated android/ host is written from. */
-export const HOST_TEMPLATES = 'vendor/eliza/packages/app/scripts/mobile/android/consumer-host';
+export const HOST_TEMPLATES = 'vendor/eliza/packages/os/android/host-templates';
 // The generator script writes the host's gradle.properties and wrapper settings itself.
 const MIRROR_FREE = [HOST_DESCRIPTOR, 'android/app/product.gradle', `${HOST_TEMPLATES}/settings.gradle`, `${HOST_TEMPLATES}/build.gradle`,
   `${HOST_TEMPLATES}/app.gradle`, `${HOST_TEMPLATES}/toolchain.json`, `${HOST_TEMPLATES}.mjs`, 'scripts/android-host.ts',
@@ -178,7 +178,7 @@ export function buildScripts(root: string) {
 export function checkVerification(root: string) {
   const problems = [];
   const file = path.join(root, METADATA);
-  if (!fs.existsSync(file)) return {problems: [`${METADATA} is missing: Gradle dependency verification is off. Run: bun run android:deps:write-verification`], metadata: null};
+  if (!fs.existsSync(file)) return {problems: [`${METADATA} is missing: Gradle dependency verification is off. Run: pnpm android:deps:write-verification`], metadata: null};
   const metadata = parseVerificationMetadata(fs.readFileSync(file, 'utf8'));
   if (metadata.configuration.verifyMetadata !== 'true') problems.push('verify-metadata must be true (POM and module files are verified too)');
   if (metadata.configuration.verifySignatures !== 'false') problems.push('verify-signatures must be false: this build pins SHA-256 checksums and trusts no key server');
@@ -262,7 +262,7 @@ async function recordOtherHostAapt2(root: string) {
 export function parseVerificationArgs(args: readonly string[]) {
   const mode = args.filter(arg => ['--check', '--write'].includes(arg));
   if (mode.length !== 1 || args.length !== 1)
-    throw new Error('Usage: bun scripts/gradle-verification.ts --check | --write');
+    throw new Error('Usage: node scripts/gradle-verification.ts --check | --write');
   return {mode:mode[0]};
 }
 
@@ -272,7 +272,7 @@ async function write(root: string) {
   delete env.ELIZA_DEV_ALLOW_TEST_MOCKS;
   execFileSync(process.execPath, [path.join(root, 'scripts/android-build-preflight.ts')], {cwd: root, stdio: 'inherit', env});
   execFileSync(process.execPath, [path.join(root, 'scripts/android-host.ts')], {cwd: root, stdio: 'inherit', env});
-  execFileSync('bun', ['run', 'android:sync'], {cwd: root, stdio: 'inherit', env});
+  execFileSync(process.execPath, ['run', 'android:sync'], {cwd: root, stdio: 'inherit', env});
   // No ALPHA_NOTIFICATION_FIXTURE_KEYSTORE here: the fixture then takes the default debug key, and
   // its dependencies resolve exactly as in scripts/build-notification-fixture.ts.
   execFileSync('./gradlew', ['--no-daemon', '--write-verification-metadata', 'sha256', ...VERIFIED_TASKS], {cwd: path.join(root, 'android'), stdio: 'inherit', env});

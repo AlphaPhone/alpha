@@ -10,7 +10,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {requireConsistentApk, PACKAGE} from './provision-unit.ts';
 import {androidEnv, tool} from './toolchain.ts';
-import {apkArchiveFacts} from '../vendor/eliza/packages/app/scripts/mobile/artifact-inspection/apk-distribution.mjs';
+import {apkArchiveFacts} from '../vendor/eliza/packages/os/android/apk-distribution.mjs';
 import {updateArtifactDigest} from './update-artifact.ts';
 import {parseXmlTree} from './apk.ts';
 import {apkUpdateChannel, type UpdateChannel} from './update-channel.ts';

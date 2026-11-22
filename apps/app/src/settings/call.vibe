@@ -1,0 +1,21 @@
+// spec/settings/vocabulary.md, "Story: See only what Android reported"
+import { Native } from "../platform/native.vibe"
+
+/** A native call Settings could not make, or whose answer was not what the plugin promises. */
+export error SettingsCallFailed { plugin: string; method: string; reason: string }
+
+/** One native call, its answer decoded by `shape`; a missing plugin, a refusal and a malformed answer all fail the same way. */
+export effect function call<A>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown) {
+  const native = try Native
+  const raw = try (native.invoke(plugin, method, args) catch effect (error) => {
+    throw new SettingsCallFailed({ plugin, method, reason: error._tag === "NativeFailed" ? (error.code ?? error.message) : error._tag })
+  })
+  return try (Schema.decodeUnknownEffect(shape)(raw) catch effect (error) => {
+    throw new SettingsCallFailed({ plugin, method, reason: error.message })
+  })
+}
+
+/** The answer of `program`, or undefined where it failed. */
+export effect function attempt<A, E, R>(program: A!E!R) {
+  return try (program catch () => undefined)
+}

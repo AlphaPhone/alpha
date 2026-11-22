@@ -145,19 +145,6 @@ public final class AlphaConnectionPlugin extends Plugin {
  /** Stable error code for a definite refusal above a slot's byte cap; nothing was written. */
  static final String STORAGE_FULL="storage-full";
  static final String STORAGE_FULL_MESSAGE="Secure storage is full. Nothing was written.";
- /** Serialized JSON metadata cannot supply native identity or bypass runtime retirement. */
- @PluginMethod public void secureWrite(PluginCall call) {
-  final String name;final long intent;
-  try{name=RendererCredentialSlots.requireAllowed(call.getString("slot"));intent=credentialIntent(name);}
-  catch(Exception invalid){call.reject("Secure storage write failed");return;}
-  submitStorage(call,() -> {
-   try {
-    storage(intent).writeCredentialSlot(name,call.getString("value"));
-    call.resolve();
-   } catch (AlphaCredentialStore.StorageFullException full) { call.reject(STORAGE_FULL_MESSAGE, STORAGE_FULL); }
-   catch (Exception error) { call.reject("Secure storage write failed"); }
-  });
- }
  private long credentialIntent(String name){
   if(RendererCredentialSlots.credentialSlot(name))return AlphaLocalAgentPlugin.reserveCredentialIntent(foregroundLock,()->{if(destroyed)throw new IllegalStateException("Connection closed");});
   synchronized(foregroundLock){if(destroyed)throw new IllegalStateException("Connection closed");return 0;}
@@ -174,37 +161,6 @@ public final class AlphaConnectionPlugin extends Plugin {
  /** Required before rendering or persisting mock mode; never resumes automatically. */
  @PluginMethod public void pauseNotificationCollection(PluginCall call) {
   submit(call,()->{try{NotificationAccess.pause(getContext(),true);call.resolve();}catch(Exception failure){call.reject("Notification collection could not be paused");}});
- }
- @PluginMethod public void secureRead(PluginCall call) {
-  submitStorage(call,()->{
-   try{String value=readCredentialSlot(RendererCredentialSlots.requireAllowed(call.getString("slot")));JSObject result=new JSObject();result.put("value",value==null?JSONObject.NULL:value);call.resolve(result);}
-   catch(Exception error){call.reject("Secure storage read failed");}
-  });
- }
- /** Compare-and-exchange is scoped to local drafts and pending device actions, never credential slots. */
- @PluginMethod public void secureCompareExchange(PluginCall call) {
-  submitStorage(call,()->{
-   try {
-    String name=RendererCredentialSlots.requireAllowed(call.getString("slot"));
-    if(!RendererCredentialSlots.compareExchangeAllowed(name)||!call.getData().has("expectedValue")||!call.getData().has("value"))throw new IllegalArgumentException();
-    for(String field:new String[]{"expectedValue","value"})if(!call.getData().isNull(field)&&!(call.getData().get(field) instanceof String))throw new IllegalArgumentException();
-    String expected=call.getString("expectedValue"), value=call.getString("value");
-    JSObject result=new JSObject();
-    result.put("status",storage().compareExchangeCredentialSlot(name,expected,value)?"saved":"conflict");call.resolve(result);
-   }catch(AlphaCredentialStore.StorageFullException full){call.reject(STORAGE_FULL_MESSAGE,STORAGE_FULL);}
-   catch(Exception error){call.reject("Secure draft update failed");}
-  });
- }
- @PluginMethod public void secureRemove(PluginCall call) {
-  final String name;final long intent;
-  try{name=RendererCredentialSlots.requireAllowed(call.getString("slot"));intent=credentialIntent(name);}
-  catch(Exception invalid){call.reject("Secure storage removal failed");return;}
-  submitStorage(call,() -> {
-   try {
-    storage(intent).removeCredentialSlot(name);
-    call.resolve();
-   } catch (Exception error) { call.reject("Secure storage removal failed"); }
-  });
  }
  private static URI validatedUrl(String text, boolean allowDevelopment) throws Exception {
   return ConnectionTransport.validatedUrl(text, allowDevelopment, false);
@@ -246,135 +202,6 @@ public final class AlphaConnectionPlugin extends Plugin {
   String code="ALPHA_TRANSPORT:"+operation+":"+stage+":"+status+":"+error.getClass().getName();
   android.util.Log.d("AlphaConnection",code);
   return code;
- }
- @PluginMethod public void request(PluginCall call) {
-  final String id;
-  try { id = required(call.getString("requestId"), 256); }
-  catch (Exception error) { call.reject("Invalid request"); return; }
-  PendingRequests.Pending pending = requests.register(id);
-  if (pending == null) { call.reject("Request already active"); return; }
-  if(!submit(call,() -> {
-   HttpURLConnection connection = null;
-   RequestOperation operation=RequestOperation.OTHER;
-   RequestStage stage=RequestStage.VALIDATE;
-   int status=-1;
-   try {
-    if (pending.cancelled()) throw new IllegalStateException();
-    URI url = validatedUrl(call.getString("url"), true);
-    // Before any route, header or body handling: a flag-off build contacts only Eliza Cloud here.
-    if(!ConnectionRoutes.admittedOrigin(url.getScheme(),url.getHost(),url.getPort()))throw new IllegalArgumentException();
-    {
-     String path=url.getPath();
-     if("/api/auth/cli-session".equals(path))operation=RequestOperation.CLI_CREATE;
-     else if(path!=null&&path.matches("/api/auth/cli-session/[0-9a-fA-F-]{36}"))operation=RequestOperation.CLI_POLL;
-     else if("/api/v1/user".equals(path))operation=RequestOperation.IDENTITY;
-     else if("/api/v1/billing/limits".equals(path))operation=RequestOperation.BILLING_LIMITS;
-     else if("/api/v1/subscription/entitlement".equals(path))operation=RequestOperation.ENTITLEMENT;
-     else if("/api/v1/subscription/entitlement-keys".equals(path))operation=RequestOperation.ENTITLEMENT_KEYS;
-     else if("/api/v1/subscription/redeem".equals(path))operation=RequestOperation.REDEEM;
-    }
-    int responseLimit=url.getPath().startsWith("/api/v1/eliza/google/gmail/inbox-v1/")?8*1024*1024:RESPONSE_LIMIT;
-    String method = call.getString("method", "GET");
-    if(!ConnectionRoutes.managedService(url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null))throw new IllegalArgumentException();
-    // Google Calendar writes need the native sync consent; the renderer's preference alone is not enough.
-    if(CalendarSyncConsent.write(url.getRawPath(),method)&&!CalendarSyncConsent.admits(url.getRawPath(),url.getRawQuery(),method,call.getString("body"),calendarSyncConsent()))throw new IllegalArgumentException();
-    String route=url.getRawPath()+(url.getRawQuery()==null?"":"?"+url.getRawQuery());
-    if(ConnectionRoutes.retiredPairing(url.getPath()))throw new IllegalArgumentException();
-    boolean selfRevocation=ConnectionRoutes.cloudSelfRevocation(url.getScheme(),url.getHost(),url.getPort(),url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null);
-    OwnerRoutes routes=OwnerRoutes.shipped(getContext().getAssets()::open);
-    if((routes.group(url.getPath(),"automations")!=null||routes.group(route,"automations")!=null)?!routes.allowed("automations",route,method):!(Set.of("GET","POST").contains(method)||selfRevocation||ConnectionRoutes.calendarSync(url.getPath(),url.getRawQuery(),method,call.getString("body")!=null)))throw new IllegalArgumentException();
-    if(ConnectionRoutes.POLICY.cliSessionPoll(url.getHost(),url.getPath(),method)){
-     // Gate only future dispatch. A claim already sent must finish and may be saved while backgrounded.
-     long expiresAt=call.getLong("expiresAt",System.currentTimeMillis()+30000);
-     synchronized(foregroundLock){
-      while(!foreground&&!pending.cancelled()&&!destroyed){long remaining=expiresAt-System.currentTimeMillis();if(remaining<=0)throw new java.net.SocketTimeoutException();foregroundLock.wait(remaining);}
-      if(pending.cancelled()||destroyed)throw new IllegalStateException();
-      if(System.currentTimeMillis()>=expiresAt)throw new java.net.SocketTimeoutException();
-     }
-    }
-    stage=RequestStage.CONNECT;
-    connection = (HttpURLConnection) url.toURL().openConnection(); pending.connection(connection::disconnect);
-    connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(20000); connection.setReadTimeout(operation==RequestOperation.CLI_POLL?30000:120000);
-    connection.setUseCaches(false); connection.setRequestMethod(method);
-    stage=RequestStage.VALIDATE;
-    JSObject headers = call.getObject("headers", new JSObject());
-    Iterator<String> names = headers.keys();
-    while (names.hasNext()) {
-     String name = names.next(), normalized = name.toLowerCase(Locale.ROOT);
-     Object raw = headers.get(name); if (!(raw instanceof String)) throw new IllegalArgumentException();
-     String value = (String) raw;
-     if (!ConnectionRoutes.admittedHeader(normalized)&&!ConnectionRoutes.mapsRequestIdentity(normalized,value,url.getRawPath(),method)&&!ConnectionRoutes.billingRequestIdentity(normalized,value,url.getRawPath(),method)) throw new IllegalArgumentException();
-     if (!ConnectionTransport.headerValue(value)) throw new IllegalArgumentException();
-     if ("x-eliza-device-capabilities".equals(normalized) && !ConnectionRoutes.deviceCapabilities(value)) throw new IllegalArgumentException();
-     if ("x-eliza-phone-protocol".equals(normalized) && !"1".equals(value)) throw new IllegalArgumentException();
-     connection.setRequestProperty(name, value);
-    }
-    String body = call.getString("body");
-    if (body != null) {
-     if (!("POST".equals(method)||"PUT".equals(method)&&routes.allowed("automations",route,method)||"PATCH".equals(method)&&ConnectionRoutes.calendarSync(url.getPath(),url.getRawQuery(),method,true))) throw new IllegalArgumentException();
-     byte[] encoded = body.getBytes(StandardCharsets.UTF_8);
-     if (encoded.length > responseLimit) throw new IllegalArgumentException();
-     parseJson(body); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(encoded.length);
-     if (pending.cancelled()) throw new IllegalStateException();
-     stage=RequestStage.WRITE;
-     try (java.io.OutputStream output = connection.getOutputStream()) { output.write(encoded); }
-    }
-    if (pending.cancelled()) throw new IllegalStateException();
-    stage=RequestStage.STATUS;
-    status = connection.getResponseCode();
-    if (status >= 300 && status < 400) throw new IllegalArgumentException();
-    // Some Cloud refusals give their wait only in Retry-After (seconds or an HTTP date).
-    String retryAfter = status >= 400 ? connection.getHeaderField("Retry-After") : null;
-    if (connection.getContentLengthLong() > responseLimit) throw new IllegalArgumentException();
-    stage=RequestStage.READ;
-    byte[] bytes;
-    try (InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) { bytes = readBounded(input, responseLimit); }
-    if (pending.cancelled()) throw new IllegalStateException();
-    Object data = JSONObject.NULL;
-    if (bytes.length > 0) {
-     stage=RequestStage.PARSE;
-     try { data = parseJson(new String(bytes, StandardCharsets.UTF_8)); }
-     catch (Exception error) { if (status < 400) throw error; }
-    }
-    stage=RequestStage.RESOLVE;
-    JSObject result = new JSObject(); result.put("status", status); result.put("data", data);
-    if (ConnectionTransport.retryAfter(retryAfter) != null) result.put("retryAfter", retryAfter);
-    call.resolve(result);
-   } catch (Exception error) {
-    String code=debugRequestFailure(operation,stage,status,error);
-    if(code!=null)try{getContext().getSharedPreferences("alpha-transport-diagnostics",android.content.Context.MODE_PRIVATE).edit().putString("lastFailure",code).apply();}
-    catch(RuntimeException ignored){/* Diagnostic storage must not mask the transport failure. */}
-    call.reject(pending.cancelled() ? "Request cancelled" : "Connection request failed",code);
-   }
-   finally { if (connection != null) connection.disconnect(); requests.remove(id, pending); }
-  }))requests.remove(id,pending);
- }
- @PluginMethod public void cancel(PluginCall call) {
-  requests.cancel(call.getString("requestId", "")); synchronized(foregroundLock){foregroundLock.notifyAll();}call.resolve();
- }
- @PluginMethod public void openExternal(PluginCall call) {
-  try {
-   URI url = validatedUrl(call.getString("url"), false);
-   // Production hosts only in a flag-off build; staging and other *.eliza.app hosts need test mocks.
-   if (!ConnectionRoutes.externalHost(url.getScheme(), url.getHost(), url.getPort())) throw new IllegalArgumentException();
-   Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())); intent.addCategory(Intent.CATEGORY_BROWSABLE);
-   boolean cliLogin=ConnectionRoutes.externalCliLogin(url.getHost(),url.getPath());
-   if(cliLogin){
-    String id=required(call.getString("requestId"),256);
-    if(destroyed){call.reject("Connection closed");return;}
-    PendingRequests.Pending pending=requests.registerBrowser(id,settles(call));
-    if(pending==null){call.reject("Request already active");return;}
-    // Register before launching: the native pause belongs to this browser handoff.
-    getActivity().runOnUiThread(()->{
-     if(destroyed){pending.cancel();requests.remove(id,pending);return;}
-     pending.launch(()->getActivity().startActivity(intent));
-     if(pending.settled())requests.remove(id,pending);
-    });
-   }else getActivity().runOnUiThread(() -> {
-    try { getActivity().startActivity(intent); call.resolve(); }
-    catch (RuntimeException error) { call.reject("Authentication browser unavailable"); }
-   });
-  } catch (Exception error) { call.reject("Unsupported authentication URL"); }
  }
  @Override protected void handleOnPause(){synchronized(foregroundLock){foreground=false;}requests.pauseAll();super.handleOnPause();}
  @Override protected void handleOnResume(){

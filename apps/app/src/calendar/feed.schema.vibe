@@ -1,0 +1,146 @@
+// spec/calendar/agent.md, "A read publishes only when all three replies arrived for the binding it was started for"; spec/calendar/approvals.md, "The status follows the request's state and whether its owner was verified"; spec/calendar/sync.md, "A review is kept only for the binding that read it"
+// Decoders for what the resident agent's Calendar API answers. Every reply is untrusted until one of these accepts it.
+
+const Text = (max: number) => Schema.String.check(Schema.isMaxLength(max))
+const Provider = Schema.Literals(["eliza", "google", "microsoft", "apple_calendar", "ics", "device"])
+const Side = Schema.Literals(["owner", "agent"])
+const Instant = Schema.String.check(Schema.isPattern(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/))
+
+/** One attendee of an agent Calendar event. */
+export const Attendee = Schema.Struct({
+  email: Schema.NullOr(Text(320)),
+  displayName: Schema.NullOr(Text(512)),
+  responseStatus: Schema.NullOr(Text(64)),
+  self: Schema.Boolean,
+  organizer: Schema.Boolean,
+  optional: Schema.Boolean,
+})
+
+/** One agent Calendar event, as the feed lists it. */
+export const Event = Schema.Struct({
+  id: Text(4096),
+  externalId: Text(4096),
+  agentId: Text(1024),
+  provider: Provider,
+  side: Side,
+  calendarId: Text(1024),
+  title: Text(4000),
+  description: Text(32768),
+  location: Text(4000),
+  status: Text(64),
+  startAt: Instant,
+  endAt: Instant,
+  isAllDay: Schema.Boolean,
+  timezone: Schema.NullOr(Text(128)),
+  htmlLink: Schema.NullOr(Text(4096)),
+  conferenceLink: Schema.NullOr(Text(4096)),
+  organizer: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
+  attendees: Schema.Array(Attendee),
+  metadata: Schema.Record(Schema.String, Schema.Unknown),
+  recurrence: Schema.optionalKey(Schema.NullOr(Schema.Array(Text(4096)))),
+  recurringEventId: Schema.optionalKey(Schema.NullOr(Text(4096))),
+  syncedAt: Schema.String,
+  updatedAt: Schema.String,
+  calendarSummary: Schema.optionalKey(Text(1024)),
+  connectorAccountId: Schema.optionalKey(Text(1024)),
+  grantId: Schema.optionalKey(Text(1024)),
+  accountEmail: Schema.optionalKey(Text(320)),
+})
+
+const SourceKey = { provider: Provider, side: Side, grantId: Text(1024), connectorAccountId: Text(1024), calendarId: Text(1024) }
+
+/** One source's health inside a feed. */
+export const SourceHealth = Schema.Struct({
+  key: Schema.Struct(SourceKey),
+  summary: Text(1024),
+  accessRole: Text(64),
+  status: Schema.Literals(["fresh", "stale", "error"]),
+  syncedAt: Schema.NullOr(Schema.String),
+})
+
+/** A feed of events over one requested window. */
+export const Feed = Schema.Struct({
+  calendarId: Text(1024),
+  events: Schema.Array(Event).check(Schema.isMaxLength(5000)),
+  source: Schema.Literals(["cache", "synced"]),
+  state: Schema.Literals(["complete", "partial", "unavailable"]),
+  sources: Schema.Array(SourceHealth),
+  timeMin: Instant,
+  timeMax: Instant,
+  syncedAt: Schema.NullOr(Schema.String),
+})
+
+/** One calendar the owner can see. */
+export const Calendar = Schema.Struct({
+  ...SourceKey,
+  accountEmail: Schema.NullOr(Text(320)),
+  summary: Text(1024),
+  description: Schema.NullOr(Text(8192)),
+  primary: Schema.Boolean,
+  accessRole: Text(64),
+  timeZone: Schema.NullOr(Text(128)),
+  selected: Schema.Boolean,
+  includeInFeed: Schema.Boolean,
+  selectionVersion: Schema.optionalKey(Schema.Number),
+})
+
+/** The calendars reply. */
+export const Calendars = Schema.Struct({ calendars: Schema.Array(Calendar).check(Schema.isMaxLength(256)) })
+
+/** The next-event context reply: the next event, if any, and the coverage it was found in. */
+export const NextContext = Schema.Struct({
+  event: Schema.NullOr(Event),
+  calendarFeedState: Schema.Literals(["complete", "partial", "unavailable"]),
+})
+
+/** A write receipt: the event as written, and whether the provider confirmed it. */
+export const WriteReceipt = Schema.Struct({
+  event: Schema.optionalKey(Schema.NullOr(Event)),
+  status: Schema.Literals(["applied", "accepted_without_readback", "unknown", "refused"]),
+  observedAt: Schema.optionalKey(Schema.String),
+})
+
+const ApprovalStateText = Schema.Literals(["pending", "approved", "executing", "retryable", "reconciliation_required", "done", "rejected", "expired"])
+
+/** One approval request in the agent's queue. */
+export const ApprovalRow = Schema.Struct({
+  id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)),
+  state: ApprovalStateText,
+  subjectUserId: Schema.optionalKey(Schema.String),
+  ownerEntityId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  ownerId: Schema.optionalKey(Schema.String),
+  action: Schema.Literals(["schedule_event", "modify_event", "cancel_event"]),
+  reason: Text(8192),
+  expiresAt: Schema.NullOr(Schema.String),
+  updatedAt: Schema.optionalKey(Schema.String),
+  payload: Schema.Record(Schema.String, Schema.Unknown),
+})
+
+/** The approvals listing. */
+export const Approvals = Schema.Struct({ approvals: Schema.Array(Schema.Unknown).check(Schema.isMaxLength(500)) })
+
+/** The agent's answer to one decision. */
+export const Resolution = Schema.Struct({
+  requestId: Schema.String,
+  decision: Schema.Literals(["approve", "reject"]),
+  kind: Schema.Literals(["succeeded", "rejected", "invalidated", "retryable", "blocked"]),
+  text: Text(8192),
+  failure: Schema.optionalKey(Schema.Struct({ code: Text(128), retryable: Schema.Boolean, acceptance: Schema.Literals(["not_accepted", "unknown"]) })),
+})
+
+export type EventRecord = typeof Event.Type
+export type FeedRecord = typeof Feed.Type
+export type CalendarRecord = typeof Calendar.Type
+export type NextRecord = typeof NextContext.Type
+export type WriteRecord = typeof WriteReceipt.Type
+export type ApprovalRecord = typeof ApprovalRow.Type
+export type ResolutionRecord = typeof Resolution.Type
+
+/** Decoders, failing with Schema's own issue on anything else. */
+export const decodeFeed = Schema.decodeUnknownEffect(Feed)
+export const decodeCalendars = Schema.decodeUnknownEffect(Calendars)
+export const decodeNext = Schema.decodeUnknownEffect(NextContext)
+export const decodeWrite = Schema.decodeUnknownEffect(WriteReceipt)
+export const decodeApprovals = Schema.decodeUnknownEffect(Approvals)
+export const decodeApproval = Schema.decodeUnknownEffect(ApprovalRow)
+export const decodeResolution = Schema.decodeUnknownEffect(Resolution, { onExcessProperty: "error" })

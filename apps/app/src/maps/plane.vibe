@@ -1,0 +1,105 @@
+// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"
+import { type Basemap, type MapPlane, Machine as PlaneMachine, basemapFor, type PlaneState } from "../../gen/maps__plane.effect.vibe"
+import { MapsProvider, type MapsTile } from "./cloud.vibe"
+import { MapsContent } from "./content.vibe"
+import { MapsScreen } from "./screen.vibe"
+import type { MapsFailure } from "./failure.vibe"
+import { viewportArea } from "./geometry.vibe"
+import type { Coordinate } from "./maps.schema.vibe"
+
+const LONG_PRESS_MS = 500
+const PRESS_SLOP_PX = 10
+
+/** The basemap the screen draws now: Google content only on the Google raster. */
+export effect function currentBasemap() {
+  const c = try (try MapsContent).get()
+  const coverage = c.coverage
+  const googleContent = coverage?.kind === "GoogleProvider" && (c.shown?.kind === "GoogleProvider" || c.results.places.length > 0 || c.routes.routes.length > 0)
+  return basemapFor(coverage?.kind ?? "NoProvider", coverage?.offer.map ?? false, googleContent)
+}
+
+/** The map plane's custody: one plane per element and basemap, its reports fenced, its copyright for the settled view. */
+export service MapsPlane {
+  /** Mount for `element`; the generation the new plane's callbacks must carry. */
+  mount(element: number, basemap: Basemap): number!!
+  report(owner: number, outcome: PlaneState): void!!
+  retry(): number!!
+  release(): void!!
+  /** The camera settled outside the area the shown copyright covers: ask for the new view's copyright. */
+  settled(center: Coordinate, zoom: number, width: number, height: number): void!!
+  tile(z: number, x: number, y: number): MapsTile!MapsFailure
+  openInfo(): void!!
+  closeInfo(): void!!
+  /** A finger went down on the map: held still for 500 ms it drops a pin there. */
+  pressStarted(coordinate: Coordinate, x: number, y: number): void!!
+  /** The finger moved; more than 10 pixels is a pan, not a press. */
+  pressMoved(x: number, y: number): void!!
+  /** The finger lifted before the press was long enough. */
+  pressEnded(): void!!
+  readonly states: Stream.Stream<MapPlane>
+}
+
+/** The plane over its machine and the provider. */
+export const planeLayer = Layer.effect(MapsPlane, effect {
+  const plane = try PlaneMachine
+  const provider = try MapsProvider
+  const content = try MapsContent
+  const asking = try Ref.make<Fiber.Fiber<void> | undefined>(undefined)
+  const screen = try MapsScreen
+  const pressing = try Ref.make<{ readonly x: number; readonly y: number; readonly fiber: Fiber.Fiber<void> } | undefined>(undefined)
+
+  effect function cancelPress() {
+    const held = try Ref.getAndSet(pressing, undefined)
+    if (held) try Fiber.interrupt(held.fiber)
+  }
+
+  effect function send(event: Parameters<typeof plane.send>[0]) {
+    return plane.send(event) catch () => undefined
+  }
+
+  return {
+    effect mount(element: number, basemap: Basemap) {
+      return (try send({ type: "mountPlane", element, basemap }))?.generation ?? (try plane.get()).generation
+    },
+    effect report(owner: number, outcome: PlaneState) { try send({ type: "planeReports", owner, outcome }) },
+    effect retry() { return (try send({ type: "retryMap" }))?.generation ?? (try plane.get()).generation },
+    effect release() {
+      const old = try Ref.getAndSet(asking, undefined)
+      if (old) try Fiber.interrupt(old)
+      try send({ type: "releasePlane" })
+    },
+    effect settled(center: Coordinate, zoom: number, width: number, height: number) {
+      try send({ type: "moveView" })
+      const asked = try send({ type: "requestCopyright" })
+      if (!asked) return
+      const token = asked.pending
+      const area = viewportArea(center, zoom, width * 3, height * 3)
+      const old = try Ref.getAndSet(asking, undefined)
+      if (old) try Fiber.interrupt(old)
+      const fiber = fork.detached effect {
+        const copyright = provider.viewport(area, zoom) catch () => undefined
+        if (copyright !== undefined) try content.update((c) => ({ ...c, copyright }))
+        try send({ type: "copyrightReply", token, success: copyright !== undefined })
+      }
+      try Ref.set(asking, fiber)
+    },
+    tile: (z: number, x: number, y: number) => provider.tile(z, x, y),
+    effect openInfo() { try send({ type: "openInfo" }) },
+    effect closeInfo() { try send({ type: "closeInfo" }) },
+    effect pressStarted(coordinate: Coordinate, x: number, y: number) {
+      try cancelPress()
+      const fiber = fork.detached effect {
+        try sleep(LONG_PRESS_MS)
+        try Ref.set(pressing, undefined)
+        try screen.dropPin(coordinate)
+      }
+      try Ref.set(pressing, { x, y, fiber })
+    },
+    effect pressMoved(x: number, y: number) {
+      const held = try Ref.get(pressing)
+      if (held && Math.hypot(x - held.x, y - held.y) > PRESS_SLOP_PX) try cancelPress()
+    },
+    pressEnded: () => cancelPress(),
+    states: plane.changes,
+  }
+})

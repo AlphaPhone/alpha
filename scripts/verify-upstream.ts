@@ -11,29 +11,30 @@ import {
 import { readUpstreamPin } from "./upstream-pin.ts";
 
 const argv = process.argv.slice(2);
-// --reachability-only reports the recorded develop compare without re-authenticating vendor bytes.
+// --reachability-only reports the recorded upstream branch compare without re-authenticating vendor bytes.
 const reachabilityOnly = argv.includes("--reachability-only");
 const { commit } = reachabilityOnly
 	? readUpstreamPin(process.cwd())
-	: verifyPinnedUpstream(process.cwd());
+	: await verifyPinnedUpstream(process.cwd());
 
 if (!reachabilityOnly && argv.includes("--record-reachability")) {
 	// Explicit, networked refresh of the recorded compare. CI never runs this.
 	const lock = readUpstreamPin(process.cwd());
+	const base = lock.branch || "vibestack";
 	const repository = new URL(lock.url).pathname.replace(/^\//, "").replace(/\.git$/, "");
 	const api = (route: string, jq: string) =>
 		execFileSync("gh", ["api", route, "--jq", jq], { encoding: "utf8", timeout: 120_000 }).trim();
-	const compare = JSON.parse(api(`repos/${repository}/compare/develop...${commit}`,
+	const compare = JSON.parse(api(`repos/${repository}/compare/${base}...${commit}`,
 		"{status,ahead_by,behind_by,merge_base:.merge_base_commit.sha,commits:[.commits[]|select((.parents|length)==1)|{sha:.sha,subject:(.commit.message|split(\"\\n\")[0])}]}"));
 	const previous = readReachabilityRecord(process.cwd()) ?? {};
 	const record = {
 		schema: 1,
 		repository,
-		base: "develop",
-		baseCommit: api(`repos/${repository}/branches/develop`, ".commit.sha"),
+		base,
+		baseCommit: api(`repos/${repository}/branches/${base}`, ".commit.sha"),
 		head: commit,
 		recordedAt: new Date().toISOString().slice(0, 10),
-		command: `gh api repos/${repository}/compare/develop...${commit}`,
+		command: `gh api repos/${repository}/compare/${base}...${commit}`,
 		status: compare.status,
 		aheadBy: compare.ahead_by,
 		behindBy: compare.behind_by,
@@ -57,9 +58,7 @@ if (!reachabilityOnly && fs.existsSync(stampFile)) {
 		!Array.isArray(stamp.patches) ||
 		stamp.patches.length ||
 		stamp.lockSha256 !== hash("upstream.lock.json") ||
-		stamp.preparerSha256 !== hash("scripts/prepare-local-agent.ts") ||
-		stamp.guardSha256 !== hash("scripts/local-agent-source.ts") ||
-		stamp.copySha256 !== hash("scripts/copy-file-clone.ts")
+		stamp.stagerSha256 !== hash("scripts/stage-agent-runtime.ts")
 	)
 		throw new Error(
 			"Staged runtime does not match the pinned source; prepare and stage it before packaging.",

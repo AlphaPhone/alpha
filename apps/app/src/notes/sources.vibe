@@ -1,0 +1,142 @@
+// spec/notes/webSource.md, "Story: Visit or remove the web page a note came from"; spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"; spec/notes/attachment.md, "Story: Open the document a note came from"; spec/notes/attachment.md, "A retained reference opens directly; a fingerprint opens only the exact file picked"; spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"
+import type { NoteJson, NotesSnapshot } from "@elizaos/plugin-notes/types"
+import { type Event as AttachmentEvent, Machine as AttachmentMachine, machine as attachmentMachine, releasesSource } from "../../gen/notes__attachment.effect.vibe"
+import { type Event as DialogEvent, Machine as SourceDialogMachine, machine as sourceDialogMachine, type SourceDialog } from "../../gen/notes__webSource.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { type NoteRow, rowOf } from "./list.vibe"
+import { NotesHandoff } from "./origins.vibe"
+
+/** What a source action did. */
+export type SourceNotice = "opened" | "removed" | "unconfirmed" | "mismatch" | "failed" | "stale"
+
+/** The web source dialog and the linked attachment of the open note. */
+export service NotesSources {
+  openDialog(noteId: string): boolean!!
+  closeDialog(): void!!
+  visit(): SourceNotice!!
+  removeWebSource(): SourceNotice!!
+  page(active: boolean, visible: boolean): void!!
+  openAttachment(row: NoteRow): SourceNotice!!
+  releaseUnused(): number!!
+}
+
+function sourceReferences(snapshot: NotesSnapshot): string[] {
+  return [...snapshot.notes, ...(snapshot.trash ?? []).map((entry) => entry.note)].flatMap((note) => {
+    const reference = rowOf(note).documentSource?.reference
+    return reference === undefined ? [] : [reference]
+  })
+}
+
+const make = effect {
+  const collection = try NotesCollection
+  const handoff = try NotesHandoff
+  const native = try Native
+  const dialog = try SourceDialogMachine
+  const attachment = try AttachmentMachine
+  const opened = try Ref.make<{ readonly noteId: string; readonly print: string } | undefined>(undefined)
+
+  effect function sendDialog(event: DialogEvent): SourceDialog | undefined!! {
+    return try (dialog.send(event) catch () => undefined)
+  }
+  effect function sendAttachment(event: AttachmentEvent): void!! {
+    try (attachment.send(event) catch () => undefined)
+  }
+
+  effect function printOf(noteId: string): string | undefined!! {
+    const note = (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
+    return note === undefined ? undefined : JSON.stringify(note)
+  }
+
+  effect function fresh(): { noteId: string; row: NoteRow } | undefined!! {
+    const held = try Ref.get(opened)
+    if (held === undefined) return undefined
+    const note = (try collection.current())?.snapshot.notes.find((item) => item.id === held.noteId)
+    if (note === undefined) return undefined
+    if (JSON.stringify(note) !== held.print) try sendDialog({ type: "outsideEdit" })
+    return { noteId: held.noteId, row: rowOf(note) }
+  }
+
+  return {
+    effect openDialog(noteId: string) {
+      const print = try printOf(noteId)
+      if (print === undefined) return false
+      try Ref.set(opened, { noteId, print })
+      return (try sendDialog({ type: "openDialog" })) !== undefined
+    },
+    effect closeDialog() { try sendDialog({ type: "closeDialog" }) },
+    effect visit() {
+      const current = try fresh()
+      const acted = try sendDialog({ type: "act", kind: "VisitAction" })
+      if (current?.row.webSource === undefined || acted === undefined || acted.op !== "VisitAction") return "stale"
+      try handoff.request({ kind: "open-web-source", url: current.row.webSource.url })
+      try sendDialog({ type: "visitSettled", ok: true })
+      return "opened"
+    },
+    effect removeWebSource() {
+      const current = try fresh()
+      const acted = try sendDialog({ type: "act", kind: "RemoveAction" })
+      const snapshot = (try collection.current())?.snapshot
+      const note = snapshot?.notes.find((item) => item.id === current?.noteId)
+      if (current === undefined || acted === undefined || acted.op !== "RemoveAction" || note === undefined || snapshot === undefined) return "stale"
+      const data: Record<string, NoteJson> = { ...(note.format?.data ?? {}) }
+      delete data.webSource
+      const reply = try (collection.interact("update-note", { id: note.id, expectedRevision: snapshot.revision, format: { kind: note.format?.kind ?? "text", data } }) catch () => undefined)
+      const saved = reply?.target?.id === note.id
+      try sendDialog({ type: "removeSettled", saved })
+      return saved ? "removed" : "unconfirmed"
+    },
+    effect page(active: boolean, visible: boolean) {
+      const state = try dialog.get()
+      if (!active && state.visit) try sendDialog({ type: "leaveVisit" })
+      if (active && !state.visit) try sendDialog({ type: "enterVisit" })
+      if (!visible && !state.hidden) try sendDialog({ type: "hideDialogPage" })
+      if (visible && state.hidden) try sendDialog({ type: "showDialogPage" })
+      if (!active) try sendAttachment({ type: "leaveAttachment" })
+      if (active && !(try attachment.get()).active) try sendAttachment({ type: "enterAttachment" })
+    },
+    effect openAttachment(row: NoteRow) {
+      const source = row.documentSource
+      if (source === undefined) return "failed"
+      try sendAttachment({ type: "configure", linked: true, referenced: source.reference !== undefined })
+      try sendAttachment({ type: "tap" })
+      const stage = (try attachment.get()).stage
+      if (stage === "AttachOpening") {
+        const ok = try (effect {
+          try native.invoke("AlphaMailAttachments", "openSourceReference", { reference: source.reference, sha256: source.sha256, size: source.size, mimeType: source.mimeType })
+          return true
+        } catch () => false)
+        try sendAttachment({ type: "finishOpen" })
+        return ok ? "opened" : "failed"
+      }
+      if (stage !== "AttachPick") return "failed"
+      const picked = try (effect { return try native.invoke("DailyApps", "perform", { action: "files" }) } catch () => undefined)
+      const selection = typeof picked === "object" && picked !== null && "selectionId" in picked && typeof picked.selectionId === "string" ? picked.selectionId : undefined
+      try sendAttachment({ type: "choose", selected: selection !== undefined })
+      if (selection === undefined) return "failed"
+      const file = try (effect { return try native.invoke("AlphaMailAttachments", "readSelected", { selectionId: selection }) } catch () => undefined)
+      const record = typeof file === "object" && file !== null ? file as Record<string, unknown> : {}
+      const matches = record.sha256 === source.sha256 && record.size === source.size && record.mimeType === source.mimeType
+      try sendAttachment({ type: "verify", matches })
+      let notice: SourceNotice = matches ? "opened" : "mismatch"
+      if ((try attachment.get()).stage === "AttachOpening") {
+        const ok = try (effect { try native.invoke("AlphaMailAttachments", "openReviewed", { ...record, reviewed: true }); return true } catch () => false)
+        if (!ok) notice = "failed"
+        try sendAttachment({ type: "finishOpen" })
+      }
+      try (native.invoke("DailyApps", "forgetSelected", { selectionId: selection }) catch () => undefined)
+      try sendAttachment({ type: "release" })
+      return notice
+    },
+    effect releaseUnused() {
+      if (!(try native.available("AlphaMailAttachments"))) return 0
+      const snapshot = (try collection.current())?.snapshot
+      if (!releasesSource(snapshot !== undefined, false, false, 259200001) || snapshot === undefined) return 0
+      const answer = try (native.invoke("AlphaMailAttachments", "releaseSourceReferences", { keep: sourceReferences(snapshot) }) catch () => undefined)
+      return typeof answer === "object" && answer !== null && "released" in answer && typeof answer.released === "number" ? answer.released : 0
+    },
+  }
+}
+
+/** The source services with their dialog and attachment machines. */
+export const sourcesLayer = Layer.provideMerge(Layer.effect(NotesSources, make), Layer.merge(sourceDialogMachine(), attachmentMachine()))

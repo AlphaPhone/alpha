@@ -1,0 +1,78 @@
+// spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/viewEvents.md, "Only this subscription's frames for this client reach the screen, until it ends"; spec/platform/viewEvents.md, "Closing removes the listener and unsubscribes whatever was dispatched"
+import { agentClient, agentPlugin } from "@elizaos/os/bridges/agent"
+import type { ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { Machine as Feed, machine as feedMachine, type FrameKind } from "../../gen/platform__viewEvents.effect.vibe"
+import { ResidentUnavailable } from "./resident.vibe"
+import { ResidentControl } from "./resident-control.vibe"
+import { ViewInteract, VoiceTranscript } from "./native.schema.vibe"
+import { newId } from "./native-capacitor.ts"
+
+/** The resident's live feeds for this renderer: nothing is replayed, kept or resubscribed by itself. */
+export service ResidentFeeds {
+  /** `view-interact` frames for `clientId`, until the screen stops reading or the session changes. */
+  view(clientId: string): Stream.Stream<unknown, ResidentUnavailable>
+  /** Voice transcript events, until the reader stops or the session changes. */
+  voice(): Stream.Stream<unknown, ResidentUnavailable>
+}
+
+type Heard = { readonly kind: "event"; readonly value: unknown } | { readonly kind: "end" }
+
+/** One live subscription of `topic` through `agent`, bound to the session it was opened under. */
+export function subscription(agent: ElizaAgentPlugin, control: ResidentControl.Shape, topic: "view" | "voice", clientId: string | undefined): Stream.Stream<unknown, ResidentUnavailable> {
+  return Stream.unwrap(effect {
+    const session = try control.session()
+    if (session === undefined) throw new ResidentUnavailable({ state: "stopped", reason: "Connect the local agent first." })
+    const feed = try Effect.provide(effect { return try Feed }, feedMachine())
+    const id = newId()
+    const frames = Stream.callback<Heard>((queue) => effect {
+      const handle = tryPromise(() => agent.addListener("agentEvent", (value) => {
+        if (value.id !== id) return
+        if (value.kind === "event") Queue.offerUnsafe(queue, { kind: "event", value: value.event })
+        else Queue.offerUnsafe(queue, { kind: "end" })
+      })) catch () => undefined
+      feed.send({ type: "listenerResult", success: handle !== undefined }) catch () => undefined
+      if (handle === undefined) {
+        Queue.offerUnsafe(queue, { kind: "end" })
+        return
+      }
+      try addFinalizer(() => effect {
+        feed.send({ type: "close" }) catch () => undefined
+        tryPromise(() => handle.remove()) catch () => undefined
+        if ((try feed.get()).dispatched) tryPromise(() => agent.unsubscribeEvents({ id })) catch () => undefined
+      })
+      const admitted = tryPromise(() => agent.subscribeEvents({ id, topic, ...(clientId === undefined ? {} : { clientId }) })) catch () => undefined
+      const after = feed.send({ type: "subscribeResult", success: admitted !== undefined, matching: admitted?.id === id }) catch () => undefined
+      if (after?.phase !== "Ready") Queue.offerUnsafe(queue, { kind: "end" })
+    })
+    effect function admitted(value: unknown): unknown | undefined {
+      if (topic === "view") {
+        const frame = Schema.decodeUnknownEffect(ViewInteract)(value) catch () => undefined
+        const kind: FrameKind = frame === undefined ? "OtherFrame" : "Interact"
+        const after = feed.send({ type: "frame", ours: true, forClient: frame?.payload.clientId === clientId, kind }) catch () => undefined
+        return after !== undefined && frame !== undefined && frame.payload.clientId === clientId && after.phase !== "Ended" ? frame.payload.frame : undefined
+      }
+      const transcript = Schema.decodeUnknownEffect(VoiceTranscript)(value) catch () => undefined
+      const kind: FrameKind = transcript === undefined ? "OtherFrame" : "Interact"
+      const after = feed.send({ type: "frame", ours: true, forClient: true, kind }) catch () => undefined
+      return after !== undefined && transcript !== undefined && after.phase !== "Ended" ? value : undefined
+    }
+    const sessionChanged = Stream.runHead(Stream.filter(control.changes, (now) => now.generation !== session.generation))
+    return Stream.interruptWhen(
+      frames
+        |> Stream.takeWhile(%, (heard) => heard.kind === "event")
+        |> Stream.mapEffect(%, (heard) => heard.kind === "event" ? admitted(heard.value) : succeed(undefined))
+        |> Stream.filter(%, (value) => value !== undefined),
+      sessionChanged,
+    )
+  })
+}
+
+/** The live feeds over the agent service's `ElizaAgent` plugin. */
+export const feedsLive = Layer.effect(ResidentFeeds, effect {
+  const control = try ResidentControl
+  const agent = agentClient(agentPlugin())
+  return {
+    view: (clientId: string) => subscription(agent, control, "view", clientId),
+    voice: () => subscription(agent, control, "voice", undefined),
+  }
+})

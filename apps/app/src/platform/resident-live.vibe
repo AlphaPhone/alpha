@@ -1,0 +1,224 @@
+// spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"
+import { createRuntimeJsonClient, RuntimeRequestError } from "@elizaos/agent/client"
+import { agentClient, agentPlugin } from "@elizaos/os/bridges/agent"
+import type { ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { adviceOf, answerOf, pathAdmitted, type PathShape } from "../../gen/platform.effect.vibe"
+import { Machine as Connection, admissionOf, machine as connectionMachine, retriesDeferred, retryDelayMs } from "../../gen/platform__resident.effect.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer } from "./resident.vibe"
+import { ResidentControl, type ResidentSession } from "./resident-control.vibe"
+import { agentBridge, agentReport, agentRequest, stopAgent } from "./resident-bridge.vibe"
+import { ResidentAgents, ResidentRefusal, ResidentWhoAmI } from "./native.schema.vibe"
+import { developmentAgentBase } from "./build-flags.ts"
+import { capacitor } from "./native-capacitor.ts"
+
+const STARTUP_TIMEOUT_MS = 120000
+const POLL_MS = 500
+const REQUEST_TIMEOUT_MS = 120000
+const LIVENESS_TICK = "5 seconds"
+const RECORD_PREFIXES = ["/api/notes/state", "/api/views/notes/interact", "/api/lifeops/calendar"]
+const IDENTIFIER_LIMIT = 512
+
+/** The shape of a request path: rooted, protocol-relative, or anything else. */
+export function pathShapeOf(path: string): PathShape {
+  if (path.startsWith("//")) return "ProtocolRelative"
+  return path.startsWith("/") && !/[\\\u0000- ]/.test(path) ? "Rooted" : "Unrooted"
+}
+
+/** Whether `path` reads the owner's records, the one kind of read a starting feature may defer. */
+export function recordRead(method: string, path: string): boolean {
+  return method === "GET" && RECORD_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`))
+}
+
+/** A refusal as the Resident service reports it, keeping a wait only where the resident gave a 429 one. */
+export function refusalOf(status: number, said: { readonly error?: string; readonly message?: string; readonly code?: string; readonly retryAfter?: number } | undefined): ResidentRefused {
+  const advice = adviceOf(status, typeof said?.retryAfter === "number" && Number.isSafeInteger(said.retryAfter), said?.retryAfter ?? 0)
+  return new ResidentRefused({
+    status,
+    message: said?.error ?? said?.message ?? `Local agent request failed (HTTP ${status}).`,
+    ...(said?.code === undefined ? {} : { code: said.code }),
+    ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}),
+  })
+}
+
+/** What a failed resident client call means for the caller. */
+export function failureOf(cause: unknown): ResidentUnavailable | ResidentRefused {
+  if (cause instanceof RuntimeRequestError) return refusalOf(cause.status, { error: cause.message, ...(cause.code === undefined ? {} : { code: cause.code }), ...(cause.retryAfter === undefined ? {} : { retryAfter: cause.retryAfter }) })
+  const why = cause instanceof Error ? cause.message : "TransportFailed"
+  return new ResidentUnavailable({ state: why === "StartupFailed" || why === "AccountChanged" || why === "RefreshFailed" ? "starting" : "stopped", reason: why })
+}
+
+function identifier(value: string | undefined): string | undefined {
+  return value !== undefined && value.length > 0 && value.length <= IDENTIFIER_LIMIT ? value : undefined
+}
+
+/** Both resident services, made once over one connection. */
+service ResidentParts {
+  readonly resident: Resident.Shape
+  readonly control: ResidentControl.Shape
+}
+
+/** The Resident and ResidentControl services over the agent service plugin `agent`, which `present` says this device has. */
+export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase: URL | undefined) {
+  const parts = Layer.effect(ResidentParts, effect {
+    const conn = try Effect.provide(effect { return try Connection }, connectionMachine())
+    const verifiedEpoch = try Ref.make(0)
+    const connecting = try Semaphore.make(1)
+    const bridge = agentBridge(agent)
+    const client = try Effect.orDie(Effect.try(() => createRuntimeJsonClient({
+      bridge: () => present ? bridge : undefined,
+      ...(httpBase === undefined ? {} : { httpBase }),
+      startupTimeoutMs: STARTUP_TIMEOUT_MS,
+      pollMs: POLL_MS,
+      requestTimeoutMs: REQUEST_TIMEOUT_MS,
+    })))
+
+    effect function fail(gen: number, retryable: boolean, reason: string): never!ResidentUnavailable {
+      conn.send({ type: "startFailed", ofGen: gen, retryable }) catch () => undefined
+      throw new ResidentUnavailable({ state: retryable ? "starting" : "stopped", reason })
+    }
+
+    effect function verify() {
+      const now = try conn.get()
+      if (now.phase === "Connected") return
+      if (now.phase === "Refused") throw new ResidentUnavailable({ state: "stopped", reason: "needs-recovery" })
+      if (now.phase === "Stopping") throw new ResidentUnavailable({ state: "stopped", reason: "stopping" })
+      if (now.phase === "Stopped" || now.phase === "Lost") conn.send({ type: "start" }) catch () => undefined
+      const gen = (try conn.get()).generation
+      const who = tryPromise({ try: () => client.request("/api/auth/me"), catch: failureOf }) catch effect (error) => {
+        try fail(gen, error._tag === "ResidentUnavailable" || error.status === 503, error._tag === "ResidentUnavailable" ? error.reason ?? "start-failed" : error.message)
+      }
+      conn.send({ type: "started", ofGen: gen, attached: false }) catch () => undefined
+      const listed = tryPromise({ try: () => client.request("/api/agents"), catch: failureOf }) catch effect (error) => {
+        try fail(gen, error._tag === "ResidentUnavailable" || error.status === 503, error._tag === "ResidentUnavailable" ? error.reason ?? "start-failed" : error.message)
+      }
+      const me = Schema.decodeUnknownEffect(ResidentWhoAmI)(who) catch () => undefined
+      const agents = Schema.decodeUnknownEffect(ResidentAgents)(listed) catch () => undefined
+      const first = agents?.agents[0]
+      const owner = identifier(me?.identity.id)
+      const agentId = identifier(first?.id)
+      const admission = admissionOf(
+        me?.identity.kind === "owner" && owner !== undefined,
+        me?.access.role === "OWNER",
+        me?.access.mode === "local" || me?.access.mode === "session",
+        agentId === undefined ? 0 : agents?.agents.length ?? 0,
+        first?.status === "running",
+      )
+      if (admission === "NotReady") try fail(gen, true, "LOCAL_AGENT_NOT_READY")
+      if (admission === "Distrust" || owner === undefined || agentId === undefined) try fail(gen, false, "The local runtime did not verify local owner access.")
+      const report = try agentReport(agent, 0)
+      const admitted = conn.send({ type: "verified", ofGen: gen, owner: owner!, agent: agentId! }) catch () => undefined
+      if (admitted === undefined) throw new ResidentUnavailable({ state: "starting", reason: "AccountChanged" })
+      try Ref.set(verifiedEpoch, report.epoch)
+    }
+
+    const ensureRunning = () => Semaphore.withPermit(connecting, verify())
+
+    effect function current(gen: number) {
+      if ((try conn.get()).generation !== gen) throw new ResidentUnavailable({ state: "starting", reason: "AccountChanged" })
+    }
+
+    effect function attempt(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown): ResidentAnswer!(ResidentUnavailable | ResidentRefused) {
+      if (method === "GET" || method === "POST") {
+        const data = try tryPromise({ try: () => client.request(path, method === "POST" ? body ?? {} : undefined), catch: failureOf })
+        return { status: 200, data }
+      }
+      const answer = try mapError(agentRequest(agent, method, path, body), (error) => new ResidentUnavailable({ state: "stopped", reason: error.code ?? error.message }))
+      if (answerOf(answer.status) === "Replied") return { status: answer.status, data: answer.data }
+      const said = Schema.decodeUnknownEffect(ResidentRefusal)(answer.data) catch () => undefined
+      throw refusalOf(answer.status, said)
+    }
+
+    effect function json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): ResidentAnswer!(ResidentUnavailable | ResidentRefused) {
+      if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
+      if ((method === "GET" || method === "DELETE") && body !== undefined) throw new ResidentRefused({ status: 400, code: "InvalidBody", message: "Invalid local request body" })
+      try ensureRunning()
+      const gen = (try conn.get()).generation
+      const deadline = (try Clock.currentTimeMillis) + REQUEST_TIMEOUT_MS
+      while (true) {
+        const answer = attempt(method, path, body) catch effect (error) => {
+          if (error._tag !== "ResidentRefused") throw error
+          const remaining = deadline - (try Clock.currentTimeMillis)
+          const starting = error.code === "feature_starting"
+          if (!retriesDeferred(recordRead(method, path), error.status, starting, remaining)) throw error
+          try sleep(retryDelayMs((error.retryAfter ?? 1) * 1000, remaining))
+          try current(gen)
+          return undefined
+        }
+        try current(gen)
+        if (answer !== undefined) return answer
+      }
+    }
+
+    function stream(path: string, body: unknown): Stream.Stream<Uint8Array, ResidentUnavailable | ResidentRefused> {
+      return Stream.unwrap(effect {
+        if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
+        try ensureRunning()
+        conn.send({ type: "turnBegan" }) catch () => undefined
+        const opened = tryPromise({ try: (signal) => client.stream(path, body, signal), catch: failureOf }) catch effect (error) => {
+          conn.send({ type: "turnEnded" }) catch () => undefined
+          throw error
+        }
+        return Stream.ensuring(Stream.fromAsyncIterable(opened.body, failureOf), Effect.ignore(conn.send({ type: "turnEnded" })))
+      })
+    }
+
+    effect function watch() {
+      while (true) {
+        try sleep(LIVENESS_TICK)
+        conn.send({ type: "tick" }) catch () => undefined
+        const before = try conn.get()
+        if (before.phase === "Lost" && !before.busy) {
+          ensureRunning() catch () => undefined
+          continue
+        }
+        const checked = conn.send({ type: "checkLiveness" }) catch () => undefined
+        if (checked === undefined) continue
+        const report = try agentReport(agent, try Ref.get(verifiedEpoch))
+        conn.send({ type: "livenessReply", ofGen: checked.generation, boot: report.boot }) catch () => undefined
+      }
+    }
+    if (present) fork.scoped watch()
+
+    const resident: Resident.Shape = {
+      status: () => effect {
+        const report = try agentReport(agent, 0)
+        return report.boot === "Listening" ? "running" : report.boot === "Booting" || report.boot === "Restarting" ? "starting" : "stopped"
+      },
+      ensureRunning,
+      json,
+      stream,
+    }
+    const control: ResidentControl.Shape = {
+      changes: conn.changes,
+      effect session(): ResidentSession | undefined {
+        const now = try conn.get()
+        if (now.phase !== "Connected") return undefined
+        return { owner: now.owner, agent: now.agent, generation: now.generation, epoch: try Ref.get(verifiedEpoch) }
+      },
+      effect refreshAccount() {
+        conn.send({ type: "accountChanged" }) catch () => undefined
+        tryPromise({ try: () => client.refreshNativeAccount(), catch: failureOf }) catch effect (error) => {
+          throw error._tag === "ResidentUnavailable" ? error : new ResidentUnavailable({ state: "starting", reason: error.message })
+        }
+        try ensureRunning()
+      },
+      effect stop() {
+        const stopping = conn.send({ type: "stop" }) catch () => undefined
+        const gen = stopping?.generation ?? (try conn.get()).generation
+        try mapError(stopAgent(agent), (error) => new ResidentUnavailable({ state: "stopped", reason: error.message }))
+        conn.send({ type: "stopped", ofGen: gen }) catch () => undefined
+      },
+      effect recovered() {
+        conn.send({ type: "recovered" }) catch () => undefined
+      },
+    }
+    return { resident, control }
+  })
+  return Layer.provide(Layer.mergeAll(
+    Layer.effect(Resident, effect { return (try ResidentParts).resident }),
+    Layer.effect(ResidentControl, effect { return (try ResidentParts).control }),
+  ), parts)
+}
+
+/** The phone's resident, through the agent service's `ElizaAgent` plugin, with the development host's agent off the phone in a test-mocks build. */
+export const residentLive = residentOver(agentClient(agentPlugin()), capacitor.registered("ElizaAgent"), developmentAgentBase(capacitor.onDevice))

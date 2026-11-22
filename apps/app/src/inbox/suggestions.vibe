@@ -1,0 +1,81 @@
+// spec/inbox/suggestions.md, "Story: Put an agent's suggestion into my email, where I can see it goes"
+import { type Event as SuggestionsEvent, type Suggestions as SuggestionsState, type SuggestionTarget, Machine as SuggestionsMachine, bodyLimit } from "../../gen/inbox__suggestions.effect.vibe"
+import { hasDraft } from "../../gen/inbox__drafts.effect.vibe"
+import { Machine as ReaderMachine } from "../../gen/inbox__reader.effect.vibe"
+import { Composer } from "./composer.vibe"
+import { pageVisible } from "./visibility.ts"
+
+/** Where a suggestion would go, as the review shows it. */
+export type SuggestionDestination = "open-draft" | "shelved-reply" | "new-reply" | "new-email"
+
+/** Reviews and inserts agent suggestions into the email being written. */
+export service Suggestions {
+  readonly changes: Stream.Stream<SuggestionsState>
+  get(): SuggestionsState!!
+  /** The destination the text would go to now. */
+  destination(): SuggestionDestination!!
+  /** Opens a review of `text` for the current destination while the Inbox is in front. */
+  open(text: string, inboxInFront: boolean): void!!
+  /** Closes the review. */
+  close(id: number): void!!
+  /** Confirms the review on screen; the text is added once, only to the destination it was reviewed for. */
+  confirm(id: number, text: string, inboxInFront: boolean): boolean!!
+}
+
+/** The suggestion shell over its machine and the composer. */
+export const layer = Layer.effect(Suggestions, effect {
+  const machine = try SuggestionsMachine
+  const reader = try ReaderMachine
+  const composer = try Composer
+
+  effect function send(event: SuggestionsEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  effect function destination(): SuggestionDestination {
+    const a = try composer.mine()
+    const r = try reader.get()
+    if (hasDraft(a.open)) return "open-draft"
+    if (r.phase === "BodyShown" && a.shelf.some((d) => d.fields.replyMessage === r.body.id && !d.earlier)) return "shelved-reply"
+    return r.phase === "BodyShown" ? "new-reply" : "new-email"
+  }
+
+  effect function target(text: string): SuggestionTarget {
+    const a = try composer.mine()
+    const where = try destination()
+    const r = try reader.get()
+    const existing = where === "open-draft" ? a.open.fields.body : where === "shelved-reply" ? (a.shelf.find((d) => d.fields.replyMessage === r.body.id)?.fields.body ?? "") : ""
+    const token = JSON.stringify([try composer.token(), where, a.open.id, a.open.revision, r.body.id])
+    return { token, ready: (try composer.token()) !== "", room: existing.trimEnd().length + 2 + text.length <= bodyLimit, append: existing.trim() !== "" }
+  }
+
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    destination,
+    effect open(text: string, inboxInFront: boolean) {
+      try send({ type: "openReview", text, target: try target(text), presenting: inboxInFront && pageVisible() })
+    },
+    close: (id: number) => effect { try send({ type: "closeReview", id }) },
+    effect confirm(id: number, text: string, inboxInFront: boolean) {
+      const before = try machine.get()
+      const where = try destination()
+      const done = try send({ type: "confirmReview", id, target: try target(text), sameText: before.review.text === text, presenting: inboxInFront && pageVisible() })
+      if (done === undefined || done.inserted === before.inserted) return false
+      if (where === "new-email") return (try composer.compose({ toList: [], subject: "", body: text, files: [] })) === undefined
+      if (where === "new-reply") {
+        const refusal = try composer.reply("ReplyMode")
+        if (refusal !== undefined && refusal !== "") return false
+      }
+      if (where === "shelved-reply") {
+        const r = try reader.get()
+        const row = (try composer.mine()).shelf.find((d) => d.fields.replyMessage === r.body.id && !d.earlier)
+        if (row === undefined || (try composer.openShelved(row.id, false)) !== undefined) return false
+      }
+      const open = (try composer.mine()).open
+      const body = open.fields.body.trim() === "" ? text : `${open.fields.body.trimEnd()}\n\n${text}`
+      try composer.edit({ ...open.fields, body }, open.pendingTo)
+      return (try composer.flush()) === undefined
+    }
+  }
+})

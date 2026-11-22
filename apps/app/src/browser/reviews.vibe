@@ -1,0 +1,56 @@
+// spec/browser/reviews.md, "Story: Confirm only what I can see"; spec/browser/reviews.md, "A request while the same review is open, or while Alpha is hidden or the phone is locked, is refused at once and opens nothing"; spec/browser/reviews.md, "Hiding Alpha or locking the phone ends every open review as not confirmed"
+import { type ReviewEffect, type ReviewKind, type Reviews, Machine, machine } from "../../gen/browser__reviews.effect.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+
+/** Browser's confirmations: one open dialog per identity, answered once, approved only on the shown, unlocked phone. */
+export service BrowserReviews {
+  readonly changes: Stream.Stream<Reviews>
+  /** Opens the review `id` and waits for its answer: true only for an approval while shown and unlocked. */
+  confirm(id: string, kind: ReviewKind, detail: string): boolean!!
+  /** The owner's tap on Confirm. */
+  approve(id: string): void!!
+  /** Cancel, Back or Escape. */
+  dismiss(id: string): void!!
+  /** Follows Alpha's visibility and the lock; never returns. */
+  follow(): void!!
+}
+
+/** BrowserReviews over its review machine in memory. */
+export const reviewsLayer = Layer.provideMerge(Layer.effect(BrowserReviews, effect {
+  const reviews = try Machine
+  const foreground = try Foreground
+  const waiting = try Ref.make(new Map<string, Deferred.Deferred<boolean>>())
+
+  effect function settle(out: readonly ReviewEffect[]) {
+    for (const answer of out) {
+      const pending = (try Ref.get(waiting)).get(answer.id)
+      if (pending === undefined) continue
+      try Ref.update(waiting, (all) => { const next = new Map(all); next.delete(answer.id); return next })
+      try Deferred.succeed(pending, answer.answer === "Approved")
+    }
+  }
+
+  effect function send(event: Parameters<typeof reviews.send>[0]) {
+    const change = reviews.send(event) catch () => undefined
+    if (change !== undefined) try settle(change.out)
+  }
+
+  return {
+    changes: reviews.changes,
+    effect confirm(id: string, kind: ReviewKind, detail: string) {
+      if ((try Ref.get(waiting)).has(id)) return false
+      const answer = try Deferred.make<boolean>()
+      try Ref.update(waiting, (all) => new Map(all).set(id, answer))
+      try send({ type: "ask", id, kind, detail })
+      return try Deferred.await(answer)
+    },
+    approve: (id: string) => send({ type: "approve", id }),
+    dismiss: (id: string) => send({ type: "dismiss", id }),
+    effect follow() {
+      for try (const state of foreground.changes) {
+        try send({ type: "foregroundChanged", foreground: state.visible })
+        try send({ type: "lockChanged", locked: state.locked })
+      }
+    },
+  }
+}), machine())

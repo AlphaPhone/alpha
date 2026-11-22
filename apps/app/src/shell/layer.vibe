@@ -1,0 +1,45 @@
+// spec/shell/index.md, "Story: Open an app from Home and keep my place"
+import { stored as storedNavigation } from "../../gen/shell__navigation.effect.vibe"
+import { stored as storedFavorites } from "../../gen/shell__favorites.effect.vibe"
+import { machine as gesturesMachine } from "../../gen/shell__gestures.effect.vibe"
+import { machine as appInfoMachine } from "../../gen/shell__appInfo.effect.vibe"
+import { machine as shadeMachine } from "../../gen/shell__shade.effect.vibe"
+import { machine as inventoryMachine } from "../../gen/shell__inventory.effect.vibe"
+import { machine as toastsMachine } from "../../gen/shell__toasts.effect.vibe"
+import { machine as geometryMachine } from "../../gen/shell__geometry.effect.vibe"
+import { machine as focusMachine } from "../../gen/shell__focus.effect.vibe"
+import { machine as overviewMachine } from "../../gen/shell__overview.effect.vibe"
+import { machine as permissionsMachine } from "../../gen/shell__permissions.effect.vibe"
+import { machine as recoveryMachine } from "../../gen/shell__recovery.effect.vibe"
+import { machine as hapticsMachine } from "../../gen/shell__haptics.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { activityLive } from "./activity.vibe"
+import { focusLive } from "./focus.vibe"
+import { foregroundLive } from "./foreground.vibe"
+import { geometryLive } from "./geometry.vibe"
+import { hapticsLive } from "./haptics.vibe"
+import { launcherLive } from "./launcher.vibe"
+import { navigationLive } from "./navigation.vibe"
+import { noticesLive } from "./notices.vibe"
+import { overviewLive } from "./overview.vibe"
+import { permissionsLive } from "./permissions.vibe"
+import { recoveryLive } from "./recovery.vibe"
+import { shadeLive } from "./shade.vibe"
+
+/** Where the shell keeps its durable machines: the navigation and Home's favorites are the device's, not an account's. */
+export const NAVIGATION_KEY = ownerKey("device", "shell/navigation")
+export const FAVORITES_KEY = ownerKey("device", "shell/favorites")
+
+const machines = Layer.mergeAll(
+  storedNavigation(NAVIGATION_KEY), storedFavorites(FAVORITES_KEY),
+  gesturesMachine(), appInfoMachine(), shadeMachine(), inventoryMachine(), toastsMachine(), geometryMachine(),
+  focusMachine(), overviewMachine(), permissionsMachine(), recoveryMachine(), hapticsMachine(),
+)
+
+const foundation = Layer.provideMerge(Layer.mergeAll(navigationLive, noticesLive, hapticsLive), machines)
+
+/** Every shell service and Machine: Navigation, Notices, Haptics, Launcher, Shade, Focus, Overview, Permissions, Recovery, Activity and Foreground, over the platform services. */
+export const layer = Layer.provideMerge(
+  Layer.mergeAll(launcherLive, shadeLive, geometryLive, focusLive, foregroundLive, overviewLive, permissionsLive, recoveryLive, activityLive),
+  foundation,
+)

@@ -2,11 +2,11 @@
  * Version/hash compatibility record for one signed Alpha Phone Pixel 10a release (issue #400).
  *
  * Alpha's binding of the shared record generator
- * (vendor/eliza/packages/os/scripts/android/aosp-release-record.mjs). Run from the repository
+ * (scripts/os-ported/os/aosp-release-record.mjs). Run from the repository
  * root; --product defaults to android/aosp/pixel10a-product.json and --channel to its update
  * channel:
  *
- *   bun scripts/aosp-release-record.ts --signed-target-files ZIP --ota ZIP --out NEW_FILE
+ *   node scripts/aosp-release-record.ts --signed-target-files ZIP --ota ZIP --out NEW_FILE
  *     [--product FILE] [--channel FILE] [--apk-manifest FILE] [--keys-dir DIR] [--incremental-from ZIP]
  *
  * It only reads archives; imageBooted, signedUpdateApplied, releaseQualified and
@@ -14,10 +14,10 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { main as sharedMain } from "../vendor/eliza/packages/os/scripts/android/aosp-release-record.mjs";
+import { main as sharedMain } from "./os-ported/os/aosp-release-record.mjs";
 import { PIXEL10A_PRODUCT } from "./aosp-pixel10a.ts";
 
-export { RECORD_KIND, compatibilityRecord, parseProperties } from "../vendor/eliza/packages/os/scripts/android/aosp-release-record.mjs";
+export { RECORD_KIND, compatibilityRecord, parseProperties } from "./os-ported/os/aosp-release-record.mjs";
 
 // The shared JS CLI allows a product path in place of its null default.
 const main = sharedMain as unknown as (argv: string[], options: {product: string; root: string}) => ReturnType<typeof sharedMain>;

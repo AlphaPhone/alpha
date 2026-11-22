@@ -1,0 +1,376 @@
+// spec/shell/favorites.md, "Story: Keep Home the way I arranged it"; spec/shell/gestures.md, "Story: Arrange Home with my fingers"; spec/shell/appInfo.md, "Story: Check an app's details in Android"; spec/shell/inventory.md, "Story: See the apps installed now"; spec/shell/toasts.md, "Home reports a failed launch once, and a failed inventory only when it removed a favorite"
+import {
+  appKey, createLauncher, describeLauncherApps, filterLauncherApps,
+  type InstalledApp, type LauncherBridge, type LauncherError, type LauncherSnapshot, type LauncherAppsChange, type Launcher as InstalledLauncher,
+} from "@elizaos/os/bridges/system"
+import { Machine as FavoritesMachine, type Event as FavoritesEvent, type Legacy } from "../../gen/shell__favorites.effect.vibe"
+import { Machine as GesturesMachine, type Outcome, type Surface } from "../../gen/shell__gestures.effect.vibe"
+import { Machine as AppInfoMachine, type InfoReply } from "../../gen/shell__appInfo.effect.vibe"
+import { Machine as InventoryMachine } from "../../gen/shell__inventory.effect.vibe"
+import { appInert, talking } from "../../gen/shell__navigation.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { appOfKey, homeDefaults } from "./apps.vibe"
+import { Haptics } from "./haptics.vibe"
+import { LegacyFavorites } from "./native.schema.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+import { focusKey, pageEvents, pageHidden, storedValue } from "./page.ts"
+
+/** The key of the library's default Phone shortcut. */
+export const DIAL_KEY = "android:dial"
+
+/** The record an earlier Alpha kept Home's favorites in. */
+export const LEGACY_FAVORITES_KEY = "alpha.launcher.favorites.v1"
+
+/** What the Home and library components draw of the installed apps: the launcher's snapshot and each entry's secondary text. */
+export interface InventoryView {
+  readonly snapshot: LauncherSnapshot
+  readonly details: ReadonlyMap<string, string[]>
+}
+
+const idle: LauncherSnapshot = { status: "idle", apps: [], views: [], dial: null, launching: null, launchError: null }
+const listeners = new Set<() => void>()
+let current: InventoryView = { snapshot: idle, details: new Map() }
+
+/** The installed inventory as an external store the components subscribe to. */
+export const inventory = {
+  getSnapshot: (): InventoryView => current,
+  subscribe(listener: () => void): () => void {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  },
+}
+
+function publish(snapshot: LauncherSnapshot): void {
+  if (snapshot === current.snapshot) return
+  current = { snapshot, details: describeLauncherApps(snapshot.apps, { builtinPrefix: "alpha:", productName: "Alpha" }) }
+  for (const listener of listeners) listener()
+}
+
+/** Home's tiles now: the favorites that are admitted Alpha apps or installed entries, in the owner's order. */
+export function homeKeys(entries: readonly string[], admitted: readonly string[], apps: readonly InstalledApp[]): string[] {
+  const installed = new Set(apps.map(appKey))
+  return entries.filter((key) => {
+    const app = appOfKey(key)
+    return app !== undefined ? admitted.includes(app) : installed.has(key)
+  })
+}
+
+/** The library's entries for a search, in their shown order. */
+export function libraryKeys(apps: readonly InstalledApp[], query: string): string[] {
+  return filterLauncherApps(apps, query).map(appKey)
+}
+
+/** The Alpha apps the Add sheet offers: admitted Home defaults that are not on Home. */
+export function addableViews(entries: readonly string[], admitted: readonly string[]): string[] {
+  return homeDefaults(admitted).filter((key) => !entries.includes(key))
+}
+
+const LAUNCH_REASONS: Readonly<Record<string, string>> = {
+  "not-installed": "It’s no longer installed.",
+  disabled: "It’s turned off. Turn it on in Android Settings to open it.",
+  "no-launcher": "It has no screen Alpha can open.",
+  "profile-locked": "Its profile is paused or locked. Unlock it in Android, then try again.",
+  "profile-unavailable": "Its profile is no longer on this phone.",
+  failed: "Android didn’t open it. Try again.",
+}
+
+/** Alpha's sentence for a failed open; the launcher's own text is never shown. */
+export function launchErrorText(error: LauncherError | null): string {
+  if (error === null) return ""
+  if (error.kind === "no-longer-installed") return `${error.label} is no longer installed.`
+  if (error.kind === "dial-refused") return `${error.label} could not be opened. Try again.`
+  const reason = error.code !== undefined && Object.hasOwn(LAUNCH_REASONS, error.code) ? LAUNCH_REASONS[error.code] : "Try again."
+  return `${error.label} could not be opened. ${reason}`
+}
+
+const INFO_REASONS: Readonly<Record<InfoReply, string>> = {
+  InfoOpened: "",
+  InfoInvalid: "Choose an app that’s installed.",
+  InfoProfileGone: "Its profile is no longer on this phone.",
+  InfoNotInstalled: "It’s no longer installed.",
+  InfoFailed: "App info could not be opened.",
+}
+
+/** Alpha's sentence for App info Android refused for an entry. */
+export function appInfoText(label: string, reply: InfoReply): string {
+  return reply === "InfoOpened" ? "" : `${label}: ${INFO_REASONS[reply]}`
+}
+
+function infoReplyOf(error: unknown): InfoReply {
+  const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined
+  return code === "invalid" ? "InfoInvalid" : code === "profile-unavailable" ? "InfoProfileGone" : code === "not-installed" ? "InfoNotInstalled" : "InfoFailed"
+}
+
+function legacyOf(record: { version: 1 | 2; defaultPolicy?: string; previousDefaults?: readonly string[] } | undefined): Legacy {
+  if (record === undefined) return "NoLegacy"
+  if (record.version === 1) return "LegacyV1"
+  return record.defaultPolicy === undefined && record.previousDefaults === undefined ? "LegacyBareDefaults" : "LegacyChoice"
+}
+
+/** The shared launcher bridge over the ElizaSystem plugin, reached through Native. */
+function bridgeOver(native: Native.Shape): LauncherBridge {
+  const call = (method: string, args?: unknown) => runPromise(native.invoke("ElizaSystem", method, args))
+  return {
+    list: (options) => call("listLauncherApps", options) as Promise<{ apps: InstalledApp[] }>,
+    launch: (target) => call("launchApp", target).then(() => undefined),
+    resolveDefault: (options) => call("resolveDefaultApp", options) as ReturnType<NonNullable<LauncherBridge["resolveDefault"]>>,
+    openDefault: (options) => call("openDefaultApp", options).then(() => undefined),
+    addListener: (_event, listener) => {
+      const fiber = runFork(Stream.runForEach(native.listen("ElizaSystem", "launcherAppsChanged"), (change) => sync(() => listener(change as LauncherAppsChange))))
+      return Promise.resolve({ remove: () => runPromise(Fiber.interrupt(fiber)).then(() => undefined) })
+    },
+  }
+}
+
+/** Home's launcher for the Home and library components: tiles, the library, Home's edit mode and their gestures. */
+export service Launcher {
+  /** Home is shown: follow the inventory, and read it when an installed favorite needs it. */
+  showHome(): void!!
+  openLibrary(): void!!
+  closeLibrary(): void!!
+  search(query: string): void!!
+  /** Opens a Home tile or library entry: an Alpha app in the shell, an installed app through Android. */
+  activate(key: string): void!!
+  openDial(): void!!
+  addToHome(key: string): void!!
+  /** Android's App info for exactly this library entry. */
+  appInfo(key: string): void!!
+  dismissAppInfo(): void!!
+  startEditing(): void!!
+  finishEditing(): void!!
+  openAdd(): void!!
+  closeAdd(): void!!
+  /** Puts an Alpha app back on Home from the Add sheet. */
+  addView(key: string): void!!
+  down(pointer: number, key: string, onRemove: boolean): void!!
+  move(pointer: number, far: boolean): void!!
+  up(pointer: number, over: string): void!!
+  cancel(pointer: number): void!!
+  context(key: string): void!!
+  tap(key: string, onRemove: boolean, keyboard: boolean): void!!
+  arrow(key: string, direction: number): void!!
+  erase(key: string): void!!
+}
+
+/** The launcher service: the shared installed-app launcher, Home's favorites, its gestures and App info. */
+export const launcherLive = Layer.effect(Launcher, effect {
+  const native = try Native
+  const build = try Build
+  const navigation = try Navigation
+  const notices = try Notices
+  const haptics = try Haptics
+  const favorites = try FavoritesMachine
+  const gestures = try GesturesMachine
+  const info = try AppInfoMachine
+  const observer = try InventoryMachine
+  const scope = try Scope.Scope
+  const android = build.info.variant !== "browser" && (try native.available("ElizaSystem"))
+  const installed: InstalledLauncher | undefined = android ? createLauncher(bridgeOver(native), { icons: true }) : undefined
+  let reads = 0
+  let readApps: readonly InstalledApp[] = current.snapshot.apps
+
+  effect function saveFavorites(event: FavoritesEvent) {
+    const result = try exit(favorites.send(event) catch () => undefined)
+    if (Exit.isFailure(result)) try notices.show("Favorites could not be saved. Nothing changed.", { failure: true })
+  }
+
+  effect function reportHome(snapshot: LauncherSnapshot) {
+    const nav = try navigation.get()
+    const kept = try favorites.get()
+    if (snapshot.apps !== readApps) {
+      reads = reads + 1
+      readApps = snapshot.apps
+    }
+    const surface = nav.app !== "" ? "NoticeApp" : nav.library ? "NoticeLibrary" : nav.editing ? "NoticeEditing" : "NoticeHome"
+    const status = snapshot.status === "idle" ? "ReadIdle" : snapshot.status === "loading" ? "ReadLoading" : snapshot.status === "ready" ? "ReadReady" : "ReadFailed"
+    const error = launchErrorText(snapshot.launchError)
+    const present = new Set(snapshot.apps.map(appKey))
+    const missingFavorite = kept.entries.some((key) => appOfKey(key) === undefined && !present.has(key))
+    try notices.send({ type: "reportLauncher", surface, status, error, errorChars: error.length, reads, missingFavorite })
+    if (snapshot.status === "ready" && reads > 0) try saveFavorites({ type: "inventoryLoaded", apps: snapshot.apps.map(appKey) })
+  }
+
+  effect function settle(read: () => Promise<LauncherSnapshot>) {
+    if (installed === undefined) return
+    const snapshot = tryPromise(read) catch () => installed.snapshot()
+    try sync(() => publish(snapshot))
+    try reportHome(snapshot)
+    try syncGestures()
+  }
+
+  effect function syncGestures() {
+    const nav = try navigation.get()
+    const kept = try favorites.get()
+    const apps = current.snapshot.apps
+    const surface: Surface = nav.app !== "" ? "Elsewhere" : nav.library ? "OnLibrary" : "OnHome"
+    const covered = appInert(nav) || nav.shade || nav.voice || talking(nav)
+    const shown = surface === "OnLibrary" ? libraryKeys(apps, nav.query) : homeKeys(kept.entries, nav.admitted, apps)
+    if (nav.library) try navigation.send({ type: "showEntries", entries: libraryKeys(apps, nav.query) })
+    gestures.send({ type: "showing", surface, editing: nav.editing, covered, visible: shown }) catch () => undefined
+  }
+
+  effect function visibleKeys() {
+    const nav = try navigation.get()
+    return homeKeys((try favorites.get()).entries, nav.admitted, current.snapshot.apps)
+  }
+
+  effect function activate(key: string) {
+    const app = appOfKey(key)
+    if (app !== undefined) {
+      try navigation.open(app)
+      return
+    }
+    if (key === DIAL_KEY) return try openDial()
+    const entry = current.snapshot.apps.find((each) => appKey(each) === key)
+    if (entry === undefined || installed === undefined) return
+    try settle(() => installed.launch(entry))
+  }
+
+  effect function openDial() {
+    if (installed === undefined) return
+    try settle(() => installed.openDial())
+  }
+
+  effect function handle(out: readonly Outcome[]) {
+    for (const outcome of out) {
+      if (outcome.act === "StartEditing") {
+        try haptics.longPress()
+        try navigation.send({ type: "startEdit" })
+      } else if (outcome.act === "OpenEntryMenu") {
+        try haptics.longPress()
+        try navigation.send({ type: "openMenu", entry: outcome.key })
+      } else if (outcome.act === "Activate") {
+        try activate(outcome.key)
+      } else if (outcome.act === "RemoveTile") {
+        try saveFavorites({ type: "remove", key: outcome.key })
+      } else if (outcome.act === "PlaceTile") {
+        try saveFavorites({ type: "place", key: outcome.key, over: outcome.over, visible: try visibleKeys() })
+      } else {
+        try saveFavorites({ type: "move", key: outcome.key, direction: outcome.act === "MoveEarlier" ? -1 : 1, visible: try visibleKeys() })
+        try sync(() => focusKey(`tile:${outcome.key}`))
+      }
+    }
+    try syncGestures()
+  }
+
+  effect function gesture(event: Parameters<GesturesMachine.Shape["send"]>[0]) {
+    const step = gestures.send(event) catch () => undefined
+    if (step !== undefined) try handle(step.out)
+    return step
+  }
+
+  effect function holdLater(pointer: number, key: string) {
+    try sleep(Duration.millis(450))
+    try gesture({ type: "hold", pointer, key })
+  }
+
+  effect function refreshLater() {
+    try sleep(Duration.millis(120))
+    const after = observer.send({ type: "timer" }) catch () => undefined
+    if (after === undefined || installed === undefined) return
+    try settle(() => installed.refresh(after.last === "FullRefresh" ? "packages-changed" : "resumed"))
+  }
+
+  effect function followSignals() {
+    for try (const _ of pageEvents("visibilitychange", "document")) {
+      const sent = observer.send({ type: "notice", signal: pageHidden() ? "Hidden" : "Visible" }) catch () => undefined
+      if (sent !== undefined && sent.scheduled) fork.in(scope) refreshLater()
+    }
+  }
+
+  effect function followNavigation() {
+    for try (const _ of navigation.changes) try syncGestures()
+  }
+
+  const raw = storedValue(LEGACY_FAVORITES_KEY)
+  const record = raw === null ? undefined : (effect { return try Schema.decodeUnknownEffect(LegacyFavorites)(try Effect.try(() => JSON.parse(raw))) } catch () => undefined)
+  try saveFavorites({ type: "importLegacy", record: legacyOf(record), keys: record === undefined ? [] : [...record.keys] })
+  try saveFavorites({ type: "syncViews", views: homeDefaults((try navigation.get()).admitted) })
+  if (installed !== undefined) {
+    observer.send({ type: "start" }) catch () => undefined
+    observer.send({ type: "listen", listening: true }) catch () => undefined
+    try settle(() => installed.show())
+    const kept = try favorites.get()
+    if (kept.entries.some((key) => appOfKey(key) === undefined)) try settle(() => installed.load())
+    fork.scoped followSignals()
+  }
+  fork.scoped followNavigation()
+
+  return {
+    effect showHome() {
+      if (installed === undefined) return
+      try settle(() => installed.show())
+    },
+    effect openLibrary() {
+      if (!(try navigation.send({ type: "openLibrary" }))) return
+      if (installed !== undefined) try settle(() => installed.load())
+      try syncGestures()
+    },
+    effect closeLibrary() {
+      try navigation.send({ type: "closeLibrary" })
+      if (installed !== undefined) try settle(() => installed.clearError())
+      try syncGestures()
+    },
+    effect search(query: string) {
+      try navigation.send({ type: "searchLibrary", query })
+      if (installed !== undefined) try settle(() => installed.clearError())
+      try syncGestures()
+    },
+    activate,
+    openDial,
+    effect addToHome(key: string) {
+      const kept = try favorites.get()
+      if (kept.entries.includes(key)) return
+      try saveFavorites({ type: "toggle", key, available: libraryKeys(current.snapshot.apps, "") })
+      if ((try favorites.get()).entries.includes(key)) try navigation.send({ type: "closeLibrary" })
+    },
+    effect appInfo(key: string) {
+      const entry = current.snapshot.apps.find((each) => appKey(each) === key)
+      if (entry === undefined) return
+      const asked = info.send({ type: "request", key }) catch () => undefined
+      if (asked === undefined) return
+      try navigation.send({ type: "closeMenu" })
+      try sync(() => focusKey(`tile:${key}`))
+      const target = { packageName: entry.packageName, ...(entry.activityName ? { activityName: entry.activityName } : {}), ...(entry.user ? { user: entry.user } : {}) }
+      const reply: InfoReply = effect {
+        try native.invoke("ElizaSystem", "openAppInfo", target)
+        return "InfoOpened" as InfoReply
+      } catch (error) => infoReplyOf(error)
+      info.send({ type: "answer", ticket: asked.ticket, reply }) catch () => undefined
+      if (reply === "InfoOpened") return
+      if (!(try navigation.get()).library) try notices.show(appInfoText(entry.label || entry.packageName, reply), { failure: true })
+      if (installed !== undefined) try settle(() => installed.refresh("packages-changed"))
+    },
+    effect dismissAppInfo() { info.send({ type: "dismissNotice" }) catch () => undefined },
+    effect startEditing() {
+      try navigation.send({ type: "startEdit" })
+      try syncGestures()
+    },
+    effect finishEditing() {
+      try navigation.send({ type: "finishEdit" })
+      if (installed !== undefined) try settle(() => installed.clearError())
+      try syncGestures()
+    },
+    effect openAdd() { try navigation.send({ type: "openAdd" }) },
+    effect closeAdd() { try navigation.send({ type: "closeAdd" }) },
+    effect addView(key: string) {
+      const nav = try navigation.get()
+      try saveFavorites({ type: "toggle", key, available: homeDefaults(nav.admitted) })
+      if (addableViews((try favorites.get()).entries, nav.admitted).length === 0) try navigation.send({ type: "closeAdd" })
+      try syncGestures()
+    },
+    effect down(pointer: number, key: string, onRemove: boolean) {
+      const step = try gesture({ type: "down", pointer, key, onRemove })
+      if (step !== undefined && step.state.press.pointer === pointer && step.state.press.key === key) fork.in(scope) holdLater(pointer, key)
+    },
+    effect move(pointer: number, far: boolean) { try gesture({ type: "movePointer", pointer, far }) },
+    effect up(pointer: number, over: string) { try gesture({ type: "up", pointer, over }) },
+    effect cancel(pointer: number) { try gesture({ type: "cancel", pointer }) },
+    effect context(key: string) { try gesture({ type: "context", key }) },
+    effect tap(key: string, onRemove: boolean, keyboard: boolean) { try gesture({ type: "tap", key, onRemove, keyboard }) },
+    effect arrow(key: string, direction: number) { try gesture({ type: "arrow", key, direction }) },
+    effect erase(key: string) { try gesture({ type: "erase", key }) },
+  }
+})

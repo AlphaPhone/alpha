@@ -1,0 +1,192 @@
+// spec/inbox/mailbox.md, "Story: Read my mailbox page by page"; spec/inbox/mailbox.md, "Story: See my saved mail at once"; spec/inbox/mailbox.md, "Story: Keep my Gmail drafts beside my local drafts"; spec/inbox/mailbox.md, "Story: Read ahead without spending my data"
+import { type Event as MailboxEvent, type Folder, type MailPage, type Mailbox as MailboxState, Machine as MailboxMachine, folderQuery, draftsView, readAheadAllowed, listIsStale } from "../../gen/inbox__mailbox.effect.vibe"
+import { Machine as DraftsMachine } from "../../gen/inbox__drafts.effect.vibe"
+import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
+import { InboxAccounts, savedScope } from "./accounts.vibe"
+import { Gmail, GmailFailed, SignInExpired } from "./gmail.vibe"
+import { SavedMail } from "./saved.vibe"
+import { Reader } from "./reader.vibe"
+import { mailReadAhead } from "@elizaos/plugin-inbox/mailbox"
+import { pageVisible } from "./visibility.ts"
+
+/** The list of the selected account's folder or search. */
+export service Mailbox {
+  readonly changes: Stream.Stream<MailboxState>
+  get(): MailboxState!!
+  /** Shows a folder, from its saved list when one is fresh, then reads it unless it was read under a minute ago. */
+  setFolder(folder: Folder): void!!
+  /** Searches the selected account; an empty query returns to the folder. */
+  search(query: string): void!!
+  /** Reads the first page again. */
+  load(): void!!
+  /** Reads the next page with the cursor the last one gave. */
+  loadMore(): void!!
+  /** Reads again from the first page, dropping read-ahead. */
+  refresh(): void!!
+  /** Stops the read in flight, keeping the list. */
+  cancel(): void!!
+  /** A change Gmail confirmed for one row. */
+  rowChanged(id: string, unread: boolean, starred: boolean): void!!
+  /** A row Gmail confirmed moved out of this folder. */
+  rowRemoved(id: string): void!!
+}
+
+/** The mailbox shell over the list machine, Gmail, the saved mail and the selected account. */
+export const layer = Layer.effect(Mailbox, effect {
+  const machine = try MailboxMachine
+  const drafts = try DraftsMachine
+  const journal = try JournalMachine
+  const accounts = try InboxAccounts
+  const gmail = try Gmail
+  const saved = try SavedMail
+  const reader = try Reader
+  const ahead = try mailReadAhead<MailPage, GmailFailed | SignInExpired>()
+  const readAtRef = try Ref.make(0)
+  const scope = try Effect.scope
+
+  effect function send(event: MailboxEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  const keyOf = (s: MailboxState) => JSON.stringify([s.account, s.epoch, s.query === "" ? folderQuery(s.folder) : s.query])
+  const queryOf = (s: MailboxState) => s.query === "" ? folderQuery(s.folder) : s.query
+
+  effect function composing() {
+    const d = try drafts.get()
+    return d.accounts.some((a) => a.owner === d.owner && a.composing)
+  }
+
+  effect function failed(generation: number, error: GmailFailed | SignInExpired, account: string) {
+    if (error._tag === "SignInExpired") {
+      try send({ type: "pageFailed", generation, failure: "Unavailable" })
+      try accounts.refresh()
+      return
+    }
+    try send({ type: "pageFailed", generation, failure: error.kind })
+    if (error.kind === "Revoked") try accounts.revoked(account)
+  }
+
+  effect function prepareNext() {
+    const s = try machine.get()
+    const fromDisk = (try accounts.get()).fromDisk
+    if (s.cursor === "" || s.cached || draftsView(s)) return
+    if (!readAheadAllowed(fromDisk, pageVisible(), try composing(), draftsView(s), 0)) return
+    try ahead.prepare(keyOf(s), s.cursor, gmail.search(s.account, queryOf(s), s.cursor))
+  }
+
+  effect function takePrepared(s: MailboxState, cursor: string) {
+    return ahead.take(keyOf(s), cursor) catch () => undefined
+  }
+
+  effect function afterRead(s: MailboxState) {
+    const current = try accounts.owner()
+    const now = try Clock.currentTimeMillis
+    try Ref.set(readAtRef, now)
+    const a = try accounts.get()
+    const account = a.rows.find((r) => r.id === s.account)
+    if (current !== undefined && account !== undefined && !draftsView(s)) {
+      try saved.rememberList(savedScope(current), account, queryOf(s), s.rows, s.cursor, s.seen, s.firstRevision, now)
+      try saved.persist(savedScope(current), a.rows, a.selected, false)
+    }
+    if (s.rows.length > 0) try accounts.acceptedRead(s.account)
+    fork.in(scope) prepareNext()
+    if (!(try accounts.get()).fromDisk && pageVisible() && !(try composing())) fork.in(scope) reader.prefetch(s.rows.slice(0, 2))
+  }
+
+  effect function readFirst() {
+    const before = try machine.get()
+    if (before.account === "") return
+    if (draftsView(before) && !(try journal.get()).capabilities.draftsList) {
+      try send({ type: "listLocalDraftsOnly" })
+      return
+    }
+    const started = try send({ type: "beginFirst" })
+    if (started === undefined) return
+    const s = try machine.get()
+    const account = s.account
+    if (draftsView(s)) {
+      const page = gmail.drafts(account, "") catch effect (error) => { try failed(s.generation, error, account); return undefined }
+      if (page !== undefined) try send({ type: "receiveDrafts", generation: s.generation, draftsPage: page })
+      return
+    }
+    const ready = try takePrepared(s, "")
+    const page = ready ?? (gmail.search(account, queryOf(s), "") catch effect (error) => { try failed(s.generation, error, account); return undefined })
+    if (page === undefined) return
+    const after = try send({ type: "receivePage", generation: s.generation, page })
+    if (after !== undefined) try afterRead(after)
+  }
+
+  effect function readMore() {
+    const started = try send({ type: "beginMore" })
+    if (started === undefined) return
+    const s = try machine.get()
+    const account = s.account
+    if (draftsView(s)) {
+      const page = gmail.drafts(account, s.asked) catch effect (error) => { try failed(s.generation, error, account); return undefined }
+      if (page !== undefined) try send({ type: "receiveDrafts", generation: s.generation, draftsPage: page })
+      return
+    }
+    const ready = try takePrepared(s, s.asked)
+    const page = ready ?? (gmail.search(account, queryOf(s), s.asked) catch effect (error) => { try failed(s.generation, error, account); return undefined })
+    if (page === undefined) return
+    const after = try send({ type: "receivePage", generation: s.generation, page })
+    if (after !== undefined) try afterRead(after)
+  }
+
+  effect function showSelection(folder: Folder, query: string) {
+    const a = try accounts.get()
+    if (a.selected === "") {
+      try send({ type: "detach" })
+      return
+    }
+    try send({ type: "show", account: a.selected, epoch: a.readEpoch, folder, query })
+    const s = try machine.get()
+    const current = try accounts.owner()
+    const account = a.rows.find((r) => r.id === a.selected)
+    if (current !== undefined && account !== undefined && a.revoked.every((id) => id !== a.selected)) {
+      const now = try Clock.currentTimeMillis
+      const list = try saved.list(savedScope(current), account, queryOf(s), now)
+      if (list !== undefined) try send({ type: "restoreCached", saved: list })
+    }
+    const restored = try machine.get()
+    if (a.fromDisk) return
+    if (restored.cached && !listIsStale(try Ref.get(readAtRef), try Clock.currentTimeMillis)) return
+    try readFirst()
+  }
+
+  fork.scoped (effect {
+    let seen = ""
+    for try (const a of accounts.changes) {
+      const key = JSON.stringify([a.selected, a.readEpoch, a.fromDisk, a.phase === "Checked"])
+      if (key === seen) continue
+      seen = key
+      try ahead.invalidate()
+      const s = try machine.get()
+      try showSelection(s.account === a.selected ? s.folder : "InboxFolder", s.account === a.selected ? s.query : "")
+    }
+  })
+
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    effect setFolder(folder: Folder) {
+      const s = try machine.get()
+      if (s.folder === folder && s.query === "" && (s.rows.length > 0 || s.drafts.length > 0)) return
+      try showSelection(folder, "")
+    },
+    effect search(query: string) {
+      const s = try machine.get()
+      try showSelection(s.folder, query.trim())
+    },
+    load: readFirst,
+    loadMore: readMore,
+    effect refresh() {
+      try ahead.invalidate()
+      try send({ type: "cancel" })
+      try readFirst()
+    },
+    cancel: () => effect { try send({ type: "cancel" }) },
+    rowChanged: (id: string, unread: boolean, starred: boolean) => effect { try send({ type: "markRow", id, unread, starred }); try ahead.invalidate() },
+    rowRemoved: (id: string) => effect { try send({ type: "dropRow", id }); try ahead.invalidate() }
+  }
+})

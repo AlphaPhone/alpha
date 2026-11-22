@@ -1,0 +1,281 @@
+// spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/device.md, "A read covers the month before through the month after next, and its first instant is never negative"; spec/calendar/preservation.md, "Story: Restore my calendar from a backup without replaying anything"
+import { type CalendarEvent, type CalendarSummary, sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import { calendarInstant, calendarWall, civilDay, deviceZone, isoInstant, isoWall, midnightAfter } from "./time.ts"
+
+export const DAY = 86_400_000
+
+/** How an event of the app's own calendar repeats. */
+export type CalendarRepeat = "none" | "daily" | "weekdays" | "weekly"
+
+/** A guest's answer, as the app's own calendar records it. */
+export type GuestResponse = "added" | "invited" | "yes" | "maybe" | "no"
+
+/** One event of the app's own document calendar: the saved app calendar and the development browser calendar. */
+export interface CalendarRecord {
+  readonly id: string
+  readonly calendarId: string
+  readonly title: string
+  readonly body: string
+  readonly location: string
+  readonly begin: number
+  readonly end: number
+  readonly revision: string
+  readonly allDay?: boolean
+  readonly timeZone?: string
+  readonly repeat?: CalendarRepeat
+  readonly who?: readonly string[]
+  readonly responses?: Readonly<Record<string, GuestResponse>>
+  readonly video?: boolean
+  readonly alert?: number | null
+  readonly seriesId?: string
+  readonly occurrenceBegin?: number
+  readonly excluded?: readonly number[]
+}
+
+/** A half-open range of instants. */
+export interface InstantRange { readonly begin: number; readonly end: number }
+
+/** What a range expansion returned: its events, whether it stopped at the limit, and whether a row was unreadable. */
+export interface Expansion { readonly events: readonly CalendarRecord[]; readonly truncated: boolean; readonly invalid: boolean }
+
+/** The RRULE line of a repeat the app writes. */
+export function rruleFor(repeat: CalendarRepeat): readonly string[] {
+  return repeat === "daily" ? ["RRULE:FREQ=DAILY"]
+    : repeat === "weekdays" ? ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]
+    : repeat === "weekly" ? ["RRULE:FREQ=WEEKLY"] : []
+}
+
+/** The repeat an RRULE line names, when it is one the app writes. */
+export function repeatOf(rules: readonly string[] | null | undefined): CalendarRepeat | undefined {
+  const rrules = (rules ?? []).filter((rule) => rule.toUpperCase().startsWith("RRULE:"))
+  if (rrules.length === 0) return "none"
+  if (rrules.length > 1) return undefined
+  const parts = rrules[0]!.slice(6).toUpperCase().split(";").sort().join(";")
+  if (parts === "FREQ=DAILY") return "daily"
+  if (parts === "FREQ=WEEKLY") return "weekly"
+  const byDay = /^BYDAY=([A-Z,]+);FREQ=WEEKLY$/.exec(parts)
+  return byDay && byDay[1]!.split(",").sort().join(",") === "FR,MO,TH,TU,WE" ? "weekdays" : undefined
+}
+
+const UNITS: Readonly<Record<string, readonly [string, string]>> = { DAILY: ["daily", "days"], WEEKLY: ["weekly", "weeks"], MONTHLY: ["monthly", "months"], YEARLY: ["yearly", "years"] }
+const WEEKDAYS: Readonly<Record<string, string>> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" }
+
+/** One plain line for a repeating event; a rule these words cannot say still says that it repeats. */
+export function repeatText(rules: readonly string[] | null | undefined, recurringEventId?: string | null): string {
+  const rrules = (rules ?? []).filter((rule) => rule.startsWith("RRULE:"))
+  if (rrules.length === 0) return recurringEventId || (rules ?? []).length > 0 ? "Repeats" : ""
+  if (rrules.length > 1) return "Repeats"
+  const parts = Object.fromEntries(rrules[0]!.slice(6).split(";").map((part) => part.split("=") as [string, string]))
+  const unit = UNITS[parts.FREQ ?? ""]
+  const interval = parts.INTERVAL === undefined ? 1 : Number(parts.INTERVAL)
+  if (!unit || !Number.isInteger(interval) || interval < 1) return "Repeats"
+  const days = parts.BYDAY?.split(",") ?? []
+  if (parts.FREQ === "WEEKLY" && days.length > 0 && days.every((day) => WEEKDAYS[day] !== undefined)) {
+    if (interval === 1 && days.join(",") === "MO,TU,WE,TH,FR") return "Repeats every weekday"
+    return `${interval === 1 ? "Repeats weekly" : `Repeats every ${interval} weeks`} on ${days.map((day) => WEEKDAYS[day]).join(", ")}`
+  }
+  return interval === 1 ? `Repeats ${unit[0]}` : `Repeats every ${interval} ${unit[1]}`
+}
+
+/** Range expansion of one stored row; a stored series is never changed by a query. */
+export function expandSeries(row: CalendarRecord, range: InstantRange, maximum = 2000): Expansion {
+  if (!Number.isFinite(range.begin) || !Number.isFinite(range.end) || range.end <= range.begin) return { events: [], truncated: false, invalid: true }
+  if (!Number.isFinite(row.begin) || !Number.isFinite(row.end) || row.end <= row.begin) return { events: [], truncated: false, invalid: true }
+  const repeat = row.repeat ?? "none"
+  if (repeat === "none") return { events: row.begin < range.end && row.end > range.begin ? [row] : [], truncated: false, invalid: false }
+  const zone = row.allDay ? "UTC" : row.timeZone ?? "UTC"
+  const firstWall = Date.parse(`${calendarWall(row.begin, zone) ?? isoWall(row.begin)}Z`)
+  const duration = row.end - row.begin
+  const stride = repeat === "weekly" ? 7 : 1
+  const first = Math.max(0, Math.floor((range.begin - duration - row.begin) / DAY / stride) - 3)
+  const last = Math.max(first, Math.ceil((range.end - row.begin) / DAY / stride) + 3)
+  if (last - first > 40_000) return { events: [], truncated: true, invalid: false }
+  const events: CalendarRecord[] = []
+  const begins = new Set<number>()
+  for (let index = first; index <= last; index += 1) {
+    const wall = firstWall + index * stride * DAY
+    const date = new Date(wall)
+    if (repeat === "weekdays" && (date.getUTCDay() === 0 || date.getUTCDay() === 6)) continue
+    const begin = index === 0 ? row.begin : calendarInstant(isoWall(wall), zone, Number.NaN, "forward")
+    if (begin === undefined) continue
+    const end = begin + duration
+    if (begin < range.begin - duration || begin >= range.end || end <= range.begin || begins.has(begin)) continue
+    if (events.length === maximum) return { events, truncated: true, invalid: false }
+    begins.add(begin)
+    events.push({ ...row, id: `${row.id}:occ:${begin}`, begin, end, seriesId: row.id, occurrenceBegin: begin })
+  }
+  return { events, truncated: false, invalid: false }
+}
+
+/** Every event of the document over a range: stored overrides win over computed occurrences, and excluded dates are skipped. */
+export function calendarRange(rows: readonly CalendarRecord[], range: InstantRange): Expansion {
+  const overrides = new Set(rows.filter((row) => row.seriesId !== undefined).map((row) => row.id))
+  const result: CalendarRecord[] = []
+  let truncated = false
+  let invalid = false
+  for (const row of rows) {
+    if (row.seriesId !== undefined) {
+      if (row.begin < range.end && row.end > range.begin) result.push(row)
+      continue
+    }
+    const expanded = expandSeries(row, range, 2000)
+    truncated ||= expanded.truncated
+    invalid ||= expanded.invalid
+    result.push(...expanded.events.filter((event) => !overrides.has(event.id) && !(row.excluded ?? []).includes(event.occurrenceBegin ?? Number.NaN)))
+  }
+  result.sort((a, b) => a.begin - b.begin || a.id.localeCompare(b.id))
+  return { events: result.slice(0, 2000), truncated: truncated || result.length > 2000, invalid }
+}
+
+/** The stored row, or the computed occurrence, with this id. */
+export function calendarRecord(rows: readonly CalendarRecord[], id: string): CalendarRecord | undefined {
+  const direct = rows.find((row) => row.id === id)
+  if (direct) return direct
+  const match = /^(.*):occ:(-?\d+)$/.exec(id)
+  if (!match) return undefined
+  const series = rows.find((row) => row.id === match[1] && row.seriesId === undefined)
+  const begin = Number(match[2])
+  if (!series || (series.excluded ?? []).includes(begin)) return undefined
+  return expandSeries(series, { begin: begin + series.end - series.begin - 1, end: begin + series.end - series.begin }, 1).events.find((row) => row.id === id)
+}
+
+/** The document after an occurrence or event is saved: an occurrence becomes a standalone override under its series. */
+export function replaceRecord(rows: readonly CalendarRecord[], record: CalendarRecord): readonly CalendarRecord[] | undefined {
+  const series = record.seriesId === undefined ? undefined : rows.find((row) => row.id === record.seriesId)
+  if (record.seriesId !== undefined && !series) return undefined
+  const replacement: CalendarRecord = record.seriesId !== undefined ? { ...record, repeat: "none", excluded: undefined } : record
+  const next = rows.map((row) => (series && row.id === series.id ? { ...row, revision: record.revision } : row))
+  return next.some((row) => row.id === record.id) ? next.map((row) => (row.id === record.id ? replacement : row)) : [...next, replacement]
+}
+
+/** The document after one occurrence or event is deleted: an occurrence becomes an exclusion of its series. */
+export function deleteRecord(rows: readonly CalendarRecord[], record: CalendarRecord, revision: string): readonly CalendarRecord[] | undefined {
+  if (record.seriesId !== undefined && !rows.some((row) => row.id === record.seriesId)) return undefined
+  return rows
+    .map((row) => (record.seriesId !== undefined && row.id === record.seriesId
+      ? { ...row, revision, excluded: [...new Set([...(row.excluded ?? []), record.occurrenceBegin ?? record.begin])] } : row))
+    .filter((row) => row.id !== record.id && (record.seriesId !== undefined || row.seriesId !== record.id))
+}
+
+/** A series changed to Once drops its deleted dates; its edited dates stay as separate events. */
+export function onceSeries(rows: readonly CalendarRecord[], series: CalendarRecord, revision: () => string): readonly CalendarRecord[] {
+  return rows.map((row) => {
+    if (row.id === series.id) return { ...row, excluded: undefined }
+    if (row.seriesId !== series.id) return row
+    const { seriesId: _series, occurrenceBegin: _begin, ...event } = row
+    return { ...event, revision: revision() }
+  })
+}
+
+/** The exclusions of a moved series: each deleted or edited date keeps its civil-day offset from the series start. */
+export function remapExclusions(rows: readonly CalendarRecord[], before: CalendarRecord, next: CalendarRecord): readonly number[] {
+  const oldZone = before.allDay ? "UTC" : before.timeZone ?? "UTC"
+  const newZone = next.allDay ? "UTC" : next.timeZone ?? "UTC"
+  const dayOf = (instant: number) => Date.parse(`${(calendarWall(instant, oldZone) ?? isoInstant(instant)).slice(0, 10)}T00:00:00Z`)
+  const oldDay = dayOf(before.begin)
+  const newWall = Date.parse(`${calendarWall(next.begin, newZone) ?? isoWall(next.begin)}Z`)
+  const exclusions = [...(before.excluded ?? []), ...rows.filter((row) => row.seriesId === before.id).map((row) => row.occurrenceBegin ?? row.begin)]
+  const moved = exclusions.map((instant) => calendarInstant(isoWall(newWall + dayOf(instant) - oldDay), newZone, Number.NaN, "forward"))
+  return [...new Set(moved.filter((instant): instant is number => instant !== undefined))]
+}
+
+/** The three-month read around the date in view: from the first of the previous month to the first of the month after next. */
+export function readWindow(day: number, month: number, now: number, zone = deviceZone()): InstantRange {
+  const selected = new Date(midnightAfter(now, zone, day))
+  const year = selected.getUTCFullYear()
+  const shown = selected.getUTCMonth() + month
+  const first = (offset: number) => Date.UTC(year, shown + offset, 1)
+  const begin = midnightAfter(first(-1), zone, 0)
+  return { begin: Math.max(0, begin), end: midnightAfter(first(2), zone, 0) }
+}
+
+/** The stable key of a read window and zone. */
+export function windowKey(range: InstantRange, zone: string): string {
+  return `${range.begin}:${range.end}:${zone}`
+}
+
+/** Where a row on screen came from. */
+export type RowSource = "device" | "agent" | "document"
+
+/** One event as the Calendar screen lays it out. */
+export interface CalendarRow {
+  readonly id: string
+  readonly source: RowSource
+  readonly sourceKey: string
+  readonly title: string
+  readonly notes: string
+  readonly where: string
+  readonly begin: number
+  readonly end: number
+  readonly allDay: boolean
+  readonly offset: number
+  readonly endOffset: number
+  readonly revision: string
+  readonly calendarName: string
+  readonly account: string
+  readonly writable: boolean
+  readonly recurring: boolean
+  readonly timeZone: string
+}
+
+/** The exact key of one agent Calendar event: provider, side, grant, account, calendar, external id and id. */
+export function agentEventKey(event: CalendarEvent): string {
+  return JSON.stringify([event.provider, event.side, event.grantId ?? "", event.connectorAccountId ?? "", event.calendarId, event.externalId, event.id])
+}
+
+/** The source key of an agent Calendar event, as its calendar list names it. */
+export function eventSourceKey(event: CalendarEvent): string {
+  return sourceKeyId({ provider: event.provider, side: event.side, grantId: event.grantId ?? "", connectorAccountId: event.connectorAccountId ?? "", calendarId: event.calendarId })
+}
+
+/** Whether a calendar may be read into the feed: included and with read access. */
+export function readableSource(calendar: CalendarSummary): boolean {
+  return calendar.includeInFeed && ["owner", "writer", "reader"].includes(calendar.accessRole)
+}
+
+/** Whether a calendar may be written from Calendar. */
+export function writableSource(calendar: CalendarSummary): boolean {
+  return calendar.includeInFeed && (calendar.accessRole === "owner" || calendar.accessRole === "writer")
+}
+
+/** Whether a source is a managed Google calendar, whose deletes and series writes the host refuses. */
+export function managedGoogle(calendar: Pick<CalendarSummary, "provider" | "grantId">): boolean {
+  return calendar.provider === "google" && /^alpha-google:[a-f0-9]{64}$/.test(calendar.grantId)
+}
+
+/** The agent's own calendar, where Alpha creates new events. */
+export function agentOwnCalendar(calendar: CalendarSummary): boolean {
+  return calendar.provider === "eliza" && calendar.side === "owner" && calendar.grantId === "eliza-calendar" && calendar.calendarId === "primary" && writableSource(calendar)
+}
+
+/** An agent Calendar event as a row, in the viewer's zone; an all-day event keeps its UTC dates. */
+export function agentRow(event: CalendarEvent, calendars: readonly CalendarSummary[], zone: string, now: number): CalendarRow | undefined {
+  const begin = utcInstant(event.startAt)
+  const end = utcInstant(event.endAt)
+  const key = eventSourceKey(event)
+  const calendar = calendars.find((summary) => sourceKeyId(summary) === key)
+  if (begin === undefined || end === undefined || end <= begin || !calendar || !readableSource(calendar) || event.status === "cancelled") return undefined
+  const today = civilDay(now, zone)
+  const offset = event.isAllDay ? Math.floor(begin / DAY) - today : civilDay(begin, zone) - today
+  const endOffset = event.isAllDay ? offset + Math.max(1, Math.ceil((end - begin) / DAY)) : civilDay(end - 1, zone) - today + 1
+  const etag = typeof event.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+  return {
+    id: `agent:${agentEventKey(event)}`, source: "agent", sourceKey: key, title: event.title || "Event", notes: event.description, where: event.location,
+    begin, end, allDay: event.isAllDay, offset, endOffset, revision: etag, calendarName: calendar.summary, account: calendar.accountEmail ?? event.provider,
+    writable: writableSource(calendar) && etag !== "" && (event.provider === "eliza" || event.provider === "google"),
+    recurring: (event.recurrence ?? []).length > 0 || !!event.recurringEventId, timeZone: event.timezone ?? zone,
+  }
+}
+
+/** A document calendar row as a Calendar row. */
+export function documentRow(record: CalendarRecord, zone: string, now: number): CalendarRow {
+  const today = civilDay(now, zone)
+  const offset = record.allDay ? Math.floor(record.begin / DAY) - today : civilDay(record.begin, zone) - today
+  return {
+    id: `document:${record.id}`, source: "document", sourceKey: record.calendarId, title: record.title || "Untitled event", notes: record.body,
+    where: record.location, begin: record.begin, end: record.end, allDay: !!record.allDay, offset,
+    endOffset: record.allDay ? offset + Math.max(1, Math.ceil((record.end - record.begin) / DAY)) : civilDay(record.end - 1, zone) - today + 1,
+    revision: record.revision, calendarName: "Saved", account: "In this app", writable: false,
+    recurring: (record.repeat ?? "none") !== "none" || record.seriesId !== undefined, timeZone: record.timeZone ?? zone,
+  }
+}

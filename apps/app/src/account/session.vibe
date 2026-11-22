@@ -1,0 +1,192 @@
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"; spec/account/session.md, "Story: Use Cloud only for managed services"
+import {
+  type Account, type IncompleteCode, type RouteKind, type Session, type SessionEffect,
+  Machine as SessionMachine, isSignedIn, routeAdmitted, stored as storedSession
+} from "../../gen/account__session.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { deployment, environmentFor, hostEnvironment } from "./deployment.ts"
+import { ensureResident, unbindInference } from "./inference.vibe"
+import { CredentialIdentity, Incomplete, Renewal, Renewed, SignedOutAnswer, UserAnswer } from "./signIn.schema.vibe"
+
+const plugin = "AlphaCloudSignIn"
+
+/** A managed route this build does not admit was asked for; nothing was sent. */
+export error RouteRefused { route: RouteKind }
+
+/** A sign-in return that did not finish, for the notice it shows. */
+export interface IncompleteNotice { readonly restarted: boolean }
+
+/** The account other areas fence their requests and results to: its generation, or 0 while signed out. */
+export function ownerOf(s: Session): number {
+  return isSignedIn(s.phase) ? s.generation : 0
+}
+
+/** The signed-in Cloud account, its key's expiry and renewal, and sign-out. */
+export service CloudSession {
+  readonly changes: Stream.Stream<Session>
+  readonly notices: Stream.Stream<IncompleteNotice>
+  current(): Session!!
+  /** The owner number of spec/account/session.md for the account signed in now, or 0. */
+  owner(): number!!
+  /** A key under `alpha/<owner>/` for state that belongs to the account signed in now. */
+  ownerKey(key: string): string!!
+  /** Load, restore the saved sign-in, settle startup, and follow the host's sign-in events; runs for the app's life. */
+  run(): void!!
+  /** The sign-in screen finished: adopt the account Cloud names for the key the host stored. */
+  adopt(): void!!
+  /** A sign-in attempt holds the slot, or released it. */
+  attempt(started: boolean): void!!
+  /** Sign out of the account signed in now; whether Cloud confirmed the revocation. */
+  signOut(): boolean!!
+  /** Cloud answered 401 for the saved key. */
+  rejected(): void!!
+  /** Refuses a route this build may not send. */
+  admit(route: RouteKind): void!RouteRefused
+}
+
+effect function readIdentity(environment: string) {
+  const native = try Native
+  return try Schema.decodeUnknownEffect(CredentialIdentity)(try native.invoke(plugin, "credentialIdentity", { environment }))
+}
+
+effect function readUser() {
+  const cloud = try Cloud
+  const answer = try Schema.decodeUnknownEffect(UserAnswer)(try cloud.json("GET", "/api/v1/user"))
+  return answer.success ? answer.data : undefined
+}
+
+/** The account Cloud names for the key the host holds now, with whether Cloud confirmed that key. */
+effect function readAccount(environment: string) {
+  const identity = readIdentity(environment) catch () => undefined
+  if (identity === undefined) return undefined
+  const user = readUser() catch () => undefined
+  if (user === undefined) return undefined
+  const account: Account = { userId: user.id, organizationId: user.organization_id, credentialId: identity.credentialId, expiresAt: identity.expiresAt }
+  return { account, confirmed: identity.activationPending !== true }
+}
+
+const incompleteCodes = { "app-link-unverified": "AppLinkUnverified", storage: "StorageFailed", "activation-expired": "ActivationExpired" } as const satisfies Record<string, IncompleteCode>
+
+/** The session service over the stored session machine. */
+export const sessionService = Layer.effect(CloudSession, effect {
+  const machine = try SessionMachine
+  const native = try Native
+  const build = try Build
+  const notices = try PubSub.unbounded<IncompleteNotice>()
+  const environment = hostEnvironment(environmentFor(build.info.testMocks))
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+    return step
+  }
+
+  effect function revoke(credentialId: string) {
+    const answer = effect {
+      return try Schema.decodeUnknownEffect(SignedOutAnswer)(try native.invoke(plugin, "signOut", { environment, credentialId }))
+    } catch () => undefined
+    return answer?.revocation === "revoked"
+  }
+
+  effect function perform(out: ReadonlyArray<SessionEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when { tag: "EnsureResident" }: try ensureResident();
+        when { tag: "UnbindInference" }: unbindInference() catch () => undefined;
+        when { tag: "RevokeKey", let credentialId }: {
+          const revoked = try revoke(credentialId)
+          native.invoke(plugin, "clearCredentialState") catch () => undefined
+          try send({ type: "signOutSettled", revoked })
+        };
+        when { tag: "ShowIncomplete", let restarted }: try PubSub.publish(notices, { restarted });
+      }
+    }
+  }
+
+  effect function adopt() {
+    const read = try readAccount(environment)
+    if (read === undefined) return
+    try send(read.confirmed ? { type: "signInCompleted", account: read.account } : { type: "restore", account: read.account, confirmed: false })
+  }
+
+  effect function renewalCheck() {
+    const answer = effect {
+      return try Schema.decodeUnknownEffect(Renewal)(try native.invoke(plugin, "renewSignIn", { environment }))
+    } catch () => undefined
+    if (answer === undefined) return
+    if (answer.status === "renewed" && answer.credentialId !== undefined && answer.expiresAt !== undefined) {
+      try send({ type: "renewed", credentialId: answer.credentialId, expiresAt: answer.expiresAt })
+    }
+    try send({ type: "renewalReported", warning: answer.expiryWarning, refused: answer.keyRefused === true })
+  }
+
+  effect function expiryWatch() {
+    while (true) {
+      const s = try machine.get()
+      const now = try Clock.currentTimeMillis
+      if (isSignedIn(s.phase) && s.phase !== "KeyExpired" && s.account.expiresAt <= now) try send({ type: "expire", now })
+      try sleep("1 minute")
+    }
+  }
+
+  effect function follow(event: string, handle: (raw: unknown) => void!!) {
+    for try (const raw of native.listen(plugin, event)) {
+      try handle(raw)
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    notices: Stream.fromPubSub(notices),
+    current: () => machine.get(),
+    effect owner() { return ownerOf(try machine.get()) },
+    effect ownerKey(key: string) {
+      const s = try machine.get()
+      return ownerKey(isSignedIn(s.phase) ? `${s.account.userId}.${s.account.organizationId}` : "device", key)
+    },
+    effect run() {
+      try send({ type: "load", deployment, environment: environmentFor(build.info.testMocks), testMocks: build.info.testMocks })
+      const s = try machine.get()
+      if (!isSignedIn(s.phase) && (try native.available(plugin))) {
+        const read = try readAccount(environment)
+        if (read !== undefined) try send({ type: "restore", account: read.account, confirmed: read.confirmed })
+      }
+      try send({ type: "startupSettles" })
+      try ensureResident()
+      try renewalCheck()
+      try.all [
+        ignore(follow("signInCompleted", effect () => { try adopt() })),
+        ignore(follow("signInIncomplete", effect (raw) => {
+          const read = Schema.decodeUnknownEffect(Incomplete)(raw) catch () => undefined
+          if (read !== undefined) try send({ type: "incompleteArrives", code: incompleteCodes[read.code] })
+        })),
+        ignore(follow("signInRenewed", effect (raw) => {
+          const read = Schema.decodeUnknownEffect(Renewed)(raw) catch () => undefined
+          if (read !== undefined) try send({ type: "renewed", credentialId: read.credentialId, expiresAt: read.expiresAt })
+        })),
+        expiryWatch()
+      ]
+    },
+    adopt,
+    effect attempt(started: boolean) {
+      try send(started ? { type: "attemptStarts" } : { type: "attemptEnds" })
+    },
+    effect signOut() {
+      const s = try machine.get()
+      if (!isSignedIn(s.phase)) return false
+      try send({ type: "beginSignOut", credentialId: s.account.credentialId })
+      return (try machine.get()).revocation === "Revoked"
+    },
+    effect rejected() { try send({ type: "rejected" }) },
+    effect admit(route: RouteKind) {
+      const s = try machine.get()
+      if (!routeAdmitted(route, s.testMocks, s.deployment)) throw new RouteRefused({ route })
+    }
+  }
+})
+
+/** The session service with its machine, stored on the device: it outlives every account it names. */
+export const sessionLayer = Layer.provideMerge(sessionService, storedSession(ownerKey("device", "account/session")))

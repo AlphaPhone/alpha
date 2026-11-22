@@ -1,0 +1,106 @@
+// spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""
+import { type HomeAgendaState, confirmedEmpty, coversPeriods, homeAgenda, homeReadable, periodRank, ranksBefore, stillToCome, tapRereads } from "../../gen/calendar__home.effect.vibe"
+import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import { AgentCalendar, type AgentView } from "./agent.vibe"
+import type { EventRecord } from "./feed.schema.vibe"
+import { DAY, agentEventKey, eventSourceKey, readableSource } from "./model.vibe"
+import { civilDay, deviceZone, midnightAfter } from "./time.ts"
+
+/** What Home's overview shows from Calendar. */
+export interface HomeAgendaCard {
+  readonly state: HomeAgendaState
+  readonly title: string
+  readonly begin: number | undefined
+  readonly end: number | undefined
+  readonly allDay: boolean
+  readonly video: boolean
+  /** The route Calendar opens on when the card is tapped: the event and its day. */
+  readonly route: string | undefined
+  readonly day: number
+  /** Whether tapping reads Calendar again first. */
+  readonly rereads: boolean
+}
+
+/** Home's view of the calendar, from the same agent Calendar and source choice Calendar shows. */
+export service HomeAgenda {
+  readonly cards: Stream.Stream<HomeAgendaCard>
+  current(): HomeAgendaCard!!
+  /** Read again when the card's read failed or was saved; the shell then opens Calendar on `route`. */
+  tapped(): void!!
+}
+
+/** The card Home shows for an agent Calendar view, the sources the owner hid, and the time now. */
+export function homeCard(view: AgentView, hidden: ReadonlySet<string>, now: number, zone = deviceZone()): HomeAgendaCard {
+  const state = view.state
+  const saved = view.savedAt !== undefined
+  const feed = view.feed
+  const readable = homeReadable(state.owner !== "" || saved, state.status === "Ready" || saved, state.status === "Failed", state.write.id !== 0,
+    feed?.state === "complete", saved)
+  const quiet = (shown: HomeAgendaState): HomeAgendaCard => ({ state: shown, title: "Calendar", begin: undefined, end: undefined, allDay: false, video: false, route: undefined, day: 0, rereads: tapRereads(shown) })
+  if (!readable || feed === undefined) return quiet(homeAgenda(false, state.status === "Failed" || state.error === "AccessRefused", false, false, saved, false))
+  const today = civilDay(now, zone)
+  const dayStart = midnightAfter(now, zone, 0)
+  const weekday = (((today + 3) % 7) + 7) % 7
+  const weekStart = midnightAfter(now, zone, -weekday)
+  const weekEnd = midnightAfter(now, zone, 7 - weekday)
+  const date = new Date(now)
+  const monthStart = midnightAfter(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1), zone, 0)
+  const monthEnd = midnightAfter(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1), zone, 0)
+  const dayEnd = midnightAfter(now, zone, 1)
+  const readableKeys = new Set(view.calendars.filter(readableSource).map((calendar) => sourceKeyId(calendar)))
+  type Ranked = { event: EventRecord; rank: number; coming: boolean; start: number }
+  const ranked: Ranked[] = []
+  let unknown = false
+  for (const event of feed.events) {
+    const begin = utcInstant(event.startAt)
+    const end = utcInstant(event.endAt)
+    if (begin === undefined || end === undefined || event.status === "cancelled") continue
+    const key = eventSourceKey(event)
+    const inPeriod = (from: number, to: number) => (event.isAllDay ? begin < to + DAY && end > from - DAY && Math.floor(begin / DAY) <= civilDay(to - 1, zone) && Math.floor((end - 1) / DAY) >= civilDay(from, zone) : begin < to && end > from)
+    const rank = periodRank(inPeriod(dayStart, dayEnd), inPeriod(weekStart, weekEnd), inPeriod(monthStart, monthEnd))
+    if (!readableKeys.has(key)) {
+      if (rank < 3) unknown = true
+      continue
+    }
+    if (hidden.has(key) || rank === 3) continue
+    ranked.push({ event, rank, coming: stillToCome(event.isAllDay, Math.floor((end - 1) / DAY) >= today, end > now), start: begin })
+  }
+  if (unknown) return quiet("HomeUnverified")
+  ranked.sort((a, b) => (ranksBefore(a.rank, a.coming, a.start, b.rank, b.coming, b.start) ? -1 : ranksBefore(b.rank, b.coming, b.start, a.rank, a.coming, a.start) ? 1 : agentEventKey(a.event).localeCompare(agentEventKey(b.event))))
+  const first = ranked[0]
+  const windowStart = utcInstant(feed.timeMin) ?? Number.POSITIVE_INFINITY
+  const windowEnd = utcInstant(feed.timeMax) ?? 0
+  const synced = feed.syncedAt === null ? 0 : utcInstant(feed.syncedAt) ?? Date.parse(feed.syncedAt)
+  const covers = coversPeriods(windowStart, windowEnd, now, Math.min(monthStart, weekStart), Math.max(monthEnd, weekEnd))
+  const empty = confirmedEmpty(!saved, first !== undefined, unknown, covers, Number.isFinite(synced) ? synced : 0, now, feed.source === "cache" && state.error !== "NoReadError")
+  const shown = homeAgenda(true, false, feed.state === "partial", first !== undefined, saved, empty)
+  if (first === undefined) return quiet(shown)
+  const begin = first.start
+  const end = utcInstant(first.event.endAt) ?? begin
+  return {
+    state: shown, title: first.event.title || "Event", begin, end, allDay: first.event.isAllDay, video: first.event.conferenceLink !== null,
+    route: `event/${encodeURIComponent(`agent:${agentEventKey(first.event)}`)}?day=${first.event.isAllDay ? Math.floor(begin / DAY) - today : civilDay(begin, zone) - today}`,
+    day: first.event.isAllDay ? Math.floor(begin / DAY) - today : civilDay(begin, zone) - today,
+    rereads: tapRereads(shown),
+  }
+}
+
+/** The Home agenda service over the agent Calendar and the owner's hidden sources. */
+export function homeLayer(hiddenSources: () => ReadonlySet<string>) {
+  return Layer.effect(HomeAgenda, effect {
+    const agent = try AgentCalendar
+    effect function card(view: AgentView) {
+      const now = try Clock.currentTimeMillis
+      return homeCard(view, hiddenSources(), now)
+    }
+    return {
+      cards: Stream.mapEffect(agent.changes, card),
+      effect current() { return try card(try agent.view()) },
+      effect tapped() {
+        const view = try agent.view()
+        const shown = try card(view)
+        if (shown.rereads && view.window !== undefined) try agent.refresh(view.window)
+      },
+    }
+  })
+}

@@ -1,0 +1,69 @@
+{
+  "name": "@alphacompute/alpha-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Alpha Cloud: the upstream cloud package run with Alpha Phone's own deployment profile, native client registration and web host, behind the ALPHA_CLOUD_CUTOVER flag.",
+  "engines": {
+    "node": ">=26"
+  },
+  "bin": {
+    "alpha-cloud": "./src/cli.vibe"
+  },
+  "exports": {
+    "./profile": {
+      "eliza-source": "./src/profile.vibe",
+      "default": "./src/profile.vibe"
+    },
+    "./deployment": {
+      "eliza-source": "./src/deployment.vibe",
+      "default": "./src/deployment.vibe"
+    },
+    "./registration": {
+      "eliza-source": "./src/registration.vibe",
+      "default": "./src/registration.vibe"
+    },
+    "./client-deployment": {
+      "eliza-source": "./generated/client-deployment.ts",
+      "default": "./generated/client-deployment.ts"
+    },
+    "./worker": {
+      "eliza-source": "./src/worker.vibe",
+      "default": "./src/worker.vibe"
+    },
+    "./edge": {
+      "eliza-source": "./src/edge.vibe",
+      "default": "./src/edge.vibe"
+    },
+    "./deployment.json": "./deployment.json",
+    "./resources.json": "./resources.json",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && vibelang -p tsconfig.build.json",
+    "deployment": "node --conditions=eliza-source --import vibelang/register src/cli.vibe deployment",
+    "deployment:check": "node --conditions=eliza-source --import vibelang/register src/cli.vibe deployment --check",
+    "profile": "node --conditions=eliza-source --import vibelang/register src/cli.vibe profile",
+    "render": "node --conditions=eliza-source --import vibelang/register src/cli.vibe render",
+    "runtime-config": "node --conditions=eliza-source --import vibelang/register src/cli.vibe runtime-config",
+    "typecheck": "vibelang --noEmit -p .",
+    "test": "vitest run",
+    "seed": "node --conditions=eliza-source --import vibelang/register src/cli.vibe seed",
+    "register-args": "node --conditions=eliza-source --import vibelang/register src/cli.vibe register-args"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.1.1",
+    "@elizaos/agent": "workspace:*",
+    "@elizaos/cloud": "workspace:*",
+    "effect": "4.1.1",
+    "vibelang-runtime": "0.0.13"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.1",
+    "@types/node": "catalog:",
+    "vibelang": "0.0.13",
+    "vibestack": "workspace:*",
+    "vitest": "catalog:",
+    "wrangler": "4.116.0"
+  }
+}

@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {sha256 as digest} from './sha256.ts';
 import {fileURLToPath} from 'node:url';
-import {verifyDeviceSource} from '../vendor/eliza/packages/os/scripts/android/verify-device-source.mjs';
-import {soongAppNativePatch} from '../vendor/eliza/packages/os/scripts/android/soong-app-native.mjs';
-import {loadProfile, verifyProfileSource} from '../vendor/eliza/packages/os/scripts/android/verify-source-lock.ts';
+import {verifyDeviceSource} from './os-ported/os/verify-device-source.mjs';
+import {soongAppNativePatch} from '../vendor/eliza/packages/os/aosp/soong-app-native.mjs';
+import {loadProfile, verifyProfileSource} from './os-ported/os/verify-source-lock.ts';
 
-export const defaultLockPath = fileURLToPath(new URL('../vendor/eliza/packages/os/android/sources/pixel10a-stallion.json', import.meta.url));
-const profileLockPath = fileURLToPath(new URL('../vendor/eliza/packages/os/android/aosp.lock.json', import.meta.url));
+export const defaultLockPath = fileURLToPath(new URL('../vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json', import.meta.url));
+const profileLockPath = fileURLToPath(new URL('../vendor/eliza/packages/os/aosp/aosp.lock.json', import.meta.url));
 
 /** Alpha adapter for upstream's shared Pixel 10a source admission. Fixture locks may
  * be supplied explicitly; production defaults authenticate the shared profile and inventory. */
@@ -42,7 +42,7 @@ export async function verifyPixel10aSource({source, factory, lock = defaultLockP
 }
 
 /** A reviewed SystemUI bundle ('ops', 'chip' or 'assist') in the form verifyPixel10aSource accepts. */
-export {senseSystemuiPatch as listenerSystemuiPatch} from '../vendor/eliza/packages/os/scripts/android/sense-systemui.mjs';
+export {senseSystemuiPatch as listenerSystemuiPatch} from './os-ported/os/sense-systemui.mjs';
 
 /** Alpha's protected Power route, independent of the optional SystemUI branding patch. */
 export function alphaProtectedPowerPatch(): ReviewedSourcePatch {

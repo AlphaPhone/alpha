@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {X509Certificate} from 'node:crypto';
 import {sha256 as sha} from './sha256.ts';
-import {admitSystemUpdater} from '../vendor/eliza/packages/os/scripts/android/system-updater-staging.mjs';
+import {admitSystemUpdater} from './os-ported/os/system-updater-staging.mjs';
 
 interface PilotEnrollment {
  schema:number; purpose:string; product:string; device:string; manifestUrl:string; hosts:string[];

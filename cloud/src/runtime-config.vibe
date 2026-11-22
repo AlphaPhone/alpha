@@ -1,0 +1,64 @@
+// spec/agent/host/launch.md, "Story: Start the agent from one launch document"; spec/agent/host/launch.md, "Story: Keep the credential out of every file and reply"; spec/agent/models/binding.md, "Story: Answer with the backend the host chose"
+import { decodeLaunchDocument, type LaunchDocument } from "@elizaos/agent/launch"
+import { agentCloudBase, cloudEnvironments, type ClientDeployment, type ClientEnvironment } from "./deployment.vibe"
+import { alphaModel } from "./profile.vibe"
+
+/** The resident agent's launch would use another Cloud authority, another model, a persisted credential or remote embeddings. */
+export error RuntimeConfigInvalid { environment: string; problem: string }
+
+/** The resident agent's cloud model backend for one environment: the deployment's own API origin and Alpha's model. */
+export function cloudModel(rows: ClientDeployment, environment: ClientEnvironment): LaunchDocument["model"] {
+  return { backend: "cloud", cloudBaseUrl: agentCloudBase(rows, environment), smallModel: alphaModel, largeModel: alphaModel, imageModel: alphaModel }
+}
+
+/** The launch facts each environment's check established. */
+export interface RuntimeConfigReport {
+  readonly environment: ClientEnvironment
+  readonly cloudBaseUrl: string
+  readonly smallModel: string
+  readonly largeModel: string
+  readonly embeddings: "local" | "none"
+  readonly credentialInDocument: boolean
+}
+
+const syntheticAccount = { userId: "11111111-1111-4111-8111-111111111111", organizationId: "22222222-2222-4222-8222-222222222222" }
+
+/** A launch document the resident agent accepts with the cloud backend, local embeddings and no credential. */
+export function cloudLaunchDocument(rows: ClientDeployment, environment: ClientEnvironment): unknown {
+  return {
+    schema: 1,
+    character: { name: "Alpha", system: "Cloud runtime configuration check." },
+    policy: { actions: { allowed: ["REPLY"] }, plugins: { load: [] } },
+    model: cloudModel(rows, environment),
+    account: syntheticAccount,
+    embeddings: "local",
+    embeddingDimensions: 384,
+    callerRole: "owner",
+  }
+}
+
+function canonicalOrigin(value: string): boolean {
+  const url = URL.parse(value)
+  return url !== null && url.protocol === "https:" && url.origin === value
+}
+
+/** Decodes each environment's launch document as the agent does and refuses any other authority, model, credential or embedding route. */
+export effect function checkRuntimeConfig(rows: ClientDeployment): ReadonlyArray<RuntimeConfigReport>!RuntimeConfigInvalid {
+  const reports: RuntimeConfigReport[] = []
+  for (const environment of cloudEnvironments) {
+    const text = JSON.stringify(cloudLaunchDocument(rows, environment))
+    const launch = decodeLaunchDocument(text) catch effect () => {
+      throw new RuntimeConfigInvalid({ environment, problem: "the agent refuses the launch document" })
+    }
+    if (launch.model.backend !== "cloud") throw new RuntimeConfigInvalid({ environment, problem: "the model backend is not cloud" })
+    if (launch.model.cloudBaseUrl !== rows[environment].api || !canonicalOrigin(launch.model.cloudBaseUrl))
+      throw new RuntimeConfigInvalid({ environment, problem: "the cloud base is not exactly the configured API origin" })
+    if (launch.model.smallModel !== alphaModel || launch.model.largeModel !== alphaModel)
+      throw new RuntimeConfigInvalid({ environment, problem: `chat must use ${alphaModel}` })
+    if (launch.embeddings !== "local") throw new RuntimeConfigInvalid({ environment, problem: "embeddings must stay on the phone" })
+    const credentialInDocument = /apiKey|credential|token/i.test(text)
+    if (credentialInDocument) throw new RuntimeConfigInvalid({ environment, problem: "the launch document carries a credential; it belongs in the launch frame" })
+    reports.push({ environment, cloudBaseUrl: launch.model.cloudBaseUrl, smallModel: launch.model.smallModel, largeModel: launch.model.largeModel, embeddings: launch.embeddings, credentialInDocument })
+  }
+  return reports
+}

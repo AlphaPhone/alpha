@@ -1,0 +1,148 @@
+// spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"; spec/notes/audioCustody.md, "One current operation controls the trash, and an erased recording never comes back"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"
+const maxSafe = 9007199254740991
+const Count = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: maxSafe }))
+
+/** A canonical note ID: a stable lowercase legacy ID or an RFC-shaped UUID. */
+export const NoteId = Schema.String.check(Schema.isPattern(/^(?:[a-z][a-z0-9-]{2,127}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/))
+
+/** An opaque recording ID as the device issues it. */
+export const RecordingId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/))
+
+/** A device operation ID: a lowercase UUID. */
+export const OperationId = Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/))
+
+/** The binding the native recorder keeps with a recording. */
+export const RecordingBinding = Schema.Struct({
+  ownerDigest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  folderId: Schema.NullOr(Schema.String.check(Schema.isPattern(/^f-[A-Za-z0-9_-]{1,64}$/))),
+})
+
+/** One finished segment of a native recording. */
+export const RecordingSegment = Schema.Struct({
+  segmentId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160)),
+  durationMs: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 30000 })),
+  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64000))),
+})
+
+/** The native recorder's status, from `noteRecordingStatus` or its `noteRecordingChanged` event. */
+export const RecordingStatus = Schema.Struct({
+  state: Schema.Literals(["idle", "recording", "paused", "stopped"]),
+  recordingId: Schema.optionalKey(RecordingId),
+  recovered: Schema.optionalKey(Schema.Boolean),
+  stopReason: Schema.optionalKey(Schema.String),
+  binding: Schema.optionalKey(RecordingBinding),
+  canonicalSavePending: Schema.optionalKey(Schema.Boolean),
+  durationMs: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))),
+  segments: Schema.optionalKey(Schema.Array(RecordingSegment).check(Schema.isMaxLength(10000))),
+  peak: Schema.optionalKey(Schema.Number),
+})
+
+/** The audio the device retained for a note. */
+export const SavedNoteAudio = Schema.Struct({
+  audioId: RecordingId,
+  noteId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  durationMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  transcript: Schema.String,
+})
+
+/** The device's description of a retained recording, with its deletion time once trashed. */
+export const AudioDescription = Schema.Struct({
+  audioId: RecordingId,
+  noteId: Schema.String,
+  durationMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  transcript: Schema.optionalKey(Schema.String),
+  deletedAt: Schema.optionalKey(Schema.Number),
+})
+
+/** The device's receipt for a recording change. */
+export const AudioReceipt = Schema.Struct({
+  audioId: RecordingId,
+  noteId: Schema.String,
+  operationId: Schema.String,
+  status: Schema.Literals(["removed", "restored", "purged", "unknown"]),
+})
+
+/** The device's playback state. */
+export const PlaybackState = Schema.Struct({ playing: Schema.Boolean, audioId: Schema.optionalKey(Schema.String), positionMs: Schema.Number })
+
+/** A transcribed window or segment. */
+export const TranscribeAnswer = Schema.Struct({ text: Schema.String })
+
+/** The claim the native recorder records before a voice note is created. */
+export const ClaimAnswer = Schema.Struct({ claimed: Schema.Boolean })
+
+/** The owner's folder list as it is stored. */
+export const FoldersDocument = Schema.Struct({
+  version: Schema.Literal(1),
+  folders: Schema.Array(Schema.Struct({
+    id: Schema.String.check(Schema.isPattern(/^f-[A-Za-z0-9_-]{1,64}$/)),
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40)),
+    createdAt: Count,
+  })).check(Schema.isMaxLength(100)),
+  revision: Schema.optionalKey(Count),
+})
+
+/** One stored back-link from a saved event or reminder to the note its draft came from; the link itself is `@elizaos/plugin-notes`'s identity-only shape. */
+export const OriginLink = Schema.Struct({
+  kind: Schema.Literals(["reminder", "event"]),
+  recordId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  link: Schema.Unknown,
+  linkedAt: Count,
+})
+
+/** The stored origin links. */
+export const OriginIndex = Schema.Struct({ version: Schema.Literal(1), links: Schema.Array(OriginLink).check(Schema.isMaxLength(2000)) })
+
+/** A document backend's result, from `AlphaNoteDocuments`. */
+export const DocumentResult = Schema.Struct({
+  status: Schema.String,
+  message: Schema.String,
+  text: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.String),
+})
+
+/** One kept change of the encrypted draft slot: the draft's words over the record and revision it started from. */
+export const KeptChange = Schema.Struct({
+  noteId: Schema.String.check(Schema.isMaxLength(128)),
+  baseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1)),
+  basePrint: Schema.String.check(Schema.isMaxLength(64)),
+  change: Schema.Literals(["added", "edited", "removed"]),
+  title: Schema.String.check(Schema.isMaxLength(256)),
+  body: Schema.String.check(Schema.isMaxLength(32000)),
+  separator: Schema.Literals(["", "\n"]),
+  format: Schema.optionalKey(Schema.Unknown),
+  color: Schema.Literals(["yellow", "green", "rose", "slate"]),
+})
+
+/** The encrypted draft slot: the kept changes of one owner. */
+export const KeptDraft = Schema.Struct({
+  version: Schema.Literal(1),
+  ownerDigest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  changes: Schema.Array(KeptChange).check(Schema.isMaxLength(10000)),
+})
+
+/** One secure slot read of `AlphaConnection`. */
+export const SecureRead = Schema.Struct({ value: Schema.NullOr(Schema.String) })
+
+export type RecordingStatus = typeof RecordingStatus.Type
+export type SavedNoteAudio = typeof SavedNoteAudio.Type
+export type AudioDescription = typeof AudioDescription.Type
+export type FoldersDocument = typeof FoldersDocument.Type
+export type OriginLink = typeof OriginLink.Type
+export type OriginIndex = typeof OriginIndex.Type
+export type KeptDraft = typeof KeptDraft.Type
+export type KeptChange = typeof KeptChange.Type
+
+/** Decoders for every untrusted payload Notes reads. */
+export const decodeRecordingStatus = Schema.decodeUnknownEffect(RecordingStatus)
+export const decodeSavedAudio = Schema.decodeUnknownEffect(SavedNoteAudio)
+export const decodeAudioDescription = Schema.decodeUnknownEffect(AudioDescription)
+export const decodeAudioReceipt = Schema.decodeUnknownEffect(AudioReceipt)
+export const decodePlayback = Schema.decodeUnknownEffect(PlaybackState)
+export const decodeTranscribe = Schema.decodeUnknownEffect(TranscribeAnswer)
+export const decodeClaim = Schema.decodeUnknownEffect(ClaimAnswer)
+export const decodeFolders = Schema.decodeUnknownEffect(Schema.fromJsonString(FoldersDocument))
+export const decodeOrigins = Schema.decodeUnknownEffect(Schema.fromJsonString(OriginIndex))
+export const decodeDocumentResult = Schema.decodeUnknownEffect(DocumentResult)
+export const decodeKeptDraft = Schema.decodeUnknownEffect(Schema.fromJsonString(KeptDraft))
+export const decodeSecureRead = Schema.decodeUnknownEffect(SecureRead)

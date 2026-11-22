@@ -1,0 +1,144 @@
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { AssistantHost, type ScreenFacts } from "../../src/assistant/host.vibe"
+import { DeviceExecutors, type OperationPorts } from "../../src/assistant/review.vibe"
+import { layer } from "../../src/assistant/layer.vibe"
+import { Preferences } from "../../src/settings/preferences.vibe"
+
+/** What the fake resident was asked, in order. */
+export interface Seen { readonly calls: { readonly method: string; readonly path: string; readonly body: unknown }[] }
+
+/** How the fake resident answers a chat turn. */
+export type TurnScript = { readonly kind: "reply"; readonly text: string } | { readonly kind: "refuse"; readonly status: number }
+
+const encoder = new TextEncoder()
+const frame = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n\n`)
+
+/** The resident's local API as a scripted fake at its network boundary. */
+export function fakeResident(seen: Seen, script: { turn: TurnScript; proposals: readonly unknown[] }) {
+  return Layer.succeed(Resident, {
+    status: () => succeed("running" as const),
+    ensureRunning: () => succeed(undefined),
+    json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => effect {
+      seen.calls.push({ method, path, body })
+      if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
+      if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }
+      if (path === "/api/client-devices/proposals") return { status: 200, data: { proposals: script.proposals } }
+      if (path.endsWith("/messages") && method === "POST") {
+        if (script.turn.kind === "refuse") throw new ResidentRefused({ status: script.turn.status, message: "busy", code: "room_busy" })
+        return { status: 200, data: { text: script.turn.text, agentName: "Alpha", messageId: "m1", userMessageId: "u1", actionResults: [] } }
+      }
+      if (path.startsWith("/api/conversations/c1/messages")) return { status: 200, data: { messages: [], hasMore: false } }
+      return { status: 200, data: {} }
+    },
+    stream: (path: string, body: unknown) => {
+      seen.calls.push({ method: "STREAM", path, body })
+      if (script.turn.kind === "refuse") return Stream.fail(new ResidentRefused({ status: script.turn.status, message: "busy", code: "room_busy" }))
+      const text = script.turn.text
+      return Stream.make(frame({ type: "token", text }), frame({ type: "done", fullText: text, messageId: "m1", userMessageId: "u1", agentName: "Alpha", actionResults: [] }))
+    },
+  })
+}
+
+/** A phone with no native plugins, as the browser build is. */
+export const noNative = Layer.succeed(Native, {
+  available: () => succeed(false),
+  invoke: (plugin: string, method: string) => fail(new NativeUnavailable({ plugin, method })),
+  listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+})
+
+/** A phone whose only plugin is the action journal, kept in memory. */
+export function journalNative(rows: Map<string, { readonly revision: number }>) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "AlphaActionJournal"),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      if (plugin !== "AlphaActionJournal") throw new NativeUnavailable({ plugin, method })
+      const input = (args ?? {}) as { readonly proposalId?: string; readonly expectedRevision?: number; readonly next?: { readonly revision: number } }
+      if (method === "get") return rows.get(input.proposalId ?? "") ?? null
+      if (method === "list") return [...rows.values()]
+      if (method === "edit") {
+        const id = input.proposalId ?? ""
+        const now = rows.get(id)?.revision ?? 0
+        if (now !== input.expectedRevision || input.next === undefined) return false
+        rows.set(id, input.next)
+        return true
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** A phone whose agent bridge never answers a plain request, and records each withdrawal. */
+export function silentAgentNative(aborts: string[]) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "ElizaAgent"),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      if (plugin === "ElizaAgent" && method === "request") return try never
+      if (plugin === "ElizaAgent" && method === "abort") {
+        aborts.push(String((args as { readonly id?: unknown } | undefined)?.id))
+        return { aborted: true }
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** A plain, unlocked Home screen. */
+export const homeScreen: ScreenFacts = {
+  exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "home", revision: 1, sensitive: false },
+  onCalendar: false,
+  contextKey: "home",
+}
+
+/** The shell's side of the assistant, signed in on Home; toasts are collected. */
+export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = []) {
+  return Layer.succeed(AssistantHost, {
+    identity: () => succeed({ origin: "https://agent.local", owner: "o1", agent: "a1", session: "s1", installationId: "i1", enrollmentId: "e1" }),
+    screen: () => succeed(screen),
+    peer: () => succeed({ optionalFields: false, takesLocation: false }),
+    inference: () => succeed({ where: "OnDevice" as const, provider: "this phone" }),
+    emergency: () => succeed(false),
+    openView: () => succeed(true),
+    sendEmail: (draft: unknown) => sync(() => { emails.push(draft); return "Delivered" as const }),
+    toast: (text: string) => sync(() => { toasts.push(text) }),
+  })
+}
+
+/** Executors that run every operation once and count it. */
+export function countingExecutors(runs: { count: number }, op: "CreateNote" | "CreateReminder" = "CreateNote", runnable = true) {
+  const ports: OperationPorts = {
+    validate: (operation) => runnable ? operation : undefined,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Create note", detail: "Saves a note." }),
+    classOf: () => op,
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Saved note." : "Not saved.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+/** The owner's preferences, as Settings would give them. */
+export function fakePreferences(said: { asks: boolean; shares: boolean }) {
+  return Layer.succeed(Preferences, {
+    current: () => die("not read by the assistant"),
+    asksBeforeActions: () => sync(() => said.asks),
+    sharesLocation: () => sync(() => said.shares),
+    loadsMailImages: () => succeed(false),
+    allowsGmailChanges: () => succeed(false),
+    allowsCalendarEdits: () => succeed(false),
+    sensorAllowed: () => succeed(false),
+    set: () => succeed(undefined),
+    reset: () => succeed(undefined),
+  })
+}
+
+/** The assistant over the fakes, with its stores in memory. */
+export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false })) {
+  return Layer.provideMerge(layer, Layer.mergeAll(resident, host, executors, native, memoryStore, preferences))
+}

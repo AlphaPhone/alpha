@@ -1,0 +1,81 @@
+// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/resident.md, "A connection is one verified owner with exactly one running agent"; spec/platform/resident.md, "Only a record read the resident deferred is retried, and only before its deadline"; spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/crashJournal.md, "Story: Tell support what went wrong without telling them what I wrote"
+
+/** What a `view-interact` frame says: the client it is for and the frame itself. */
+export schema ViewPayload { readonly clientId: string; readonly frame: Schema.Unknown }
+
+/** A resident `view-interact` agent event. */
+export schema ViewInteract { readonly type: "agent_event"; readonly stream: "view-interact"; readonly payload: ViewPayload }
+
+/** A resident `voice-transcript` agent event. */
+export schema VoiceTranscript { readonly type: "agent_event"; readonly stream: "voice-transcript" }
+
+/** `ElizaSystem.getNetworkStatus`: the app's active Android network; an omitted fact means Android could not tell. */
+export schema NetworkStatus { readonly connected?: boolean; readonly wifiActive?: boolean; readonly internetValidated?: boolean }
+
+/** `DeviceApps.platformCapabilities`: what the image verified. */
+export schema PlatformCapabilities {
+  readonly aospImage: boolean
+  readonly phone?: boolean
+  readonly contacts?: boolean
+  readonly sms?: boolean
+  readonly sense?: boolean
+  readonly startupPermissionDefaults?: boolean
+}
+
+/** `AlphaDevice.crashLog`: the native entries, untrusted until each is sanitized, and whether exit history is readable. */
+export schema CrashLogReply { readonly entries?: Schema.Unknown; readonly exitHistory?: boolean }
+
+/** One entry of the problem log as native or the page kept it. */
+export schema CrashEntry {
+  readonly at: Schema.Int
+  readonly source: "renderer" | "uncaught" | "exit" | "inference"
+  readonly kind?: "render" | "startup" | "uncaught"
+  readonly errorClass?: string
+  readonly rootClass?: string
+  readonly reason?: "crash" | "native-crash" | "anr" | "low-memory" | "signaled" | "initialization-failure" | "excessive-resource-usage" | "dependency-died" | "freezer" | "other" | "unknown" | "exit-self"
+  readonly process?: string
+  readonly thread?: "main" | "background"
+}
+
+/** Who `/api/auth/me` says the session is. */
+export schema ResidentIdentity { readonly kind: string; readonly id: string }
+
+/** The access `/api/auth/me` grants the session. */
+export schema ResidentAccess { readonly role: string; readonly mode: string }
+
+/** The resident's `/api/auth/me` answer. */
+export schema ResidentWhoAmI { readonly identity: ResidentIdentity; readonly access: ResidentAccess }
+
+/** One agent `/api/agents` lists. */
+export schema ResidentAgentRow { readonly id: string; readonly name?: string; readonly status: string }
+
+/** The resident's `/api/agents` answer. */
+export schema ResidentAgents { readonly agents: readonly ResidentAgentRow[] }
+
+/** A resident refusal body. */
+export schema ResidentRefusal { readonly error?: string; readonly code?: string; readonly message?: string; readonly retryAfter?: number }
+
+/** The resident's closed read barrier while a feature is still starting. */
+export schema FeatureStarting {
+  readonly code: "feature_starting"
+  readonly error: "feature_starting"
+  readonly retryable: true
+  readonly phase: "agent-deferred-boot" | "app-route-tail"
+  readonly status: "pending" | "runtime_starting"
+  readonly retryAfter?: number
+}
+
+/** A renderer-owned Cloud inference failure: only its fixed stage, reason and status, never what was asked. */
+export schema InferenceFailure {
+  readonly version: 1
+  readonly at: Schema.Int
+  readonly stage: "response-handler" | "action-planner" | "text" | "other"
+  readonly reason: "unsupported-schema-keyword" | "invalid-parameter" | "context-window" | "unavailable-model" | "rate-limit" | "credits" | "transport" | "unknown" | "schema-limit"
+  readonly status?: Schema.Int
+}
+
+/** `ElizaNetworkPolicy.getMeteredHint`: Android's metered flag, null where it could not tell. */
+export schema MeteredHint { readonly metered: Schema.NullOr(Schema.Boolean) }
+
+/** An `ElizaAgent` `agentEvent`: one event of a subscription, its end, or its failure. */
+export schema FeedEvent { readonly id: string; readonly kind: "event" | "end" | "failed"; readonly event?: Schema.Unknown; readonly code?: string }

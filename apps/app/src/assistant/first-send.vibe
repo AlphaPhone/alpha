@@ -1,0 +1,44 @@
+// spec/assistant/firstSend.md, "The source is cleared only after the destination and the source both show the sent text, and the destination confirms it"; spec/assistant/firstSend.md, "The clear names the exact source revision read; a source changed meanwhile is a conflict and is kept"
+import { Machine as MigrationMachine, machine as migrationMachine, retryDelaysMs, type SlotRead } from "../../gen/assistant__firstSend.effect.vibe"
+import { Machine as DraftsMachine, slotOf } from "../../gen/assistant__draft.effect.vibe"
+import { textOf } from "./units.vibe"
+
+effect function holdMigration() {
+  provide migrationMachine() {
+    return try MigrationMachine
+  }
+}
+
+/** Move a new chat's draft into the conversation its first send created; true once the new-chat slot is clear. */
+export effect function moveFirstDraft(source: string, destination: string) {
+  const drafts = try DraftsMachine
+  const migration = try holdMigration()
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  effect function read(binding: string) {
+    const slot = slotOf(try drafts.get(), binding)
+    return { revision: slot.revision, text: textOf(slot.text), sending: slot.sending } satisfies SlotRead
+  }
+  const text = textOf(slotOf(try drafts.get(), source).text)
+  if (text === "" || !(try quiet(migration.send({ type: "start", text })))) return false
+  for (const delay of retryDelaysMs) {
+    try sleep(delay)
+    if ((try migration.get()).phase === "Retrying") try quiet(migration.send({ type: "resumeRetry" }))
+    if ((try drafts.get()).active !== destination) try quiet(migration.send({ type: "rebind" }))
+    if ((try migration.get()).phase === "ReadingDestination") {
+      if (textOf(slotOf(try drafts.get(), destination).text) === "") try quiet(drafts.send({ type: "edit", text: slotOf(try drafts.get(), source).text }))
+      try quiet(migration.send({ type: "readDestination", seen: try read(destination) }))
+    }
+    if ((try migration.get()).phase === "ReadingSource") try quiet(migration.send({ type: "readSource", seen: try read(source) }))
+    if ((try migration.get()).phase === "Confirming") try quiet(migration.send({ type: "confirmDestination", seen: try read(destination) }))
+    if ((try migration.get()).phase === "Clearing") {
+      const before = slotOf(try drafts.get(), source)
+      const active = (try drafts.get()).active
+      const exchanged = before.revision === (try migration.get()).source.revision
+        && (try quiet(drafts.send({ type: "select", binding: source }))) && (try quiet(drafts.send({ type: "edit", text: [] })))
+      if ((try drafts.get()).active !== active) try quiet(drafts.send({ type: "select", binding: active }))
+      try quiet(migration.send({ type: "finishClear", exchanged, revision: slotOf(try drafts.get(), source).revision }))
+    }
+    if ((try migration.get()).phase === "Done") return (try migration.get()).result === "Moved"
+  }
+  return false
+}

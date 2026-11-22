@@ -1,0 +1,83 @@
+// spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/handoff.md, "Story: Try the Clock screen without opening Clock"; spec/clock/handoffHistory.md, "Story: Know what became of my last Clock request after a restart"; spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as HandoffMachine } from "../../gen/clock__handoff.effect.vibe"
+import { Machine as HistoryMachine, shownStatus } from "../../gen/clock__handoffHistory.effect.vibe"
+import { ClockHandoff, handoffLayer } from "../../src/clock/handoff.vibe"
+import { ClockReview, agentReviewLayer } from "../../src/clock/agent-review.vibe"
+import { build, fakePhone, machines } from "./phone.vibe"
+
+describe("Clock handoff (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => {
+  it.effect("review a repeating alarm, open Clock once and keep what it answered (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => effect {
+    const phone = fakePhone({
+      "DailyApps.surfaceInfo": () => ({ clockRepeatDaysVersion: 1 }),
+      "DailyApps.clockHandoff": (args) => ({ action: (args as { action: string }).action, status: "opened", message: "Clock request sent. Check the Clock app; Alpha cannot confirm an alarm was changed." }),
+    })
+    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("launcher") {
+      const handoff = try ClockHandoff
+      const draft = try HandoffMachine
+      const history = try HistoryMachine
+      try handoff.restore()
+      try draft.send({ type: "setTime", hour: 6, minute: 45 })
+      try draft.send({ type: "toggleDay", day: 6 })
+      try draft.send({ type: "toggleDay", day: 2 })
+      const reviewed = try handoff.prepare()
+      try draft.send({ type: "setLabel", label: "Run" })
+      const retired = (try draft.get()).phase
+      try handoff.prepare()
+      try handoff.confirm()
+      try handoff.confirm()
+      const sent = phone.calls.filter((c) => c.method === "clockHandoff").map((c) => c.args as Record<string, unknown>)
+      const after = try draft.get()
+      const kept = try history.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { reviewed, retired, sent: sent.map((r) => [r.action, r.hour, r.minute, r.label, r.days, r.reviewed]), message: after.message, kept: shownStatus(kept) },
+        { reviewed: true, retired: "Drafting", sent: [["set", 6, 45, "Run", [2, 6], true]], message: { tag: "Answered", status: "ClockOpened", reason: "Clock request sent. Check the Clock app; Alpha cannot confirm an alarm was changed." }, kept: "ClockOpened" },
+      ))
+    }
+  })
+
+  // spec/clock/handoff.md, "A repeating alarm is reviewed only when the phone's Clock handoff carries repeat days"
+  it.effect("refuse a repeat the phone's Clock cannot take, and simulate only with test mocks (spec/clock/handoff.md, \"Story: Try the Clock screen without opening Clock\")", () => effect {
+    const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}), "DailyApps.clockHandoff": () => ({ action: "show", status: "opened" }) })
+    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("launcher", true) {
+      const handoff = try ClockHandoff
+      const draft = try HandoffMachine
+      try handoff.restore()
+      try draft.send({ type: "toggleDay", day: 2 })
+      const repeat = try handoff.prepare()
+      const refusal = (try draft.get()).message
+      try draft.send({ type: "toggleDay", day: 2 })
+      try draft.send({ type: "chooseAction", handoffAction: "ShowAlarms" })
+      try draft.send({ type: "simulate", on: true })
+      try handoff.prepare()
+      try handoff.confirm()
+      const simulated = (try draft.get()).message
+      try Effect.try(() => assert.deepStrictEqual(
+        { repeat, refusal, simulated, opened: phone.calls.filter((c) => c.method === "clockHandoff").length },
+        { repeat: false, refusal: { tag: "NeedsRepeatSupport" }, simulated: { tag: "Simulated" }, opened: 0 },
+      ))
+    }
+  })
+})
+
+describe("Agent Clock review (spec/clock/agentReview.md, \"Story: Let the agent ask Clock only with my approval on the phone\")", () => {
+  it.effect("confirm an approved request once and report only what Clock answered (spec/clock/agentReview.md, \"Story: Let the agent ask Clock only with my approval on the phone\")", () => effect {
+    const phone = fakePhone({
+      "AlphaActionJournal.reviewClock": () => ({ reviewToken: "approved-1" }),
+      "AlphaActionJournal.confirmClock": () => ({ result: { action: "set", status: "opened" } }),
+      "AlphaActionJournal.cancelClock": () => ({}),
+    })
+    provide agentReviewLayer, phone.layer {
+      const review = try ClockReview
+      const identity = { scope: "agent", proposalId: "p1", operationId: "op_1" }
+      const status = try review.review(identity, { action: "set", hour: 7, minute: 0, timeZone: "Europe/Paris" })
+      const invalid = review.review({ ...identity, operationId: "op_2" }, { action: "set", hour: 31, minute: 0, timeZone: "Europe/Paris" }) catch (error) => error._tag
+      const methods = phone.calls.map((c) => c.method)
+      try Effect.try(() => assert.deepStrictEqual(
+        { status, invalid, methods },
+        { status: "ClockOpened", invalid: "InvalidClockRequest", methods: ["reviewClock", "confirmClock", "cancelClock"] },
+      ))
+    }
+  })
+})

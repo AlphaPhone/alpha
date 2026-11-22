@@ -1,0 +1,112 @@
+// spec/clock/index.md; spec/clock/notices.md, "One retained-data notice at a time, shown only on a visible page, and hiding closes it"
+// Everything Clock provides: its machines, its services and the fibers that keep time, follow taps and read deletions.
+import { ownerKey } from "../platform/storage.vibe"
+import { machine as ringerMachine } from "../../gen/clock__ringer.effect.vibe"
+import { machine as alarmsMemory, stored as alarmsStored } from "../../gen/clock__alarms.effect.vibe"
+import { machine as timersMemory, stored as timersStored } from "../../gen/clock__timers.effect.vibe"
+import { machine as stopwatchMemory, stored as stopwatchStored } from "../../gen/clock__stopwatch.effect.vibe"
+import { machine as worldMemory, stored as worldStored } from "../../gen/clock__worldClock.effect.vibe"
+import { machine as handoffMachine } from "../../gen/clock__handoff.effect.vibe"
+import { machine as historyMemory, stored as historyStored } from "../../gen/clock__handoffHistory.effect.vibe"
+import { machine as remindersMachine } from "../../gen/clock__reminders.effect.vibe"
+import { machine as journalMemory, stored as journalStored } from "../../gen/clock__reminderJournal.effect.vibe"
+import { machine as tapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
+import { machine as shadeMachine } from "../../gen/clock__notifications.effect.vibe"
+import { machine as canonicalMachine } from "../../gen/clock__canonicalTaps.effect.vibe"
+import { machine as workflowMachine } from "../../gen/clock__workflowNotices.effect.vibe"
+import { machine as deletionsMachine } from "../../gen/clock__deletions.effect.vibe"
+import { machine as mirrorMachine } from "../../gen/clock__mirror.effect.vibe"
+import { Machine as NoticesMachine, machine as noticesMachine } from "../../gen/clock__notices.effect.vibe"
+import { actionsLayer, keepTime } from "./clock.vibe"
+import { ClockHandoff, handoffLayer } from "./handoff.vibe"
+import { agentReviewLayer } from "./agent-review.vibe"
+import { followReminderScreen, remindersLayer } from "./reminders.vibe"
+import { ReminderTaps, followReminderEvents, reminderTapsLayer } from "./reminder-taps.vibe"
+import { followShade, notificationsLayer } from "./notifications.vibe"
+import { CanonicalTaps, canonicalTapsLayer, followCanonicalTaps } from "./canonical-taps.vibe"
+import { WorkflowNotices, followWorkflowNotices, workflowNoticesLayer } from "./workflow-notices.vibe"
+import { deletionsLayer, followDeletions } from "./deletions.vibe"
+import { mirrorLayer } from "./mirror.vibe"
+import { pageVisible, primeOnGesture } from "./page.ts"
+import { ClockRecovery, keepUnreadable, recoveryLayer } from "./recovery.vibe"
+
+const key = (name: string) => ownerKey("device", `clock/${name}`)
+
+/** Stored data that cannot be read is kept as it is: the machine runs in memory, and the owner is told the data was kept. */
+function kept<A, E, R>(stored: (key: string) => Layer.Layer<A, E, R>, memory: Layer.Layer<A>, name: string, heading: string) {
+  return Layer.catch(stored(key(name)), () => Layer.merge(memory, Layer.effectDiscard(sync(() => keepUnreadable(heading, key(name))))))
+}
+
+const machines = Layer.mergeAll(
+  ringerMachine(),
+  kept(alarmsStored, alarmsMemory(), "alarms", "Alarms"),
+  kept(timersStored, timersMemory(), "timers", "Timers"),
+  kept(stopwatchStored, stopwatchMemory(), "stopwatch", "Stopwatch"),
+  kept(worldStored, worldMemory(), "world-clock", "World clock"),
+  handoffMachine(),
+  kept(historyStored, historyMemory(), "clock-handoff", "Clock history"),
+  remindersMachine(),
+  kept(journalStored, journalMemory(), "reminder-journal", "Reminder history"),
+  tapsMachine(),
+  shadeMachine(),
+  canonicalMachine(),
+  workflowMachine(),
+  deletionsMachine(),
+  mirrorMachine(),
+  noticesMachine(),
+)
+
+const services = Layer.mergeAll(
+  actionsLayer,
+  handoffLayer,
+  agentReviewLayer,
+  Layer.provideMerge(reminderTapsLayer, remindersLayer),
+  notificationsLayer,
+  canonicalTapsLayer,
+  workflowNoticesLayer,
+  deletionsLayer,
+  mirrorLayer,
+  recoveryLayer,
+)
+
+effect function followAttention() {
+  const notices = try NoticesMachine
+  const taps = try ReminderTaps
+  const canonical = try CanonicalTaps
+  const workflow = try WorkflowNotices
+  while (true) {
+    const visible = pageVisible()
+    if (visible !== (try notices.get()).visible) {
+      notices.send({ type: "setVisible", visible }) catch () => undefined
+      try taps.setBlocked(!visible)
+      if (visible) {
+        try canonical.wake()
+        try taps.check(false)
+        try workflow.check()
+      }
+    }
+    try sleep("1 second")
+  }
+}
+
+const background = Layer.effectDiscard(effect {
+  try (try ClockRecovery).announce()
+  try (try ClockHandoff).restore()
+  try acquireRelease(sync(() => primeOnGesture()), (stop) => sync(() => stop()))
+  fork.scoped keepTime()
+  fork.scoped followReminderEvents()
+  fork.scoped followShade()
+  fork.scoped followCanonicalTaps()
+  fork.scoped followWorkflowNotices()
+  fork.scoped followDeletions()
+  fork.scoped followAttention()
+  fork.scoped followReminderScreen()
+})
+
+/**
+ * Clock's machines and services: ClockActions, ClockHandoff, ClockReview, Reminders, ReminderTaps, Notifications,
+ * CanonicalTaps, WorkflowNotices, Deletions, Mirror and ClockRecovery. It needs Native, Build and KeyValueStore from the
+ * platform, Navigation (shell), CloudSession (account), Composer and Assistant (assistant), WorkflowRuns (workflows),
+ * NotesOrigins (notes) and the settings facts Machine (settings).
+ */
+export const layer = Layer.provideMerge(background, Layer.provideMerge(services, machines))

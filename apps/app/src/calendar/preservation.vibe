@@ -1,0 +1,315 @@
+// spec/calendar/preservation.md, "Story: Keep my old app calendar, read only, for each account that chose to"; spec/calendar/preservation.md, "A saved calendar that is unreadable or has unsettled changes needs recovery; a readable one needs the keep review"; spec/calendar/preservation.md, "A restore copies only reviewed event fields; every event gets a fresh identity and revision, alerts off"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type Preservation, type SavedCalendar, type Event as PreservationEvent, Machine as PreservationMachine, savedCalendar, backupAccepted, salvageKeepsGroup } from "../../gen/calendar__preservation.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import type { CalendarRecord, CalendarRepeat, GuestResponse } from "./model.vibe"
+import { validZone } from "./time.ts"
+
+/** The saved app calendar's raw document, under the key the earlier app wrote it. */
+export const LEGACY_KEY = "alpha.browser.calendar.v1"
+
+/** What a capture of the saved app calendar found. It never imports or writes. */
+export interface LegacyCapture {
+  readonly fingerprint: string
+  readonly present: boolean
+  readonly readable: boolean
+  readonly pending: boolean
+  readonly records: readonly CalendarRecord[]
+}
+
+/** Storage could not be read. */
+export error LegacyUnavailable { reason: string }
+/** The confirmation could not be recorded; `notice` is what the owner is told. */
+export error PreservationRefused { notice: "review-changed" | "storage-error" | "aborted" }
+
+/** The saved app calendar, read only, and each account's choice to keep it. */
+export service LegacyCalendar {
+  readonly changes: Stream.Stream<Preservation>
+  capture(): LegacyCapture!LegacyUnavailable
+  /** The fingerprint of the last capture. */
+  fingerprint(): string!!
+  /** Whether the current account has kept the current fingerprint read only. */
+  retainedReadOnly(): boolean!LegacyUnavailable
+  /** What Calendar must do about the saved app calendar before agent reads. */
+  standing(): SavedCalendar!LegacyUnavailable
+  /** The account or session the review is for. */
+  bind(owner: string, session: number): void!!
+  openReview(): void!!
+  leaveReview(): void!!
+  visibility(hidden: boolean): void!!
+  /** Record the owner's choice to keep the reviewed saved calendar read only, by a marker read back. */
+  confirmReadOnly(): void!PreservationRefused
+}
+
+/** A stable fingerprint of raw bytes, for change detection only. */
+export function fingerprintOf(raw: string | undefined): string {
+  if (raw === undefined) return "absent"
+  let hash = 0xcbf29ce484222325n
+  for (let index = 0; index < raw.length; index += 1) {
+    hash ^= BigInt(raw.charCodeAt(index))
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn
+  }
+  return hash.toString(16).padStart(16, "0")
+}
+
+const REPEATS: readonly CalendarRepeat[] = ["none", "daily", "weekdays", "weekly"]
+const RESPONSES: readonly GuestResponse[] = ["added", "invited", "yes", "maybe", "no"]
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** Whether a raw record is an event the saved calendar may hold. */
+function recordShape(row: unknown): row is CalendarRecord {
+  return isObject(row) && typeof row.id === "string" && row.id !== "" && typeof row.calendarId === "string" && typeof row.title === "string"
+    && typeof row.begin === "number" && Number.isFinite(row.begin) && typeof row.end === "number" && Number.isFinite(row.end) && row.end > row.begin
+    && (row.repeat === undefined || REPEATS.includes(row.repeat as CalendarRepeat))
+}
+
+/** The saved document's state, or undefined when it is no saved calendar. */
+export function readDocument(raw: string): { events: unknown[]; deletions?: Record<string, { phase?: string }>; creations?: Record<string, { acknowledged?: boolean }>; deleteClaims?: Record<string, string> } | undefined {
+  const parsed = parseJson(raw)
+  const value = isObject(parsed) && parsed.version === 1 && typeof parsed.value === "string" ? parseJson(parsed.value) : parsed
+  return isObject(value) && Array.isArray(value.events) ? value as never : undefined
+}
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+}
+
+/** Classify a capture of the saved document. */
+export function classify(raw: string | undefined): LegacyCapture {
+  const fingerprint = fingerprintOf(raw)
+  if (raw === undefined) return { fingerprint, present: false, readable: false, pending: false, records: [] }
+  const document = readDocument(raw)
+  const readable = document !== undefined && document.events.every(recordShape)
+  const pending = document !== undefined && (
+    Object.values(document.deletions ?? {}).some((entry) => entry.phase !== "deleted" && entry.phase !== "undone")
+    || Object.values(document.creations ?? {}).some((entry) => entry.acknowledged !== true)
+    || Object.keys(document.deleteClaims ?? {}).length > 0)
+  return { fingerprint, present: true, readable, pending, records: readable ? document.events as CalendarRecord[] : [] }
+}
+
+/** Why a backup was refused, said to the owner; nothing is changed. */
+export error BackupRefused { reason: "too-large" | "unsupported" | "nothing-recoverable" }
+
+/** A restored calendar: fresh identities and revisions, alerts off, invitations and receipts not imported. */
+export interface RestoredCalendar { readonly sourceRevision: string; readonly events: readonly CalendarRecord[] }
+
+function utf8Length(raw: string): number {
+  let bytes = 0
+  for (const character of raw) {
+    const code = character.codePointAt(0) ?? 0
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4
+  }
+  return bytes
+}
+
+function encodedSeriesId(id: string): string | undefined {
+  const match = /^(.*):occ:(-?\d+)$/.exec(id)
+  return match && Number.isSafeInteger(Number(match[2])) && String(Number(match[2])) === match[2] ? match[1] : undefined
+}
+
+function backupRows(raw: string): unknown[] | undefined {
+  const document = readDocument(raw)
+  return document && document.events.length <= 10_000 ? document.events : undefined
+}
+
+function instant(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= -62_135_596_800_000 && value <= 253_402_214_400_000 ? value : undefined
+}
+
+function text(value: unknown, max: number): string | undefined {
+  return typeof value === "string" && value.length <= max ? value : undefined
+}
+
+/** Every backed-up event with a fresh identity, or undefined when any event is invalid. */
+export function prepareBackup(raw: string, nextRevision: () => string): RestoredCalendar | undefined {
+  const rows = backupRows(raw)
+  if (rows === undefined || !backupAccepted(utf8Length(raw), rows.length, true)) return undefined
+  const sourceRevision = nextRevision()
+  const ids = new Map<string, string>()
+  const byId = new Map<string, Record<string, unknown>>()
+  for (const row of rows) {
+    if (!isObject(row)) return undefined
+    const id = text(row.id, 512)
+    if (!id || ids.has(id)) return undefined
+    ids.set(id, `restored-${sourceRevision}-${ids.size}`)
+    byId.set(id, row)
+  }
+  const events: CalendarRecord[] = []
+  for (const row of rows as Record<string, unknown>[]) {
+    const id = row.id as string
+    const parent = encodedSeriesId(id)
+    if (parent !== undefined && byId.has(parent) && row.seriesId !== parent) return undefined
+    const begin = instant(row.begin)
+    const end = instant(row.end)
+    const title = text(row.title, 500)
+    const body = text(row.body ?? "", 16_000)
+    const location = text(row.location ?? "", 2000)
+    const zone = row.timeZone === undefined ? "UTC" : text(row.timeZone, 100)
+    const repeat = (row.repeat ?? "none") as CalendarRepeat
+    if (begin === undefined || end === undefined || end <= begin || !title?.trim() || body === undefined || location === undefined) return undefined
+    if (zone === undefined || !validZone(zone) || !REPEATS.includes(repeat)) return undefined
+    if ((row.allDay !== undefined && typeof row.allDay !== "boolean") || (row.video !== undefined && typeof row.video !== "boolean")) return undefined
+    if (row.who !== undefined && (!Array.isArray(row.who) || row.who.length > 256)) return undefined
+    const who = ((row.who ?? []) as unknown[]).map((person) => text(person, 500))
+    if (who.some((person) => person === undefined)) return undefined
+    const responses: Record<string, GuestResponse> = {}
+    if (row.responses !== undefined) {
+      if (!isObject(row.responses)) return undefined
+      for (const [name, response] of Object.entries(row.responses)) {
+        if (!who.includes(name) || !RESPONSES.includes(response as GuestResponse)) return undefined
+        responses[name] = response as GuestResponse
+      }
+    }
+    if (row.excluded !== undefined && (!Array.isArray(row.excluded) || row.excluded.length > 10_000)) return undefined
+    const excluded = ((row.excluded ?? []) as unknown[]).map(instant)
+    if (excluded.some((value) => value === undefined)) return undefined
+    let restored: CalendarRecord = { id: ids.get(id)!, calendarId: "local", revision: nextRevision(), title, body, location, begin, end, timeZone: zone,
+      allDay: row.allDay === true, repeat, who: who as string[], responses, video: row.video === true, alert: null, excluded: excluded as number[] }
+    if (row.seriesId !== undefined) {
+      const seriesId = text(row.seriesId, 512)
+      const series = seriesId === undefined ? undefined : byId.get(seriesId)
+      const occurrenceBegin = instant(row.occurrenceBegin)
+      if (!series || series.seriesId !== undefined || !["daily", "weekdays", "weekly"].includes(series.repeat as string) || repeat !== "none") return undefined
+      if (occurrenceBegin === undefined || id !== `${seriesId}:occ:${occurrenceBegin}`) return undefined
+      const newSeries = ids.get(seriesId!)!
+      restored = { ...restored, seriesId: newSeries, occurrenceBegin, id: `${newSeries}:occ:${occurrenceBegin}` }
+    }
+    events.push(restored)
+  }
+  return { sourceRevision, events }
+}
+
+/** An explicit partial recovery: every series with its exceptions restores whole or not at all. */
+export function prepareSalvage(raw: string, nextRevision: () => string): { readonly restored: RestoredCalendar; readonly skipped: readonly { readonly index: number; readonly reason: string }[] } | undefined {
+  const rows = backupRows(raw)
+  if (rows === undefined) return undefined
+  const validId = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 512
+  const counts = new Map<string, number>()
+  for (const row of rows) if (isObject(row) && validId(row.id)) counts.set(row.id, (counts.get(row.id) ?? 0) + 1)
+  const parents = new Map<string, string>()
+  const root = (key: string): string => {
+    let found = key
+    while (parents.has(found)) found = parents.get(found)!
+    return found
+  }
+  const join = (left: string, right: string) => {
+    const a = root(left)
+    const b = root(right)
+    if (a !== b) parents.set(a, b)
+  }
+  const keyOf = (index: number) => {
+    const row = rows[index]
+    return isObject(row) && validId(row.id) ? JSON.stringify(["id", row.id]) : JSON.stringify(["invalid", index])
+  }
+  rows.forEach((row, index) => {
+    if (!isObject(row)) return
+    if (validId(row.seriesId)) join(keyOf(index), JSON.stringify(["id", row.seriesId]))
+    const inferred = validId(row.id) ? encodedSeriesId(row.id) : undefined
+    if (inferred !== undefined && counts.has(inferred)) join(keyOf(index), JSON.stringify(["id", inferred]))
+  })
+  const groups = new Map<string, number[]>()
+  rows.forEach((_row, index) => {
+    const key = root(keyOf(index))
+    groups.set(key, [...(groups.get(key) ?? []), index])
+  })
+  const accepted = new Set<number>()
+  const skipped: { index: number; reason: string }[] = []
+  for (const indexes of groups.values()) {
+    const group = indexes.map((index) => rows[index])
+    const duplicate = group.some((row) => isObject(row) && validId(row.id) && (counts.get(row.id) ?? 0) > 1)
+    const valid = !duplicate && prepareBackup(JSON.stringify({ events: group }), () => "validation") !== undefined
+    if (salvageKeepsGroup(valid, duplicate)) for (const index of indexes) accepted.add(index)
+    else for (const index of indexes) skipped.push({ index: index + 1, reason: duplicate ? "Ambiguous duplicate identity" : "Invalid event or incomplete recurring series" })
+  }
+  if (accepted.size === 0) return undefined
+  const restored = prepareBackup(JSON.stringify({ events: rows.filter((_row, index) => accepted.has(index)) }), nextRevision)
+  return restored === undefined ? undefined : { restored, skipped: skipped.sort((a, b) => a.index - b.index) }
+}
+
+/** The saved calendar service over the KeyValueStore and the preservation machine. */
+export const preservationLayer = Layer.effect(LegacyCalendar, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const machine = try PreservationMachine
+  const last = try Ref.make("absent")
+
+  effect function capture() {
+    const raw = try mapError(store.get(LEGACY_KEY), (cause) => new LegacyUnavailable({ reason: String(cause) }))
+    const found = classify(raw)
+    try Ref.set(last, found.fingerprint)
+    if (found.present) machine.send({ type: "observeInventory", fingerprint: found.fingerprint }) catch () => undefined
+    return found
+  }
+
+  effect function markerKey(owner: string) {
+    return ownerKey(owner, "calendar/retention")
+  }
+
+  effect function retained(owner: string, fingerprint: string) {
+    const raw = try mapError(store.get(try markerKey(owner)), (cause) => new LegacyUnavailable({ reason: String(cause) }))
+    const marker = raw === undefined ? undefined : parseJson(raw)
+    return isObject(marker) && marker.version === 1 && marker.disposition === "retained-read-only" && marker.fingerprint === fingerprint
+  }
+
+  effect function send(event: PreservationEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  return {
+    changes: machine.changes,
+    capture,
+    effect fingerprint() { return try Ref.get(last) },
+    effect retainedReadOnly() {
+      const state = try machine.get()
+      const found = try capture()
+      return !found.present || (try retained(state.owner, found.fingerprint))
+    },
+    effect standing() {
+      const state = try machine.get()
+      const found = try capture()
+      return savedCalendar(found.present, found.readable, found.pending, found.present && (try retained(state.owner, found.fingerprint)))
+    },
+    effect bind(owner: string, session: number) {
+      const state = try machine.get()
+      if (state.owner !== owner || state.session !== session) try send({ type: "replaceOwner", nextOwner: owner })
+    },
+    effect openReview() { try send({ type: "openReview" }) },
+    effect leaveReview() { try send({ type: "leaveReview" }) },
+    effect visibility(hidden: boolean) { try send({ type: hidden ? "hide" : "show" }) },
+    effect confirmReadOnly() {
+      const begun = try send({ type: "begin" })
+      if (begun === undefined) throw new PreservationRefused({ notice: "aborted" })
+      const id = begun.active
+      const found = try mapError(capture(), () => new PreservationRefused({ notice: "storage-error" }))
+      if (found.fingerprint !== begun.inventory && begun.inventory !== found.fingerprint) {
+        try send({ type: "reject", id, notice: "ReviewChanged" })
+        throw new PreservationRefused({ notice: "review-changed" })
+      }
+      if ((try send({ type: "captureValidated", id })) === undefined) throw new PreservationRefused({ notice: "review-changed" })
+      try send({ type: "markerRead", id })
+      try send({ type: "markerReceipt", id })
+      try send({ type: "dispatch", id })
+      const key = try markerKey(begun.owner)
+      const written = store.set(key, JSON.stringify({ version: 1, disposition: "retained-read-only", fingerprint: found.fingerprint })) catch () => "failed" as const
+      if (written === "failed") {
+        try send({ type: "reject", id, notice: "StorageError" })
+        throw new PreservationRefused({ notice: "storage-error" })
+      }
+      try send({ type: "commit", id })
+      const kept = retained(begun.owner, found.fingerprint) catch () => false
+      if (!kept) {
+        try send({ type: "reject", id, notice: "StorageError" })
+        throw new PreservationRefused({ notice: "storage-error" })
+      }
+      try send({ type: "markerReadback", id })
+      const done = try send({ type: "succeed", id })
+      if (done === undefined) throw new PreservationRefused({ notice: "aborted" })
+    },
+  }
+})

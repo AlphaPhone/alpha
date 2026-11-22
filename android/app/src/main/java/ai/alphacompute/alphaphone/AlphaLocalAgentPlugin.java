@@ -639,6 +639,7 @@ private static final class ResidentAttachDiagnostic {
   configureNativeViews(context.getAssets().open(AlphaImageCapability.verified(context)?"agent/image-native-view-declarations.json":"agent/native-view-declarations.json"),env);
   for(String key:new String[]{"ELIZA_NATIVE_GOOGLE_HOST_MODULE","ELIZA_NATIVE_GOOGLE_BINDING_JSON","ELIZA_NATIVE_GOOGLE_API_KEY","ELIZA_MANAGED_GMAIL_READ_BROKER","ELIZA_MANAGED_GMAIL_SEND_BROKER","ELIZA_MANAGED_GMAIL_OPERATION_BROKER","ELIZA_MANAGED_CALENDAR_READ_BROKER","ELIZA_MANAGED_CALENDAR_DELETE_ENABLED","ELIZA_NATIVE_GOOGLE_GMAIL_SEND_ENABLED","ELIZA_MANAGED_GMAIL_MAILBOX_CHANGES_ENABLED"})env.remove(key);
   env.remove("ELIZA_MOBILE_WORKFLOWS");
+  AlphaInferenceHost.configure(context,env);
   java.io.File nativeHostResources=null;
   java.io.InputStream workerIndex=null;
   try {workerIndex=context.getAssets().open("agent/workflow-worker/files.sha256");}
@@ -796,13 +797,6 @@ private static final class ResidentAttachDiagnostic {
   if(disposed||!credentialIntents.isCurrent(intent)||epoch!=lifecycleEpoch||credentialShutdownRetryEpoch!=epoch||credentialMutationEpoch>=0||!pending.contains(call)
     ||getActivity()==null||!getActivity().hasWindowFocus())throw new Superseded();
  }
- @PluginMethod public void start(PluginCall call) {
-  String requestId=call.getString("requestId");
-  if(requestId!=null&&!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
-  if(retryCredentialShutdown(call,requestId))return;
-  // Boot state reads take the service's processLock; never on the shared Capacitor thread.
-  PluginWorkers.submit(workers,()->startAfterShutdown(call,-1,-1),()->call.reject("Local agent bridge is closed."));
- }
  private void startAfterShutdown(PluginCall call,long continuationEpoch,long continuationIntent) {
   String requestId=call.getString("requestId");
   if(requestId!=null&&!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
@@ -939,28 +933,6 @@ private static final class ResidentAttachDiagnostic {
    if(pending.remove(call))call.reject(message,code);
   }
  }
- /** Only the current startup caller may retire a launch it created; reused services are never stopped here. */
- @PluginMethod public void cancelStart(PluginCall call) {
-  String requestId=call.getString("requestId","");
-  if(!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
-  synchronized(lifecycleLock){
-   if(disposed){call.reject("Local agent bridge is closed.");return;}
-   // A start that attached owns no launch: its cancellation retires nothing.
-   if(attachedStarts.remove(requestId)){call.resolve();return;}
-   if(requestId.equals(startRequestId)&&startRequestEpoch==lifecycleEpoch){
-    boolean stopOwned=startOwnsLaunch;
-    startRequestId=null;startOwnsLaunch=false;
-    invalidateCalls();++lifecycleEpoch;clearEnrollment();
-    if(stopOwned){
-     accepting=false;stopping=true;
-     try{ElizaAgentService.stop(getContext());}
-     catch(Exception uncertain){call.reject("Owned startup cancellation requested; check shutdown status.");return;}
-    }
-   }else if(cancelledStarts.size()<128)cancelledStarts.add(requestId);
-   else {call.reject("Startup cancellation capacity reached; reopen the app.");return;}
-   call.resolve();
-  }
- }
  static String startupRefusalMessage(String reason){return ResidentAttachment.startupRefusalMessage(reason);}
  private boolean rejectStartupRefusal(PluginCall call,long epoch,JSONObject status) throws Superseded {
   String reason=status.optString("reason");
@@ -969,9 +941,6 @@ private static final class ResidentAttachDiagnostic {
   synchronized(lifecycleLock){requireCurrent(epoch);if(pending.remove(call))call.reject(message,reason);return true;}
  }
  private static boolean shutdownConfirmed(JSONObject status){return ResidentAttachment.shutdownConfirmed(status);}
- /** Finite, foreground recovery review; all file ownership and archival remain service-owned. */
- @PluginMethod public void reviewRecovery(PluginCall call){ipcRecovery(call,false);}
- @PluginMethod public void archiveRecovery(PluginCall call){ipcRecovery(call,true);}
  private void ipcRecovery(PluginCall call,boolean archive){
   final String token=archive?call.getString("reviewToken",""):null;
   if(archive&&(token==null||!token.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"))){call.reject("Review recovery again before continuing.");return;}
@@ -998,28 +967,6 @@ private static final class ResidentAttachDiagnostic {
    }catch(Exception error){synchronized(lifecycleLock){recoveryReview.clear();}rejectPending(call,"Recovery could not be confirmed. Your records were kept. Review again before restarting.");}
   },()->rejectPending(call,"Recovery is unavailable right now. Your records were kept."));
  }
- @PluginMethod public void getStatus(PluginCall call) {
-  // Boot state reads take the service's processLock, held across asset extraction.
-  PluginWorkers.submit(workers,()->{try{
-   boolean packaged=runtimePackaged();
-   for(int attempt=0;attempt<3;attempt++){
-    final long observedEpoch;
-    synchronized(lifecycleLock){observedEpoch=lifecycleEpoch;}
-    // Native socket observation must never delay stop's epoch invalidation.
-    JSObject status=new JSObject(ElizaAgentService.getLocalAgentBootState(getContext()).toString());
-    synchronized(lifecycleLock){
-     if(observedEpoch!=lifecycleEpoch)continue;
-     if(stopping||!accepting){
-      boolean stopped=shutdownConfirmed(status)&&(credentialShutdownRequest==-1||credentialShutdownRequest>=0&&ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest));
-      if(stopped)stopping=false;
-      status.put("state",stopped?"stopped":"stopping");
-     }
-     status.put("packaged",packaged);call.resolve(status);return;
-    }
-   }
-   call.reject("Local runtime changed while checking status; check again.");
-  }catch(Exception error){call.reject("Local runtime status unavailable.");}},()->call.reject("Local agent bridge is closed."));
- }
  /** Updater owns a service shutdown lease; no vault/lifecycle monitor is held during the wait. */
  static long pauseForUpdate(Context context){
   final long request;
@@ -1033,20 +980,6 @@ private static final class ResidentAttachDiagnostic {
  }
  static boolean updateShutdownConfirmed(Context context,long request)throws Exception{return ElizaAgentService.isCredentialShutdownConfirmed(request)&&shutdownConfirmed(ElizaAgentService.getLocalAgentBootState(context));}
  static void releaseUpdateShutdown(long request){ElizaAgentService.releaseCredentialShutdown(request);}
- @PluginMethod public void stop(PluginCall call) {
-  synchronized(lifecycleLock){
-   if(disposed){call.reject("Local agent bridge is closed.");return;}
-   startRequestId=null;startOwnsLaunch=false;
-   AlphaCanonicalNotifications.forget(getContext());invalidateCalls();++lifecycleEpoch;accepting=false;stopping=true;clearEnrollment();
-   // A retained, unconfirmed credential stop reports stopped only on its own ACK. Reissue the strict
-   // stop so that ACK can arrive once whatever refused it has exited; nothing launches here. A
-   // credential write in flight still owns its request. A Retry in flight is superseded above.
-   boolean strict=credentialShutdownRequest>=0&&credentialMutationEpoch<0
-     &&!ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest);
-   try{if(strict)reissueCredentialShutdownLocked();else ElizaAgentService.stop(getContext());call.resolve(new JSObject().put("state","stopping"));}
-   catch(Exception unavailable){call.reject("Your agent may still be running. Try stopping it again.");}
-  }
- }
  /** Native speech uses only the existing enrollment, bound to its exact token and runtime epoch. */
  static ai.eliza.voice.LiveSegmentPipe.Transport openNativeVoiceTransport(String expectedOwner)throws Exception{
   final String root,token,owner;final long epoch;
@@ -1301,190 +1234,10 @@ private static final class ResidentAttachDiagnostic {
   if(!root.equals(rootToken)||ownerToken==null||expiresAt<=System.currentTimeMillis()+30000)throw new RuntimeRootChanged();
   return ownerToken;
  }
- @PluginMethod public void request(PluginCall call) {
-  long entered=android.os.SystemClock.elapsedRealtime();
-  String path=call.getString("path",""),method=call.getString("method","GET"),body=call.getString("body"),expectedOwner=call.getString("ownerId");
-  boolean startupRead=expectedOwner==null&&"GET".equals(method)&&("/api/auth/me".equals(path)||"/api/agents".equals(path));
-  if(path.endsWith("/navigate")&&!PreparedViewNavigation.allowed(path,method,body)){call.reject("Unsupported navigation preparation.");return;}
-  OwnerRoutes routes;
-  try{routes=OwnerRoutes.shipped(getContext().getAssets()::open);}catch(IllegalStateException unavailable){logRequestFailure("other",method,0,"route-table");call.reject("Unsupported local agent request.");return;}
-  String group=routes.group(path);
-  if(!routes.requestAllowed(path,method,body,expectedOwner)){
-   logRequestFailure(group==null?"other":group,method,0,"gate");
-   call.reject("Unsupported local agent request.");return;
-  }
-  final Long deadline;
-  try{
-   deadline=localRequestDeadline(call.getData(),entered);
-   remainingLocalRequestTimeout(deadline);
-  }catch(IllegalArgumentException invalid){call.reject("Invalid local agent request timeout.");return;}
-  catch(RequestDeadlineExpired expired){
-   if(startupRead)call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");
-   else call.reject(REQUEST_DEADLINE_MESSAGE);
-   return;
-  }
-  JSONObject headers=call.getObject("headers");
-  final String cancelId=call.getString("cancelId");
-  if(cancelId!=null&&!cancelId.matches("[A-Za-z0-9-]{16,64}")){logRequestFailure(group==null?"other":group,method,0,"cancel-id");call.reject("Unsupported local agent request.");return;}
-  final long epoch;
-  try{synchronized(lifecycleLock){epoch=admittedEpoch();if(cancelId!=null&&withdrawable.containsKey(cancelId))throw new Superseded();pending.add(call);if(cancelId!=null)withdrawable.put(cancelId,call);}}catch(Superseded stale){call.reject("Local agent is stopped or unavailable.","LOCAL_AGENT_EPOCH_CHANGED");return;}
-  PluginWorkers.submit(workers,()->{try{
-   // A withdrawn or superseded call is no longer owned: it stops here, before enrollment.
-   requireOwned(call,epoch);
-   remainingLocalRequestTimeout(deadline);
-   final String token,startupRoot;
-   if(startupRead)synchronized(lifecycleLock){
-    requireOwned(call,epoch);
-    startupRoot=rootToken;
-    token=startupReadToken(epoch,startupRoot);
-   }else{
-    startupRoot=null;
-    token=enroll(epoch);
-   }
-   synchronized(lifecycleLock){requireCurrent(epoch);if(expectedOwner!=null&&!expectedOwner.equals(ownerIdentity)){logRequestFailure(group==null?"other":group,method,409,"owner-mismatch");resolveCurrent(call,epoch,new JSObject().put("status",409).put("body","{\"error\":\"Local owner changed; reconnect before continuing\"}"));return;}}
-   requireOwned(call,epoch);
-   if("telephony".equals(group)){
-    if(!AlphaImageCapability.verified(getContext()))throw new SecurityException("Reply drafting requires the Alpha image");
-    requireProviderOwner(true);
-   }
-   JSONObject result=raw(path,method,body,token,headers,remainingLocalRequestTimeout(deadline));
-   int status=result.getInt("status");
-   if(status>=400)logRequestFailure(group==null?"other":group,method,status,"http");
-   synchronized(lifecycleLock){
-    requireCurrent(epoch);
-    if(startupRead){
-     if(!token.equals(startupReadToken(epoch,startupRoot)))throw new RuntimeRootChanged();
-     if(status>=500&&status<=599)throw new java.io.IOException();
-    }
-    if(status==401||startupRead&&status==403)clearEnrollment();
-    if(startupRead&&(status==401||status==403)){
-     if(pending.remove(call))call.reject("Alpha couldn’t verify the local agent.","runtime-identity-unavailable");
-     return;
-    }
-   }
-   if(path.equals("/api/auth/me")&&status==200){JSONObject who=new JSONObject(result.getString("body"));who.getJSONObject("session").put("id","native-owned-session");result.put("body",who.toString());result.remove("bodyBase64");}
-   resolveCurrent(call,epoch,new JSObject(result.toString()));
-  }catch(RequestDeadlineExpired expired){
-   if(startupRead)rejectStartupReadPending(call);
-   else rejectPending(call,REQUEST_DEADLINE_MESSAGE);
-  }
-  catch(Superseded stale){rejectSuperseded(call);}
-  catch(Exception error){
-   logRequestFailure(group==null?"other":group,method,0,"transport");
-   if(startupRead&&(error instanceof RuntimeRootChanged||error instanceof java.io.IOException)){
-    rejectStartupReadPending(call);
-   }else rejectPending(call,"Local agent request failed. No automatic retry was made.");
-  }
-  finally{forgetWithdrawable(cancelId,call);}},()->{forgetWithdrawable(cancelId,call);rejectPending(call,"Local agent bridge is closed.");});
- }
  private void rejectStartupReadPending(PluginCall call){
   synchronized(lifecycleLock){if(pending.remove(call))call.reject("Alpha is getting ready.","LOCAL_AGENT_ATTACH_PENDING");}
  }
  private void forgetWithdrawable(String cancelId,PluginCall call){if(cancelId!=null)synchronized(lifecycleLock){withdrawable.remove(cancelId,call);}}
- /**
-  * Withdraws a plain request its caller abandoned. The call is answered now and stops being owned,
-  * so one still queued or enrolling is never sent to the runtime. One already sent keeps its worker
-  * until the transport answers or times out, and its effect may have completed: withdrawal closes
-  * no transport and cancels no server effect.
-  */
- @PluginMethod public void cancelRequest(PluginCall call) {
-  String id=call.getString("cancelId","");boolean withdrawn=false;
-  synchronized(lifecycleLock){
-   PluginCall request=withdrawable.remove(id);
-   if(request!=null&&pending.remove(request)){withdrawn=true;request.reject("Local agent request cancelled. A dispatched operation may still have completed; inspect its receipt before retrying.","LOCAL_AGENT_REQUEST_CANCELLED");}
-  }
-  call.resolve(new JSObject().put("withdrawn",withdrawn).put("outcome","unknown"));
- }
- /** Cancellation acknowledges transport closure, never server-effect cancellation. */
- @PluginMethod public void cancelStream(PluginCall call) {
-  String id=call.getString("streamId","");
-  synchronized(lifecycleLock){var handle=streams.remove(id);streamInvalidators.remove(id);if(handle!=null)handle.cancel();}
-  call.resolve(new JSObject().put("transportClosed",true).put("outcome","unknown"));
- }
- @PluginMethod public void requestStream(PluginCall call) {
-  String id=call.getString("streamId",""),path=call.getString("path",""),owner=call.getString("ownerId",""),body=call.getString("body","");
-  if(!id.matches("[A-Za-z0-9-]{16,64}")||id.startsWith("voice-")||id.startsWith("view-")||!path.matches("^/api/conversations/[A-Za-z0-9_-]+/messages/stream$")||owner.isEmpty()||body.isEmpty()||body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>OwnerRoutes.requestBodyLimit(path,"POST")){call.reject("Unsupported local stream.");return;}
-  final long epoch;final var handle=new ElizaAgentService.LocalStreamHandle();
-  try{synchronized(lifecycleLock){epoch=admittedEpoch();if(streams.keySet().stream().filter(value->!value.startsWith("voice-")&&!value.startsWith("view-")).count()>=2||streams.containsKey(id))throw new IllegalStateException();streams.put(id,handle);streamInvalidators.put(id,()->notifyListeners("alphaAgentStream",new JSObject().put("streamId",id).put("event",new JSObject().put("type","complete").put("error","Local connection changed. Outcome unknown; check history before retrying."))));}}
-  catch(Exception unavailable){call.reject("Local stream unavailable.");return;}
-  final JSONObject supplied=call.getObject("headers");
-  call.resolve(new JSObject().put("streamId",id));
-  PluginWorkers.submit(workers,()->{try{
-   String token=enroll(epoch);JSONObject headers=new JSONObject().put("Authorization","Bearer "+token).put("Accept","text/event-stream").put("Content-Type","application/json");
-   if(supplied!=null)for(String key:new String[]{"X-Eliza-Device-Id","X-Eliza-Device-Key","X-Eliza-Device-Capabilities","X-ElizaOS-Client-Id"})if(supplied.has(key)){String value=supplied.getString(key);if(value.length()>2048||value.contains("\r")||value.contains("\n")||("X-ElizaOS-Client-Id".equals(key)&&!value.matches("[A-Za-z0-9._-]{1,128}")))throw new IllegalArgumentException();headers.put(key,value);}
-   if(supplied!=null&&supplied.has("X-Eliza-Trace-Id")){
-    String traceId=supplied.getString("X-Eliza-Trace-Id");
-    JSONObject turn=new JSONObject(body);
-    String turnId=turn.optString("clientMessageId");
-    if(!"VOICE_DM".equals(turn.optString("channelType"))||!traceId.matches("[a-f0-9]{32}")||traceId.matches("0{32}")||
-       !turnId.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")||!traceId.equals(turnId.replace("-","")))throw new IllegalArgumentException();
-    headers.put("X-Eliza-Trace-Id",traceId);
-   }
-   synchronized(lifecycleLock){requireCurrent(epoch);if(!owner.equals(ownerIdentity)||streams.get(id)!=handle)throw new Superseded();}
-   JSONObject input=new JSONObject().put("path",path).put("method","POST").put("body",body).put("headers",headers).put("timeoutMs",120000);
-   ElizaAgentService.requestLocalAgentStream(input.toString(),event->{synchronized(lifecycleLock){try{requireCurrent(epoch);if(streams.get(id)!=handle)return;JSONObject value=new JSONObject(event);if("response".equals(value.optString("type"))&&value.optInt("status")==401)clearEnrollment();notifyListeners("alphaAgentStream",new JSObject().put("streamId",id).put("event",value));}catch(Exception ignored){}}},handle);
-  }catch(Exception error){synchronized(lifecycleLock){if(streams.get(id)==handle)notifyListeners("alphaAgentStream",new JSObject().put("streamId",id).put("event",new JSObject().put("type","complete").put("error","Stream interrupted. Outcome unknown; check history before retrying.")));}}
-  finally{synchronized(lifecycleLock){if(streams.get(id)==handle){streams.remove(id);streamInvalidators.remove(id);}handle.cancel();}}},()->{synchronized(lifecycleLock){streams.remove(id);streamInvalidators.remove(id);handle.cancel();}notifyListeners("alphaAgentStream",new JSObject().put("streamId",id).put("event",new JSObject().put("type","complete").put("error","Stream unavailable.")));});
- }
- /** A single ephemeral voice-only feed per surface. Never expose the root credential or
-  * general agent events to the renderer. Uses its own bounded worker so an open feed cannot
-  * occupy a request worker needed by ASR or cancellation. Lifecycle invalidation owns its socket. */
- @PluginMethod public void subscribeVoiceEvents(PluginCall call) {
-  String id=call.getString("subscriptionId",""),owner=call.getString("ownerId","");
-  if(!id.matches("[A-Za-z0-9-]{16,64}")||owner.isEmpty()){call.reject("Invalid voice subscription.");return;}
-  String key="voice-"+id;final long epoch;final var handle=new ElizaAgentService.LocalStreamHandle();
-  try{synchronized(lifecycleLock){epoch=admittedEpoch();if(streams.keySet().stream().anyMatch(value->value.startsWith("voice-")))throw new IllegalStateException();streams.put(key,handle);streamInvalidators.put(key,()->notifyListeners("alphaVoiceEvent",new JSObject().put("subscriptionId",id).put("type","end")));}}
-  catch(Exception unavailable){call.reject("Voice subscription unavailable.");return;}
-  call.resolve(new JSObject().put("subscriptionId",id));
-  PluginWorkers.submit(voiceWorkers,()->{try{
-   enroll(epoch);final String admittedRoot;
-   synchronized(lifecycleLock){requireCurrent(epoch);admittedRoot=rootToken;if(!VoiceEventAdmission.current(admittedRoot,rootToken,ElizaAgentService.localAgentToken(),owner,ownerIdentity,expiresAt,System.currentTimeMillis())||streams.get(key)!=handle)throw new Superseded();}
-   JSONObject input=new JSONObject().put("streams",new org.json.JSONArray().put("voice-transcript"));
-   ElizaAgentService.subscribeLocalAgentEvents(input.toString(),event->{synchronized(lifecycleLock){try{
-    requireCurrent(epoch);if(streams.get(key)!=handle)return;
-    if(!VoiceEventAdmission.current(admittedRoot,rootToken,ElizaAgentService.localAgentToken(),owner,ownerIdentity,expiresAt,System.currentTimeMillis())){handle.cancel();return;}
-    JSONObject value=new JSONObject(event);
-    if(!"event".equals(value.optString("type")))return;
-    JSONObject envelope=value.optJSONObject("event");if(envelope==null||!"agent_event".equals(envelope.optString("type"))||!"voice-transcript".equals(envelope.optString("stream")))return;
-    notifyListeners("alphaVoiceEvent",new JSObject().put("subscriptionId",id).put("type","event").put("event",envelope));
-   }catch(Exception ignored){handle.cancel();}}},handle);
-  }catch(Exception unavailable){/* Final HTTP transcripts remain available if the optional feed fails. */}
-  finally{synchronized(lifecycleLock){if(streams.get(key)==handle){streams.remove(key);streamInvalidators.remove(key);notifyListeners("alphaVoiceEvent",new JSObject().put("subscriptionId",id).put("type","end"));}handle.cancel();}}},()->{synchronized(lifecycleLock){if(streams.get(key)==handle){streams.remove(key);streamInvalidators.remove(key);notifyListeners("alphaVoiceEvent",new JSObject().put("subscriptionId",id).put("type","end"));}handle.cancel();}});
- }
- @PluginMethod public void unsubscribeVoiceEvents(PluginCall call) {
-  String key="voice-"+call.getString("subscriptionId","");
-  synchronized(lifecycleLock){var handle=streams.remove(key);streamInvalidators.remove(key);if(handle!=null)handle.cancel();}
-  call.resolve(new JSObject().put("closed",true));
- }
- @PluginMethod public void subscribeViewEvents(PluginCall call) {
-  String id=call.getString("subscriptionId",""),owner=call.getString("ownerId",""),clientId=call.getString("clientId","");
-  if(!id.matches("[A-Za-z0-9-]{16,64}")||owner.isEmpty()||!clientId.matches("[A-Za-z0-9._-]{1,128}")){call.reject("Invalid voice subscription.");return;}
-  String key="view-"+id;final long epoch;final var handle=new ElizaAgentService.LocalStreamHandle();
-  try{synchronized(lifecycleLock){epoch=admittedEpoch();if(streams.keySet().stream().anyMatch(value->value.startsWith("view-")))throw new IllegalStateException();streams.put(key,handle);streamInvalidators.put(key,()->notifyListeners("alphaViewEvent",new JSObject().put("subscriptionId",id).put("type","end")));}}
-  catch(Exception unavailable){call.reject("Renderer subscription unavailable.");return;}
-  final java.util.concurrent.atomic.AtomicBoolean resolved=new java.util.concurrent.atomic.AtomicBoolean();
-  PluginWorkers.submit(rendererWorkers,()->{try{
-   enroll(epoch);final String admittedRoot;
-   synchronized(lifecycleLock){requireCurrent(epoch);admittedRoot=rootToken;if(!VoiceEventAdmission.current(admittedRoot,rootToken,ElizaAgentService.localAgentToken(),owner,ownerIdentity,expiresAt,System.currentTimeMillis())||streams.get(key)!=handle)throw new Superseded();}
-   JSONObject input=new JSONObject().put("streams",new org.json.JSONArray().put("view-interact")).put("clientId",clientId);
-   ElizaAgentService.subscribeLocalAgentEvents(input.toString(),event->{synchronized(lifecycleLock){try{
-    requireCurrent(epoch);if(streams.get(key)!=handle)return;
-    if(!VoiceEventAdmission.current(admittedRoot,rootToken,ElizaAgentService.localAgentToken(),owner,ownerIdentity,expiresAt,System.currentTimeMillis())){handle.cancel();return;}
-    JSONObject value=new JSONObject(event);
-    if("subscribed".equals(value.optString("type"))){if(resolved.compareAndSet(false,true))call.resolve(new JSObject().put("subscriptionId",id));return;}
-    if(!"event".equals(value.optString("type")))return;
-    JSONObject envelope=value.optJSONObject("event");if(envelope==null||!"agent_event".equals(envelope.optString("type"))||!"view-interact".equals(envelope.optString("stream")))return;
-    JSONObject payload=envelope.optJSONObject("payload");if(payload==null||!clientId.equals(payload.optString("clientId")))return;
-    notifyListeners("alphaViewEvent",new JSObject().put("subscriptionId",id).put("type","event").put("event",envelope));
-   }catch(Exception ignored){handle.cancel();}}},handle);
-  }catch(Exception unavailable){if(resolved.compareAndSet(false,true))call.reject("Renderer subscription unavailable.");}
-  finally{if(resolved.compareAndSet(false,true))call.reject("Renderer subscription ended before admission.");synchronized(lifecycleLock){if(streams.get(key)==handle){streams.remove(key);streamInvalidators.remove(key);notifyListeners("alphaViewEvent",new JSObject().put("subscriptionId",id).put("type","end"));}handle.cancel();}}},()->{if(resolved.compareAndSet(false,true))call.reject("Renderer worker unavailable.");synchronized(lifecycleLock){if(streams.get(key)==handle){streams.remove(key);streamInvalidators.remove(key);notifyListeners("alphaViewEvent",new JSObject().put("subscriptionId",id).put("type","end"));}handle.cancel();}});
- }
- @PluginMethod public void unsubscribeViewEvents(PluginCall call) {
-  String key="view-"+call.getString("subscriptionId","");
-  synchronized(lifecycleLock){var handle=streams.remove(key);streamInvalidators.remove(key);if(handle!=null)handle.cancel();}
-  call.resolve(new JSObject().put("closed",true));
- }
  /** Destroying one surface (for example closing the assistant) cancels only this instance's
   * calls and streams. The shared runtime, its epoch and the owner enrollment stay valid for
   * other surfaces. When the last surface goes away (the app is closed or recreated) the epoch

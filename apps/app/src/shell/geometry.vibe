@@ -1,0 +1,69 @@
+// spec/shell/geometry.md, "Story: Type without the page turning sideways"; spec/shell/geometry.md, "Story: Read everything at the text size I chose"
+import { Machine as GeometryMachine, extraLargeText, largeText, type Event as GeometryEvent, type Geometry } from "../../gen/shell__geometry.effect.vibe"
+import { KeyboardVisibility } from "./native.schema.vibe"
+import { Navigation } from "./navigation.vibe"
+import {
+  blurActive, dockFootprint, focusedField, headerBottom, layoutChanges, pageEvents, pageHidden, resizes,
+  setRootClass, setRootProperty, textScales, windowSize,
+} from "./page.ts"
+
+effect function sendTo(machine: GeometryMachine.Shape, event: GeometryEvent) {
+  machine.send(event) catch () => undefined
+}
+
+effect function measureWindow(machine: GeometryMachine.Shape) {
+  const size = windowSize()
+  try sendTo(machine, { type: "resize", width: size.width, layoutHeight: size.layoutHeight, visualHeight: size.visualHeight })
+}
+
+effect function measureLayout(machine: GeometryMachine.Shape) {
+  const footprint = dockFootprint()
+  if (footprint !== undefined) try sendTo(machine, { type: "dockMeasured", clearance: footprint.clearance, rest: footprint.rest })
+  try sendTo(machine, { type: "headerMeasured", px: headerBottom() })
+}
+
+function publish(state: Geometry): void {
+  setRootProperty("--alpha-free-height", `${state.free}px`)
+  setRootProperty("--alpha-canvas-width", `${state.canvasWidth}px`)
+  setRootProperty("--alpha-text-scale", String(state.textScale / 100))
+  setRootProperty("--alpha-dock-clearance", state.clearance < 0 ? undefined : `${state.clearance}px`)
+  setRootProperty("--alpha-dock-rest", state.rest < 0 ? undefined : `${state.rest}px`)
+  setRootProperty("--alpha-header-clearance", `${state.header}px`)
+  setRootClass("alpha-landscape", state.landscape)
+  setRootClass("alpha-wide", state.wide)
+  setRootClass("alpha-large-text", largeText(state))
+  setRootClass("alpha-text-xl", extraLargeText(state))
+}
+
+/** The geometry machine, measured from the window, the keyboard, the text probe and the dock. */
+export const geometryLive = Layer.effectDiscard(effect {
+  const machine = try GeometryMachine
+  const navigation = try Navigation
+  const size = windowSize()
+  const host = (try navigation.get()).host
+  try sendTo(machine, { type: "mount", width: size.width, height: size.layoutHeight, launcher: host === "HomeApp" || host === "LauncherApp" })
+  let releases = (try machine.get()).releases
+  fork.scoped (effect {
+    for try (const state of machine.changes) {
+      try sync(() => publish(state))
+      if (state.releases > releases) try sync(() => blurActive())
+      releases = state.releases
+    }
+  })
+  fork.scoped (effect { for try (const _ of resizes()) { try measureWindow(machine); try measureLayout(machine) } })
+  fork.scoped (effect { for try (const _ of layoutChanges()) try measureLayout(machine) })
+  fork.scoped (effect { for try (const scale of textScales()) try sendTo(machine, { type: "measureText", scale }) })
+  fork.scoped (effect { for try (const _ of pageEvents("focusin", "document")) try sendTo(machine, { type: "focusField", field: focusedField() }) })
+  fork.scoped (effect { for try (const _ of pageEvents("focusout", "document")) try sendTo(machine, { type: "focusField", field: focusedField() }) })
+  fork.scoped (effect {
+    for try (const detail of pageEvents("alpha-keyboard-visibility")) {
+      const shown = Schema.decodeUnknownEffect(KeyboardVisibility)(detail) catch () => undefined
+      if (shown !== undefined) try sendTo(machine, { type: "keyboardShown", visible: shown.visible, handoff: shown.handoff })
+    }
+  })
+  fork.scoped (effect {
+    for try (const _ of pageEvents("visibilitychange", "document")) {
+      if (pageHidden()) try sendTo(machine, { type: "background" })
+    }
+  })
+})

@@ -1,0 +1,222 @@
+// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
+import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
+import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
+import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, curTab, isPrivateTab, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
+import { type Preference, Machine, machine } from "../../gen/browser__agent.effect.vibe"
+import type { PageCommand } from "../../gen/browser__page.ts"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { matchingTabs, newId, newTabId, searchAddress } from "./address.ts"
+import { AGENT_REFUSALS } from "./messages.ts"
+import { BrowserReviews } from "./reviews.vibe"
+import { BrowserTabs } from "./session.vibe"
+import { TabHost } from "./tabHost.vibe"
+
+/** An agent request refused before any effect: nothing happened, and the message says why. */
+export error BrowserOpenRefused { message: string }
+
+/** What the owner chooses when a request's words match several tabs. */
+export interface BrowserTabChoice {
+  readonly verb: "Switch to" | "Close"
+  readonly options: readonly { readonly title: string; readonly host: string; readonly priv: boolean }[]
+}
+
+/** The opaque identity of the selected tab's document: never its address or content. */
+export interface BrowserTabSelection {
+  readonly kind: "browser-tab"
+  readonly id: string
+  readonly revision: string
+}
+
+/** The receipt a view command answers with: a dispatch, never a finished page, or a typed refusal before any effect. */
+export type ViewCommandAnswer =
+  | { readonly ok: true; readonly data: { readonly dispatched: true; readonly completed: false; readonly requiresReadback: true } }
+  | { readonly ok: false; readonly code: "UNAVAILABLE" | "UNSUPPORTED" | "STALE_REF"; readonly message: string }
+
+/** What the agent may do in Browser. */
+export service BrowserAgent {
+  /** An approved HTTPS open: the tab it loaded into, and how to show it after the action's receipt. */
+  openApproved(url: string, newTab: boolean): Effect.Effect<{ readonly tab: string; readonly present: Effect.Effect<void> }, BrowserOpenRefused>
+  /** A reviewed Browser control from chat; the returned presentation runs after the action's journal and receipt. */
+  control(operation: unknown, observed: BrowserTabSelection | undefined, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>): Effect.Effect<Effect.Effect<void>, BrowserOpenRefused>
+  /** A view command from the assistant's Browser view, claimed once and never repeated. */
+  command(raw: unknown, selection: unknown): ViewCommandAnswer!!
+  /** The owner's "review phone actions first" preference. */
+  prefer(preference: Preference): void!!
+  /** The selected tab's identity for a proposal. */
+  selection(): Effect.Effect<BrowserTabSelection | undefined>
+  /** Whether a switch request's words match more than one tab. */
+  tabNeedsChoice(target: string): boolean!!
+  /** Asks the owner to approve a reviewed control on the shown, unlocked phone. */
+  review(operation: unknown): boolean!BrowserOpenRefused
+}
+
+const historyOf = { back: "GoBack", forward: "GoForward", reload: "Reload", stop: "StopLoading" } as const satisfies Record<string, PageCommand>
+
+function inBrowser(state: ForegroundState): boolean {
+  return state.visible && state.screen === "home" && state.view === "browser"
+}
+
+/** BrowserAgent over the session and the agent machine in memory. */
+export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
+  const tabs = try BrowserTabs
+  const agent = try Machine
+  const host = try TabHost
+  const foreground = try Foreground
+  const reviews = try BrowserReviews
+
+  const refuse = (outcome: AgentOutcome) => new BrowserOpenRefused({ message: AGENT_REFUSALS[outcome] })
+
+  effect function settleOf(event: SessionEvent, request: string) {
+    const result = try tabs.dispatch(event)
+    return result.settled.find((s: AgentSettled) => s.request === request)
+  }
+
+  effect function open(url: string, newTab: boolean) {
+    const request = newId()
+    const shown = inBrowser(try foreground.get())
+    const selected = (try tabs.get()).cur
+    const settled = try settleOf({ type: "agentOpen", request, id: newTabId(), url, newTab, inBrowser: shown }, request)
+    if (settled === undefined) throw refuse("RefusedChanged")
+    if (settled.outcome !== "Dispatched") throw refuse(settled.outcome)
+    agent.send({ type: "executed", tab: settled.tab }) catch () => undefined
+    return {
+      tab: settled.tab,
+      present: effect {
+        try tabs.dispatch({ type: "agentPresent", tab: settled.tab, selected, edit: false })
+        agent.send({ type: "presentOpened", foreground: inBrowser(try foreground.get()) || (try foreground.get()).visible }) catch () => undefined
+      },
+    }
+  }
+
+  effect function chosen(target: string, closing: boolean, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>) {
+    const state = try tabs.get()
+    const shown = inBrowser(try foreground.get())
+    const visible = visibleTabs(state, shown)
+    const page = (t: BrowserTab) => ({ title: t.page.title || t.restoreTitle, url: t.page.url || t.restoreUrl })
+    const named = matchingTabs(closing || !shown ? visible : visible.filter((t) => t.id !== state.cur), target, page)
+    if (named.length === 0) {
+      throw new BrowserOpenRefused({ message: !closing && matchingTabs(visible, target, page).length > 0 ? AGENT_REFUSALS.RefusedShowing : `No open tab matches “${target}”.` })
+    }
+    if (named.length === 1) return named[0]!.id
+    const pick = try choose({
+      verb: closing ? "Close" : "Switch to",
+      options: named.map((t) => ({ title: page(t).title || page(t).url || (t.profile === "Private" ? "New private tab" : "New tab"), host: URL.parse(page(t).url)?.host ?? "", priv: t.profile === "Private" })),
+    })
+    const id = pick === null ? undefined : named[pick]?.id
+    if (id === undefined) throw new BrowserOpenRefused({ message: `More than one tab matches “${target}”, and none was chosen.` })
+    if ((try tabs.get()).cur !== state.cur) throw new BrowserOpenRefused({ message: "Browser changed while you were choosing. Nothing was done." })
+    return id
+  }
+
+  effect function outcome(event: SessionEvent, request: string) {
+    const settled = try settleOf(event, request)
+    if (settled === undefined) throw refuse("RefusedChanged")
+    if (settled.outcome !== "Done" && settled.outcome !== "Dispatched") throw refuse(settled.outcome)
+    return settled
+  }
+
+  return {
+    effect openApproved(url: string, newTab: boolean) {
+      const parsed = parseBrowserNavigate({ type: "browser_navigate", url, ...(newTab ? { newTab: true } : {}) })
+      if (!parsed.ok) throw new BrowserOpenRefused({ message: "Only HTTPS destinations may be approved" })
+      return try open(parsed.operation.url, newTab)
+    },
+    effect control(raw: unknown, observed: BrowserTabSelection | undefined, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>) {
+      const parsed = parseBrowserControl(raw)
+      if (!parsed.ok) throw new BrowserOpenRefused({ message: parsed.reason })
+      const operation: BrowserControlOperation = parsed.operation
+      const state = try tabs.get()
+      const selected = state.cur
+      const shown = inBrowser(try foreground.get())
+      const request = newId()
+      const observedTab = observed === undefined ? "" : observed.id.slice(observed.id.indexOf(":") + 1)
+      const observedRevision = observed === undefined ? 0 : Number(observed.revision)
+      switch (operation.type) {
+        case "browser_search": {
+          const opened = try open(searchAddress(operation.query), false)
+          return opened.present
+        }
+        case "browser_tab_new": {
+          const id = newTabId()
+          try outcome({ type: "agentTabNew", request, id, priv: operation.private === true }, request)
+          return effect { try tabs.dispatch({ type: "agentPresent", tab: id, selected, edit: true }) }
+        }
+        case "browser_tab_switch": {
+          const target = try chosen(operation.target, false, choose)
+          try outcome({ type: "agentSwitch", request, target, inBrowser: shown }, request)
+          return effect { try tabs.dispatch({ type: "agentPresent", tab: target, selected, edit: false }) }
+        }
+        case "browser_tab_close": {
+          if (operation.target === undefined && isPrivateTab(state, selected) && !shown) throw refuse("RefusedPrivate")
+          const target = operation.target === undefined ? "" : try chosen(operation.target, true, choose)
+          const settled = try outcome({ type: "agentClose", request, target, inBrowser: shown, fallback: newTabId() }, request)
+          if (settled.tab !== selected) return effect { try tabs.dispatch({ type: "agentPresent", tab: (try tabs.get()).cur, selected, edit: false }) }
+          return effect { try tabs.dispatch({ type: "agentCloseShown", tab: selected, selected, fallback: newTabId() }) }
+        }
+        case "browser_find": {
+          try outcome({ type: "agentFind", request, query: operation.text }, request)
+          try tabs.typeFind(operation.text)
+          return effect { try tabs.dispatch({ type: "agentPresent", tab: selected, selected, edit: false }) }
+        }
+        case "browser_history": {
+          const command = historyOf[operation.action]
+          try outcome({ type: "agentHistory", request, command, observedTab, observedRevision }, request)
+          const navigation = curTab(state).page.navigation
+          return effect { try tabs.dispatch({ type: "agentCommandShown", tab: selected, command, navigation }) }
+        }
+      }
+    },
+    effect command(raw: unknown, selection: unknown) {
+      const parsed = parseNativeHistoryCommand(raw, selection)
+      if (!parsed.ok) return { ok: false, code: "UNSUPPORTED", message: parsed.message } as const
+      const state = try tabs.get()
+      const shownState = try foreground.get()
+      const tab = curTab(state)
+      const claimed = agent.send({ type: "claim", revision: tab.revision, inBrowser: inBrowser(shownState) }) catch () => undefined
+      if (claimed === undefined) return { ok: false, code: "UNAVAILABLE", message: AGENT_REFUSALS.RefusedNotShowing } as const
+      if (!observedTabCurrent(parsed.command.selection, { id: `${host.session}:${state.cur}`, revision: String(tab.revision) })) {
+        agent.send({ type: "claimSettled", revision: -1, nativeHost: host.onDevice, shown: false, covered: true }) catch () => undefined
+        agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
+        return { ok: false, code: "STALE_REF", message: AGENT_REFUSALS.RefusedChanged } as const
+      }
+      const shown = inBrowser(shownState) && !shownState.shade && !shownState.locked
+      const bound = agent.send({ type: "claimSettled", revision: tab.revision, nativeHost: host.onDevice, shown, covered: false }) catch () => undefined
+      if (bound?.command !== "Bound") {
+        agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
+        return { ok: false, code: "UNAVAILABLE", message: (try agent.get()).preference === "ReviewOff" ? AGENT_REFUSALS.RefusedNotShowing : "Review phone actions first is on. Approve this in chat." } as const
+      }
+      const request = newId()
+      const result = try tabs.dispatch({ type: "viewCommand", request, command: historyOf[parsed.command.subaction], tab: state.cur, navigation: tab.page.navigation, shown })
+      const settled = result.settled.find((s) => s.request === request)
+      if (settled?.outcome !== "Dispatched") {
+        agent.send({ type: "commandSent", revision: -1 }) catch () => undefined
+        agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
+        return { ok: false, code: settled?.outcome === "RefusedChanged" ? "STALE_REF" : "UNAVAILABLE", message: AGENT_REFUSALS[settled?.outcome ?? "RefusedChanged"] } as const
+      }
+      agent.send({ type: "commandSent", revision: tab.revision }) catch () => undefined
+      agent.send({ type: "acknowledged", delivered: !result.failed }) catch () => undefined
+      if (result.failed) return { ok: false, code: "UNAVAILABLE", message: "Native browser result belongs to another tab or session" } as const
+      return { ok: true, data: { dispatched: true, completed: false, requiresReadback: true } } as const
+    },
+    prefer: (preference: Preference) => agent.send({ type: "prefer", preference }) catch () => undefined,
+    effect selection() {
+      const picked = selectionOf(try tabs.get())
+      return picked.tab === "" ? undefined : { kind: "browser-tab", id: `${host.session}:${picked.tab}`, revision: String(picked.revision) } as const
+    },
+    effect tabNeedsChoice(target: string) {
+      const state = try tabs.get()
+      const shown = inBrowser(try foreground.get())
+      const page = (t: BrowserTab) => ({ title: t.page.title || t.restoreTitle, url: t.page.url || t.restoreUrl })
+      return matchingTabs(visibleTabs(state, shown).filter((t) => !shown || t.id !== state.cur), target, page).length > 1
+    },
+    effect review(raw: unknown) {
+      const parsed = parseBrowserControl(raw)
+      if (!parsed.ok) throw new BrowserOpenRefused({ message: parsed.reason })
+      const shownState = try foreground.get()
+      const notice = browserControlReviewNotice({ sensitive: shownState.locked || !shownState.visible })
+      if (notice !== undefined) throw new BrowserOpenRefused({ message: notice })
+      const card = describeBrowserControl(parsed.operation)
+      return try reviews.confirm(`browser-control-${newId()}`, "BrowserControl", `${card.title}\n${card.description}`)
+    },
+  }
+}), machine())

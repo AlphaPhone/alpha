@@ -1,0 +1,175 @@
+// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/preservation.md, "Story: Restore my calendar from a backup without replaying anything"; spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""
+import { assert, describe, it } from "@effect/vitest"
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { layer } from "../../src/calendar/layer.vibe"
+import { AgentCalendar } from "../../src/calendar/agent.vibe"
+import { ApprovalReviews } from "../../src/calendar/approvals.vibe"
+import { bindCalendar, currentWindow, readCalendar } from "../../src/calendar/binding.vibe"
+import { HeldDeletions } from "../../src/calendar/deletions.vibe"
+import { DeviceCalendar } from "../../src/calendar/device.vibe"
+import { CalendarDrafts } from "../../src/calendar/drafts.vibe"
+import { HomeAgenda } from "../../src/calendar/home.vibe"
+import { prepareBackup, prepareSalvage } from "../../src/calendar/preservation.vibe"
+import { agentEventKey } from "../../src/calendar/model.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+effect function check(run: () => void) {
+  try Effect.try(run)
+}
+
+function fakes(agent: CalendarAgentFake, device: DeviceCalendarFake) {
+  return Layer.mergeAll(
+    Layer.succeed(Resident, {
+      status: () => succeed("running" as const),
+      ensureRunning: () => Effect.void,
+      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => Effect.try({
+        try: () => agent.json(method, path, body),
+        catch: (error) => new ResidentRefused({ status: (error as { status?: number }).status ?? 500, message: String(error) }),
+      }),
+      stream: () => Stream.empty,
+    }),
+    Layer.succeed(Native, {
+      available: (plugin: string) => sync(() => device.available(plugin)),
+      invoke: (plugin: string, method: string, args?: unknown) => Effect.try({
+        try: () => device.invoke(plugin, method, (args ?? {}) as Record<string, unknown>),
+        catch: (error) => new NativeFailed({ plugin, method, message: String(error) }),
+      }),
+      listen: () => Stream.empty,
+    }),
+    Layer.succeed(Build, { info: { version: "test", variant: "browser", testMocks: true } }),
+    memoryStore,
+  )
+}
+
+const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake) => Layer.provide(layer, fakes(agent, device))
+const binding = { owner: JSON.stringify(["https://agent.test", "owner-1", "agent-1"]), session: 1, agentId: "agent-1", usable: true }
+
+describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Calendar for the account I am signed in to\")", () => {
+  it.live("reads the bound account, saves only after a readback, and deletes after the Undo window (spec/calendar/agent.md, \"Story: Change my agent's Calendar only as I reviewed, and be told what happened\")", () => effect {
+    const fakeAgent = new CalendarAgentFake()
+    fakeAgent.add("event-a", "Standup", 0, 23)
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const agent = try AgentCalendar
+      const read = try agent.view()
+      // spec/calendar/agent.md, "A read publishes only when all three replies arrived for the binding it was started for"
+      try check(() => assert.deepStrictEqual([read.state.status, read.state.owner, read.feed?.events.map((event) => event.title)], ["Ready", binding.owner, ["Standup"]]))
+
+      // spec/calendar/agent.md, "An applied create or change is read back through the same scoped calendar; only a readback that finds it says saved"
+      const window = try currentWindow()
+      const start = window.range.begin + 40 * 86_400_000
+      const created = try agent.create({ sourceKey: JSON.stringify(["eliza", "owner", "eliza-calendar", "", "primary"]), admitted: true, request: {
+        title: "Dentist", startAt: new Date(start).toISOString(), endAt: new Date(start + 3_600_000).toISOString(), timeZone: "UTC", idempotencyKey: "create-1" } })
+      const repeated = try agent.create({ sourceKey: "", admitted: false, request: { title: "", startAt: "", endAt: "", idempotencyKey: "" } })
+      try check(() => assert.deepStrictEqual([created, repeated, fakeAgent.writes.length], ["Saved", "WriteNotAdmitted", 1]))
+
+      // spec/calendar/deletions.md, "Undo inside the window sends nothing; after the window it changes nothing"
+      const held = try HeldDeletions
+      const target = (try agent.view()).feed!.events.find((event) => event.title === "Standup")!
+      let sends = 0
+      const send = effect {
+        sends += 1
+        const outcome = try agent.remove({ eventKey: agentEventKey(target), admitted: true, request: { expectedProviderVersion: "etag-1", idempotencyKey: "delete-1", cancellationMode: "organizer_cancel" } })
+        return outcome === "Deleted"
+      }
+      const first = try held.confirm({ target: target.id, decline: false, source: "primary", series: target.externalId, start: 0, scope: "event", send })
+      const undone = try held.undo(first)
+      const second = try held.confirm({ target: target.id, decline: false, source: "primary", series: target.externalId, start: 0, scope: "event", send })
+      try held.leave()
+      try sleep("200 millis")
+      try readCalendar(true, false)
+      const after = try agent.view()
+      try check(() => assert.deepStrictEqual(
+        { undone, second: second > first, sends, standupGone: !(after.feed?.events.some((event) => event.title === "Standup") ?? true), held: (try held.get()).held.length },
+        { undone: true, second: true, sends: 1, standupGone: true, held: 0 },
+      ))
+
+      // spec/calendar/agent.md, "Retiring the binding empties Calendar and abandons the read"
+      try bindCalendar({ ...binding, owner: JSON.stringify(["https://agent.test", "owner-2", "agent-1"]), session: 2 })
+      const other = try agent.view()
+      try check(() => assert.deepStrictEqual([other.state.owner, other.feed], ["", undefined]))
+    }
+  })
+
+  it.live("a refused read drops the saved copy and Home stays unverified (spec/calendar/home.md, \"Story: See what is next on Home, and trust \\\"nothing planned\\\"\")", () => effect {
+    const fakeAgent = new CalendarAgentFake()
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      fakeAgent.refuseReads = true
+      try readCalendar(true, false)
+      const view = try (try AgentCalendar).view()
+      const card = try (try HomeAgenda).current()
+      try check(() => assert.deepStrictEqual([view.state.error, card.state === "HomeNothingPlanned"], ["AccessRefused", false]))
+    }
+  })
+
+  it.effect("a draft survives the editor closing and is offered back (spec/calendar/drafts.md, \"Story: Keep what I typed when Calendar is interrupted\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const drafts = try CalendarDrafts
+      try drafts.bind("owner-1")
+      try drafts.open("", "")
+      const fields = { title: "Lunch", body: "", location: "", start: "2026-11-20T12:00", end: "2026-11-20T13:00", zone: "UTC", allDay: false,
+        repeat: "none" as const, alert: null, video: false, who: [], calendar: "local", creationId: "c-1", origin: "typed" as const }
+      try drafts.edit(fields)
+      try drafts.close()
+      try drafts.open("", "")
+      const reopened = try drafts.get()
+      const restored = try drafts.restore()
+      // spec/calendar/drafts.md, "Changing owner closes the editor; the old owner's slot keeps its edits"
+      try drafts.bind("owner-2")
+      const foreign = try drafts.retained("")
+      try drafts.bind("owner-1")
+      const own = try drafts.retained("")
+      try check(() => assert.deepStrictEqual([reopened.offered, restored?.title, foreign, own?.title], [true, "Lunch", undefined, "Lunch"]))
+    }
+  })
+
+  it.effect("an approval is read again at the tap and decided once (spec/calendar/approvals.md, \"Story: Approve or decline a Calendar change the agent asked for\")", () => effect {
+    const fakeAgent = new CalendarAgentFake()
+    const id = "0f0f0f0f-1111-4222-8333-444455556666"
+    fakeAgent.approvals.push({ id, state: "pending", subjectUserId: "u", ownerId: "u", action: "schedule_event", reason: "Add lunch", expiresAt: null,
+      payload: { action: "schedule_event", side: "owner", calendarId: "primary", title: "Lunch", startsAtMs: 1_800_000_000_000, endsAtMs: 1_800_003_600_000,
+        attendees: [], location: "", description: "", notifyAttendees: false } })
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()) {
+      const reviews = try ApprovalReviews
+      try reviews.open(id)
+      try reviews.choose("ApproveChange")
+      try reviews.choose("ApproveChange")
+      try check(() => assert.deepStrictEqual(fakeAgent.resolved.map((entry) => (entry.body as { decision: string }).decision), ["approve"]))
+    }
+  })
+
+  it.effect("a lost device create blocks a second until it is checked (spec/calendar/device.md, \"Story: Create an event on my phone without making it twice\")", () => effect {
+    const phone = new DeviceCalendarFake()
+    phone.loseNextSave = true
+    provide calendarOver(new CalendarAgentFake(), phone) {
+      const device = try DeviceCalendar
+      const form = { creationId: "c-1", separate: false, calendarId: "1", title: "Run", body: "", location: "", begin: 1_800_000_000_000, end: 1_800_003_600_000,
+        allDay: false, timeZone: "UTC", repeat: "none" as const, guests: [], alert: null, video: false }
+      try device.openForm("new", false)
+      const lost = try device.save(form)
+      try device.openForm("new", false)
+      const blocked = try device.save({ ...form, creationId: "c-2" })
+      try check(() => assert.deepStrictEqual([lost, blocked, phone.events.length], ["unconfirmed", "duplicate", 0]))
+    }
+  })
+
+  it("a backup restores fresh identities and a damaged series not at all (spec/calendar/preservation.md, \"Story: Restore my calendar from a backup without replaying anything\")", () => {
+    let next = 0
+    const revision = () => `r${++next}`
+    const series = { id: "s", calendarId: "local", title: "Run", body: "", location: "", begin: 0, end: 3_600_000, repeat: "daily" }
+    const exception = { id: "s:occ:86400000", calendarId: "local", title: "Run late", begin: 90_000_000, end: 93_600_000, seriesId: "s", occurrenceBegin: 86_400_000 }
+    const restored = prepareBackup(JSON.stringify({ events: [series, exception] }), revision)
+    const salvaged = prepareSalvage(JSON.stringify({ events: [series, { ...exception, begin: "bad" }, { id: "x", calendarId: "local", title: "Solo", begin: 0, end: 1 }] }), revision)
+    assert.deepStrictEqual({
+      ids: restored?.events.map((event) => event.id.startsWith("restored-")),
+      alerts: restored?.events.map((event) => event.alert),
+      kept: salvaged?.restored.events.map((event) => event.title),
+      skipped: salvaged?.skipped.map((row) => row.index),
+    }, { ids: [true, true], alerts: [null, null], kept: ["Solo"], skipped: [1, 2] })
+  })
+})

@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Audits a built web bundle (web-dist or an APK's extracted assets/public) for mock,
 // fixture and developer surfaces. Usage:
-//   bun scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]
-// The denylist is skipped only when the bundle's build-flags.json records testMocks:true.
+//   node scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]
+// The denylist is skipped only when the bundle's build-flags.json records testMocks:true
+// (scripts/write-build-flags.ts writes it after `vite build` of apps/app into web-dist).
 import {readFileSync,statSync,existsSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -10,14 +11,13 @@ import {fontLicenceFindings, fontLicenceLine} from './font-license-blockers.ts';
 import {licenceFlagLines} from './licence-policy.ts';
 import {assetLinksProblems} from './render-assetlinks.ts';
 import {regularFiles} from './regular-files.ts';
-import {SHIPPED_CLOUD_DEPLOYMENT,CLOUD_DEPLOYMENT_IS_CANDIDATE,CLOUD_SIGN_IN_REGISTRATION} from './cloud-deployment-policy.ts';
-import {STORAGE_NAMESPACES} from './cloud-deployment.ts';
+import {SHIPPED_CLOUD_DEPLOYMENT,CLOUD_DEPLOYMENT_IS_CANDIDATE,CLOUD_SIGN_IN_REGISTRATION,STORAGE_NAMESPACES} from './cloud-deployment-policy.ts';
 
 /** The staging Cloud's authorities, return page and tenant, from the deployment policy: test-mocks builds only. */
-export const STAGING_CLOUD_TEXT = Object.freeze([new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.api).host, new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.services).host,
-  new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.web).host + CLOUD_SIGN_IN_REGISTRATION.callbackPath.replace(/\/auth\/callback$/, ''),
+export const STAGING_CLOUD_TEXT = Object.freeze([...new Set([new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.api).host, new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.services ?? SHIPPED_CLOUD_DEPLOYMENT.staging.web).host,
+  new URL(SHIPPED_CLOUD_DEPLOYMENT.staging.web).host + CLOUD_SIGN_IN_REGISTRATION.routePrefix,
   // The former 'cloud-staging' entry also caught the staging tenant name.
-  SHIPPED_CLOUD_DEPLOYMENT.staging.tenant]);
+  SHIPPED_CLOUD_DEPLOYMENT.staging.tenant ?? ''].filter(Boolean))]);
 
 /** Decision P-43: production copy that offered or described a "no agent" state. */
 export const RETIRED_NO_AGENT_TEXT = Object.freeze(['without AI', 'Continue offline', 'continue offline', 'Connect an agent']);
@@ -128,8 +128,23 @@ export function avatarInitials(text: string) {
   return [...text.matchAll(AVATAR_INITIALS)].map(match => match[1]);
 }
 
+/** The build-time define of apps/app/vite.config.ts. A bundle that still names it was not folded: a
+ * mock, fixture or developer branch guarded by it may have shipped. */
+export const TEST_MOCKS_DEFINE = '__ALPHA_TEST_MOCKS__';
+/** Fixture, story-metadata and Storybook files that exist only for tests and stories (src/web/<area>/fixtures.ts,
+ * *.meta.tsx, storybook-static). A production bundle holding a chunk by one of these names kept a test-only module. */
+export const TEST_ONLY_PATH = /(?:^|\/)(?:fixtures?(?:[.-][^/]*)?\.(?:js|mjs|css|json)|[^/]+\.meta(?:[.-][^/]*)?\.js|storybook-static\/|iframe\.html$|mockServiceWorker\.js$)/i;
+
+/** Every place a bundle file shows that `__ALPHA_TEST_MOCKS__` was not folded or a test-only module was bundled. */
+export function testMocksFindings(file: string, text: string | undefined, testMocks: boolean) {
+  const findings: Finding[] = [];
+  if (text !== undefined && text.includes(TEST_MOCKS_DEFINE)) findings.push({file, rule: `unfolded build define ${TEST_MOCKS_DEFINE}`});
+  if (!testMocks && TEST_ONLY_PATH.test(file)) findings.push({file, rule: 'test-only module (fixtures, story metadata or Storybook)'});
+  return findings;
+}
+
 /** Reads {"testMocks": boolean}. A missing or malformed record is treated as a production bundle.
- * `fastIteration` is written only into the synced Android payload by `bun run android:build:fast`. */
+ * `fastIteration` is written only into the synced Android payload by `pnpm android:build:fast`. */
 export function readBuildFlags(dir: string) {
   const file = path.join(dir, 'build-flags.json');
   if (!existsSync(file)) return {present: false, testMocks: false, candidateCloud: false, fastIteration: false};
@@ -141,7 +156,7 @@ export function readBuildFlags(dir: string) {
   } catch { return {present: true, testMocks: false, candidateCloud: false, fastIteration: false, valid: false}; }
 }
 
-export const FAST_ITERATION_ERROR = 'build-flags.json records fastIteration:true: this payload comes from bun run android:build:fast, a developer build that skipped lint, tests and APK verification. It is never a production bundle; build with bun run android:build:local.';
+export const FAST_ITERATION_ERROR = 'build-flags.json records fastIteration:true: this payload comes from pnpm android:build:fast, a developer build that skipped lint, tests and APK verification. It is never a production bundle; build with pnpm android:build:local.';
 
 interface BundleAuditOptions {
   testMocks?: boolean;
@@ -151,6 +166,7 @@ interface BundleAuditOptions {
 export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
   const errors: string[] = [];
   const engine: Finding[] = [];
+  const folding: Finding[] = [];
   const policy: Finding[] = [];
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return {ok: false, testMocks: false, files: 0, findings: [], errors: [`Bundle directory not found: ${dir}`]};
   const flags = readBuildFlags(dir);
@@ -170,6 +186,7 @@ export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
     const file = path.relative(dir, source).split(path.sep).join('/');
     const text = TEXT.test(file) ? readFileSync(source, 'utf8') : undefined;
     engine.push(...engineFindings(file, text));
+    folding.push(...testMocksFindings(file, text, flags.testMocks && expected));
     if (skip) continue;
     if (file === 'img' || file.startsWith('img/')) policy.push({file, rule: 'fixture image directory img/'});
     if (file.endsWith('.map')) policy.push({file, rule: 'source map'});
@@ -187,7 +204,7 @@ export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
     if (path.posix.basename(file) === 'assetlinks.json')
       for (const problem of assetLinksProblems(text, {debugFingerprints: options.debugFingerprints ?? []})) policy.push({file, rule: problem});
   }
-  const findings = [...engine, ...policy];
+  const findings = [...engine, ...folding, ...policy];
   return {ok: errors.length === 0 && findings.length === 0, testMocks: flags.testMocks, files, findings, errors};
 }
 
@@ -196,7 +213,7 @@ function main(argv: string[]) {
   const flags = argv.filter(arg => arg.startsWith('--'));
   const unknown = flags.filter(flag => flag !== '--expect-test-mocks');
   if (args.length !== 1 || unknown.length) {
-    console.error('Usage: bun scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]');
+    console.error('Usage: node scripts/audit-production-bundle.ts <dir> [--expect-test-mocks]');
     return 2;
   }
   const dir = path.resolve(args[0]);

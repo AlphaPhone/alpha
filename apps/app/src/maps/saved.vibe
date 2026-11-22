@@ -1,0 +1,57 @@
+// spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"; spec/maps/savedPlaces.md, "A saved place can be renamed to a non-empty name and removed"
+import { type SavedItem, Machine as SavedMachine, stored } from "../../gen/maps__savedPlaces.effect.vibe"
+import { labelFits, mayKeep } from "../../gen/maps__vocabulary.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import type { Shown } from "./content.vibe"
+import { failure, type MapsFailure } from "./failure.vibe"
+import { micro } from "./geometry.vibe"
+
+/** Where saved places are kept: the owner's private WebView storage, never synced. */
+export const SAVED_PLACES_KEY = ownerKey("phone", "maps/saved-places")
+
+/** The places saved on this phone. */
+export service SavedPlacesStore {
+  list(): ReadonlyArray<SavedItem>!!
+  /** Save the shown place under `label`; a Google place is refused. */
+  save(shown: Shown, label: string): SavedItem!MapsFailure
+  rename(id: number, label: string): void!MapsFailure
+  remove(id: number): void!MapsFailure
+  readonly changes: Stream.Stream<ReadonlyArray<SavedItem>>
+}
+
+/** Saved places over the stored machine. */
+export const savedLayer = Layer.effect(SavedPlacesStore, effect {
+  const machine = try SavedMachine
+  return {
+    effect list() { return (try machine.get()).items },
+    effect save(shown: Shown, label: string) {
+      const name = label.trim().slice(0, 300)
+      if (!mayKeep(shown.kind)) throw failure("unsupported", "Google Maps results cannot be saved on this device.")
+      if (!labelFits(name.length)) throw failure("invalid-response", "A name and valid place identity are required.")
+      const before = try machine.get()
+      const point = micro(shown.coordinate)
+      if (before.items.length >= 200 && !before.items.some((i) => i.id === shown.savedId)) throw failure("storage", "Remove a saved place before adding another.")
+      machine.send({ type: "savePlace", place: {
+        label: name, lat: point.lat, lng: point.lng, provider: shown.providerId ?? "", providerPlaceId: shown.providerPlaceId ?? "", kind: shown.kind,
+      } }) catch effect () => { throw failure("storage", "The place could not be saved.") }
+      const readBack = try machine.get()
+      const item = readBack.items.find((i) => i.lat === point.lat && i.lng === point.lng && i.label === name)
+      if (!item) throw failure("storage", "Saved places could not be confirmed on this device.")
+      return item
+    },
+    effect rename(id: number, label: string) {
+      const name = label.trim().slice(0, 300)
+      if (!name) throw failure("invalid-response", "A saved-place name is required.")
+      machine.send({ type: "renamePlace", id, label: name }) catch effect () => { throw failure("unavailable", "This saved place no longer exists.") }
+      if (!(try machine.get()).items.some((i) => i.id === id && i.label === name)) throw failure("storage", "Saved places could not be confirmed on this device.")
+    },
+    effect remove(id: number) {
+      machine.send({ type: "removePlace", id }) catch effect () => { throw failure("unavailable", "This saved place no longer exists.") }
+      if ((try machine.get()).items.some((i) => i.id === id)) throw failure("storage", "Saved places could not be confirmed on this device.")
+    },
+    changes: Stream.map(machine.changes, (s) => s.items),
+  }
+})
+
+/** The stored saved-places machine; a stored value that is not a list of saved places fails the layer and is never written over. */
+export const savedMachine = stored(SAVED_PLACES_KEY)

@@ -1,0 +1,378 @@
+// spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/editor.md, "A draft opens from a note at the current revision, or starts as a new note"; spec/notes/editor.md, "A save captures the draft, runs only on its own base, and queues a later edit"; spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/editor.md, "A delete of an edited note waits for its save, and a changed draft cancels it"; spec/notes/editor.md, "A delete or restore is confirmed only when the reply moves exactly that note"; spec/notes/editor.md, "Try again confirms words already saved, rebases only onto an untouched record, and otherwise keeps the draft"; spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
+import { parseNoteFormat } from "@elizaos/plugin-notes/format"
+import type { NoteFormat, NotesSnapshot, StickyColor, StickyNote } from "@elizaos/plugin-notes/types"
+import { textCreationAllowed } from "../../gen/notes__collection.effect.vibe"
+import {
+  type Editor, type Event as EditorEvent, Machine as EditorMachine, dirty, leavePlan, machine as editorMachine, selectionCurrent,
+} from "../../gen/notes__editor.effect.vibe"
+import type { NotesFailure } from "./client.vibe"
+import { NotesBusy, NotesCollection, NotesRetired, type OwnedSnapshot } from "./collection.vibe"
+import { NotesDrafts } from "./drafts.vibe"
+import { authoredText, contentOf, contentParts, nextDefaultTitle } from "./list.vibe"
+import { randomId, sha256Hex } from "./platform.ts"
+
+/** The words and rich data of the open draft; the editor machine owns its identity, base and version. */
+export interface DraftContent {
+  readonly token: number
+  readonly creationId: string
+  readonly title: string
+  readonly body: string
+  readonly separator: "" | "\n"
+  readonly framing: "verbatim" | "fields"
+  readonly format?: NoteFormat
+  readonly color: StickyColor
+  readonly basePrint: string
+  readonly defaultTitle?: string
+}
+
+/** One explicit editor patch; never a difference between two collections. */
+export interface DraftPatch { readonly title?: string; readonly body?: string; readonly format?: unknown; readonly color?: StickyColor }
+
+/** What Try again found. */
+export type RetryOutcome = "confirmed" | "saved" | "changed-elsewhere" | "deleted" | "not-saved" | "unavailable"
+
+/** A confirmed delete, with the deletion time Undo needs. */
+export interface DeleteOutcome { readonly deleted: boolean; readonly deletedAt?: string }
+
+/** Words kept on the phone for a note that changed since they were kept: shown for Copy draft or Discard only. */
+export interface KeptReview { readonly noteId: string; readonly title: string; readonly body: string }
+
+/** The one draft of the Notes editor over the canonical collection. */
+export service NotesEditor {
+  readonly drafts: Stream.Stream<DraftContent | undefined>
+  readonly keptReviews: Stream.Stream<KeptReview | undefined>
+  draft(): DraftContent | undefined!!
+  openNote(id: string): boolean!!
+  newNote(kind: "text" | "list", folderId?: string): boolean!!
+  edit(patch: DraftPatch): boolean!!
+  save(): boolean!!
+  leave(next?: string): boolean!!
+  remove(id: string): DeleteOutcome!!
+  restore(id: string): boolean!!
+  retry(): RetryOutcome!!
+  discard(): void!!
+  createFromText(content: string, creationId: string): { readonly id: string; readonly revision: number } | undefined!NotesFailure | NotesBusy | NotesRetired
+  selection(): { readonly kind: "canonical-note"; readonly id: string; readonly revision: string } | undefined!!
+}
+
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable)
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable((value as Record<string, unknown>)[key])]))
+  return value
+}
+
+/** What a record or draft says, for comparing the two: its text and authored rich data. */
+export function contentPrint(content: string, format: NoteFormat | undefined): string {
+  return JSON.stringify([content, format?.kind ?? "text", stable(format?.data ?? {})])
+}
+
+function notePrint(note: StickyNote): string {
+  return contentPrint(note.title + note.body, note.format)
+}
+
+function draftPrint(content: DraftContent): string {
+  return contentPrint(contentOf(content.title, content.separator, content.body), content.format)
+}
+
+function authored(content: DraftContent): boolean {
+  return contentOf(content.title, content.separator, content.body).trim() !== "" || authoredText(content.format).trim() !== ""
+}
+
+function fieldsOf(note: StickyNote) {
+  const parts = contentParts(note)
+  return { title: parts.title, body: parts.body, separator: parts.separator, framing: parts.separator === "\n" || parts.body !== "" ? "verbatim" as const : "fields" as const,
+    ...(note.format === undefined ? {} : { format: structuredClone(note.format) }), color: note.color }
+}
+
+const noteIds = (snapshot: NotesSnapshot) => new Set(snapshot.notes.map((note) => note.id))
+const trashIds = (snapshot: NotesSnapshot) => new Set((snapshot.trash ?? []).map((entry) => entry.note.id))
+
+const make = effect {
+  const collection = try NotesCollection
+  const drafts = try NotesDrafts
+  const machine = try EditorMachine
+  const content = try SubscriptionRef.make<DraftContent | undefined>(undefined)
+  const keptReview = try SubscriptionRef.make<KeptReview | undefined>(undefined)
+  const writing = try Semaphore.make(1)
+
+  effect function send(event: EditorEvent): Editor | undefined!! {
+    return try (machine.send(event) catch () => undefined)
+  }
+
+  effect function owned(): { owner: string; snapshot: NotesSnapshot; digest: string } | undefined!! {
+    const current = try collection.current()
+    if (current === undefined) return undefined
+    const digest = try (tryPromise(() => sha256Hex(`notes-owner:${current.owner}`)) catch () => "")
+    return digest === "" ? undefined : { ...current, digest }
+  }
+
+  effect function note(id: string): StickyNote | undefined!! {
+    return (try collection.current())?.snapshot.notes.find((row) => row.id === id)
+  }
+
+  effect function show(next: DraftContent | undefined): void!! {
+    try SubscriptionRef.set(content, next)
+    const state = try machine.get()
+    try collection.setClean(!dirty(state))
+  }
+
+  effect function adopt(id: string, token: number): void!! {
+    const saved = try note(id)
+    const held = try SubscriptionRef.get(content)
+    if (saved === undefined || held === undefined || held.token !== token) return
+    try show({ ...held, ...fieldsOf(saved), basePrint: notePrint(saved) })
+  }
+
+  effect function keepFailedDraft(state: Editor): void!! {
+    const held = try SubscriptionRef.get(content)
+    const owner = try owned()
+    if (held === undefined || owner === undefined || !state.present) return
+    const base = state.draftId === "" ? undefined : owner.snapshot.notes.find((row) => row.id === state.draftId)
+    const basePrint = base === undefined ? "" : try (tryPromise(() => sha256Hex(notePrint(base))) catch () => "")
+    try (drafts.keep(owner.digest, {
+      noteId: state.draftId, baseRevision: state.base, basePrint, change: state.draftId === "" ? "added" : "edited",
+      title: held.title.slice(0, 256), body: held.body.slice(0, 32000), separator: held.separator,
+      ...(held.format === undefined ? {} : { format: held.format }), color: held.color,
+    }) catch () => undefined)
+  }
+
+  effect function runMutation(): DeleteOutcome!! {
+    const state = try machine.get()
+    if (state.mutation !== "Deleting" && state.mutation !== "Restoring") return { deleted: false }
+    const id = state.mutationId
+    const deleting = state.mutation === "Deleting"
+    const result = try exit(collection.interact(deleting ? "delete-note" : "restore-note",
+      deleting ? { id } : { id, expectedRevision: state.revision }))
+    const reply = Exit.isSuccess(result) ? result.value : undefined
+    const snapshot = reply?.state
+    const after = try send({ type: "finishMutation", revision: snapshot?.revision ?? -1, notes: snapshot === undefined ? [] : [...noteIds(snapshot)],
+      trashed: snapshot === undefined ? [] : [...trashIds(snapshot)], success: reply !== undefined && reply.target?.id === id })
+    if (after === undefined || after.review) {
+      try collection.needReview()
+      return { deleted: false }
+    }
+    if (!after.present) try show(undefined)
+    const deletedAt = snapshot?.trash?.find((entry) => entry.note.id === id)?.deletedAt
+    return deleting ? { deleted: true, ...(deletedAt === undefined ? {} : { deletedAt }) } : { deleted: true }
+  }
+
+  effect function write(): boolean!! {
+    let confirmed = false
+    while (true) {
+      const state = try machine.get()
+      const held = try SubscriptionRef.get(content)
+      if (!state.saving || held === undefined) break
+      const words = contentOf(held.title, held.separator, held.body)
+      const params: Record<string, unknown> = state.capturedId !== ""
+        ? { id: state.capturedId, expectedRevision: state.base, content: words, color: held.color, ...(held.format === undefined ? {} : { format: held.format }) }
+        : { forceNew: true, creationId: held.creationId, content: words, color: held.color, ...(held.format === undefined ? {} : { format: held.format }) }
+      const result = try exit(collection.interact(state.capturedId !== "" ? "update-note" : "create-note", params))
+      const reply = Exit.isSuccess(result) ? result.value : undefined
+      const after = try send({ type: "finishSave", noteId: reply?.target?.id ?? "", revision: reply?.target?.revision ?? -1, observed: reply !== undefined })
+      if (after === undefined) break
+      if (reply === undefined || after.review) {
+        try keepFailedDraft(after)
+        try collection.needReview()
+        break
+      }
+      confirmed = true
+      if (after.present && after.committedToken === held.token && after.version === 0) try adopt(after.draftId, held.token)
+      try collection.clearReview()
+      const owner = try owned()
+      if (owner !== undefined) {
+        const read = try drafts.read(owner.digest)
+        try drafts.clear(owner.digest, after.committedId, read, true)
+      }
+      if (after.mutation === "Deleting") { try runMutation(); break }
+    }
+    const settled = try machine.get()
+    try collection.setClean(!dirty(settled))
+    return confirmed
+  }
+
+  effect function save(): boolean!! {
+    const before = try machine.get()
+    const after = try send({ type: "saveDraft" })
+    if (after === undefined) return false
+    if (before.saving) return false
+    if (!after.saving) {
+      if (after.review) try collection.needReview()
+      return false
+    }
+    return try writing.withPermits(1)(write())
+  }
+
+  effect function publish(current: OwnedSnapshot | undefined): void!! {
+    const state = try machine.get()
+    if (current === undefined) {
+      if (state.current) try send({ type: "retireOwner" })
+      try show(undefined)
+      try SubscriptionRef.set(keptReview, undefined)
+      return
+    }
+    if (!state.current) try send({ type: "bindOwner" })
+    const after = try send({ type: "publish", revision: current.snapshot.revision, notes: [...noteIds(current.snapshot)], trashed: [...trashIds(current.snapshot)] })
+    if (after === undefined) return
+    const held = try SubscriptionRef.get(content)
+    if (!after.present) { if (held !== undefined) try show(undefined); return }
+    if (after.review) try collection.needReview()
+    if (held !== undefined && after.draftId !== "" && after.version === 0) try adopt(after.draftId, held.token)
+  }
+
+  effect function openNote(id: string): boolean!! {
+    const saved = try note(id)
+    if (saved === undefined) return false
+    const fields = fieldsOf(saved)
+    const words: DraftContent = { token: 0, creationId: randomId(), basePrint: notePrint(saved), ...fields }
+    const after = try send({ type: "openNote", id, authored: authored(words) })
+    if (after === undefined) return false
+    try SubscriptionRef.set(keptReview, undefined)
+    try show({ ...words, token: after.token })
+    const owner = try owned()
+    if (owner === undefined) return true
+    const print = try (tryPromise(() => sha256Hex(notePrint(saved))) catch () => "")
+    const kept = try drafts.offer(owner.digest, id, print)
+    if (kept.change === undefined) return true
+    if (kept.offer === "ResumeKeptDraft") {
+      try edit({ title: kept.change.title, body: kept.change.body, ...(kept.change.format === undefined ? {} : { format: kept.change.format }), color: kept.change.color })
+    } else if (kept.offer === "ReviewKeptDraft") {
+      try SubscriptionRef.set(keptReview, { noteId: id, title: kept.change.title, body: kept.change.body })
+    }
+    return true
+  }
+
+  effect function edit(patch: DraftPatch): boolean!! {
+    const held = try SubscriptionRef.get(content)
+    if (held === undefined) return false
+    const format = patch.format === undefined ? held.format : parseNoteFormat(patch.format)
+    if (patch.format !== undefined && format === undefined) return false
+    const title = patch.title ?? held.title
+    const body = patch.body ?? held.body
+    const separator = held.framing === "fields" ? (title !== "" && body !== "" ? "\n" : "") : held.separator
+    const next: DraftContent = { ...held, title, body, separator, color: patch.color ?? held.color, ...(format === undefined ? {} : { format }) }
+    const after = try send({ type: "editDraft", authored: authored(next) })
+    if (after === undefined) return false
+    try show(next)
+    return true
+  }
+
+  effect function leave(next?: string): boolean!! {
+    const state = try machine.get()
+    const held = try SubscriptionRef.get(content)
+    const plan = leavePlan(state.present, dirty(state), state.draftId !== "", held !== undefined && authored(held))
+    if (plan === "SaveFirst") {
+      const token = state.token
+      if (!(try save())) return false
+      const after = try machine.get()
+      if (after.token !== token) return false
+    }
+    if ((try machine.get()).present) try send({ type: "closeDraft" })
+    try show(undefined)
+    try SubscriptionRef.set(keptReview, undefined)
+    return next === undefined ? true : try openNote(next)
+  }
+
+  return {
+    drafts: SubscriptionRef.changes(content),
+    keptReviews: SubscriptionRef.changes(keptReview),
+    draft: () => SubscriptionRef.get(content),
+    openNote,
+    effect newNote(kind: "text" | "list", folderId?: string) {
+      if (!(try leave())) return false
+      const current = try collection.current()
+      if (current === undefined) return false
+      const title = nextDefaultTitle([...current.snapshot.notes, ...(current.snapshot.trash ?? []).map((entry) => entry.note)].map((row) => row.title), "New note")
+      const folder = folderId === undefined ? {} : { folderId }
+      const format: NoteFormat | undefined = kind === "list" ? { kind: "list", data: { items: [], pinned: false, ...folder } }
+        : folderId === undefined ? undefined : { kind: "text", data: folder }
+      const after = try send({ type: "beginNote", titled: true })
+      if (after === undefined) return false
+      try show({ token: after.token, creationId: randomId(), title, body: "", separator: "", framing: "fields", color: "yellow", basePrint: "", defaultTitle: title,
+        ...(format === undefined ? {} : { format }) })
+      return true
+    },
+    edit,
+    save,
+    leave,
+    effect remove(id: string) {
+      const state = try machine.get()
+      if (state.present && state.draftId === "" && id === "") {
+        try send({ type: "closeDraft" })
+        try show(undefined)
+        return { deleted: true }
+      }
+      const after = try send({ type: "removeNote", id })
+      if (after === undefined) return { deleted: false }
+      if (after.mutation === "DeleteAfterSave") {
+        try writing.withPermits(1)(write())
+        const settled = try machine.get()
+        if (settled.known.includes(id)) return { deleted: false }
+        const deletedAt = (try collection.current())?.snapshot.trash?.find((entry) => entry.note.id === id)?.deletedAt
+        return deletedAt === undefined ? { deleted: true } : { deleted: true, deletedAt }
+      }
+      if (after.mutation !== "Deleting") {
+        if (after.review) try collection.needReview()
+        return { deleted: false }
+      }
+      return try runMutation()
+    },
+    effect restore(id: string) {
+      const after = try send({ type: "restoreNote", id })
+      if (after === undefined || after.mutation !== "Restoring") return false
+      return (try runMutation()).deleted
+    },
+    effect retry() {
+      const started = try machine.get()
+      const held = try SubscriptionRef.get(content)
+      if (!started.present || started.draftId === "" || !started.review || started.version === 0 || held === undefined) return "unavailable"
+      try collection.refresh()
+      const saved = try note(started.draftId)
+      const now = try machine.get()
+      if (now.token !== started.token) return "unavailable"
+      if (saved === undefined) return "deleted"
+      if (notePrint(saved) === draftPrint(held)) {
+        try send({ type: "confirmRetry" })
+        try collection.clearReview()
+        try show({ ...held, basePrint: notePrint(saved) })
+        return "confirmed"
+      }
+      if (held.basePrint !== notePrint(saved)) return "changed-elsewhere"
+      const rebased = try send({ type: "retryDraft", untouched: true })
+      if (rebased === undefined || !rebased.saving) return "not-saved"
+      return (try writing.withPermits(1)(write())) ? "saved" : "not-saved"
+    },
+    effect discard() {
+      const state = try machine.get()
+      const owner = try owned()
+      if (owner !== undefined && state.draftId !== "") {
+        const read = try drafts.read(owner.digest)
+        try drafts.clear(owner.digest, state.draftId, read, true)
+      }
+      try send({ type: "discardDraft" })
+      try show(undefined)
+      try SubscriptionRef.set(keptReview, undefined)
+      try collection.clearReview()
+      try collection.refresh()
+      if (state.draftId !== "") try openNote(state.draftId)
+    },
+    effect createFromText(text: string, creationId: string) {
+      const words = text.trim()
+      if (!textCreationAllowed({ blank: words === "", units: words.length, creationIdValid: /^[A-Za-z0-9._:-]{1,128}$/.test(creationId), titleUnits: 0 })) return undefined
+      const reply = try collection.interact("create-note", { content: words, creationId, color: "yellow" })
+      return reply.target
+    },
+    effect selection() {
+      const state = try machine.get()
+      return selectionCurrent(state) ? { kind: "canonical-note" as const, id: state.draftId, revision: String(state.revision) } : undefined
+    },
+    publish,
+  }
+}
+
+/** The editor service with its machine, following the collection it edits. */
+export const editorLayer = Layer.provideMerge(Layer.effect(NotesEditor, effect {
+  const editor = try make
+  const collection = try NotesCollection
+  try fork.scoped Stream.runForEach(collection.snapshots, (current) => editor.publish(current))
+  return editor
+}), editorMachine())

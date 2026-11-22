@@ -1,0 +1,59 @@
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"
+import { machine as accountsMachine } from "../../gen/inbox__accounts.effect.vibe"
+import { machine as mailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
+import { machine as readerMachine } from "../../gen/inbox__reader.effect.vibe"
+import { machine as selectionMachine } from "../../gen/inbox__selection.effect.vibe"
+import { machine as suggestionsMachine } from "../../gen/inbox__suggestions.effect.vibe"
+import { machine as noticesMachine } from "../../gen/inbox__notices.effect.vibe"
+import { stored as storedDrafts } from "../../gen/inbox__drafts.effect.vibe"
+import { stored as storedJournal } from "../../gen/inbox__operations.effect.vibe"
+import { stored as storedCards } from "../../gen/inbox__agentDrafts.effect.vibe"
+import { stored as storedDigest } from "../../gen/inbox__digest.effect.vibe"
+import { keys, mailStore } from "./store.vibe"
+import { layer as gmail } from "./gmail.vibe"
+import { layer as saved } from "./saved.vibe"
+import { layer as accounts } from "./accounts.vibe"
+import { layer as reader } from "./reader.vibe"
+import { layer as mailbox } from "./mailbox.vibe"
+import { layer as operations } from "./operations.vibe"
+import { layer as composer } from "./composer.vibe"
+import { layer as selection } from "./selection.vibe"
+import { layer as notices } from "./notices.vibe"
+import { layer as digest } from "./digest.vibe"
+import { layer as agentEmails } from "./agentEmails.vibe"
+import { layer as suggestions } from "./suggestions.vibe"
+
+export { Gmail } from "./gmail.vibe"
+export { SavedMail } from "./saved.vibe"
+export { InboxAccounts } from "./accounts.vibe"
+export { Reader } from "./reader.vibe"
+export { Mailbox } from "./mailbox.vibe"
+export { MailOperations } from "./operations.vibe"
+export { Composer } from "./composer.vibe"
+export { MailSelection } from "./selection.vibe"
+export { MailNoticesShell } from "./notices.vibe"
+export { DigestResults } from "./digest.vibe"
+export { AgentEmails } from "./agentEmails.vibe"
+export { Suggestions } from "./suggestions.vibe"
+export { emailShareTarget } from "./shareTarget.vibe"
+
+/** The Inbox's machines: memory for what is read, the phone's mail store for drafts, operations and agent emails. */
+export const machines = Layer.mergeAll(
+  accountsMachine(), mailboxMachine(), readerMachine(), selectionMachine(), suggestionsMachine(), noticesMachine(),
+  Layer.provide(Layer.mergeAll(storedDrafts(keys.drafts), storedJournal(keys.operations), storedCards(keys.agentEmails)), mailStore),
+  storedDigest(keys.digest)
+)
+
+/**
+ * Every Inbox service, over the platform's Native, Resident, Cloud, Build and KeyValueStore, the account area's
+ * CloudSession and GoogleAccounts, the shell's Navigation, the assistant's Assistant, the browser's BrowserAgent, files' FilePicker and settings' Preferences.
+ */
+export const layer = Layer.provideMerge(
+  Layer.mergeAll(selection, notices, digest, agentEmails, suggestions),
+  Layer.provideMerge(composer,
+    Layer.provideMerge(operations,
+      Layer.provideMerge(mailbox,
+        Layer.provideMerge(reader,
+          Layer.provideMerge(accounts,
+            Layer.provideMerge(Layer.mergeAll(gmail, saved), machines))))))
+)

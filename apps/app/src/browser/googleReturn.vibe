@@ -1,0 +1,43 @@
+// spec/browser/googleReturn.md, "Story: Link Google only when the account really changed"; spec/browser/googleReturn.md, "A callback is only a wakeup for the newest attempt of the same credential, and only a matching readback closes the panel"
+import { type Linking, beginLink, callback, readback } from "../../gen/browser__googleReturn.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+
+/** The Google link panel of the browser build: a returned callback wakes it, and only Cloud's readback closes it. */
+export service GoogleLink {
+  readonly changes: Stream.Stream<Linking>
+  /** The owner starts linking under the signed-in credential `credential`; the answer is the attempt's nonce. */
+  begin(credential: number): number!!
+  /** The loopback callback arrived with its nonce and host. */
+  returned(nonce: number, host: number): void!!
+  /** The signed-in credential changed: a pending attempt can no longer be adopted. */
+  credentialChanged(credential: number): void!!
+  /** The attempt's ten minutes passed. */
+  expire(): void!!
+}
+
+const unlinked: Linking = { credential: 0, attemptCredential: 0, attemptHost: 0, nonce: 0, used: false, expired: false, candidate: false, verified: false, panel: false }
+
+function linkedIn(answer: unknown): boolean {
+  return typeof answer === "object" && answer !== null && "connected" in answer && answer.connected === true
+}
+
+/** GoogleLink over a reference to its linking state and Cloud's account read. */
+export const googleLinkLayer = Layer.effect(GoogleLink, effect {
+  const cloud = try Cloud
+  const linking = try SubscriptionRef.make(unlinked)
+  return {
+    changes: SubscriptionRef.changes(linking),
+    effect begin(credential: number) {
+      const next = try SubscriptionRef.updateAndGet(linking, (l) => beginLink({ ...l, credential }))
+      return next.nonce
+    },
+    effect returned(nonce: number, host: number) {
+      const woken = try SubscriptionRef.updateAndGet(linking, (l) => callback(nonce, host, l))
+      if (!woken.candidate) return
+      const answer = cloud.json("GET", "/api/v1/google/connection") catch () => undefined
+      try SubscriptionRef.update(linking, (l) => readback(linkedIn(answer), l))
+    },
+    credentialChanged: (credential: number) => SubscriptionRef.update(linking, (l) => ({ ...l, credential, candidate: false, verified: false })),
+    expire: () => SubscriptionRef.update(linking, (l) => ({ ...l, expired: true })),
+  }
+})

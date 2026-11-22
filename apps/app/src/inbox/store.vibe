@@ -1,0 +1,45 @@
+// spec/inbox/drafts.md, "Each account has one open draft and a shelf of at most fifty, with distinct ids"; spec/inbox/operations.md, "An account holds at most one operation, and a kind is offered only when the account allows it"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+
+/** The device-wide keys of the Inbox's stored machines; each state keeps every owner's part apart by its owner key. */
+export const keys = {
+  drafts: ownerKey("device", "inbox/drafts"),
+  operations: ownerKey("device", "inbox/operations"),
+  agentEmails: ownerKey("device", "inbox/agent-emails"),
+  digest: ownerKey("device", "inbox/digest"),
+  savedMail: (owner: string) => ownerKey(owner, "inbox/saved-mail"),
+  digestResult: (scope: string, runId: string) => ownerKey("device", `inbox/digest/${scope}/${runId}`),
+}
+
+schema SlotValue { value: string | null }
+
+function failure(method: string, key: string, cause: unknown) {
+  return new KeyValueStore.KeyValueStoreError({ message: "Secure mail storage refused the request", method, key, cause })
+}
+
+/** Drafts, operation records and agent emails: Android's encrypted secure slots where the app has them, the platform's store otherwise. */
+export const mailStore = Layer.effect(KeyValueStore.KeyValueStore, effect {
+  const native = try Native
+  if (!(try native.available("AlphaConnection"))) {
+    return try KeyValueStore.KeyValueStore
+  }
+  const slot = (key: string) => `device:${key}`
+  return KeyValueStore.makeStringOnly({
+    effect get(key: string) {
+      const raw = native.invoke("AlphaConnection", "secureRead", { slot: slot(key) }) catch effect (cause) => { throw failure("get", key, cause) }
+      const answer = Schema.decodeUnknownEffect(SlotValue)(raw) catch effect (cause) => { throw failure("get", key, cause) }
+      return answer.value ?? undefined
+    },
+    effect set(key: string, value: string) {
+      native.invoke("AlphaConnection", "secureWrite", { slot: slot(key), value }) catch effect (cause) => { throw failure("set", key, cause) }
+    },
+    effect remove(key: string) {
+      native.invoke("AlphaConnection", "secureRemove", { slot: slot(key) }) catch effect (cause) => { throw failure("remove", key, cause) }
+    },
+    clear: effect { throw failure("clear", "", "Secure slots are removed one at a time") },
+    size: succeed(0),
+    keys: succeed([] as string[]),
+  })
+})

@@ -1,10 +1,10 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Runs one command with the upstream test-mocks switch explicitly on.
 import { exitFromChild, runChild } from './child-command.ts';
 
 const [command, ...args] = process.argv.slice(2);
 if (!command) {
-  console.error('Usage: bun scripts/with-test-mocks.ts <command> [...args]');
+  console.error('Usage: node scripts/with-test-mocks.ts <command> [...args]');
   process.exit(2);
 }
 

@@ -1,0 +1,63 @@
+// spec/clock/notices.md, "Story: Be told my data was kept"; spec/clock/notices.md, "Story: Recover unreadable data while developing"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Build } from "../platform/build.vibe"
+import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
+import { pageVisible } from "./page.ts"
+
+/** A store whose saved state could not be read, kept as it was. */
+export interface Unreadable {
+  readonly heading: string
+  readonly key: string
+}
+
+const unreadable: Unreadable[] = []
+
+/** Records a store that could not be read; its notice shows once the page is in front. */
+export function keepUnreadable(heading: string, key: string): void {
+  if (!unreadable.some((u) => u.key === key)) unreadable.push({ heading, key })
+}
+
+/** The retained-data notice, and in a test-mocks build the developer's download and reset of the kept bytes. */
+export service ClockRecovery {
+  /** Shows the notice of the first unreadable store, when the page is in front. */
+  announce(): void!!
+  /** The kept bytes of the store the notice names, for a download; only in a test-mocks build. */
+  download(): string | undefined!!
+  /** Removes the saved state of the store the notice names, after its confirmation; only in a test-mocks build. */
+  reset(): void!!
+}
+
+/** Recovery over the notices machine and the owner's KeyValueStore. */
+export const recoveryLayer = Layer.effect(ClockRecovery, effect {
+  const notices = try NoticesMachine
+  const store = try KeyValueStore.KeyValueStore
+  const mocks = (try Build).info.testMocks
+  if (mocks) notices.send({ type: "allowMocks" }) catch () => undefined
+
+  effect function named() {
+    const shown = (try notices.get()).retained
+    return typeof shown === "object" && shown.tag === "Retained" ? unreadable.find((u) => u.heading === shown.heading) : undefined
+  }
+
+  return {
+    effect announce() {
+      const first = unreadable[0]
+      if (first !== undefined && pageVisible()) notices.send({ type: "showRetained", heading: first.heading }) catch () => undefined
+    },
+    effect download() {
+      if (!mocks) return undefined
+      const target = try named()
+      if (target === undefined) return undefined
+      const raw: unknown = store.get(target.key) catch () => undefined
+      const text = Option.isOption(raw) ? Option.getOrUndefined(raw as Option.Option<string>) : raw
+      return typeof text === "string" ? text : undefined
+    },
+    effect reset() {
+      const target = try named()
+      const confirmed = notices.send({ type: "confirmReset" }) catch () => undefined
+      if (!mocks || target === undefined || confirmed?.recovery !== "Resetting") return
+      const removed = (store.remove(target.key) catch () => false) !== false
+      notices.send({ type: "resetAnswered", ok: removed }) catch () => undefined
+    },
+  }
+})

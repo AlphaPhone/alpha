@@ -1,0 +1,51 @@
+// spec/telephony/index.md; spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/drafts.md, "Story: Keep what I was asking Alpha"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
+import { machine as actionsMachine } from "../../gen/telephony__actions.effect.vibe"
+import { machine as attentionMachine } from "../../gen/telephony__attention.effect.vibe"
+import { machine as callBarMachine } from "../../gen/telephony__callBar.effect.vibe"
+import { stored as commsStored } from "../../gen/telephony__comms.effect.vibe"
+import { machine as contactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { stored as draftsStored } from "../../gen/telephony__drafts.effect.vibe"
+import { machine as messagesMachine } from "../../gen/telephony__messages.effect.vibe"
+import { machine as phoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { machine as undoMachine } from "../../gen/telephony__undo.effect.vibe"
+import { machine as voicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
+import { telephonyActionsLayer } from "./actions.vibe"
+import { homeAttentionLayer } from "./attention.vibe"
+import { bridgesLayer, type TelephonyBridges } from "./bridges.vibe"
+import { callWatchLayer } from "./call-bar.vibe"
+import { commsStageLayer } from "./comms.vibe"
+import { contactsViewLayer } from "./contacts.vibe"
+import { draftSendsLayer } from "./drafts.vibe"
+import { messagesViewLayer } from "./messages.vibe"
+import { telephonyKey } from "./owner.vibe"
+import { phoneViewLayer } from "./phone.vibe"
+import { listAskLayer } from "./list-ask.vibe"
+import { pictureAttachLayer } from "./share.vibe"
+import { deletionUndoLayer } from "./undo.vibe"
+import { voicemailViewLayer } from "./voicemail.vibe"
+
+export { messagesShareTarget } from "./share.vibe"
+
+/** Every telephony machine: the visit state in memory, and the owner's drafts and stage stored per owner. */
+export const machines = Layer.mergeAll(
+  callBarMachine(), phoneMachine(), voicemailMachine(), messagesMachine(), contactsMachine(), actionsMachine(), attentionMachine(), undoMachine(),
+  Layer.unwrap(effect { return draftsStored(try telephonyKey("drafts")) }),
+  Layer.unwrap(effect { return commsStored(try telephonyKey("comms")) }),
+)
+
+/** The area over a given way to reach the phone's providers: the image's bridges, or a test's. */
+export function telephonyLayer<E, R>(bridges: Layer.Layer<TelephonyBridges, E, R>) {
+  const base = Layer.provideMerge(deletionUndoLayer, Layer.provideMerge(bridges, machines))
+  const views = Layer.provideMerge(
+    Layer.mergeAll(callWatchLayer, phoneViewLayer, voicemailViewLayer, draftSendsLayer, contactsViewLayer, commsStageLayer, homeAttentionLayer, listAskLayer),
+    base,
+  )
+  const conversations = Layer.provideMerge(Layer.mergeAll(messagesViewLayer, pictureAttachLayer), views)
+  return Layer.provideMerge(telephonyActionsLayer, conversations)
+}
+
+/**
+ * Phone, Messages, Contacts, voicemail, the call bar, the comms stage, Home's cards and the approved actions,
+ * over the platform's Native, Build and KeyValueStore and the account's CloudSession (Files' FilePicker is needed only when attaching).
+ */
+export const layer = telephonyLayer(bridgesLayer)

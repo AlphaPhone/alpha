@@ -1,0 +1,116 @@
+// spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/device.md, "Nothing is dispatched unless the inspection says the reviewed event is still current"; spec/calendar/nativeSync.md, "Enabling persists consent only for a current lease and the exact journal position it read"
+// Decoders for the AlphaCalendar Android plugin's answers. spec/os/android/calendar.md owns what the plugin does.
+
+const Id = Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,18}$/))
+const Revision = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
+const Text = (max: number) => Schema.String.check(Schema.isMaxLength(max))
+const SafeInstant = Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }))
+
+/** One device event in a range. */
+export const DeviceEvent = Schema.Struct({
+  id: Id,
+  calendarId: Id,
+  title: Text(4000),
+  body: Text(32768),
+  location: Text(4000),
+  begin: SafeInstant,
+  end: SafeInstant,
+  revision: Text(512),
+  allDay: Schema.optionalKey(Schema.Boolean),
+  timeZone: Schema.optionalKey(Text(128)),
+  recurring: Schema.optionalKey(Schema.Boolean),
+  account: Schema.optionalKey(Text(320)),
+  local: Schema.optionalKey(Schema.Boolean),
+  creationId: Schema.optionalKey(Text(100)),
+})
+
+/** One device calendar. */
+export const DeviceCalendar = Schema.Struct({
+  id: Id,
+  name: Text(512),
+  account: Text(320),
+  writable: Schema.Boolean,
+  local: Schema.Boolean,
+  visible: Schema.optionalKey(Schema.Boolean),
+})
+
+/** A range read. */
+export const ListReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ready"), events: Schema.Array(DeviceEvent).check(Schema.isMaxLength(2000)), calendars: Schema.Array(DeviceCalendar), truncated: Schema.Boolean }),
+  Schema.Struct({ status: Schema.Literals(["permission-required", "unavailable", "invalid-range"]) }),
+])
+
+/** The access request's answer. */
+export const AccessReply = Schema.Struct({ status: Schema.Literals(["granted", "denied", "unavailable"]) })
+
+/** The creation journal's unacknowledged entries. */
+export const CreationsReply = Schema.Struct({
+  status: Schema.Literal("ready"),
+  creations: Schema.Array(Schema.Struct({ creationId: Text(100), status: Schema.Literals(["saved", "unknown"]) })).check(Schema.isMaxLength(128)),
+})
+
+/** A save's answer. */
+export const SaveReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("saved"), id: Id, creationId: Schema.optionalKey(Text(100)) }),
+  Schema.Struct({ status: Schema.Literals(["pending-creation", "conflict", "read-only", "unavailable"]) }),
+])
+
+/** A direct save's readback of the fields it set. */
+export const OptionsReply = Schema.Struct({ status: Schema.Literal("ready"), allDay: Schema.Boolean, timeZone: Text(128), rrule: Schema.NullOr(Text(1024)) })
+
+/** An inspection: the current ticket, a review in Android Calendar, or a changed event. */
+export const InspectReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ready"), eventId: Id, revision: Text(512), sourceId: Schema.optionalKey(Id), sourceRevision: Text(512) }),
+  Schema.Struct({ status: Schema.Literals(["external", "conflict", "changed", "permission-required", "unavailable"]) }),
+])
+
+/** A deletion's answer. */
+export const RemoveReply = Schema.Struct({ status: Schema.Literals(["queued", "deleted", "conflict", "unknown", "cancelled", "unavailable"]) })
+
+/** The phone's own calendar prepared as the assistant's target for a new event. */
+export const SourceReply = Schema.Struct({ status: Schema.Literal("ready"), sourceId: Text(128), sourceRevision: Text(512) })
+
+/** An editor handoff's answer: a preview receipt, never a write. */
+export const HandoffReply = Schema.Struct({ status: Schema.Literals(["opened", "unavailable", "cancelled"]) })
+
+/** A device sync call's answer. */
+export const SyncReply = Schema.Struct({
+  status: Schema.Literals(["ready", "enabled", "paused", "saved", "queued", "deleted", "undone", "cancelled", "context-changed", "permission-required", "conflict", "unknown", "unavailable"]),
+  lease: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/))),
+  revision: Schema.optionalKey(Revision),
+  phase: Schema.optionalKey(Text(64)),
+})
+
+/** An availability read: occupancy only, and how fresh it was. */
+export const AvailabilityReply = Schema.Struct({
+  status: Schema.Literals(["ready", "permission-required", "unavailable", "zone-changed", "source-changed", "too-many"]),
+  freshness: Schema.optionalKey(Schema.Literals(["local", "unknown"])),
+  rows: Schema.optionalKey(Schema.Array(Schema.Struct({ start: Schema.String, end: Schema.String, allDay: Schema.Boolean, availability: Schema.Literals(["busy", "free", "tentative"]) })).check(Schema.isMaxLength(200))),
+})
+
+/** The calendars an availability check may offer. */
+export const AvailabilitySources = Schema.Struct({
+  status: Schema.Literals(["ready", "unavailable", "permission-required", "zone-changed"]),
+  sources: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Text(128), revision: Revision, name: Schema.optionalKey(Schema.NullOr(Schema.String)), account: Schema.optionalKey(Schema.NullOr(Schema.String)), local: Schema.Boolean })).check(Schema.isMaxLength(64))),
+})
+
+export type DeviceEventRecord = typeof DeviceEvent.Type
+export type DeviceCalendarRecord = typeof DeviceCalendar.Type
+export type ListRecord = typeof ListReply.Type
+export type InspectRecord = typeof InspectReply.Type
+export type SaveRecord = typeof SaveReply.Type
+export type AvailabilityRecord = typeof AvailabilityReply.Type
+export type AvailabilitySourcesRecord = typeof AvailabilitySources.Type
+
+export const decodeList = Schema.decodeUnknownEffect(ListReply)
+export const decodeAccess = Schema.decodeUnknownEffect(AccessReply)
+export const decodeCreations = Schema.decodeUnknownEffect(CreationsReply)
+export const decodeSave = Schema.decodeUnknownEffect(SaveReply)
+export const decodeOptions = Schema.decodeUnknownEffect(OptionsReply)
+export const decodeInspect = Schema.decodeUnknownEffect(InspectReply)
+export const decodeRemove = Schema.decodeUnknownEffect(RemoveReply)
+export const decodeSource = Schema.decodeUnknownEffect(SourceReply)
+export const decodeHandoff = Schema.decodeUnknownEffect(HandoffReply)
+export const decodeSync = Schema.decodeUnknownEffect(SyncReply)
+export const decodeAvailability = Schema.decodeUnknownEffect(AvailabilityReply)
+export const decodeAvailabilitySources = Schema.decodeUnknownEffect(AvailabilitySources)

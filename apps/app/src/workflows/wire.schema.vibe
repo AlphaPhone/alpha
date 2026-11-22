@@ -1,0 +1,154 @@
+// spec/workflows/automations.md, "Each source is read on its own, and its failure is a note beside the other sources' rows"; spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/hostedResults.md, "Story: Be told when my digest is ready, and open exactly that result"
+
+/** `GET /api/auth/me`: the resident's local owner. */
+export schema AuthMe { identity: { kind: string; id: string } }
+
+/** One row of `GET /api/automations`. */
+export schema AutomationRecord {
+  id: string
+  type: "workflow" | "coordinator_text" | "automation_draft"
+  title: string
+  description?: string
+  status?: string
+  enabled: boolean
+  system?: boolean
+  workflowId?: string
+  triggerId?: string
+}
+
+/** `GET /api/automations`. */
+export schema AutomationList {
+  automations: ReadonlyArray<AutomationRecord>
+  workflowFetchError?: string
+  executionFetchErrors?: ReadonlyArray<unknown>
+}
+
+/** A scheduled task's trigger as the agent lists it. */
+export schema TaskTrigger {
+  kind: string
+  expression?: string
+  tz?: string
+  atIso?: string
+  anchorKey?: string
+  offsetMinutes?: number
+  windowKey?: string
+}
+
+/** One owner-visible scheduled task. */
+export schema ScheduledTaskRecord {
+  taskId: string
+  kind?: string
+  ownerVisible?: boolean
+  promptInstructions?: string
+  state: { status: string; firedAt?: string; lastDecisionLog?: string }
+  trigger: TaskTrigger
+  metadata?: { recordKey?: string }
+}
+
+/** `GET /api/scheduled-tasks?ownerVisibleOnly=1`. */
+export schema ScheduledTaskList { tasks: ReadonlyArray<ScheduledTaskRecord> }
+
+/** A verb's answer: the task it changed. */
+export schema TaskReply { task: ScheduledTaskRecord }
+
+/** `POST /api/scheduled-tasks/:id/fire`. */
+export schema FireReply { fire: { kind: string; task?: { taskId: string }; reason?: string; nextAttemptAtIso?: string } }
+
+/** A LifeOps definition: a reminder, routine or goal. */
+export schema LifeDefinition {
+  id: string
+  title?: string
+  description?: string
+  status?: string
+  kind?: string
+  timezone?: string
+  metadata?: { ownerSurface?: string }
+  cadence?: { kind?: string; dueAt?: string }
+}
+
+/** `GET /api/lifeops/reminders`. */
+export schema ReminderList { reminders: ReadonlyArray<{ definition: LifeDefinition; occurrence?: { id: string; dueAt?: string; status?: string } }> }
+
+/** `GET /api/lifeops/definitions`. */
+export schema DefinitionList { definitions: ReadonlyArray<{ definition: LifeDefinition }> }
+
+/** A definition write's answer. */
+export schema DefinitionReply { definition: LifeDefinition }
+
+/** A saved prompt. */
+export schema TriggerRecord {
+  id: string
+  displayName: string
+  instructions: string
+  enabled: boolean
+  triggerType?: "once" | "cron" | "event"
+  scheduledAtIso?: string
+  cronExpression?: string
+  eventKind?: string
+  timezone?: string
+  revision?: number
+}
+
+/** `GET`, `POST` and `PUT /api/triggers…`. */
+export schema TriggerReply { trigger: TriggerRecord; deliveryConversationId?: string }
+
+/** `GET /api/triggers/:id/runs`. */
+export schema TriggerRuns { runs: ReadonlyArray<{ startedAtIso?: string; status?: string; error?: string }> }
+
+/** `POST /api/triggers/:id/execute`. */
+export schema ExecuteReply { ok: boolean; result: { status: string; error?: string } }
+
+/** `DELETE`: `{ ok: true }` or `{ deleted: true }`. */
+export schema Deleted { ok?: boolean; deleted?: boolean }
+
+/** A run, as `/api/workflow/executions…` answers it. */
+export schema RunRecord {
+  id: string
+  workflowId: string
+  status: string
+  startedAt: string
+  finished: boolean
+  versionId: string
+  stoppedAt?: string
+  error?: string
+  output?: unknown
+  missedOccurrenceAt?: string
+  reconciliation?: { state: "worker-running" | "outcome-unknown"; message?: string }
+  occurrence?: { scheduledAt: string; status: "ready" | "missed" | "overlap" | "unavailable" }
+  events?: ReadonlyArray<{ type: string; at: string; node?: string }>
+}
+
+/** `GET /api/workflow/executions/:id`, `POST …/cancel` and `POST …/run`. */
+export schema RunReply { execution: RunRecord; submissionId?: string }
+
+/** `AlphaHostedResults.publishResult`. */
+export schema PublishedPhase { phase: string }
+
+/** `AlphaHostedResults.pendingResult`: empty, or the captured tap. */
+export schema PendingResult {
+  scope?: string
+  origin?: string
+  ownerId?: string
+  agentId?: string
+  runId?: string
+  workflowId?: string
+  workflowVersionId?: string
+  token?: string
+  retained?: boolean
+  question?: boolean
+}
+
+/** `AlphaHostedResults.configureBackground`. */
+export schema BackgroundConfigured { generation: string; scope: string }
+
+/** `AlphaHostedResults.postWorkflowApprovalNotice` and `resumeWorkflowApprovalNotice`. */
+export schema NoticePosted { status: string }
+
+/** `AlphaHostedResults.nativeSourceIdentity`. */
+export schema SourceIdentity { ownerId: string; agentId: string; installationId: string; enrollmentId: string }
+
+/** `AlphaHostedResults.nativeSourceConsent`. */
+export schema ConsentReply { revoked?: boolean; expiresAt?: string; sourceId?: string }
+
+/** `POST /api/workflow/hosted/cloud-delegation/{start|status|complete|cancel}`. */
+export schema DelegationRequest { mutationId: string; state: string; kinds: ReadonlyArray<"email" | "calendar">; expiresAt: string; status: "waiting" | "complete" | "failed"; grantId?: string }

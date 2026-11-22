@@ -1,0 +1,181 @@
+#!/usr/bin/env node
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"; spec/cloud/operator.md, "Story: Operate the deployment without reading secrets"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import type { CloudEnvironment } from "@elizaos/cloud/profile"
+import { checkOutputs, deploymentOutputs, selectDeployment, writeOutputs } from "./deployment.vibe"
+import { localProfile, OperatorInputs, readAlphaProfile, type OperatorInputs as Inputs } from "./profile.vibe"
+import { environmentRegistration, registerArguments, seedDocument, type AppIdentity, type ReleaseSigner } from "./registration.vibe"
+import { checkRuntimeConfig } from "./runtime-config.vibe"
+import { renderEnvironment, type CloudResources } from "./wrangler.vibe"
+
+module node {
+  /** @throws {never} */
+  export function commandLine(): ReadonlyArray<string> {
+    return process.argv.slice(2)
+  }
+}
+import { commandLine } from node
+
+/** The command line names an unknown command or misses a flag. */
+export error UsageInvalid { message: string }
+/** A repository file the command reads is missing or not JSON. */
+export error InputUnreadable { file: string }
+
+const usage = [
+  "usage: alpha-cloud deployment [--check]",
+  "     | alpha-cloud runtime-config",
+  "     | alpha-cloud profile --inputs <file> --out <file> [--local <origin>…]",
+  "     | alpha-cloud seed --inputs <file> --environment production|staging --out <file>",
+  "     | alpha-cloud register-args --inputs <file> --environment production|staging",
+  "     | alpha-cloud render --inputs <file> --environment production|staging [--resources <file>] [--out <dir>]",
+].join("\n")
+
+effect function flags(args: ReadonlyArray<string>, valued: ReadonlyArray<string>, repeated: ReadonlyArray<string> = [], switches: ReadonlyArray<string> = []) {
+  const single = new Map<string, string>()
+  const many = new Map<string, string[]>()
+  const on = new Set<string>()
+  for (let index = 0; index < args.length; index++) {
+    const name = args[index] ?? ""
+    const key = name.slice(2)
+    if (!name.startsWith("--")) throw new UsageInvalid({ message: usage })
+    if (switches.includes(key)) { on.add(key); continue }
+    const value = args[index + 1]
+    if (value === undefined || (!valued.includes(key) && !repeated.includes(key)) || single.has(key)) throw new UsageInvalid({ message: usage })
+    if (repeated.includes(key)) many.set(key, [...(many.get(key) ?? []), value])
+    else single.set(key, value)
+    index++
+  }
+  return { single, many, on }
+}
+
+effect function required(found: ReadonlyMap<string, string>, name: string): string!UsageInvalid {
+  const value = found.get(name)
+  if (value === undefined) throw new UsageInvalid({ message: `--${name} is required\n${usage}` })
+  return value
+}
+
+effect function environmentOf(found: ReadonlyMap<string, string>): CloudEnvironment!UsageInvalid {
+  const value = try required(found, "environment")
+  if (value !== "production" && value !== "staging") throw new UsageInvalid({ message: `--environment must be production or staging, not ${value}` })
+  return value
+}
+
+effect function repositoryRoot() {
+  const path = try Path.Path
+  return try path.fromFileUrl(new URL("../../", import.meta.url))
+}
+
+effect function readJson(file: string): unknown!InputUnreadable!FileSystem.FileSystem {
+  const fs = try FileSystem.FileSystem
+  const text = fs.readFileString(file) catch effect () => { throw new InputUnreadable({ file }) }
+  return try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new InputUnreadable({ file }) })
+}
+
+effect function repositoryJson(name: string) {
+  const path = try Path.Path
+  return try readJson(path.join(try repositoryRoot(), name))
+}
+
+effect function inputsOf(file: string): Inputs {
+  return try Schema.decodeUnknownEffect(OperatorInputs, { onExcessProperty: "error" })(try readJson(file))
+}
+
+effect function registrationOf(found: ReadonlyMap<string, string>, environment: CloudEnvironment) {
+  const profile = try readAlphaProfile(try required(found, "inputs"))
+  const identity = (try repositoryJson("app.config.json")) as AppIdentity
+  const signer = (try repositoryJson("android/release-signer.json")) as ReleaseSigner
+  return { profile, client: try environmentRegistration(profile, environment, identity, signer) }
+}
+
+effect function deployment(args: ReadonlyArray<string>) {
+  const found = try flags(args, [], [], ["check"])
+  const selection = try selectDeployment()
+  const identity = (try repositoryJson("app.config.json")) as AppIdentity
+  const outputs = deploymentOutputs(selection.rows, identity.appId)
+  const root = try repositoryRoot()
+  if (found.on.has("check")) {
+    try checkOutputs(root, selection, outputs)
+    try checkRuntimeConfig(selection.rows)
+    return { checked: Object.keys(outputs), cutover: selection.cutover, candidate: selection.candidate }
+  }
+  try writeOutputs(root, outputs)
+  return { written: Object.keys(outputs), cutover: selection.cutover, candidate: selection.candidate }
+}
+
+effect function runtimeConfig(args: ReadonlyArray<string>) {
+  try flags(args, [])
+  return try checkRuntimeConfig((try selectDeployment()).rows)
+}
+
+effect function profileFile(args: ReadonlyArray<string>) {
+  const found = try flags(args, ["inputs", "out"], ["local"])
+  const accepted = try readAlphaProfile(try required(found.single, "inputs"))
+  const loopback = found.many.get("local") ?? []
+  if (loopback.length > 0 && (try Config.withDefault(Config.String("ELIZA_DEV_ALLOW_TEST_MOCKS"), "")) !== "1")
+    throw new UsageInvalid({ message: "--local writes a loopback development profile and needs ELIZA_DEV_ALLOW_TEST_MOCKS=1" })
+  const profile = loopback.length > 0 ? localProfile(accepted, loopback) : accepted
+  const out = try required(found.single, "out")
+  const fs = try FileSystem.FileSystem
+  try fs.writeFileString(out, JSON.stringify(profile, null, 2) + "\n")
+  return { profile: out, local: loopback.length > 0 }
+}
+
+effect function seed(args: ReadonlyArray<string>) {
+  const found = try flags(args, ["inputs", "environment", "out"])
+  const environment = try environmentOf(found.single)
+  const { client } = try registrationOf(found.single, environment)
+  const out = try required(found.single, "out")
+  const fs = try FileSystem.FileSystem
+  try fs.writeFileString(out, JSON.stringify(seedDocument(client), null, 2) + "\n")
+  return { seed: out, clientId: client.clientId, environment }
+}
+
+effect function registerArgs(args: ReadonlyArray<string>) {
+  const found = try flags(args, ["inputs", "environment"])
+  const environment = try environmentOf(found.single)
+  const { client } = try registrationOf(found.single, environment)
+  return registerArguments(client)
+}
+
+effect function render(args: ReadonlyArray<string>) {
+  const found = try flags(args, ["inputs", "environment", "resources", "out"])
+  const environment = try environmentOf(found.single)
+  const inputsFile = try required(found.single, "inputs")
+  const { profile, client } = try registrationOf(found.single, environment)
+  const inputs = try inputsOf(inputsFile)
+  const path = try Path.Path
+  const root = try repositoryRoot()
+  const resources = (try readJson(found.single.get("resources") ?? path.join(root, "cloud/resources.json"))) as Record<CloudEnvironment, CloudResources>
+  const templates = { api: try readJson(path.join(root, "cloud/wrangler/api.template.json")), edge: try readJson(path.join(root, "cloud/wrangler/edge.template.json")) }
+  const rendered = try renderEnvironment(templates, profile, environment, resources[environment], inputs[environment], client)
+  const out = found.single.get("out") ?? path.join(root, "cloud/rendered")
+  const fs = try FileSystem.FileSystem
+  try fs.makeDirectory(out, { recursive: true })
+  const api = path.join(out, `wrangler.${environment}.json`)
+  const edge = path.join(out, `wrangler.edge.${environment}.json`)
+  try fs.writeFileString(api, JSON.stringify(rendered.api, null, 2) + "\n")
+  try fs.writeFileString(edge, JSON.stringify(rendered.edge, null, 2) + "\n")
+  return { api, edge }
+}
+
+/** The Alpha Cloud command line: client deployment outputs, runtime check, profile, seed, client registration and Wrangler rendering. */
+export effect function cli(argv: ReadonlyArray<string>) {
+  const [command, ...rest] = argv
+  switch (command) {
+    case "deployment": return try deployment(rest)
+    case "runtime-config": return try runtimeConfig(rest)
+    case "profile": return try profileFile(rest)
+    case "seed": return try seed(rest)
+    case "register-args": return try registerArgs(rest)
+    case "render": return try render(rest)
+    default: throw new UsageInvalid({ message: command === undefined ? usage : `unknown command ${command}\n${usage}` })
+  }
+}
+
+effect function main() {
+  const result = try cli(commandLine())
+  try Console.log(JSON.stringify(result, null, 2))
+}
+
+if (import.meta.main) NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))

@@ -1,0 +1,24 @@
+// spec/camera/notices.md, "Story: Be told only what I need to act on"
+import { Machine as NoticeMachine } from "../../gen/camera__notices.effect.vibe"
+
+/** The one short line over Camera or Photos. */
+export service CameraNotices {
+  /** Show `text`, replacing the last line; it goes after five seconds unless persistent. */
+  say(text: string, persistent: boolean): void!!
+}
+
+/** Notices over the notices Machine, each line expiring from its own timer. */
+export const cameraNotices = Layer.effect(CameraNotices, effect {
+  const machine = try NoticeMachine
+  return {
+    effect say(text: string, persistent: boolean) {
+      const after = machine.send({ type: "say", text, persistent }) catch () => undefined
+      if (after === undefined || after.persistent || after.said === "") return
+      const generation = after.generation
+      try forkDetach(effect {
+        try sleep("5 seconds")
+        machine.send({ type: "expire", generation }) catch () => undefined
+      })
+    },
+  }
+})

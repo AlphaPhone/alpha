@@ -1,0 +1,38 @@
+// spec/assistant/index.md, "Story: Ask my assistant from anywhere"
+import { machine as dockMachine } from "../../gen/assistant__dock.effect.vibe"
+import { stored as draftsStored } from "../../gen/assistant__draft.effect.vibe"
+import { machine as sendsMachine } from "../../gen/assistant__send.effect.vibe"
+import { machine as stoppedMachine } from "../../gen/assistant__stoppedReply.effect.vibe"
+import { machine as clientMachine } from "../../gen/assistant__conversation.effect.vibe"
+import { machine as locatorMachine } from "../../gen/assistant__context.effect.vibe"
+import { machine as searchMachine } from "../../gen/assistant__search.effect.vibe"
+import { machine as summonsMachine } from "../../gen/assistant__entry.effect.vibe"
+import { machine as custodyMachine } from "../../gen/assistant__attachments.effect.vibe"
+import { machine as reviewMachine } from "../../gen/assistant__review.effect.vibe"
+import { machine as bridgeMachine } from "../../gen/assistant__withdrawal.effect.vibe"
+import { machine as suggestionMachine } from "../../gen/assistant__suggestion.effect.vibe"
+import { assistantLayer } from "./assistant.vibe"
+import { attachmentsLayer } from "./attachments.vibe"
+import { composerLayer } from "./composer.vibe"
+import { conversationsLayer } from "./conversations.vibe"
+import { locationLayer } from "./location.vibe"
+import { reviewLayer } from "./review.vibe"
+import { searchLayer } from "./search.vibe"
+import { flowsLayer } from "./flows.vibe"
+import { suggestionsLayer } from "./suggestion.vibe"
+import { withdrawableLayer } from "./withdrawable.vibe"
+
+/** The key the composer's drafts are kept under; each binding inside names its origin, owner, agent and conversation. */
+export const draftsKey = "alpha/assistant/drafts"
+
+/** Every machine the assistant keeps; the drafts survive a restart, the rest live with the page. */
+export const machines = Layer.mergeAll(
+  dockMachine(), draftsStored(draftsKey), sendsMachine(), stoppedMachine(), clientMachine(), locatorMachine(),
+  searchMachine(), summonsMachine(), custodyMachine(), reviewMachine(), bridgeMachine(), suggestionMachine(),
+)
+
+/** The assistant's services and machines, needing Native, Resident, KeyValueStore, Preferences, AssistantHost and DeviceExecutors. */
+export const layer = Layer.provideMerge(
+  Layer.provideMerge(flowsLayer, Layer.mergeAll(searchLayer, assistantLayer)),
+  Layer.provideMerge(composerLayer, Layer.provideMerge(Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer), Layer.provideMerge(withdrawableLayer, machines))),
+)

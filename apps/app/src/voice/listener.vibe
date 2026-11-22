@@ -1,0 +1,191 @@
+// spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { Machine, type Event, type Listener as ListenerState, type ListenerMode, type Origin, type Stop } from "../../gen/voice__listener.effect.vibe"
+import { newId, sessionKey } from "./ids.ts"
+import { InvocationReceipt, ListenerStatusReply, SettingsOpened } from "./native.schema.vibe"
+
+/** The listener as Alpha shows it: whether the image has one, what it is doing and whether it holds the microphone. */
+export interface ListenerStatus {
+  readonly available: boolean
+  readonly mode: ListenerMode
+  readonly consented: boolean
+  readonly microphoneOpen: boolean
+}
+
+/** A Pause or Turn off answer: confirmed only when the listener saved it with the microphone closed. */
+export interface ListenerStopAnswer {
+  readonly confirmed: boolean
+  readonly status: ListenerStatus
+}
+
+/** What the screen is doing when an invocation is taken. */
+export interface InvocationScreen {
+  readonly unlocked: boolean
+  readonly visible: boolean
+  readonly dialogOpen: boolean
+  readonly connectionPrompt: boolean
+  readonly voiceActive: boolean
+}
+
+/** The always-on listener of the Alpha image: status, Pause, Turn off, its settings, the startup stop and invocations. Never turns listening on. */
+export service Listener {
+  /** The listener state now and after each change. */
+  readonly changes: Stream.Stream<ListenerState>
+  /** The listener state at this moment. */
+  get(): ListenerState!!
+  /** Decide once whether this image admits the listener, and stop a listener left on where it does not. */
+  boot(): void!!
+  /** Read the listener's status; a read issued before an action or another read is not shown. */
+  status(): ListenerStatus!!
+  /** Pause listening until the owner resumes it in the listener's own screen. */
+  pause(): ListenerStopAnswer!!
+  /** Turn listening off; consent is kept, and only the listener's own screen turns it on. */
+  turnOff(): ListenerStopAnswer!!
+  /** Open the listener's own consent and settings screen. */
+  openSettings(): boolean!!
+  /** Bind the signed-in session's opaque authority, or none, to the listener's invocation bridge. */
+  bindSession(authority: string | null): void!!
+  /** Take the pending invocation once; true when it starts a voice conversation. */
+  takeInvocation(screen: InvocationScreen): boolean!!
+}
+
+const SENSE = "ElizaSense"
+const STOP_DEADLINE = "5 seconds"
+const PAUSE_STOP_STATES = new Set(["OFF", "PERMISSION_REQUIRED", "NOTIFICATIONS_REQUIRED", "STOPPED_AFTER_ERRORS", "STOPPED_INDICATOR_LOST",
+  "PAUSED_OTHER_USER", "WAITING_FOR_UNLOCK", "SPEECH_UNAVAILABLE", "PAUSED_USER"])
+const decodeStatus = Schema.decodeUnknownOption(ListenerStatusReply)
+const decodeReceipt = Schema.decodeUnknownOption(InvocationReceipt)
+const decodeOpened = Schema.decodeUnknownOption(SettingsOpened)
+
+/** The Sense bridge's state as the mode Alpha shows. */
+export function modeOf(state: string | undefined): ListenerMode {
+  if (state === undefined) return "Unavailable"
+  if (state === "LISTENING") return "ListeningOn"
+  if (state === "OFF") return "ListeningOff"
+  if (state === "STOPPED_AFTER_ERRORS" || state === "STOPPED_INDICATOR_LOST") return "StoppedByListener"
+  if (state.startsWith("PAUSED_")) return "ListeningPaused"
+  return "NeedsSetup"
+}
+
+function originOf(invocation: string | undefined, assistant: boolean): Origin {
+  if (!assistant) return "NothingPending"
+  if (invocation === "listener") return "ListenerWake"
+  if (invocation === "system") return "SystemGesture"
+  if (invocation === "power") return "PowerPress"
+  return "AssistOnly"
+}
+
+const unavailable: ListenerStatus = { available: false, mode: "Unavailable", consented: false, microphoneOpen: false }
+
+/** The listener service over the listener Machine it is given. */
+export const listenerService = Layer.effect(Listener, effect {
+  const held = try Machine
+  const native = try Native
+  const build = try Build
+  const bindingId = newId()
+  let generation = 0
+  let boundKey: string | null = null
+
+  effect function send(event: Event) {
+    held.send(event) catch () => undefined
+  }
+
+  function statusOf(raw: unknown): ListenerStatus {
+    const reply = Option.getOrUndefined(decodeStatus(raw))
+    if (reply === undefined || !reply.available) return unavailable
+    const mode = modeOf(reply.state)
+    return { available: mode !== "Unavailable", mode, consented: reply.consented === true, microphoneOpen: reply.microphoneOpen === true }
+  }
+
+  function confirmsStop(raw: unknown, stop: Stop): boolean {
+    const reply = Option.getOrUndefined(decodeStatus(raw))
+    if (reply === undefined) return false
+    if (!reply.available) return reply.reason === "not-installed" && reply.listening !== true && reply.microphoneOpen !== true
+    if (reply.saved !== true || reply.listening !== false || reply.microphoneOpen !== false || reply.state === undefined) return false
+    return stop === "TurnOffListening" ? reply.state === "OFF" : PAUSE_STOP_STATES.has(reply.state)
+  }
+
+  effect function admitted() {
+    return (try held.get()).image === "ListenerAdmitted"
+  }
+
+  effect function boot() {
+    if ((try held.get()).booted) return
+    const android = build.info.variant !== "browser"
+    const declared = android && (try native.available(SENSE)) && build.info.variant === "aosp"
+    try send({ type: "boot", aosp: build.info.variant === "aosp", declared, android })
+    if ((try held.get()).wakeStop !== "StopPending") return
+    const reply = timeout(native.invoke(SENSE, "turnOff", {}), STOP_DEADLINE) catch () => undefined
+    const confirmed = reply !== undefined && confirmsStop(reply, "TurnOffListening")
+    try send({ type: "wakeStopAnswered", inTime: reply !== undefined, reportedOff: confirmed, microphoneClosed: confirmed })
+  }
+
+  effect function status() {
+    if (!(try admitted())) return unavailable
+    const before = try held.get()
+    try send({ type: "beginRead" })
+    const token = (try held.get()).issued
+    if (token === before.issued) return statusOf(undefined)
+    const raw = native.invoke(SENSE, "status", {}) catch () => undefined
+    const read = statusOf(raw)
+    try send({ type: "readAnswered", token, mode: read.mode, microphoneOpen: read.microphoneOpen })
+    const shown = try held.get()
+    return { ...read, mode: shown.mode, microphoneOpen: shown.microphoneOpen }
+  }
+
+  effect function stopWith(stop: Stop) {
+    const before = try held.get()
+    try send({ type: "beginStop", stop })
+    if (!(try held.get()).busy) {
+      const shown: ListenerStatus = { available: before.image === "ListenerAdmitted", mode: before.mode, consented: true, microphoneOpen: before.microphoneOpen }
+      const refused: ListenerStopAnswer = { confirmed: false, status: shown }
+      return refused
+    }
+    const raw = native.invoke(SENSE, stop === "PauseListening" ? "pause" : "turnOff", {}) catch () => undefined
+    const confirmed = raw !== undefined && confirmsStop(raw, stop)
+    const read = statusOf(raw)
+    try send({ type: "stopAnswered", confirmed, mode: confirmed ? read.mode : before.mode })
+    const after = try held.get()
+    const answer: ListenerStopAnswer = { confirmed, status: { ...read, available: true, mode: after.mode, microphoneOpen: after.microphoneOpen } }
+    return answer
+  }
+
+  effect function bindSession(authority: string | null) {
+    if (!(try admitted())) return
+    const key = authority === null ? null : try (tryPromise(() => sessionKey(authority)) catch () => null)
+    if (key === boundKey && generation > 0) return
+    generation += 1
+    native.invoke(SENSE, "bindInvocationSession", { generation, bindingId, sessionKey: key }) catch () => undefined
+    boundKey = key
+  }
+
+  effect function takeInvocation(screen: InvocationScreen) {
+    if (!(try admitted()) || boundKey === null) return false
+    const raw = native.invoke(SENSE, "takeInvocation", { generation, bindingId, sessionKey: boundKey }) catch () => undefined
+    const receipt = raw === undefined ? undefined : Option.getOrUndefined(decodeReceipt(raw))
+    const origin = originOf(receipt?.invocation, receipt?.assistant === true)
+    if (origin === "NothingPending") return false
+    const out = held.send({ type: "invocationTaken", origin, unlocked: screen.unlocked && receipt?.locked === false, visible: screen.visible,
+      dialogOpen: screen.dialogOpen, connectionPrompt: screen.connectionPrompt, voiceActive: screen.voiceActive }) catch () => undefined
+    return out !== undefined && out.out.includes("StartVoice")
+  }
+
+  fork.detached boot()
+
+  return {
+    changes: held.changes,
+    get: () => held.get(),
+    boot,
+    status,
+    pause: () => stopWith("PauseListening"),
+    turnOff: () => stopWith("TurnOffListening"),
+    effect openSettings() {
+      if (!(try admitted())) return false
+      const raw = native.invoke(SENSE, "openSettings", {}) catch () => undefined
+      return Option.getOrUndefined(decodeOpened(raw))?.opened === true
+    },
+    bindSession,
+    takeInvocation,
+  }
+})

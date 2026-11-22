@@ -1,0 +1,108 @@
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"
+import { Machine as DockMachine, swallowWindow, type Detent } from "../../gen/assistant__dock.effect.vibe"
+import { Machine as DraftsMachine, shown, slotOf, type Drafts } from "../../gen/assistant__draft.effect.vibe"
+import { Machine as SummonsMachine, startsVoice, type Origin } from "../../gen/assistant__entry.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { AttachmentRefused, ChatAttachments, type Picked } from "./attachments.vibe"
+import { AssistantHost } from "./host.vibe"
+import { AssistInvocation } from "./payloads.schema.vibe"
+import { unitsOf } from "./units.vibe"
+import type { ChatFile } from "./transcript.vibe"
+
+/** Something another area hands to the composer: picked files to read, or files it already read and encoded. */
+export type Handed = { readonly kind: "files"; readonly files: readonly Picked[] } | { readonly kind: "encoded"; readonly files: readonly ChatFile[] }
+
+/** The assistant as other areas reach it: open the sheet with a draft, attach a reviewed item, and follow its summons. */
+export service Assistant {
+  /** Whether the owner holds an unsent draft: text in the composer, a send in flight, or a message waiting for review; each change once. */
+  readonly holdingDraftChanges: Stream.Stream<boolean>
+  /** Whether the owner holds an unsent draft now. */
+  holdingDraft(): boolean!!
+  /** Voice turns the assistant asks the voice area to start, one per voice invocation. */
+  readonly voiceRequests: Stream.Stream<void>
+  /** Open the sheet with an editable draft the owner sends; text the owner already typed is kept. */
+  openWith(draft: string): void!!
+  /** Add an item to the composer and open the sheet; nothing is sent. */
+  attach(item: Handed): void!AttachmentRefused
+  /** Open the chat at a detent. */
+  show(detent: Detent): void!!
+  /** The owner pressed Talk: ask the voice area for a conversation. */
+  requestVoice(): void!!
+  /** Follow Android's assist invocations for as long as it runs. */
+  follow(): void!!
+}
+
+const tickMs = 200
+
+function holds(state: Drafts): boolean {
+  const slot = slotOf(state, state.active)
+  return shown(state).length > 0 || slot.sending || slot.unsettled
+}
+
+function originOf(raw: string): Origin {
+  return raw === "listener" ? "ListenerOrigin" : raw === "system" || raw === "power" ? "SystemOrigin" : raw === "assist" ? "AssistOrigin" : "NoOrigin"
+}
+
+/** The assistant service over the dock, drafts and entry machines. */
+export const assistantLayer = Layer.effect(Assistant, effect {
+  const dock = try DockMachine
+  const drafts = try DraftsMachine
+  const summons = try SummonsMachine
+  const native = try Native
+  const host = try AssistantHost
+  const files = try ChatAttachments
+  const voice = try PubSub.unbounded<void>()
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  effect function show(detent: Detent) {
+    const state = try dock.get()
+    if (state.chat === detent) return
+    if (detent === "Sheet" || (detent === "Full" && state.chat !== "Sheet")) try quiet(dock.send({ type: "openSheet" }))
+    if (detent === "Full" && (try dock.get()).chat === "Sheet") try quiet(dock.send({ type: "sizeButton" }))
+    if ((detent === "Input" || detent === "Hidden") && (state.chat === "Sheet" || state.chat === "Full")) try quiet(dock.send({ type: "closeChat" }))
+  }
+  effect function ticks() {
+    while (true) {
+      try sleep(tickMs)
+      const state = try dock.get()
+      if (state.swallowAge < swallowWindow || state.dragAge < swallowWindow || state.ghost) try quiet(dock.send({ type: "tick" }))
+    }
+  }
+  effect function invoked(raw: unknown) {
+    const found = Schema.decodeUnknownOption(AssistInvocation)(raw)
+    if (Option.isNone(found)) return
+    const origin = originOf(found.value.origin)
+    if (origin === "NoOrigin") return
+    try quiet(summons.send({ type: "invoke", origin, cold: found.value.cold === true }))
+    if (found.value.cold === true) try quiet(summons.send({ type: "adopt" }))
+    const exposure = (try host.screen()).exposure
+    const before = try summons.get()
+    const voiced = startsVoice({ ...before, locked: exposure.locked })
+    if (try quiet(summons.send({ type: "take", foreground: !exposure.hidden }))) {
+      try show("Full")
+      if (voiced) try PubSub.publish(voice, undefined)
+    }
+  }
+  return {
+    holdingDraftChanges: Stream.changes(Stream.map(drafts.changes, holds)),
+    holdingDraft: () => map(drafts.get(), holds),
+    voiceRequests: Stream.fromPubSub(voice),
+    openWith: (draft: string) => effect {
+      if (draft.trim() !== "") try quiet(drafts.send({ type: "handOver", text: unitsOf(draft) }))
+      try show("Sheet")
+    },
+    attach: (item: Handed) => effect {
+      if (item.kind === "files") try files.add(item.files)
+      else try files.addEncoded(item.files)
+      try show("Sheet")
+    },
+    show,
+    requestVoice: () => map(PubSub.publish(voice, undefined), () => undefined),
+    follow: () => effect {
+      fork.detached ticks()
+      if (!(try native.available("DailyApps"))) return
+      for try (const raw of Stream.ignore(native.listen("DailyApps", "assistantInvoked"))) {
+        try invoked(raw)
+      }
+    },
+  }
+})

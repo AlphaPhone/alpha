@@ -1,0 +1,116 @@
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as ShadeMachine } from "../../gen/clock__notifications.effect.vibe"
+import { Machine as DeletionsMachine } from "../../gen/clock__deletions.effect.vibe"
+import { Notifications, notificationsLayer } from "../../src/clock/notifications.vibe"
+import { CanonicalTaps, canonicalTapsLayer } from "../../src/clock/canonical-taps.vibe"
+import { WorkflowNotices, workflowNoticesLayer } from "../../src/clock/workflow-notices.vibe"
+import { Deletions, deletionsLayer } from "../../src/clock/deletions.vibe"
+import { fakeAssistant, fakeNavigation, fakeOrigins, fakePhone, fakeRuns, machines, session } from "./phone.vibe"
+
+const row = (id: string, revision: string, clearable = true) =>
+  ({ id, revision, source: "own", kind: "reminder", appLabel: "Alpha Phone", title: "Call", text: "", at: 1, clearable, canOpen: true })
+
+describe("Notifications (spec/clock/notifications.md, \"Story: Act on exactly the notification I see\")", () => {
+  it.effect("act only on the listed row and clear exactly the clearable ones (spec/clock/notifications.md, \"Story: Act on exactly the notification I see\")", () => effect {
+    let items = [row("reminder-1", "v1"), row("nav-1", "v1", false)]
+    const phone = fakePhone({
+      "AlphaNotifications.list": () => ({ items, scope: "device" }),
+      "AlphaNotifications.dismiss": () => ({}),
+      "AlphaNotifications.clear": (args) => ({ outcomes: (args as { items: unknown[] }).items.map(() => ({ status: "requested" })) }),
+    })
+    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, fakeAssistant().layer {
+      const notifications = try Notifications
+      const shade = try ShadeMachine
+      try notifications.open()
+      try notifications.swipe("reminder-1", "v0")
+      const changed = (try shade.get()).report
+      try notifications.swipe("nav-1", "v1")
+      const ongoing = (try shade.get()).report
+      try notifications.clearAll()
+      const cleared = phone.calls.find((c) => c.method === "clear")?.args
+      items = []
+      try notifications.close()
+      const closed = (try shade.get()).rows.length
+      try Effect.try(() => assert.deepStrictEqual(
+        { changed, ongoing, cleared, dismissed: phone.calls.filter((c) => c.method === "dismiss").length, closed },
+        { changed: "ReportChanged", ongoing: "ReportOngoing", cleared: { items: [{ id: "reminder-1", revision: "v1", source: "own" }] }, dismissed: 0, closed: 0 },
+      ))
+    }
+  })
+})
+
+describe("Notification taps (spec/clock/canonicalTaps.md, \"Story: Open the view a notification names\")", () => {
+  it.effect("open the view a tap names for this account and acknowledge it once (spec/clock/canonicalTaps.md, \"Story: Open the view a notification names\")", () => effect {
+    let pending: Record<string, string> = { token: "t1", ownerId: "org:owner-1", agentId: "agent-1", view: "reminders" }
+    const phone = fakePhone({
+      "AlphaNotifications.canonicalPending": () => pending,
+      "AlphaNotifications.acknowledgeCanonical": () => {
+        pending = {}
+        return { ok: true }
+      },
+    })
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(canonicalTapsLayer, machines), phone.layer, navigator.layer, fakeAssistant().layer, session("org:owner-1") {
+      const taps = try CanonicalTaps
+      try taps.wake()
+      try taps.wake()
+      pending = { token: "t2", ownerId: "someone-else", agentId: "agent-1", view: "notes" }
+      try taps.wake()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: navigator.opened, acknowledged: phone.calls.filter((c) => c.method === "acknowledgeCanonical").map((c) => c.args) },
+        { opened: [{ app: "reminders", route: undefined }], acknowledged: [{ token: "t1" }] },
+      ))
+    }
+  })
+
+  // spec/clock/workflowNotices.md, "A pending tap opens its run only for the signed-in account, and a run opened once is never opened again for the same tap"
+  it.effect("open the exact run a workflow notice names, once (spec/clock/workflowNotices.md, \"Story: Return to the run a notice names\")", () => effect {
+    let consumeOk = false
+    const phone = fakePhone({
+      "ElizaNotifications.pendingWorkflowTap": () => ({ token: "w1", ownerId: "org:owner-1", agentId: "agent-1", runId: "run-7", retained: true }),
+      "ElizaNotifications.consumeWorkflowTap": () => (consumeOk ? {} : { refused: "busy" }),
+      "AlphaHostedResults.pendingResult": () => ({}),
+    })
+    const runs = fakeRuns()
+    const navigation = fakeNavigation()
+    provide Layer.provideMerge(workflowNoticesLayer, machines), phone.layer, runs.layer, navigation.layer, fakeAssistant().layer, session("org:owner-1") {
+      const notices = try WorkflowNotices
+      try notices.check()
+      consumeOk = true
+      try notices.check()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: runs.opened, shown: navigation.opened, consumes: phone.calls.filter((c) => c.method === "consumeWorkflowTap").length },
+        { opened: ["run-7"], shown: [{ app: "workflows", route: "run/run-7" }], consumes: 2 },
+      ))
+    }
+  })
+})
+
+describe("Deletion Undo (spec/clock/deletions.md, \"Story: Undo a reviewed deletion in time\")", () => {
+  it.effect("undo a queued deletion, and know nothing of the old owner after a change (spec/clock/deletions.md, \"Story: Undo a reviewed deletion in time\")", () => effect {
+    let rows = [{ kind: "reminder", id: "op1", phase: "queued", window: "open", target: { row: { title: "Call" } } }]
+    const origins = fakeOrigins()
+    const phone = fakePhone({
+      "AlphaDeletions.pending": () => ({ deletions: rows, deletedOrigins: rows.length ? [] : [{ kind: "reminder", id: "r9" }] }),
+      "AlphaDeletions.undo": () => {
+        rows = []
+        return { phase: "undone" }
+      },
+    })
+    provide Layer.provideMerge(deletionsLayer, machines), phone.layer, origins.layer, session("org:owner-1") {
+      const deletions = try Deletions
+      const notice = try DeletionsMachine
+      try deletions.refresh()
+      const shown = (try notice.get()).rows.map((r) => r.key)
+      try deletions.undo("reminder:op1")
+      const kept = try notice.get()
+      try deletions.refresh()
+      try Effect.try(() => assert.deepStrictEqual(
+        { shown, report: kept.report, rows: kept.rows.length, undone: phone.calls.filter((c) => c.method === "undo").map((c) => c.args), forgotten: origins.forgotten },
+        { shown: ["reminder:op1"], report: "Kept", rows: 0, undone: [{ kind: "reminder", id: "op1" }], forgotten: [{ kind: "reminder", id: "r9" }] },
+      ))
+    }
+  })
+})

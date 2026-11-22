@@ -133,6 +133,6 @@ for(const path of inventory){
  exportBytes('payload/'+path,bytes);
 }
 exportBytes('provenance/upstream.lock.json',lockBytes);
-exportBytes('provenance/client-source.json',read(resolve('.eliza/client-features/.source.json')));
+exportBytes('provenance/client-source.json',read(resolve('upstream.lock.json')));
 const identity={schema:1,kind:mode,alphaCommit:git('rev-parse','HEAD'),alphaTree:git('rev-parse','HEAD^{tree}'),sdkCommit:sdk,sdkTree:git('-C','vendor/eliza','rev-parse','HEAD^{tree}'),lockSha256:hash(lockBytes),runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,node:process.version,platform:process.platform,arch:process.arch,files,totalBytes:exportedBytes,readBytes,limits:{authenticatedPromptProof:false,localApiBridgeIncluded:false,nativeQualification:false}};
 writeFileSync(checked(join(output,'identity.json'),true),JSON.stringify(identity,null,2)+'\n',{flag:'wx'});

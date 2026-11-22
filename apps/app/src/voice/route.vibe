@@ -1,0 +1,131 @@
+// spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/route.md, "Story: Stay within my plan's voice limits"; spec/voice/route.md, "Story: Know what leaves my phone when I talk"
+import {
+  SpeechAttemptFailed, SpeechBusy, SpeechRoutingMachine, SpeechUnavailable as NoRouteSpoke, deviceSpeechUnavailable, nextSpeechRoute,
+  serviceLimitOf, speakOnRoute, speechFailureOf, speechKeyChanged, speechLimitChanged,
+  type MisroutedSpeech, type NetworkKey, type ObservedLimit, type SpeechRoute, type SpeechRouting,
+} from "@elizaos/plugin-local-inference/speech-route"
+import { Native } from "../platform/native.vibe"
+import { privacyOf, sendsOf, type Route, type Sends } from "../../gen/voice__route.effect.vibe"
+import { newId } from "./ids.ts"
+import { LocalSpeechStatus } from "./native.schema.vibe"
+
+/** The owner's account as the account area reports it: none, Cloud with its credential, or own keys with their revision. */
+export type VoiceAccount =
+  | { readonly kind: "none" }
+  | { readonly kind: "cloud"; readonly environment: string; readonly credentialId: string }
+  | { readonly kind: "own"; readonly revision: string; readonly cartesia: boolean }
+
+/** Where the Settings privacy row says speech goes now. */
+export type PrivacyRoute = "OnPhone" | "ViaCloud" | "Direct" | "RouteUnavailable"
+
+/** No route spoke or transcribed this request: where it ended, and the request's own refusal. */
+export error VoiceRouteFailed { route: Route; cause: unknown }
+
+/** One request on a route: it calls `heard` before its first audio plays or its result is used. */
+export type RouteAttempt<A> = (route: Route, heard: () => void!MisroutedSpeech) => A!(SpeechAttemptFailed | MisroutedSpeech)
+
+/** The speech route every voice surface uses now, over the local inference package's route. */
+export service VoiceRoute {
+  /** The route state now and after each change. */
+  readonly changes: Stream.Stream<SpeechRouting>
+  /** Device, Cloud or Direct for the next request. */
+  route(): Route!!
+  /** The account last reported, with its real credential or revision. */
+  account(): VoiceAccount!!
+  /** The account area reports the owner's account and its key. */
+  observeAccount(account: VoiceAccount): void!!
+  /** The account area reports the Cloud plan or rate limit now in force. */
+  observeLimit(limit: ObservedLimit | undefined): void!!
+  /** Ask the phone whether on-device speech is ready; when it is not, the network holds nothing. */
+  probeOnDevice(): boolean!!
+  /** Run one request on the admitted route, on the phone when a network route fails before audio. */
+  run<A>(attempt: RouteAttempt<A>): A!VoiceRouteFailed
+  /** The route as the privacy row names it. */
+  privacy(): PrivacyRoute!!
+  /** What the route in use sends, and to whom. */
+  sends(): Sends!!
+}
+
+const BUSY_WAIT = "100 millis"
+
+/** The product route of the package's route. */
+export function routeName(route: SpeechRoute): Route {
+  return route === "CloudRoute" ? "Cloud" : route === "DirectRoute" ? "Direct" : "Device"
+}
+
+/** A failed request as the route's attempt failure; a cancellation is an interruption, never a failure. */
+export function attemptFailed(cause: unknown): SpeechAttemptFailed {
+  return new SpeechAttemptFailed({ failure: speechFailureOf(cause) ?? { tag: "RequestRefused" }, cause })
+}
+
+/** The route service over the package's speech routing Machine. */
+export const routeService = Layer.effect(VoiceRoute, effect {
+  const routing = try SpeechRoutingMachine
+  const native = try Native
+  const ids = new Map<string, number>()
+  let reported: VoiceAccount = { kind: "none" }
+  let onDevice = true
+
+  function idOf(value: string): number {
+    const known = ids.get(value)
+    if (known !== undefined) return known
+    ids.set(value, ids.size + 1)
+    return ids.size
+  }
+
+  function keyOf(account: VoiceAccount): NetworkKey {
+    switch (account.kind) {
+      case "none": return { tag: "NoNetworkKey" }
+      case "cloud": return { tag: "CloudKey", credential: idOf(`cloud:${account.environment}:${account.credentialId}`) }
+      case "own": return account.cartesia ? { tag: "DirectKey", revision: idOf(`own:${account.revision}`) } : { tag: "NoNetworkKey" }
+    }
+  }
+
+  effect function route() {
+    provide SpeechRoutingMachine = routing {
+      return routeName(try nextSpeechRoute())
+    }
+  }
+
+  effect function runOnce<A>(attempt: RouteAttempt<A>) {
+    provide SpeechRoutingMachine = routing {
+      while (true) {
+        const outcome = speakOnRoute((route: SpeechRoute, heard) => effect { return { value: try attempt(routeName(route), heard) } }) catch effect (error) => match (error) {
+          when SpeechBusy: undefined;
+          when NoRouteSpoke: throw new VoiceRouteFailed({ route: routeName(error.route), cause: error.failure });
+        }
+        if (outcome !== undefined) return outcome.value
+        try sleep(BUSY_WAIT)
+      }
+    }
+  }
+
+  return {
+    changes: routing.changes,
+    route,
+    effect account() { return reported },
+    effect observeAccount(account: VoiceAccount) {
+      reported = account
+      provide SpeechRoutingMachine = routing { try speechKeyChanged(keyOf(account)) }
+    },
+    effect observeLimit(limit: ObservedLimit | undefined) {
+      const now = try Clock.currentTimeMillis
+      provide SpeechRoutingMachine = routing { try speechLimitChanged(serviceLimitOf(limit, now)) }
+    },
+    effect probeOnDevice() {
+      const answer = native.invoke("AlphaVoiceCloud", "localSpeechStatus", { requestId: newId() }) catch () => undefined
+      const status = answer === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(LocalSpeechStatus)(answer))
+      onDevice = status !== undefined && status.ready && status.execution === "device"
+      if (!onDevice) {
+        provide SpeechRoutingMachine = routing { try deviceSpeechUnavailable() }
+      }
+      return onDevice
+    },
+    run: runOnce,
+    effect privacy() {
+      const shown = privacyOf(try route(), onDevice)
+      return (shown === "ViaCartesia" ? "Direct" : shown) as PrivacyRoute
+    },
+    effect sends() { return sendsOf(try route()) },
+  }
+})

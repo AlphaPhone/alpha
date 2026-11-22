@@ -1,0 +1,214 @@
+// spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/contacts.md, "Story: Change only the contact I reviewed"; spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/callBar.md, "Story: See my live call over every view"
+import { assert, it } from "@effect/vitest"
+import type { TelephonyStatus } from "@elizaos/os/bridges/phone"
+import { Machine as CallBarMachine, barPhase } from "../../gen/telephony__callBar.effect.vibe"
+import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { Machine as DraftsMachine, slotOf } from "../../gen/telephony__drafts.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { CloudSession } from "../../src/account/layer.vibe"
+import { Native } from "../../src/platform/native.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { TelephonyActions } from "../../src/telephony/actions.vibe"
+import { TelephonyBridges, type TelephonyClients } from "../../src/telephony/bridges.vibe"
+import { CallWatch } from "../../src/telephony/call-bar.vibe"
+import { ContactsView } from "../../src/telephony/contacts.vibe"
+import { DraftSends } from "../../src/telephony/drafts.vibe"
+import { telephonyLayer } from "../../src/telephony/layer.vibe"
+import { PhoneView } from "../../src/telephony/phone.vibe"
+
+const status = (over: Partial<TelephonyStatus["permissions"]> = {}): TelephonyStatus => ({
+  version: 2, voiceCapable: true, smsCapable: true,
+  permissions: { contacts: "granted", phoneState: "granted", sms: "granted", sendSms: "granted", callLog: "granted", ...over },
+  sendMode: "direct", mmsSend: true,
+  roles: { dialer: { available: true, held: true, eligible: true }, sms: { available: true, held: true, eligible: true } },
+  defaultDialer: "ai.alphacompute.alphaphone", defaultSms: "ai.alphacompute.alphaphone",
+  subscriptions: [{ id: 7, slot: 0, displayName: "Personal", carrierName: "Carrier", defaultSms: true, defaultVoice: true }], defaultSmsSubscriptionId: 7,
+})
+
+/** The native boundary of the image, scripted per journey: every call is recorded. */
+function fakePhone() {
+  const calls: string[] = []
+  let callLog: TelephonyStatus["permissions"]["callLog"] = "prompt"
+  let sent = 0
+  let ongoing: unknown = { calls: [] }
+  let callState: unknown = { inCall: false, emergency: false, emergencyLive: false, watching: true }
+  let saveAnswer: () => Promise<{ status: string }> = () => Promise.reject(new Error("lost"))
+  const log = (name: string) => calls.push(name)
+  const contactsRows = [{ id: "7", lookup: "k7", name: "Maya Chen", revision: "r1", starred: false, phones: ["4155550100"], emails: [] }]
+  const clients = {
+    phone: {
+      status: async () => (log("status"), status({ callLog })),
+      requestAccess: async () => (log("requestAccess"), callLog = "granted", status({ callLog })),
+      recentCalls: async () => (log("recentCalls"), { calls: [{ id: "1", number: "4155550100", cachedName: "Maya Chen", date: 5, durationSeconds: 0, type: "missed", isNew: true }], next: null }),
+      placeCall: async () => (log("placeCall"), { placeStatus: "CallRoleRequired", receipt: {} }),
+      dial: async () => (log("dial"), { dialStatus: "DialHandedOff", handler: "Dialer", receipt: {} }),
+      refreshVoicemail: async () => ({ carrier: "CarrierUnsupported", gate: "WriteIdle", voicemails: [] }),
+      observeVoicemail: async () => async () => {},
+    },
+    messages: {
+      status: async () => status(),
+      sendSms: async () => { log("sendSms"); sent++; throw new Error("answer lost") },
+      smsSendResult: async () => (log("smsSendResult"), { kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 9 }),
+    },
+    contacts: {
+      open: async () => ({ available: true, readable: true, writable: true }),
+      close: async () => {},
+      status: async () => ({ available: true, readable: true, writable: true }),
+      list: async () => (log("list"), { contacts: contactsRows, next: null }),
+      get: async () => ({ id: "7", lookup: "k7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", starred: false,
+        phoneNumbers: [{ number: "4155550100", type: "mobile" }], emailAddresses: [], version: "a".repeat(64) }),
+      createContact: async () => saveAnswer(),
+      updateContact: async () => saveAnswer(),
+    },
+  } as unknown as TelephonyClients
+  const native = {
+    available: () => succeed(true),
+    invoke: (plugin: string, method: string) => sync(() => {
+      log(`${plugin}.${method}`)
+      return method === "ongoingCall" ? ongoing : method === "callState" ? callState : method === "endCall" ? true : undefined
+    }),
+    listen: () => Stream.never,
+  }
+  return {
+    calls, sent: () => sent,
+    setOngoing: (value: unknown) => { ongoing = value },
+    setCallState: (value: unknown) => { callState = value },
+    setSaveAnswer: (answer: () => Promise<{ status: string }>) => { saveAnswer = answer },
+    layer: Layer.provide(
+      telephonyLayer(Layer.succeed(TelephonyBridges, { offered: true, clients: () => succeed(clients) })),
+      Layer.mergeAll(
+        Layer.succeed(Native, native as unknown as Native.Shape),
+        memoryStore,
+        Layer.succeed(CloudSession, { owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`) } as unknown as CloudSession.Shape),
+      ),
+    ),
+  }
+}
+
+effect function until<S>(changes: Stream.Stream<S>, ok: (s: S) => boolean) {
+  try timeout(Stream.runHead(Stream.filter(changes, ok)), "2 seconds")
+}
+
+it.live("Read my recent calls and call a number myself (spec/telephony/phone.md, \"Story: Call a number myself\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try PhoneView
+    const phone = try PhoneMachine
+    const visit = fork view.visit()
+    // spec/telephony/phone.md, "Only the latest read publishes, and rows already shown stay until it answers"
+    try until(phone.changes, (p) => p.access === "LogNeeded")
+    try view.refresh(true)
+    const read = try phone.get()
+    // spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"
+    try view.dial("call me")
+    try view.dial("415-555-0100")
+    const dialed = try phone.get()
+    try Fiber.interrupt(visit)
+    const left = try phone.get()
+    try Effect.try(() => assert.deepStrictEqual({
+      read: [read.access, read.recents.map((r) => [r.title, r.kind, r.fresh])],
+      dialed: [dialed.notice, dialed.dialing],
+      left: [left.shown, left.recents.length, left.number],
+      calls: fake.calls.filter((c) => ["requestAccess", "placeCall", "dial"].includes(c)),
+    }, {
+      read: ["LogGranted", [["Maya Chen", "MissedCall", true]]],
+      dialed: [{ tag: "Placement", outcome: "DialerOpened" }, false],
+      left: [false, 0, ""],
+      calls: ["requestAccess", "placeCall", "dial"],
+    }))
+  }
+})
+
+it.live("Send only what I reviewed, once (spec/telephony/drafts.md, \"Story: Send only what I reviewed, once\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const drafts = try DraftsMachine
+    const sends = try DraftSends
+    const thread = "thread:1"
+    try drafts.send({ type: "ownerTyped", thread, recipients: ["4155550100"], text: "On my" }, "Owner")
+    // spec/telephony/drafts.md, "Alpha's draft goes only into an unoccupied slot addressed to exactly the same people, and keeps one Undo"
+    const elsewhere = try sends.placeAlphaDraft(thread, ["4155550111"], "Hi")
+    const placed = try sends.placeAlphaDraft(thread, ["4155550100"], "Running late")
+    const alphaSend = try (drafts.send({ type: "sendStarted", thread, operationId: "op1", kind: "SmsSend", sim: 7 }, "Alpha") catch () => "Rejected")
+    const drafted = slotOf((try drafts.get()).slots, thread)
+    // spec/telephony/drafts.md, "An accepted send clears the slot, a definite refusal releases its operation, and an unknown outcome keeps it"
+    try sends.send(thread)
+    const unknown = slotOf((try drafts.get()).slots, thread)
+    const blocked = try sends.placeAlphaDraft(thread, ["4155550100"], "Another")
+    try sends.send(thread)
+    const settled = slotOf((try drafts.get()).slots, thread)
+    try Effect.try(() => assert.deepStrictEqual({
+      placed: [elsewhere, placed, alphaSend, drafted.author, drafted.undo],
+      unknown: [unknown.outcome, unknown.operation.tag, unknown.text, blocked],
+      settled: [settled.text, settled.operation.tag, fake.sent()],
+    }, {
+      placed: ["unavailable", "drafted", "Rejected", "ByAlpha", { tag: "UndoTo", undoText: "On my", undoAuthor: "ByOwner" }],
+      unknown: ["Unconfirmed", "BoundOperation", "Running late", "occupied"],
+      settled: ["", "NoOperation", 1],
+    }))
+  }
+})
+
+it.live("Change only the contact I reviewed (spec/telephony/contacts.md, \"Story: Change only the contact I reviewed\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try ContactsView
+    const contacts = try ContactsMachine
+    const visit = fork view.visit()
+    try until(contacts.changes, (c) => c.rows.length === 1 && !c.loading)
+    try view.open("7")
+    try until(contacts.changes, (c) => c.detail.tag === "DetailRead")
+    try view.edit("Editing")
+    try contacts.send({ type: "edited" })
+    try view.save({ displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", phoneNumbers: [{ number: "4155550100", type: "mobile" }], emailAddresses: [] })
+    const lost = try contacts.get()
+    // spec/telephony/contacts.md, "A write holds the gate while it runs, and a lost answer blocks every write until an explicit read that began after it"
+    try view.read("", false)
+    const automatic = try contacts.get()
+    try view.read("", true)
+    const explicit = try contacts.get()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { lost: [lost.gate, lost.editor.tag, lost.notice], automatic: automatic.gate, explicit: explicit.gate },
+      { lost: ["WriteUnsettled", "EditorClosed", "OutcomeUnknown"], automatic: "WriteUnsettled", explicit: "WriteIdle" },
+    ))
+  }
+})
+
+it.live("Call only the person I approved (spec/telephony/actions.md, \"Story: Call or text only the person I approved\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    // spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"
+    const ungrounded = try actions.run({ type: "phone_call", target: { kind: "number", number: "4155550199" } }, "op-1", { text: "call 415-555-0100" })
+    const repeated = try (actions.run({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-1", { text: "call 415-555-0100" }) catch (e) => e._tag)
+    // spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"
+    try sync(() => fake.setCallState({ inCall: true, emergency: null, emergencyLive: true, watching: true }))
+    const emergency = try actions.run({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-2", { text: "call 415-555-0100" })
+    try Effect.try(() => assert.deepStrictEqual(
+      { ungrounded: ungrounded.settled, repeated, emergency: emergency.settled, placed: fake.calls.filter((c) => c === "placeCall").length },
+      { ungrounded: "Refused", repeated: "AlreadyRan", emergency: "Refused", placed: 0 },
+    ))
+  }
+})
+
+it.live("See my live call over every view (spec/telephony/callBar.md, \"Story: See my live call over every view\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const watch = try CallWatch
+    const bar = try CallBarMachine
+    try watch.eligible(true)
+    try sync(() => fake.setOngoing({ calls: [{ id: "c1", state: "active", connectedAt: 1000 }] }))
+    try watch.refresh()
+    const live = barPhase(try bar.get())
+    // spec/telephony/callBar.md, "Return and End act only on the call the bar shows, and End is asked once"
+    try watch.end("c1")
+    try sync(() => fake.setOngoing({ calls: [{ id: "c1", state: "active", connectedAt: 1000, extra: 1 }] }))
+    try watch.refresh()
+    const untrusted = barPhase(try bar.get())
+    try Effect.try(() => assert.deepStrictEqual(
+      { live, untrusted, ended: fake.calls.filter((c) => c === "AlphaOngoingCall.endCall").length },
+      { live: "LiveBar", untrusted: "NoBar", ended: 1 },
+    ))
+  }
+})

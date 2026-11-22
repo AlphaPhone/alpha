@@ -1,0 +1,105 @@
+// spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
+import { machine as agentSurfaceMachine } from "../../gen/maps__agentSurface.effect.vibe"
+import { machine as cardsMachine } from "../../gen/maps__cards.effect.vibe"
+import { type ConnectionStep, Machine as ConnectionMachine, machine as connectionMachine } from "../../gen/maps__connection.effect.vibe"
+import { machine as deliveryMachine } from "../../gen/maps__delivery.effect.vibe"
+import { machine as eventReturnMachine } from "../../gen/maps__eventReturn.effect.vibe"
+import { machine as guidanceMachine } from "../../gen/maps__guidance.effect.vibe"
+import { machine as locatorMachine } from "../../gen/maps__location.effect.vibe"
+import { machine as notificationOpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
+import { machine as planeMachine } from "../../gen/maps__plane.effect.vibe"
+import { machine as screenMachine } from "../../gen/maps__screen.effect.vibe"
+import { machine as selectedReadMachine } from "../../gen/maps__selectedRead.effect.vibe"
+import { agentLayer } from "./agent.vibe"
+import { MapsProvider, providerLayer } from "./cloud.vibe"
+import { MapsContent, contentLayer } from "./content.vibe"
+import { handoffLayer } from "./handoff.vibe"
+import { locationLayer } from "./location.vibe"
+import { Navigation, navigationLayer } from "./navigation.vibe"
+import { phoneLocationLayer } from "./phone-location.vibe"
+import { planeLayer } from "./plane.vibe"
+import { MapsAccount, MapsShell } from "./ports.vibe"
+import { MapsHandoff } from "./handoff.vibe"
+import { savedLayer, savedMachine } from "./saved.vibe"
+import { MapsScreen, screenLayer } from "./screen.vibe"
+import { voiceLayer } from "./voice.vibe"
+
+/** The Cloud Maps session: account binding, coverage reads and what an account change retires. */
+export service MapsSession {
+  /** Maps was opened: read coverage if none is installed or the last read failed. */
+  open(): void!!
+  /** The owner's Retry after a failed read. */
+  retry(): void!!
+}
+
+const sessionLayer = Layer.effect(MapsSession, effect {
+  const connection = try ConnectionMachine
+  const account = try MapsAccount
+  const provider = try MapsProvider
+  const screen = try MapsScreen
+  const navigation = try Navigation
+  const content = try MapsContent
+  const shell = try MapsShell
+  const handoff = try MapsHandoff
+  const accounts = new Map<string, number>()
+  let client = 0
+
+  effect function settle(step: ConnectionStep | undefined) {
+    for (const out of step?.out ?? []) {
+      if (out.tag === "ReadCapabilities") fork.detached provider.readCoverage(out.attempt)
+      else {
+        try navigation.retire()
+        try screen.providerChanged()
+        try content.update((c) => ({ ...c, coverage: undefined, copyright: "" }))
+      }
+    }
+  }
+
+  fork.detached Stream.runForEach(account.changes, (binding) => effect {
+    const key = binding ? `${binding.sessionId}\u0000${binding.credentialId}` : ""
+    const id = binding ? accounts.get(key) ?? accounts.size + 1 : 0
+    if (binding) accounts.set(key, id)
+    client += 1
+    try settle(connection.send({ type: "bindAccount", account: id, client }) catch () => undefined)
+  })
+  fork.detached Stream.runForEach(Stream.filter(account.residentReady, (ready) => ready), () => effect {
+    try settle(connection.send({ type: "residentStarts" }) catch () => undefined)
+  })
+
+  let shown = { inMaps: false, hidden: false, home: false }
+  fork.detached Stream.runForEach(shell.states, (state) => effect {
+    const now = { inMaps: state.view === "maps", hidden: state.hidden, home: state.view === "home" }
+    if (now.hidden !== shown.hidden) {
+      try screen.setHidden(now.hidden)
+      try navigation.setHidden(now.hidden)
+    }
+    if (shown.inMaps !== now.inMaps) try navigation.setInMaps(now.inMaps)
+    if (shown.inMaps && !now.inMaps) try screen.leave()
+    if (now.home && !shown.home) try handoff.goneHome()
+    shown = now
+  })
+
+  return {
+    effect open() { try settle(connection.send({ type: "openMaps" }) catch () => undefined) },
+    effect retry() { try settle(connection.send({ type: "retryCoverage" }) catch () => undefined) },
+  }
+})
+
+const machines = Layer.mergeAll(
+  connectionMachine(), locatorMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
+  notificationOpenMachine(), agentSurfaceMachine(), selectedReadMachine(), deliveryMachine(), cardsMachine(), savedMachine, contentLayer,
+)
+
+/**
+ * Every Maps service: the session, provider, location, screen, guidance, voice, plane, saved places, agent glue, hand-offs and the
+ * chat's phone position, over their machines. Requires the platform's Native, Resident, Cloud and KeyValueStore, and from other areas
+ * MapsAccount (account), GuidanceSpeaker (voice), MapsShell (shell), MapsPreferences (settings) and AgentCalendar (calendar).
+ */
+export const layer = sessionLayer.pipe(
+  Layer.provideMerge(Layer.mergeAll(agentLayer, handoffLayer, planeLayer)),
+  Layer.provideMerge(screenLayer),
+  Layer.provideMerge(navigationLayer),
+  Layer.provideMerge(Layer.mergeAll(voiceLayer, savedLayer, phoneLocationLayer)),
+  Layer.provideMerge(Layer.mergeAll(providerLayer, locationLayer)),
+  Layer.provideMerge(machines),
+)

@@ -1,0 +1,47 @@
+// spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/shell/navigation.md, "Story: Keep the assistant within reach"
+import type { IdleFacts } from "../../gen/settings__updates.ts"
+import { Machine as GeometryMachine } from "../../gen/shell__geometry.effect.vibe"
+import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
+import { activeShown, blurActive, focusedField } from "./page.ts"
+
+/** What the owner is doing in the shell, for an update that must wait for idle Home and keep what was typed. */
+export service Activity {
+  /** The shell's facts of the idle decision. Calls, connection work and the sign-in card belong to their own areas and read as quiet here. */
+  updateIdleFacts(): IdleFacts!!
+  /** Commits the field being typed in, so every draft is in its area's kept state; true when no field still holds input. */
+  keepDrafts(): boolean!!
+}
+
+/** The activity service over the navigation and geometry machines. */
+export const activityLive = Layer.effect(Activity, effect {
+  const navigation = try NavigationMachine
+  const geometry = try GeometryMachine
+  return {
+    effect updateIdleFacts() {
+      const nav = try navigation.get()
+      const window = try geometry.get()
+      const field = focusedField()
+      return {
+        home: nav.app === "" && !nav.hidden,
+        viewOpen: nav.app !== "",
+        voiceOff: !nav.voice,
+        voiceInactive: !nav.voice,
+        typing: window.field !== "NoField" || field !== "NoField",
+        chatResting: nav.chat === "ChatInput" || nav.chat === "ChatHidden",
+        editor: window.field === "ComposerField" || field === "ComposerField",
+        drawer: nav.library || nav.menu !== "",
+        shade: nav.shade,
+        homeEdit: nav.editing || nav.adding,
+        review: nav.layers.length > 0 || nav.holds.length > 0,
+        connectionBusy: false,
+        signInOpen: false,
+        signInUntouched: true,
+        call: false,
+      } satisfies IdleFacts
+    },
+    effect keepDrafts() {
+      if (focusedField() !== "NoField") try sync(() => blurActive())
+      return focusedField() === "NoField" || !activeShown()
+    },
+  }
+})

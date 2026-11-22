@@ -1,0 +1,126 @@
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/scan.md, "Story: Ask Alpha to scan what Camera sees"
+import { assert, it } from "@effect/vitest"
+import { Machine as NoticeMachine } from "../../gen/camera__notices.effect.vibe"
+import { CameraActions } from "../../src/camera/actions.vibe"
+import { Viewfinder } from "../../src/camera/viewfinder.vibe"
+import { cameraOver, phone, preview, until } from "./support.vibe"
+
+function camera(extra: Record<string, (args: unknown) => unknown> = {}) {
+  let recordingNow = false
+  return phone({
+    "ElizaCamera.startPreview": () => preview,
+    "ElizaCamera.stopPreview": () => undefined,
+    "ElizaCamera.setCaptureMode": () => undefined,
+    "ElizaCamera.switchCamera": () => ({ ...preview, hasFlash: false }),
+    "ElizaCamera.setZoom": () => undefined,
+    "ElizaCamera.setSettings": () => undefined,
+    "ElizaCamera.setFocusPoint": () => undefined,
+    "ElizaCamera.capturePhoto": () => ({ format: "jpeg", thumbnail: "AA", width: 4000, height: 3000, path: "content://media/external/images/media/41" }),
+    "ElizaCamera.startRecording": () => { recordingNow = true; return undefined },
+    "ElizaCamera.getRecordingState": () => ({ isRecording: recordingNow, duration: 3, fileSize: 1000 }),
+    "ElizaCamera.stopRecording": () => ({ path: "content://media/external/video/media/7", duration: 3, width: 1920, height: 1080, fileSize: 1000 }),
+    "AlphaDevice.setVolumeShutter": () => undefined,
+    "AlphaPhotos.list": () => ({ items: [], next: "" }),
+    "AlphaPhotos.read": (args) => ({ id: (args as { id: string }).id, kind: "video", width: 1920, height: 1080, date: 1, size: 1000, revision: "r1", image: "data:image/jpeg;base64,VV" }),
+    "AlphaPhotos.libraryAccess": () => ({ scope: "full", images: "full", videos: "full" }),
+    "AlphaPhotos.albums": () => ({ items: [] }),
+    ...extra,
+  })
+}
+
+// spec/camera/viewfinder.md, "Story: Take photos"
+it.live("take a photo on the ready preview, with the self-timer, and see it as the last capture (spec/camera/viewfinder.md, \"Story: Take photos\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.shutter()
+    try until(() => effect { return (try view.get()).photos === 1 })
+    try view.cycleTimer()
+    try view.shutter()
+    const counting = try view.get()
+    try view.shutter()
+    const cancelled = try view.get()
+    try view.zoomTo(80)
+    try view.flip()
+    const flipped = try view.get()
+    try view.leave()
+    const left = try view.get()
+    try Effect.try(() => assert.deepStrictEqual({
+      last: counting.lastId, timer: counting.countdown, cancelled: cancelled.countdown, zoom: flipped.zoom, lens: flipped.lens, flash: flipped.flash,
+      released: [left.phase, left.released], stopped: device.calls.some((call) => call.method === "ElizaCamera.stopPreview"),
+    }, { last: "41", timer: 3, cancelled: 0, zoom: 10, lens: "FrontLens", flash: "FlashOff", released: ["PreviewOff", true], stopped: true }))
+  }
+})
+
+// spec/camera/viewfinder.md, "Story: Record videos"
+it.live("record a video without sound after the microphone is refused, then one with sound (spec/camera/viewfinder.md, \"Story: Record videos\")", () => effect {
+  let refuse = true
+  const device = camera({ "ElizaCamera.startRecording": (args) => {
+    if (refuse && (args as { audio: boolean }).audio) return { reject: "MICROPHONE_DENIED" }
+    return undefined
+  } })
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    const notices = try NoticeMachine
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.pickMode("VideoMode")
+    try until(() => effect { return !(try view.get()).binding })
+    try view.shutter()
+    const refused = try view.get()
+    try view.answerMicNotice(false)
+    const soundless = try view.get()
+    try view.shutter()
+    try until(() => effect { return (try view.get()).recording === "RecordingIdle" })
+    refuse = false
+    try view.shutter()
+    const withSound = try view.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { notice: refused.notice, soundless: [soundless.recording, soundless.withSound], again: [withSound.recording, withSound.withSound], said: typeof (try notices.get()).said },
+      { notice: "MicrophoneNotice", soundless: ["RecordingActive", false], again: ["RecordingActive", true], said: "string" },
+    ))
+  }
+})
+
+// spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"
+it.live("the assistant's photo needs the visible Camera, flips to the named camera and names the library id only when offered (spec/camera/agentCapture.md, \"Story: Let the assistant take the photo I asked for\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    const actions = try CameraActions
+    try view.leave()
+    const closed = actions.execute({ type: "camera_capture_photo" }, { operationId: "op-1", reviewed: true, ownerWords: false }) catch (refused) => refused.message
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    const unasked = actions.execute({ type: "camera_capture_photo" }, { operationId: "op-2", reviewed: false, ownerWords: false }) catch (refused) => refused.message
+    const front = try actions.execute({ type: "camera_capture_photo", lens: "front" }, { operationId: "op-3", reviewed: true, ownerWords: false, capabilities: "camera.capture-photo.v1, camera.capture-library-id.v1" })
+    const plain = try actions.execute({ type: "camera_capture_photo" }, { operationId: "op-4", reviewed: true, ownerWords: false, capabilities: "camera.capture-photo.v1" })
+    const lens = (try view.get()).lens
+    try Effect.try(() => assert.deepStrictEqual({ closed, unasked, front, plain, lens }, {
+      closed: "Open Camera first", unasked: "Camera busy",
+      front: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-3", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg", libraryId: "41" } },
+      plain: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-4", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg" } },
+      lens: "FrontLens",
+    }))
+  }
+})
+
+// spec/camera/agentCapture.md, "A recording or another shutter that starts first refuses a waiting request"
+it.live("a recording refuses the assistant's photo and takes nothing (spec/camera/agentCapture.md, \"A recording or another shutter that starts first refuses a waiting request\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    const actions = try CameraActions
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.pickMode("VideoMode")
+    try until(() => effect { return !(try view.get()).binding })
+    try view.shutter()
+    const before = device.calls.filter((call) => call.method === "ElizaCamera.capturePhoto").length
+    const refused = actions.execute({ type: "camera_capture_photo" }, { operationId: "op-5", reviewed: true, ownerWords: false }) catch (failure) => failure.message
+    const after = device.calls.filter((call) => call.method === "ElizaCamera.capturePhoto").length
+    try Effect.try(() => assert.deepStrictEqual({ refused, shutters: after - before }, { refused: "Recording — no photo", shutters: 0 }))
+  }
+})

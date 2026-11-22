@@ -3,8 +3,8 @@
 
 /** The plugin is not installed in this build or on this device, such as an AOSP-only plugin on stock Android. */
 export error NativeUnavailable { plugin: string; method: string }
-/** The plugin ran and refused or failed; `code` is the plugin's own code when it gave one. */
-export error NativeFailed { plugin: string; method: string; message: string; code?: string }
+/** The plugin ran and refused or failed; `code` and `data` are what the plugin gave with its refusal, such as a retry wait. */
+export error NativeFailed { plugin: string; method: string; message: string; code?: string; data?: unknown }
 
 /** A native plugin call and its events. */
 export service Native {

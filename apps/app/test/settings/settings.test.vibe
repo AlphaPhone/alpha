@@ -1,0 +1,183 @@
+// spec/settings/index.md, "Story: Find a setting in a few taps"
+import { assert, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as FactsMachine, machine as factsMachine, unread } from "../../gen/settings__facts.effect.vibe"
+import { Machine as UpdatesMachine } from "../../gen/settings__updates.effect.vibe"
+import { Machine as ResetMachine, machine as resetMachine } from "../../gen/settings__reset.effect.vibe"
+import { Machine as VaultMachine, machine as vaultMachine } from "../../gen/settings__passwords.effect.vibe"
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { Activity } from "../../src/shell/activity.vibe"
+import { Appearance, APPEARANCE_KEY, appearance } from "../../src/settings/appearance.vibe"
+import { buildReport } from "../../src/settings/diagnostics.vibe"
+import { DeviceFacts, deviceFacts } from "../../src/settings/facts.vibe"
+import { Vault, vault } from "../../src/settings/passwords.vibe"
+import { Preferences, PREFERENCES_KEY, preferences } from "../../src/settings/preferences.vibe"
+import { Reset, reset } from "../../src/settings/reset.vibe"
+import { Updates, updates } from "../../src/settings/updates.vibe"
+
+const SIGNER = "a".repeat(64)
+type Answer = unknown | ((args: unknown) => unknown)
+
+/** Android at its plugin boundary: each answer by plugin and method, and the calls it saw. */
+function android(answers: Record<string, Answer>) {
+  const calls: Array<{ readonly name: string; readonly args: unknown }> = []
+  const native = Layer.succeed(Native, {
+    available: (plugin: string) => effect { return Object.keys(answers).some((k) => k.startsWith(`${plugin}.`)) },
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      const name = `${plugin}.${method}`
+      calls.push({ name, args })
+      if (!Object.hasOwn(answers, name)) throw new NativeUnavailable({ plugin, method })
+      const answer = answers[name]
+      const value = typeof answer === "function" ? answer(args) : answer
+      if (value instanceof Error) throw new NativeFailed({ plugin, method, message: value.message })
+      return value
+    },
+    listen: () => Stream.empty,
+  })
+  return { calls, native }
+}
+
+const build = (variant: "launcher" | "aosp" | "browser" = "launcher") => Layer.succeed(Build, { info: { version: "1.4.0", variant, testMocks: false } })
+const idle = Layer.succeed(Activity, {
+  updateIdleFacts: () => effect { return { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: false } },
+  keepDrafts: () => effect { return true },
+})
+
+it.effect("Read my phone's state truthfully (spec/settings/facts.md, \"Story: Read my phone's state truthfully\")", () => effect {
+  const { native } = android({
+    "AlphaDevice.snapshot": { appVersion: "1.4.0", appVersionCode: 140, permissions: { Camera: true }, textScalePercent: 115 },
+    "ElizaSystem.getSystemFacts": { wifiActive: true, airplaneMode: false, interruptionFilter: "priority" },
+    "ElizaSystem.getStatus": { packageName: "ai.alphacompute.alphaphone", roles: [{ role: "home", androidRole: "android.app.role.HOME", held: false, holders: [], available: true }] },
+    "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+    "AlphaDevice.setTextScale": (args: unknown) => ({ textScalePercent: (args as { percent: number }).percent }),
+  })
+  provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), native, build())) {
+    const facts = try DeviceFacts
+    try facts.show()
+    // spec/settings/vocabulary.md, "Wi-Fi is on when Android reports the switch, or an active Wi-Fi transport without it"
+    const shown = (try (try FactsMachine).get()).read
+    try facts.requestScale(130)
+    const scaled = (try (try FactsMachine).get()).read.textScale
+    try Effect.try(() => assert.deepStrictEqual(
+      { wifi: shown.wifi, bluetooth: shown.bluetooth, airplane: shown.airplane, dnd: shown.dnd, camera: shown.camera, microphone: shown.microphone, home: shown.home, scale: [shown.textScale, scaled] },
+      { wifi: "On", bluetooth: "Unknown", airplane: "Off", dnd: "On", camera: "Allowed", microphone: "Unread", home: "NotHeldByAlpha", scale: [115, 130] },
+    ))
+  }
+})
+
+it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md, \"Story: Decide what Alpha may do without asking\")", () => effect {
+  const fresh = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(memoryStore, build())) {
+      const p = try Preferences
+      const before = [try p.sharesLocation(), try p.asksBeforeActions()]
+      try p.set("AgentLocation", false)
+      return [...before, try p.sharesLocation()]
+    }
+  }
+  // spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"
+  const damaged = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, "{not json") }), memoryStore), build())) {
+      const p = try Preferences
+      const locked = try (p.set("MailImages", false) catch (e) => e._tag)
+      const before = [try p.asksBeforeActions(), try p.sharesLocation(), locked]
+      try p.reset()
+      return [...before, try p.sharesLocation(), (try p.current()).readable]
+    }
+  }
+  try Effect.try(() => assert.deepStrictEqual({ fresh, damaged }, { fresh: [true, false, false], damaged: [true, false, "PreferencesUnreadable", true, true] }))
+})
+
+it.effect("Choose how Alpha looks (spec/settings/appearance.md, \"Story: Choose how Alpha looks\")", () => effect {
+  const chosen = try effect {
+    provide Layer.provideMerge(appearance, Layer.mergeAll(memoryStore, build())) {
+      try (try Appearance).choose("Dark")
+      return try (try KeyValueStore.KeyValueStore).get(APPEARANCE_KEY)
+    }
+  }
+  try Effect.try(() => assert.deepStrictEqual(JSON.parse(chosen ?? "null"), { choice: "Dark", legible: false }))
+})
+
+it.effect("Update Alpha when I choose (spec/settings/updates.md, \"Story: Update Alpha when I choose\")", () => effect {
+  const row = { schema: "alpha-update/v1", versionCode: 150, versionName: "1.5.0", variant: "launcher", signerSha256: SIGNER, apkUrl: "https://updates.example/alpha.apk", sha256: "b".repeat(64), sizeBytes: 1000 }
+  const other = { ...row, signerSha256: "c".repeat(64) }
+  let feed = JSON.stringify({ schema: "alpha-update/index-v1", releases: [row] })
+  const { calls, native } = android({
+    "AlphaDevice.snapshot": { appVersionCode: 140, appSigner: SIGNER, appAutomaticUpdates: "supported" },
+    "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+    "AlphaDevice.checkForUpdate": () => ({ manifest: feed, manifestSha256: "d".repeat(64) }),
+    "AlphaDevice.installUpdate": { status: "offer-withdrawn" },
+  })
+  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+    const u = try Updates
+    try u.check(true)
+    const ready = (try (try UpdatesMachine).get()).outcome
+    try u.install()
+    // spec/settings/updates.md, "Install is offered only for the offer the last answer holds for this install"
+    const withdrawn = try u.offer()
+    feed = JSON.stringify(other)
+    try u.check(true)
+    const otherSigner = (try (try UpdatesMachine).get()).outcome
+    try Effect.try(() => assert.deepStrictEqual(
+      { ready, installed: calls.filter((c) => c.name === "AlphaDevice.installUpdate").map((c) => (c.args as { versionCode: number }).versionCode), withdrawn, otherSigner },
+      { ready: "UpdateReady", installed: [150], withdrawn: undefined, otherSigner: "NoneOffered" },
+    ))
+  }
+})
+
+it.effect("Erase Alpha's data on purpose (spec/settings/reset.md, \"Story: Erase Alpha's data on purpose\")", () => effect {
+  let answer: unknown = { status: "cancelled", message: "Reset cancelled. Nothing reset." }
+  const { native } = android({ "AlphaReset.review": () => answer })
+  provide Layer.provideMerge(reset, Layer.mergeAll(resetMachine(), native)) {
+    const r = try Reset
+    const cancelled = try r.review()
+    answer = { status: "unavailable", message: "Everything was erased." }
+    const unknown = try r.review()
+    answer = new Error("bridge closed")
+    const refused = try r.review()
+    try Effect.try(() => assert.deepStrictEqual([cancelled, unknown, refused, (try (try ResetMachine).get()).open], ["NoNotice", "Unconfirmed", "Unconfirmed", false]))
+  }
+})
+
+it.effect("Use my saved passwords only after Android unlocks them (spec/settings/passwords.md, \"Story: Use my saved passwords only after Android unlocks them\")", () => effect {
+  let locked = true
+  const status = () => ({ available: true, locked, unlockRemainingMs: locked ? null : 60000, unlockSeconds: 60, biometric: true, autofill: { supported: true, selected: "none" } })
+  const entry = { id: "a", label: "Bank", username: "ann", bindings: [{ kind: "web", facet: "https://bank.example", display: "bank.example" }], updatedAt: 1, revision: 3 }
+  const { calls, native } = android({
+    "ElizaPasswords.status": status,
+    "ElizaPasswords.unlock": () => { locked = false; return { unlocked: true, unlockRemainingMs: 60000 } },
+    "ElizaPasswords.list": () => ({ entries: [entry] }),
+    "ElizaPasswords.lock": () => { locked = true; return { locked: true } },
+    "ElizaPasswords.remove": { removed: true },
+  })
+  provide Layer.provideMerge(vault, Layer.mergeAll(vaultMachine(), native)) {
+    const v = try Vault
+    const held = try VaultMachine
+    try v.open()
+    const opened = (try held.get()).phase
+    try v.run("Unlocking", "")
+    const unlocked = try held.get()
+    // spec/settings/passwords.md, "A removal acts on the revision the owner selected, after a second tap"
+    try v.run("Removing", "a")
+    const refusedFirstTap = calls.some((c) => c.name === "ElizaPasswords.remove")
+    try (held.send({ type: "askRemove", id: "a" }))
+    try v.run("Removing", "a")
+    const removed = calls.find((c) => c.name === "ElizaPasswords.remove")?.args
+    try v.leave()
+    const left = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { opened, unlocked: [unlocked.phase, unlocked.entries.map((e) => [e.label, e.sites]), unlocked.observed], refusedFirstTap, removed, left: [left.phase, left.entries.length, left.observed] },
+      { opened: { tag: "Locked" }, unlocked: [{ tag: "Unlocked" }, [["Bank", ["bank.example"]]], false], refusedFirstTap: false, removed: { id: "a", expectedRevision: 3 }, left: [{ tag: "Closed" }, 0, true] },
+    ))
+  }
+})
+
+// spec/settings/diagnostics.md, "The report copies only allowlisted fields, so no text, address, key or identifier can reach it"
+it("The report copies only allowlisted fields (spec/settings/diagnostics.md, \"Story: See what went wrong and share it with support\")", () => {
+  const report = buildReport({ at: 0, native: true, testMocks: false, read: { ...unread, version: "1.4.0", home: "HeldElsewhere" }, entries: [], facts: { upstreamPin: "not a pin", account: "ann@example.test", runtimeHashes: { "agent/agent-bundle.js": "e".repeat(64), "/etc/passwd": "f".repeat(64) } } })
+  const text = JSON.stringify(report)
+  assert.deepStrictEqual({ pin: report.upstreamPin, hashes: Object.keys(report.runtimeHashes), leaks: [text.includes("ann@"), text.includes("passwd")], roles: report.roles }, {
+    pin: null, hashes: ["agent/agent-bundle.js"], leaks: [false, false], roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: false }],
+  })
+})

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { resolveAndroidSdkRoot, resolveJavaHome, javaMajorVersion } from '../vendor/eliza/packages/app/scripts/mobile/toolchain.ts';
+import {resolveAndroidSdkRoot, resolveJavaHome, javaMajorVersion} from '../vendor/eliza/packages/os/android/toolchain.ts';
 
 export function androidEnv() {
   const sdk = resolveAndroidSdkRoot();

@@ -1,0 +1,271 @@
+// spec/maps/guidance.md, "Start begins a new session from a ready route"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/guidance.md, "Ending, the provider's retirement, a failed watch or the navigation service ends the session"; spec/maps/guidance.md, "A reroute belongs to its session; a failed or late one keeps the current route"
+import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps/client/device-navigation"
+import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, readingUsable } from "../../gen/maps__guidance.effect.vibe"
+import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
+import { maySpeak } from "../../gen/maps__vocabulary.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { MapsProvider } from "./cloud.vibe"
+import { MapsContent } from "./content.vibe"
+import { type MapsFailure, failure } from "./failure.vibe"
+import { type Position, guidanceDistance, guidanceDuration, instructionKey, maneuverAlong, readingOf, remaining, spokenInstruction } from "./geometry.vibe"
+import { MapsLocation } from "./location.vibe"
+import { NavigationActive, NavigationAvailability, NavigationStopped, type Route } from "./maps.schema.vibe"
+import { NavigationVoice } from "./voice.vibe"
+
+const SERVICE = "AlphaMapsTransport"
+const LOCALE = "en-US"
+
+/** Turn-by-turn guidance along the route the owner started. */
+export service Navigation {
+  /** Start guidance on the screen's chosen route; only the owner's Start reaches this. */
+  start(): void!MapsFailure
+  end(): void!!
+  /** A new route from the current fix, for the agent's explicit request; the current route is kept on failure. */
+  reroute(): void!MapsFailure
+  stopFollowing(): void!!
+  recenter(): void!!
+  toggleVoice(): void!!
+  setHidden(hidden: boolean): void!!
+  /** Maps left for another app, or came back, while guidance may continue. */
+  setInMaps(inMaps: boolean): void!!
+  /** The provider was retired: guidance it planned ends. */
+  retire(): void!!
+  readonly states: Stream.Stream<Guidance>
+}
+
+/** The step the banner shows and the distance to it, from the last fix. */
+export function bannerOf(route: Route, marks: ReadonlyArray<number>, step: number, fix: Position | undefined) {
+  const target = route.steps[step]
+  const left = fix ? remaining(fix.coordinate, route) : undefined
+  return {
+    instruction: target?.instruction ?? "Continue to the destination",
+    maneuver: target?.maneuver ?? "continue",
+    then: route.steps[step + 1],
+    distance: left ? left.toStep(marks, step) : target?.distanceMeters ?? 0,
+    remainingMeters: left?.meters ?? route.distanceMeters,
+    remainingSeconds: left?.seconds ?? route.durationSeconds,
+  }
+}
+
+/** Guidance over its machine, the location watch, and the plugin's screen-off navigation service on `AlphaMapsTransport`. */
+export const navigationLayer = Layer.effect(Navigation, effect {
+  const guidance = try GuidanceMachine
+  const screen = try ScreenMachine
+  const content = try MapsContent
+  const provider = try MapsProvider
+  const location = try MapsLocation
+  const voice = try NavigationVoice
+  const native = try Native
+  const watching = try Ref.make<Fiber.Fiber<void> | undefined>(undefined)
+  const serviceEnds = try Queue.unbounded<"notification" | "lost" | "arrived">()
+  const routes = new Map<string, number>()
+
+  effect function call(method: string, args: unknown) {
+    return native.invoke(SERVICE, method, args) catch effect () => { throw new NavigationBridgeFailed({ operation: method }) }
+  }
+
+  const bridge: NavigationBridge = {
+    availability: () => effect {
+      const raw = try call("navigationAvailability", undefined)
+      return Schema.decodeUnknownEffect(NavigationAvailability)(raw) catch () => ({ background: false })
+    },
+    listen: (sessionId: string, stopped: (reason: string) => void) => effect {
+      const fiber = fork.detached Stream.runForEach(native.listen(SERVICE, "navigationStopped"), (raw) => effect {
+        const event = Schema.decodeUnknownEffect(NavigationStopped)(raw) catch () => undefined
+        if (event?.sessionId === sessionId) try sync(() => stopped(event.reason))
+      }) catch () => undefined
+      return () => fiber.interruptUnsafe()
+    },
+    start: (input) => map(call("startNavigation", input), () => undefined),
+    update: (input) => effect {
+      const raw = try call("updateNavigation", input)
+      return Schema.decodeUnknownEffect(NavigationActive)(raw) catch () => ({ active: false })
+    },
+    stop: (input) => map(call("stopNavigation", input), () => ({ stopped: true })),
+  }
+  const service = try backgroundNavigation(bridge, (reason) => { Queue.offerUnsafe(serviceEnds, reason) })
+
+  function routeNumber(id: string): number {
+    const known = routes.get(id)
+    if (known !== undefined) return known
+    routes.set(id, routes.size + 1)
+    return routes.size
+  }
+
+  effect function tell(message: string) {
+    try content.update((c) => ({ ...c, message }))
+  }
+
+  effect function apply(event: Parameters<typeof guidance.send>[0]) {
+    const sent: NavStep | undefined = guidance.send(event) catch () => undefined
+    if (sent === undefined) return undefined
+    for (const out of sent.out) try perform(out)
+    if (sent.state.phase === "NotGuiding" && (try content.get()).guidance !== undefined) try ended(sent.state)
+    return sent.state
+  }
+
+  effect function ended(state: Guidance) {
+    try voice.pause()
+    try content.update((c) => ({ ...c, guidance: undefined }))
+    if (state.ended !== "EndedFromNotification" && state.ended !== "PausedInBackground") try service.end()
+    const said: Partial<Record<Guidance["ended"], string>> = {
+      EndedFromNotification: "Navigation stopped from the notification.",
+      PausedInBackground: "Navigation paused while the app is in the background. Tap Start to resume.",
+      EndedByProvider: "The Maps account changed. Navigation ended.",
+      EndedByOwner: "",
+    }
+    const message = said[state.ended]
+    if (message !== undefined) try tell(message)
+  }
+
+  effect function perform(out: NavEffect) {
+    switch (out.tag) {
+      case "StartWatch": {
+        const session = out.session
+        const previous = try Ref.getAndSet(watching, undefined)
+        if (previous) try Fiber.interrupt(previous)
+        const fiber = fork.detached effect {
+          Stream.runForEach(location.watch(), (fix) => onFix(session, fix)) catch effect (error) => {
+            try tell(error.message)
+            try service.watchFailed()
+            try apply({ type: "watchFailed", owner: session })
+          }
+        }
+        try Ref.set(watching, fiber)
+        return
+      }
+      case "StopWatch": {
+        const fiber = try Ref.getAndSet(watching, undefined)
+        if (fiber) try Fiber.interrupt(fiber)
+        return
+      }
+      case "PlanReroute": {
+        const ticket = out.ticket
+        const g = (try content.get()).guidance
+        const fix = g?.fix
+        if (!g || !fix) {
+          try apply({ type: "rerouteSettles", ticket, route: 0, steps: 1 })
+          return
+        }
+        try tell("Planning a new route from here…")
+        const planned = provider.routes(fix.coordinate, g.route.to, (try screen.get()).travel, false) catch effect (error) => {
+          try tell(`${error.message} The current route was kept.`)
+          return []
+        }
+        const next = planned[0]
+        const state = try apply({ type: "rerouteSettles", ticket, route: next ? routeNumber(next.id) : 0, steps: Math.max(1, next?.steps.length ?? 1) })
+        if (next && state?.phase === "Guiding") {
+          try content.update((c) => c.guidance ? { ...c, guidance: { ...c.guidance, route: next, marks: maneuverAlong(next) } } : c)
+          try voice.pause()
+          try tell("New route ready.")
+        }
+        return
+      }
+    }
+  }
+
+  effect function onFix(session: number, fix: Position) {
+    const g = (try content.get()).guidance
+    const before = try guidance.get()
+    if (!g || g.session !== session || before.session !== session) return
+    const now = try Clock.currentTimeMillis
+    const reading = readingOf(fix, g.route, before.step, g.marks, now)
+    const after = try apply({ type: "fix", owner: session, reading })
+    if (!after) return
+    const banner = bannerOf(g.route, g.marks, after.step, fix)
+    const title = after.offRoute ? "Off route" : `${guidanceDistance(banner.distance, LOCALE)} · ${banner.instruction}`
+    const text = after.offRoute ? "Open Maps to end navigation." : `${guidanceDuration(banner.remainingSeconds)} · ${guidanceDistance(banner.remainingMeters, LOCALE)} remaining`
+    try content.update((c) => c.guidance?.session === session ? { ...c, position: fix, guidance: { ...c.guidance, fix, title, text } } : c)
+    const speak = maySpeak(g.kind)
+    if (!readingUsable(reading)) {
+      try voice.pause()
+      return try tell("A fresh, precise location fix is needed for turn guidance.")
+    }
+    if (after.phase === "Arrived") {
+      try service.arrive(true, true)
+      try voice.offer(`${g.route.id}:arrived`, "You have arrived.", speak)
+      return try tell("Destination reached.")
+    }
+    try service.update(title, text)
+    if (after.offRoute) {
+      try voice.offer(`${g.route.id}:off-route`, "You are off route. End navigation to plan a new route.", speak)
+      return try tell("Off route. End navigation to plan a new route.")
+    }
+    try voice.offer(instructionKey(g.route.id, after.step, banner.distance), spokenInstruction(banner.instruction, banner.distance, LOCALE), speak)
+    try tell(g.screenOff ? "Navigation continues in notifications with the screen off." : "")
+  }
+
+  fork.detached Stream.runForEach(Stream.fromQueue(serviceEnds), (reason) => effect {
+    if (reason === "arrived") {
+      const state = try service.state()
+      const g = (try content.get()).guidance
+      if (!state.visible) native.invoke(SERVICE, "navigationArrived", { title: `Arrived at ${g?.destination ?? "your destination"}`, text: "Navigation ended." }) catch () => undefined
+      return
+    }
+    try apply({ type: "serviceEnded", reason: reason === "notification" ? "EndedFromNotification" : "PausedInBackground" })
+  })
+
+  fork.detached Stream.runForEach(service.changes, (s) => effect {
+    const screenOff = s.background === "ScreenOff"
+    try content.update((c) => c.guidance && c.guidance.screenOff !== screenOff ? { ...c, guidance: { ...c.guidance, screenOff } } : c)
+    const mine = try guidance.get()
+    if (s.phase === "NoGuidance" && (mine.phase === "Guiding" || mine.phase === "Rerouting")) try apply({ type: "serviceEnded", reason: "PausedInBackground" })
+    if (s.fallback && s.visible) try tell("Screen-off guidance is unavailable. Keep Maps open for turn guidance.")
+  })
+
+  fork.detached Stream.runForEach(location.states, (s) => service.permissionHold(s.phase === "Prompting" || s.phase === "WaitingFront", false)) catch () => undefined
+
+  return {
+    effect start() {
+      const view = try screen.get()
+      const c = try content.get()
+      const route = c.routes.run === view.routeRun ? c.routes.routes[view.chosen] : undefined
+      if (view.route !== "Ready" || !route || !c.shown) throw failure("unavailable", "Calculate a route before starting navigation.")
+      const sent = guidance.send({ type: "start", route: routeNumber(route.id), steps: Math.max(1, route.steps.length) }) catch effect () => {
+        throw failure("unavailable", "Calculate a route before starting navigation.")
+      }
+      const destination = c.shown.label
+      try content.update((x) => ({
+        ...x, message: "Waiting for your location.",
+        guidance: { session: sent.state.session, route, marks: maneuverAlong(route), destination, kind: c.coverage?.kind ?? "NoProvider", title: "", text: "", screenOff: false },
+      }))
+      for (const out of sent.out) try perform(out)
+      const screenOff = try service.start(route.id, `Route to ${destination}`, "Waiting for location")
+      if (screenOff) try tell("Waiting for your location. Navigation updates continue in notifications with the screen off.")
+    },
+    end: () => map(apply({ type: "endGuidance" }), () => undefined),
+    effect reroute() {
+      const g = try guidance.get()
+      if (g.phase === "NotGuiding") throw failure("unavailable", "No navigation is active on the phone.")
+      if (g.phase === "Arrived") throw failure("unavailable", "The phone has already arrived at the destination.")
+      if (g.phase === "Rerouting") throw failure("unavailable", "The phone is already planning a new route.")
+      if (!g.fixUsable) {
+        try tell("A fresh, precise location fix is needed to reroute. The current route was kept.")
+        throw failure("unavailable", "The phone has no fresh, precise location fix, so it kept the current route.")
+      }
+      try voice.pause()
+      const after = try apply({ type: "reroute" })
+      if (after?.session !== g.session || after.phase === "NotGuiding") throw failure("unavailable", "Navigation ended on the phone before the new route was ready.")
+      if (after.route === g.route) throw failure("unavailable", "The phone kept the previous route.")
+    },
+    stopFollowing: () => map(apply({ type: "stopFollowing" }), () => undefined),
+    recenter: () => map(apply({ type: "recenter" }), () => undefined),
+    effect toggleVoice() {
+      const kind = (try content.get()).guidance?.kind ?? "NoProvider"
+      try voice.toggle(maySpeak(kind))
+    },
+    effect setHidden(hidden: boolean) {
+      const kind = (try content.get()).guidance?.kind ?? "NoProvider"
+      try voice.setHidden(hidden, maySpeak(kind))
+      if (hidden) try service.hide() else try service.show()
+    },
+    effect setInMaps(inMaps: boolean) {
+      if (inMaps) try service.select() else try service.leave()
+    },
+    effect retire() {
+      try apply({ type: "providerRetires" })
+      try service.providerRetires()
+    },
+    states: guidance.changes,
+  }
+})

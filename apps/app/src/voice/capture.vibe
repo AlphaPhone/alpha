@@ -1,0 +1,88 @@
+// spec/voice/capture.md, "Story: One voice surface at a time hears me"; spec/voice/capture.md, "Story: Recover from a refused microphone"; spec/voice/capture.md, "Story: See my voice as I speak"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { Machine, barHeight, levelBars, type Event, type MicOwner, type Microphone as MicrophoneState } from "../../gen/voice__capture.effect.vibe"
+import { RecordingMetrics } from "./native.schema.vibe"
+
+const LEVEL_EVERY = "100 millis"
+
+/** The renderer's one owner of the microphone, its ticket and why a start was refused. */
+export service Microphone {
+  /** The microphone state now and after each change. */
+  readonly changes: Stream.Stream<MicrophoneState>
+  /** The microphone state at this moment. */
+  get(): MicrophoneState!!
+  /** Take the microphone for `who`; the ticket of the new capture, or undefined when it was refused. */
+  acquire(who: MicOwner): (number | undefined)!!
+  /** The native capture under `ticket` opened. */
+  opened(ticket: number): void!!
+  /** The capture under `ticket` released the microphone. */
+  release(ticket: number): void!!
+  /** Telecom reports whether a call holds the microphone. */
+  callChanged(active: boolean): void!!
+  /** The page came to the front or left it. */
+  foregroundChanged(inFront: boolean): void!!
+  /** Android answered the microphone permission. */
+  permissionAnswered(granted: boolean): void!!
+  /** Whether Alpha runs on the phone, where its settings can allow the microphone. */
+  native(): boolean!!
+  /** Open Android's settings for Alpha, where the microphone can be allowed. */
+  openAppSettings(): void!!
+  /** The last 44 level bars of the recording, while the capture stays open. */
+  levels(recordingId: string): Stream.Stream<readonly number[]>
+}
+
+const decodeMetrics = Schema.decodeUnknownOption(RecordingMetrics)
+
+/** The microphone service over the capture Machine it is given. */
+export const captureService = Layer.effect(Microphone, effect {
+  const held = try Machine
+  const native = try Native
+  const build = try Build
+
+  effect function send(event: Event) {
+    held.send(event) catch () => undefined
+  }
+
+  effect function acquire(who: MicOwner) {
+    const before = try held.get()
+    try send({ type: "acquire", who })
+    const after = try held.get()
+    return after.ticket !== before.ticket && after.owner === who ? after.ticket : undefined
+  }
+
+  effect function permille(recordingId: string) {
+    const raw = native.invoke("AlphaVoiceCloud", "getRecordingMetrics", { recordingId }) catch () => undefined
+    const metrics = raw === undefined ? undefined : Option.getOrUndefined(decodeMetrics(raw))
+    if (metrics === undefined || metrics.recordingId !== recordingId) return -1
+    const level = metrics.rms ?? metrics.peak
+    if (!Number.isFinite(level) || level < 0 || level > 1) return -1
+    return Math.round(level * 1000)
+  }
+
+  effect function* levels(recordingId: string) {
+    let bars: readonly number[] = Array.from({ length: levelBars }, () => barHeight(0))
+    while ((try held.get()).open) {
+      const level = try permille(recordingId)
+      if (level >= 0) {
+        bars = [...bars.slice(1), barHeight(level)]
+        yield bars
+      }
+      try sleep(LEVEL_EVERY)
+    }
+  }
+
+  return {
+    changes: held.changes,
+    get: () => held.get(),
+    acquire,
+    effect opened(ticket: number) { try send({ type: "opened", ticket }) },
+    effect release(ticket: number) { try send({ type: "release", ticket }) },
+    effect callChanged(active: boolean) { try send({ type: "callChanged", active }) },
+    effect foregroundChanged(inFront: boolean) { try send({ type: "foregroundChanged", inFront }) },
+    effect permissionAnswered(granted: boolean) { try send({ type: "permissionAnswered", granted }) },
+    effect native() { return build.info.variant !== "browser" },
+    effect openAppSettings() { native.invoke("AlphaDevice", "openSettings", { page: "app" }) catch () => undefined },
+    levels,
+  }
+})

@@ -1,0 +1,51 @@
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+import { assert, describe, it } from "@effect/vitest"
+import { alphaCloudProfile, alphaProfile, localProfile, pendingDatabaseIdentity, requiredSecrets } from "../src/profile.vibe"
+import { operatorInputs } from "./support.ts"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+
+describe("Alpha Cloud deployment profile", () => {
+  it.effect("accepts the operator's reviewed inputs with Alpha's own hosts, audience and every capability", () => effect {
+    // spec/cloud/deployment.md, "A profile is accepted only when its two environments share no origin or database, production uses no loopback adapter, and each environment offers a sign-in method and complete documents"
+    const profile = try alphaProfile(operatorInputs)
+    const production = profile.environments.production
+    try check(() => assert.strictEqual(production.api, "https://api.alphacompute.ai"))
+    try check(() => assert.strictEqual(production.web, "https://cloud.alphacompute.ai"))
+    try check(() => assert.strictEqual(profile.environments.staging.api, "https://api-staging.alphacompute.ai"))
+    try check(() => assert.strictEqual(production.entitlementAudience, "ai.alphacompute.alphaphone"))
+    try check(() => assert.deepStrictEqual([...production.capabilities], ["inference", "speech", "maps", "managedGoogle", "billing"]))
+    try check(() => assert.deepStrictEqual([...production.firstPartyOrigins], ["https://cloud.alphacompute.ai"]))
+    try check(() => assert.strictEqual(production.inference?.models[0]?.id, "qwen-3.8-27b"))
+  })
+
+  it.effect("refuses inputs that give both environments one database", () => effect {
+    // spec/cloud/deployment.md, "A profile is accepted only when its two environments share no origin or database, production uses no loopback adapter, and each environment offers a sign-in method and complete documents"
+    const shared = { ...operatorInputs, staging: { ...operatorInputs.staging, databaseIdentity: operatorInputs.production.databaseIdentity } }
+    const outcome = alphaProfile(shared) catch (failure) => failure._tag
+    try check(() => assert.strictEqual(outcome, "ProfileInvalid"))
+  })
+
+  it.effect("refuses inputs with fields it does not know", () => effect {
+    // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+    const outcome = alphaProfile({ ...operatorInputs, tenant: "alphacompute" }) catch (failure) => failure._tag
+    try check(() => assert.strictEqual(outcome, "OperatorInputsInvalid"))
+  })
+
+  it.effect("serves loopback mail and loopback first-party origins only in the staging development profile", () => effect {
+    // spec/cloud/deployment.md, "An instance starts only for an accepted profile, on its environment's own readable database, seeded only in staging, with loopback delivery only on PGlite"
+    const local = localProfile(alphaCloudProfile(operatorInputs), ["http://127.0.0.1:5173"])
+    try check(() => assert.strictEqual(local.environments.staging.mail.kind, "loopback"))
+    try check(() => assert.ok(local.environments.staging.firstPartyOrigins.includes("http://127.0.0.1:5173")))
+    try check(() => assert.strictEqual(local.environments.production.mail.kind, "https"))
+    try check(() => assert.ok(!local.environments.production.firstPartyOrigins.includes("http://127.0.0.1:5173")))
+  })
+
+  it.effect("names every provider secret and recognizes an unreviewed database receipt", () => effect {
+    // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+    const profile = alphaCloudProfile(operatorInputs)
+    try check(() => assert.ok(requiredSecrets.includes("CEREBRAS_API_KEY") && requiredSecrets.includes("STRIPE_WEBHOOK_SECRET")))
+    try check(() => assert.strictEqual(pendingDatabaseIdentity(profile.environments.production), false))
+    try check(() => assert.strictEqual(pendingDatabaseIdentity({ ...profile.environments.production, databaseIdentity: "0".repeat(63) + "1" }), true))
+  })
+})

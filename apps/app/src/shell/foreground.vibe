@@ -1,0 +1,46 @@
+// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"
+import { appInert, talking, type Nav } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
+
+/** What is in front of the owner now, for areas that show something only while nothing covers it. */
+export interface ForegroundState {
+  /** The page is in front and lit. */
+  readonly visible: boolean
+  /** A locked or private surface shows; Alpha draws no lock screen of its own, so it is Android's keyguard only. */
+  readonly locked: boolean
+  /** The phone's screen: `home` while Alpha's page shows. */
+  readonly screen: "home" | "off"
+  /** The open app, or "" on Home. */
+  readonly view: string
+  /** The stand-in shade covers Home. */
+  readonly shade: boolean
+  /** Where the assistant sits: closed (bar or pill), a half sheet or full screen. */
+  readonly chat: "closed" | "sheet" | "full"
+  /** A sheet, menu or dialog, or another surface's hold, owns the phone. */
+  readonly modal: boolean
+}
+
+/** The foreground as the navigation shows it. */
+export function foregroundOf(nav: Nav): ForegroundState {
+  const chat = talking(nav) ? (nav.chat === "ChatSheet" ? "sheet" : "full") : "closed"
+  return {
+    visible: !nav.hidden, locked: false, screen: nav.hidden ? "off" : "home", view: nav.app,
+    shade: nav.shade, chat, modal: appInert(nav),
+  }
+}
+
+/** The foreground for every area: what is in front, and each change of it. */
+export service Foreground {
+  readonly changes: Stream.Stream<ForegroundState>
+  get(): ForegroundState!!
+}
+
+/** The foreground service over the navigation machine. */
+export const foregroundLive = Layer.effect(Foreground, effect {
+  const machine = try NavigationMachine
+  return {
+    changes: Stream.changesWith(Stream.map(machine.changes, foregroundOf), (a, b) =>
+      a.visible === b.visible && a.locked === b.locked && a.screen === b.screen && a.view === b.view && a.shade === b.shade && a.chat === b.chat && a.modal === b.modal),
+    effect get() { return foregroundOf(try machine.get()) },
+  }
+})

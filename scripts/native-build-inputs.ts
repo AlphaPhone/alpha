@@ -35,12 +35,12 @@ export function nativeRecipe(root:string) {
   const git=(...args:string[])=>execFileSync('git',['-C',vendor,...args],{encoding:'utf8',maxBuffer:16*1024*1024}).trim();
   if(!/^[a-f0-9]{40}$/.test(pin)||git('rev-parse','HEAD')!==pin)throw Error('Native producer requires the locked SDK checkout');
   // Trees include the complete upstream producer module closure, model recipes and Java/JNI inputs.
-  const sources=[...new Set([...embeddingProducerInputPaths,...nativeInputPaths,nativeJavaPath,'packages/app/scripts','bun.lock','packages/app/scripts/paradee-voice/build-native.ts','packages/app/scripts/voice/build-phonon2-gguf.ts','plugins/plugin-local-inference/native/android','plugins/plugin-native-inference/src/model-catalog','plugins/plugin-native-inference/src/model-catalog/voice-model-versions.json'])].sort();
+  const sources=[...new Set([...embeddingProducerInputPaths,...nativeInputPaths,nativeJavaPath,'packages/os/android/local-inference/scripts','bun.lock','packages/os/android/local-inference/scripts/paradee-voice/build-native.ts','packages/os/android/local-inference/scripts/voice/build-phonon2-gguf.ts','packages/os/android/local-inference','packages/os/android/local-inference/model-catalog','packages/os/android/local-inference/model-catalog/voice-model-versions.json'])].sort();
   const ids=git('rev-parse',...sources.map(name=>`${pin}:${name}`)).split('\n');
   const sourceTrees=Object.fromEntries(sources.map((name,index)=>[name,ids[index]]));
-  git('diff','--quiet','HEAD','--',...sources,'plugins/plugin-local-inference/native/llama.cpp');
-  const engineCommit=git('rev-parse',`${pin}:plugins/plugin-local-inference/native/llama.cpp`);
-  const inputFiles=['app.config.json','android/consumer-host.json','android/embedding-host/build-toolchain.json',NATIVE_BUILD_REQUIREMENTS,'android/embedding-host/bootstrap-requirements.txt','android/paradee-voice/asr-inputs.json','scripts/build-embedding-host.ts','scripts/prepare-embedding-host.ts','scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/native-build-inputs.ts','scripts/android-identity.ts','scripts/android-stage-voice-models.ts','scripts/local-agent-source.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts','scripts/android-abis.ts','scripts/copy-file-clone.ts','scripts/stage-embedding-host.ts'];
+  git('diff','--quiet','HEAD','--',...sources,'packages/os/android/local-inference/llama.cpp');
+  const engineCommit=git('rev-parse',`${pin}:packages/os/android/local-inference/llama.cpp`);
+  const inputFiles=['app.config.json','android/consumer-host.json','android/embedding-host/build-toolchain.json',NATIVE_BUILD_REQUIREMENTS,'android/embedding-host/bootstrap-requirements.txt','android/paradee-voice/asr-inputs.json','scripts/build-embedding-host.ts','scripts/prepare-embedding-host.ts','scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/native-build-inputs.ts','scripts/android-identity.ts','scripts/android-stage-voice-models.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts','scripts/android-abis.ts','scripts/copy-file-clone.ts','scripts/stage-embedding-host.ts'];
   const productInputs=Object.fromEntries(inputFiles.map(name=>[name,fileDigest(path.join(root,name))]));
   const voice=json(root,'android/voice-host/qualified-voice-host.json');
   return {schema:'alpha-native-recipe/v1',identity:androidIdentity(root).appId,engineCommit,sourceTrees,productInputs,models:voice.models,asrSlot:voice.asrSlot,embeddingModel:json(root,'android/embedding-host/qualified-host.json').model,toolchain:json(root,'android/embedding-host/build-toolchain.json'),python:NATIVE_PYTHON};
@@ -88,7 +88,7 @@ export function assertNativeOutputPath(root:string,relative:string) {
 /** Clear only the generated voice bundle and the staged native libraries. */
 export function clearStagedNativeInputs(root:string) {
   const voice='.eliza/paradee-voice';
-  const libraries=ANDROID_ABIS.flatMap(abi=>['libelizainference.so','libelizavoicejni.so','libc++_shared.so'].map(name=>`android/app/src/main/jniLibs/${abi}/${name}`));
+  const libraries=ANDROID_ABIS.flatMap(abi=>['libelizainference.so','libparadeevoicejni.so','libc++_shared.so'].map(name=>`android/app/src/main/jniLibs/${abi}/${name}`));
   // Check every target before removing anything: an ABI directory may redirect
   // a library path even when the common jniLibs parent is a real directory.
   for(const relative of [voice,...libraries])assertNativeOutputPath(root,relative);
@@ -124,12 +124,12 @@ export function validateNativeBuildReceipt(root:string,receipt:NativeBuildReceip
   if(receipt.embedding.abi!=='arm64-v8a'||receipt.embedding.jniIdentityRelocated!==true)throw Error('Native JNI ABI or relocation changed');
   if(JSON.stringify(receipt.embedding.model)!==JSON.stringify(recipe.embeddingModel))throw Error('Native embedding model admission changed');
   const abis=receipt.voice.abis,libraries=receipt.embedding.libraries;
-  if(!Array.isArray(abis)||abis.map((row:any)=>row.abi).join()!==ANDROID_ABIS.join()||!Array.isArray(libraries)||libraries.map((row:any)=>row.name).sort().join()!=='libc++_shared.so,libelizainference.so,libelizavoicejni.so')throw Error('Native library inventory changed');
+  if(!Array.isArray(abis)||abis.map((row:any)=>row.abi).join()!==ANDROID_ABIS.join()||!Array.isArray(libraries)||libraries.map((row:any)=>row.name).sort().join()!=='libc++_shared.so,libelizainference.so,libparadeevoicejni.so')throw Error('Native library inventory changed');
   for(const abi of abis)if(abi.alignment16KiB!==true||abi.abiVersion<17||abi.libraries.map((row:any)=>row.name).join()!=='libelizainference.so,libc++_shared.so')throw Error('Native voice ABI changed');
   const additional=receipt.embedding.additionalAbis;
   if(!Array.isArray(additional)||additional.length!==1||additional[0]?.abi!=='x86_64'||!Array.isArray(additional[0].libraries))throw Error('Native embedding ABI inventory is incomplete');
   for(const embedding of embeddingAbiLibraries<any>(receipt.embedding as any)) {
-    if(embedding.libraries.map((row:any)=>row.name).sort().join()!=='libc++_shared.so,libelizainference.so,libelizavoicejni.so')throw Error('Native embedding library inventory changed');
+    if(embedding.libraries.map((row:any)=>row.name).sort().join()!=='libc++_shared.so,libelizainference.so,libparadeevoicejni.so')throw Error('Native embedding library inventory changed');
     for(const library of embedding.libraries)if(library.alignment16KiB!==true||!Number.isSafeInteger(library.bytes)||library.bytes<=0||!/^[a-f0-9]{64}$/.test(library.sha256))throw Error('Native JNI library metadata changed');
     for(const library of abis.find((row:any)=>row.abi===embedding.abi).libraries) {const same=embedding.libraries.find((row:any)=>row.name===library.name);if(same?.bytes!==library.bytes||same?.sha256!==library.sha256)throw Error('Voice and embedding engines differ');}
   }
@@ -145,7 +145,7 @@ export function nativeOutputInventory(receipt:NativeBuildReceipt) {
   for(const model of receipt.voice.models)expected.set(`${native}/assets/paradee-voice/v1/${model.path}`,model);
   expected.set(`${native}/assets/paradee-voice/v1/manifest.json`,null);expected.set(`${native}/build-record.json`,null);
   for(const abi of receipt.voice.abis)for(const library of abi.libraries){expected.set(`android/app/src/main/jniLibs/${abi.abi}/${library.name}`,library);if(library.name==='libelizainference.so')expected.set(`${native}/jniLibs/${abi.abi}/${library.name}`,library);}
-  for(const abi of embeddingAbiLibraries<any>(receipt.embedding as any))expected.set(`android/app/src/main/jniLibs/${abi.abi}/libelizavoicejni.so`,abi.libraries.find((row:any)=>row.name==='libelizavoicejni.so'));
+  for(const abi of embeddingAbiLibraries<any>(receipt.embedding as any))expected.set(`android/app/src/main/jniLibs/${abi.abi}/libparadeevoicejni.so`,abi.libraries.find((row:any)=>row.name==='libparadeevoicejni.so'));
   return expected;
 }
 export function verifyNativeBuildFiles(root:string,receipt=readNativeBuildReceipt(root)) {
@@ -170,7 +170,7 @@ export function verifyNativeFileBytes(root:string,files:NativeFile[]) {
 }
 /** Inspect executable structure separately from frozen-byte custody checks. */
 export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceipt) {
-  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)('../vendor/eliza/packages/app/scripts/build-helpers/verify-fused-symbols.ts');
+  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)('./os-ported/app/build-helpers/verify-fused-symbols.ts');
   const sdk=nativeAndroidSdk();
   const prebuilt=path.join(sdk,'ndk',receipt.producer.ndk,'toolchains/llvm/prebuilt');
   const host=fs.readdirSync(prebuilt).find(name=>fs.existsSync(path.join(prebuilt,name,'bin/llvm-nm')));
@@ -185,7 +185,7 @@ export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceip
     }
   }
   for(const abi of embeddingAbiLibraries<any>(receipt.embedding as any)) {
-    const jni=path.join(root,'android/app/src/main/jniLibs',abi.abi,'libelizavoicejni.so'),bytes=fs.readFileSync(jni);
+    const jni=path.join(root,'android/app/src/main/jniLibs',abi.abi,'libparadeevoicejni.so'),bytes=fs.readFileSync(jni);
     if(bytes.length<64||bytes.readUInt32BE(0)!==0x7f454c46||bytes[4]!==2||bytes[5]!==1||bytes.readUInt16LE(18)!==(abi.abi==='arm64-v8a'?183:62)||minElfLoadAlignment(bytes)<16384)throw Error('Native JNI ABI or page alignment differs');
     verifyNativeSymbols(execFileSync(tool('llvm-nm'),['-D','--defined-only',jni],{encoding:'utf8'}),receipt.embedding.jniBinding);
     const linkage=execFileSync(tool('llvm-readelf'),['-W','-d',jni],{encoding:'utf8'});

@@ -1,0 +1,129 @@
+// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"
+import { sanitizeCrashEntries, type NativeCrashEntry } from "@elizaos/os/bridges/system"
+import { type Export, type Notice, type Problem, Machine } from "../../gen/settings__diagnostics.effect.vibe"
+import type { DeviceRead } from "../../gen/settings__facts.ts"
+import { Build } from "../platform/build.vibe"
+import { CrashJournal } from "../platform/crash-journal.vibe"
+import { Native } from "../platform/native.vibe"
+import { attempt, call } from "./call.vibe"
+import { saveFile, shippedNotices } from "./files.ts"
+import { LicenceNotice, ShareReply } from "./native.schema.vibe"
+
+export const DIAGNOSTICS_FORMAT = "alpha-diagnostics/v1"
+
+const EXIT_TITLES: Record<string, string> = {
+  crash: "Alpha stopped after a crash", "native-crash": "Alpha stopped after a crash in native code",
+  anr: "Alpha stopped because it wasn’t responding", "low-memory": "Android stopped Alpha to free up memory",
+  signaled: "Android stopped Alpha with a system signal", "initialization-failure": "Alpha stopped because it couldn’t start",
+  "excessive-resource-usage": "Android stopped Alpha for using too many resources",
+  "dependency-died": "Alpha stopped because a part it depends on stopped",
+  freezer: "Android stopped Alpha while it was frozen in the background", other: "Android stopped Alpha for another reason",
+  unknown: "Alpha stopped for an unknown reason", "exit-self": "Alpha closed itself after an error",
+}
+const SCREEN_TITLES: Record<string, string> = { render: "A screen couldn’t be shown", startup: "Alpha’s screens couldn’t start", uncaught: "A screen ran into an error" }
+
+/** Alpha's line for one sanitized problem entry: what failed, and its class or reason. */
+export function describeProblem(entry: NativeCrashEntry): Problem {
+  const where = entry.process !== undefined && entry.process !== "main" ? ` · ${entry.process} process` : ""
+  if (entry.source === "exit") return { at: entry.at, title: Object.hasOwn(EXIT_TITLES, entry.reason ?? "") ? EXIT_TITLES[entry.reason ?? ""] : "Alpha stopped", detail: `Reported by Android${where}` }
+  if (entry.source === "renderer") return { at: entry.at, title: Object.hasOwn(SCREEN_TITLES, entry.kind ?? "") ? SCREEN_TITLES[entry.kind ?? ""] : "A screen failed", detail: entry.errorClass ?? "Error" }
+  const parts = [entry.errorClass, entry.rootClass !== undefined && entry.rootClass !== entry.errorClass ? `caused by ${entry.rootClass}` : "", entry.thread !== undefined ? `${entry.thread} thread` : ""]
+  return { at: entry.at, title: "App crashed", detail: parts.filter((p) => p !== undefined && p !== "").join(" · ") || "Unknown class" }
+}
+
+const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+
+/** The support report: allowlisted fields of strict shapes only; anything else is dropped, not scrubbed. */
+export function buildReport(input: { readonly at: number; readonly native: boolean; readonly testMocks: boolean; readonly read: DeviceRead; readonly entries: ReadonlyArray<NativeCrashEntry>; readonly facts: Record<string, unknown> }) {
+  const text = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value) ? value : undefined
+  const hashes = typeof input.facts.runtimeHashes === "object" && input.facts.runtimeHashes !== null ? input.facts.runtimeHashes as Record<string, unknown> : {}
+  const assets = ["agent/alpha-source.json", "agent/agent-bundle.js", "agent/workflow-worker/manifest.json", "agent/workflow-worker/files.sha256"]
+  const grant = (access: string) => access === "Allowed" ? true : access === "Denied" ? false : undefined
+  const permissions = Object.fromEntries(([["Camera", input.read.camera], ["Microphone", input.read.microphone], ["Location", input.read.locationAccess], ["Calendar", input.read.calendar], ["Notifications", input.read.notifications]] as const)
+    .flatMap(([name, access]) => grant(access) === undefined ? [] : [[name, grant(access)]]))
+  return {
+    format: DIAGNOSTICS_FORMAT,
+    generatedAt: new Date(input.at).toISOString(),
+    platform: input.native ? "android" : "web",
+    app: { version: text(input.read.version, VERSION) ?? null, versionCode: input.read.versionCode, testMocks: input.testMocks,
+      variant: text(input.facts.variant, /^(launcher|standalone)$/), buildType: text(input.facts.buildType, /^(debug|release)$/) },
+    os: { androidRelease: text(input.read.android, VERSION), securityPatch: text(input.facts.securityPatch, /^\d{4}-\d{2}-\d{2}$/),
+      sdkInt: typeof input.facts.sdkInt === "number" && Number.isSafeInteger(input.facts.sdkInt) && input.facts.sdkInt > 0 && input.facts.sdkInt < 1000 ? input.facts.sdkInt : undefined },
+    upstreamPin: text(input.facts.upstreamPin, /^[0-9a-f]{40}$/) ?? null,
+    runtimeHashes: Object.fromEntries(assets.flatMap((asset) => { const hash = text(hashes[asset], /^[0-9a-f]{64}$/); return hash === undefined ? [] : [[asset, hash]] })),
+    permissions,
+    roles: [["home", input.read.home], ["assistant", input.read.assistant]].map(([role, hold]) => ({ role, held: hold === "HeldByAlpha", available: hold !== "RoleUnavailable" && hold !== "RoleUnread" })),
+    crashes: { count: input.entries.length, recent: input.entries.slice(-20) },
+  }
+}
+
+/** The problem log, the diagnostics export and the licence notices. */
+export service Diagnostics {
+  readLog(): void!!
+  clearLog(): void!!
+  exportReport(read: DeviceRead): void!!
+  loadLicences(): void!!
+}
+
+effect function entries() {
+  const journal = try CrashJournal
+  const now = try Clock.currentTimeMillis
+  return sanitizeCrashEntries((try journal.read()).entries, now)
+}
+
+/** Diagnostics over the diagnostics Machine it is given. */
+export const diagnostics = Layer.effect(Diagnostics, effect {
+  const held = try Machine
+  const native = try Native
+  const build = (try Build).info
+  const journal = try CrashJournal
+  const within = <A, E>(program: A!E!(Native | CrashJournal)) => Effect.provideService(Effect.provideService(program, Native, native), CrashJournal, journal)
+  return {
+    readLog: () => within(effect {
+      const under = (try held.get()).version
+      const read = try attempt(entries())
+      try (held.send({ type: "logRead", under, ok: read !== undefined, problems: (read ?? []).map(describeProblem) }) catch () => undefined)
+    }),
+    clearLog: () => within(effect {
+      const begun = try (held.send({ type: "confirmClearLog" }) catch () => undefined)
+      if (begun === undefined) return
+      const done = try attempt(journal.clear())
+      try (held.send({ type: "cleared", ok: done !== undefined }) catch () => undefined)
+      const read = try attempt(entries())
+      if (read !== undefined) try (held.send({ type: "logPublished", problems: read.map(describeProblem) }) catch () => undefined)
+    }),
+    exportReport: (read: DeviceRead) => within(effect {
+      const begun = try (held.send({ type: "beginExport" }) catch () => undefined)
+      if (begun === undefined) return
+      const isNative = build.variant !== "browser"
+      const facts = isNative ? try attempt(native.invoke("AlphaDevice", "diagnosticsFacts")) : undefined
+      const at = try Clock.currentTimeMillis
+      const report = buildReport({ at, native: isNative, testMocks: build.testMocks, read, entries: (try attempt(entries())) ?? [], facts: typeof facts === "object" && facts !== null ? facts as Record<string, unknown> : {} })
+      const text = JSON.stringify(report, null, 2) + "\n"
+      let answer: Export = "ExportFailed"
+      if (isNative) {
+        const shared = try attempt(call("AlphaDevice", "shareDiagnostics", ShareReply, { text }))
+        if (shared?.status === "opened") answer = "Shared"
+      } else {
+        const saved = try attempt(Effect.try(() => saveFile(`alpha-diagnostics-${report.generatedAt.replace(/[:.]/g, "-")}.json`, text)))
+        if (saved !== undefined) answer = "Saved"
+      }
+      try (held.send({ type: "exportAnswered", answer }) catch () => undefined)
+    }),
+    effect loadLicences() {
+      const begun = try (held.send({ type: "loadLicences" }) catch () => undefined)
+      if (begun === undefined) return
+      const value = try attempt(tryPromise(() => shippedNotices()))
+      const list = Array.isArray(value) ? value : []
+      const seen = new Set<string>()
+      const notices: Notice[] = list.flatMap((item) => {
+        const notice = Option.getOrUndefined(Schema.decodeUnknownOption(LicenceNotice)(item))
+        const key = notice === undefined ? "" : `${notice.name}@${notice.version}`
+        if (notice === undefined || seen.has(key)) return []
+        seen.add(key)
+        return [{ name: notice.name, version: notice.version, licence: notice.license, source: notice.source ?? "", text: notice.text ?? "", flags: [...(notice.flags ?? [])] }]
+      })
+      try (held.send({ type: "licencesAnswered", notices }) catch () => undefined)
+    },
+  }
+})

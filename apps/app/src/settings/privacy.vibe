@@ -1,0 +1,48 @@
+// spec/settings/privacy.md, "Story: Know where my voice goes"; spec/settings/privacy.md, "Story: Pause or turn off listening and see what the listener did"
+import { type Listening, type Route, type Stop, Machine } from "../../gen/settings__privacy.effect.vibe"
+import { Listener } from "../voice/listener.vibe"
+import { VoiceRoute } from "../voice/route.vibe"
+
+/** The Privacy page's view of Voice: the speech route and the always-on listener row. */
+export service PrivacyRow {
+  /** Where speech goes now, as Voice routes it. */
+  route(): Route!!
+  /** Read the listener's status, unless a stop is running. */
+  readListener(): void!!
+  /** Pause or turn off the listener, keeping its own answer. */
+  stop(stop: Stop): void!!
+  /** Open the listener's own settings, where listening is turned on or resumed. */
+  openListenerSettings(): boolean!!
+}
+
+function listening(status: { readonly available: boolean; readonly state?: string; readonly listening?: boolean; readonly microphoneOpen?: boolean; readonly consented?: boolean }): Listening {
+  if (!status.available) return "ListenerUnavailable"
+  if (status.state === "OFF" && (status.microphoneOpen === true || status.listening === true)) return "MicStillOpen"
+  if (status.listening === true || status.microphoneOpen === true) return "ListenerOn"
+  if (status.state === "PERMISSION_REQUIRED" || status.state === "NOTIFICATIONS_REQUIRED" || status.state === "SPEECH_UNAVAILABLE") return "ListenerNeedsSetup"
+  if (typeof status.state === "string" && status.state.startsWith("PAUSED")) return "ListenerPaused"
+  return status.consented === true && status.state !== "OFF" ? "ListenerOn" : "ListenerOff"
+}
+
+/** PrivacyRow over the listener-row Machine it is given and Voice's route and listener. */
+export const privacyRow = Layer.effect(PrivacyRow, effect {
+  const row = try Machine
+  const voice = try VoiceRoute
+  const listener = try Listener
+  return {
+    route: () => voice.privacy(),
+    effect readListener() {
+      const begun = try (row.send({ type: "beginRead" }) catch () => undefined)
+      if (begun === undefined) return
+      const status = try listener.status()
+      try (row.send({ type: "readAnswered", token: begun.issued, listening: listening(status) }) catch () => undefined)
+    },
+    effect stop(stop: Stop) {
+      const begun = try (row.send({ type: "beginStop", stop }) catch () => undefined)
+      if (begun === undefined) return
+      const answer = try (stop === "Pause" ? listener.pause() : listener.turnOff())
+      try (row.send({ type: "stopAnswered", confirmed: answer.available, listening: listening(answer) }) catch () => undefined)
+    },
+    openListenerSettings: () => listener.openSettings(),
+  }
+})

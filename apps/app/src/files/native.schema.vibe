@@ -1,0 +1,121 @@
+// spec/files/storage.md, "A row names one file or folder of one volume by a key unique in its listing"; spec/files/mutations.md, "A row is done only when its answer is the operation's result and names the result"; spec/files/preview.md, "A shown document is the device's selection of one file and what Files knew of it"
+const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const Text = Schema.String.check(Schema.isMaxLength(4096))
+const Path = Schema.String.check(Schema.isMaxLength(1024))
+const Mime = Schema.String.check(Schema.isMaxLength(200))
+const Id = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9:._-]{1,200}$/))
+
+/** Every status the files bridge answers. */
+export const StorageStatus = Schema.Literals(["ready", "denied", "unavailable", "invalid", "exists", "missing", "failed", "changed",
+  "confirmation-required", "superseded", "unsupported"])
+export type StorageStatus = typeof StorageStatus.Type
+
+const answered = {
+  status: StorageStatus,
+  message: Schema.optionalKey(Text),
+  access: Schema.optionalKey(Schema.Literals(["granted", "denied", "unsupported"])),
+  legacy: Schema.optionalKey(Schema.Boolean),
+}
+
+export const StorageVolume = Schema.Struct({ id: Id, name: Text, primary: Schema.Boolean, free: Schema.Number, total: Schema.Number })
+export const StorageEntry = Schema.Struct({ path: Path, name: Text, directory: Schema.Boolean, mimeType: Mime, size: Schema.Number, modified: Schema.Number, children: Schema.optionalKey(Schema.Number) })
+export type StorageEntry = typeof StorageEntry.Type
+export const CategoryFolder = Schema.Struct({ folder: Path, count: Count, latest: StorageEntry })
+export const TrashEntry = Schema.Struct({ id: Id, name: Text, origin: Path, directory: Schema.Boolean, mimeType: Mime, size: Schema.Number, deletedAt: Schema.Number })
+export type TrashEntry = typeof TrashEntry.Type
+export const OutcomeRow = Schema.Struct({
+  path: Path,
+  status: Schema.Literals(["copied", "moved", "unchanged", "trashed", "restored", "changed", "missing", "invalid", "failed"]),
+  to: Schema.optionalKey(Path),
+})
+export type OutcomeRow = typeof OutcomeRow.Type
+
+/** A bare answer of the files bridge. */
+export const StorageAnswer = Schema.Struct(answered)
+export type StorageAnswer = typeof StorageAnswer.Type
+/** `storageState`: access and the mounted volumes. */
+export const StateAnswer = Schema.Struct({ ...answered, volumes: Schema.optionalKey(Schema.Array(StorageVolume)) })
+export type StateAnswer = typeof StateAnswer.Type
+/** `storageList` and `storageQuery`: rows, and whether the read was cut short. */
+export const ListAnswer = Schema.Struct({ ...answered, entries: Schema.optionalKey(Schema.Array(StorageEntry)), truncated: Schema.optionalKey(Schema.Boolean), count: Schema.optionalKey(Count) })
+export type ListAnswer = typeof ListAnswer.Type
+/** `storageCategory`: the newest rows, the whole category's count and size, and its folders' own counts. */
+export const CategoryAnswer = Schema.Struct({ ...answered, entries: Schema.optionalKey(Schema.Array(StorageEntry)), count: Schema.optionalKey(Count),
+  bytes: Schema.optionalKey(Count), truncated: Schema.optionalKey(Schema.Boolean), folders: Schema.optionalKey(Schema.Array(CategoryFolder)) })
+export type CategoryAnswer = typeof CategoryAnswer.Type
+/** `storageReviewedIdentities`: one opaque identity per path, in order. */
+export const ReviewedAnswer = Schema.Struct({ ...answered, reviewed: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/)))) })
+export type ReviewedAnswer = typeof ReviewedAnswer.Type
+/** A change's receipts, one per row. */
+export const OutcomesAnswer = Schema.Struct({ ...answered, outcomes: Schema.optionalKey(Schema.Array(OutcomeRow)) })
+export type OutcomesAnswer = typeof OutcomesAnswer.Type
+/** A rename or new folder, with the path it made. */
+export const PlacedAnswer = Schema.Struct({ ...answered, path: Schema.optionalKey(Path) })
+export type PlacedAnswer = typeof PlacedAnswer.Type
+/** One volume's Trash. */
+export const TrashAnswer = Schema.Struct({ ...answered, items: Schema.optionalKey(Schema.Array(TrashEntry)) })
+export type TrashAnswer = typeof TrashAnswer.Type
+/** A permanent deletion: how many entries lost both their data and their record. */
+export const ErasedAnswer = Schema.Struct({ ...answered, count: Schema.optionalKey(Count) })
+export type ErasedAnswer = typeof ErasedAnswer.Type
+/** A share or an open in another app: only that the chooser was dispatched. */
+export const HandoffAnswer = Schema.Union([Schema.Struct({ status: Schema.Literal("opened"), count: Count }), StorageAnswer])
+export type HandoffAnswer = typeof HandoffAnswer.Type
+/** `storageSelect`: a selection of the file for the preview, or why there is none. */
+export const SelectionAnswer = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("selected"), action: Schema.Literal("files"), selectionId: Id, name: Text, mimeType: Mime,
+    canRename: Schema.Boolean, uri: Schema.optionalKey(Text), size: Schema.optionalKey(Count), modified: Schema.optionalKey(Count) }),
+  StorageAnswer,
+])
+export type SelectionAnswer = typeof SelectionAnswer.Type
+
+/** A selected document as the selected-documents registry describes it. */
+export const SelectedDocument = Schema.Struct({
+  status: Schema.Literals(["selected", "renamed-reselect", "unavailable", "unsupported", "failed", "cancelled"]),
+  action: Schema.optionalKey(Schema.Literals(["files", "photos"])),
+  message: Schema.optionalKey(Text),
+  selectionId: Schema.optionalKey(Id),
+  uri: Schema.optionalKey(Text),
+  name: Schema.optionalKey(Text),
+  mimeType: Schema.optionalKey(Schema.NullOr(Mime)),
+  canRename: Schema.optionalKey(Schema.Boolean),
+  size: Schema.optionalKey(Count),
+  modified: Schema.optionalKey(Count),
+})
+export type SelectedDocument = typeof SelectedDocument.Type
+/** One rendered page of a selected PDF. */
+export const PdfPageAnswer = Schema.Struct({
+  status: Schema.Literals(["rendered", "unavailable", "unsupported", "failed"]),
+  message: Schema.optionalKey(Text),
+  page: Schema.optionalKey(Count),
+  pageCount: Schema.optionalKey(Count),
+  imageUri: Schema.optionalKey(Text),
+  text: Schema.optionalKey(Schema.String),
+})
+export type PdfPageAnswer = typeof PdfPageAnswer.Type
+/** The text of a selected document, within the reader's 64 KiB. */
+export const DocumentText = Schema.Struct({
+  status: Schema.Literals(["read", "unavailable", "unsupported", "too-large", "failed"]),
+  message: Schema.optionalKey(Text),
+  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(65536))),
+  mimeType: Schema.optionalKey(Schema.NullOr(Mime)),
+  bytes: Schema.optionalKey(Count),
+})
+export type DocumentText = typeof DocumentText.Type
+/** An open or share of a selected document in another app. */
+export const DocumentHandoff = Schema.Struct({ status: Schema.Literals(["opened", "cancelled", "unavailable", "unsupported", "failed"]), message: Schema.optionalKey(Text) })
+export type DocumentHandoff = typeof DocumentHandoff.Type
+/** The bytes of a selected document, with the digest the device computed over them. */
+export const AttachmentBytes = Schema.Struct({
+  name: Text, mimeType: Mime,
+  dataBase64: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/)),
+  sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  size: Count,
+  sourceReferenceVersion: Schema.optionalKey(Schema.Literal(1)),
+})
+export type AttachmentBytes = typeof AttachmentBytes.Type
+/** The device's storage use by this app, where no volume reports its totals. */
+export const UsageAnswer = Schema.Struct({ bytes: Count, files: Count })
+export type UsageAnswer = typeof UsageAnswer.Type
+/** The native Browser asking Files to show its Downloads. */
+export const ShowDownloads = Schema.Struct({ session: Schema.optionalKey(Text) })

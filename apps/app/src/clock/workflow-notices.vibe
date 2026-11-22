@@ -1,0 +1,108 @@
+// spec/clock/workflowNotices.md, "Story: Return to the run a notice names"
+import { Native } from "../platform/native.vibe"
+import { assistantPeer, ownerPeer, runsPeer } from "./peers.vibe"
+import { Machine as WorkflowNoticesMachine, type NoticeTapSource } from "../../gen/clock__workflowNotices.effect.vibe"
+import { WorkflowTapRecord } from "./native.schema.vibe"
+import { HOSTED_RESULTS, WORKFLOW_NOTICES, call, command } from "./plugins.vibe"
+
+type Tap = typeof WorkflowTapRecord.Type
+
+const READ: Readonly<Record<NoticeTapSource, { readonly plugin: string; readonly pending: string }>> = {
+  WorkflowTap: { plugin: WORKFLOW_NOTICES, pending: "pendingWorkflowTap" },
+  ResultTap: { plugin: HOSTED_RESULTS, pending: "pendingResult" },
+}
+
+/** The question a workflow notice's Ask action reviews. */
+export interface WorkflowQuestion {
+  readonly title: string
+  readonly text: string
+}
+
+/** Workflow notices and hosted results that open their exact run, once, for the signed-in account. */
+export service WorkflowNotices {
+  /** A tap was announced, Alpha came to the front, or the account changed: check both sources. */
+  check(): void!!
+  /** The workflows view refreshed or reset: a read under the old view is read again. */
+  viewMoved(): void!!
+  /** The question under review, while one is. */
+  question(): WorkflowQuestion | undefined!!
+  /** Continues the question into the composer after consuming its tap; none returns the tap. */
+  answer(draft: string | undefined): void!!
+}
+
+/** Workflow notices over `ElizaNotifications` and `AlphaHostedResults`, opening runs through the workflows area. */
+export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
+  const notices = try WorkflowNoticesMachine
+  const runs = try runsPeer()
+  const session = try ownerPeer()
+  const composer = try assistantPeer()
+  const asking = try Ref.make<{ readonly source: NoticeTapSource; readonly token: string; readonly question: WorkflowQuestion } | undefined>(undefined)
+  const step = (event: Parameters<typeof notices.send>[0]) => notices.send(event) catch () => undefined
+
+  effect function consume(source: NoticeTapSource, token: string, unavailable: boolean) {
+    const done = source === "WorkflowTap"
+      ? command(WORKFLOW_NOTICES, "consumeWorkflowTap", { token, ...(unavailable ? { unavailable: true } : {}) }) catch () => false
+      : command(HOSTED_RESULTS, "consumeResult", { token }) catch () => false
+    return done !== false
+  }
+
+  effect function checkOne(source: NoticeTapSource) {
+    step({ type: "tapAnnounced" })
+    if (step({ type: "beginCheck", source })?.stage !== "WReadingTap") return
+    const tap: Tap | undefined = call(READ[source].plugin, READ[source].pending, WorkflowTapRecord) catch () => undefined
+    const owner = try session.owner()
+    const sameAccount = owner !== undefined && tap?.ownerId === owner.ownerId && tap.retained !== false
+    const resolved = step({ type: "tapResolved", token: tap?.token ?? "", sameAccount, runId: tap?.runId ?? "", question: tap?.question === true })
+    if (resolved === undefined) return
+    if (resolved.stage === "WQuestionTap") {
+      try Ref.set(asking, { source, token: resolved.token, question: { title: tap?.notice?.title ?? "", text: tap?.notice?.text ?? "" } })
+      return
+    }
+    if (resolved.stage === "WOpeningRun") {
+      const opened = try runs.open(resolved.runId)
+      step({ type: "runOpened", ok: opened })
+    }
+    const consuming = try notices.get()
+    if (consuming.stage === "WConsumingTap") step({ type: "tapConsumed", ok: try consume(source, consuming.token, consuming.report === "RunUnavailable") })
+  }
+
+  return {
+    effect check() {
+      try checkOne("WorkflowTap")
+      try checkOne("ResultTap")
+      while ((try notices.get()).recheck && (try notices.get()).stage === "WIdleTap") {
+        const before = (try notices.get()).generation
+        try checkOne((try notices.get()).source)
+        if ((try notices.get()).generation === before) return
+      }
+    },
+    viewMoved: () => step({ type: "viewMoved" }),
+    effect question() {
+      return (try Ref.get(asking))?.question
+    },
+    effect answer(draft: string | undefined) {
+      const open = try Ref.getAndSet(asking, undefined)
+      if (open === undefined) return
+      const compose = draft !== undefined && draft.trim() !== ""
+      const answered = step({ type: "questionAnswered", compose })
+      if (answered?.stage === "WConsumingTap") {
+        const ok = try consume(open.source, open.token, false)
+        step({ type: "tapConsumed", ok })
+        if (ok && draft !== undefined) try composer.draft(draft.trim())
+      } else if (open.source === "ResultTap") {
+        command(HOSTED_RESULTS, "releaseResultQuestion", { token: open.token }) catch () => undefined
+      }
+    },
+  }
+})
+
+/** Checks for workflow taps whenever the phone announces one. Never returns while the plugins are present. */
+export effect function followWorkflowNotices() {
+  const native = try Native
+  const notices = try WorkflowNotices
+  try notices.check()
+  try.all [
+    effect { if (try native.available(WORKFLOW_NOTICES)) Stream.runForEach(native.listen(WORKFLOW_NOTICES, "pendingWorkflowTap"), () => notices.check()) catch () => undefined },
+    effect { if (try native.available(HOSTED_RESULTS)) Stream.runForEach(native.listen(HOSTED_RESULTS, "pendingResult"), () => notices.check()) catch () => undefined },
+  ]
+}

@@ -2,13 +2,13 @@
  * Release-sign an alpha_stallion_phone target-files zip and build its OTA (issue #400).
  *
  * Alpha's binding of the shared Pixel 10a signing job
- * (vendor/eliza/packages/os/scripts/android/aosp-release-signing.mjs): it signs with
+ * (scripts/os-ported/os/aosp-release-signing.mjs): it signs with
  * Alpha's release descriptor (android/aosp/pixel10a-product.json), its one update channel
  * (android/aosp/pixel10a-ota-channel.json) and its APK release signer
  * (android/release-signer.json). Runs on the Linux image host after the production image
  * build, with AOSP releasetools (otatools `bin/`) and a decrypted release key directory:
  *
- *   bun scripts/sign-aosp-release.ts \
+ *   node scripts/sign-aosp-release.ts \
  *     --target-files /abs/unsigned-target_files.zip --target-files-sha256 <hex from the build record> \
  *     --keys-dir /dev/shm/keys --releasetools /abs/otatools/bin --out /abs/new-release-dir \
  *     [--apksigner /abs/apksigner] [--map-key SOURCE=NAME ...] [--apk-manifest /abs/apk-manifest.json]
@@ -23,11 +23,11 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { signingMain, signRelease as signShared } from "../vendor/eliza/packages/os/scripts/android/aosp-release-signing.mjs";
+import { signingMain, signRelease as signShared } from "./os-ported/os/aosp-release-signing.mjs";
 import { PIXEL10A_RELEASE, readPixel10aComposition } from "./aosp-pixel10a.ts";
 
-export { AVB_SIGNABLE_PARTITIONS, PKCS11_JAVA_ARGS, X509_KEYS, gitWorkTreeProblem, isWithin, parseSigningArgs, signingCommands } from "../vendor/eliza/packages/os/scripts/android/aosp-release-signing.mjs";
-export { channelDistributionProblems, channelSigningProblems } from "../vendor/eliza/packages/os/scripts/android/pixel10a-release.mjs";
+export { AVB_SIGNABLE_PARTITIONS, PKCS11_JAVA_ARGS, X509_KEYS, gitWorkTreeProblem, isWithin, parseSigningArgs, signingCommands } from "./os-ported/os/aosp-release-signing.mjs";
+export { channelDistributionProblems, channelSigningProblems } from "./os-ported/os/pixel10a-release.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {isDeepStrictEqual} from 'node:util';
-import type {CloudEnvironment} from './cloud-sdk-authority.ts';
+import type {CloudEnvironment} from './cloud-deployment-policy.ts';
 import type {CloudResources} from './cloud-worker.ts';
 
 type RecordValue = Record<string, unknown>;

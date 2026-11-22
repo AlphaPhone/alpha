@@ -1,0 +1,66 @@
+// spec/camera/index.md
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
+import { layer } from "../../src/camera/layer.vibe"
+
+/** One plugin method's answer: a value, or a rejection with a plugin code. */
+export type Answer = unknown | { readonly reject: string; readonly message?: string }
+
+/** The phone as a test sees it: each `Plugin.method` answer, and every call made. */
+export interface Phone {
+  readonly answers: Map<string, (args: unknown) => Answer>
+  readonly calls: { readonly method: string; readonly args: unknown }[]
+}
+
+/** A phone whose plugins answer from `answers`; a method with no answer is not installed. */
+export function phone(answers: Record<string, (args: unknown) => Answer>): Phone {
+  return { answers: new Map(Object.entries(answers)), calls: [] }
+}
+
+function rejection(value: unknown): value is { readonly reject: string; readonly message?: string } {
+  return typeof value === "object" && value !== null && "reject" in value
+}
+
+/** The Native service over a test phone, at its network-free boundary. */
+export function fakeNative(device: Phone) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed([...device.answers.keys()].some((key) => key.startsWith(`${plugin}.`))),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      device.calls.push({ method: `${plugin}.${method}`, args })
+      const answer = device.answers.get(`${plugin}.${method}`)
+      if (answer === undefined) throw new NativeUnavailable({ plugin, method })
+      const value = answer(args)
+      if (rejection(value)) throw new NativeFailed({ plugin, method, message: value.message ?? "", code: value.reject })
+      return value
+    },
+    listen: () => Stream.empty,
+  })
+}
+
+/** Every Camera service over a test phone, in-memory storage and a launcher build with test mocks. */
+export function cameraOver(device: Phone, variant: "launcher" | "aosp" | "browser" = "launcher") {
+  const platform = Layer.mergeAll(
+    fakeNative(device),
+    Layer.succeed(Build, { info: { version: "0.1.0", variant, testMocks: true } }),
+    KeyValueStore.layerMemory,
+  )
+  return Layer.provide(layer, platform)
+}
+
+/** Wait, in real time, until `ready` holds. */
+export effect function until(ready: () => boolean!!) {
+  for (let tries = 0; tries < 200; tries++) {
+    if (try ready()) return
+    try sleep("10 millis")
+  }
+  throw new Error("timed out")
+}
+
+/** A media item as `AlphaPhotos` lists it. */
+export function item(id: string, date: number, extra: Record<string, unknown> = {}) {
+  return { id, kind: "image", width: 4000, height: 3000, date, size: 2_000_000, revision: `r-${id}`, mutationRevision: `m-${id}-1`, image: `data:image/jpeg;base64,${id}`, folder: "DCIM/Camera/", ...extra }
+}
+
+/** A ready preview receipt of a back camera with a flash and a 5× lens. */
+export const preview = { width: 1920, height: 1440, deviceId: "0", minZoom: 0.5, maxZoom: 5, zoom: 1, hasFlash: true, flash: "off" }

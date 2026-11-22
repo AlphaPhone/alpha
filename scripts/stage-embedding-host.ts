@@ -10,7 +10,7 @@ import {ANDROID_ABIS} from './android-abis.ts';
 const root=path.resolve(import.meta.dirname,'..');
 const sha=(value: string | Buffer)=>createHash('sha256').update(value).digest('hex');
 const hash=(file: string)=>sha(fs.readFileSync(file));
-const names=['libelizainference.so','libelizavoicejni.so','libc++_shared.so'];
+const names=['libelizainference.so','libparadeevoicejni.so','libc++_shared.so'];
 const model={path:'android/app/src/main/assets/agent/models/bge-small-en-v1.5-f16.gguf',sha256:'f0b2fef971e8366438bfd2d9aefea1b0115919389448806d290237f638bae999',dimensions:384};
 export type EmbeddingInput = { path: string; sourceSha256: string; generatedSha256: string };
 export type EmbeddingProducerInput = { path: string; sha256: string };
@@ -38,7 +38,7 @@ export type EmbeddingManifest = EmbeddingInputs & {
  jniIdentityRelocated: boolean;
  requalification?: { required: boolean; atPin: string; reason: string };
 };
-const forkPath='plugins/plugin-local-inference/native/llama.cpp';
+const forkPath='packages/os/android/local-inference/llama.cpp';
 
 /** Map original receipt paths onto a verified extracted artifact without rewriting the receipt. */
 export function embeddingLibrarySource(row: Pick<PreparedEmbeddingLibrary, "path" | "artifactPath">,libraryRoot?: string){
@@ -160,7 +160,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
    return {name,sha256:row.sha256,bytes:row.bytes,alignment16KiB:true,source:sourcePath,target};
   });
   // agent:stage-android stages the model with the runtime payload; this command only checks it.
-  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run bun run agent:prepare, bun run agent:build-workflow-worker and bun run agent:stage-android first');
+  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run pnpm agent:prepare, pnpm agent:build-workflow-worker and pnpm agent:stage-android first');
   if(hash(path.join(root,model.path))!==model.sha256)throw Error('Pinned BGE model bytes changed');
   const manifest={pin:receipt.pin,forkPin:receipt.forkPin,identity,abi:receipt.abi,model,libraries:libraries.map(({source,target,...row})=>row),jniIdentityRelocated:true,inputs:receipt.inputs,producerInputs:receipt.producerInputs,...(receipt.jniBinding?{jniBinding:receipt.jniBinding}:{})};
   // Refuse before copying anything: the voice host stages the same arm64 engine file.
@@ -169,5 +169,5 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   for(const row of libraries){fs.mkdirSync(path.dirname(row.target),{recursive:true});if(!fs.existsSync(row.target))fs.copyFileSync(row.source,row.target,fs.constants.COPYFILE_EXCL);}
   fs.mkdirSync(path.dirname(manifestFile),{recursive:true});fs.writeFileSync(manifestFile,JSON.stringify(manifest,null,2)+'\n');
   verifyEmbeddingHost(root,{requireProducerInputs:true});console.log('ARM64 embedding host staged with verified build inputs and library hashes.');
- }else throw Error('Usage: bun scripts/stage-embedding-host.ts --receipt <PREPARATION.json> [--library-root <directory>] | --verify');
+ }else throw Error('Usage: node scripts/stage-embedding-host.ts --receipt <PREPARATION.json> [--library-root <directory>] | --verify');
 }

@@ -161,32 +161,6 @@ public final class AlphaDevicePlugin extends Plugin {
  private void diagnostics(PluginCall call,Runnable work){
   PluginWorkers.submit(diagnosticsWorker,work,()->call.reject("Problem log is unavailable"));
  }
- /** Local problem log (shared plugin-native-system crash.CrashLog): failure classes only, never messages, stacks or content. */
- @PluginMethod public void crashLog(PluginCall call){
-  diagnostics(call,()->{
-   try{
-    try{ai.eliza.plugins.system.crash.CrashLog.collectExitReasons(getContext());}catch(Exception unavailable){/* Exit history is best effort. */}
-    org.json.JSONArray stored=ai.eliza.plugins.system.crash.CrashLog.read(getContext()).getJSONArray("entries");
-    org.json.JSONArray entries=new org.json.JSONArray();
-    for(int i=0;i<stored.length();i++){
-     org.json.JSONObject row=stored.optJSONObject(i);
-     if(row==null||!(row.opt("at") instanceof Number timestamp))continue;
-     // Keep the renderer's safe integer contract before the redactor reads a long.
-     double at=timestamp.doubleValue();
-     if(!Double.isFinite(at)||at!=Math.rint(at)||Math.abs(at)>9_007_199_254_740_991d)continue;
-     org.json.JSONObject safe=ai.eliza.plugins.system.crash.CrashLog.redact(row);
-     if(safe!=null)entries.put(safe);
-    }
-    JSObject out=new JSObject();out.put("entries",entries);out.put("exitHistory",Build.VERSION.SDK_INT>=Build.VERSION_CODES.R);call.resolve(out);
-   }catch(Exception error){call.reject("Problem log is unavailable");}
-  });
- }
- @PluginMethod public void recordRendererFailure(PluginCall call){
-  diagnostics(call,()->{try{ai.eliza.plugins.system.crash.CrashLog.recordRenderer(getContext(),call.getString("kind"),call.getString("errorClass"));call.resolve();}catch(Exception error){call.reject("Problem was not recorded");}});
- }
- @PluginMethod public void clearCrashLog(PluginCall call){
-  diagnostics(call,()->{try{ai.eliza.plugins.system.crash.CrashLog.clear(getContext());call.resolve();}catch(Exception error){call.reject("Problem log could not be cleared");}});
- }
  /** Non-secret build identity for diagnostics: variant, pin and packaged runtime hashes. */
  @PluginMethod public void diagnosticsFacts(PluginCall call){
   diagnostics(call,()->{

@@ -1,6 +1,6 @@
 /**
  * Named reasons a verify-apks release row may not be distributed: Alpha's policy binding of
- * the shared judgement (vendor/eliza/packages/os/scripts/android/apk-release-record.mjs).
+ * the shared judgement (scripts/os-ported/os/apk-release-record.mjs).
  * This is the one release admission decision: verify-apks records `distributable` as "no
  * blockers", and provisioning, image staging and update publication judge rows with it.
  *
@@ -19,7 +19,7 @@
  *   other item, pending device qualification of the voice host, is not a build gate.
  *
  */
-import { apkReleaseBlockers } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
+import { apkReleaseBlockers } from "./os-ported/os/apk-release-record.mjs";
 import { UNRESOLVED_FONT_LICENCE_BLOCKS_DISTRIBUTION } from "./licence-policy.ts";
 import { FONT_BLOCKER, isFontCheckFailure } from "./font-license-blockers.ts";
 import { releaseAdmission } from "./build-android.ts";

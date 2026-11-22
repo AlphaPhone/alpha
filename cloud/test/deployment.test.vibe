@@ -1,0 +1,50 @@
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+import { assert, describe, it } from "@effect/vitest"
+import { alphaDeployment, clientDeploymentFile, deploymentOutputs, deploymentProblems, isAlphaCloud, namespaceProblem, sdkBases, shippedDeployment, storageFingerprint, storageNamespaces, validateDeployment } from "../src/deployment.vibe"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+const appId = "ai.alphacompute.alphaphone"
+
+describe("Alpha Phone's client deployment and the cutover flag", () => {
+  it.effect("keeps every installed phone's credential namespace while the shipped Cloud is unchanged", () => effect {
+    // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+    try check(() => assert.strictEqual(storageFingerprint(shippedDeployment), storageNamespaces.at(-1)))
+    try check(() => assert.strictEqual(namespaceProblem({ rows: shippedDeployment, candidate: false, cutover: false }), undefined))
+    try check(() => assert.strictEqual(isAlphaCloud(shippedDeployment), false))
+  })
+
+  it.effect("gives an Alpha Cloud candidate its own namespace and refuses it as the shipped deployment", () => effect {
+    // spec/cloud/deployment.md, "A credentialed cross-origin request is answered only for an exact first-party origin of the environment"
+    try check(() => assert.strictEqual(isAlphaCloud(alphaDeployment), true))
+    try check(() => assert.notStrictEqual(storageFingerprint(alphaDeployment), storageNamespaces.at(-1)))
+    try check(() => assert.strictEqual(namespaceProblem({ rows: alphaDeployment, candidate: true, cutover: true }), undefined))
+    try check(() => assert.ok(namespaceProblem({ rows: alphaDeployment, candidate: false, cutover: true }) !== undefined))
+    try check(() => assert.ok(namespaceProblem({ rows: shippedDeployment, candidate: true, cutover: false }) !== undefined))
+  })
+
+  it.effect("refuses rows the native sign-in client could not register", () => effect {
+    // spec/cloud/deployment.md, "A profile is accepted only when its two environments share no origin or database, production uses no loopback adapter, and each environment offers a sign-in method and complete documents"
+    const mixed = { production: { ...alphaDeployment.production }, staging: { ...alphaDeployment.staging, alphaCloud: false } }
+    try check(() => assert.ok(deploymentProblems(mixed).some((problem) => problem.includes("both production and staging"))))
+    const sameApi = { production: shippedDeployment.production, staging: { ...shippedDeployment.staging, api: shippedDeployment.production.api } }
+    try check(() => assert.ok(deploymentProblems(sameApi).some((problem) => problem.includes("distinct API origins"))))
+    const withPath = { ...shippedDeployment, production: { ...shippedDeployment.production, api: "https://api.eliza.app/v1" } }
+    const refused = validateDeployment(withPath) catch (failure) => failure._tag
+    try check(() => assert.strictEqual(refused, "DeploymentInvalid"))
+    try check(() => assert.deepStrictEqual(deploymentProblems({ production: {} }), ["expected production and staging Cloud rows"]))
+  })
+
+  it.effect("writes the flag into the renderer, Java and Gradle outputs from the same rows", () => effect {
+    // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+    const shipped = deploymentOutputs(shippedDeployment, appId)
+    const alpha = deploymentOutputs(alphaDeployment, appId)
+    const java = "android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java"
+    try check(() => assert.deepStrictEqual(Object.keys(shipped).sort(), ["android/app/cloud-deployment.generated.gradle", java, clientDeploymentFile].sort()))
+    try check(() => assert.ok(shipped[java].includes("static final boolean ALPHA_CLOUD_CUTOVER = false;")))
+    try check(() => assert.ok(alpha[java].includes("static final boolean ALPHA_CLOUD_CUTOVER = true;")))
+    try check(() => assert.ok(alpha[clientDeploymentFile].includes("export const alphaCloudCutover: boolean = true;")))
+    try check(() => assert.ok(alpha["android/app/cloud-deployment.generated.gradle"].includes("production: \"cloud.alphacompute.ai\",")))
+    try check(() => assert.ok(shipped[java].includes(`cloud-deployment:${storageNamespaces.at(-1)}:`)))
+    try check(() => assert.deepStrictEqual(sdkBases(alphaDeployment), { production: "https://api.alphacompute.ai/api/v1", staging: "https://api-staging.alphacompute.ai/api/v1" }))
+  })
+})

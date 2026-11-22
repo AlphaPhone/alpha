@@ -1,0 +1,97 @@
+// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/reply.md, "At most five reply notices of at most 500 characters reach the transcript, and only the latest system notice stays, until a real reply follows it"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"
+import type { CutOff } from "../../gen/assistant__receipts.ts"
+import type { PlanAction, ReplyView } from "../../gen/assistant__reply.ts"
+import { initial as replyStart, keptNotices, noticeFits, systemNoticeShown } from "../../gen/assistant__reply.effect.vibe"
+import type { CardState } from "../../gen/assistant__approvals.ts"
+import type { EmailCard } from "../../gen/assistant__emailCard.ts"
+import { classify, type Segment } from "./reply-lines.vibe"
+
+/** A file the owner attached, as it travels and as it is saved beside its message. */
+export interface ChatFile { readonly id: string; readonly name: string; readonly mimeType: string; readonly data: string; readonly thumbnail?: string }
+
+/** The message a reply quotes. */
+export interface Quote { readonly messageId: string; readonly text: string; readonly from: "user" | "agent" }
+
+/** An action card in the transcript. */
+export interface ProposalCard {
+  readonly proposalId: string
+  readonly digest: string
+  readonly title: string
+  readonly detail: string
+  readonly expiresAt: number
+  readonly state: CardState
+  readonly recovered: boolean
+  readonly session: string
+  readonly destination?: "home" | "notes" | "calendar"
+  readonly summary?: string
+}
+
+/** One row of the transcript. */
+export type Row =
+  | { readonly kind: "user"; readonly id: string; readonly text: string; readonly files: readonly ChatFile[]; readonly status: "pending" | "recorded" | "unconfirmed"; readonly quote?: Quote; readonly clientMessageId?: string }
+  | { readonly kind: "agent"; readonly id: string; readonly text: string; readonly segments: readonly Segment[]; readonly reply: ReplyView; readonly label?: string; readonly notices: readonly string[]; readonly plan?: PlanAction; readonly cutOff: CutOff; readonly recorded: boolean }
+  | { readonly kind: "receipt"; readonly id: string; readonly proposalId: string; readonly title: string; readonly summary: string }
+  | { readonly kind: "notice"; readonly id: string; readonly text: string; readonly system: boolean }
+  | { readonly kind: "card"; readonly id: string; readonly card: ProposalCard }
+  | { readonly kind: "email"; readonly id: string; readonly card: EmailCard; readonly to: string; readonly subject: string; readonly body: string }
+
+/** The transcript of the open conversation, as the assistant shows it. */
+export interface Transcript {
+  readonly conversation: string | null
+  readonly rows: readonly Row[]
+  readonly hasMore: boolean
+  readonly typing: boolean
+  readonly toast?: string
+}
+
+/** An empty transcript. */
+export const emptyTranscript: Transcript = { conversation: null, rows: [], hasMore: false, typing: false }
+
+/** A streaming agent row for a new turn. */
+export function pendingReply(id: string): Row {
+  return { kind: "agent", id, text: "", segments: [], reply: replyStart, notices: [], cutOff: "NotCutOff", recorded: false }
+}
+
+/** An agent row with its text and view replaced. */
+export function withReply(row: Row, text: string, reply: ReplyView, checkin: boolean): Row {
+  return row.kind === "agent" ? { ...row, text, reply, segments: classify(text, checkin) } : row
+}
+
+/** The notices a reply may add: non-blank, at most 500 characters, at most five. */
+export function replyNotices(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return []
+  const fitting = raw.filter((notice): notice is string => typeof notice === "string" && notice.trim() !== "" && noticeFits(notice.length))
+  return fitting.slice(0, keptNotices(fitting.length))
+}
+
+/** Whether a row is an ordinary reply that settles a system notice before it. */
+export function ordinaryReply(row: Row): boolean {
+  return row.kind === "agent" && row.reply.status === "Settled" && row.text.trim() !== ""
+}
+
+/** The transcript with only the latest system notice, and none once a reply follows it. */
+export function collapseSystemNotices(rows: readonly Row[]): readonly Row[] {
+  const latest = rows.findLastIndex((row) => row.kind === "notice" && row.system)
+  return rows.filter((row, at) => !(row.kind === "notice" && row.system) || systemNoticeShown(at === latest, rows.slice(at + 1).some(ordinaryReply)))
+}
+
+/** The email draft an agent reply staged, from its action results, or none. */
+export function emailDraftOf(actionResults: readonly { readonly action: string; readonly data: unknown }[]): { readonly to: string; readonly subject: string; readonly body: string } | undefined {
+  for (const result of actionResults) {
+    if (!/EMAIL|GMAIL|MAIL_DRAFT/i.test(result.action) || typeof result.data !== "object" || result.data === null) continue
+    const { to, subject, body } = result.data as { readonly to?: unknown; readonly subject?: unknown; readonly body?: unknown }
+    if (typeof body === "string" && body.trim() !== "") return { to: typeof to === "string" ? to : Array.isArray(to) ? to.filter((x) => typeof x === "string").join(", ") : "", subject: typeof subject === "string" ? subject : "", body }
+  }
+  return undefined
+}
+
+/** Rows of history as the transcript shows them. */
+export function historyRows(messages: readonly { readonly id: string; readonly role: string; readonly text: string; readonly clientMessageId?: string; readonly source?: string }[]): readonly Row[] {
+  return messages.map((message): Row => message.role === "user"
+    ? { kind: "user", id: message.id, text: message.text, files: [], status: "recorded", ...(message.clientMessageId === undefined ? {} : { clientMessageId: message.clientMessageId }) }
+    : message.role === "system"
+      ? { kind: "notice", id: message.id, text: message.text, system: true }
+      : { kind: "agent", id: message.id, text: message.text, segments: classify(message.text, message.source === "lifeops-checkin"),
+          reply: { ...replyStart, status: "Settled", shown: message.text.length, final: message.text.length, spoken: message.text.length },
+          notices: [], cutOff: "NotCutOff", recorded: true })
+}

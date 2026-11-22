@@ -1,0 +1,335 @@
+// spec/inbox/drafts.md, "Story: Keep what I write, with the account I wrote it from"; spec/inbox/drafts.md, "Story: Write replies and forwards that go where I mean"; spec/inbox/drafts.md, "Story: Send from another of my accounts"; spec/inbox/drafts.md, "Story: Continue a Gmail draft"; spec/inbox/drafts.md, "Story: Type without waiting for storage"; spec/inbox/attachments.md, "Story: Attach files to an email I write"; spec/inbox/attachments.md, "Story: Email a file from Files or Photos"
+import {
+  type Event as DraftsEvent, type Drafts, type Draft, type DraftFields, type AccountDrafts, type DraftPick, type ForwardSource,
+  Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, hasDraft, meaningful, shelfRoom, replyRecipients, replyCopies,
+  forwardKeepsOriginals, editableHere, coalesceDelay, editDelay, editMaximumWait, draftBytesLimit, recipientSuggestions
+} from "../../gen/inbox__drafts.effect.vibe"
+import { type OutgoingFile, type Admission, admit, handoffOutcome, type HandoffOutcome, fileAccepted } from "../../gen/inbox__attachments.effect.vibe"
+import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
+import { Machine as ReaderMachine } from "../../gen/inbox__reader.effect.vibe"
+import type { DraftRow, Mailbox as MailboxState } from "../../gen/inbox__mailbox.ts"
+import type { Reader as ReaderState } from "../../gen/inbox__reader.ts"
+import { InboxAccounts, mailOwnerKey } from "./accounts.vibe"
+import { Gmail } from "./gmail.vibe"
+import { MailOperations, type OperationOutcome } from "./operations.vibe"
+import { FilePicker } from "../files/picker.vibe"
+import { checkMailFile, isRefusal, supportedMimeTypes, type FileRefusal } from "./files.ts"
+import { addressKey, forwardBody, forwardSubject, jsonBytes, literalMailAddress, newId, oneLineSubject, replySubject } from "./text.ts"
+
+/** Why the composer did not do what was asked, so the owner can be told in a word or two. */
+export type ComposerRefusal =
+  | "no-account" | "drafts-full" | "changed" | "no-reply-address" | "unclear-recipient" | "not-movable" | "destination-busy"
+  | "edit-in-gmail" | "gmail-draft-changed" | "admission" | FileRefusal | "file-changed" | "account-changed" | "duplicate" | "not-ready" | "too-long"
+
+/** A file the owner picked or shared, before it is checked. */
+export interface PickedFile { readonly name: string; readonly mimeType: string; readonly dataBase64: string; readonly sha256?: string }
+
+/** What a new email starts with. */
+export interface Prefill { readonly toList: string[]; readonly subject: string; readonly body: string; readonly files: OutgoingFile[] }
+
+/** The composer of the selected account and its Drafts. */
+export service Composer {
+  readonly changes: Stream.Stream<Drafts>
+  get(): Drafts!!
+  /** The selected account's drafts. */
+  mine(): AccountDrafts!!
+  /** Starts a new email, setting the open one aside first. */
+  compose(prefill?: Prefill): ComposerRefusal | undefined!!
+  /** Replies to, replies to all of, or forwards the open message. */
+  reply(mode: "ReplyMode" | "ReplyAllMode" | "ForwardMode"): ComposerRefusal | string | undefined!!
+  /** One edit of the open draft as typed; edits are written coalesced. */
+  edit(fields: DraftFields, pendingTo: string): void!!
+  /** Writes the waiting edit now. */
+  flush(): ComposerRefusal | undefined!!
+  /** Adds a picked file to the open draft after checking its bytes and the account's policy. */
+  attach(file: PickedFile): ComposerRefusal | Admission | undefined!!
+  /** Lets the owner choose files through Files' picker and attaches each, stopping at the first refusal. */
+  pickAndAttach(): ComposerRefusal | Admission | undefined!!
+  /** Sets the open draft aside to Drafts, as Back does. */
+  back(): ComposerRefusal | undefined!!
+  /** Hides the composer, keeping the draft open, as leaving the Inbox does. */
+  hide(): void!!
+  /** Shows the open draft again. */
+  resume(): void!!
+  /** Opens a shelved draft; an earlier version of a sent email needs `confirmed`. */
+  openShelved(id: string, confirmed: boolean): ComposerRefusal | undefined!!
+  /** Deletes exactly the selected versions of shelved drafts. */
+  deleteShelved(picks: DraftPick[]): boolean!!
+  /** Moves the open new email to another account and selects it. */
+  transfer(grant: string): ComposerRefusal | undefined!!
+  /** Opens a Gmail draft here, or says it stays in Gmail. */
+  openGmailDraft(row: DraftRow, confirmed: boolean): ComposerRefusal | undefined!!
+  /** Sends the open draft once. */
+  send(): OperationOutcome | ComposerRefusal!!
+  /** Saves the open draft to Gmail after review. */
+  saveToGmail(): OperationOutcome | ComposerRefusal | undefined!!
+  /** A file from Files or Photos, read twice with the same bytes, starts a new email for the account `token` names. */
+  shareFile(first: PickedFile, again: PickedFile, token: string): HandoffOutcome!!
+  /** The token of the account a share or suggestion is reviewed for. */
+  token(): string!!
+}
+
+const modeNames = { ReplyMode: "ReplyMode", ReplyAllMode: "ReplyAllMode", ForwardMode: "ForwardMode" } as const
+
+/** A checked file as an outgoing attachment. */
+export function outgoing(name: string, mimeType: string, bytes: number, sha256: string, dataBase64: string): OutgoingFile {
+  return { name, nameKey: name.toLowerCase(), mimeType, bytes, sha256, dataBase64 }
+}
+
+/** Recent addresses of the selected account: listed senders, the open message's people and shelved drafts' recipients. */
+export function recipientCandidates(mailbox: MailboxState, reader: ReaderState, shelf: readonly Draft[]): string[] {
+  const open = reader.phase === "BodyShown" ? [reader.body.senderAddress, ...reader.body.recipients, ...reader.body.copied] : []
+  return [...open, ...mailbox.rows.map((r) => r.senderAddress), ...shelf.flatMap((d) => [...d.fields.toList, ...d.fields.ccList])].map(addressKey).filter(literalMailAddress)
+}
+
+/** The suggestions for what is typed in To: candidates containing it, each once, none already added nor the account's own. */
+export function suggestRecipients(candidates: readonly string[], typed: string, added: readonly string[], me: string): string[] {
+  const needle = typed.trim().toLowerCase()
+  if (needle === "") return []
+  return recipientSuggestions(candidates.filter((c) => c.includes(needle)), added.map(addressKey), addressKey(me))
+}
+
+/** The composer shell over the drafts machine, the account, the open message and the reviewed operations. */
+export const layer = Layer.effect(Composer, effect {
+  const machine = try DraftsMachine
+  const journal = try JournalMachine
+  const reader = try ReaderMachine
+  const accounts = try InboxAccounts
+  const gmail = try Gmail
+  const operations = try MailOperations
+  const picker = try FilePicker
+  const scope = try Effect.scope
+  const waiting = try Ref.make<{ fields: DraftFields; pendingTo: string; first: number } | undefined>(undefined)
+  const timer = try Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined)
+  const conflict = try Ref.make(false)
+  const writing = try Semaphore.make(1)
+
+  effect function send(event: DraftsEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  effect function mine() {
+    const s = try machine.get()
+    return accountOf(s.owner, s)
+  }
+
+  effect function write(): ComposerRefusal | undefined {
+    return try Semaphore.withPermit(writing, effect {
+      const w = try Ref.getAndSet(waiting, undefined)
+      if (w === undefined) return undefined
+      const open = (try mine()).open
+      if (!hasDraft(open)) return undefined
+      const next = { ...open, fields: w.fields, pendingTo: w.pendingTo }
+      const done = try send({ type: "edit", id: open.id, revision: open.revision, fields: w.fields, pendingTo: w.pendingTo, bytes: jsonBytes(next) })
+      if (done === undefined) {
+        try Ref.set(conflict, true)
+        return "changed"
+      }
+      return undefined
+    })
+  }
+
+  effect function flush() {
+    const old = try Ref.getAndSet(timer, undefined)
+    if (old !== undefined) try Fiber.interrupt(old)
+    return try write()
+  }
+
+  effect function start(draft: Draft): ComposerRefusal | undefined {
+    try flush()
+    const s = try machine.get()
+    if (s.owner === "") return "no-account"
+    const a = accountOf(s.owner, s)
+    if (!shelfRoom(a.shelf, a.open)) return "drafts-full"
+    const opened = try send({ type: "openDraft", draft, bytes: jsonBytes(draft) })
+    try Ref.set(conflict, false)
+    return opened === undefined ? "changed" : undefined
+  }
+
+  effect function fresh(fields: DraftFields): Draft {
+    return { ...noDraft, id: newId(), revision: 1, fields }
+  }
+
+  effect function attach(file: PickedFile): ComposerRefusal | Admission | undefined {
+    try flush()
+    const open = (try mine()).open
+    if (!hasDraft(open)) return "not-ready"
+    const checked = tryPromise({ try: () => checkMailFile(file.name, file.mimeType, file.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
+    if (isRefusal(checked)) return checked
+    if (file.sha256 !== undefined && !fileAccepted({ typeMatches: true, firstHash: file.sha256, checkedHash: checked.sha256, firstBytes: checked.bytes, checkedBytes: checked.bytes })) return "file-changed"
+    const policy = (try journal.get()).capabilities.policy
+    const candidate = outgoing(checked.name, checked.mimeType, checked.bytes, checked.sha256, file.dataBase64)
+    const admission = admit(open.fields.files, open.fields.forward.parts, candidate, policy)
+    if (admission !== "Admitted") return admission
+    const next = { ...open, fields: { ...open.fields, files: [...open.fields.files, candidate] } }
+    const done = try send({ type: "attach", id: open.id, revision: open.revision, file: candidate, policy, bytes: jsonBytes(next) })
+    return done === undefined ? "changed" : undefined
+  }
+
+  fork.scoped (effect {
+    for try (const _ of accounts.changes) {
+      const key = try accounts.selectedKey()
+      const s = try machine.get()
+      if (key === s.owner) continue
+      try flush()
+      if (key === "") try send({ type: "unbind" })
+      else try send({ type: "bind", owner: key })
+    }
+  })
+
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    mine,
+    effect compose(prefill?: Prefill) {
+      const fields: DraftFields = prefill === undefined ? emptyFields : {
+        ...emptyFields, toList: [...new Set(prefill.toList.map((t) => t.trim()).filter(literalMailAddress))].slice(0, 20),
+        subject: oneLineSubject(prefill.subject), body: prefill.body.slice(0, 64000), files: prefill.files.slice(0, 10)
+      }
+      return try start(try fresh(fields))
+    },
+    effect reply(mode: "ReplyMode" | "ReplyAllMode" | "ForwardMode") {
+      const r = try reader.get()
+      if (r.phase !== "BodyShown") return "not-ready"
+      const a = try mine()
+      if (hasDraft(a.open) && a.open.fields.replyMessage === r.body.id && a.open.fields.mode === modeNames[mode]) {
+        try send({ type: "resume" })
+        return undefined
+      }
+      const caps = (try journal.get()).capabilities
+      const me = addressKey(caps.sender)
+      if (mode === "ForwardMode") {
+        const keepable = r.body.parts.filter((p) => p.partId !== "" && forwardKeepsOriginals(caps.forwardOriginals, r.body.historyId, p.bytes)).slice(0, 10)
+        const dropped = r.body.parts.filter((p) => !keepable.includes(p)).map((p) => p.name)
+        const forward: ForwardSource = keepable.length ? { messageId: r.body.id, historyId: r.body.historyId, parts: keepable.map((p) => ({ partId: p.partId, name: p.name, nameKey: p.name.toLowerCase(), mimeType: p.mimeType, bytes: p.bytes })) } : noForward
+        const fields: DraftFields = { ...emptyFields, mode: "ForwardMode", subject: forwardSubject(r.body.subject), body: forwardBody("", r.body.sender, r.body.subject, r.body.text), forward }
+        const refusal = try start(try fresh(fields))
+        return refusal ?? (dropped.length ? dropped.join(", ") : undefined)
+      }
+      const primary = addressKey(r.body.replyTo !== "" ? r.body.replyTo : r.body.senderAddress)
+      if (!literalMailAddress(primary)) return "no-reply-address"
+      const everyone = mode === "ReplyAllMode"
+      const toList = replyRecipients(primary, r.body.recipients.map(addressKey), me, everyone)
+      const ccList = everyone ? replyCopies(r.body.copied.map(addressKey), toList, me) : []
+      if (![...toList, ...ccList].every(literalMailAddress)) return "unclear-recipient"
+      const fields: DraftFields = { ...emptyFields, mode: modeNames[mode], toList, ccList, subject: replySubject(r.body.subject), replyMessage: r.body.id, replyThread: r.body.threadId }
+      return try start(try fresh(fields))
+    },
+    effect edit(fields: DraftFields, pendingTo: string) {
+      const now = try Clock.currentTimeMillis
+      const prior = try Ref.get(waiting)
+      const first = prior?.first ?? now
+      try Ref.set(waiting, { fields, pendingTo, first })
+      const old = try Ref.getAndSet(timer, undefined)
+      if (old !== undefined) try Fiber.interrupt(old)
+      const delay = coalesceDelay(editDelay, editMaximumWait, first, now)
+      const fiber = fork.in(scope) (effect { try sleep(`${delay} millis`); try write() })
+      try Ref.set(timer, fiber)
+    },
+    flush,
+    attach,
+    effect pickAndAttach() {
+      const open = (try mine()).open
+      if (!hasDraft(open)) return "not-ready"
+      const policy = (try journal.get()).capabilities.policy
+      const room = Math.max(0, Math.min(policy.maximumOutgoing, 10) - open.fields.files.length - open.fields.forward.parts.length)
+      if (room === 0) return "TooManyFiles"
+      const files = try picker.choose(room, (mimeType) => supportedMimeTypes.includes(mimeType))
+      for (const file of files) {
+        const refusal = try attach({ name: file.name, mimeType: file.mimeType, dataBase64: file.dataBase64, sha256: file.sha256 })
+        if (refusal !== undefined) return refusal
+      }
+      return undefined
+    },
+    effect back() {
+      const refusal = try flush()
+      if (refusal !== undefined) return refusal
+      const a = try mine()
+      if (!hasDraft(a.open)) return undefined
+      if (!meaningful(a.open)) {
+        try send({ type: "setAside", shelfBytes: 0 })
+        return undefined
+      }
+      const shelfBytes = jsonBytes([...a.shelf.filter((d) => d.id !== a.open.id), a.open])
+      const done = try send({ type: "setAside", shelfBytes })
+      return done === undefined ? (shelfBytes > draftBytesLimit || !shelfRoom(a.shelf, a.open) ? "drafts-full" : "changed") : undefined
+    },
+    effect hide() {
+      try flush()
+      try send({ type: "hide" })
+    },
+    effect resume() {
+      try Ref.set(conflict, false)
+      try send({ type: "resume" })
+    },
+    effect openShelved(id: string, confirmed: boolean) {
+      try flush()
+      const done = try send({ type: "openShelved", id, confirmed })
+      return done === undefined ? "changed" : undefined
+    },
+    effect deleteShelved(picks: DraftPick[]) {
+      try flush()
+      const a = try mine()
+      if (hasDraft(a.open)) {
+        const shelved = try send({ type: "setAside", shelfBytes: jsonBytes([...a.shelf, a.open]) })
+        if (shelved === undefined) return false
+      }
+      return (try send({ type: "deleteShelved", picks })) !== undefined
+    },
+    effect transfer(grant: string) {
+      const refusal = try flush()
+      if (refusal !== undefined) return refusal
+      const current = try accounts.owner()
+      if (current === undefined) return "no-account"
+      const destination = mailOwnerKey(current, grant)
+      const done = try send({ type: "transfer", destination })
+      if (done === undefined) {
+        const s = try machine.get()
+        return hasDraft(accountOf(destination, s).open) ? "destination-busy" : "not-movable"
+      }
+      try accounts.choose(grant)
+      return undefined
+    },
+    effect openGmailDraft(row: DraftRow, confirmed: boolean) {
+      try flush()
+      const grant = (try accounts.get()).selected
+      const d = gmail.draft(grant, row.draftId) catch () => undefined
+      if (d === undefined) return "not-ready"
+      if (!editableHere(d.threaded, d.attachmentCount, d.plainText)) return "edit-in-gmail"
+      const fields: DraftFields = { ...emptyFields, toList: d.toList, ccList: d.ccList, bccList: d.bccList, subject: oneLineSubject(d.subject), body: d.body.slice(0, 64000) }
+      const draft: Draft = { ...noDraft, id: newId(), revision: 1, fields, provider: { draftId: d.draftId, digest: d.digest } }
+      const done = try send({ type: "openProvider", draft, confirmed, bytes: jsonBytes(draft) })
+      return done === undefined ? "changed" : undefined
+    },
+    effect send() {
+      const refusal = try flush()
+      if (refusal !== undefined) return refusal
+      const open = (try mine()).open
+      if (!hasDraft(open)) return "not-ready"
+      if (open.pendingTo !== "" || ![...open.fields.toList, ...open.fields.ccList, ...open.fields.bccList].every(literalMailAddress)) return "unclear-recipient"
+      return try operations.sendDraft(open)
+    },
+    effect saveToGmail() {
+      const refusal = try flush()
+      if (refusal !== undefined) return refusal
+      const open = (try mine()).open
+      if (!hasDraft(open)) return "not-ready"
+      return try operations.saveGmailDraft(open)
+    },
+    effect shareFile(first: PickedFile, again: PickedFile, token: string) {
+      const s = try machine.get()
+      const a = accountOf(s.owner, s)
+      const checked = tryPromise({ try: () => checkMailFile(first.name, first.mimeType, first.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
+      const sameBytes = !isRefusal(checked) && again.name === first.name && again.mimeType === first.mimeType && again.dataBase64 === first.dataBase64
+        && (first.sha256 === undefined || first.sha256 === checked.sha256)
+      const duplicate = !isRefusal(checked) && a.open.fields.files.some((f) => f.sha256 === checked.sha256)
+      const outcome = handoffOutcome({ tokenAtStart: token, tokenNow: s.owner, destinationReady: s.owner !== "", sameBytesTwice: sameBytes, shelfRoom: shelfRoom(a.shelf, a.open), duplicate })
+      if (outcome !== "FileAdded" || isRefusal(checked)) return outcome
+      const refusal = try start(try fresh({ ...emptyFields, files: [outgoing(checked.name, checked.mimeType, checked.bytes, checked.sha256, first.dataBase64)] }))
+      return refusal === undefined ? "FileAdded" : refusal === "drafts-full" ? "DraftsFull" : "NotReady"
+    },
+    effect token() {
+      return (try machine.get()).owner
+    }
+  }
+})

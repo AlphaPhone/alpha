@@ -1,0 +1,79 @@
+// spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"
+// What Clock needs of the shell, account, assistant, workflows and notes areas, each captured once when a layer is built.
+import type { AppId } from "../web/app-screen.ts"
+import { Navigation } from "../shell/navigation.vibe"
+import { CloudSession, ownerOf } from "../account/session.vibe"
+import { Composer } from "../assistant/composer.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
+import { WorkflowRuns } from "../workflows/runs.vibe"
+import { NotesOrigins } from "../notes/origins.vibe"
+import { shownOf } from "./screen.ts"
+
+/** Where the shell is: the app in front ("home" when none) and its route. */
+export interface Shown {
+  readonly app: string
+  readonly route?: string
+}
+
+/** The signed-in account a notice must belong to, and the key that changes with each sign-in. */
+export interface NoticeOwner {
+  readonly ownerId: string
+  readonly key: string
+}
+
+/** The shell's navigation: open an app at a route, and read where it is. */
+export effect function navigationPeer() {
+  const navigation = try Navigation
+  return {
+    open: (app: AppId, route?: string) => navigation.open(app, route),
+    effect shown() {
+      return shownOf(try navigation.get()) as Shown
+    },
+  }
+}
+
+/** The signed-in Cloud account, as notices name it: `organization:user`; undefined while signed out. */
+export effect function ownerPeer() {
+  const session = try CloudSession
+  return {
+    effect owner() {
+      const current = try session.current()
+      if (ownerOf(current) === 0 || current.account.userId === "") return undefined
+      return { ownerId: `${current.account.organizationId}:${current.account.userId}`, key: JSON.stringify([current.account.organizationId, current.account.userId, current.generation]) } as NoticeOwner
+    },
+  }
+}
+
+/** The assistant: whether it is quiet enough to be navigated away from, and the draft a reviewed question opens. */
+export effect function assistantPeer() {
+  const composer = try Composer
+  const assistant = try Assistant
+  return {
+    effect quiet() {
+      const transcript = try Stream.runHead(composer.transcript)
+      return !(Option.getOrUndefined(transcript)?.typing ?? false)
+    },
+    draft: (question: string) => assistant.openWith(question),
+  }
+}
+
+/** The workflows area opens the run a notice names; the shell then shows it under the route it gives. */
+export effect function runsPeer() {
+  const runs = try WorkflowRuns
+  const navigation = try Navigation
+  return {
+    effect open(runId: string) {
+      const route = runs.open(runId) catch () => undefined
+      if (route === undefined) return false
+      return try navigation.open("workflows", route)
+    },
+  }
+}
+
+/** The notes area's back-links: a record a deletion removed forgets the note it came from. */
+export effect function originsPeer() {
+  const origins = try NotesOrigins
+  return {
+    forget: (kind: "reminder" | "event", recordId: string) => origins.forget(kind, recordId, true),
+  }
+}

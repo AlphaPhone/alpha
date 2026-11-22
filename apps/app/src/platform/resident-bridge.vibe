@@ -1,0 +1,210 @@
+// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Stopping is confirmed only when the service reports its launch stopped and serving nothing"; spec/platform/resident.md, "The agent's status reads as running only while its launch serves"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"
+import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client"
+import type { AgentStatus, AgentStreamData, AgentStreamEnd, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { runtimePhaseOf, stopConfirmed, type Boot } from "../../gen/platform__resident.effect.vibe"
+import { Machine as Relay, machine as relayMachine, type Event as RelayEvent, type Failure, type Relay as RelayState } from "../../gen/platform__nativeStream.effect.vibe"
+import { bytesOfBase64, jsonBytes, newId } from "./native-capacitor.ts"
+
+const IDLE_MS = 60000
+const TURN_MS = 600000
+const STOP_DEADLINE_MS = 30000
+
+/** The agent service did not do what was asked; the resident client treats it as a broken transport. */
+export error AgentCallFailed { method: string; code?: string; message: string }
+
+/** What the agent service said of its launch: the boot state the resident spec names, its epoch and its body limit. */
+export interface AgentReport {
+  readonly available: boolean
+  readonly boot: Boot
+  readonly epoch: number
+  readonly requestBodyLimit: number
+}
+
+/** The boot state of a service status, seen from a connection verified under `epoch` (0 when none is). */
+export function bootOf(status: AgentStatus, epoch: number): Boot {
+  switch (status.state) {
+    case "running": return epoch !== 0 && status.epoch !== epoch ? "Restarting" : "Listening"
+    case "starting": return "Booting"
+    case "failed": return "Dead"
+    case "stopped":
+    case "unavailable": return "Halted"
+  }
+}
+
+const runtimeStates = { PhaseStopped: "stopped", PhaseStarting: "starting", PhaseRunning: "running" } as const
+
+effect function call<A>(method: string, run: () => Promise<A>) {
+  return try tryPromise({
+    try: run,
+    catch: (cause) => {
+      const value = typeof cause === "object" && cause !== null ? cause as Record<string, unknown> : {}
+      return new AgentCallFailed({
+        method,
+        message: typeof value.message === "string" ? value.message : "",
+        ...(typeof value.code === "string" ? { code: value.code } : {}),
+      })
+    },
+  })
+}
+
+/** The service's status as the renderer reads it; unavailable where it cannot be read. */
+export effect function agentReport(agent: ElizaAgentPlugin, epoch: number): AgentReport!! {
+  const status = call("getStatus", () => agent.getStatus()) catch () => undefined
+  if (status === undefined) return { available: false, boot: "Halted", epoch: 0, requestBodyLimit: 0 }
+  return { available: status.available && status.state !== "unavailable", boot: bootOf(status, epoch), epoch: status.epoch, requestBodyLimit: status.requestBodyLimit }
+}
+
+function runtimeStatusOf(status: AgentStatus): RuntimeStatus {
+  const state = runtimeStates[runtimePhaseOf(bootOf(status, 0))]
+  return {
+    available: status.available && status.state !== "unavailable",
+    state,
+    ...(status.state === "failed" && status.error !== undefined ? { error: status.error } : {}),
+    ...(status.requestBodyLimit > 0 ? { requestBodyLimit: status.requestBodyLimit } : {}),
+  }
+}
+
+/** Stops the launch and waits until the service reports it stopped, reading 200 ms apart and backing off to one second. */
+export effect function stopAgent(agent: ElizaAgentPlugin) {
+  const first = try call("stop", () => agent.stop())
+  if (stopConfirmed(first.state === "stopped", first.state === "running")) return
+  const deadline = (try Clock.currentTimeMillis) + STOP_DEADLINE_MS
+  let delay = 200
+  while ((try Clock.currentTimeMillis) < deadline) {
+    try sleep(delay)
+    const status = call("getStatus", () => agent.getStatus()) catch () => undefined
+    if (status !== undefined && stopConfirmed(status.state === "stopped", status.state === "running")) return
+    delay = delay * 2 > 1000 ? 1000 : delay * 2
+  }
+  throw new AgentCallFailed({ method: "stop", message: "Not confirmed" })
+}
+
+/** One plain resident request through the agent service. */
+export effect function agentRequest(agent: ElizaAgentPlugin, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown) {
+  const fields = typeof body === "object" && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : {}
+  return try call("request", () => agent.request({ method, path, id: newId(), ...fields }))
+}
+
+const refusalOfFailure: Readonly<Record<Failure, { status: number; code: string; error: string } | undefined>> = {
+  NoFailure: undefined,
+  BeforeDispatch: { status: 503, code: "not-dispatched", error: "The on-device agent did not accept this message." },
+  Busy: { status: 429, code: "busy", error: "The agent is busy and did not accept this message." },
+  Unauthorized: { status: 401, code: "unauthorized", error: "The on-device agent refused this session." },
+  Interrupted: undefined,
+  Invalid: undefined,
+  TooLarge: undefined,
+  TimedOut: undefined,
+  Aborted: undefined,
+}
+
+const contentTypeOf = (headers: Readonly<Record<string, string>>) =>
+  Object.entries(headers).find(([name]) => name.toLowerCase() === "content-type")?.[1] ?? ""
+
+type Heard = AgentStreamData | AgentStreamEnd | { readonly id: string; readonly kind: "rejected" | "changed" }
+
+/** One streamed reply through the agent service, as the frames `@elizaos/agent/client` reads: the listeners first, then the request, then what the service posts under its id. */
+export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body: unknown) {
+  const relay = try Effect.provide(effect { return try Relay }, relayMachine())
+  effect function hear(event: RelayEvent) {
+    const next = relay.send(event) catch () => undefined
+    const now: RelayState = next ?? try relay.get()
+    return now
+  }
+  const id = newId()
+  const inbox = try Queue.unbounded<Heard>()
+  const offer = (value: Heard) => { if (value.id === id) Queue.offerUnsafe(inbox, value) }
+  const listening = try acquireRelease(
+    Effect.orElseSucceed(tryPromise(async () => [
+      await agent.addListener("streamData", offer),
+      await agent.addListener("streamEnd", offer),
+    ]), () => undefined),
+    (handles) => handles === undefined ? Effect.void : Effect.ignore(tryPromise(() => Promise.all(handles.map((handle) => handle.remove())))),
+  )
+  try hear({ type: "listenerAttached" })
+  if (listening === undefined) {
+    try hear({ type: "abort", timedOut: false })
+    try hear({ type: "finish" })
+    yield { kind: "error" }
+    return
+  }
+  try hear({ type: "requestStream" })
+  try addFinalizer(() => Effect.ignore(tryPromise(() => agent.abort({ id }))))
+  const fields = typeof body === "object" && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : {}
+  effect function dispatch() {
+    const admitted = call("requestStream", () => agent.requestStream({ id, method: "POST", path, ...fields })) catch () => undefined
+    if (admitted === undefined) try Queue.offer(inbox, { id, kind: "rejected" })
+    else if (admitted.id !== id) try Queue.offer(inbox, { id, kind: "changed" })
+  }
+  fork.scoped dispatch()
+  const startedAt = try Clock.currentTimeMillis
+  let refusal: { status: number; code: string; error: string } | undefined = undefined
+  let ended = false
+  while (!ended) {
+    const remaining = TURN_MS - ((try Clock.currentTimeMillis) - startedAt)
+    const next = remaining <= 0 ? undefined : timeout(Queue.take(inbox), remaining < IDLE_MS ? remaining : IDLE_MS) catch () => undefined
+    ended = true
+    if (next === undefined) {
+      try hear({ type: "abort", timedOut: true })
+      yield { kind: "error" }
+    } else if (next.kind === "head") {
+      const after = try hear({ type: "response", httpStatus: next.status, eventStream: contentTypeOf(next.headers).startsWith("text/event-stream") })
+      if (after.outcome === "Open") {
+        yield { kind: "head", status: next.status, headers: next.headers }
+        ended = false
+      } else {
+        refusal = refusalOfFailure[after.failure]
+        if (refusal === undefined) yield { kind: "error" }
+      }
+    } else if (next.kind === "chunk") {
+      const bytes = bytesOfBase64(next.dataBase64)
+      const after = try hear({ type: "chunk", size: bytes === undefined ? -1 : bytes.length })
+      if (after.outcome === "Open" && bytes !== undefined) {
+        yield { kind: "chunk", data: bytes }
+        ended = false
+      } else {
+        yield { kind: "error" }
+      }
+    } else if (next.kind === "end" || next.kind === "error") {
+      const after = try hear({ type: "complete", withError: next.kind === "error" })
+      yield after.outcome === "Completed" ? { kind: "end" } : { kind: "error" }
+    } else if (next.kind === "aborted" || next.kind === "changed") {
+      try hear({ type: "abort", timedOut: false })
+      yield { kind: next.kind === "aborted" ? "aborted" : "error" }
+    } else {
+      const before = try relay.get()
+      const after = next.kind === "failed" && next.code === "Busy" && !before.responded
+        ? try hear({ type: "response", httpStatus: 429, eventStream: false })
+        : next.kind === "rejected" || (next.kind === "failed" && !before.responded && next.code !== "Restarted" && next.code !== "Broken")
+          ? try hear({ type: "requestRejected" })
+          : try hear({ type: "abort", timedOut: false })
+      refusal = refusalOfFailure[after.failure]
+      if (refusal === undefined) yield { kind: "error" }
+    }
+  }
+  if (refusal !== undefined) {
+    yield { kind: "head", status: refusal.status, headers: { "content-type": "application/json" } }
+    yield { kind: "chunk", data: jsonBytes({ error: refusal.error, code: refusal.code }) }
+    yield { kind: "end" }
+  }
+  try hear({ type: "finish" })
+}
+
+/** The bridge `@elizaos/agent/client` drives: status, start, restart, plain requests and streams through the agent service. */
+export function agentBridge(agent: ElizaAgentPlugin): RuntimeJsonBridge {
+  return {
+    status: async () => runtimeStatusOf(await agent.getStatus()),
+    start: async () => runtimeStatusOf(await agent.start()),
+    restart: async () => runtimeStatusOf(await agent.restart()),
+    request: (input) => runPromise(agentRequest(agent, input.method, input.path, input.body)),
+    requestStream(input, signal) {
+      const frames: Stream.Stream<RuntimeStreamFrame> = Stream.interruptWhen(
+        relayFrames(agent, input.path, input.body),
+        callback<void>((resume) => {
+          if (signal.aborted) resume(Effect.void)
+          else signal.addEventListener("abort", () => resume(Effect.void), { once: true })
+        }),
+      )
+      return Stream.toAsyncIterable(frames)
+    },
+  }
+}

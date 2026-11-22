@@ -1,0 +1,114 @@
+// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"
+
+/** The host's `status()` answer: which methods are ready, and whether a saved key awaits Cloud's confirmation. */
+export schema HostStatus {
+  inApp?: boolean
+  methodsKnown?: boolean
+  google?: boolean
+  email?: boolean
+  phone?: boolean
+  activationPending?: boolean
+}
+
+/** A code on its way: the host's attempt, its expiry and when another send is allowed, in epoch milliseconds. */
+export schema CodeStarted {
+  attemptId: string
+  expiresAt: number
+  resendAt: number
+}
+
+/** A verification or Google answer: signed in with a stored and acknowledged key, or a second factor asked. */
+export schema SignInAnswer {
+  status: "authenticated" | "mfa"
+  expiresAt: number
+  attemptId?: string
+  credentialId?: string
+  method?: "totp" | "sms" | "passkey"
+  accountCreated?: boolean
+  previousSignIn?: "revoked" | "unconfirmed"
+}
+
+/** The installed key's local generation and expiry; never the key. */
+export schema CredentialIdentity {
+  credentialId: string
+  expiresAt: number
+  activationPending?: boolean
+}
+
+/** Where the saved key's silent renewal stands. */
+export schema Renewal {
+  status: "current" | "renewed" | "deferred" | "sign-in-required" | "unavailable" | "signed-out"
+  expiryWarning: boolean
+  expiresAt?: number
+  credentialId?: string
+  keyRefused?: boolean
+}
+
+/** The retained `signInRenewed` event. */
+export schema Renewed {
+  expiresAt: number
+  credentialId: string
+}
+
+/** The retained `signInIncomplete` event. */
+export schema Incomplete {
+  code: "app-link-unverified" | "storage" | "activation-expired"
+}
+
+/** The host's answer to sign-out: whether Cloud confirmed the revocation. */
+export schema SignedOutAnswer {
+  status: "signed-out"
+  revocation?: "revoked" | "unconfirmed"
+}
+
+/** The account Cloud names for the presented key (`GET /api/v1/user`). */
+export schema UserRow {
+  id: string
+  organization_id: string
+  email?: string
+}
+
+/** The `/api/v1/user` envelope. */
+export schema UserAnswer {
+  success: boolean
+  data: UserRow
+}
+
+/** A native rejection's code (`PluginCall.reject(message, code)`). */
+export schema NativeRejection {
+  code: string
+}
+
+/** Android's own network facts (`ElizaSystem.getNetworkStatus`). */
+export schema NetworkStatus {
+  connected?: boolean
+  wifiActive?: boolean
+  internetValidated?: boolean
+}
+
+/** One titled section of plain paragraphs. */
+export schema ServiceSection {
+  title: string
+  paragraphs: Array<string>
+}
+
+/** A published legal document. */
+export schema ServiceDocument {
+  title: string
+  revision: string
+  sections: Array<ServiceSection>
+}
+
+/** The deployment's published name, Terms and Privacy. */
+export schema ServiceRow {
+  name: string
+  terms: ServiceDocument
+  privacy: ServiceDocument
+}
+
+/** `GET /api/public/service`. */
+export schema ServiceAnswer {
+  success: boolean
+  version: number
+  service: ServiceRow
+}

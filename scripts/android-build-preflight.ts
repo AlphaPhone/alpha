@@ -1,15 +1,15 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Prepare the source-bound native inputs, then fail before the long runtime preparation,
  * web sync and Gradle when the pinned checkout or on-device voice outputs are unavailable.
  * The normal build produces the native inputs automatically; only release signing needs
  * human-supplied custody. Input readiness does not establish device qualification.
  *
- *   bun scripts/android-build-preflight.ts
- *   bun scripts/android-build-preflight.ts --report     (bun run android:build:inputs)
+ *   node scripts/android-build-preflight.ts
+ *   node scripts/android-build-preflight.ts --report     (pnpm android:build:inputs)
  *
  * android:build:local runs it first and build-android.ts runs it again for a plain
- * `bun run android:build`. Everything the chain produces is verified where it is used: staging,
+ * `pnpm android:build`. Everything the chain produces is verified where it is used: staging,
  * the Gradle verify tasks and verify-apks.
  * `--report` lists every input of the build with its state and whether a
  * script or a person supplies it. It reads files only, builds nothing and always exits 0.
@@ -25,7 +25,7 @@ import {readUpstreamPin} from './upstream-pin.ts';
 
 export {VOICE_ASSET_ROOT, VOICE_HOST_MANIFEST};
 export const GRADLE_VERIFICATION = 'android/gradle/verification-metadata.xml';
-const FULL_CHAIN = 'bun run android:build:local';
+const FULL_CHAIN = 'pnpm android:build:local';
 const VOICE_GUIDE = 'README.md';
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -139,7 +139,7 @@ function assessVoiceHost(root: string, {voiceHost = verifyVoiceHost}: VoiceOptio
   try {
     return {status: voiceHost(root), problems: []};
   } catch (error) {
-    return {status: null, problems: [`The on-device voice outputs in ${VOICE_ASSET_ROOT} are not admitted by ${VOICE_HOST_MANIFEST} (${message(error)}; Gradle :app:verifyVoiceHost rejects the build). ${FULL_CHAIN} produces them automatically from pinned public source and model inputs; run bun run agent:build-embedding-host to prepare the native cache.`]};
+    return {status: null, problems: [`The on-device voice outputs in ${VOICE_ASSET_ROOT} are not admitted by ${VOICE_HOST_MANIFEST} (${message(error)}; Gradle :app:verifyVoiceHost rejects the build). ${FULL_CHAIN} produces them automatically from pinned public source and model inputs; run pnpm agent:build-embedding-host to prepare the native cache.`]};
   }
 }
 
@@ -151,7 +151,7 @@ const SIGNING_ENV = ['ELIZAOS_KEYSTORE_PATH', 'ELIZAOS_KEYSTORE_PASSWORD', 'ELIZ
 const readJson = (root: string, rel: string) => JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8'));
 
 /**
- * Every input of the build (`bun run android:build:local`), in the order the chain needs it. `suppliedBy` is 'script' when a committed command produces the
+ * Every input of the build (`pnpm android:build:local`), in the order the chain needs it. `suppliedBy` is 'script' when a committed command produces the
  * input from pinned source and 'person' when no script may. `preparedSource` is null while the
  * pinned checkout is absent (its location cannot be resolved then).
  */
@@ -172,7 +172,7 @@ export function strictBuildInputs(root: string, preparedSource: string | null, {
     const {status: voiceStatus, problems: voice} = assessVoiceHost(root, {voiceHost});
     add('on-device voice outputs', voice.length === 0, 'script',
       voice.length ? voice[0] : `staged outputs match ${VOICE_HOST_MANIFEST}`,
-      'bun run agent:build-embedding-host (downloads pinned public sources, builds and caches voice and embedding inputs)');
+      'pnpm agent:build-embedding-host (downloads pinned public sources, builds and caches voice and embedding inputs)');
 
   }
 
@@ -185,23 +185,20 @@ export function strictBuildInputs(root: string, preparedSource: string | null, {
     const hostState = embeddingHostState(host, toolchain, libraries);
     add('embedding host libraries', hostState.ready, hostState.suppliedBy,
       hostState.ready ? `reviewed bytes staged in android/app/src/main/jniLibs/${host.abi}` : libraries.filter(row => row.state !== 'staged').map(row => `${row.name} ${row.state === 'missing' ? 'missing' : 'is not the reviewed bytes'}`).join(', '),
-      'bun run agent:build-embedding-host');
+      'pnpm agent:build-embedding-host');
   }
 
-  const stamp = preparedSource ? path.join(preparedSource, '.alpha-runtime-source.json') : null;
-  const prepared = stamp !== null && fs.existsSync(stamp);
-  add('prepared resident runtime source', prepared, 'script', preparedSource ? path.relative(root, preparedSource) : 'needs the pinned checkout first', 'bun run agent:prepare');
-  const worker = path.join(workerDirectory || path.join(root, 'artifacts', `mobile-workflow-worker-${pin}`), 'manifest.json');
-  add('workflow worker artifact', fs.existsSync(worker), 'script', path.relative(root, path.dirname(worker)), 'bun run agent:build-workflow-worker');
+  const prepared = preparedSource !== null && fs.existsSync(preparedSource);
+  add('resident agent bundle', prepared, 'script', preparedSource ? path.relative(root, preparedSource) : '.eliza/agent-bundle is not built', 'pnpm agent:bundle');
   const staged = path.join(root, 'android/app/src/main/assets/agent/alpha-source.json');
-  const stagedWorker = path.join(root, 'android/app/src/main/assets/agent/workflow-worker/manifest.json');
-  const current = prepared && fs.existsSync(staged) && fs.existsSync(stagedWorker) && fs.readFileSync(staged, 'utf8') === fs.readFileSync(stamp, 'utf8');
-  add('staged resident runtime payload', current, 'script', !fs.existsSync(staged) ? 'android/app/src/main/assets/agent is not staged' : current ? 'staged from the prepared source' : 'staged from a different prepared source', 'bun run agent:stage-android');
+  let current = false;
+  try { current = prepared && JSON.parse(fs.readFileSync(staged, 'utf8')).base === pin; } catch { current = false; }
+  add('staged resident runtime payload', current, 'script', !fs.existsSync(staged) ? 'android/app/src/main/assets/agent is not staged' : current ? 'staged from the pinned source' : 'staged from a different pin', 'pnpm agent:stage-android');
   {
     const host = readJson(root, QUALIFIED_HOST), model = path.join(root, host.model.path);
-    add('embedding model', fs.existsSync(model), 'script', host.model.path, 'bun run agent:stage-android (it stages the pinned model with the payload)');
+    add('embedding model', fs.existsSync(model), 'script', host.model.path, 'pnpm agent:stage-android (it stages the pinned model with the payload)');
   }
-  add('Gradle dependency verification metadata', fs.existsSync(path.join(root, GRADLE_VERIFICATION)), 'script', GRADLE_VERIFICATION, 'bun run android:deps:write-verification (then review the diff)');
+  add('Gradle dependency verification metadata', fs.existsSync(path.join(root, GRADLE_VERIFICATION)), 'script', GRADLE_VERIFICATION, 'pnpm android:deps:write-verification (then review the diff)');
 
   const signer = readJson(root, 'android/release-signer.json').signerSha256;
   const missingSigning = SIGNING_ENV.filter(name => {
@@ -210,7 +207,7 @@ export function strictBuildInputs(root: string, preparedSource: string | null, {
   });
   add('release signer', signer !== 'unset' && missingSigning.length === 0, 'person',
     [signer === 'unset' ? 'android/release-signer.json says unset' : `android/release-signer.json names ${signer}`, missingSigning.length ? `not set in this environment: ${missingSigning.join(', ')}` : 'signing variables are set'].join('; '),
-    'Needs a person: Alpha Compute controls signing and Shaw owns release/support/rollback (#400). After the offline key ceremony, bun scripts/enroll-release-keys.ts records the certificate digest in android/release-signer.json; then the release operator either supplies ELIZAOS_KEYSTORE_PATH, ELIZAOS_KEYSTORE_PASSWORD, ELIZAOS_KEY_ALIAS and ELIZAOS_KEY_PASSWORD to the build or signs the unsigned releases afterwards with bun scripts/sign-release-apks.ts (ceremony key files or a PKCS#11 token; H-10). Without either the build still completes and records unsigned, non-distributable releases.');
+    'Needs a person: Alpha Compute controls signing and Shaw owns release/support/rollback (#400). After the offline key ceremony, node scripts/enroll-release-keys.ts records the certificate digest in android/release-signer.json; then the release operator either supplies ELIZAOS_KEYSTORE_PATH, ELIZAOS_KEYSTORE_PASSWORD, ELIZAOS_KEY_ALIAS and ELIZAOS_KEY_PASSWORD to the build or signs the unsigned releases afterwards with node scripts/sign-release-apks.ts (ceremony key files or a PKCS#11 token; H-10). Without either the build still completes and records unsigned, non-distributable releases.');
   return rows;
 }
 
@@ -232,8 +229,8 @@ async function main() {
   const root = path.resolve(import.meta.dirname, '..');
   if (args.includes('--report')) {
     // The source guard imports the pinned checkout; without it the prepared path is unknown.
-    let prepared: string | null = null, workerDirectory: string | undefined;
-    try { const source = await import('./local-agent-source.ts'); prepared = source.sourceDirectory(root); workerDirectory = source.workerArtifactDirectory(root); } catch { /* reported as the missing checkout */ }
+    const bundle = path.join(root, '.eliza/agent-bundle');
+    const prepared: string | null = fs.existsSync(bundle) ? bundle : null, workerDirectory: string | undefined = undefined;
     console.log(formatReport(strictBuildInputs(root, prepared, {workerDirectory})));
     return;
   }

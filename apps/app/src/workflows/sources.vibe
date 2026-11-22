@@ -1,0 +1,163 @@
+// spec/workflows/digestSources.md, "Story: Let my digest read Google through Cloud only as I authorized"; spec/workflows/digestSources.md, "Story: Let my digest read my phone's Calendar and reminders only with my consent"; spec/workflows/digestSources.md, "Story: Choose exactly what a Google source reads"
+import { type Selection, Machine, stored, validSelection } from "../../gen/workflows__digestSources.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { WorkflowApi, decoded } from "./api.vibe"
+import { deviceZone, instant, newId, sha256Hex } from "./ids.ts"
+import { ConsentReply, DelegationRequest, SourceIdentity } from "./wire.schema.vibe"
+
+export const SOURCES_KEY = ownerKey("device", "workflows/digest-sources")
+
+/** What the phone may read for a digest, as the owner reviewed it. */
+export interface PhoneScope {
+  readonly sourceId: string
+  readonly calendars: ReadonlyArray<{ readonly id: string; readonly revision: string }>
+  readonly reminders: boolean
+  readonly maximumItems: number
+  readonly expiresAt: number
+}
+
+/** A Google selection as the owner chose it. */
+export interface GoogleChoice {
+  readonly accountId: string
+  readonly accountRevision: string
+  readonly offeredRevision: string
+  readonly kinds: ReadonlyArray<"email" | "calendar">
+  readonly kind: "email" | "calendar"
+  readonly windowHours: number
+  readonly maxItems: number
+  readonly calendarId?: string
+}
+
+/** Cloud read grants, the phone's consent and Google selections for digests. */
+export service DigestSourcesService {
+  bind(): void!!
+  foreground(front: boolean): void!!
+  tick(): void!!
+  /** Ask Cloud for a read grant of `email` and `calendar`. */
+  startGrant(email: boolean, calendar: boolean): boolean!!
+  /** Approve the waiting grant request in review. */
+  approveGrant(): boolean!!
+  cancelGrant(): void!!
+  revokeGrant(grantId: string): boolean!!
+  /** Ask the phone for consent to read the reviewed scope; whether it was given. */
+  consent(scope: PhoneScope): boolean!!
+  revokeConsent(sourceId: string): boolean!!
+  /** Whether a Google selection reads only what it shows. */
+  validGoogle(choice: GoogleChoice): boolean!!
+}
+
+export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesService, effect {
+  const held = try Machine
+  const agent = try WorkflowApi
+  const native = try Native
+  const delegation = try Ref.make({ state: "", sessionId: "" })
+
+  effect function sessionId() {
+    const scope = try (agent.scope() catch () => undefined)
+    if (scope === undefined) return ""
+    return try (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+  }
+
+  effect function now() {
+    const at = try Clock.currentTimeMillis
+    held.send({ type: "tick", now: at }) catch () => undefined
+    return at
+  }
+
+  effect function delegate(path: string, body: Record<string, unknown>) {
+    const route = `/api/workflow/hosted/cloud-delegation/${path}`
+    return try decoded(DelegationRequest, route, try agent.request("POST", route, body))
+  }
+
+  return {
+    effect bind() {
+      const id = try sessionId()
+      if (id === "" || (try Ref.get(delegation)).sessionId === id) return
+      try Ref.set(delegation, { state: "", sessionId: id })
+      const generation = (try held.get()).session + 1
+      held.send({ type: "selectSession", session: generation }) catch () => undefined
+    },
+    effect foreground(front: boolean) {
+      held.send({ type: "foreground", front }) catch () => undefined
+    },
+    tick: effect () => { try now() },
+    effect startGrant(email: boolean, calendar: boolean) {
+      try now()
+      const mutation = newId()
+      const started = try (held.send({ type: "start", mutation, email, calendar }) catch () => undefined)
+      if (started === undefined) return false
+      const kinds = [...(calendar ? ["calendar"] : []), ...(email ? ["email"] : [])]
+      const request = try (delegate("start", { confirmed: true, mutationId: mutation, kinds }) catch () => undefined)
+      if (request === undefined || request.mutationId !== mutation || request.status !== "waiting") {
+        held.send({ type: "cancelRequest" }) catch () => undefined
+        return false
+      }
+      try Ref.update(delegation, (d) => ({ ...d, state: request.state }))
+      held.send({ type: "started" }) catch () => undefined
+      return true
+    },
+    effect approveGrant() {
+      try now()
+      const approved = try (held.send({ type: "approve" }) catch () => undefined)
+      if (approved === undefined) return false
+      const { state } = try Ref.get(delegation)
+      const request = try (delegate("complete", { state, confirmed: true }) catch () => undefined)
+      const ok = request !== undefined && request.status === "complete" && request.grantId !== undefined
+      held.send({ type: "completed", ok }) catch () => undefined
+      return ok
+    },
+    effect cancelGrant() {
+      const { state } = try Ref.get(delegation)
+      held.send({ type: "cancelRequest" }) catch () => undefined
+      if (state !== "") delegate("cancel", { state, confirmed: true }) catch () => undefined
+    },
+    effect revokeGrant(grantId: string) {
+      const answer = try (effect {
+        const route = "/api/workflow/hosted/cloud-delegation/revoke"
+        const reply = try agent.request("POST", route, { grantId, confirmed: true })
+        return typeof reply === "object" && reply !== null && (reply as { remoteRevocation?: unknown }).remoteRevocation === "confirmed"
+      } catch () => false)
+      held.send({ type: "revokeGrant", confirmed: answer }) catch () => undefined
+      return answer
+    },
+    effect consent(scope: PhoneScope) {
+      try now()
+      const id = try sessionId()
+      const asked = try (held.send({ type: "askConsent", expiresAt: scope.expiresAt, calendar: scope.calendars.length > 0, reminders: scope.reminders }) catch () => undefined)
+      if (asked === undefined || id === "") return false
+      const identity = try (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke("AlphaHostedResults", "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
+      if (identity === undefined) {
+        held.send({ type: "consentAnswered", approved: false }) catch () => undefined
+        return false
+      }
+      const reply = try (effect {
+        return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke("AlphaHostedResults", "nativeSourceConsent", {
+          sessionId: id, sourceId: scope.sourceId, expiresAt: new Date(scope.expiresAt).toISOString(), confirmed: true, expectedBinding: identity,
+          scope: { calendars: scope.calendars, reminders: scope.reminders, timeZone: deviceZone(), window: "owner_day_and_overdue_reminders",
+            maximumItems: Math.min(Math.max(scope.maximumItems, 1), 200), modelEgress: true },
+        }))
+      } catch () => undefined)
+      const approved = reply !== undefined && reply.revoked !== true && instant(reply.expiresAt) > 0
+      held.send({ type: "consentAnswered", approved }) catch () => undefined
+      return approved && (try held.get()).consent === "ConsentApproved"
+    },
+    effect revokeConsent(sourceId: string) {
+      const id = try sessionId()
+      const identity = try (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke("AlphaHostedResults", "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
+      if (identity === undefined) return false
+      const reply = try (effect { return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke("AlphaHostedResults", "nativeSourceConsent", { sessionId: id, sourceId, expectedBinding: identity, revoke: true, confirmed: true })) } catch () => undefined)
+      if (reply?.revoked !== true) return false
+      held.send({ type: "revokeConsent" }) catch () => undefined
+      return true
+    },
+    effect validGoogle(choice: GoogleChoice) {
+      const selection: Selection = {
+        kind: choice.kind === "email" ? "MailKind" : "CalendarKind", windowHours: choice.windowHours, maxItems: choice.maxItems,
+        calendarId: choice.calendarId ?? "", revisionMatches: /^[a-f0-9]{64}$/.test(choice.accountRevision) && choice.accountRevision === choice.offeredRevision,
+        kindOffered: choice.kinds.includes(choice.kind),
+      }
+      return validSelection(selection)
+    },
+  }
+}), stored(SOURCES_KEY))

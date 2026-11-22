@@ -18,8 +18,8 @@ import { releaseBlockers } from "./release-blockers.ts";
 import {auditBundle, extractWebPayload, parseXmlTree, signerDigest, telephonySetupReceiverProblems, verifyOwnerRouteTable} from "./apk.ts";
 import {apkUpdateChannelOrLegacy, assertProvisioningUpdateChannel, recordedProvisioningUpdateChannel} from "./update-channel.ts";
 import {updateArtifactDigest} from "./update-artifact.ts";
-import { aaptManifestTree, admitImageApk, manifestTreeIsDebuggable, readApkBuildFlags, reviewedSourceOverrides as sharedReviewedSourceOverrides } from "../vendor/eliza/packages/os/scripts/android/image-apk-admission.mjs";
-import { CUTTLEFISH_TARGETS, cuttlefishProductProblems } from "../vendor/eliza/packages/os/scripts/android/cuttlefish-product.mjs";
+import { aaptManifestTree, admitImageApk, manifestTreeIsDebuggable, readApkBuildFlags, reviewedSourceOverrides as sharedReviewedSourceOverrides } from "./os-ported/os/image-apk-admission.mjs";
+import { CUTTLEFISH_TARGETS, cuttlefishProductProblems } from "./os-ported/os/cuttlefish-product.mjs";
 import { assertSenseLauncher, assertSenseQualification, readSenseQualification, senseLauncherDigest, writeSenseImageActivation, type SenseImageActivation } from './aosp-sense-image.ts';
 import { stageAlphaSensePolicy } from './aosp-sense-policy.ts';
 import { verifyPinnedUpstream } from './pinned-upstream-source.ts';
@@ -57,7 +57,7 @@ export const LAUNCHER_DEFAULT_PERMISSIONS = [
   "android.permission.READ_PHONE_STATE",
   "android.permission.READ_PHONE_NUMBERS",
 ];
-export const SHARED_CUTTLEFISH_LOCK = "vendor/eliza/packages/os/android/aosp.lock.json";
+export const SHARED_CUTTLEFISH_LOCK = "vendor/eliza/packages/os/aosp/aosp.lock.json";
 export const AOSP_TARGETS = CUTTLEFISH_TARGETS;
 type PhysicalSource = Awaited<ReturnType<typeof verifyPixel10aSource>> & {hardwareLayout?: ReturnType<typeof pixel10aSourceLayout>};
 interface SourceOverrideOptions {
@@ -160,7 +160,7 @@ export function writeOwnerImageTelephony(output: string, tree: string, packageNa
 
 /**
  * Problems that keep the Alpha AOSP product from production staging, read from `root` by the shared
- * Cuttlefish product checks (vendor/eliza/packages/os/scripts/android/cuttlefish-product.mjs): the
+ * Cuttlefish product checks (scripts/os-ported/os/cuttlefish-product.mjs): the
  * product descriptor, its brand config, the shared reviewed Cuttlefish source-lock profile, the host
  * package hashes and the reviewed signer. An empty list means the lock is complete; it says nothing
  * about an image build or boot.
@@ -246,7 +246,7 @@ import { stageListener } from "./aosp-listener.ts";
 
 /**
  * Alpha's policy for the shared image APK admission
- * (vendor/eliza/packages/os/scripts/android/image-apk-admission.mjs): the shared admission requires a
+ * (scripts/os-ported/os/image-apk-admission.mjs): the shared admission requires a
  * test-mocks directory to refuse. Alpha no longer builds a mocks lane, so nothing writes
  * artifacts/test-mocks/; the name stays only for that required refusal. A release row is judged by release-blockers.ts
  * (Alpha's signer and font-licence policy). Production judges the row against the committed
@@ -466,7 +466,7 @@ if (qualification && listenerDescriptor) {
 execFileSync(
   process.execPath,
   [
-    "vendor/eliza/packages/os/scripts/android/stage-launcher-overlay.ts",
+    "vendor/eliza/packages/os/aosp/stage-launcher-overlay.ts",
     "--descriptor",
     admittedLauncherDescriptor,
     "--apk",

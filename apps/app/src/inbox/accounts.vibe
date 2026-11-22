@@ -1,0 +1,165 @@
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/accounts.md, "Story: Grant Gmail access a step at a time"
+import { type Event as AccountsEvent, type MailAccount, type MailAccounts, type GmailCapability, type GmailPermission, Machine as AccountsMachine, canChangeMail, consentCapabilities } from "../../gen/inbox__accounts.effect.vibe"
+import { CloudSession, GoogleAccounts, ownerOf, type GoogleAccount } from "../account/layer.vibe"
+import { SavedMail, type SavedMailScope } from "./saved.vibe"
+
+/** The Cloud owner the Inbox works for: its deployment and environment, user, organization, credential and session generation. */
+export interface MailOwner { readonly environment: string; readonly userId: string; readonly organizationId: string; readonly sessionId: string; readonly credentialId: string }
+
+const capabilityNames: Record<GmailCapability, readonly string[]> = {
+  CapIdentity: ["google.basic_identity"], CapTriage: ["google.gmail.triage"], CapSend: ["google.gmail.send"],
+  CapDrafts: ["google.gmail.drafts"], CapMailbox: ["google.gmail.mailbox", "google.gmail.manage"]
+}
+
+/** The Gmail capabilities a Google account row was granted; a manage grant counts as mailbox changes, as upstream reads it. */
+export function capabilitiesOf(granted: readonly string[]): GmailCapability[] {
+  return (Object.keys(capabilityNames) as GmailCapability[]).filter((c) => capabilityNames[c].some((name) => granted.includes(name)))
+}
+
+/** One Google account row as an Inbox account. */
+export function mailAccountOf(row: GoogleAccount): MailAccount {
+  const id = row.grantId ?? row.connectionId
+  return { id, label: row.email ?? "Gmail account", address: row.email ?? "", connected: id !== "", capabilities: capabilitiesOf(row.grantedCapabilities) }
+}
+
+/** Who this phone's saved mail belongs to and which session and credential may read it. */
+export function savedScope(owner: MailOwner): SavedMailScope {
+  return { owner: JSON.stringify([owner.environment, owner.userId]), organization: owner.organizationId, credential: owner.credentialId, session: owner.sessionId }
+}
+
+/** The key every draft, review and receipt of one account is kept under: environment, user, organization and grant. */
+export function mailOwnerKey(owner: MailOwner, grant: string): string {
+  return grant === "" ? "" : JSON.stringify([owner.environment, owner.userId, owner.organizationId, grant])
+}
+
+/** The accounts the Inbox can show, and the one it shows. */
+export service InboxAccounts {
+  readonly changes: Stream.Stream<MailAccounts>
+  get(): MailAccounts!!
+  /** The Cloud owner now, if one is signed in. */
+  owner(): MailOwner | undefined!!
+  /** The key of the selected account's drafts and operations, or "" when none is selected. */
+  selectedKey(): string!!
+  /** Shows the saved accounts of this owner while Cloud restores. */
+  restoreSaved(): void!!
+  /** Reads the account list for the current Cloud session and keeps a readable selection. */
+  refresh(): void!!
+  /** Shows another readable account. */
+  choose(id: string): void!!
+  /** Gmail confirmed that the selected account's access was revoked. */
+  revoked(id: string): void!!
+  /** A first page was accepted for the selected account, so its saved mail may show again. */
+  acceptedRead(id: string): void!!
+  /** Asks Google, through the account area, for the access `permission` needs, keeping what the account holds. */
+  requestAccess(permission: GmailPermission): void!!
+  /** Whether mail of the selected account may be changed now. */
+  canChange(): boolean!!
+}
+
+/** The account shell over the accounts machine, the account area's Cloud session and Google accounts, and the saved mail. */
+export const layer = Layer.effect(InboxAccounts, effect {
+  const machine = try AccountsMachine
+  const session = try CloudSession
+  const google = try GoogleAccounts
+  const saved = try SavedMail
+
+  effect function owner(): MailOwner | undefined {
+    const s = try session.current()
+    if (ownerOf(s) === 0) return undefined
+    return {
+      environment: `${s.deployment}/${s.environment}`, userId: s.account.userId, organizationId: s.account.organizationId,
+      sessionId: String(s.generation), credentialId: s.account.credentialId
+    }
+  }
+
+  effect function send(event: AccountsEvent) {
+    machine.send(event) catch () => undefined
+  }
+
+  effect function adopt(current: MailOwner, rows: ReadonlyArray<GoogleAccount>) {
+    const before = try machine.get()
+    try send({ type: "accountsRead", session: current.sessionId, fresh: rows.map(mailAccountOf) })
+    const after = try machine.get()
+    if (after.readEpoch !== before.readEpoch) try saved.forget(savedScope(current))
+    if (after.phase === "Checked" && after.selected !== "") try saved.persist(savedScope(current), after.rows, after.selected, false)
+  }
+
+  effect function refresh() {
+    const current = try owner()
+    if (current === undefined) {
+      try send({ type: "signOut" })
+      return
+    }
+    try send({ type: "begin", session: current.sessionId })
+    try google.reload()
+    try adopt(current, try google.list())
+  }
+
+  fork.scoped (effect {
+    for try (const rows of google.accounts) {
+      const current = try owner()
+      if (current === undefined) {
+        try send({ type: "signOut" })
+        continue
+      }
+      const s = try machine.get()
+      if (s.phase !== "Checking" || s.session !== current.sessionId) try send({ type: "begin", session: current.sessionId })
+      try adopt(current, rows)
+    }
+  })
+
+  fork.scoped (effect {
+    let generation = -1
+    for try (const s of session.changes) {
+      const now = ownerOf(s)
+      if (now === generation) continue
+      generation = now
+      if (now === 0) try send({ type: "signOut" })
+      else try refresh()
+    }
+  })
+
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    owner,
+    effect selectedKey() {
+      const current = try owner()
+      const s = try machine.get()
+      return current === undefined || s.selected === "" ? "" : mailOwnerKey(current, s.selected)
+    },
+    effect restoreSaved() {
+      const current = try owner()
+      if (current === undefined) return
+      const restored = try saved.restore(savedScope(current), null)
+      if (restored !== undefined) try send({ type: "restoreSaved", saved: restored.accounts, choice: restored.selected })
+    },
+    refresh,
+    effect choose(id: string) {
+      const before = try machine.get()
+      try send({ type: "chooseAccount", id })
+      const current = try owner()
+      const s = try machine.get()
+      if (current !== undefined && s.selected === id && before.selected !== id) {
+        try saved.forget(savedScope(current))
+        try saved.persist(savedScope(current), s.rows, s.selected, false)
+      }
+    },
+    effect revoked(id: string) {
+      try send({ type: "revoke", id })
+      const current = try owner()
+      if (current !== undefined) try saved.forget(savedScope(current))
+      try refresh()
+    },
+    acceptedRead: (id: string) => send({ type: "acceptedRead", id }),
+    effect requestAccess(permission: GmailPermission) {
+      const s = try machine.get()
+      const held = s.rows.find((a) => a.id === s.selected)?.capabilities ?? []
+      try google.connect(consentCapabilities(permission, held).map((c) => capabilityNames[c][0]!))
+      try refresh()
+    },
+    effect canChange() {
+      return canChangeMail(try machine.get())
+    }
+  }
+})

@@ -1,0 +1,2 @@
+// spec/shell/toasts.md, "Story: Read what just happened, at my own pace"
+export { Notices as Toasts, noticesLive as toastsLive, type ToastOptions } from "./notices.vibe"

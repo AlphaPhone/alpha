@@ -1,0 +1,9 @@
+// spec/cloud/index.md, "Story: Use inference on my subscription or funded pilot account"; spec/cloud/index.md, "Story: Sign in to the Cloud"
+import { cloudWorker, type CloudBindings } from "@elizaos/cloud/worker"
+
+export { SpeechRelayCoordinator } from "@elizaos/cloud/worker"
+
+/** Alpha Cloud's API Worker: upstream's whole Cloud Worker with no product extension; identity and resources come from the rendered Wrangler configuration. */
+export const alphaCloudWorker = cloudWorker<CloudBindings>()
+
+export default alphaCloudWorker

@@ -1,0 +1,140 @@
+// spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"
+import { recognizedMapsCards, type MapsCard } from "@elizaos/plugin-maps/cards"
+import type { Line } from "../../gen/assistant__reply.ts"
+
+/** A workflow run a reply announced. */
+export interface WorkflowRun { readonly workflowId: string; readonly runId: string; readonly title: string }
+
+/** One option of a reply's share choice. */
+export interface ChoiceOption { readonly value: string; readonly label: string }
+
+/** What a classified line carries besides its kind. */
+export type Payload =
+  | { readonly kind: "none" }
+  | { readonly kind: "maps"; readonly card: MapsCard }
+  | { readonly kind: "workflow"; readonly run: WorkflowRun }
+  | { readonly kind: "choice"; readonly id: string; readonly options: readonly ChoiceOption[] }
+
+/** One line of a reply as the spec sees it, with the source text it covers. */
+export interface Segment { readonly line: Line; readonly text: string; readonly payload: Payload }
+
+const fenceLine = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/
+const workflowOpen = /^\s*\[WORKFLOW\]\s*$/
+const workflowClose = /^\s*\[\/WORKFLOW\]\s*$/
+const choiceOpen = /^\s*\[CHOICE:(maps-share|checkin-[0-9a-f-]{36}) id=([A-Za-z0-9_-]{1,128})\]\s*$/
+const choiceClose = /^\s*\[\/CHOICE\]\s*$/
+const form = /^\s*\[FORM\]([\s\S]*)\[\/FORM\]\s*$/
+const bracketTag = /^\s*\[\/?[A-Z][A-Z0-9_:-]*(?:[ \t][^\]]*)?\]/
+const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/
+const none: Payload = { kind: "none" }
+
+interface Fence { readonly character: string; readonly length: number }
+
+function fenceAfter(open: Fence | undefined, line: string): Fence | undefined {
+  const found = fenceLine.exec(line)
+  if (found === null) return open
+  const run = found[1] ?? ""
+  const rest = (found[2] ?? "").trim()
+  const character = run.charAt(0)
+  if (open === undefined) return character === "`" && rest.includes("`") ? undefined : { character, length: run.length }
+  return character === open.character && run.length >= open.length && rest === "" ? undefined : open
+}
+
+function parsed(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+function workflowRun(body: readonly string[]): WorkflowRun | undefined {
+  const value = parsed(body.join("\n"))
+  if (typeof value !== "object" || value === null) return undefined
+  const { workflowId, runId, title } = value as { readonly workflowId?: unknown; readonly runId?: unknown; readonly title?: unknown }
+  if (typeof workflowId !== "string" || typeof runId !== "string" || workflowId === "" || runId === "") return undefined
+  return { workflowId, runId, title: typeof title === "string" && title.trim() !== "" ? title.trim().slice(0, 200) : "Workflow run" }
+}
+
+function validForm(body: string): boolean {
+  const value = parsed(body)
+  return typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string" && Array.isArray((value as { fields?: unknown }).fields)
+}
+
+function closingIndex(lines: readonly string[], from: number, closes: RegExp): number {
+  for (let at = from; at < lines.length; at++) if (closes.test(lines[at] ?? "")) return at
+  return -1
+}
+
+/** The lines of a reply, each classified for spec/assistant/reply.md; `checkin` says the message is a check-in whose choice block is hidden. */
+export function classify(text: string, checkin: boolean): readonly Segment[] {
+  const lines = text.split(/\r?\n/)
+  const maps = new Map(recognizedMapsCards(text).map((found) => [found.start, found] as const))
+  const segments: Segment[] = []
+  let fence: Fence | undefined
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at] ?? ""
+    const card = fence === undefined ? maps.get(at) : undefined
+    if (card !== undefined) {
+      segments.push({ line: { tag: "ToolBlock", card: "MapsCard" }, text: lines.slice(at, card.end + 1).join("\n"), payload: { kind: "maps", card: card.card } })
+      at = card.end
+      continue
+    }
+    const next = fenceAfter(fence, line)
+    if (next !== fence) {
+      fence = next
+      segments.push({ line: { tag: "FenceMark" }, text: line, payload: none })
+      continue
+    }
+    if (fence !== undefined) {
+      segments.push({ line: { tag: "Prose" }, text: line, payload: none })
+      continue
+    }
+    if (workflowOpen.test(line)) {
+      const end = closingIndex(lines, at + 1, workflowClose)
+      const run = end < 0 ? undefined : workflowRun(lines.slice(at + 1, end))
+      const covered = end < 0 ? lines.slice(at) : lines.slice(at, end + 1)
+      segments.push(run === undefined
+        ? { line: { tag: "BrokenBlock" }, text: covered.join("\n"), payload: none }
+        : { line: { tag: "ToolBlock", card: "WorkflowCard" }, text: covered.join("\n"), payload: { kind: "workflow", run } })
+      at = end < 0 ? lines.length : end
+      continue
+    }
+    const choice = choiceOpen.exec(line)
+    if (choice !== null) {
+      const end = closingIndex(lines, at + 1, choiceClose)
+      const body = end < 0 ? [] : lines.slice(at + 1, end)
+      const options = body.flatMap((entry) => {
+        const found = option.exec(entry.trim())
+        return found === null ? [] : [{ value: (found[1] ?? "").trim(), label: (found[2] ?? "").trim() }]
+      })
+      const covered = (end < 0 ? lines.slice(at, at + 1) : lines.slice(at, end + 1)).join("\n")
+      const isCheckin = (choice[1] ?? "").startsWith("checkin-")
+      if (end >= 0 && isCheckin && checkin) segments.push({ line: { tag: "FormBlock" }, text: covered, payload: none })
+      else if (end >= 0 && !isCheckin && options.length === 2 && options.length === body.length)
+        segments.push({ line: { tag: "ToolBlock", card: "ChoiceCard" }, text: covered, payload: { kind: "choice", id: choice[2] ?? "", options } })
+      else {
+        segments.push({ line: { tag: "UnknownTag" }, text: covered, payload: none })
+      }
+      at = end < 0 ? at : end
+      continue
+    }
+    const filled = form.exec(line)
+    if (filled !== null && validForm(filled[1] ?? "")) {
+      segments.push({ line: { tag: "FormBlock" }, text: line, payload: none })
+      continue
+    }
+    segments.push({ line: bracketTag.test(line) ? { tag: "UnknownTag" } : { tag: "Prose" }, text: line, payload: none })
+  }
+  return segments
+}
+
+/** The text a surface without cards speaks or copies: the reply with its cards, forms and hidden blocks taken out. */
+export function plainText(segments: readonly Segment[]): string {
+  return segments
+    .filter((segment) => segment.line.tag === "Prose" || segment.line.tag === "UnknownTag" || segment.line.tag === "FenceMark")
+    .map((segment) => segment.text)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}

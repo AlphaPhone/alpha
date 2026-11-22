@@ -1,12 +1,11 @@
-import { serializeOwnerRouteTable } from "../apps/app/src/product/owner-route-table.ts";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { androidEnv, tool } from "./toolchain.ts";
 import {
   apkDistributionProblems, extractApkWebPayload, parseApkSignerDigest, readApk, readApkSignerDigest,
-} from "../vendor/eliza/packages/app/scripts/mobile/artifact-inspection/apk-distribution.mjs";
-import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "../vendor/eliza/packages/app/scripts/lib/android-manifest-facts.mjs";
+} from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
+import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "../vendor/eliza/packages/os/android/android-manifest-facts.mjs";
 
 export type ApkMode = "debug" | "release";
 export type ApkVariant = "launcher";
@@ -73,7 +72,7 @@ const assessDistribution = apkDistributionProblems as (
 
 
 // Alpha's distribution policy as data for the upstream APK inspection
-// (vendor/eliza/packages/app/scripts/mobile/artifact-inspection/apk-distribution.mjs).
+// (vendor/eliza/packages/os/android/apk-distribution.mjs).
 // Development hooks no APK may package. The upstream inspection admits them only in a test-mocks
 // debug build, and Alpha never builds one, so every APK is refused if it carries them.
 export const DEVELOPMENT_CLASSES = Object.freeze([
@@ -280,7 +279,7 @@ export function verifyOwnerRouteTable(file: string) {
   let packaged;
   try { packaged = execFileSync("unzip", ["-p", file, "assets/owner-routes.json"], { stdio: ["ignore", "pipe", "pipe"] }); }
   catch { throw new Error("assets/owner-routes.json is missing"); }
-  if (!packaged.equals(Buffer.from(serializeOwnerRouteTable())))
+  if (!packaged.equals(fs.readFileSync(new URL('../apps/app/src/platform/owner-routes.json', import.meta.url))))
     throw new Error("assets/owner-routes.json differs from the generated owner-route table");
 }
 

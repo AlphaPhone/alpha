@@ -1,14 +1,14 @@
 /**
  * Alpha's binding of the shared system secure camera (policy P-23):
- * vendor/eliza/packages/os/scripts/android/secure-camera.mjs owns the reviewed Camera2/SystemUI
- * source contract (packages/os/android/sources/secure-camera.json), the product overlay, the
+ * scripts/os-ported/os/secure-camera.mjs owns the reviewed Camera2/SystemUI
+ * source contract (packages/os/aosp/sources/secure-camera.json), the product overlay, the
  * launcher manifest policy and the read-only image checks. Alpha supplies only its package.
  */
 import fs from "node:fs";
 import {
   assertNoLockScreenSurface,
   verifySecureCameraImage as sharedImageCheck,
-} from "../vendor/eliza/packages/os/scripts/android/secure-camera.mjs";
+} from "./os-ported/os/secure-camera.mjs";
 
 export {
   SECURE_CAMERA_CONTRACT,
@@ -18,7 +18,7 @@ export {
   secureCameraPackage,
   verifySecureCameraSource,
   writeSecureCameraOverlay,
-} from "../vendor/eliza/packages/os/scripts/android/secure-camera.mjs";
+} from "./os-ported/os/secure-camera.mjs";
 
 const alphaPackage: string = JSON.parse(fs.readFileSync(new URL("../app.config.json", import.meta.url), "utf8")).appId;
 

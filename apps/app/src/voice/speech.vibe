@@ -1,0 +1,217 @@
+// spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/speech.md, "Story: Never have a secret read aloud"
+import type { MisroutedSpeech, SpeechAttemptFailed } from "@elizaos/plugin-local-inference/speech-route"
+import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { Machine, voiceEntry, type Channel, type Event, type SpeechChains, type VoiceEntry } from "../../gen/voice__speech.effect.vibe"
+import type { Route } from "../../gen/voice__route.ts"
+import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
+import { refusalOf } from "./failure.vibe"
+import { newId } from "./ids.ts"
+import { PlaybackEvent, PreparedSpeech } from "./native.schema.vibe"
+import { planReading, planReply, refusalMessage, type SpokenRefusal } from "./spoken-text.ts"
+
+/** The passage was not spoken because of what it says. */
+export error SpeechRefused { reason: SpokenRefusal; message: string }
+/** No route could speak the passage, nor the phone. */
+export error SpeechUnavailable { route: Route; cause: unknown }
+/** Speech stopped before the passage finished: the owner's stop, a call, or a failure after some audio. */
+export error SpeechInterrupted { reason: string; started: boolean }
+/** The channel's last stop was never confirmed; Alpha must restart before it speaks again. */
+export error SpeechNotStopped
+
+/** How a passage is spoken: queued behind the one playing, and told when its first audio starts. */
+export interface SpeakOptions {
+  readonly queue?: boolean
+  readonly onStarted?: () => void!!
+}
+
+/** Everything Alpha says aloud, one passage at a time on each channel, with confirmed cleanup. */
+export service Speech {
+  /** The channels now and after each change. */
+  readonly changes: Stream.Stream<SpeechChains>
+  /** The channels at this moment. */
+  get(): SpeechChains!!
+  /** Speak a reply or a reading on `channel`, on the route in use, on the phone when a network route fails before audio. */
+  speak(text: string, channel: Channel, options?: SpeakOptions): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  /** Speak already planned reply pieces in order, telling `played` after each. */
+  speakPieces(pieces: readonly string[], played: () => void!!): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  /** Stop what `channel` is saying now. */
+  stop(channel: Channel): void!!
+  /** Whether voice may enter now, given an open recording. */
+  entry(recorderOpen: boolean): VoiceEntry!!
+  /** Prime the phone's output after a sent turn; advisory. */
+  warmDevice(): void!!
+  /** Warm Cloud speech for `connection`, at most once a minute. */
+  warmCloud(connection: number): void!!
+  /** Mute or unmute only the speech output; false when the phone cannot. */
+  setMuted(muted: boolean): boolean!!
+}
+
+const PASSAGE_LIMIT = "20 minutes"
+const BUSY_WAIT = "100 millis"
+const PLAYBACK_EVENTS = ["playbackEnded", "playbackFailed", "playbackStopped"] as const
+const decodePrepared = Schema.decodeUnknownOption(PreparedSpeech)
+const decodePlayback = Schema.decodeUnknownOption(PlaybackEvent)
+
+type Ending = { readonly event: (typeof PLAYBACK_EVENTS)[number] | "stopped"; readonly reason?: string }
+
+function synthesis(route: Route, account: VoiceAccount, text: string, requestId: string, queue: boolean) {
+  const replace = queue ? { replace: false } : {}
+  if (route === "Cloud" && account.kind === "cloud") {
+    return { method: "synthesize", args: { text, requestId, environment: account.environment, credentialId: account.credentialId, ...replace } }
+  }
+  if (route === "Direct" && account.kind === "own") {
+    return { method: "synthesizeOwn", args: { text, requestId, providerRevision: account.revision, ...replace } }
+  }
+  return { method: "synthesizeLocal", args: { text, requestId, ...replace } }
+}
+
+/** The speech service over the speech Machine it is given. */
+export const speechService = Layer.effect(Speech, effect {
+  const held = try Machine
+  const native = try Native
+  const resident = try Resident
+  const routes = try VoiceRoute
+  const stops = new Map<Channel, Deferred.Deferred<string>>()
+
+  effect function send(event: Event) {
+    held.send(event) catch () => undefined
+  }
+
+  effect function chainOf(channel: Channel) {
+    const state = try held.get()
+    return channel === "Replies" ? state.replies : channel === "Reading" ? state.reading : channel === "AppSpeech" ? state.app : state.cloud
+  }
+
+  effect function nativeStop(args: object) {
+    const stopped = native.invoke("AlphaVoiceCloud", "stopPlayback", args) catch () => false
+    return stopped !== false
+  }
+
+  effect function admit(channel: Channel) {
+    try send({ type: "speak", ch: channel })
+    while (true) {
+      const chain = try chainOf(channel)
+      if (chain.stage === "Playing") return
+      if (chain.stage === "Latched") throw new SpeechNotStopped()
+      if (chain.stage === "Recovering") {
+        try send({ type: "recoverySettled", ch: channel, confirmed: try nativeStop({}) })
+        continue
+      }
+      try sleep(BUSY_WAIT)
+    }
+  }
+
+  effect function retire(channel: Channel, requestId: string, playbackId: string | undefined) {
+    if ((try chainOf(channel)).stage === "Playing") try send({ type: "finished", ch: channel })
+    const cancelled = native.invoke("AlphaVoiceCloud", "cancel", { requestId }) catch () => false
+    const stopped = try nativeStop({ requestId, ...(playbackId ? { playbackId } : {}) })
+    try send({ type: "cleanupSettled", ch: channel, confirmed: cancelled !== false && stopped })
+  }
+
+  effect function ended(playbackId: string) {
+    const streams = PLAYBACK_EVENTS.map((event) => Stream.map(native.listen("AlphaVoiceCloud", event), (raw) => ({ event, raw })))
+    const matching = Stream.filter(Stream.mergeAll(streams, { concurrency: "unbounded" }), ({ raw }) => Option.getOrUndefined(decodePlayback(raw))?.playbackId === playbackId)
+    const first = Stream.runHead(matching) catch () => Option.none()
+    const found = Option.getOrUndefined(first)
+    const reason = found === undefined ? undefined : Option.getOrUndefined(decodePlayback(found.raw))?.reason
+    const ending: Ending = { event: found?.event ?? "playbackFailed", ...(reason ? { reason } : {}) }
+    return ending
+  }
+
+  effect function untilBusyClears<A>(call: () => A!(SpeechAttemptFailed | MisroutedSpeech), queue: boolean) {
+    while (true) {
+      const value = call() catch effect (error) => {
+        if (queue && error._tag === "SpeechAttemptFailed" && refusalOf(error.cause, 0).code === "playback-busy") return undefined
+        throw error
+      }
+      if (value !== undefined) return value
+      try sleep(BUSY_WAIT)
+    }
+  }
+
+  effect function playPiece(channel: Channel, text: string, queue: boolean, started: () => void!!) {
+    const stopSignal = stops.get(channel)
+    const requestId = newId()
+    let playbackId: string | undefined
+    const playing = routes.run((route: Route, heard) => effect {
+      const account = try routes.account()
+      const call = synthesis(route, account, text, requestId, queue)
+      const id = try untilBusyClears(() => effect {
+        const raw = native.invoke("AlphaVoiceCloud", call.method, call.args) catch effect (error) => { throw attemptFailed(error) }
+        const prepared = Option.getOrUndefined(decodePrepared(raw))
+        if (prepared === undefined || prepared.playbackId === "") throw attemptFailed({ code: "no-playback" })
+        return prepared.playbackId
+      }, queue)
+      playbackId = id
+      const ending = fork ended(id)
+      try heard()
+      try untilBusyClears(() => effect {
+        native.invoke("AlphaVoiceCloud", "play", { playbackId: id, ...(queue ? { replace: false } : {}) }) catch effect (error) => { throw attemptFailed(error) }
+        return true
+      }, queue)
+      try started()
+      return try join ending
+    })
+    const stopped = effect {
+      const reason = try (stopSignal === undefined ? never : Deferred.await(stopSignal))
+      const ending: Ending = { event: "stopped", reason }
+      return ending
+    }
+    try ensuring(effect {
+      const outcome = try.race [
+        effect { return playing catch effect (error) => { throw new SpeechUnavailable({ route: error.route, cause: error.cause }) } },
+        stopped,
+      ]
+      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: playbackId !== undefined })
+    }, effect { retire(channel, requestId, playbackId) catch () => undefined })
+  }
+
+  effect function speakPlanned(channel: Channel, pieces: readonly string[], queue: boolean, started: () => void!!, played: () => void!!) {
+    if (pieces.length === 0) {
+      try started()
+      return
+    }
+    try admit(channel)
+    stops.set(channel, try Deferred.make<string>())
+    let first = true
+    timeout(effect {
+      for (const piece of pieces) {
+        try playPiece(channel, piece, queue || !first, first ? started : () => sync(() => undefined))
+        first = false
+        try played()
+      }
+    }, PASSAGE_LIMIT) catch effect (error) => {
+      if (error._tag === "TimeoutError") throw new SpeechInterrupted({ reason: "timeout", started: !first })
+      throw error
+    }
+  }
+
+  return {
+    changes: held.changes,
+    get: () => held.get(),
+    effect speak(text: string, channel: Channel, options?: SpeakOptions) {
+      const plan = channel === "Replies" ? planReply(text) : planReading(text)
+      if (plan.kind === "refused") throw new SpeechRefused({ reason: plan.reason, message: refusalMessage(plan.reason, channel === "Replies") })
+      try speakPlanned(channel, plan.pieces, options?.queue ?? false, options?.onStarted ?? (() => sync(() => undefined)), () => sync(() => undefined))
+    },
+    effect speakPieces(pieces: readonly string[], played: () => void!!) {
+      try speakPlanned("Replies", pieces, true, () => sync(() => undefined), played)
+    },
+    effect stop(channel: Channel) {
+      const signal = stops.get(channel)
+      if (signal !== undefined) try Deferred.succeed(signal, "stopped")
+    },
+    effect entry(recorderOpen: boolean) { return voiceEntry(try held.get(), recorderOpen) },
+    effect warmDevice() { native.invoke("AlphaVoiceCloud", "warmSpeechOutput", {}) catch () => undefined },
+    effect warmCloud(connection: number) {
+      const now = try Clock.currentTimeMillis
+      const sent = held.send({ type: "warmCloud", connection, now }) catch () => undefined
+      if (sent !== undefined) resident.json("POST", "/api/cloud/warm", {}) catch () => undefined
+    },
+    effect setMuted(muted: boolean) {
+      const done = native.invoke("AlphaVoiceCloud", "setSpeechOutputMuted", { muted }) catch () => false
+      return done !== false
+    },
+  }
+})

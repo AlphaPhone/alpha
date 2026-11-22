@@ -1,0 +1,85 @@
+// spec/files/downloads.md, "Story: Download exactly the files I selected"; spec/files/browserDownloads.md, "Story: Save a download only as I reviewed it"
+import { type Export, Machine as ExportMachine } from "../../gen/files__downloads.effect.vibe"
+import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { type DownloadFile, fromBase64, handOver, pageVisible, storedZip } from "./download.ts"
+import { keyPath } from "./paths.vibe"
+import { Documents, FilesStorage } from "./storage.vibe"
+
+const BROWSER_PLUGIN = "AlphaBrowser"
+
+/** How a download request ended: handed to the browser, or why not. */
+export type DownloadResult = "handed" | "refused" | "changed" | "busy"
+
+/** Downloads of selected files in the browser build, and the route the native Browser's Downloads list asks Files to open. */
+export service FilesDownloads {
+  readonly exports: Stream.Stream<Export>
+  download(keys: readonly string[]): DownloadResult!!
+  /** `"downloads"` each time the Browser's Downloads list asks to show its files in Files. */
+  readonly routes: Stream.Stream<string>
+}
+
+/** Downloads over the export machine, the device's storage and the browser's own downloads. */
+export const layer = Layer.effect(FilesDownloads, effect {
+  const storage = try FilesStorage
+  const documents = try Documents
+  const native = try Native
+  const exports = try ExportMachine
+  const view = try BrowserMachine
+
+  effect function identities(paths: readonly string[], volume: string) {
+    const answer = storage.reviewedIdentities(paths, volume) catch () => undefined
+    return answer?.status === "ready" && answer.reviewed?.length === paths.length ? answer.reviewed.join("\n") : undefined
+  }
+
+  effect function readOne(path: string, volume: string) {
+    const selected = storage.select(path, volume) catch () => undefined
+    if (selected?.status !== "selected" || !("selectionId" in selected)) return undefined
+    const bytes = documents.bytes(selected.selectionId) catch () => undefined
+    try documents.forget(selected.selectionId)
+    if (bytes === undefined) return undefined
+    const file = Effect.try(() => ({ name: bytes.name, mimeType: bytes.mimeType, bytes: fromBase64(bytes.dataBase64) } satisfies DownloadFile)) catch () => undefined
+    return file !== undefined && file.bytes.length === bytes.size ? file : undefined
+  }
+
+  effect function download(keys: readonly string[]) {
+    const s = try view.get()
+    const located = keys.map(keyPath)
+    const volume = located[0]?.volume ?? ""
+    const paths = located.map((k) => k.path)
+    const batch = s.generation
+    const begun = exports.send({ type: "beginExport", batch, count: keys.length, unique: new Set(keys).size === keys.length, ownerCurrent: s.active }) catch () => undefined
+    if (begun === undefined) return "busy" satisfies DownloadResult
+    const exportId = begun.ticket
+    const reviewed = try identities(paths, volume)
+    const files: DownloadFile[] = []
+    for (const path of paths) {
+      const file = try readOne(path, volume)
+      if (file === undefined) break
+      files.push(file)
+    }
+    const valid = reviewed !== undefined && files.length === paths.length
+    try ignore(exports.send({ type: "finishReading", exportId, valid }))
+    if (!valid) return "changed" satisfies DownloadResult
+    const single = files.length === 1 ? files[0] : undefined
+    const encoded = single ? single.bytes : Effect.try(() => storedZip(files)) catch () => undefined
+    try ignore(exports.send({ type: "finishEncoding", exportId, encoded: encoded !== undefined }))
+    if (encoded === undefined) return "refused" satisfies DownloadResult
+    const reread = (try identities(paths, volume)) === reviewed
+    const now = try view.get()
+    const visible = Effect.try(() => pageVisible()) catch () => false
+    const handed = exports.send({ type: "checkAndHand", exportId, batch: now.generation, reread, ownerCurrent: now.active, visible }) catch () => undefined
+    if (!handed?.handed) return (reread ? "refused" : "changed") satisfies DownloadResult
+    const handedOver = Effect.try(() => {
+      handOver(single ? single.name : "Alpha files.zip", single ? single.mimeType : "application/zip", encoded)
+      return true
+    }) catch () => false
+    return handedOver ? "handed" satisfies DownloadResult : "refused" satisfies DownloadResult
+  }
+
+  return {
+    exports: exports.changes,
+    download,
+    routes: Stream.map(Stream.catch(native.listen(BROWSER_PLUGIN, "showDownloads"), () => Stream.empty), () => "downloads"),
+  }
+})

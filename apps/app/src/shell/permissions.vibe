@@ -1,0 +1,198 @@
+// spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as PermissionsMachine, accessOf as stepAccess, keyAt, walkthroughOpens, type Access, type Event as PermissionsEvent, type Perm, type Permissions as Walkthrough } from "../../gen/shell__permissions.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import {
+  CalendarAccess, CameraAccess, FilesAccess, LocationAccess, MicrophoneAccess, NotificationAccess, PhotoAccess, SavedProgress,
+} from "./native.schema.vibe"
+import { browserPermissionRequest, browserPermissionStatus, pageEvents, pageHidden } from "./page.ts"
+
+/** Where the walkthrough's progress is kept on this device. */
+export const PROGRESS_KEY = ownerKey("device", "shell/permission-progress")
+
+/** What decides whether the walkthrough may open now, from the account area. */
+export interface ConnectionFacts {
+  readonly account: boolean
+  readonly ownKeys: boolean
+  readonly signingIn: boolean
+  readonly busy: boolean
+  readonly residentStarting: boolean
+  readonly background: boolean
+  /** A new account was made by this sign-in. */
+  readonly created: boolean
+}
+
+/** The startup access walkthrough, for the account area and Settings. */
+export service Permissions {
+  /** The connection changed: open the walkthrough for a signed-in account, or return to sign-in. */
+  connection(facts: ConnectionFacts): void!!
+  /** Allow on the current step: Android asks only now, and only once. */
+  allow(): void!!
+  /** Moves past the current step; `skip` moves on without its access. */
+  next(skip: boolean): void!!
+  /** Done on the Ready card. */
+  finish(): void!!
+  /** Settings → "Set up Alpha access" at one step. */
+  reopen(index: number): void!!
+  close(): void!!
+}
+
+interface Bridge {
+  readonly status: () => Access!!
+  readonly request: () => void!!
+  readonly settings: () => void!!
+}
+
+type Answer = "granted" | "denied" | "prompt" | "prompt-with-rationale" | "unsupported"
+
+function accessFrom(answer: Answer, attempted: boolean): Access {
+  if (answer === "granted") return "AccessReady"
+  if (answer === "unsupported") return "AccessUnavailable"
+  return answer === "denied" || attempted ? "AccessSettings" : "AccessAsk"
+}
+
+const BROWSER_NAMES: Readonly<Record<Perm, "notifications" | "microphone" | "camera" | "location">> = {
+  PermNotifications: "notifications", PermMicrophone: "microphone", PermCamera: "camera", PermLocation: "location",
+  PermCalendar: "notifications", PermPhotos: "notifications", PermFiles: "notifications",
+}
+
+/** The walkthrough service: each step's platform reader, the owner's request and the kept progress. */
+export const permissionsLive = Layer.effect(Permissions, effect {
+  const native = try Native
+  const build = try Build
+  const store = try KeyValueStore.KeyValueStore
+  const machine = try PermissionsMachine
+  const onDevice = build.info.variant !== "browser"
+
+  effect function sendTo(event: PermissionsEvent) {
+    const sent = machine.send(event) catch () => undefined
+    return sent
+  }
+
+  effect function attempted(key: Perm) {
+    return (try machine.get()).attempted.includes(key)
+  }
+
+  effect function nativeAnswer<A>(plugin: string, method: string, decode: (input: unknown) => A!unknown, read: (value: A) => Answer) {
+    const value = effect { return read(try decode(try native.invoke(plugin, method))) } catch () => "unsupported" as Answer
+    return value
+  }
+
+  function bridgeFor(key: Perm): Bridge {
+    const privacy = () => native.invoke("AlphaDevice", "openSettings", { page: "privacy" }) catch () => undefined
+    const quietly = (plugin: string, method: string, args?: unknown) => native.invoke(plugin, method, args) catch () => undefined
+    if (!onDevice) {
+      const name = BROWSER_NAMES[key]
+      return {
+        status: effect () => accessFrom(try browserPermissionStatus(name), try attempted(key)),
+        request: () => browserPermissionRequest(name),
+        settings: () => sync(() => undefined),
+      }
+    }
+    const state = (value: string): Answer => value === "granted" || value === "denied" ? value : value === "prompt" || value === "prompt-with-rationale" ? "prompt" : "unsupported"
+    switch (key) {
+      case "PermNotifications": return {
+        status: effect () => {
+          const read = effect { return try Schema.decodeUnknownEffect(NotificationAccess)(try native.invoke("AlphaNotifications", "status")) } catch () => undefined
+          if (read === undefined) return "AccessUnavailable" as Access
+          return read.permissionGranted && read.appEnabled ? "AccessReady" as Access : accessFrom("prompt", try attempted(key) || read.permissionGranted)
+        },
+        request: () => quietly("DailyApps", "requestPermissions", { permissions: ["notifications"] }),
+        settings: () => quietly("AlphaDevice", "openSettings", { page: "notifications" }),
+      }
+      case "PermMicrophone": return {
+        status: effect () => accessFrom(try nativeAnswer("AlphaVoiceCloud", "checkPermissions", Schema.decodeUnknownEffect(MicrophoneAccess), (v) => state(v.microphone)), try attempted(key)),
+        request: () => quietly("AlphaVoiceCloud", "requestPermissions", { permissions: ["microphone"] }),
+        settings: privacy,
+      }
+      case "PermCamera": return {
+        status: effect () => accessFrom(try nativeAnswer("DailyApps", "checkPermissions", Schema.decodeUnknownEffect(CameraAccess), (v) => state(v.camera)), try attempted(key)),
+        request: () => quietly("DailyApps", "requestPermissions", { permissions: ["camera"] }),
+        settings: privacy,
+      }
+      case "PermLocation": return {
+        status: effect () => accessFrom(try nativeAnswer("ElizaLocation", "checkPermissions", Schema.decodeUnknownEffect(LocationAccess), (v) => state(v.location)), try attempted(key)),
+        request: () => quietly("ElizaLocation", "requestPermissions"),
+        settings: privacy,
+      }
+      case "PermCalendar": return {
+        status: effect () => accessFrom(try nativeAnswer("AlphaCalendar", "checkPermissions", Schema.decodeUnknownEffect(CalendarAccess), (v) => state(v.calendar)), try attempted(key)),
+        request: () => quietly("AlphaCalendar", "requestAccess"),
+        settings: privacy,
+      }
+      case "PermPhotos": return {
+        status: effect () => accessFrom(try nativeAnswer("AlphaPhotoLibrary", "scope", Schema.decodeUnknownEffect(PhotoAccess), (v) => v.locked ? "unsupported" : v.scope === "denied" ? "denied" : "granted"), try attempted(key)),
+        request: () => quietly("AlphaPhotoLibrary", "requestAccess"),
+        settings: privacy,
+      }
+      case "PermFiles": return {
+        status: effect () => accessFrom(try nativeAnswer("AlphaFiles", "storageState", Schema.decodeUnknownEffect(FilesAccess), (v) => v.access === "denied" ? "prompt" : "granted"), try attempted(key)),
+        request: () => quietly("AlphaFiles", "storageRequestAccess"),
+        settings: () => quietly("AlphaFiles", "storageRequestAccess", { settings: true }),
+      }
+    }
+  }
+
+  effect function readAll() {
+    const state: Walkthrough = try machine.get()
+    for (const key of state.keys) {
+      const access = try bridgeFor(key).status()
+      try sendTo({ type: "platformStatus", key, access })
+    }
+  }
+
+  effect function save(state: Walkthrough) {
+    const saved = { attempted: [...state.attempted], saved: state.completed ? state.keys.length : Math.max(0, state.progress), done: state.completed }
+    const kept = store.set(PROGRESS_KEY, JSON.stringify(saved)) catch () => false
+    if (kept === false) try sendTo({ type: "progressWriteFailed" })
+  }
+
+  const raw = store.get(PROGRESS_KEY) catch () => undefined
+  const text = Option.isOption(raw) ? Option.getOrUndefined(raw) : raw
+  const restored = typeof text !== "string" ? undefined : (effect { return try Schema.decodeUnknownEffect(SavedProgress)(try Effect.try(() => JSON.parse(text))) } catch () => undefined)
+  try sendTo({ type: "restore", native: onDevice, attempted: restored === undefined ? [] : [...restored.attempted], saved: restored?.saved ?? 0, done: restored?.done ?? false })
+  try readAll()
+  fork.scoped (effect {
+    for try (const _ of pageEvents("visibilitychange", "document")) {
+      if (pageHidden()) try sendTo({ type: "suspend" })
+      else {
+        try sendTo({ type: "resume" })
+        try readAll()
+      }
+    }
+  })
+
+  return {
+    effect connection(facts: ConnectionFacts) {
+      const state = try machine.get()
+      const opens = walkthroughOpens(facts.account, facts.ownKeys, facts.signingIn, facts.busy, facts.residentStarting, facts.background)
+      if (opens && !state.signedIn) try sendTo({ type: "signIn", created: facts.created })
+      else if (!facts.account && !facts.ownKeys && state.signedIn) try sendTo({ type: "signOut" })
+    },
+    effect allow() {
+      const begun = try sendTo({ type: "begin" })
+      if (begun === undefined) return
+      const key = keyAt(begun, begun.pending)
+      const bridge = bridgeFor(key)
+      if ((try sendTo({ type: "ask" })) !== undefined) {
+        try save(try machine.get())
+        try bridge.request()
+      } else if (stepAccess(begun, begun.pending) === "AccessSettings") {
+        try bridge.settings()
+      }
+      try sendTo({ type: "settle", access: try bridge.status() })
+    },
+    effect next(skip: boolean) {
+      const after = try sendTo({ type: "advance", skip })
+      if (after !== undefined) try save(after)
+    },
+    effect finish() { try sendTo({ type: "finish" }) },
+    effect reopen(index: number) {
+      try sendTo({ type: "openTarget", index })
+      try readAll()
+    },
+    effect close() { try sendTo({ type: "closeTarget" }) },
+  }
+})

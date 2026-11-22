@@ -1,0 +1,65 @@
+// spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"; spec/telephony/comms.md, "A subject is briefed once, only with the chat open, and never from fixtures in production"; spec/telephony/comms.md, "A new proposal replaces the open one, and a replaced or ignored proposal never acts"
+import { Machine as CallBarMachine, shownCall } from "../../gen/telephony__callBar.effect.vibe"
+import { emergencyLive } from "../../gen/telephony__common.effect.vibe"
+import { Machine as CommsMachine, type Event as CommsEvent, type ProposalKind } from "../../gen/telephony__comms.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { Machine as VoicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
+
+/** The facts a Phone briefing is made of, from what Phone read on this device; Messages and Contacts give none. */
+export interface BriefingFacts {
+  readonly key: string
+  readonly missed: readonly { readonly title: string; readonly number: string; readonly date: number }[]
+  readonly voicemail: readonly { readonly title: string; readonly number: string }[]
+  readonly at: number
+}
+
+/** The comms stage's effects: Telecom's calls and rings into the stage, briefings and Alpha's proposals. */
+export service CommsStage {
+  /** Follow the call bar's calls into the stage for as long as it runs. */
+  follow(): void!!
+  /** The briefing due now for the subject on screen, marked briefed, or null when none is due or nothing is known. */
+  briefing(): BriefingFacts | null!!
+  /** Alpha proposes one action card; a newer one replaces the open one. False when it was dropped. */
+  propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string): boolean!!
+}
+
+/** The comms stage over its stored machine and the call bar, Phone and voicemail machines. */
+export const commsStageLayer = Layer.effect(CommsStage, effect {
+  const comms = try CommsMachine
+  const calls = try CallBarMachine
+  const phone = try PhoneMachine
+  const voicemail = try VoicemailMachine
+  const tell = (event: CommsEvent, by: "Owner" | "Alpha" | "Device") => comms.send(event, by) catch () => undefined
+
+  return {
+    effect follow() {
+      for try (const bar of calls.changes) {
+        const live = bar.shown && bar.calls.length > 0
+        const before = try comms.get()
+        if (before.callLive !== live || before.emergency !== (live && emergencyLive(bar.reading)))
+          try tell({ type: "callChanged", live, emergencyCall: emergencyLive(bar.reading) }, "Device")
+        const ringing = shownCall(bar.calls)
+        const ring = live && ringing.phase === "Ringing" ? ringing.id : ""
+        if (ring !== before.ring) {
+          if (before.ring !== "") try tell({ type: "ringEnded" }, "Device")
+          if (ring !== "") try tell({ type: "ringStarted", ring }, "Device")
+        }
+      }
+    },
+    effect briefing() {
+      const c = try comms.get()
+      if (c.app !== "PhoneApp") return null
+      const p = try phone.get()
+      const v = try voicemail.get()
+      const missed = p.recents.filter((r) => r.kind === "MissedCall" && r.fresh).map((r) => ({ title: r.title, number: r.number, date: r.date }))
+      const fresh = v.rows.filter((r) => r.fresh).map((r) => ({ title: r.title, number: r.number }))
+      if (missed.length === 0 && fresh.length === 0) return null
+      if ((try tell({ type: "briefingShown", key: c.key }, "Device")) === undefined) return null
+      return { key: c.key, missed, voicemail: fresh, at: p.readAt } satisfies BriefingFacts
+    },
+    effect propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string) {
+      const after = try tell({ type: "proposed", proposalId, kind, acts, ring }, "Alpha")
+      return after !== undefined && after.proposal.tag === "Proposed" && after.proposal.proposalId === proposalId
+    },
+  }
+})

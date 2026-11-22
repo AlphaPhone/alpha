@@ -1,0 +1,179 @@
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"
+import { useState } from "react";
+import { BellRing, Check, ChevronLeft, CircleAlert, ListTodo, Plus, RefreshCw, RotateCcw, Trash2, Undo2 } from "lucide-react";
+import { canBeginWrite, type ReminderRow, type Reminders } from "../../../gen/clock__reminders.ts";
+import type { ReminderDraft } from "../../clock/schedule.ts";
+import { overdue, todos, upcoming } from "../../clock/schedule.ts";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Separator } from "../components/ui/index.ts";
+import { ReminderForm } from "./ReminderForm.tsx";
+import { reminderOutcome } from "./text.ts";
+
+export type RemindersViewProps = {
+  /** The listing, its refreshes and the write in progress. */
+  reminders: Reminders;
+  /** Unconfirmed creations and changes kept in the journal. */
+  unconfirmed: number;
+  /** A tapped reminder whose link is still pending. */
+  tapPending: boolean;
+  /** The reminder whose detail is open, if any. */
+  openId?: string;
+  /** The page's latest instant. */
+  now: number;
+  onOpen: (id: string | undefined) => void;
+  onBack: () => void;
+  onRefresh: () => void;
+  onCreate: (draft: ReminderDraft) => void;
+  onContinueCreate: (approved: boolean) => void;
+  onEdit: (row: ReminderRow, draft: ReminderDraft) => void;
+  onDecide: (row: ReminderRow, decision: "done" | "snooze") => void;
+  onReopen: (row: ReminderRow, mode: "open" | "tomorrow") => void;
+  onDelete: (row: ReminderRow) => void;
+  onSaveTodo: (title: string) => void;
+  onTodo: (row: ReminderRow, decision: "done" | "reopen" | "cancel") => void;
+  onOpenTap: () => void;
+  onDismissTap: () => void;
+};
+
+const SAVED: ReadonlySet<string> = new Set(["Saved", "Updated", "Rescheduled", "AlreadyExists", "AlertUnconfirmed"]);
+
+const when = (at: number) => new Date(at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+function draftOf(row: ReminderRow | undefined): ReminderDraft {
+  if (row === undefined) {
+    const at = new Date();
+    at.setHours(at.getHours() + 1, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const day = new Date(at);
+    day.setHours(0, 0, 0, 0);
+    return { title: "", body: "", dayOffset: Math.round((day.getTime() - today.getTime()) / 86_400_000), minuteOfDay: at.getHours() * 60, repeat: "none", alertMinutes: 0 };
+  }
+  const due = new Date(row.dueAt);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(due);
+  day.setHours(0, 0, 0, 0);
+  return { title: row.title, body: row.body, dayOffset: Math.round((day.getTime() - today.getTime()) / 86_400_000), minuteOfDay: due.getHours() * 60 + due.getMinutes(), repeat: "none", alertMinutes: row.hasAlert ? row.alertMinutes : null };
+}
+
+/**
+ * Reminders and to-dos as the phone holds them, with one change at a time.
+ * @model spec/clock/reminders.md
+ */
+export function RemindersView(props: RemindersViewProps) {
+  const { reminders, unconfirmed, tapPending, openId, now, onOpen, onBack, onRefresh, onCreate, onContinueCreate, onEdit, onDecide, onReopen, onDelete, onSaveTodo, onTodo, onOpenTap, onDismissTap } = props;
+  const [form, setForm] = useState<"new" | "edit" | undefined>(undefined);
+  const [submitted, setSubmitted] = useState(false);
+  const [reopening, setReopening] = useState<"open" | "tomorrow" | undefined>(undefined);
+  const [todo, setTodo] = useState("");
+  const saving = reminders.stage !== "WIdle";
+  const saved = submitted && !saving && SAVED.has(typeof reminders.outcome === "object" ? reminders.outcome.tag : "");
+  const editing = form !== undefined && !saved;
+  const openForm = (which: "new" | "edit") => { setForm(which); setSubmitted(false); };
+  const row = reminders.rows.find((r) => r.id === openId);
+  const outcome = reminderOutcome(reminders.outcome, row?.repeats ?? false);
+  const allowed = (kind: Parameters<typeof canBeginWrite>[1], r: ReminderRow) => canBeginWrite(reminders, kind, r.id, r.revision);
+  const listed = (rows: ReminderRow[]) => rows.map((r) => (
+    <li key={r.id}>
+      <ListRow title={r.title} detail={when(r.dueAt)} leading={r.status === "RPosted" ? <BellRing aria-label="Due" className="size-5 text-primary" /> : undefined} onClick={() => onOpen(r.id)} />
+    </li>
+  ));
+  const late = overdue(reminders.rows, now);
+  const coming = upcoming(reminders.rows).filter((r) => !late.includes(r));
+  const createReview = reminders.stage === "WReview" && reminders.kind === "CreateWrite";
+  return (
+    <main className="flex min-h-full flex-col gap-4 bg-background px-4 pt-4 pb-28 text-foreground">
+      <header className="flex items-center gap-2">
+        <Button variant="ghost" size="icon" aria-label="Back" onClick={row ? () => onOpen(undefined) : onBack}><ChevronLeft aria-hidden className="size-6" /></Button>
+        <h1 className="flex-1 font-serif text-3xl">{row ? row.title : "Reminders"}</h1>
+        {!row && <Button variant="ghost" size="icon" aria-label="Refresh" onClick={onRefresh}><RefreshCw aria-hidden className="size-5" /></Button>}
+        {!row && !editing && <Button size="icon" aria-label="New reminder" disabled={saving} onClick={() => openForm("new")}><Plus aria-hidden className="size-5" /></Button>}
+      </header>
+      {reminders.stale && <Alert role="status"><CircleAlert aria-hidden className="mr-2 inline size-4" />Out of date</Alert>}
+      {tapPending && (
+        <Alert className="flex items-center gap-2">
+          <span className="flex-1">Reminder link</span>
+          <Button size="sm" variant="secondary" onClick={onOpenTap}>Open</Button>
+          <Button size="sm" variant="ghost" onClick={onDismissTap}>Dismiss</Button>
+        </Alert>
+      )}
+      {unconfirmed > 0 && (
+        <Alert className="flex items-center gap-2">
+          <span className="flex-1">{`${unconfirmed} unconfirmed`}</span>
+          <Button size="sm" variant="secondary" onClick={onRefresh}>Check</Button>
+        </Alert>
+      )}
+      {outcome && <p role="status" className="text-sm text-muted-foreground">{outcome}</p>}
+      {editing ? (
+        <ReminderForm
+          initial={draftOf(form === "edit" ? row : undefined)}
+          saving={saving}
+          onCancel={() => setForm(undefined)}
+          onSave={(draft) => { if (form === "edit" && row) onEdit(row, draft); else onCreate(draft); setSubmitted(true); }}
+        />
+      ) : row ? (
+        <section className="flex flex-col gap-4">
+          <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">{row.undated ? "To-do" : `Due ${when(row.dueAt)}`}</p>
+          {row.body && <p className="whitespace-pre-wrap">{row.body}</p>}
+          <div className="flex flex-wrap gap-2">
+            {allowed("DoneWrite", row) && <Button disabled={saving} onClick={() => onDecide(row, "done")}><Check aria-hidden className="size-4" />Done</Button>}
+            {allowed("SnoozeWrite", row) && <Button variant="secondary" disabled={saving} onClick={() => onDecide(row, "snooze")}>Snooze</Button>}
+            {allowed("ReopenWrite", row) && <Button variant="secondary" disabled={saving} onClick={() => setReopening("open")}><RotateCcw aria-hidden className="size-4" />Reopen</Button>}
+            {allowed("ReopenWrite", row) && <Button variant="outline" disabled={saving} onClick={() => setReopening("tomorrow")}>Tomorrow</Button>}
+            {allowed("EditWrite", row) && <Button variant="outline" disabled={saving} onClick={() => openForm("edit")}>Edit</Button>}
+            {allowed("DeleteWrite", row) && <Button variant="ghost" aria-label="Delete reminder" disabled={saving} onClick={() => onDelete(row)}><Trash2 aria-hidden className="size-4" /></Button>}
+          </div>
+        </section>
+      ) : (
+        <>
+          {late.length > 0 && (
+            <section aria-label="Overdue">
+              <h2 className="font-mono text-xs uppercase tracking-widest text-destructive">Overdue</h2>
+              <ul>{listed(late)}</ul>
+            </section>
+          )}
+          {coming.length === 0 && late.length === 0 && todos(reminders.rows).length === 0
+            ? <EmptyState title={reminders.loaded ? "No reminders" : "Loading"} icon={<BellRing className="size-8" />} />
+            : <ul className="flex flex-col divide-y divide-border">{listed(coming)}</ul>}
+          {reminders.todoVersion === 1 && (
+            <section aria-label="To-dos" className="flex flex-col gap-2">
+              <Separator />
+              <ul className="flex flex-col">
+                {todos(reminders.rows).map((t) => (
+                  <li key={t.id} className="flex items-center gap-2">
+                    <ListRow title={t.title} className={t.status === "RCompleted" ? "flex-1 text-muted-foreground line-through" : "flex-1"} leading={<ListTodo aria-hidden className="size-5" />}
+                      disabled={saving} onClick={() => onTodo(t, t.status === "RCompleted" ? "reopen" : "done")} />
+                    <Button variant="ghost" size="icon" aria-label={`Delete ${t.title}`} disabled={saving || !allowed("TodoDeleteWrite", t)} onClick={() => onTodo(t, "cancel")}><Trash2 aria-hidden className="size-4" /></Button>
+                  </li>
+                ))}
+              </ul>
+              <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (todo.trim()) { onSaveTodo(todo); setTodo(""); } }}>
+                <Input aria-label="New to-do" value={todo} maxLength={200} onChange={(e) => setTodo(e.target.value)} />
+                <Button type="submit" size="icon" aria-label="Add to-do" disabled={saving || !todo.trim()}><Plus aria-hidden className="size-4" /></Button>
+              </form>
+            </section>
+          )}
+        </>
+      )}
+      <Dialog open={createReview} onOpenChange={(open) => { if (!open) onContinueCreate(false); }}>
+        <DialogContent>
+          <DialogTitle>Create another?</DialogTitle>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => onContinueCreate(false)}>Cancel</Button>
+            <Button onClick={() => onContinueCreate(true)}>Create another</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={reopening !== undefined && row !== undefined} onOpenChange={(open) => { if (!open) setReopening(undefined); }}>
+        <DialogContent>
+          <DialogTitle>Reopen?</DialogTitle>
+          <p className="text-sm text-muted-foreground">{reopening === "open" ? "No alert" : "Alert tomorrow at the same time"}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setReopening(undefined)}><Undo2 aria-hidden className="size-4" />Cancel</Button>
+            <Button onClick={() => { if (row && reopening) onReopen(row, reopening); setReopening(undefined); }}>Reopen</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </main>
+  );
+}

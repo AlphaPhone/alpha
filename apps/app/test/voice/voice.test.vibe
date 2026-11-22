@@ -1,0 +1,205 @@
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/capture.md, "Story: One voice surface at a time hears me"
+import { assert, it } from "@effect/vitest"
+import { Build } from "../../src/platform/build.vibe"
+import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Resident } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { Microphone } from "../../src/voice/capture.vibe"
+import { VoiceConversation } from "../../src/voice/conversation.vibe"
+import { Dictation, type DictationTarget } from "../../src/voice/dictation.vibe"
+import { layer } from "../../src/voice/layer.vibe"
+import { Listener } from "../../src/voice/listener.vibe"
+import { VoiceRoute } from "../../src/voice/route.vibe"
+import { Speech } from "../../src/voice/speech.vibe"
+
+/** What the fakes were asked, in order, as `plugin.method`. */
+type Calls = Array<{ readonly name: string; readonly args: unknown }>
+/** A native answer, or a refusal with its code. */
+type Answer = unknown | { readonly refuse: string }
+
+const onPhone: Record<string, Answer> = {
+  "AlphaVoiceCloud.localSpeechStatus": { ready: true, execution: "device" },
+  "AlphaVoiceCloud.startRecording": { recordingId: "rec-1", maxDurationMs: 29000 },
+  "AlphaVoiceCloud.stopRecording": { recordingId: "rec-1", durationMs: 3000 },
+  "AlphaVoiceCloud.transcribeLocalRecording": { text: "hello there", local: true, execution: "device" },
+  "AlphaVoiceCloud.cancelRecording": {},
+  "ElizaSense.turnOff": { available: false, reason: "not-installed" },
+}
+
+function refused(answer: Answer): answer is { readonly refuse: string } {
+  return typeof answer === "object" && answer !== null && "refuse" in answer
+}
+
+/** The platform at its boundary: the native host answers from a table, the resident and Cloud refuse; nothing leaves the test. */
+function platform(calls: Calls, native: Record<string, Answer>, variant: "launcher" | "aosp" | "browser" = "launcher") {
+  return Layer.mergeAll(
+    Layer.succeed(Native, {
+      available: (plugin: string) => Effect.succeed(plugin !== "AlphaCloudSpeechStream"),
+      invoke: (plugin: string, method: string, args?: unknown) => {
+        calls.push({ name: `${plugin}.${method}`, args })
+        const answer = native[`${plugin}.${method}`]
+        if (answer === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
+        if (refused(answer)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: answer.refuse }))
+        return Effect.succeed(answer)
+      },
+      listen: () => Stream.never,
+    }),
+    Layer.succeed(Cloud, {
+      base: "https://api.eliza.app",
+      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string) => Effect.fail(new CloudUnavailable({ status: 404, message: `${method} ${path}` })),
+    }),
+    Layer.succeed(Resident, {
+      status: () => Effect.succeed("running" as const),
+      ensureRunning: () => Effect.void,
+      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string) => Effect.succeed({ status: 200, data: { method, path } }),
+      stream: () => Stream.empty,
+    }),
+    Layer.succeed(Build, { info: { version: "test", variant, testMocks: false } }),
+    memoryStore,
+  )
+}
+
+function voice(calls: Calls, native: Record<string, Answer>, variant: "launcher" | "aosp" | "browser" = "launcher") {
+  return Layer.provide(layer, platform(calls, native, variant))
+}
+
+/** A draft that records what dictation inserted into it. */
+function draft(id: string, existing: string) {
+  const inserted: Array<{ readonly text: string; readonly voiceOriginated: boolean }> = []
+  const target: DictationTarget = {
+    id,
+    account: "owner-1",
+    draftLength: () => Effect.succeed(existing.length),
+    insert: (text: string, voiceOriginated: boolean) => Effect.sync(() => { inserted.push({ text, voiceOriginated }) }),
+  }
+  return { target, inserted }
+}
+
+const names = (calls: Calls) => calls.map((c) => c.name)
+
+it.live(`Dictate into the draft I am writing (spec/voice/dictation.md, "Story: Dictate into the draft I am writing")`, () => effect {
+  const calls: Calls = []
+  provide voice(calls, onPhone) {
+    const dictation = try Dictation
+    const empty = draft("composer-1", "")
+    try dictation.into(empty.target)
+    try dictation.start()
+    try dictation.stop()
+    // spec/voice/dictation.md, "The words are inserted once, only from the current capture, into the draft and account it opened for"
+    const after = try dictation.get()
+    try Effect.try(() => assert.deepStrictEqual({ inserted: empty.inserted, stage: after.stage, inserted_count: after.inserted }, {
+      inserted: [{ text: "hello there", voiceOriginated: true }], stage: "Closed", inserted_count: 1,
+    }))
+    try Effect.try(() => assert.include(names(calls), "AlphaVoiceCloud.transcribeLocalRecording"))
+    const written = draft("composer-1", "Hi")
+    try dictation.into(written.target)
+    try dictation.start()
+    try dictation.stop()
+    try Effect.try(() => assert.deepStrictEqual(written.inserted, [{ text: "\nhello there", voiceOriginated: false }]))
+    // spec/voice/dictation.md, "Cancel ends the dictation at once and discards whatever it recorded"
+    const cancelled = draft("note-7", "")
+    try dictation.into(cancelled.target)
+    try dictation.start()
+    try dictation.cancel()
+    try dictation.stop()
+    try Effect.try(() => assert.deepStrictEqual({ inserted: cancelled.inserted, stage: stageOf(try dictation.get()) }, { inserted: [], stage: "Closed" }))
+  }
+})
+
+function stageOf(state: { readonly stage: string }): string {
+  return state.stage
+}
+
+it.live(`Keep my recording when transcription fails (spec/voice/dictation.md, "Story: Keep my recording when transcription fails")`, () => effect {
+  const calls: Calls = []
+  const silent = { ...onPhone, "AlphaVoiceCloud.transcribeLocalRecording": { text: "  ", local: true, execution: "device" } }
+  provide voice(calls, silent) {
+    const dictation = try Dictation
+    const kept = draft("composer-2", "")
+    try dictation.into(kept.target)
+    try dictation.start()
+    try dictation.stop()
+    // spec/voice/dictation.md, "The words are inserted once, only from the current capture, into the draft and account it opened for"
+    const heardNothing = try dictation.get()
+    try Effect.try(() => assert.deepStrictEqual({ stage: heardNothing.stage, failure: heardNothing.failure, kept: heardNothing.clipMs > 0, inserted: kept.inserted },
+      { stage: "Recorded", failure: "NothingHeard", kept: true, inserted: [] }))
+    // spec/voice/dictation.md, "A kept clip can be transcribed again, or discarded"
+    try dictation.discard()
+    try Effect.try(() => assert.include(names(calls), "AlphaVoiceCloud.cancelRecording"))
+  }
+  const cloudCalls: Calls = []
+  const busyCloud = { ...onPhone, "AlphaVoiceCloud.transcribeRecording": { refuse: "voice-http-503" } }
+  provide voice(cloudCalls, busyCloud) {
+    const routes = try VoiceRoute
+    const dictation = try Dictation
+    try routes.observeAccount({ kind: "cloud", environment: "production", credentialId: "key-1" })
+    const fallback = draft("composer-3", "")
+    try dictation.into(fallback.target)
+    try dictation.start()
+    try dictation.stop()
+    // spec/voice/dictation.md, "A network failure that falls back transcribes the same clip on the phone when it fits; otherwise the clip is kept"
+    const after = try dictation.get()
+    try Effect.try(() => assert.deepStrictEqual({ inserted: fallback.inserted, fellBack: after.fellBack, order: names(cloudCalls).filter((n) => n.includes("transcribe")) }, {
+      inserted: [{ text: "hello there", voiceOriginated: true }], fellBack: true,
+      order: ["AlphaVoiceCloud.transcribeRecording", "AlphaVoiceCloud.transcribeLocalRecording"],
+    }))
+  }
+})
+
+it.live(`Use the listener only on the image that admits it (spec/voice/listener.md, "Story: Use the listener only on the image that admits it")`, () => effect {
+  const calls: Calls = []
+  provide voice(calls, onPhone, "launcher") {
+    const listener = try Listener
+    // spec/voice/listener.md, "The startup stop is confirmed only by an off reply, within five seconds, with the microphone closed"
+    const confirmed = try settledBoot(listener.changes)
+    const status = try listener.status()
+    try Effect.try(() => assert.deepStrictEqual({ image: confirmed?.image, wakeStop: confirmed?.wakeStop, available: status.available, opened: askedTheListener(calls) },
+      { image: "NoListener", wakeStop: "StopConfirmed", available: false, opened: false }))
+  }
+  const stillOn = { ...onPhone, "ElizaSense.turnOff": { available: true, state: "LISTENING", listening: true, microphoneOpen: true } }
+  provide voice([], stillOn, "launcher") {
+    const listener = try Listener
+    const settled = try settledBoot(listener.changes)
+    try Effect.try(() => assert.strictEqual(settled?.wakeStop, "StopUnconfirmed"))
+  }
+})
+
+function askedTheListener(calls: Calls): boolean {
+  return calls.some((c) => c.name === "ElizaSense.openSettings" || c.name === "ElizaSense.status")
+}
+
+effect function settledBoot<A extends { readonly booted: boolean; readonly wakeStop: string }>(changes: Stream.Stream<A>) {
+  const first = try timeout(Stream.runHead(Stream.filter(changes, (s) => s.booted && s.wakeStop !== "StopPending")), "5 seconds")
+  return Option.getOrUndefined(first)
+}
+
+it.live(`Never have a secret read aloud (spec/voice/speech.md, "Story: Never have a secret read aloud")`, () => effect {
+  const calls: Calls = []
+  provide voice(calls, onPhone) {
+    const speech = try Speech
+    // spec/voice/speech.md, "A reading also refuses a link or email address, characters it cannot say and more than 16,000 characters"
+    const secret = Effect.flip(speech.speak("My password is: hunter2hunter2", "Reading")) catch () => undefined
+    const link = Effect.flip(speech.speak("Open https://example.com now", "Reading")) catch () => undefined
+    try Effect.try(() => assert.deepStrictEqual({ secret: secret?._tag, link: link?._tag, synthesized: names(calls).some((n) => n.includes("synthesize")) },
+      { secret: "SpeechRefused", link: "SpeechRefused", synthesized: false }))
+  }
+})
+
+it.live(`Start talking only when Alpha can listen safely (spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely")`, () => effect {
+  const calls: Calls = []
+  provide voice(calls, onPhone) {
+    const conversation = try VoiceConversation
+    const microphone = try Microphone
+    const start = { admitted: true, callActive: true, conversationId: "c-1", roomId: "room-1", chatCurrent: () => true }
+    // spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
+    try conversation.start(start)
+    const refusedForCall = try conversation.get()
+    // spec/voice/capture.md, "A capture starts only in front, outside a call and with permission not refused, and a new one replaces the last"
+    try microphone.callChanged(true)
+    const ticket = try microphone.acquire("AssistantCapture")
+    const mic = try microphone.get()
+    try Effect.try(() => assert.deepStrictEqual({ shown: refusedForCall.shown, notice: refusedForCall.notice, ticket, refusal: mic.refusal, captured: names(calls).includes("AlphaVoiceCloud.startLiveCapture") },
+      { shown: "Off", notice: "CallHoldsMicrophone", ticket: undefined, refusal: "RefusedCall", captured: false }))
+  }
+})

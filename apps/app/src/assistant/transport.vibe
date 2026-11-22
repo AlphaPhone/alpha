@@ -1,0 +1,47 @@
+// spec/assistant/send.md, "The transport's own result decides, and a send that may have reached the agent stays in the transcript, unconfirmed"; spec/assistant/withdrawal.md, "A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once"
+import type { TurnTransport } from "@elizaos/agent/client"
+import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
+
+/** The resident could not be reached, or refused, for an assistant request. */
+export error AgentUnreachable { status: number; code?: string; message: string }
+
+/** What the upstream turn controller reads as a refusal of the request. */
+export interface RuntimeRefusal { readonly name: "RuntimeRequestError"; readonly status: number; readonly message: string; readonly code?: string }
+
+function refusalOf(status: number, message: string, code: string | undefined): RuntimeRefusal {
+  return { name: "RuntimeRequestError", status, message, ...(code === undefined ? {} : { code }) }
+}
+
+/** One JSON request of the resident whose refusal and absence are both `AgentUnreachable`. */
+export effect function ask(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) {
+  const resident = try Resident
+  const answer = resident.json(method, path, body) catch effect (error) => match (error) {
+    when ResidentRefused: throw new AgentUnreachable({ status: error.status, code: error.code, message: error.message });
+    when ResidentUnavailable: throw new AgentUnreachable({ status: 0, code: "unavailable", message: error.reason ?? error.state });
+  }
+  if (answer.status >= 400) throw new AgentUnreachable({ status: answer.status, message: "refused" })
+  return answer.data
+}
+
+/** The resident's local API as the upstream turn controller reaches it: a refusal keeps its status, an absent agent is a request never sent. */
+export effect function turnTransport() {
+  const resident = try Resident
+  const transport: TurnTransport = {
+    request: async (path: string, body?: unknown) => {
+      const exit = await runPromiseExit(resident.json(body === undefined ? "GET" : "POST", path, body))
+      if (Exit.isSuccess(exit)) {
+        if (exit.value.status >= 400) throw refusalOf(exit.value.status, "refused", undefined)
+        return exit.value.data
+      }
+      const failure = Cause.findErrorOption(exit.cause)
+      if (Option.isSome(failure) && failure.value._tag === "ResidentRefused") throw refusalOf(failure.value.status, failure.value.message, failure.value.code)
+      throw new Error("StartupFailed")
+    },
+    stream: async (path: string, body: unknown) => {
+      const bytes = Stream.mapError(resident.stream(path, body), (error) =>
+        error._tag === "ResidentRefused" ? refusalOf(error.status, error.message, error.code) : new Error("StartupFailed"))
+      return { status: 200, headers: { "content-type": "text/event-stream" }, body: Stream.toAsyncIterable(bytes) }
+    },
+  }
+  return transport
+}

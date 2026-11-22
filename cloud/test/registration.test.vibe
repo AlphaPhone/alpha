@@ -1,0 +1,51 @@
+// spec/cloud/nativeClients/registry.md, "Story: Admit only a registered native client"
+import { assert, describe, it } from "@effect/vitest"
+import { alphaCloudProfile } from "../src/profile.vibe"
+import { colonFingerprint, environmentRegistration, registerArguments, registrationProblems, registryVariable, releaseSignerFingerprints, seedDocument } from "../src/registration.vibe"
+import { identity, operatorInputs, rotatedSigner } from "./support.ts"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+
+describe("Alpha Phone's native client registration", () => {
+  it.effect("writes release fingerprints as colon-separated upper-case bytes and refuses anything else", () => effect {
+    // spec/cloud/nativeClients/registry.md, "A registration names one client of one environment, its exact returns, its Android signers and a key lifetime from one to ninety days"
+    const fingerprint = try colonFingerprint("ab".repeat(32))
+    try check(() => assert.strictEqual(fingerprint, Array(32).fill("AB").join(":")))
+    const refused = colonFingerprint("AB".repeat(32)) catch (failure) => failure._tag
+    try check(() => assert.strictEqual(refused, "RegistrationInvalid"))
+  })
+
+  it.effect("keeps the previous certificate only while a rotation is approved", () => effect {
+    // spec/cloud/nativeClients/registry.md, "A registration names one client of one environment, its exact returns, its Android signers and a key lifetime from one to ninety days"
+    const rotated = try releaseSignerFingerprints(rotatedSigner)
+    try check(() => assert.strictEqual(rotated.length, 2))
+    const pending = try releaseSignerFingerprints({ ...rotatedSigner, apkSigningRotation: { approval: "pending", previousSignerSha256: rotatedSigner.apkSigningRotation.previousSignerSha256 } })
+    try check(() => assert.strictEqual(pending.length, 1))
+  })
+
+  it.effect("registers the app's three returns on the web origin, never on the API origin", () => effect {
+    // spec/cloud/nativeClients/registry.md, "A registration is accepted only when the registry stays valid and no return lies on the API origin, and it never changes how another client is admitted"
+    const profile = alphaCloudProfile(operatorInputs)
+    const client = try environmentRegistration(profile, "production", identity, rotatedSigner)
+    try check(() => assert.strictEqual(client.clientId, "ai.alphacompute.alphaphone"))
+    try check(() => assert.strictEqual(client.signInReturn, "https://cloud.alphacompute.ai/alphaphone/auth/callback"))
+    try check(() => assert.strictEqual(client.billingReturn, "https://cloud.alphacompute.ai/alphaphone/billing/return"))
+    try check(() => assert.strictEqual(client.connectReturn, "https://cloud.alphacompute.ai/alphaphone/gmail/callback"))
+    const onApi = { ...client, billingReturn: "https://api.alphacompute.ai/alphaphone/billing/return" }
+    try check(() => assert.ok(registrationProblems(onApi, "https://api.alphacompute.ai").some((problem) => problem.includes("API origin"))))
+    const shared = { ...client, billingReturn: client.signInReturn }
+    try check(() => assert.ok(registrationProblems(shared, "https://api.alphacompute.ai").length > 0))
+  })
+
+  it.effect("describes the same registration to the seed, the Worker registry and the operator command", () => effect {
+    // spec/cloud/operator.md, "Thirteen commands exist, and only credits add and the three account commands name an account"
+    const client = try environmentRegistration(alphaCloudProfile(operatorInputs), "staging", identity, rotatedSigner)
+    try check(() => assert.deepStrictEqual(seedDocument(client).clients, [client]))
+    const [entry] = (try Effect.try(() => JSON.parse(registryVariable(client, "staging")))) as ReadonlyArray<Record<string, unknown>>
+    try check(() => assert.deepStrictEqual(Object.keys(entry).sort(), ["androidPackage", "billingReturn", "certFingerprints", "clientId", "connectReturn", "credentialTtlMs", "displayName", "enabled", "environment", "nativeGoogle", "signInReturn"]))
+    try check(() => assert.strictEqual(entry.environment, "staging"))
+    const args = registerArguments(client)
+    try check(() => assert.strictEqual(args.filter((arg) => arg === "--cert").length, client.certFingerprints.length))
+    try check(() => assert.ok(!args.includes("--native-google")))
+  })
+})

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "globalDependencies": ["pnpm-workspace.yaml", "upstream.lock.json", "app.config.json", "cloud/deployment.json"],
+  "globalPassThroughEnv": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE"],
+  "tasks": {
+    "gen": {
+      "outputs": ["gen/**", "generated/**"]
+    },
+    "build": {
+      "dependsOn": ["gen", "^build"],
+      "env": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE", "VITE_*"],
+      "outputs": ["dist/**", "generated/**", "storybook-static/**", "../../web-dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["gen", "^build"],
+      "outputs": [".vibe/declarations/**"]
+    },
+    "test": {
+      "dependsOn": ["gen", "^build"],
+      "outputs": [".cache/test-result-*.json"]
+    },
+    "test:browser": {
+      "dependsOn": ["gen", "^build"],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["gen"],
+      "outputs": []
+    },
+    "check": {
+      "dependsOn": ["gen"],
+      "cache": false
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

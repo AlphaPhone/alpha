@@ -1,0 +1,179 @@
+// spec/maps/location.md, "A start is admitted one at a time and retires the session before it"; spec/maps/location.md, "Only the owner's own request or the guidance they started may prompt for permission"; spec/maps/location.md, "Fixes count only from the current watch; a one-shot session ends at its first fix or after 15 seconds"
+import { type Locator, Machine as LocatorMachine, type Purpose, oneShotTimeoutMs } from "../../gen/maps__location.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { MapsFailure, failure } from "./failure.vibe"
+import type { Position } from "./geometry.vibe"
+import { LocationError, LocationEvent, Permission, WatchId } from "./maps.schema.vibe"
+
+const PLUGIN = "ElizaLocation"
+
+/** The phone's location for Maps: one session at a time, each step fenced by the session that started it. */
+export service MapsLocation {
+  /** One fix for a quiet, owner or agent request; only the owner's request may prompt. */
+  once(purpose: "QuietFix" | "OwnerFix" | "AgentFix"): Position!MapsFailure
+  /** The guidance watch: fixes until the stream is released. */
+  watch(): Stream.Stream<Position, MapsFailure>
+  /** Whether location is already granted, without a prompt. */
+  granted(): boolean!!
+  /** Retire the current session. */
+  stop(): void!!
+  /** Maps left or returned to the front. */
+  setHidden(hidden: boolean): void!!
+  /** A new visit: the quiet fix may be taken once more. */
+  newVisit(): void!!
+  readonly states: Stream.Stream<Locator>
+}
+
+function denied(): MapsFailure {
+  return failure("permission-denied", "Location permission was not granted. You can choose an origin manually.")
+}
+
+function positionOf(event: typeof LocationEvent.Type, accuracy: Permission["accuracy"]): Position | undefined {
+  const c = event.coords
+  if (!Number.isFinite(c.accuracy) || c.accuracy < 0 || !Number.isFinite(c.timestamp)) return undefined
+  const moving = typeof c.speed === "number" && c.speed > 0.5
+  const heading = typeof c.heading === "number" && c.heading >= 0 && c.heading <= 360 && moving ? c.heading % 360 : undefined
+  return {
+    coordinate: { latitude: c.latitude, longitude: c.longitude }, accuracyMeters: c.accuracy, timestamp: c.timestamp,
+    precision: accuracy === "precise" ? "precise" : accuracy === "approximate" ? "approximate" : "unknown",
+    ...(heading === undefined ? {} : { headingDegrees: heading }),
+    ...(typeof c.speed === "number" && c.speed >= 0 ? { speedMetersPerSecond: c.speed } : {}),
+  }
+}
+
+/** Location over `ElizaLocation` and the location custody machine. */
+export const locationLayer = Layer.effect(MapsLocation, effect {
+  const native = try Native
+  const locator = try LocatorMachine
+
+  effect function permission() {
+    const raw = native.invoke(PLUGIN, "checkPermissions") catch effect () => { throw failure("unavailable", "Native location is unavailable in this build.") }
+    return Schema.decodeUnknownEffect(Permission)(raw) catch effect () => { throw failure("invalid-response", "Location permission could not be read.") }
+  }
+
+  effect function until(test: (s: Locator) => boolean) {
+    return try Stream.runHead(Stream.filter(locator.changes, test))
+  }
+
+  effect function confirmCleanup(watchId: string | undefined) {
+    const cleared = watchId === undefined ? true
+      : (native.invoke(PLUGIN, "clearWatch", { watchId }) |> map(%, () => true)) catch () => false
+    locator.send({ type: "cleanupSettles", confirmed: cleared }) catch () => undefined
+  }
+
+  /** The admitted session for `purpose`: its generation and the permission it may use. */
+  effect function admit(purpose: Purpose) {
+    if (!(try native.available(PLUGIN))) throw failure("unavailable", "Native location is unavailable in this build.")
+    const begun = locator.send({ type: "beginLocate", purpose }) catch effect () => {
+      throw failure("unavailable", "A location permission or start request is still settling.")
+    }
+    const owner = begun.generation
+    if (begun.phase === "Stopping") {
+      const after = try until((s) => s.generation !== owner || s.phase !== "Stopping")
+      if (after._tag === "None" || after.value.generation !== owner) throw failure("cancelled", "Location request cancelled.")
+      if (after.value.phase === "Failed") throw failure("unavailable", "Location cleanup could not be confirmed.")
+    }
+    const grant = try permission()
+    const checked = locator.send({ type: "permissionChecked", owner, granted: grant.location === "granted" && grant.accuracy !== "none" }) catch effect () => {
+      throw failure("cancelled", "Location request cancelled.")
+    }
+    let accuracy = grant.accuracy
+    if (checked.phase === "Failed") throw denied()
+    if (checked.phase === "Prompting") {
+      const asked = native.invoke(PLUGIN, "requestPermissions") catch effect () => { throw denied() }
+      const answer = Schema.decodeUnknownEffect(Permission)(asked) catch () => ({ location: "denied" as const })
+      accuracy = answer.accuracy
+      const answered = locator.send({ type: "permissionAnswered", owner, granted: answer.location === "granted" && answer.accuracy !== "none" }) catch effect () => {
+        throw failure("cancelled", "Location request cancelled.")
+      }
+      if (answered.phase === "Failed") throw denied()
+      if (answered.phase === "WaitingFront") {
+        const front = try until((s) => s.generation !== owner || s.phase !== "WaitingFront")
+        if (front._tag === "None" || front.value.generation !== owner) throw failure("cancelled", "Location request cancelled.")
+      }
+    }
+    return { owner, accuracy }
+  }
+
+  effect function* session(purpose: Purpose) {
+    const { owner, accuracy } = try admit(purpose)
+    const events = Stream.merge(
+      Stream.map(native.listen(PLUGIN, "locationChange"), (raw) => ({ kind: "fix" as const, raw })),
+      Stream.map(native.listen(PLUGIN, "error"), (raw) => ({ kind: "error" as const, raw })),
+    )
+    const queue = try Queue.unbounded<{ kind: "fix" | "error"; raw: unknown }>()
+    fork.scoped Stream.runForEach(events, (event) => Queue.offer(queue, event)) catch () => undefined
+    try acquireRelease(
+      effect {
+        const raw = native.invoke(PLUGIN, "watchPosition", { accuracy: "high", minInterval: 1000, minDistance: 0 }) catch effect () => {
+          locator.send({ type: "watchStarted", owner, created: false }) catch () => undefined
+          throw failure("unavailable", "Location could not start.")
+        }
+        const id = (Schema.decodeUnknownEffect(WatchId)(raw) catch () => ({ watchId: "" })).watchId
+        const started = locator.send({ type: "watchStarted", owner, created: id !== "" }) catch () => undefined
+        if (started === undefined && id !== "") {
+          try confirmCleanup(id)
+          throw failure("cancelled", "Location request cancelled.")
+        }
+        if (id === "") throw failure("unavailable", "Location could not start.")
+        return id
+      },
+      (id) => effect {
+        locator.send({ type: "stopLocate" }) catch () => undefined
+        try confirmCleanup(id)
+      },
+    )
+    while (true) {
+      const event = try Queue.take(queue)
+      if (event.kind === "error") {
+        const code = (Schema.decodeUnknownEffect(LocationError)(event.raw) catch () => ({ code: "UNKNOWN" })).code
+        locator.send({ type: "watchFails", owner }) catch () => undefined
+        throw code === "PERMISSION_DENIED" ? denied() : failure("unavailable", "Location is unavailable. Check device location settings or choose an origin manually.")
+      }
+      const decodedEvent = Schema.decodeUnknownEffect(LocationEvent)(event.raw) catch () => undefined
+      const fix = decodedEvent === undefined ? undefined : positionOf(decodedEvent, accuracy)
+      if (fix === undefined) {
+        locator.send({ type: "watchFails", owner }) catch () => undefined
+        throw failure("invalid-response", "A fresh location fix is not available.")
+      }
+      const now = try Clock.currentTimeMillis
+      const before = try locator.get()
+      const after = locator.send({ type: "fixArrives", owner, ageMs: Math.round(now - fix.timestamp) }) catch effect () => {
+        throw failure("cancelled", "Location request cancelled.")
+      }
+      if (after.fixes > before.fixes) yield fix
+      if (after.phase === "Idle") return
+    }
+  }
+
+  return {
+    effect once(purpose) {
+      const first = timeout(Stream.runHead(session(purpose)), oneShotTimeoutMs) catch effect (error) => {
+        if (error._tag === "TimeoutError") {
+          const s = try locator.get()
+          locator.send({ type: "timedOut", owner: s.generation }) catch () => undefined
+          throw failure("timeout", "Couldn't find your location. Try again or enter a starting point.")
+        }
+        throw error
+      }
+      if (first._tag === "None") throw failure("unavailable", "Location unavailable.")
+      return first.value
+    },
+    watch: () => session("GuidanceWatch"),
+    effect granted() {
+      if (!(try native.available(PLUGIN))) return false
+      const grant = permission() catch () => undefined
+      return grant?.location === "granted" && grant.accuracy !== "none"
+    },
+    effect stop() {
+      locator.send({ type: "stopLocate" }) catch () => undefined
+    },
+    effect setHidden(hidden: boolean) {
+      locator.send(hidden ? { type: "hideScreen" } : { type: "showScreen" }) catch () => undefined
+    },
+    effect newVisit() {
+      locator.send({ type: "newVisit" }) catch () => undefined
+    },
+    states: locator.changes,
+  }
+})

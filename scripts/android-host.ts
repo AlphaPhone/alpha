@@ -1,33 +1,22 @@
 /**
- * Generate Alpha's Android build files with the upstream consumer-host generator.
+ * Generate Alpha's Android build files with the upstream host generator (@elizaos/os/build generateAndroidHost).
  *
- *   bun scripts/android-host.ts        write the generated host into android/
+ *   node --conditions=eliza-source --import vibelang/register scripts/android-host.ts   write the generated host into android/
+ *   node scripts/android-host.ts --check-identity                                       verify the projected identity only
  *
- * android/consumer-host.json is the only authored Gradle setup: identity comes from
- * app.config.json; modules, dependencies, variants, signing and version environment
- * names, admission and installed-data compatibility names come
- * from the descriptor. The generator at the pinned upstream commit owns the Gradle
- * scripts, toolchain, wrapper and variant policy; the generated files are build
- * outputs (git-ignored), regenerated before every Android build. android/app/product.gradle
- * keeps Alpha's Gradle-time product admission. A host whose inputs changed refuses
- * to configure until it is regenerated.
+ * android/consumer-host.json (schema 2) is the only authored Gradle setup: identity comes from app.config.json;
+ * os modules, consumer modules, dependencies, variants, signing and version environment names and admission come
+ * from the descriptor. The generator at the pinned upstream commit owns the Gradle scripts, toolchain, wrapper
+ * and variant policy; the generated files are build outputs (git-ignored), regenerated before every Android build.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {generateAndroidConsumerHost} from '../vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs';
-import {preparePatchedNative} from './prepare-patched-native.ts';
-import {serializeOwnerRouteTable} from '../apps/app/src/product/owner-route-table.ts';
-import {androidIdentity, readHostDescriptor, HOST_DESCRIPTOR, stageAndroidIdentity, verifyAndroidIdentity} from './android-identity.ts';
+import {androidIdentity, readHostDescriptor, HOST_DESCRIPTOR, verifyAndroidIdentity} from './android-identity.ts';
 export {readHostDescriptor, HOST_DESCRIPTOR};
 
-export const PATCHED_NATIVE_ROOT = 'patchedNative';
 const OWNER_ROUTE_ASSET = '.eliza/generated-android/owner-routes.json';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-export interface HostReference {root: string; path: string}
-type ReferenceMapper = (reference: HostReference) => HostReference;
-type HostDescriptor = typeof import('../android/consumer-host.json');
-type AppConfig = typeof import('../app.config.json');
 
 /** Product identity for the generator: package, label and version from app.config.json. */
 export function hostIdentity(root = ROOT) {
@@ -35,108 +24,54 @@ export function hostIdentity(root = ROOT) {
  return {appId, appName, version, versionCode};
 }
 
-const isReference = (value: unknown): value is HostReference =>
- !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 2 &&
- 'root' in value && typeof value.root === 'string' && 'path' in value && typeof value.path === 'string';
-/** Replace patched-native references; every other value is copied unchanged. */
-export function mapReferences(value: unknown, map: ReferenceMapper): unknown {
- if (Array.isArray(value)) return value.map(item => mapReferences(item, map));
- if (isReference(value)) return value.root === PATCHED_NATIVE_ROOT ? map(value) : {...value};
- if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapReferences(item, map)]));
- return value;
+/** The schema-2 profile with the app's orientation placeholder. */
+export function hostProfile(root = ROOT) {
+ const {profile} = readHostDescriptor(root);
+ const app = JSON.parse(fs.readFileSync(path.join(root, 'app.config.json'), 'utf8')) as {orientation: string};
+ return {...profile, manifestPlaceholders: {appOrientation: app.orientation}};
 }
 
 /**
- * The upstream profile with patched-native modules resolved. With `canonical`, staged
- * modules name the pinned upstream directories from which staging copies them.
+ * The owner route table the native connection policy reads, staged outside the authored tree. The renderer's
+ * platform area publishes it as apps/app/src/platform/owner-routes.json.
  */
-export function hostProfile(root = ROOT, {patchedNativeRoot, canonical = false}: {patchedNativeRoot?: string; canonical?: boolean} = {}) {
- const {profile} = readHostDescriptor(root);
- const app: AppConfig = JSON.parse(fs.readFileSync(path.join(root, 'app.config.json'), 'utf8'));
- let map: ReferenceMapper;
- if (canonical) map = reference => ({root: 'upstream', path: reference.path});
- else {
-  if (!patchedNativeRoot) throw new Error('Patched native staging path is required');
-  const relative = path.relative(fs.realpathSync(root), fs.realpathSync(patchedNativeRoot)).split(path.sep).join('/');
-  if (!relative || relative.startsWith('..')) throw new Error('Patched native staging must be inside this checkout');
-  map = reference => ({root: 'consumer', path: reference.path === '.' ? relative : `${relative}/${reference.path}`});
- }
- // Reference replacement preserves the descriptor's fields and reference shape.
- const resolved = {...mapReferences(profile, map) as HostDescriptor['profile'], manifestPlaceholders: {appOrientation: app.orientation}};
- const projected = stageAndroidIdentity(root);
- if (!projected) return resolved;
- // Existing descriptor references keep ownership and variant policy. Only authored native
- // files with an authenticated projection are redirected; shared plugins stay pinned verbatim.
- const redirect = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(redirect);
-  if (isReference(value)) {
-   const included = Object.keys(projected.receipt.inputs).some(name => name === value.path || name.startsWith(value.path + '/'));
-   return value.root === 'consumer' && included
-    ? {...value, path: `${projected.relative}/${value.path.replaceAll(projected.receipt.sourceApplicationId.replaceAll('.', '/'), projected.receipt.applicationId.replaceAll('.', '/'))}`} : value;
-  }
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, redirect(child)]));
-  return value;
- };
- const result = redirect(resolved) as typeof resolved;
- // The in-place generator owns no authored manifest: keep those inputs in place.
- // product.gradle selects the authenticated projected manifest before compilation.
- result.manifest = resolved.manifest;
- result.flavors = resolved.flavors;
- for (const variant of ['main', 'launcher', 'debug', 'androidTest'] as const) {
-  const directory = `${projected.relative}/android/app/src/${variant}/java`;
-  if (!fs.existsSync(path.join(root, directory))) continue;
-  const sets = result.sourceSets as Record<string, Record<string, HostReference[]>>;
-  const current = sets[variant] || (sets[variant] = {});
-  current.java = [...(current.java || []), {root: 'consumer', path: directory}];
- }
- result.assetFiles.push({source: {root: 'consumer', path: `${projected.relative}/identity.json`}, name: 'android-identity.json'});
- result.generationInputs.push({root: 'consumer', path: `${projected.relative}/identity.json`});
- return result;
-}
-
-/** Write the generated table outside the authored tree, ready for the host's asset staging task. */
-export function stageOwnerRouteAsset(root: string) {
+export function stageOwnerRouteAsset(root = ROOT) {
+ const source = path.join(root, 'apps/app/src/platform/owner-routes.json');
+ if (!fs.existsSync(source)) throw new Error(`${path.relative(root, source)} is missing: the platform area publishes the owner route table`);
+ JSON.parse(fs.readFileSync(source, 'utf8'));
  const file = path.join(root, OWNER_ROUTE_ASSET);
  fs.mkdirSync(path.dirname(file), {recursive: true});
- const temporary = fs.mkdtempSync(path.join(path.dirname(file), '.owner-routes-'));
- try {
-  const staged = path.join(temporary, 'owner-routes.json');
-  fs.writeFileSync(staged, serializeOwnerRouteTable());
-  fs.renameSync(staged, file);
- } finally {
-  fs.rmSync(temporary, {recursive: true, force: true});
- }
+ fs.copyFileSync(source, file);
  return file;
 }
 
-/** Every option the upstream generator receives for this checkout. Stages patched native source and generated assets. */
-export function hostOptions(root = ROOT) {
- const patched = preparePatchedNative({root});
+/** Every option the upstream generator receives for this checkout. */
+export function hostOptions(root = ROOT, runtime?: string) {
  stageOwnerRouteAsset(root);
  return {
   consumerRoot: root,
-  upstreamRoot: path.join(root, 'vendor/eliza'),
   dependencyRoot: path.join(root, 'node_modules'),
   output: path.join(root, 'android'),
-  inPlace: true,
   identity: hostIdentity(root),
-  profile: hostProfile(root, {patchedNativeRoot: patched.root}),
+  profile: hostProfile(root),
+  ...(runtime ? {runtime} : {}),
  };
 }
 
-/** Write the generated host into android/. preparePatchedNative authenticates the pinned vendor checkout. */
-export function generateAlphaAndroidHost(root = ROOT) {
- return generateAndroidConsumerHost({...hostOptions(root), runtimeDirectory: undefined});
+/** Write the generated host into android/. */
+export async function generateAlphaAndroidHost(root = ROOT, runtime?: string) {
+ const {generateAndroidHost} = await import('./upstream-os.ts');
+ return generateAndroidHost(hostOptions(root, runtime));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
  if (process.argv.length === 3 && process.argv[2] === '--check-identity') {
   console.log(`Verified the ${verifyAndroidIdentity()} Android identity`);
  } else if (process.argv.length > 2) {
-  console.error('Usage: bun scripts/android-host.ts [--check-identity]');
+  console.error('Usage: node --conditions=eliza-source --import vibelang/register scripts/android-host.ts [--check-identity]');
   process.exit(2);
  } else {
-  const result = generateAlphaAndroidHost();
+  const result = await generateAlphaAndroidHost();
   console.log(`Generated the ${result.appId} Android host (${result.files.length} files, Gradle ${result.toolchain}) in ${path.relative(process.cwd(), result.directory) || '.'}`);
  }
 }

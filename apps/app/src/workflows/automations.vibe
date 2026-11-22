@@ -1,0 +1,373 @@
+// spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"
+import { type Answer, type ChangeKind, type Row, type RowKind, type Source, Machine, readOf, stored } from "../../gen/workflows__automations.effect.vibe"
+import {
+  type Draft, type TaskStatus, type Verb, definitionRow, draftProblem, editConfirmed, enableOutcome, fireOutcome, runNowOutcome,
+  saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
+} from "../../gen/workflows__agentSchedules.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { AgentRefused, AgentUnavailable, NotSent, Unrecognized, WorkflowApi, decoded } from "./api.vibe"
+import { deviceZone, instant, sameLocalDay } from "./ids.ts"
+import {
+  AutomationList, DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ReminderList, ScheduledTaskList,
+  type ScheduledTaskRecord, type TaskTrigger, TaskReply, TriggerReply, TriggerRuns,
+} from "./wire.schema.vibe"
+
+/** The key the held changes and the last list are kept under. */
+export const AUTOMATIONS_KEY = ownerKey("device", "workflows/automations")
+
+/** What the owner is told after a change: its answer, and Alpha's word for a known outcome. */
+export interface Report {
+  readonly answer: "applied" | "refused" | "unknown" | "busy"
+  readonly word?: ReportWord
+  readonly detail?: string
+}
+
+/** Known outcomes the screen words. */
+export type ReportWord =
+  | "limit" | "not-confirmed" | "not-sent" | "prompt-not-run" | "fire-skipped" | "fire-deferred" | "fire-failed" | "fire-raced"
+  | "needs-name" | "needs-future-time" | "needs-schedule" | "needs-event" | "needs-instructions" | "snooze-past"
+
+/** A prompt as the owner edits it. */
+export interface PromptInput {
+  readonly title: string
+  readonly instructions: string
+  readonly kind: "once" | "cron" | "event"
+  readonly at: number
+  readonly cron: string
+  readonly eventKind: string
+  readonly original?: { readonly at: number; readonly enabled: boolean; readonly timezone: string }
+}
+
+/** One prompt run as its history line shows it. */
+export interface PromptRunLine { readonly at: number; readonly status: string; readonly error?: string }
+
+/** The Workflows list: every source, and the one change held per owner. */
+export service Automations {
+  /** Read every source on its own, for the agent's current owner. */
+  refresh(): void!!
+  /** Turn a prompt, reminder or routine on or off. */
+  setEnabled(key: string, on: boolean): Report!!
+  /** Delete a prompt, reminder or routine, or cancel a reminder. */
+  remove(key: string): Report!!
+  /** Run a prompt or fire a scheduled item now. */
+  run(key: string): Report!!
+  /** Answer a scheduled item with one of its offered verbs. */
+  verb(key: string, verb: Verb): Report!!
+  /** Snooze a scheduled item or a reminder by ten minutes. */
+  snooze(key: string): Report!!
+  /** Change a scheduled item's instructions, and its daily time when it changed. */
+  editSchedule(key: string, instructions: string, minuteOfDay?: number): Report!!
+  /** Save a new prompt, or the prompt `id`. */
+  savePrompt(input: PromptInput, id?: string): Report!!
+  /** The prompt's run history, newest first. */
+  promptRuns(id: string): ReadonlyArray<PromptRunLine>!AgentRefused | AgentUnavailable | Unrecognized | NotSent
+  /** Release the held change after the owner confirmed it may still apply. */
+  allowAnother(): void!!
+}
+
+const sources: ReadonlyArray<Source> = ["AutomationSource", "ScheduleSource", "ReminderSource", "DefinitionSource"]
+
+function statusOf(status: string): TaskStatus {
+  switch (status) {
+    case "scheduled": return "TaskScheduled"
+    case "fired": return "TaskFired"
+    case "acknowledged": return "TaskAcknowledged"
+    case "completed": return "TaskCompleted"
+    case "dismissed": return "TaskDismissed"
+    case "skipped": return "TaskSkipped"
+    case "expired": return "TaskExpired"
+    case "failed": return "TaskFailed"
+    default: return "TaskOther"
+  }
+}
+
+/** The schedule code a row carries; the screen words it. */
+export function scheduleCode(t: TaskTrigger): string {
+  switch (t.kind) {
+    case "once": return `once:${t.atIso ?? ""}`
+    case "cron": return `cron:${t.expression ?? ""}|${t.tz === undefined || t.tz === "owner_local" ? deviceZone() : t.tz}`
+    case "event": return "event"
+    case "manual": return "manual"
+    case "relative_to_anchor": return `relative:${t.anchorKey ?? ""}:${t.offsetMinutes ?? 0}`
+    case "during_window": return `window:${t.windowKey ?? ""}`
+    case "after_task": return "after"
+    default: return ""
+  }
+}
+
+function scheduledRow(task: ScheduledTaskRecord): Row | undefined {
+  if (task.ownerVisible !== true) return undefined
+  const status = statusOf(task.state.status)
+  const snoozed = taskSnoozed(status, instant(task.state.firedAt) > 0, task.state.lastDecisionLog === `snoozed until ${task.state.firedAt} (ladder reset)`)
+  const manual = task.trigger.kind === "manual"
+  return {
+    key: `scheduled:${task.taskId}`, id: task.taskId, target: task.taskId, kind: "ScheduleRow",
+    enabled: taskOn(manual, status), status: snoozed ? "snoozed" : manual && !taskEnded(status) ? "paused" : task.state.status,
+    title: task.metadata?.recordKey ?? task.kind ?? "", description: task.promptInstructions ?? "",
+    schedule: snoozed ? `${scheduleCode(task.trigger)}|snoozed:${task.state.firedAt ?? ""}` : scheduleCode(task.trigger), system: false,
+  }
+}
+
+function answerOf(error: NotSent | AgentRefused | AgentUnavailable | Unrecognized): Answer {
+  return match (error) {
+    when NotSent: "AnswerRefused";
+    when AgentUnavailable: "AnswerRefused";
+    when AgentRefused: error.status >= 400 && error.status < 500 ? "AnswerRefused" : "AnswerUnknown";
+    when Unrecognized: "AnswerUnknown";
+  }
+}
+
+function reportOf(answer: Answer, word?: ReportWord, detail?: string): Report {
+  const kind = answer === "AnswerApplied" ? "applied" : answer === "AnswerRefused" ? "refused" : "unknown"
+  return { answer: kind, ...(word === undefined ? {} : { word }), ...(detail === undefined ? {} : { detail }) }
+}
+
+/** Automations over the stored list Machine and the agent's owner routes. */
+export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
+  const held = try Machine
+  const agent = try WorkflowApi
+
+  effect function bind() {
+    const scope = try (agent.scope() catch () => undefined)
+    if (scope === undefined) return undefined
+    const owner = `${scope.origin}|${scope.ownerId}|${scope.agentId}`
+    held.send({ type: "bindOwner", owner }) catch () => undefined
+    return owner
+  }
+
+  effect function read(source: Source) {
+    switch (source) {
+      case "AutomationSource": {
+        const list = try decoded(AutomationList, "/api/automations", try agent.request("GET", "/api/automations"))
+        const rows: Row[] = list.automations.map((a) => ({
+          key: a.id, id: a.id, target: a.type === "workflow" ? (a.workflowId ?? a.id) : (a.triggerId ?? a.id),
+          kind: a.type === "workflow" ? "WorkflowRow" : "PromptRow", enabled: a.enabled, status: a.status ?? "",
+          title: a.title, description: a.description ?? "", schedule: a.type === "workflow" ? "workflow" : "prompt", system: a.system === true,
+        }))
+        return { rows, partial: list.workflowFetchError !== undefined || (list.executionFetchErrors?.length ?? 0) > 0 }
+      }
+      case "ScheduleSource": {
+        const list = try decoded(ScheduledTaskList, "/api/scheduled-tasks", try agent.request("GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
+        return { rows: list.tasks.flatMap((t) => { const row = scheduledRow(t); return row === undefined ? [] : [row] }), partial: false }
+      }
+      case "ReminderSource": {
+        const list = try decoded(ReminderList, "/api/lifeops/reminders", try agent.request("GET", "/api/lifeops/reminders"))
+        const rows: Row[] = list.reminders.map(({ definition, occurrence }) => ({
+          key: `reminder:${definition.id}`, id: definition.id, target: occurrence?.id ?? "", kind: "ReminderRow", enabled: definition.status === "active",
+          status: occurrence?.status ?? definition.status ?? "", title: definition.title ?? "", description: definition.description ?? "",
+          schedule: definition.cadence?.kind === "once" ? `once:${occurrence?.dueAt ?? definition.cadence.dueAt ?? ""}` : `routine:${definition.cadence?.kind ?? ""}`, system: false,
+        }))
+        return { rows, partial: false }
+      }
+      case "DefinitionSource": {
+        const list = try decoded(DefinitionList, "/api/lifeops/definitions", try agent.request("GET", "/api/lifeops/definitions"))
+        const rows: Row[] = list.definitions.flatMap(({ definition }) => {
+          const listed = definitionRow(definition.metadata?.ownerSurface ?? "", definition.kind ?? "", definition.status === "archived")
+          if (listed === "NotListed") return []
+          return [{
+            key: `reminder:${definition.id}`, id: definition.id, target: definition.id, kind: "RoutineRow" as RowKind, enabled: definition.status === "active",
+            status: definition.status ?? "", title: definition.title ?? "", description: definition.description ?? "",
+            schedule: listed === "GoalRow" ? `goal:${definition.cadence?.kind ?? ""}` : `routine:${definition.cadence?.kind ?? ""}`, system: false,
+          }]
+        })
+        return { rows, partial: false }
+      }
+    }
+  }
+
+  effect function refreshSource(source: Source) {
+    const outcome = try (effect {
+      const { rows, partial } = try read(source)
+      return { read: readOf(200), rows, partial }
+    } catch (error) => ({ read: match (error) {
+      when AgentRefused: readOf(error.status);
+      default: readOf(0);
+    }, rows: [] as Row[], partial: false }))
+    held.send({ type: "listed", source, read: outcome.read, rows: outcome.rows, partial: outcome.partial }) catch () => undefined
+  }
+
+  effect function refresh() {
+    if ((try bind()) === undefined) return
+    for concurrent (const source of sources) { try refreshSource(source) }
+  }
+
+  effect function rowOf(key: string) {
+    return (try held.get()).rows.find((r) => r.key === key)
+  }
+
+  /** Hold the change, send it, settle it with the agent's answer, then read the list again. */
+  effect function settle(kind: ChangeKind, key: string, target: boolean, send: Report!(NotSent | AgentRefused | AgentUnavailable | Unrecognized)) {
+    const accepted = try (held.send({ type: "change", kind, key, target }) catch () => undefined)
+    if (accepted === undefined) return { answer: "busy" } satisfies Report
+    const id = (try held.get()).minted
+    const report = try (send catch (error) => reportOf(answerOf(error), match (error) { when NotSent: "not-sent"; default: undefined; }))
+    const answer: Answer = report.answer === "applied" ? "AnswerApplied" : report.answer === "refused" ? "AnswerRefused" : "AnswerUnknown"
+    held.send({ type: "answered", id, answer }) catch () => undefined
+    try refresh()
+    return report
+  }
+
+  effect function readTrigger(id: string) {
+    const path = `/api/triggers/${id}`
+    return (try decoded(TriggerReply, path, try agent.request("GET", path))).trigger
+  }
+
+  effect function enablePrompt(id: string, on: boolean) {
+    const path = `/api/triggers/${id}`
+    const sent = try (effect {
+      const reply = try decoded(TriggerReply, path, try agent.request("PUT", path, { enabled: on }))
+      return { status: 200, confirmed: reply.trigger.id === id && reply.trigger.enabled === on, failure: undefined }
+    } catch (error) => ({ status: match (error) { when AgentRefused: error.status; default: 0; }, confirmed: false, failure: error }))
+    if (sent.failure === undefined) return sent.confirmed ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+    const reread = try (readTrigger(id) catch () => undefined)
+    const outcome = enableOutcome(on, sent.status, reread === undefined || reread.id !== id ? "RereadFailed" : reread.enabled ? "RereadOn" : "RereadPaused")
+    if (outcome === "EnableLanded") return reportOf("AnswerApplied")
+    if (outcome === "EnableRefusedAtLimit") return reportOf("AnswerRefused", "limit")
+    throw sent.failure
+  }
+
+  effect function setDefinition(id: string, body: Record<string, unknown>, check: (status: string | undefined) => boolean) {
+    const path = `/api/lifeops/definitions/${id}`
+    const saved = (try decoded(DefinitionReply, path, try agent.request("PUT", path, body))).definition
+    return saved.id === id && check(saved.status) ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+  }
+
+  effect function taskVerb(id: string, verb: Verb, body: Record<string, unknown>) {
+    const name = verb.toLowerCase()
+    const path = `/api/scheduled-tasks/${id}/${name}`
+    const answer = try agent.request("POST", path, body)
+    if (verb === "Fire") {
+      const { fire } = try decoded(FireReply, path, answer)
+      const outcome = fireOutcome(fire.kind, fire.task?.taskId === id)
+      switch (outcome) {
+        case "FiredNow": return reportOf("AnswerApplied")
+        case "FireRaced": return reportOf("AnswerRefused", "fire-raced")
+        case "FireSkipped": return reportOf("AnswerApplied", "fire-skipped", fire.reason)
+        case "FireDeferred": return reportOf("AnswerApplied", "fire-deferred", fire.nextAttemptAtIso)
+        case "FireFailed": return reportOf("AnswerApplied", "fire-failed")
+        case "FireUnconfirmed": return reportOf("AnswerUnknown", "not-confirmed")
+      }
+    }
+    const { task } = try decoded(TaskReply, path, answer)
+    return task.taskId === id ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+  }
+
+  return {
+    refresh,
+    effect setEnabled(key: string, on: boolean) {
+      const row = try rowOf(key)
+      if (row === undefined) return { answer: "refused" } satisfies Report
+      return try settle("EnableChange", key, on, effect {
+        if (row.kind === "PromptRow") return try enablePrompt(row.target, on)
+        const status = on ? "active" : "paused"
+        return try setDefinition(row.id, { status }, (saved) => saved === status)
+      })
+    },
+    effect remove(key: string) {
+      const row = try rowOf(key)
+      if (row === undefined) return { answer: "refused" } satisfies Report
+      return try settle("DeleteChange", key, false, effect {
+        if (row.kind === "PromptRow") {
+          const path = `/api/triggers/${row.target}`
+          return (try decoded(Deleted, path, try agent.request("DELETE", path))).ok === true ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+        }
+        if (row.kind === "ReminderRow" && row.schedule.startsWith("once:")) return try setDefinition(row.id, { status: "archived" }, (saved) => saved === "archived")
+        const path = `/api/lifeops/definitions/${row.id}`
+        return (try decoded(Deleted, path, try agent.request("DELETE", path))).deleted === true ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+      })
+    },
+    effect run(key: string) {
+      const row = try rowOf(key)
+      if (row === undefined) return { answer: "refused" } satisfies Report
+      return try settle("RunChange", key, false, effect {
+        if (row.kind === "ScheduleRow") return try taskVerb(row.id, "Fire", {})
+        const path = `/api/triggers/${row.target}/execute`
+        const reply = try decoded(ExecuteReply, path, try agent.request("POST", path, {}))
+        const outcome = runNowOutcome(reply.ok, reply.result.status)
+        return outcome === "RanNow" ? reportOf("AnswerApplied") : outcome === "NotRunNow" ? reportOf("AnswerApplied", "prompt-not-run", reply.result.error ?? reply.result.status) : reportOf("AnswerUnknown", "not-confirmed")
+      })
+    },
+    effect verb(key: string, verb: Verb) {
+      const row = try rowOf(key)
+      if (row === undefined || row.kind !== "ScheduleRow") return { answer: "refused" } satisfies Report
+      return try settle("VerbChange", key, false, taskVerb(row.id, verb, {}))
+    },
+    effect snooze(key: string) {
+      const row = try rowOf(key)
+      if (row === undefined) return { answer: "refused" } satisfies Report
+      const now = try Clock.currentTimeMillis
+      return try settle("SnoozeChange", key, false, effect {
+        if (row.kind === "ReminderRow") {
+          const path = `/api/lifeops/occurrences/${row.target}/snooze`
+          try agent.request("POST", path, { minutes: 10 })
+          return reportOf("AnswerApplied")
+        }
+        const [, snoozedPart] = row.schedule.split("|snoozed:")
+        const snoozedUntil = instant(snoozedPart)
+        const until = snoozeUntil(row.status === "snoozed" || row.status === "scheduled", nextCronAt(row.schedule, now), now, snoozedUntil, sameLocalDay(snoozedUntil, nextCronAt(row.schedule, now), deviceZone()))
+        if (until <= now) return reportOf("AnswerRefused", "snooze-past")
+        const untilIso = new Date(until).toISOString()
+        const path = `/api/scheduled-tasks/${row.id}/snooze`
+        const { task } = try decoded(TaskReply, path, try agent.request("POST", path, { untilIso }))
+        return task.taskId === row.id && snoozeConfirmed(until, statusOf(task.state.status), instant(task.state.firedAt)) ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+      })
+    },
+    effect editSchedule(key: string, instructions: string, minuteOfDay?: number) {
+      const row = try rowOf(key)
+      const text = instructions.trim()
+      if (row === undefined || row.kind !== "ScheduleRow") return { answer: "refused" } satisfies Report
+      if (text === "") return reportOf("AnswerRefused", "needs-instructions")
+      return try settle("EditChange", key, false, effect {
+        const trigger = minuteOfDay === undefined ? undefined : { kind: "cron", expression: `${minuteOfDay % 60} ${Math.floor(minuteOfDay / 60)} * * *`, tz: deviceZone() }
+        const path = `/api/scheduled-tasks/${row.id}/edit`
+        const { task } = try decoded(TaskReply, path, try agent.request("POST", path, { promptInstructions: text, ...(trigger === undefined ? {} : { trigger }) }))
+        const same = trigger === undefined || (task.trigger.kind === trigger.kind && task.trigger.expression === trigger.expression && task.trigger.tz === trigger.tz)
+        return task.taskId === row.id && editConfirmed(text, task.promptInstructions ?? "", trigger !== undefined, same) ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+      })
+    },
+    effect savePrompt(input: PromptInput, id?: string) {
+      const now = try Clock.currentTimeMillis
+      const draft: Draft = {
+        title: input.title.trim(), instructions: input.instructions.trim(), kind: input.kind === "once" ? "OnceAt" : input.kind === "cron" ? "OnCron" : "OnEvent",
+        at: input.at, cron: input.cron.trim(), eventKind: input.eventKind.trim(),
+        unchangedTime: input.original !== undefined && input.original.at === input.at, wasEnabled: input.original?.enabled ?? false,
+      }
+      const problem = draftProblem(draft, now)
+      if (problem !== "DraftReady") {
+        const word: ReportWord = problem === "NeedsNameAndInstructions" ? "needs-name" : problem === "NeedsFutureTime" ? "needs-future-time" : problem === "NeedsSchedule" ? "needs-schedule" : "needs-event"
+        return reportOf("AnswerRefused", word)
+      }
+      const creating = id === undefined
+      return try settle("CreateChange", "", false, effect {
+        const body = {
+          kind: "prompt", displayName: draft.title, instructions: draft.instructions, triggerType: input.kind,
+          timezone: input.original?.timezone ?? deviceZone(),
+          ...(input.kind === "once" ? { scheduledAtIso: new Date(input.at).toISOString() } : input.kind === "cron" ? { cronExpression: draft.cron } : { eventKind: draft.eventKind }),
+          ...(creating ? { wakeMode: "inject_now", enabled: false } : {}),
+        }
+        const path = creating ? "/api/triggers" : `/api/triggers/${id}`
+        const reply = try decoded(TriggerReply, path, try agent.request(creating ? "POST" : "PUT", path, body))
+        const saved = { id: reply.trigger.id, displayName: reply.trigger.displayName, instructions: reply.trigger.instructions, enabled: reply.trigger.enabled, room: reply.deliveryConversationId ?? "" }
+        return saveConfirmed(creating, id ?? "", draft.title, draft.instructions, "", saved) ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
+      })
+    },
+    effect promptRuns(id: string) {
+      const path = `/api/triggers/${id}/runs`
+      const { runs } = try decoded(TriggerRuns, path, try agent.request("GET", path))
+      return runs.map((run) => ({ at: instant(run.startedAtIso), status: run.status ?? "", ...(run.error === undefined ? {} : { error: run.error }) }))
+    },
+    effect allowAnother() {
+      held.send({ type: "allowAnother" }) catch () => undefined
+    },
+  }
+}), stored(AUTOMATIONS_KEY))
+
+/** The next local occurrence of a daily `cron:m h * * *` schedule code after `now`, or 0. */
+function nextCronAt(code: string, now: number): number {
+  const match = /^cron:(\d{1,2}) (\d{1,2}) \* \* \*\|/.exec(code)
+  if (match === null) return 0
+  const at = new Date(now)
+  at.setHours(Number(match[2]), Number(match[1]), 0, 0)
+  if (at.getTime() <= now) at.setDate(at.getDate() + 1)
+  return at.getTime()
+}

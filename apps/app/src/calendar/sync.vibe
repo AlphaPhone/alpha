@@ -1,0 +1,248 @@
+// spec/calendar/sync.md, "Story: Change Calendar sync only from a review of the current link"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/calendar/googleLink.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"; spec/calendar/nativeSync.md, "Story: Turn device sync on only through Android's consent, and off for every review at once"; spec/calendar/disconnect.md, "Story: Revoke Google's access without waiting on Calendar"
+import { type SyncControl, type Event as ControlEvent, type ControlKind, type PreservationCheck, type SourceFreshness, type LinksReply, Machine as ControlMachine, syncWord } from "../../gen/calendar__sync.effect.vibe"
+import { type GoogleLink, type Event as LinkEvent, type GoogleGrant, type LinksReply as LinkLinksReply, Machine as LinkMachine } from "../../gen/calendar__googleLink.effect.vibe"
+import { type NativeSync, type Event as NativeEvent, Machine as NativeMachine } from "../../gen/calendar__nativeSync.effect.vibe"
+import { type Disconnect, type Event as DisconnectEvent, type CleanupReview, Machine as DisconnectMachine } from "../../gen/calendar__disconnect.effect.vibe"
+import { calendarSyncReportMessage, controlOperationKey } from "@elizaos/plugin-calendar/linked-sync"
+import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { AgentCalendar, type AgentBinding } from "./agent.vibe"
+import type { LinkedCalendarControlView, LinkedCalendarMapping } from "@elizaos/plugin-calendar/client"
+import { residentClients } from "./client.vibe"
+import { LegacyCalendar } from "./preservation.vibe"
+
+/** Everything the sync sheet shows. */
+export interface SyncView {
+  readonly control: SyncControl
+  readonly link: GoogleLink
+  readonly device: NativeSync
+  readonly disconnect: Disconnect
+  readonly review: LinkedCalendarControlView | undefined
+  readonly links: readonly LinkedCalendarMapping[] | undefined
+}
+
+/** A writable Google calendar the owner can choose as the sync destination. */
+export interface SyncDestination { readonly connectorAccountId: string; readonly providerCalendarId: string; readonly name: string; readonly account: string; readonly version: number }
+
+/** Linked Google Calendar sync: its control, the owner's consent, setup, device consent and disconnect cleanup. */
+export service CalendarSync {
+  readonly changes: Stream.Stream<SyncView>
+  view(): SyncView!!
+  bind(binding: AgentBinding, draftOpen: boolean): void!!
+  /** Read the link control for the current binding. */
+  review(): void!!
+  change(kind: ControlKind, destination?: SyncDestination): void!!
+  listLinks(): void!!
+  cancelLinks(): void!!
+  reviewConsent(): void!!
+  giveConsent(): void!!
+  withdrawConsent(): void!!
+  /** The local calendar changed: a review made before it no longer counts. */
+  localChanged(): void!!
+  /** Link from a verified grant: review, select or resume, then read the links back. */
+  link(grant: GoogleGrant, destinations: readonly SyncDestination[]): void!!
+  abortLink(): void!!
+  deviceEnable(): void!!
+  devicePause(): void!!
+  /** Cleanup for a Google disconnect, around the account area's revoke. */
+  disconnect(review: CleanupReview, independent: boolean, revoke: Effect.Effect<boolean>): void!!
+  /** The words of the sync status line. */
+  word(): "off" | "on" | "synced" | "needs-review" | "paused"!!
+}
+
+
+/** The sync service over the resident's link control, the device plugin and its machines. */
+export const syncLayer = Layer.effect(CalendarSync, effect {
+  const control = try ControlMachine
+  const link = try LinkMachine
+  const device = try NativeMachine
+  const cleanup = try DisconnectMachine
+  const resident = try Resident
+  const native = try Native
+  const agent = try AgentCalendar
+  const legacy = try LegacyCalendar
+  const reviewed = try Ref.make<LinkedCalendarControlView | undefined>(undefined)
+  const listed = try Ref.make<readonly LinkedCalendarMapping[] | undefined>(undefined)
+  const linked = residentClients(resident).linked
+  const view0: SyncView = { control: try control.get(), link: try link.get(), device: try device.get(), disconnect: try cleanup.get(), review: undefined, links: undefined }
+  const shown = try SubscriptionRef.make<SyncView>(view0)
+
+  effect function publish() {
+    try SubscriptionRef.set(shown, { control: try control.get(), link: try link.get(), device: try device.get(), disconnect: try cleanup.get(),
+      review: try Ref.get(reviewed), links: try Ref.get(listed) })
+  }
+  effect function sendControl(event: ControlEvent) { const after = control.send(event) catch () => undefined; try publish(); return after }
+  effect function sendLink(event: LinkEvent) { const after = link.send(event) catch () => undefined; try publish(); return after }
+  effect function sendDevice(event: NativeEvent) { const after = device.send(event) catch () => undefined; try publish(); return after }
+  effect function sendCleanup(event: DisconnectEvent) { const after = cleanup.send(event) catch () => undefined; try publish(); return after }
+
+  effect function preservation(): PreservationCheck {
+    const capture = legacy.capture() catch () => undefined
+    if (capture === undefined) return "PreservationFailedCheck"
+    if (!capture.present) return "PreservationSame"
+    if (!capture.readable) return "PreservationUnreadableCheck"
+    if (capture.pending) return "PreservationPendingCheck"
+    const kept = legacy.retainedReadOnly() catch () => false
+    return kept ? "PreservationSame" : "PreservationChangedCheck"
+  }
+
+  effect function readControl(): LinkedCalendarControlView | undefined {
+    return try tryPromise({ try: () => linked.getLinkedCalendarControl(), catch: () => undefined }) catch () => undefined
+  }
+
+  effect function writeControl(kind: ControlKind, revision: number, destination: SyncDestination | undefined, owner: string): number {
+    const operation = kind === "SelectDestination" ? "select" : kind === "ResumeSync" ? "resume" : kind === "PauseSync" ? "pause" : "recover"
+    const target = destination ? { connectorAccountId: destination.connectorAccountId, providerCalendarId: destination.providerCalendarId } : null
+    return effect {
+      const key = try controlOperationKey(owner, operation, revision, target)
+      const reference = (try Ref.get(reviewed))?.pendingDispatch?.reference ?? ""
+      const request = operation === "select" ? { operation, destination: target, expectedRevision: revision, idempotencyKey: key }
+        : operation === "recover" ? { operation, dispatchReference: reference, expectedRevision: revision, idempotencyKey: key }
+        : { operation, expectedRevision: revision, idempotencyKey: key }
+      const result = try tryPromise({ try: () => linked.updateLinkedCalendarControl(request), catch: () => "failed" as const })
+      try Ref.set(reviewed, result)
+      return result.revision
+    } catch () => 0
+  }
+
+  effect function runChange(kind: ControlKind, destination: SyncDestination | undefined) {
+    const started = try sendControl({ type: "start", kind, target: kind === "SelectDestination" ? destination?.providerCalendarId ?? "" : "", keyed: true })
+    if (started === undefined || started.attempt.phase !== "CheckingPreservation") return
+    const id = started.attempt.id
+    const preserved = try sendControl({ type: "preserve", id, result: try preservation() })
+    if (preserved?.attempt.phase === "ReadingControl") {
+      const read = try readControl()
+      if (read === undefined) try sendControl({ type: "controlReadFailed", id })
+      else {
+        try Ref.set(reviewed, read)
+        try sendControl({ type: "controlRead", id, revision: read.revision, destination: read.destination?.providerCalendarId ?? "", paused: read.paused, pending: read.pendingDispatch !== null })
+      }
+      return
+    }
+    if (preserved?.attempt.phase === "CheckingSource") {
+      const fresh = try readControl()
+      const saved = (try Ref.get(reviewed))?.destination
+      const target = kind === "SelectDestination" ? destination : saved === null || saved === undefined ? undefined : { ...saved, name: "", account: "", version: 0 }
+      const freshness: SourceFreshness = fresh === undefined ? "SourceFailed" : fresh.revision !== preserved.attempt.captured ? "SourceVersionChanged" : "SourceExact"
+      try sendControl({ type: "sourceRead", id, listed: target !== undefined, freshness })
+    }
+    const sending = try control.get()
+    if (sending.attempt.id === id && sending.attempt.phase === "SendingChange") {
+      const revision = try writeControl(kind, sending.attempt.captured, destination, sending.owner)
+      try sendControl({ type: "changeReply", id, revision })
+    }
+  }
+
+  effect function linksReply(): LinksReply {
+    return effect {
+      const answer = try tryPromise({ try: () => linked.listLinkedCalendarEvents(), catch: () => "failed" as const })
+      try Ref.set(listed, answer.links)
+      return (answer.links.some((entry) => entry.state === "conflicted" || entry.state === "quarantined") ? "LinksReplyHeld" : "LinksReplyEmpty") as LinksReply
+    } catch () => "LinksReplyFailed" as LinksReply
+  }
+
+  effect function syncCall(kind: string, args: Record<string, unknown> = {}) {
+    return effect { return try native.invoke("AlphaCalendar", "sync", { kind, ...args }) as { status?: string } } catch () => ({ status: "unavailable" })
+  }
+
+  return {
+    changes: shown.changes,
+    effect view() { return try SubscriptionRef.get(shown) },
+    effect bind(binding: AgentBinding, draftOpen: boolean) {
+      const before = try control.get()
+      try sendControl({ type: "bindPort", owner: binding.owner, session: binding.session, usable: binding.usable && binding.owner !== "" })
+      try sendControl({ type: "setDraft", canChange: !draftOpen })
+      try sendLink({ type: "setFence", stillCurrent: binding.usable && before.portOwner === binding.owner, canChange: !draftOpen })
+      if (before.portOwner !== binding.owner || before.portSession !== binding.session) {
+        try sendControl({ type: "retire" })
+        try Ref.set(reviewed, undefined)
+      }
+      const view = try agent.view()
+      try sendControl({ type: "refresh", ready: view.state.status === "Ready" || view.state.status === "Partial" || view.state.status === "Unavailable" })
+      try sendLink({ type: "setCalendar", ready: view.state.status === "Ready" || view.state.status === "Partial", busy: view.state.read.id !== 0 || view.state.write.id !== 0 })
+    },
+    effect review() { try runChange("ReviewControl", undefined) },
+    effect change(kind: ControlKind, destination?: SyncDestination) { try runChange(kind, destination) },
+    effect listLinks() {
+      const started = try sendControl({ type: "listLinks" })
+      if (started?.linksPhase === "LinksReading") try sendControl({ type: "linksReply", reply: try linksReply() })
+    },
+    effect cancelLinks() { try sendControl({ type: "cancelLinks" }) },
+    effect reviewConsent() { try sendControl({ type: "reviewConsent" }) },
+    effect giveConsent() { try sendControl({ type: "giveConsent" }) },
+    effect withdrawConsent() { try sendControl({ type: "withdrawConsent" }) },
+    effect localChanged() { try sendControl({ type: "localChange" }) },
+    effect link(grant: GoogleGrant, destinations: readonly SyncDestination[]) {
+      let state = try sendLink({ type: "start", grant })
+      while (state !== undefined && state.phase !== "LinkDone") {
+        if (state.phase === "ReviewingControl") {
+          const read = try readControl()
+          if (read === undefined) { state = try sendLink({ type: "reviewFailed" }); continue }
+          try Ref.set(reviewed, read)
+          const saved = read.destination
+          const listedHere = saved !== null && destinations.some((candidate) => candidate.providerCalendarId === saved.providerCalendarId && candidate.connectorAccountId === saved.connectorAccountId)
+          state = try sendLink({ type: "reviewReply", revision: read.revision, hasDestination: saved !== null, listed: listedHere, authorized: listedHere,
+            paused: read.paused, pendingId: read.pendingDispatch?.reference ?? read.pendingDispatch?.linkId ?? "", onePrimary: destinations.length === 1 })
+        } else if (state.phase === "CheckingWrite") {
+          state = try sendLink({ type: "authorize" })
+        } else if (state.phase === "WritingControl") {
+          const current = try Ref.get(reviewed)
+          const kind: ControlKind = state.planned === "SelectDestination" ? "SelectDestination" : "ResumeSync"
+          const revision = try writeControl(kind, current?.revision ?? 0, kind === "SelectDestination" ? destinations[0] : undefined, (try control.get()).owner)
+          state = revision === 0 ? try sendLink({ type: "writeFailed" }) : try sendLink({ type: "writeReply", revision })
+        } else if (state.phase === "ListingLinks") {
+          const reply = try linksReply()
+          const mapped: LinkLinksReply = reply === "LinksReplyFailed" ? "LinksFailed" : reply === "LinksReplyHeld" ? "LinksConflictHeld" : "LinksClean"
+          state = try sendLink({ type: "linksReply", links: mapped })
+        } else {
+          return
+        }
+      }
+    },
+    effect abortLink() { try sendLink({ type: "abort" }) },
+    effect deviceEnable() {
+      if ((try sendDevice({ type: "prepare" })) === undefined) return
+      const prepared = try syncCall("prepare")
+      if (prepared.status !== "ready") return
+      try sendDevice({ type: "queueEnable" })
+      try sendDevice({ type: "showDialog" })
+      try sendDevice({ type: "holdEnable", afterRead: false })
+      const enabled = try syncCall("enable")
+      const finished = try sendDevice({ type: "finishEnable" })
+      if (enabled.status !== "enabled" && finished?.durable === "ConsentEnabled") try sendDevice({ type: "pause" })
+    },
+    effect devicePause() {
+      const reply = try syncCall("pause")
+      try sendDevice({ type: "setPauseRefusals", refusals: reply.status === "paused" ? 0 : 8 })
+      try sendDevice({ type: "pause" })
+    },
+    effect disconnect(review: CleanupReview, independent: boolean, revoke: Effect.Effect<boolean>) {
+      const started = try sendCleanup({ type: "start", identity: true, budget: true })
+      if (started?.phase !== "Revoking") return
+      fork.detached effect {
+        const ok = revoke catch () => false
+        try sendCleanup({ type: "revokeReply", ok })
+      }
+      if (started.pause === "CleanupPending") {
+        try runChange("PauseSync", undefined)
+        const after = try control.get()
+        try sendCleanup({ type: "pauseReply", exact: after.attempt.outcome === "AttemptChanged" })
+      }
+      if (started.retirement === "CleanupPending") {
+        const retired = try syncCall("cancel")
+        try sendCleanup({ type: "retirementReply", ok: retired.status !== "unavailable" })
+      }
+    },
+    effect word() {
+      const state = try control.get()
+      const links = try Ref.get(listed)
+      const review = try Ref.get(reviewed)
+      const conflicts = (links ?? []).filter((entry) => entry.state === "conflicted" || entry.state === "quarantined").length
+      const shownWord = syncWord(state.consent, review?.paused ?? true, review?.pendingDispatch != null, links !== undefined, conflicts + (review?.conflicts ?? 0))
+      return shownWord === "SyncOff" ? "off" : shownWord === "SyncOn" ? "on" : shownWord === "SyncSynced" ? "synced" : shownWord === "SyncPaused" ? "paused" : "needs-review"
+    },
+  }
+})
+
+/** The report line after a sync pass, in upstream's words. */
+export const syncReportMessage = calendarSyncReportMessage

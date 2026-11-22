@@ -1,20 +1,19 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import {VOICE_HOST_MANIFEST, voiceHostProblems, type readVoiceHost} from './voice-host.ts';
 import {readNativeBuildReceipt, verifyNativeBuildFiles} from './native-build-inputs.ts';
 import {HOST_DESCRIPTOR, generateAlphaAndroidHost, readHostDescriptor} from './android-host.ts';
 import {HOST_TEMPLATES, referencePath} from './gradle-verification.ts';
-import {readAgentBundleDependencies} from './agent-bundle-dependencies.ts';
-import {LOCKFILE, readBunLock, type PackageLock} from './bun-lock.ts';
+import {LOCKFILE, readPnpmLock as readLock, type PackageLock} from './pnpm-lock.ts';
 import {readUpstreamPin} from './upstream-pin.ts';
 export type {PackageLock};
 // Generates the third-party notices shipped in the web bundle and in every APK payload.
 //
-//   bun scripts/generate-licenses.ts                    write apps/app/public/licenses/*
-//   bun scripts/generate-licenses.ts --check            fail when outputs are stale or an input is broken
-//   bun scripts/generate-licenses.ts --refresh-android  re-resolve the Gradle release/debug runtime
+//   node scripts/generate-licenses.ts                    write apps/app/public/licenses/*
+//   node scripts/generate-licenses.ts --check            fail when outputs are stale or an input is broken
+//   node scripts/generate-licenses.ts --refresh-android  re-resolve the Gradle release/debug runtime
 //                                                         classpath into licenses/android-runtime-classpath.json
 //
-//   bun scripts/generate-licenses.ts --packaged-runtime  also list Bun and every npm package bundled
+//   node scripts/generate-licenses.ts --packaged-runtime  also list the Node runtime and every npm package bundled
 //                                                         into the staged agent (from its hash-bound
 //                                                         inventory, verified in the prepared source)
 //                                                         and workflow worker (its dependencies.json)
@@ -168,7 +167,7 @@ export function declarationOnlyPackage(dir: string) {
 }
 
 /**
- * Production packages in bun.lock: not dev, not optional platform binaries, not links, and
+ * Production packages in pnpm-lock.yaml: not dev, not optional platform binaries, not links, and
  * not declaration-only type packages (which ship no code).
  */
 export function productionLockPackages(lock: PackageLock, root = ROOT) {
@@ -429,11 +428,11 @@ export function listFonts(root: string) {
 // ---------------------------------------------------------------- collectors
 
 function npmEntries(root: string, templates: Templates, errors: string[]): NoticeDraft[] {
-  const lock = readBunLock(root);
+  const lock = readLock(root);
   const entries: NoticeDraft[] = [];
   for (const pkg of productionLockPackages(lock, root)) {
     const dir = path.join(root, pkg.key);
-    if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${pkg.name}@${pkg.version}: not installed at ${pkg.key}; run bun install --frozen-lockfile`); continue; }
+    if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${pkg.name}@${pkg.version}: not installed at ${pkg.key}; run pnpm install --frozen-lockfile`); continue; }
     const manifest = readManifest(dir, `${pkg.name}@${pkg.version}`, errors);
     if (!manifest) continue;
     if (manifest.version !== pkg.version) errors.push(`${pkg.name}: installed ${manifest.version} differs from ${LOCKFILE} ${pkg.version}`);
@@ -490,7 +489,7 @@ function tesseractCoreEntries(root: string, errors: string[]): NoticeDraft[] {
     components: {name: string; version: string; license: string; source: string; preface?: string; files: {path: string; sha256: string}[]}[];
   } = readJson(root, TESSERACT_CORE_SOURCES);
   const dir = `node_modules/${pinned.package}`;
-  if (!exists(root, `${dir}/package.json`)) { errors.push(`${pinned.package}: not installed; run bun install --frozen-lockfile`); return []; }
+  if (!exists(root, `${dir}/package.json`)) { errors.push(`${pinned.package}: not installed; run pnpm install --frozen-lockfile`); return []; }
   const installed = readJson(root, `${dir}/package.json`).version;
   if (installed !== pinned.version)
     errors.push(`${pinned.package} ${installed} differs from ${TESSERACT_CORE_SOURCES} (${pinned.version}); re-review its statically linked libraries`);
@@ -573,7 +572,7 @@ function fontEntries(root: string, templates: Templates, errors: string[]) {
   const fontsource = Object.keys({...pkg.dependencies, ...pkg.devDependencies}).filter(name => name.startsWith('@fontsource/')).sort();
   for (const name of fontsource) {
     const dir = `node_modules/${name}`;
-    if (!exists(root, `${dir}/package.json`)) { errors.push(`${name}: not installed; run bun install --frozen-lockfile`); continue; }
+    if (!exists(root, `${dir}/package.json`)) { errors.push(`${name}: not installed; run pnpm install --frozen-lockfile`); continue; }
     const manifest = readManifest(path.join(root, dir), name, errors);
     if (!manifest) continue;
     const notice = packageNotice({declared: manifestLicense(manifest), text: licenseFilesText(path.join(root, dir)), dir: path.join(root, dir), manifest, templates});
@@ -636,7 +635,7 @@ export function androidDependencyFingerprint(root: string) {
     }
   }
   // The shared paradee-voice library (:local-speech) declares its build in the pinned consumer script.
-  const paradeeConsumer = 'vendor/eliza/plugins/plugin-local-inference/native/android/consumer.gradle';
+  const paradeeConsumer = 'vendor/eliza/packages/os/android/local-inference/consumer.gradle';
   if (exists(root, paradeeConsumer) && !files.includes(paradeeConsumer)) files.push(paradeeConsumer);
   const lines = [...declared];
   for (const file of [...new Set(files)].sort()) {
@@ -664,10 +663,10 @@ export function refreshAndroidClasspath(root: string, env: NodeJS.ProcessEnv) {
 }
 
 function androidEntries(root: string, templates: Templates, errors: string[]): NoticeDraft[] {
-  if (!exists(root, ANDROID_CLASSPATH)) { errors.push(`${ANDROID_CLASSPATH} missing; run bun scripts/generate-licenses.ts --refresh-android`); return []; }
+  if (!exists(root, ANDROID_CLASSPATH)) { errors.push(`${ANDROID_CLASSPATH} missing; run node scripts/generate-licenses.ts --refresh-android`); return []; }
   const snapshot = readJson(root, ANDROID_CLASSPATH);
   if (snapshot.inputFingerprint !== androidDependencyFingerprint(root))
-    errors.push(`${ANDROID_CLASSPATH} is stale: Android dependency declarations changed; run bun scripts/generate-licenses.ts --refresh-android`);
+    errors.push(`${ANDROID_CLASSPATH} is stale: Android dependency declarations changed; run node scripts/generate-licenses.ts --refresh-android`);
   const families = new Map<(typeof MAVEN_FAMILIES)[number], string[]>();
   const unknown: string[] = [];
   for (const coord of snapshot.coordinates) {
@@ -775,11 +774,11 @@ export const AGENT_ASSETS = 'android/app/src/main/assets/agent';
 
 /** True when a resident runtime is staged into the APK assets (runtimePackaging PACKAGED). */
 export function packagedRuntimePresent(root = ROOT, agentDir = path.join(root, AGENT_ASSETS)) {
-  return fs.existsSync(path.join(agentDir, 'agent-bundle.js')) && fs.existsSync(path.join(agentDir, 'android-agent-runtime-provenance.json'));
+  return fs.existsSync(path.join(agentDir, 'agent.mjs')) && fs.existsSync(path.join(agentDir, 'inventory.json'));
 }
 
 function runtimePackageEntry(dir: string, bundle: string, templates: Templates, errors: string[]): RuntimePackageNotice | null {
-  if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${bundle}: ${dir} is not in the prepared runtime source; run bun run agent:prepare`); return null; }
+  if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${bundle}: ${dir} is not in the prepared runtime source; run pnpm agent:bundle`); return null; }
   const manifest = readManifest(dir, `${bundle}: ${dir}`, errors);
   if (!manifest) return null;
   if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') { errors.push(`${bundle}: ${dir}/package.json has no name and version`); return null; }
@@ -787,38 +786,36 @@ function runtimePackageEntry(dir: string, bundle: string, templates: Templates, 
   return {name: manifest.name, version: manifest.version, source: `https://www.npmjs.com/package/${manifest.name}/v/${manifest.version}`, ...notice, _bundles: [bundle]};
 }
 
-function bunEntry(provenance: {bun?: {version?: string; revision?: string; architectures?: string[]}}, templates: Templates, offer: string | null): NoticeDraft {
-  const {version, revision} = provenance.bun ?? {};
-  return {name: BUN_ENTRY, version: `${version} (oven-sh/bun ${revision})`, license: UNVERIFIED,
-    source: `https://github.com/oven-sh/bun/tree/${revision}`, _flags: ['copyleft-weak'],
+/** The pinned Node runtime (vendor/eliza/packages/os/aosp/runtime/node.lock.json) packaged as libeliza_node.so. */
+function nodeEntry(lock: {version?: string; ndk?: string; buildCommit?: string; entries?: {abi: string}[]}, templates: Templates, offer: string | null): NoticeDraft {
+  const {version, buildCommit} = lock;
+  return {name: RUNTIME_ENTRY, version: `${version} (nodejs/node v${version})`, license: UNVERIFIED,
+    source: `https://github.com/nodejs/node/tree/v${version}`, _flags: [],
     text: [
-      `Bun ${version}, built from oven-sh/bun revision ${revision}, is packaged as libeliza_bun.so for ${(provenance.bun?.architectures ?? []).join(' and ')} and runs the on-device agent.`,
-      'Bun is distributed under the MIT License:',
+      `Node.js ${version}, built for Android with NDK ${lock.ndk} (elizaOS/eliza ${buildCommit}), is packaged as libeliza_node.so for ${(lock.entries ?? []).map(entry => entry.abi).join(' and ')} and runs the on-device agent.`,
+      'Node.js is distributed under the MIT License:',
       templates.mit,
-      'Bun statically links JavaScriptCore from WebKit (Oven fork, https://github.com/oven-sh/WebKit). JavaScriptCore is licensed under the GNU Lesser General Public License, version 2 or later (LGPL-2.0-or-later and LGPL-2.1-or-later portions), with BSD-licensed portions. Under the LGPL you may obtain, modify and relink the corresponding JavaScriptCore source.',
-      `Corresponding source: Bun ${revision} at https://github.com/oven-sh/bun/tree/${revision}; its pinned WebKit revision is recorded in that tree (cmake/tools/SetupWebKit.cmake) and is available at https://github.com/oven-sh/WebKit.`,
-      'The complete corresponding source of these LGPL components is available at those addresses.',
+      `Corresponding source: https://github.com/nodejs/node/tree/v${version}. Node.js bundles third-party components (for example V8, libuv, OpenSSL, ICU, llhttp, zlib, brotli and c-ares) whose licences are listed in its LICENSE file at that tag.`,
       ...(offer ? [offer] : []),
-      'Other statically linked Bun dependencies (for example BoringSSL, libuv, zlib, mimalloc, c-ares, libdeflate, lol-html, zstd, brotli and libarchive) are listed in Bun\'s LICENSE.md at that revision.',
     ].join('\n\n')};
 }
 
 /**
- * Bun, every npm package bundled into the agent and every package in the
+ * Node.js, every npm package bundled into the agent and every package in the
  * workflow-worker artifact, when a resident runtime is staged. Without one, the
  * notices carry only the umbrella payload entry.
  */
 export function runtimeEntries(root: string, templates: Templates, errors: string[], {agentDir = path.join(root, AGENT_ASSETS), sourceDir}: {agentDir?: string; sourceDir?: string} = {}): NoticeDraft[] {
   if (!packagedRuntimePresent(root, agentDir)) return [];
-  const provenance = JSON.parse(fs.readFileSync(path.join(agentDir, 'android-agent-runtime-provenance.json'), 'utf8'));
-  if (!provenance.bun?.version || !provenance.bun?.revision) errors.push(`${agentDir}/android-agent-runtime-provenance.json: no Bun version and revision`);
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'), 'utf8'));
+  if (!lock.version) errors.push('vendor/eliza/packages/os/aosp/runtime/node.lock.json: no Node version');
   let offer: string | null = null;
   try { offer = readSourceOffer(root); } catch (error) { errors.push(errorMessage(error)); }
-  const entries = [bunEntry(provenance, templates, offer)];
+  const entries = [nodeEntry(lock, templates, offer)];
   if (!sourceDir) {
     try {
       const base = JSON.parse(fs.readFileSync(path.join(agentDir, 'alpha-source.json'), 'utf8')).base;
-      sourceDir = process.env.ALPHA_LOCAL_AGENT_SOURCE_DIR || path.join(root, 'artifacts', `local-agent-resident-${base}`);
+      sourceDir = process.env.ALPHA_LOCAL_AGENT_SOURCE_DIR || path.join(root, 'vendor/eliza');
     } catch { errors.push(`${agentDir}/alpha-source.json is missing or unreadable`); return entries; }
   }
   const byId = new Map<string, RuntimePackageNotice>();
@@ -830,7 +827,8 @@ export function runtimeEntries(root: string, templates: Templates, errors: strin
     else byId.set(key, entry);
   };
   try {
-    for (const {directory} of readAgentBundleDependencies(sourceDir, agentDir))
+    const manifest = JSON.parse(fs.readFileSync(path.join(agentDir, 'bundle-manifest.json'), 'utf8')) as {packages?: {directory: string}[]};
+    for (const {directory} of manifest.packages ?? [])
       add(runtimePackageEntry(path.join(sourceDir, directory), 'agent bundle', templates, errors));
   } catch (error) { errors.push(errorMessage(error)); }
   const workerDir = path.join(agentDir, 'workflow-worker');
@@ -881,15 +879,15 @@ export function runtimeEntries(root: string, templates: Templates, errors: strin
   return entries;
 }
 
-export const BUN_ENTRY = 'Bun JavaScript runtime (libeliza_bun.so)';
+export const RUNTIME_ENTRY = 'Node.js runtime (libeliza_node.so)';
 
 function payloadEntries(packaged: boolean) {
   return [
     {name: 'On-device elizaOS agent runtime payload', version: 'pinned upstream runtime when present in the APK payload', license: UNVERIFIED,
-      source: 'scripts/stage-local-agent-runtime.ts',
+      source: 'scripts/stage-agent-runtime.ts',
       text: packaged
-        ? 'The staged on-device agent payload is present. Bun and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (musl loader, libstdc++ and libgcc_s runtime libraries, PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
-        : 'This build does not include the on-device agent runtime (Bun and the bundled elizaOS agent), so no agent notices are listed.'},
+        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (musl loader, libstdc++ and libgcc_s runtime libraries, PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
+        : 'This build does not include the on-device agent runtime (Node.js and the bundled elizaOS agent), so no agent notices are listed.'},
   ];
 }
 
@@ -927,7 +925,7 @@ function applyReasons(root: string, entries: NoticeDraft[], warnings: string[], 
 export function collectNotices(root = ROOT, {packagedRuntime = false} = {}) {
   const errors: string[] = [], warnings: string[] = [];
   if (packagedRuntime && !packagedRuntimePresent(root))
-    errors.push(`--packaged-runtime needs a staged runtime in ${AGENT_ASSETS}; run bun run agent:stage-android first`);
+    errors.push(`--packaged-runtime needs a staged runtime in ${AGENT_ASSETS}; run pnpm agent:stage-android first`);
   const templates = loadTemplates(root);
   const entries = [
     ...npmEntries(root, templates, errors),
@@ -1009,7 +1007,7 @@ export function renderText(entries: readonly Notice[]) {
     'Alpha Phone third-party notices',
     '',
     'This product includes the third-party software, fonts, models and data listed below.',
-    'Generated by scripts/generate-licenses.ts from bun.lock, bundled font files,',
+    'Generated by scripts/generate-licenses.ts from pnpm-lock.yaml, bundled font files,',
     'the resolved Android runtime classpath, the qualified voice-host record and elizaOS.',
     `Entries: ${entries.length}. Flagged entries: ${flagged.length}.`,
     '',
@@ -1050,8 +1048,8 @@ async function main(argv: readonly string[]) {
   const {entries, errors, warnings, flagLines, json, text} = generate(ROOT, {packagedRuntime});
   const summarize = (rows: readonly Notice[], label: string) => {
     const bundled = rows.filter(entry => /^Bundled in the on-device /.test(entry.text));
-    const bun = rows.find(entry => entry.name === BUN_ENTRY);
-    console.log(`${label}: ${bun ? `${bun.name} ${bun.version}` : 'Bun MISSING'}; ${bundled.length} bundled agent/workflow-worker npm packages.`);
+    const bun = rows.find(entry => entry.name === RUNTIME_ENTRY);
+    console.log(`${label}: ${bun ? `${bun.name} ${bun.version}` : 'Node.js runtime MISSING'}; ${bundled.length} bundled agent/workflow-worker npm packages.`);
   };
   if (packagedRuntime) summarize(entries, 'PACKAGED runtime notices');
   else if (check && packagedRuntimePresent(ROOT)) {
@@ -1060,7 +1058,7 @@ async function main(argv: readonly string[]) {
     const staged = collectNotices(ROOT, {packagedRuntime: true});
     summarize(staged.entries, 'Staged runtime (not in the committed notices; use --packaged-runtime for a distribution)');
     for (const error of staged.errors) console.warn(`Staged runtime notice problem: ${error}`);
-  } else console.log('These notices list no on-device agent runtime. A PACKAGED distribution regenerates them after staging with bun scripts/generate-licenses.ts --packaged-runtime (resident-android.yml).');
+  } else console.log('These notices list no on-device agent runtime. A PACKAGED distribution regenerates them after staging with node scripts/generate-licenses.ts --packaged-runtime (resident-android.yml).');
   // Flags are warnings. Only broken input (errors) stops generation.
   for (const line of flagLines) console.warn(line);
   for (const warning of warnings) console.warn(`LICENCE NOTE ${warning}`);
@@ -1076,7 +1074,7 @@ async function main(argv: readonly string[]) {
   if (check) {
     const stale = outputs.filter(([file, content]) => !exists(ROOT, file) || read(ROOT, file) !== content).map(([file]) => file);
     if (stale.length) {
-      console.error(`Third-party notices are stale: ${stale.join(', ')}. Run bun scripts/generate-licenses.ts`);
+      console.error(`Third-party notices are stale: ${stale.join(', ')}. Run node scripts/generate-licenses.ts`);
       process.exit(1);
     }
     console.log(`Third-party notices are complete and current (${entries.length} entries).`);

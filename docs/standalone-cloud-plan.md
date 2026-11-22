@@ -72,7 +72,7 @@ deployment-config object.
 
 - One policy file, `scripts/cloud-deployment-policy.ts`, feeds the renderer
   (`apps/app/src/runtime/cloud-deployment.generated.ts`), native code (`CloudDeployment.java`),
-  Gradle and the manifest app-link host. `bun run verify` fails on drift.
+  Gradle and the manifest app-link host. `pnpm verify` fails on drift.
 - `test/cloud-deployment.test.mjs` already drives a different deployment through native login,
   request admission, revocation and inference configuration.
 - The display name is white-labelled and enforced by `test/white-label-copy.test.mjs`. CSP,
@@ -219,7 +219,7 @@ certificate fingerprints for asset links.
 | Conformance suite | Sign-in (email code, Google), app-auth PKCE, entitlement token and keys, inference, embeddings, STT and TTS, Maps, Google connector, key self-revocation | Against local harness, Alpha staging, Alpha production |
 | Migration test | A fresh database reaches the current schema from the baseline; an existing Eliza database is unaffected | Upstream |
 | App against candidate cloud | Existing flows (`test/cloud-deployment.test.mjs`, sign-in, voice, Maps, Gmail and Calendar suites) pass with the `candidate` row | This repo, explicit browser test/preview with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` |
-| Production unchanged | `bun run verify`, `scripts/audit-production-bundle.ts`, storage fingerprint equal to the current namespace, the launcher release built with the required resident runtime | This repo, every change before cutover |
+| Production unchanged | `pnpm verify`, `scripts/audit-production-bundle.ts`, storage fingerprint equal to the current namespace, the launcher release built with the required resident runtime | This repo, every change before cutover |
 | Device | Release-signed APK: App Link verified for the new host, Google native sign-in, resident agent first reply, voice, Maps | Emulator HOME-role test, then real device; neither proves the other |
 | Cutover rehearsal | Upgrade an installed, signed-in build to the cutover build: namespace migration, re-sign-in prompt, old key revoked | Device |
 
@@ -260,7 +260,7 @@ certificate fingerprints for asset links.
 
 ## 7. Built so far (this repository)
 
-- **Local standalone Cloud** (`scripts/local-cloud.ts`, `bun run cloud:local`): exports the
+- **Local standalone Cloud** (`scripts/local-cloud.ts`, `pnpm cloud:local`): exports the
   pinned upstream source outside the checkout, runs Steward and the Cloud API worker with
   Alpha's own tenant (`alphacloud-local`), client registration, entitlement signing key and
   service documents, behind one TLS front door.
@@ -323,7 +323,7 @@ connector (needs provider keys), then point an explicit browser test/preview (`E
 - One policy (`apps/app/scripts/cloud-deployment-policy.ts`) generates the gateway presets and
   host allowlist, Java defaults, App Link hosts, APK policy rows and the user-facing Cloud
   name; `GRACE_CLOUD_DEPLOYMENT_FILE` selects a candidate Cloud that is never signed.
-- Evidence reported by that work: `bun run verify` green on Node 24 (3373 tests, 0 fail), a
+- Evidence reported by that work: `pnpm verify` green on Node 24 (3373 tests, 0 fail), a
   default `android:build -- --ci-shell`, and a candidate rehearsal whose manifest and dex
   carry no `cloud.eliza.app`. Not run: device build with agent and voice, emulator, sign-in.
 
@@ -337,7 +337,7 @@ Neither branch is pushed or proposed upstream; that needs the owner's go-ahead.
   Eliza's own definition reproduces the current `wrangler.toml` identity and bindings apart
   from six added deployment variables. 18 tests.
 - This repository: `cloud/` (example policy and resources) and `scripts/cloud-worker.ts`
-  (`bun run cloud:worker`). It derives the upstream deployment file from the app's own policy
+  (`pnpm cloud:worker`). It derives the upstream deployment file from the app's own policy
   rows, refuses the shipped Eliza policy and any Eliza host, renders both environments and
   bundles them.
 - Evidence (2026-11-11): both environments rendered outside the upstream tree and bundled
@@ -355,7 +355,7 @@ Neither branch is pushed or proposed upstream; that needs the owner's go-ahead.
   file gains `components` (Steward login Worker, speech Worker, admission Worker, Pages web
   front end), each rendered with the product's own names, hosts and cross-bindings, and the
   Pages proxy refuses to fall back to Eliza's API for a product deployment.
-- `bun run cloud:worker -- check` now renders and checks all five components for both
+- `pnpm cloud:worker check` now renders and checks all five components for both
   environments. On 2026-11-11 all ten passed with networking disabled, bundling from the
   installed tree of the earlier branch revision. Limits of that check: the login container
   image is not built, the web check compiles Pages Functions only (not the web app), and
@@ -376,7 +376,7 @@ Neither branch is pushed or proposed upstream; that needs the owner's go-ahead.
 - Pack check: 23 tarballs (24.5 MB) installed into an empty directory; a thin `worker.ts`
   bundled with 14,150 inputs, none outside that directory.
 - This repository: `cloud/worker.ts` is that thin entry, and
-  `bun run cloud:worker -- check --packages <install dir>` bundled Alpha's example Cloud API
+  `pnpm cloud:worker check --packages <install dir>` bundled Alpha's example Cloud API
   Worker for both environments from the installed tarballs with networking disabled
   (33.97 MB). Login, speech, admission and web still build from an upstream checkout.
 - Not done: publication, so `cloud/` has no `package.json` yet; the install is about 2.8 GB

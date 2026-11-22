@@ -1,0 +1,44 @@
+// spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Native } from "../platform/native.vibe"
+import { decodeSecureRead } from "./notes.schema.vibe"
+
+/** The slot could not be read or written; nothing was changed. */
+export error SlotUnavailable { slot: string }
+
+const plugin = "AlphaConnection"
+
+/** The encrypted, no-backup device slots Notes keeps beside the canonical collection. */
+export const slots = {
+  draft: "notes-canonical-draft:v1:device",
+  folders: "notes-folders:v1:device",
+  origins: "note-origins:v1:device",
+} as const
+
+/** One slot's raw value: the Keystore slot on Android, the WebView's private storage elsewhere. */
+export effect function readSlot(slot: string): string | undefined!SlotUnavailable {
+  const native = try Native
+  if (try native.available(plugin)) {
+    const answer = try (native.invoke(plugin, "secureRead", { slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const read = try (decodeSecureRead(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    return read.value ?? undefined
+  }
+  const store = try KeyValueStore.KeyValueStore
+  return try (store.get(`alpha.browser.${slot}`) catch effect () => { throw new SlotUnavailable({ slot }) })
+}
+
+/** Replace a slot's value only when it still holds `expected`; false when another writer got there first. */
+export effect function compareExchangeSlot(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable {
+  const native = try Native
+  if (try native.available(plugin)) {
+    const answer = try (native.invoke(plugin, "secureCompareExchange", { slot, expectedValue: expected ?? null, value: value ?? null })
+      catch effect () => { throw new SlotUnavailable({ slot }) })
+    return typeof answer === "object" && answer !== null && "status" in answer && answer.status === "saved"
+  }
+  const store = try KeyValueStore.KeyValueStore
+  const key = `alpha.browser.${slot}`
+  const held = try (store.get(key) catch effect () => { throw new SlotUnavailable({ slot }) })
+  if (held !== expected) return false
+  try ((value === undefined ? store.remove(key) : store.set(key, value)) catch effect () => { throw new SlotUnavailable({ slot }) })
+  return true
+}

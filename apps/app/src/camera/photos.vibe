@@ -1,0 +1,138 @@
+// spec/camera/library.md, "Story: See my whole permitted library, newest first"; spec/camera/browse.md, "Story: Change my photos in batches I confirm"; spec/camera/albums.md, "Story: Keep my photos in albums"; spec/camera/edit.md, "Story: Edit a photo and keep the original"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"
+import {
+  AlbumList, AlbumWritten, BatchReport, ChangedItem, EditPreview, EditReceipt, LibraryAccess, LibraryPage, LibraryScope, LibrarySummary,
+  MediaItem, MediaPage, PreparedTrash, SharedMany, ShareOpened, Thumbnails, TrashReceipt, Validated, VideoEditSession,
+} from "@elizaos/os/bridges/media.schema"
+import { Native } from "../platform/native.vibe"
+import { StatusReply } from "./bridge.schema.vibe"
+
+/** A Photos call failed: the plugin's code and Alpha-unworded message, `UNAVAILABLE` without the plugin. */
+export error PhotosFailed { method: string; code: string; message: string }
+
+/** An item named with the revision the owner or the assistant saw. */
+export interface Reviewed { readonly id: string; readonly revision: string }
+
+/** What a library listing reads: a page after `before`, of Recently deleted or an album. */
+export interface ListOptions {
+  readonly before?: string
+  readonly trashed?: boolean
+  readonly album?: string
+  readonly limit?: number
+  readonly thumbnails?: boolean
+}
+
+/** One photo edit as the bridge renders it. */
+export interface PhotoEditRequest {
+  readonly sessionId: string
+  readonly rotation: number
+  readonly filter: string
+  readonly crop: boolean
+  readonly cropRect?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly replace?: boolean
+}
+
+/** One video edit as the bridge renders it, in seconds. */
+export interface VideoEditRequest { readonly sessionId: string; readonly start: number; readonly end: number; readonly rotation: number; readonly crop: boolean }
+
+/** An album change naming the revisions the owner saw. */
+export type AlbumChange =
+  | { readonly operation: "create"; readonly name: string; readonly mediaId?: string; readonly mediaRevision?: string }
+  | { readonly operation: "rename"; readonly id: string; readonly revision: string; readonly name: string }
+  | { readonly operation: "delete"; readonly id: string; readonly revision: string }
+  | { readonly operation: "add"; readonly id: string; readonly revision: string; readonly mediaId: string; readonly mediaRevision: string }
+  | { readonly operation: "remove"; readonly id: string; readonly revision: string; readonly mediaId: string }
+
+/** The photo library Android permits, Alpha's own captures and albums, and the reviewed device library. */
+export service PhotoStore {
+  libraryAccess(): typeof LibraryAccess.Type!PhotosFailed
+  requestLibraryAccess(): typeof LibraryAccess.Type!PhotosFailed
+  openLibrarySettings(): void!PhotosFailed
+  watch(active: boolean): void!PhotosFailed
+  readonly changed: Stream.Stream<void>
+  list(options: ListOptions): typeof MediaPage.Type!PhotosFailed
+  read(id: string, includeTrashed: boolean): typeof MediaItem.Type!PhotosFailed
+  thumbnails(ids: readonly string[]): typeof Thumbnails.Type!PhotosFailed
+  keepCapture(operationId: string, dataBase64: string): typeof StatusReply.Type!PhotosFailed
+  keepVideo(dataBase64: string, mimeType: string, duration: number, width: number, height: number): typeof MediaItem.Type!PhotosFailed
+  setFavorite(item: Reviewed, favorite: boolean): typeof ChangedItem.Type!PhotosFailed
+  changeMany(operation: "favorite" | "unfavorite" | "trash" | "restore", items: readonly Reviewed[]): typeof BatchReport.Type!PhotosFailed
+  share(item: Reviewed): typeof ShareOpened.Type!PhotosFailed
+  shareMany(items: readonly Reviewed[]): typeof SharedMany.Type!PhotosFailed
+  summary(): typeof LibrarySummary.Type!PhotosFailed
+  prepareDeleteTrash(items: readonly Reviewed[]): typeof PreparedTrash.Type!PhotosFailed
+  cancelDeleteTrash(confirmation: string): void!PhotosFailed
+  deletePreparedTrash(confirmation: string): typeof TrashReceipt.Type!PhotosFailed
+  albums(): typeof AlbumList.Type!PhotosFailed
+  changeAlbum(change: AlbumChange): typeof AlbumWritten.Type!PhotosFailed
+  beginEdit(item: Reviewed): typeof EditPreview.Type!PhotosFailed
+  previewEdit(edit: PhotoEditRequest): typeof EditPreview.Type!PhotosFailed
+  saveEdit(edit: PhotoEditRequest): typeof EditReceipt.Type!PhotosFailed
+  editResult(operationId: string): typeof EditReceipt.Type!PhotosFailed
+  cancelEdit(sessionId: string): void!PhotosFailed
+  beginVideoEdit(item: Reviewed): typeof VideoEditSession.Type!PhotosFailed
+  saveVideoEdit(edit: VideoEditRequest): typeof EditReceipt.Type!PhotosFailed
+  cancelVideoEdit(sessionId: string): void!PhotosFailed
+  reviewRemovedVideoCopy(operationId: string): typeof EditReceipt.Type!PhotosFailed
+  deviceScope(): typeof LibraryScope.Type!PhotosFailed
+  devicePage(options: { readonly limit: number; readonly kind: "all" | "image" | "video"; readonly from?: number; readonly to?: number; readonly favorites?: boolean }): typeof LibraryPage.Type!PhotosFailed
+  deviceInspect(id: string): typeof MediaItem.Type!PhotosFailed
+  deviceValidate(items: readonly Reviewed[]): typeof Validated.Type!PhotosFailed
+  deviceRequestChange(operation: "favorite" | "unfavorite" | "trash", items: readonly Reviewed[]): typeof BatchReport.Type!PhotosFailed
+  deviceShare(items: readonly Reviewed[]): typeof SharedMany.Type!PhotosFailed
+}
+
+const PHOTOS = "AlphaPhotos"
+const DEVICE = "AlphaPhotoLibrary"
+
+effect function call<A, I>(native: Native.Shape, plugin: string, method: string, shape: Schema.Codec<A, I>, args?: unknown) {
+  const raw = try mapError(native.invoke(plugin, method, args), (failure) =>
+    new PhotosFailed({ method, code: failure._tag === "NativeFailed" ? failure.code ?? "FAILED" : "UNAVAILABLE", message: failure._tag === "NativeFailed" ? failure.message : "" }))
+  return try mapError(Schema.decodeUnknownEffect(shape)(raw), (issue) => new PhotosFailed({ method, code: "MALFORMED", message: issue.message }))
+}
+
+effect function run(native: Native.Shape, plugin: string, method: string, args?: unknown) {
+  try mapError(native.invoke(plugin, method, args), (failure) =>
+    new PhotosFailed({ method, code: failure._tag === "NativeFailed" ? failure.code ?? "FAILED" : "UNAVAILABLE", message: failure._tag === "NativeFailed" ? failure.message : "" }))
+}
+
+/** Android's `AlphaPhotos` (the permitted catalog, owned captures, albums, edits) and `AlphaPhotoLibrary` (the reviewed device library). */
+export const nativePhotoStore = Layer.effect(PhotoStore, effect {
+  const native = try Native
+  return {
+    libraryAccess: () => call(native, PHOTOS, "libraryAccess", LibraryAccess),
+    requestLibraryAccess: () => call(native, PHOTOS, "requestLibraryAccess", LibraryAccess),
+    openLibrarySettings: () => run(native, PHOTOS, "openLibrarySettings"),
+    watch: (active: boolean) => run(native, PHOTOS, "watchLibrary", { active }),
+    changed: Stream.map(Stream.catch(native.listen(PHOTOS, "libraryChanged"), () => Stream.empty), () => undefined),
+    list: (options: ListOptions) => call(native, PHOTOS, "list", MediaPage, options),
+    read: (id: string, includeTrashed: boolean) => call(native, PHOTOS, "read", MediaItem, { id, includeTrashed }),
+    thumbnails: (ids: readonly string[]) => call(native, PHOTOS, "thumbnails", Thumbnails, { ids }),
+    keepCapture: (operationId: string, dataBase64: string) => call(native, PHOTOS, "keepCapture", StatusReply, { operationId, dataBase64 }),
+    keepVideo: () => fail(new PhotosFailed({ method: "keepVideo", code: "UNAVAILABLE", message: "" })),
+    setFavorite: (item: Reviewed, favorite: boolean) => call(native, PHOTOS, "setFavorite", ChangedItem, { ...item, favorite }),
+    changeMany: (operation: "favorite" | "unfavorite" | "trash" | "restore", items: readonly Reviewed[]) => call(native, PHOTOS, "changeMany", BatchReport, { operation, items }),
+    share: (item: Reviewed) => call(native, PHOTOS, "share", ShareOpened, item),
+    shareMany: (items: readonly Reviewed[]) => call(native, PHOTOS, "shareMany", SharedMany, { items }),
+    summary: () => call(native, PHOTOS, "summary", LibrarySummary),
+    prepareDeleteTrash: (items: readonly Reviewed[]) => call(native, PHOTOS, "prepareDeleteTrash", PreparedTrash, { items }),
+    cancelDeleteTrash: (confirmation: string) => run(native, PHOTOS, "cancelDeleteTrash", { confirmation }),
+    deletePreparedTrash: (confirmation: string) => call(native, PHOTOS, "deletePreparedTrash", TrashReceipt, { confirmation }),
+    albums: () => call(native, PHOTOS, "albums", AlbumList),
+    changeAlbum: (change: AlbumChange) => call(native, PHOTOS, "changeAlbum", AlbumWritten, change),
+    beginEdit: (item: Reviewed) => call(native, PHOTOS, "beginEdit", EditPreview, item),
+    previewEdit: (edit: PhotoEditRequest) => call(native, PHOTOS, "previewEdit", EditPreview, edit),
+    saveEdit: (edit: PhotoEditRequest) => call(native, PHOTOS, "saveEdit", EditReceipt, edit),
+    editResult: (operationId: string) => call(native, PHOTOS, "editResult", EditReceipt, { operationId }),
+    cancelEdit: (sessionId: string) => run(native, PHOTOS, "cancelEdit", { sessionId }),
+    beginVideoEdit: (item: Reviewed) => call(native, PHOTOS, "beginVideoEdit", VideoEditSession, item),
+    saveVideoEdit: (edit: VideoEditRequest) => call(native, PHOTOS, "saveVideoEdit", EditReceipt, edit),
+    cancelVideoEdit: (sessionId: string) => run(native, PHOTOS, "cancelVideoEdit", { sessionId }),
+    reviewRemovedVideoCopy: (operationId: string) => call(native, PHOTOS, "reviewRemovedVideoCopy", EditReceipt, { operationId }),
+    deviceScope: () => call(native, DEVICE, "scope", LibraryScope),
+    devicePage: (options) => call(native, DEVICE, "page", LibraryPage, { ...options, thumbnails: false }),
+    deviceInspect: (id: string) => call(native, DEVICE, "inspect", MediaItem, { id, pixels: false }),
+    deviceValidate: (items: readonly Reviewed[]) => call(native, DEVICE, "validate", Validated, { items }),
+    deviceRequestChange: (operation: "favorite" | "unfavorite" | "trash", items: readonly Reviewed[]) => call(native, DEVICE, "requestChange", BatchReport, { operation, items }),
+    deviceShare: (items: readonly Reviewed[]) => call(native, DEVICE, "share", SharedMany, { items }),
+  }
+})

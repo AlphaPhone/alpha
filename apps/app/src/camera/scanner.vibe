@@ -1,0 +1,481 @@
+// spec/camera/scan.md, "Story: Ask Alpha to scan what Camera sees"; spec/camera/scan.md, "Story: Assemble a document and keep a draft I can reload"; spec/camera/scan.md, "Story: Save only the reviewed scan and know whether it saved"; spec/camera/scanDialogs.md, "Story: Review the text I scanned before anything is saved"; spec/camera/scanDialogs.md, "Story: Make a searchable PDF of the pages I reviewed"; spec/camera/scanDialogs.md, "Story: Correct a page's perspective before it replaces the page"; spec/camera/scanDialogs.md, "Story: Capture a document page with Camera"; spec/camera/scanDialogs.md, "Story: Keep my scan open while a system picker covers it"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as ScanMachine, type Event as ScanEvent, type ExportResult, type KeepStatus, type Source } from "../../gen/camera__scan.effect.vibe"
+import { Machine as DialogMachine, type Event as DialogEvent, type PhotoKeep } from "../../gen/camera__scanDialogs.effect.vibe"
+import { retireBrowserPicker } from "./browserCamera.ts"
+import { CameraBridge } from "./bridge.vibe"
+import { CameraHandoffs } from "./handoffs.vibe"
+import { photosText, scanExportTitle } from "./messages.vibe"
+import { CameraNotices } from "./notices.vibe"
+import { PhotoStore } from "./photos.vibe"
+import { scannedLinks, suggestScanEvent, textLayerValid, type TextLine } from "./scanText.ts"
+import { base64Of, blobFromBase64, buildPdf, copyText, correctPage, detectEdges, fullPage, imageSize, jpegBlob, objectUrl, recognizeText, revokeUrl, type Corners } from "./scanWork.ts"
+import { Viewfinder } from "./viewfinder.vibe"
+
+const DRAFT = "alpha/camera/scan-draft/v1"
+
+interface StoredDraft { readonly revision: number; readonly pages: readonly { readonly type: string; readonly data: string }[]; readonly layers: readonly (readonly TextLine[] | null)[] }
+
+/** Scanning: a frame or a picked image into the text review, multi-page documents with drafts and export, and Keep into Photos. */
+export service Scanner {
+  /** Ask Alpha to scan what Camera sees; false when Camera is not shown. */
+  scanFrame(): boolean!!
+  chooseImage(): void!!
+  editText(body: string): void!!
+  saveToNotes(): void!!
+  copyText(): boolean!!
+  exportPhotoPdf(): void!!
+  keepPhoto(): void!!
+  links(): readonly string[]!!
+  openLink(url: string): void!!
+  tickRepeat(): void!!
+  offerEvent(): void!!
+  closeText(): void!!
+  back(): void!!
+  openDocument(): void!!
+  addPage(from: "camera" | "picker"): void!!
+  movePage(index: number, by: -1 | 1): void!!
+  removePage(index: number): void!!
+  saveDraft(): void!!
+  loadDraft(replace: boolean): void!!
+  deleteDraft(): void!!
+  closeDocument(): void!!
+  exportDocument(searchable: boolean): void!!
+  openCorrection(index: number): void!!
+  moveCorner(corner: number, x: number, y: number): void!!
+  detect(): void!!
+  previewCorrection(): void!!
+  applyCorrection(): void!!
+  closeCorrection(): void!!
+  corners(): Corners!!
+  correctionPreview(): string!!
+  openCapture(): void!!
+  capturePage(): void!!
+  retake(): void!!
+  usePage(): void!!
+  closeCapture(): void!!
+  pageShown(hidden: boolean): void!!
+}
+
+/** The scanner over the scan and dialog Machines, the camera, the store and the device's drafts. */
+export const scanner = Layer.effect(Scanner, effect {
+  const scan = try ScanMachine
+  const dialogs = try DialogMachine
+  const bridge = try CameraBridge
+  const store = try PhotoStore
+  const viewfinder = try Viewfinder
+  const handoffs = try CameraHandoffs
+  const notices = try CameraNotices
+  const kv = try KeyValueStore.KeyValueStore
+  const pages = new Map<string, { readonly blob: Blob; readonly layer: readonly TextLine[] | null }>()
+  const keepIds = new Map<number, string>()
+  let frame: Blob | undefined
+  let frameUrl = ""
+  let corrected: { index: number; corners: Corners; preview: Blob | undefined; previewUrl: string } | undefined
+  let captured: Blob | undefined
+  let noteId = ""
+
+  effect function say(text: string) {
+    try notices.say(text, false)
+  }
+
+  effect function dialog(event: DialogEvent) {
+    return dialogs.send(event) catch () => undefined
+  }
+
+  effect function doc(event: ScanEvent) {
+    return scan.send(event) catch () => undefined
+  }
+
+  effect function withPicker<A, E>(task: A!E) {
+    try dialog({ type: "pickerStart" })
+    return try ensuring(task, dialog({ type: "pickerEnd" }))
+  }
+
+  effect function openReview(image: Blob, source: Source) {
+    if (frameUrl !== "") revokeUrl(frameUrl)
+    frame = image
+    frameUrl = objectUrl(image)
+    noteId = `scan-${globalThis.crypto.randomUUID()}`
+    try dialog({ type: "textClose" })
+    const opened = try dialog({ type: "openText", image: frameUrl })
+    if (opened === undefined) return
+    try doc({ type: "closeKeepReview" })
+    try doc({ type: "openKeepReview", source, hasPort: true, native: !bridge.browser })
+    try forkDetach(effect {
+      const read = try exit(tryPromise(() => recognizeText(image, undefined, () => undefined)))
+      if (Exit.isSuccess(read)) try dialog({ type: "ocrSettled", ok: true, body: read.value.text })
+      else {
+        try dialog({ type: "ocrSettled", ok: false, body: "" })
+        try say("Scan failed")
+      }
+    })
+  }
+
+  effect function readDraft(): StoredDraft | undefined!! {
+    const raw = kv.get(DRAFT) catch () => undefined
+    if (raw === undefined) return undefined
+    return Effect.try({ try: () => JSON.parse(raw) as StoredDraft, catch: () => undefined }) catch () => undefined
+  }
+
+  effect function writeDraft(expected: number): number | undefined!! {
+    const stored = try readDraft()
+    if ((stored?.revision ?? 0) !== expected) return undefined
+    const ids = (try scan.get()).pageIds
+    const entries = ids.map((id) => pages.get(id)).filter((page) => page !== undefined)
+    const encoded = all(entries.map((page) => tryPromise(() => base64Of(page.blob)))) catch () => undefined
+    if (encoded === undefined) return undefined
+    const revision = expected + 1
+    const draft: StoredDraft = { revision, pages: entries.map((page, at) => ({ type: page.blob.type, data: encoded[at]! })), layers: entries.map((page) => page.layer) }
+    const written = kv.set(DRAFT, JSON.stringify(draft)) catch () => false
+    return written === false ? undefined : revision
+  }
+
+  effect function settleAutosave() {
+    const now = try scan.get()
+    if (!now.autoQueued) return
+    const stored = (try readDraft())?.revision ?? 0
+    const revision = try writeDraft(now.draftRevision)
+    try doc({ type: "settleAutoSave", stored, revision: revision ?? 0, committed: revision !== undefined })
+    const after = try scan.get()
+    if (after.cleanupRevision > 0) {
+      const latest = (try readDraft())?.revision ?? 0
+      const removed = latest === after.cleanupRevision ? (kv.remove(DRAFT) catch () => false) : false
+      try doc({ type: "settleAutoCleanup", stored: latest, committed: removed !== false })
+    }
+  }
+
+  effect function finishPages(ids: readonly string[]) {
+    const entries = ids.map((id) => pages.get(id)).filter((page) => page !== undefined)
+    const bytes = entries.reduce((sum, page) => sum + page.blob.size, 0)
+    const done = try doc({ type: "finishEdit", batch: { count: ids.length, bytes, validated: entries.length === ids.length }, autosave: !bridge.browser, ids: [...ids] })
+    if (done === undefined) {
+      try doc({ type: "cancelEdit" })
+      return try say("Choose pages up to 64 MB total.")
+    }
+    try settleAutosave()
+  }
+
+  effect function admitPage(image: Blob) {
+    const size = tryPromise(() => imageSize(image)) catch () => undefined
+    if (size === undefined || !["image/jpeg", "image/png", "image/webp"].includes(image.type)) return undefined
+    const id = objectUrl(image)
+    pages.set(id, { blob: image, layer: null })
+    return id
+  }
+
+  effect function pick() {
+    if (bridge.browser) {
+      retireBrowserPicker()
+      try dialog({ type: "filePickerStart" })
+    }
+    return withPicker(bridge.pickImage()) catch effect () => {
+      try say("Unreadable image")
+      return undefined
+    }
+  }
+
+  effect function exportPages(blobs: readonly Blob[], layers: readonly (readonly TextLine[] | null)[], kind: string): ExportResult!! {
+    const data = tryPromise(() => buildPdf(blobs, layers, undefined)) catch effect () => {
+      try say("PDF failed")
+      return undefined
+    }
+    if (data === undefined) return "ExportRetryable"
+    const answer = withPicker(bridge.exportPdf(scanExportTitle(kind, new Date()), data)) catch () => undefined
+    if (answer === undefined) {
+      try say("Export unconfirmed")
+      return "ExportUnknown"
+    }
+    try say(answer.message)
+    return ["cancelled", "failed", "unavailable", "too-large"].includes(answer.status) ? "ExportRetryable" : answer.status === "exported" || answer.status === "requested" ? "ExportConfirmed" : "ExportUnknown"
+  }
+
+  return {
+    effect scanFrame() {
+      const view = try viewfinder.get()
+      if (!view.visible) return false
+      if (view.phase !== "PreviewReady") {
+        if (view.phase === "PreviewOff") try viewfinder.retry()
+        try viewfinder.settled()
+      }
+      const shot = try viewfinder.borrow(() => effect { return bridge.capturePhoto({ saveToGallery: false, quality: 85 }) catch () => undefined })
+      if (shot.status !== "done") {
+        try say("Busy")
+        return true
+      }
+      const photo = shot.value
+      if (photo === undefined || photo.format !== "jpeg" || photo.base64 === undefined || photo.width <= 0 || photo.height <= 0) {
+        try say("Not captured")
+        return true
+      }
+      try openReview(jpegBlob(photo.base64), "UnsavedFrame")
+      return true
+    },
+    effect chooseImage() {
+      const image = try pick()
+      if (image !== undefined) try openReview(image, "PickedImage")
+    },
+    effect editText(body: string) {
+      try dialog({ type: "editText", body })
+    },
+    effect saveToNotes() {
+      const now = try dialogs.get()
+      const started = try dialog({ type: "saveToNotes" })
+      if (started === undefined) return
+      const saved = try handoffs.saveScannedNote(now.text.body.trim(), noteId)
+      try dialog({ type: "notesSettled", saved })
+      try say(saved ? "Saved to Notes." : "Save unconfirmed")
+    },
+    effect copyText() {
+      const now = try dialogs.get()
+      return try promise(() => copyText(now.text.body))
+    },
+    effect exportPhotoPdf() {
+      if (frame === undefined) return
+      const started = try dialog({ type: "exportPhotoPdf" })
+      if (started === undefined) return
+      const result = try exportPages([frame], [null], "scan")
+      try dialog({ type: "photoPdfSettled", retry: result === "ExportRetryable" })
+    },
+    effect keepPhoto() {
+      const now = try scan.get()
+      if (frame === undefined || (try doc({ type: "requestKeep" })) === undefined) return
+      try dialog({ type: "keepPhoto" })
+      const operationId = keepIds.get(now.keep.operation) ?? globalThis.crypto.randomUUID()
+      keepIds.set(now.keep.operation, operationId)
+      const data = tryPromise(() => base64Of(frame!)) catch () => ""
+      const answer = store.keepCapture(operationId, data) catch () => undefined
+      const outcome: KeepStatus = answer === undefined || answer.status === "unknown" ? "KeepUnknown" : answer.status === "saved" && answer.id !== undefined ? "KeepSaved" : "KeepFailed"
+      const kept: PhotoKeep = outcome === "KeepSaved" ? "PhotoKept" : outcome === "KeepFailed" || (outcome === "KeepUnknown" && !bridge.browser) ? "PhotoKeepIdle" : "PhotoKeepUnconfirmed"
+      try doc({ type: "resolveKeep", outcome })
+      try dialog({ type: "keepSettled", kept })
+      try say(outcome === "KeepSaved" ? "Kept in Photos." : outcome === "KeepFailed" ? photosText(answer?.message, "Not saved") : "Unconfirmed")
+    },
+    links: () => effect { return scannedLinks((try dialogs.get()).text.body) },
+    effect openLink(url: string) {
+      const now = try dialogs.get()
+      if (!scannedLinks(now.text.body).includes(url)) return
+      const opened = try dialog({ type: "openLink", revision: now.text.textRevision })
+      if (opened !== undefined) try handoffs.open("browser", url)
+    },
+    tickRepeat: () => effect { try dialog({ type: "tickRepeat" }) },
+    effect offerEvent() {
+      const now = try dialogs.get()
+      const suggestion = suggestScanEvent(now.text.body, new Date())
+      if (suggestion === undefined) return try say("No event found")
+      const accepted = try handoffs.reviewScannedEvent({
+        creationId: globalThis.crypto.randomUUID(), title: suggestion.title, date: suggestion.date, time: suggestion.time, minutes: suggestion.minutes,
+        allDay: suggestion.allDay, location: suggestion.location, notes: now.text.body.slice(0, 2000), repeat: now.text.repeatTicked ? suggestion.repeat : "none",
+      })
+      if (accepted) try dialog({ type: "offerEvent", revision: now.text.textRevision })
+    },
+    effect closeText() {
+      try dialog({ type: "textClose" })
+      try doc({ type: "closeKeepReview" })
+    },
+    effect back() {
+      const now = try dialogs.get()
+      if (now.capture.shown) return try dialog({ type: "captureClose" })
+      if (now.correction.shown) return try dialog({ type: "correctionClose" })
+      if (now.searchable.shown) return try dialog({ type: "searchableClose" })
+      if (now.text.shown) return try dialog({ type: "textBack" })
+      if (now.document) return try dialog({ type: "closeDocument" })
+    },
+    effect openDocument() {
+      try dialog({ type: "openDocument" })
+      const now = try scan.get()
+      if (now.closed) try doc({ type: "reopenScan" })
+      if (frame !== undefined && (try scan.get()).pages.count === 0 && (try doc({ type: "beginEdit" })) !== undefined) {
+        const id = try admitPage(frame)
+        try finishPages(id === undefined ? [] : [id])
+      }
+    },
+    effect addPage(from: "camera" | "picker") {
+      if ((try doc({ type: "beginEdit" })) === undefined) return
+      const image = from === "picker" ? try pick() : captured
+      captured = undefined
+      const id = image === undefined ? undefined : try admitPage(image)
+      if (id === undefined) return try doc({ type: "cancelEdit" })
+      try finishPages([...(try scan.get()).pageIds, id])
+    },
+    effect movePage(index: number, by: -1 | 1) {
+      const ids = [...(try scan.get()).pageIds]
+      const target = index + by
+      if (target < 0 || target >= ids.length || (try doc({ type: "beginEdit" })) === undefined) return
+      const moved = ids[index]!
+      ids[index] = ids[target]!
+      ids[target] = moved
+      try finishPages(ids)
+    },
+    effect removePage(index: number) {
+      const ids = [...(try scan.get()).pageIds]
+      if ((try doc({ type: "beginEdit" })) === undefined) return
+      const [removed] = ids.splice(index, 1)
+      try finishPages(ids)
+      if (removed !== undefined) {
+        pages.delete(removed)
+        revokeUrl(removed)
+      }
+    },
+    effect saveDraft() {
+      if ((try doc({ type: "beginDraftAction" })) === undefined) return
+      const now = try scan.get()
+      const stored = (try readDraft())?.revision ?? 0
+      const revision = try writeDraft(now.draftRevision)
+      const saved = try doc({ type: "saveExplicitDraft", stored, revision: revision ?? 0, committed: revision !== undefined })
+      if (saved === undefined) {
+        try doc({ type: "endDraftAction" })
+        try say("Another draft is saved. Load or delete it first.")
+      } else try say("Draft saved")
+    },
+    effect loadDraft(replace: boolean) {
+      const stored = try readDraft()
+      if (stored === undefined || (try doc({ type: "beginDraftAction" })) === undefined) return
+      const ids: string[] = []
+      for (const [at, page] of stored.pages.entries()) {
+        const blob = blobFromBase64(page.data, page.type)
+        const layer = stored.layers[at] ?? null
+        const id = objectUrl(blob)
+        pages.set(id, { blob, layer: layer !== null && textLayerValid(layer) ? layer : null })
+        ids.push(id)
+      }
+      const bytes = [...ids].reduce((sum, id) => sum + (pages.get(id)?.blob.size ?? 0), 0)
+      const adopted = try doc({ type: "adoptStoredPages", batch: { count: ids.length, bytes, validated: true }, revision: stored.revision, approved: replace, ids })
+      if (adopted === undefined) {
+        try doc({ type: "endDraftAction" })
+        for (const id of ids) {
+          pages.delete(id)
+          revokeUrl(id)
+        }
+      }
+    },
+    effect deleteDraft() {
+      const now = try scan.get()
+      const stored = (try readDraft())?.revision ?? 0
+      if ((try doc({ type: "beginDraftAction" })) === undefined) return
+      const removed = stored === now.draftRevision ? (kv.remove(DRAFT) catch () => false) : false
+      const deleted = try doc({ type: "deleteDraft", stored, approved: true, committed: removed !== false })
+      if (deleted === undefined) try doc({ type: "endDraftAction" })
+    },
+    effect closeDocument() {
+      try dialog({ type: "closeDocument" })
+      const ids = (try scan.get()).pageIds
+      try doc({ type: "closeScan" })
+      for (const id of ids) {
+        pages.delete(id)
+        revokeUrl(id)
+      }
+    },
+    effect exportDocument(searchable: boolean) {
+      const ids = (try scan.get()).pageIds
+      const entries = ids.map((id) => pages.get(id)).filter((page) => page !== undefined)
+      if (searchable) {
+        try dialog({ type: "openSearchable" })
+        const layers: (readonly TextLine[] | null)[] = []
+        for (const page of entries) {
+          const read = tryPromise(() => recognizeText(page.blob, undefined, () => undefined, true)) catch () => undefined
+          layers.push(read?.lines ?? null)
+        }
+        try dialog({ type: "recognised" })
+        entries.forEach((page, at) => pages.set(ids[at]!, { blob: page.blob, layer: layers[at] ?? null }))
+        try dialog({ type: "download" })
+      }
+      if ((try doc({ type: "beginExport" })) === undefined) return
+      if (searchable) try dialog({ type: "providerAsked" })
+      const result = try exportPages(entries.map((page) => page.blob), searchable ? entries.map((page) => page.layer) : entries.map(() => null), searchable ? "searchable scan" : "scan")
+      try doc({ type: "finishExport", result })
+      if (searchable) try dialog(result === "ExportRetryable" ? { type: "providerCancelled" } : { type: "providerSettled", outcome: result === "ExportConfirmed" ? "PdfExported" : "PdfFailed" })
+      try settleAutosave()
+    },
+    effect openCorrection(index: number) {
+      if ((try dialog({ type: "openCorrection" })) === undefined) return
+      corrected = { index, corners: fullPage(), preview: undefined, previewUrl: "" }
+    },
+    effect moveCorner(corner: number, x: number, y: number) {
+      if (corrected === undefined || (try dialog({ type: "moveCorner" })) === undefined) return
+      const corners = [...corrected.corners] as Corners
+      corners[corner] = { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) }
+      if (corrected.previewUrl !== "") revokeUrl(corrected.previewUrl)
+      corrected = { ...corrected, corners, preview: undefined, previewUrl: "" }
+    },
+    effect detect() {
+      const current = corrected
+      const page = current === undefined ? undefined : pages.get((try scan.get()).pageIds[current.index] ?? "")
+      if (current === undefined || page === undefined || (try dialog({ type: "beginWork", forPreview: false })) === undefined) return
+      const found = tryPromise(() => detectEdges(page.blob, undefined)) catch () => undefined
+      if (found !== undefined && corrected === current) corrected = { ...current, corners: found, preview: undefined, previewUrl: "" }
+      try dialog({ type: "workSettled", ok: found !== undefined })
+      if (found === undefined) try say("No page edges found")
+    },
+    effect previewCorrection() {
+      const current = corrected
+      const page = current === undefined ? undefined : pages.get((try scan.get()).pageIds[current.index] ?? "")
+      if (current === undefined || page === undefined || (try dialog({ type: "beginWork", forPreview: true })) === undefined) return
+      const preview = tryPromise(() => correctPage(page.blob, current.corners, undefined)) catch () => undefined
+      if (preview !== undefined && corrected === current) corrected = { ...current, preview, previewUrl: objectUrl(preview) }
+      try dialog({ type: "workSettled", ok: preview !== undefined })
+    },
+    effect applyCorrection() {
+      const current = corrected
+      if (current?.preview === undefined || (try dialog({ type: "applyCorrection" })) === undefined) return
+      const ids = [...(try scan.get()).pageIds]
+      if ((try doc({ type: "beginEdit" })) === undefined) return
+      const id = objectUrl(current.preview)
+      pages.set(id, { blob: current.preview, layer: null })
+      const old = ids[current.index]
+      ids[current.index] = id
+      try finishPages(ids)
+      if (old !== undefined) {
+        pages.delete(old)
+        revokeUrl(old)
+      }
+      corrected = undefined
+    },
+    effect closeCorrection() {
+      try dialog({ type: "correctionClose" })
+      if (corrected?.previewUrl !== undefined && corrected.previewUrl !== "") revokeUrl(corrected.previewUrl)
+      corrected = undefined
+    },
+    corners: () => effect { return corrected?.corners ?? fullPage() },
+    correctionPreview: () => effect { return corrected?.previewUrl ?? "" },
+    effect openCapture() {
+      if ((try dialog({ type: "openCapture" })) === undefined) return
+      const view = try viewfinder.get()
+      try dialog({ type: "cameraStarted", ok: view.phase === "PreviewReady" })
+    },
+    effect capturePage() {
+      if ((try dialog({ type: "capturePage" })) === undefined) return
+      const shot = try viewfinder.borrow(() => effect { return bridge.capturePhoto({ saveToGallery: false, quality: 85, width: 2048, height: 1536 }) catch () => undefined })
+      const photo = shot.status === "done" ? shot.value : undefined
+      const ok = photo !== undefined && photo.format === "jpeg" && photo.base64 !== undefined && photo.width > 0 && photo.height > 0 && photo.width <= 2048 && photo.height <= 2048
+      captured = ok ? jpegBlob(photo!.base64!) : undefined
+      try dialog({ type: "frameEncoded", ok })
+      if (!ok) try say(shot.status === "busy" ? "Camera is busy. Try again." : "Page could not be captured. Try again.")
+    },
+    effect retake() {
+      try dialog({ type: "retake" })
+      captured = undefined
+    },
+    effect usePage() {
+      if ((try dialog({ type: "usePage" })) !== undefined) {
+        const image = captured
+        if ((try doc({ type: "beginEdit" })) === undefined || image === undefined) return
+        const id = try admitPage(image)
+        captured = undefined
+        if (id === undefined) return try doc({ type: "cancelEdit" })
+        try finishPages([...(try scan.get()).pageIds, id])
+      }
+    },
+    effect closeCapture() {
+      try dialog({ type: "captureClose" })
+      captured = undefined
+    },
+    effect pageShown(hidden: boolean) {
+      try dialog({ type: hidden ? "hideEvent" : "showEvent" })
+      if (hidden) {
+        const now = try dialogs.get()
+        if (!now.text.shown) try doc({ type: "closeKeepReview" })
+      }
+    },
+  }
+})

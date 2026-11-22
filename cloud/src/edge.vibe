@@ -1,0 +1,189 @@
+// spec/cloud/returnPages.md, "Story: Bring me back to the app when its link did not open"; spec/cloud/nativeClients/registry.md, "Story: Admit only a registered native client"
+import { nativeAssetLinks } from "@elizaos/cloud/worker"
+import { EdgeResponse } from "./edge-platform.ts"
+
+/** The web host Worker's bindings: the same registry and origins the API Worker of its environment reads. */
+export interface EdgeEnv {
+  readonly CLOUD_ENVIRONMENT: "production" | "staging"
+  readonly PUBLIC_API_ORIGIN: string
+  readonly WEB_ORIGIN: string
+  readonly CLOUD_NAME: string
+  readonly NATIVE_CLIENT_REGISTRY: string
+}
+
+/** A return purpose of a registration. */
+export type ReturnPurpose = "SignInPage" | "BillingPage" | "ConnectPage"
+
+/** One enabled registration as the web host reads it. */
+export interface EdgeRegistration {
+  readonly clientId: string
+  readonly environment: "production" | "staging"
+  readonly displayName: string
+  readonly androidPackage: string
+  readonly signInReturn: string
+  readonly billingReturn: string
+  readonly connectReturn?: string
+  readonly enabled: boolean
+}
+
+/** What the web host answers for one address. */
+export type EdgeRoute =
+  | { readonly tag: "AssetLinks" }
+  | { readonly tag: "Health" }
+  | { readonly tag: "ReturnToApp"; readonly purpose: ReturnPurpose; readonly registration: EdgeRegistration }
+  | { readonly tag: "RegistryUnreadable" }
+  | { readonly tag: "NotFound" }
+
+/** A name and value the page forwards into the app link. */
+export interface Forwarded {
+  readonly name: string
+  readonly value: string
+}
+
+const Entry = Schema.Struct({
+  clientId: Schema.String, environment: Schema.Literals(["production", "staging"]), displayName: Schema.String,
+  androidPackage: Schema.String, certFingerprints: Schema.Array(Schema.String), signInReturn: Schema.String, billingReturn: Schema.String,
+  connectReturn: Schema.optionalKey(Schema.String), credentialTtlMs: Schema.optionalKey(Schema.Int), nativeGoogle: Schema.optionalKey(Schema.Boolean), enabled: Schema.Boolean,
+})
+const decodeRegistry = Schema.decodeUnknownOption(Schema.Array(Entry), { onExcessProperty: "error" })
+
+/** The registry the Worker was deployed with, or undefined when it cannot be read. */
+export function readRegistry(text: string): ReadonlyArray<EdgeRegistration> | undefined {
+  if (text.length === 0 || text.length > 32768) return undefined
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  const parsed = decodeRegistry(raw)
+  return Option.isSome(parsed) ? parsed.value : undefined
+}
+
+/** Classifies an address on the web origin; only an enabled registration of the served environment that holds the exact return shows a page. */
+export function edgeRoute(url: URL, env: EdgeEnv): EdgeRoute {
+  if (url.protocol !== "https:" || url.username || url.password) return { tag: "NotFound" }
+  if (url.pathname === "/.well-known/assetlinks.json") return { tag: "AssetLinks" }
+  if (url.pathname === "/health") return { tag: "Health" }
+  if (url.origin !== env.WEB_ORIGIN) return { tag: "NotFound" }
+  const registry = readRegistry(env.NATIVE_CLIENT_REGISTRY)
+  if (registry === undefined) return { tag: "RegistryUnreadable" }
+  const address = url.origin + url.pathname
+  const holders: { purpose: ReturnPurpose; registration: EdgeRegistration }[] = []
+  for (const registration of registry) {
+    if (!registration.enabled || registration.environment !== env.CLOUD_ENVIRONMENT) continue
+    if (registration.signInReturn === address) holders.push({ purpose: "SignInPage", registration })
+    if (registration.billingReturn === address) holders.push({ purpose: "BillingPage", registration })
+    if (registration.connectReturn === address) holders.push({ purpose: "ConnectPage", registration })
+  }
+  return holders.length === 1 ? { tag: "ReturnToApp", purpose: holders[0].purpose, registration: holders[0].registration } : { tag: "NotFound" }
+}
+
+const patterns: Readonly<Record<string, RegExp>> = {
+  state: /^[A-Za-z0-9_-]{43}$/,
+  connectionId: /^[A-Za-z0-9_-]{1,128}$/,
+  session_id: /^cs_(?:test|live)_[A-Za-z0-9]{1,200}$/,
+  result: /^[a-z]{1,16}$/,
+}
+
+type Param = { readonly tag: "Missing" } | { readonly tag: "Malformed" } | { readonly tag: "WellFormed"; readonly text: string }
+
+function param(query: URLSearchParams, name: string): Param {
+  const value = query.get(name)
+  if (value === null) return { tag: "Missing" }
+  return patterns[name].test(value) ? { tag: "WellFormed", text: value } : { tag: "Malformed" }
+}
+
+function named(name: string, value: Param): Forwarded[] {
+  return value.tag === "WellFormed" ? [{ name, value: value.text }] : []
+}
+
+/** The purpose's well-formed results the page forwards: sign-in never forwards a code, connect forwards a whole result or nothing. */
+export function forwarded(purpose: ReturnPurpose, query: URLSearchParams): ReadonlyArray<Forwarded> {
+  const state = param(query, "state")
+  const result = param(query, "result")
+  const connectionId = param(query, "connectionId")
+  const sessionId = param(query, "session_id")
+  switch (purpose) {
+    case "SignInPage":
+      return state.tag === "WellFormed" ? [{ name: "error", value: "app_link_unverified" }, ...named("state", state)] : []
+    case "ConnectPage": {
+      if (state.tag !== "WellFormed" || result.tag !== "WellFormed" || !["connected", "denied", "failed"].includes(result.text)) return []
+      const idFits = result.text === "connected" ? connectionId.tag === "WellFormed" : connectionId.tag === "Missing"
+      return idFits ? [...named("state", state), ...named("result", result), ...named("connectionId", connectionId)] : []
+    }
+    case "BillingPage":
+      return [...named("session_id", sessionId), ...(result.tag === "WellFormed" && ["success", "cancel"].includes(result.text) ? [{ name: "result", value: result.text }] : [])]
+  }
+}
+
+/** The page's one action: the registered return opened in the registration's package, sign-in and billing values in the query, connect values in the fragment. */
+export function appLink(url: URL, purpose: ReturnPurpose, androidPackage: string, values: ReadonlyArray<Forwarded>): string {
+  const encoded = values.map((value) => `${encodeURIComponent(value.name)}=${encodeURIComponent(value.value)}`).join("&")
+  const target = `${url.host}${url.pathname}`
+  const tail = `#Intent;scheme=https;package=${androidPackage};end`
+  if (encoded === "") return `intent://${target}${tail}`
+  return purpose === "ConnectPage" ? `intent://${target}#${encoded}${tail}` : `intent://${target}?${encoded}${tail}`
+}
+
+function escaped(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#39;")
+}
+
+const copy: Readonly<Record<ReturnPurpose, string>> = {
+  SignInPage: "Finish signing in",
+  BillingPage: "Finish your plan change",
+  ConnectPage: "Finish connecting Google",
+}
+
+/** The ReturnToApp page: the deployment and app names, one link, no form, no script and no query or fragment value shown. */
+export function returnPage(serviceName: string, appName: string, purpose: ReturnPurpose, link: string): string {
+  return [
+    "<!doctype html>",
+    "<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+    `<meta name="robots" content="noindex"><title>${escaped(appName)}</title></head>`,
+    `<body><main><p>${escaped(serviceName)}</p><h1>${escaped(copy[purpose])}</h1>`,
+    `<p>${escaped(appName)} did not open by itself.</p>`,
+    `<a href="${escaped(link)}">Open ${escaped(appName)}</a></main></body></html>`,
+  ].join("\n")
+}
+
+/** Every page is private, unframed and unindexed, and runs no script. */
+export const pageHeaders: Readonly<Record<string, string>> = {
+  "Content-Type": "text/html; charset=utf-8",
+  "Cache-Control": "no-store",
+  "X-Robots-Tag": "noindex",
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+}
+
+const noStore = { "Cache-Control": "no-store" }
+
+/** The web host Worker: asset links from the registry, the ReturnToApp page for registered returns, and nothing else. */
+export const edgeWorker = {
+  async fetch(request: Request, env: EdgeEnv): Promise<Response> {
+    const url = new URL(request.url)
+    const route = edgeRoute(url, env)
+    switch (route.tag) {
+      case "Health":
+        return EdgeResponse.json({ ok: true }, { headers: noStore })
+      case "AssetLinks": {
+        if (request.method !== "GET" && request.method !== "HEAD") return new EdgeResponse(null, { status: 405, headers: { Allow: "GET, HEAD" } })
+        const answer = nativeAssetLinks(env)
+        return new EdgeResponse(request.method === "HEAD" ? null : answer.body, { status: answer.status, headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } })
+      }
+      case "RegistryUnreadable":
+        return EdgeResponse.json({ error: "service_unavailable" }, { status: 503, headers: { ...noStore, "Retry-After": "30" } })
+      case "ReturnToApp": {
+        if (request.method !== "GET" && request.method !== "HEAD") return new EdgeResponse(null, { status: 405, headers: { Allow: "GET, HEAD" } })
+        const link = appLink(url, route.purpose, route.registration.androidPackage, forwarded(route.purpose, url.searchParams))
+        return new EdgeResponse(request.method === "HEAD" ? null : returnPage(env.CLOUD_NAME, route.registration.displayName, route.purpose, link), { status: 200, headers: pageHeaders })
+      }
+      case "NotFound":
+        return new EdgeResponse("Not Found", { status: 404, headers: noStore })
+    }
+  },
+}
+
+export default edgeWorker

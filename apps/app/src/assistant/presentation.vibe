@@ -1,0 +1,171 @@
+// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
+import type { CutOff, ReceiptTitle } from "../../gen/assistant__receipts.ts"
+import type { FailureKind, PlanAction } from "../../gen/assistant__reply.ts"
+import { hostOf } from "./grounding.vibe"
+
+/** Alpha's words for what the owner sees; shared code's raw error text never reaches a toast. */
+export const copy = {
+  declined: "Declined. No phone action was performed.",
+  declineBusy: "Wait for the current connection step, then decline again. Nothing was performed.",
+  declineFailed: "The proposal could not be declined.",
+  agentChanged: "The agent changed. Review this action again.",
+  agentChangedHistory: "The agent changed. Check phone action history.",
+  reviewExpiredTitle: "Review expired",
+  reviewExpired: "This review has expired. Request a new action if still needed.",
+  reviewUnavailableTitle: "Review unavailable",
+  reviewUnavailable: "This request is no longer available to review. Check action history before trying again.",
+  emergency: "Not during an emergency call.",
+  notShownHere: "Phone action not shown here",
+  unconfirmed: "I couldn’t confirm the result.",
+  unconfirmedFull: "I couldn’t confirm the result. Check the app before trying again.",
+  notDispatched: "Not started, so nothing was sent.",
+  outcomeNeedsReview: "The outcome needs review and won't be repeated automatically.",
+  journalUnavailable: "The phone’s action history couldn’t be read or updated. Check Agent activity before trying again.",
+  notAvailableHere: "This action isn't available on this phone.",
+  couldNotComplete: "Action could not complete.",
+  wrongNumber: "That is not the number in your message, so nothing was called or sent. Ask again with the number.",
+  wrongNumberContact: "That is not the number in your message, so nothing was saved. Ask again with the number.",
+  browserUngrounded: "I only open a site or search you ask for yourself, for example \"open nytimes.com\" or \"search for weather in Paris\".",
+  backInComposer: "Not sent. Your message is back in the composer.",
+  keptInOwnConversation: "Not sent. Your message was kept as a draft in its own conversation.",
+  notRestored: "Not sent. The conversation changed, so the message could not be put back.",
+  maySent: "This message may already have been sent. Check the conversation before sending it again.",
+  savedLocally: "Draft saved locally.",
+  tooLong: "This draft is too long to save. Shorten it before sending; your current text is retained.",
+  storageUnavailable: "Local draft could not be read. Your current text is retained.",
+  draftPrepare: "Draft could not be prepared. Nothing was sent.",
+  ignored: "Your agent chose not to reply.",
+  stopped: "Stopped.",
+  replyFailed: "Sorry, I couldn’t finish that reply.",
+  maybeSent: "It may already have been sent, so check before sending it again.",
+  stoppedPending: "Checking what happened to the stopped reply…",
+  stoppedLookLater: "The stopped reply wasn’t checked. Open this conversation later to see whether it finished.",
+  stoppedNotRecorded: "Your agent didn’t record that message.",
+  stoppedConfirmed: "Stopped. Your agent did not finish that reply.",
+  editFirst: "Finish or clear your current draft before editing a message.",
+  editingMessage: "Finish or cancel the message you are editing first.",
+  attachmentChangesChat: "Send or remove the attachment before changing chats.",
+  attachmentNewChat: "Send or remove the attachment before starting a new chat.",
+  attachmentFull: "Remove an attachment before adding another.",
+  attachmentTooLarge: "Choose fewer or smaller files.",
+  attachmentSaveFailed: "Attachment could not be saved. Try again.",
+  attachmentsRestoreFailed: "Saved attachments could not load. Try reopening this conversation.",
+  explainFile: "Explain this file",
+  summarize: "Summarize this for me",
+  searchFailed: "Search could not finish.",
+  searchOpenFailed: "This message could not be opened. Try the search again.",
+  noAgent: "The agent connection is unavailable. Nothing was sent.",
+  screenChanged: "The active screen changed. Your message is back in the composer.",
+  busy: "Wait for the current reply before sending another message.",
+  stale: "The account or view changed. Request again from the current view.",
+  emptyChat: "Ask me anything.",
+  agentUnavailable: "Your agent isn’t available right now.",
+  hostedDisclosure: (provider: string) => `Prompts and the context you share go to ${provider}.`,
+  locationShared: "Location shared with this chat",
+} as const
+
+/** The title of a receipt for what the journal proves. */
+export function receiptTitle(title: ReceiptTitle): string {
+  switch (title) {
+    case "Completed": return "Completed"
+    case "NotConfirmed": return "Not confirmed"
+    case "NotCompleted": return "Not completed"
+    case "NoTitle": return ""
+  }
+}
+
+/** The label a cut-off reply carries. */
+export function cutOffText(cut: CutOff): string {
+  switch (cut) {
+    case "NotCutOff": return ""
+    case "DoneCutOff": return "Done · reply cut off"
+    case "NeedsApprovalCutOff": return "Needs your approval · reply cut off"
+  }
+}
+
+/** A failure kind, from the reply's `failureKind` or `terminalFailure.kind`. */
+export function failureKindOf(code: string | undefined): FailureKind {
+  switch (code) {
+    case "insufficient_credits": return "InsufficientCredits"
+    case "missing_capability": return "MissingCapability"
+    case "no_provider": return "NoProvider"
+    case "provider_issue": return "ProviderIssue"
+    case "rate_limited": return "RateLimited"
+    case "billing-refused":
+    case "subscription-required":
+    case "allowance-exhausted": return "PlanLimit"
+    default: return "OtherFailure"
+  }
+}
+
+/** Alpha's sentence for a failed reply. */
+export function failureText(kind: FailureKind): string {
+  switch (kind) {
+    case "InsufficientCredits": return "Your plan is out of credits. Manage your plan to keep chatting."
+    case "MissingCapability": return "Your agent can’t do that on this phone yet."
+    case "NoProvider": return "No AI provider is set up. Choose one in Settings."
+    case "ProviderIssue": return "The AI provider isn’t answering. Try again in a moment."
+    case "RateLimited": return "Too many requests right now. Try again in a moment."
+    case "PlanLimit": return "Your plan’s allowance is used up. Manage your plan to keep chatting."
+    case "OtherFailure": return copy.replyFailed
+  }
+}
+
+/** The plan card a reply carries, or none. */
+export function planCardTitle(action: PlanAction, cloud: string): string {
+  switch (action) {
+    case "ChoosePlan": return "Choose plan"
+    case "SignIn": return `Sign in with ${cloud}`
+    case "RetryCloud":
+    case "RecheckProvider": return `Check ${cloud} again`
+    case "Funding": return "Manage plan"
+  }
+}
+
+/** A plan action of the wire, or none. */
+export function planActionOf(raw: unknown): PlanAction | undefined {
+  switch (raw) {
+    case "plan": return "ChoosePlan"
+    case "retry": return "RetryCloud"
+    case "sign-in": return "SignIn"
+    case "provider": return "RecheckProvider"
+    case "funding": return "Funding"
+    default: return undefined
+  }
+}
+
+/** "Expires at …" in the device's own clock format, or nothing once past. */
+export function approvalExpiryText(expiresAt: number, now: number, locale: string | undefined): string {
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return ""
+  try {
+    return `Expires at ${new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(expiresAt))}`
+  } catch {
+    return ""
+  }
+}
+
+/** The receipt summary shown for an action result, in Alpha's words. */
+export function actionResultText(summary: string): string {
+  if (summary === "The action could not reach a confirmed result." || summary === "Action did not reach a confirmed result. Check action history before requesting it again.") return copy.unconfirmed
+  return summary
+}
+
+/** The summary of an approved Browser open. */
+export function browserNavigationSummary(url: string): string {
+  const host = hostOf(url)
+  return host === "" ? "" : `Created a browser tab for ${host}.`
+}
+
+/** The summary of a receipt whose upload has not reached the agent yet. */
+export function unsyncedSummary(summary: string): string {
+  return `${summary.replace(/\.$/, "")}, but it isn't synced yet.`
+}
+
+/** A stored system notice in Alpha's words. */
+export function systemNoticeText(kind: "model-unavailable" | "runtime-error" | "both", unanswered: boolean): string {
+  switch (kind) {
+    case "model-unavailable": return "No AI provider · Open Settings"
+    case "runtime-error": return unanswered ? "Agent error · Send again" : "Agent degraded"
+    case "both": return "No AI provider · Open Settings\nAgent degraded"
+  }
+}

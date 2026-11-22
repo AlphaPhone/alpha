@@ -1,0 +1,125 @@
+// spec/workflows/simulator.md, "Story: Walk a workflow end to end in the browser without touching anything real"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import {
+  type Destination, type Where, expenseValid, focusFits, historyRemovable, noticeFits, receiptMatches, removableRun, resultAccepted,
+  sendAllowed, simulatorLoads, urgencyDecisionValid, urgencyInputValid, whereFrom,
+} from "../../gen/workflows__simulator.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+
+/** A simulated step refused; `reason` is the simulator's own word for why. */
+export error SimulatedRefusal { reason: "not-loaded" | "destination" | "receipt" | "amount" | "urgency" | "result" | "focus" | "history" | "ledger" }
+
+/** One simulated message or email the simulator saved for a step. */
+export interface SimulatedSend { readonly id: string; readonly destination: Destination; readonly recipient: string; readonly text: string }
+
+/** An urgency decision: the agent's, or a developer's review where no agent answered. */
+export interface Urgency { readonly urgent: boolean; readonly reason: string; readonly source: "agent" | "development-review" }
+
+const sendsKey = ownerKey("dev", "workflows/simulator/sends")
+const expensesKey = ownerKey("dev", "workflows/simulator/expenses")
+const noticesKey = ownerKey("dev", "workflows/simulator/notices")
+
+/** Simulated workflow steps for the browser build with test mocks; refused everywhere else. */
+export service SimulatedWorkflows {
+  /** Save a simulated message or email for step `id`, once; a second run must find the same text. */
+  send(id: string, destination: Destination, recipient: string, senders: number, text: string): SimulatedSend!SimulatedRefusal
+  /** Record a simulated expense of `cents` at `merchant` on `card`, never a payment. */
+  recordExpense(id: string, merchant: string, cents: number, card: string): void!SimulatedRefusal
+  /** Read the agent's urgency answer, or take the developer's review when the agent gave none. */
+  urgency(input: string, answer: string | undefined, review: boolean | undefined): Urgency!SimulatedRefusal
+  /** Take a developer's step result as test data. */
+  result(text: string): string!SimulatedRefusal
+  /** Whether a focus summary fits, or focus is released. */
+  focus(seen: number, arrivals: number, chars: number): void!SimulatedRefusal
+  /** Where the simulated phone is relative to Home. */
+  where(distance: number, accuracy: number, radius: number): Where!!
+  /** Which runs of a history may be removed: finished ones, and none while one runs. */
+  removable(statuses: ReadonlyArray<string>): ReadonlyArray<number>!SimulatedRefusal
+  /** Post a simulated notice into the bounded ledger. */
+  notice(id: string, title: string, text: string): void!SimulatedRefusal
+}
+
+export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
+  const build = try Build
+  const store = try KeyValueStore.KeyValueStore
+  const loaded = simulatorLoads(build.info.testMocks, build.info.variant === "browser")
+
+  effect function guard() {
+    if (!loaded) throw new SimulatedRefusal({ reason: "not-loaded" })
+  }
+
+  effect function readList<A>(key: string) {
+    const raw = try (store.get(key) catch () => undefined)
+    if (raw === undefined) return [] as A[]
+    const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => [])
+    return Array.isArray(value) ? value as A[] : []
+  }
+
+  return {
+    effect send(id: string, destination: Destination, recipient: string, senders: number, text: string) {
+      try guard()
+      if (!sendAllowed(destination, senders, text.trim())) throw new SimulatedRefusal({ reason: "destination" })
+      const sends = try readList<SimulatedSend>(sendsKey)
+      const saved = sends.find((s) => s.id === id)
+      if (!receiptMatches(saved !== undefined, saved?.text === text, saved?.recipient === recipient)) throw new SimulatedRefusal({ reason: "receipt" })
+      if (saved !== undefined) return saved
+      const next = { id, destination, recipient, text }
+      try (store.set(sendsKey, JSON.stringify([...sends, next].slice(-500))) catch effect () => { throw new SimulatedRefusal({ reason: "receipt" }) })
+      return next
+    },
+    effect recordExpense(id: string, merchant: string, cents: number, card: string) {
+      try guard()
+      if (!Number.isSafeInteger(cents) || !expenseValid(merchant.trim().length, cents, card !== "")) throw new SimulatedRefusal({ reason: "amount" })
+      const expenses = try readList<{ id: string; merchant: string; cents: number; card: string }>(expensesKey)
+      const saved = expenses.find((e) => e.id === id)
+      if (saved !== undefined) {
+        if (saved.merchant !== merchant.trim() || saved.cents !== cents || saved.card !== card) throw new SimulatedRefusal({ reason: "receipt" })
+        return
+      }
+      try (store.set(expensesKey, JSON.stringify([...expenses, { id, merchant: merchant.trim(), cents, card }].slice(-500))) catch effect () => { throw new SimulatedRefusal({ reason: "amount" }) })
+    },
+    effect urgency(input: string, answer: string | undefined, review: boolean | undefined) {
+      try guard()
+      if (!urgencyInputValid(input.trim() === "" ? 0 : input.length)) throw new SimulatedRefusal({ reason: "urgency" })
+      if (answer === undefined) {
+        if (review === undefined) throw new SimulatedRefusal({ reason: "urgency" })
+        return { urgent: review, reason: review ? "Marked urgent in development review." : "Marked not urgent in development review.", source: "development-review" } satisfies Urgency
+      }
+      const value = try (Effect.try(() => JSON.parse(answer) as unknown) catch () => undefined)
+      const record = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+      const exact = Object.keys(record).sort().join(",") === "reason,urgent" && typeof record.urgent === "boolean" && typeof record.reason === "string"
+      const reason = typeof record.reason === "string" ? record.reason.trim() : ""
+      if (!urgencyDecisionValid(exact, reason.length)) throw new SimulatedRefusal({ reason: "urgency" })
+      return { urgent: record.urgent === true, reason, source: "agent" } satisfies Urgency
+    },
+    effect result(text: string) {
+      try guard()
+      if (!resultAccepted(text.trim() === "" ? 0 : text.length)) throw new SimulatedRefusal({ reason: "result" })
+      return text
+    },
+    effect focus(seen: number, arrivals: number, chars: number) {
+      try guard()
+      if (!focusFits(seen, arrivals, chars)) throw new SimulatedRefusal({ reason: "focus" })
+    },
+    where: effect (distance: number, accuracy: number, radius: number) => whereFrom(Math.round(distance), Math.round(accuracy), Math.round(radius)),
+    effect removable(statuses: ReadonlyArray<string>) {
+      try guard()
+      const running = statuses.includes("running")
+      const finished = statuses.flatMap((status, index) => removableRun(status) ? [index] : [])
+      if (!historyRemovable(running, finished.length)) throw new SimulatedRefusal({ reason: "history" })
+      return finished
+    },
+    effect notice(id: string, title: string, text: string) {
+      try guard()
+      const rows = try readList<{ id: string; title: string; text: string }>(noticesKey)
+      const prior = rows.find((r) => r.id === id)
+      if (prior !== undefined) {
+        if (prior.title !== title || prior.text !== text) throw new SimulatedRefusal({ reason: "receipt" })
+        return
+      }
+      if (!noticeFits(rows.length, text.trim() === "" ? 0 : text.length, title.trim() === "" ? 0 : title.length)) throw new SimulatedRefusal({ reason: "ledger" })
+      try (store.set(noticesKey, JSON.stringify([...rows, { id, title, text }])) catch effect () => { throw new SimulatedRefusal({ reason: "ledger" }) })
+    },
+  }
+})

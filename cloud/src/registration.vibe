@@ -1,0 +1,132 @@
+// spec/cloud/nativeClients/registry.md, "Story: Admit only a registered native client"; spec/cloud/operator.md, "Story: Operate the deployment without reading secrets"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import deployment from "../deployment.json" with { type: "json" }
+
+/** The app identity app.config.json records. */
+export interface AppIdentity {
+  readonly appId: string
+  readonly appName: string
+  readonly slug: string
+}
+
+/** android/release-signer.json: the release certificate and an approved rotation's previous one. */
+export interface ReleaseSigner {
+  readonly signerSha256: string
+  readonly apkSigningRotation?: { readonly approval?: string; readonly previousSignerSha256?: string }
+}
+
+/** One client entry of an `elizaos-cloud serve --seed` document. */
+export interface SeedClient {
+  readonly clientId: string
+  readonly displayName: string
+  readonly androidPackage: string
+  readonly certFingerprints: ReadonlyArray<string>
+  readonly signInReturn: string
+  readonly billingReturn: string
+  readonly connectReturn: string
+  readonly nativeGoogle: boolean
+}
+
+/** One entry of a Worker's NATIVE_CLIENT_REGISTRY variable. */
+export interface RegistryEntry extends SeedClient {
+  readonly environment: CloudEnvironment
+  readonly credentialTtlMs: number
+  readonly enabled: true
+}
+
+/** A fingerprint is not 64 lower-case hex characters, or the registration would break the registry rules. */
+export error RegistrationInvalid { problem: string }
+
+/** The Alpha sign-in, billing and Google connection return paths and the browser sign-in namespace. */
+export const signInRegistration = deployment.signIn
+
+/** The registry's default device key lifetime, thirty days. */
+export const defaultCredentialTtlMs = 30 * 24 * 60 * 60 * 1000
+
+const maxFingerprints = 4
+
+/** `AB:CD:…`, as asset links and the upstream registry require, from 64 lower-case hex characters. */
+export effect function colonFingerprint(hex: string): string!RegistrationInvalid {
+  if (!/^[0-9a-f]{64}$/.test(hex)) throw new RegistrationInvalid({ problem: "signer fingerprints must be 64 lower-case hex characters" })
+  return hex.toUpperCase().replace(/(..)(?=.)/g, "$1:")
+}
+
+/** The release certificate and, while a rotation is approved, the previous one that installed phones still carry. */
+export effect function releaseSignerFingerprints(signer: ReleaseSigner): ReadonlyArray<string>!RegistrationInvalid {
+  const values = [signer.signerSha256]
+  const rotation = signer.apkSigningRotation
+  if (rotation?.approval === "approved" && rotation.previousSignerSha256) values.push(rotation.previousSignerSha256)
+  const result: string[] = []
+  for (const value of new Set(values)) result.push(try colonFingerprint(value))
+  return result
+}
+
+/** The app's one client registration on an environment whose web origin holds its returns. */
+export effect function registrationFor(identity: AppIdentity, web: string, nativeGoogle: boolean, fingerprints: ReadonlyArray<string>, extraFingerprints: ReadonlyArray<string> = []): SeedClient!RegistrationInvalid {
+  const extra: string[] = []
+  for (const value of extraFingerprints) extra.push(/:/.test(value) ? value.toUpperCase() : try colonFingerprint(value))
+  const certFingerprints = [...new Set([...fingerprints, ...extra])]
+  if (certFingerprints.length === 0 || certFingerprints.length > maxFingerprints) throw new RegistrationInvalid({ problem: `a registration names one to ${maxFingerprints} certificate fingerprints` })
+  return {
+    clientId: identity.appId,
+    displayName: identity.appName,
+    androidPackage: identity.appId,
+    certFingerprints,
+    signInReturn: web + signInRegistration.callbackPath,
+    billingReturn: web + signInRegistration.billingReturnPath,
+    connectReturn: web + signInRegistration.connectReturnPath,
+    nativeGoogle,
+  }
+}
+
+/** Problems the upstream registry would refuse: shared returns, a return on the API origin, or a malformed fingerprint. */
+export function registrationProblems(client: SeedClient, api: string): ReadonlyArray<string> {
+  const problems: string[] = []
+  const returns = [client.signInReturn, client.billingReturn, client.connectReturn]
+  if (new Set(returns).size !== returns.length) problems.push("the sign-in, billing and connect returns must be three different URLs")
+  for (const url of returns) {
+    const parsed = URL.parse(url)
+    if (parsed === null || parsed.protocol !== "https:" || parsed.search || parsed.hash || parsed.username || parsed.password || parsed.port || parsed.origin + parsed.pathname !== url)
+      problems.push(`${url} is not an HTTPS origin and path`)
+    else if (parsed.origin === api) problems.push(`${url} lies on the API origin, which serves no page`)
+  }
+  if (new Set(client.certFingerprints).size !== client.certFingerprints.length) problems.push("certificate fingerprints repeat")
+  for (const fingerprint of client.certFingerprints) if (!/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(fingerprint)) problems.push(`${fingerprint} is not a colon-separated SHA-256 fingerprint`)
+  if (!/^[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)+$/.test(client.androidPackage)) problems.push("the Android package is not a reverse-DNS name")
+  return problems
+}
+
+/** The registration of one environment of the profile, refused when the registry would refuse it. */
+export effect function environmentRegistration(profile: CloudProfile, environment: CloudEnvironment, identity: AppIdentity, signer: ReleaseSigner, extraFingerprints: ReadonlyArray<string> = []): SeedClient!RegistrationInvalid {
+  const settings = profile.environments[environment]
+  const client = try registrationFor(identity, settings.web, settings.google?.nativeSignIn ?? false, try releaseSignerFingerprints(signer), extraFingerprints)
+  const problems = registrationProblems(client, settings.api)
+  if (problems.length > 0) throw new RegistrationInvalid({ problem: problems.join("; ") })
+  return client
+}
+
+/** The `--seed` document `elizaos-cloud serve` and `client register` accept for one environment. */
+export function seedDocument(client: SeedClient): { readonly clients: ReadonlyArray<SeedClient> } {
+  return { clients: [client] }
+}
+
+/** The NATIVE_CLIENT_REGISTRY value a Worker of one environment reads, as JSON. */
+export function registryVariable(client: SeedClient, environment: CloudEnvironment): string {
+  const entry: RegistryEntry = { ...client, environment, credentialTtlMs: defaultCredentialTtlMs, enabled: true }
+  return JSON.stringify([entry])
+}
+
+/** The `elizaos-cloud client register` arguments for the registration. */
+export function registerArguments(client: SeedClient): ReadonlyArray<string> {
+  return [
+    "client", "register",
+    "--client-id", client.clientId,
+    "--display-name", client.displayName,
+    "--android-package", client.androidPackage,
+    ...client.certFingerprints.flatMap((fingerprint) => ["--cert", fingerprint]),
+    "--sign-in-return", client.signInReturn,
+    "--billing-return", client.billingReturn,
+    "--connect-return", client.connectReturn,
+    ...(client.nativeGoogle ? ["--native-google"] : []),
+  ]
+}
