@@ -26,6 +26,10 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
    'Go back':{operation:{type:'browser_history',action:'back'},bound:true},
    'Reload this page':{operation:{type:'browser_history',action:'reload'},bound:true},
    'Find harbour on this page':{operation:{type:'browser_find',text:'harbour'},bound:true},
+   // v620: "close all the browser tabs" became one "Close tab" card for the tab showing.
+   'Close this tab':{operation:{type:'browser_tab_close'},bound:false},
+   'Close all the tabs':{operation:{type:'browser_tab_close',all:true},bound:false},
+   'Close every tab':{operation:{type:'browser_tab_close',all:true},bound:false},
   };
   const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
   w.Capacitor={PluginHeaders:[{name:'AlphaConnection',methods:methods(['request','cancel','secureRead','secureWrite','secureCompareExchange','secureRemove'])},{name:'AlphaActionJournal',methods:methods(['reserve','markApplying','finish','get','list'])}],nativePromise:async(plugin:string,method:string,input:any)=>{
@@ -48,7 +52,7 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
    if(path==='/api/auth/me')return ok({identity:{id:'fixture-owner',displayName:'Fixture',kind:'owner'},session:{id:'synthetic-session',kind:'machine',expiresAt:Date.now()+600000},access:{role:'OWNER',mode:'session'}});
    if(path==='/api/agents')return ok({agents:[{id:agentId,name:'Browser fixture',status:'running'}]});
    // The agent offers all four groups; this web build must not take find in page.
-   if(path==='/api/client-devices/register'){w.browserInstallation=input.headers['X-Eliza-Device-Id'];return ok({installationId:w.browserInstallation,enrollmentId:'browser-enrollment',capabilities:['browser.search.v1','browser.tabs.v1','browser.find.v1','browser.history.v1']});}
+   if(path==='/api/client-devices/register'){w.browserInstallation=input.headers['X-Eliza-Device-Id'];return ok({installationId:w.browserInstallation,enrollmentId:'browser-enrollment',capabilities:['browser.search.v1','browser.tabs.v1','browser.find.v1','browser.history.v1','browser.tabs.close-all.v1']});}
    if(path==='/api/workflow/status')return ok({});
    if(path==='/api/conversations'&&input.method==='POST')return ok({conversation:{id:'browser-chat',title:'Fixture'}});
    if(path==='/api/conversations/browser-chat/messages'&&input.method==='POST'){
@@ -104,7 +108,7 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await receipts(1);await browserShown();await showing('Results for harbour tides');
  const first=await fixture();
  expect(first.posts[0].mode).toBe('direct-request-v1');expect(first.decisions).toEqual(['proposal-1']);
- expect(first.capabilities.split(',').sort()).toEqual(expect.arrayContaining(['browser.history.v1','browser.search.v1','browser.tabs.v1']));
+ expect(first.capabilities.split(',').sort()).toEqual(expect.arrayContaining(['browser.history.v1','browser.search.v1','browser.tabs.v1','browser.tabs.close-all.v1']));
  expect(first.capabilities).not.toContain('browser.find.v1');
 
  // New tab: a second, empty tab is selected with its address field open.
@@ -156,9 +160,43 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await expect(page.getByText('This action isn\'t available on this phone.',{exact:false}).first()).toBeVisible();
  await expect(page.getByRole('search',{name:'Find in page'})).toHaveCount(0);
 
+ // Close this tab: one reviewed card, and only the showing tab closes.
+ await ask('Close this tab');
+ const closeThis=page.getByRole('button',{name:/^Close tab\b.*Approve$/s});
+ await expect(closeThis).toHaveCount(1);await expect(tabs).toHaveText('3');
+ await closeThis.click();
+ await receipts(8);await expect(tabs).toHaveText('2');
+ await minimizeChat();await tabs.click();
+ await expect(page.getByRole('button',{name:/^Switch to .*shop\.example\/hats/})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:/^Switch to .*shop\.example\/shoes/})).toHaveCount(1);
+ await page.getByRole('button',{name:/^Switch to .*shop\.example\/shoes/}).click();
+
+ // Close all: one reviewed card that lists, from the phone, exactly the two tabs that will close.
+ await ask('Close all the tabs');
+ const closeTwo=page.getByRole('button',{name:/^Close 2 tabs\b.*Approve$/s});
+ await expect(closeTwo).toHaveCount(1);
+ await expect(closeTwo).toHaveAccessibleName(/shop\.example\/shoes/);await expect(closeTwo).toHaveAccessibleName(/google/);
+ await expect(page.getByRole('button',{name:/^Close tab\b.*Approve$/s})).toHaveCount(0);
+ expect((await fixture()).decisions).not.toContain('proposal-10');
+ // The owner opens a tab before approving: that card no longer says what would close, so it is
+ // withdrawn (it can no longer be approved), and asking again lists the three tabs open now.
+ await minimizeChat();await page.getByRole('button',{name:'Menu',exact:true}).click();await page.getByRole('button',{name:'New tab',exact:true}).click();
+ const added=page.getByRole('textbox',{name:'Address',exact:true});await added.fill('https://news.example/evening');await added.press('Enter');await showing('news.example/evening');
+ await expect(tabs).toHaveText('3');
+ await ask('Close every tab');
+ // The earlier card keeps its text but no longer has an Approve button.
+ await expect(closeTwo).toHaveCount(0);
+ await expect(page.getByRole('button',{name:/Message actions: .*shop\.example\/shoes Closes every tab listed here/})).toHaveCount(1);
+ const closeThree=page.getByRole('button',{name:/^Close 3 tabs\b.*Approve$/s});
+ await expect(closeThree).toHaveCount(1);await expect(closeThree).toHaveAccessibleName(/news\.example\/evening/);
+ await closeThree.click();
+ await receipts(9);await expect(tabs).toHaveText('1');
+ const closed=await fixture();
+ expect(closed.decisions).not.toContain('proposal-10');expect(closed.decisions).toContain('proposal-11');
+
  // The agent received outcomes only: no result, tab title, address or search words.
  const done=await fixture();
- expect(done.receipts.map((receipt:any)=>[receipt.id,receipt.outcome])).toEqual([['proposal-1','applied'],['proposal-2','applied'],['proposal-3','applied'],['proposal-4','applied'],['proposal-5','applied'],['proposal-6','applied'],['proposal-7','applied']]);
+ expect(done.receipts.map((receipt:any)=>[receipt.id,receipt.outcome])).toEqual([['proposal-1','applied'],['proposal-2','applied'],['proposal-3','applied'],['proposal-4','applied'],['proposal-5','applied'],['proposal-6','applied'],['proposal-7','applied'],['proposal-9','applied'],['proposal-11','applied']]);
  for(const receipt of done.receipts)expect(Object.keys(receipt).sort()).toEqual(['id','operationId','outcome']);
  expect(JSON.stringify(done.receipts)).not.toMatch(/example|google|harbour|shop|news/);
 });
