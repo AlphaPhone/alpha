@@ -7,10 +7,10 @@ import {bundleVendorCore, deferred, observeFile, tick} from '../../legacy/core/s
 const driver = fileURLToPath(import.meta.url);
 const call = (name, ...args) => ({name, args});
 const taskId = 'task-fixture', actorId = 'actor-fixture';
-const timerPorts = {name: 'approval-service-timer-ports', setup(builder) {
+const timerPorts = {name: 'approval-service-clock-and-timer-ports', setup(builder) {
   observeFile(builder, 'approval.ts', [
     ['import { logger } from "../logger.ts";',
-      'import { logger } from "../logger.ts";\nconst {setTimeout, clearTimeout} = __quint;'],
+      'import { logger } from "../logger.ts";\nconst {Date, setTimeout, clearTimeout} = __quint;'],
   ]);
 }};
 
@@ -21,6 +21,7 @@ async function fixture(bundle) {
   const errors = [], workerErrors = [], unavailable = new Set(), blocked = new Set();
   let stopDone = false, stopping, missingTimeoutTask;
   const {ApprovalService} = bundle.instantiate({
+    Date: {now: () => 0},
     setTimeout(callback, delay) {
       assert.equal(timer, undefined);
       assert.equal(delay, 1000);
