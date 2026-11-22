@@ -495,30 +495,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       proposal.smsReview==='draft'||proposal.smsReview==='recipient'?'Choose recipient':proposal.reviewDestination?'Open':'Approve';
     return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,approvalLabel,smsReview:proposal.smsReview,smsPreview:proposal.smsPreview,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
-  type PlainSmsDraft={proposal:import('../runtime/alpha-client').ActionProposal;binding:NonNullable<AgentReply['messageBinding']>};
   const sendThisText=/^(?:yes[,]?\s+)?send this (?:text|message|draft)[.!]?$/i;
   const spokenConfirmationLead=/^(?:(?:yes|yeah|yep|okay|ok|sure|hmm+|um+|uh)[,.!]?\s+)*(?:go ahead and )?/iu;
   const sendReviewedText=/^(?:(?:i think )?i (?:want to|wanna|would like to|want you to) |i['’]d like to |let['’]s )?send (?:it|this(?: (?:text|message|draft))?|the (?:text|message|draft))(?:\s+to\s+(.+?))?[.!?]?$/iu;
-  function rememberPlainSmsDraft(shell:Shell,reply:AgentReply){
-    const proposal=reply.proposals?.find(item=>item.plainSmsDraft===true);
-    if(proposal&&reply.messageBinding)shell.plainSmsDraft={proposal,binding:reply.messageBinding};
-  }
-  async function sendPlainSmsDraft(draft:PlainSmsDraft,signal?:AbortSignal){
-    const {proposal,binding}=draft;
-    const preference=await readDevicePreferences(signal).catch(()=>({askBeforeAgentActions:true}));
-    const connection=connectionController.getSnapshot();
-    if(preference.askBeforeAgentActions||signal?.aborted||document.hidden||connection.open||
-       connectionController.getSelectedConversationId()!==binding.conversationId||
-       JSON.stringify(connection.session)!==JSON.stringify(binding.session)||alphaClient.getState().context.revision!==proposal.contextRevision)
-      return 'Give me the recipient and message you want to send.';
-    try{
-      const result=await alphaClient.approve(proposal.id,signal,'send-draft',proposal.description);
-      return result.summary;
-    }catch{
-      const known=await connectionController.actionReceipt(proposal.id,binding.session.sessionId);
-      return known?.summary??'I couldn’t confirm the text. Check Messages before trying again.';
-    }
-  }
   function visibleSmsReview(proposalId:string):boolean {
     if(document.hidden||document.querySelector('dialog[open]'))return false;
     const rows=Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-voice-send-review]'))
@@ -621,7 +600,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   function recoverPendingActions(shell:Shell) {
     const connection=connectionController.getSnapshot(),currentContext=alphaClient.getState().context;
     if(shell.pendingActionApproval&&(document.hidden||currentContext.sensitive||connection.open||JSON.stringify(shell.pendingActionApprovalContext)!==JSON.stringify(currentContext)||JSON.stringify(shell.pendingActionApprovalSession)!==JSON.stringify(connection.session)))shell.pendingActionApproval.abort();
-    const blocked=cachedDevicePreferences()?.askBeforeAgentActions===false||currentContext.view==='workflows'||!shell.live||!connection.session||!connection.phoneActionsAvailable||connection.open||connection.busy||document.hidden||currentContext.sensitive||shell.S().typing||shell.pendingActionApproval;
+    const blocked=currentContext.view==='workflows'||!shell.live||!connection.session||!connection.phoneActionsAvailable||connection.open||connection.busy||document.hidden||currentContext.sensitive||shell.S().typing||shell.pendingActionApproval;
     const key=blocked?null:JSON.stringify([connection.session,connection.history?.revision,currentContext]);
     if(!key)shell.pendingActionRecoveryFailedKey=null;
     if(shell.pendingActionRecoveryKey===key||key!==null&&shell.pendingActionRecoveryFailedKey===key)return;
@@ -650,8 +629,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         });
       },Math.min(2147483647,Math.max(0,Math.ceil(nearest-Date.now())+1)));
     };
-    void readDevicePreferences(controller.signal).then(prefs=>prefs.askBeforeAgentActions
-      ?connectionController.pendingActions(currentContext,controller.signal):[]).then(proposals=>{
+    void readDevicePreferences(controller.signal).then(async prefs=>{
+      const proposals=await connectionController.pendingActions(currentContext,controller.signal);
+      return prefs.askBeforeAgentActions?proposals:proposals.filter(proposal=>proposal.smsReview);
+    }).then(proposals=>{
       if(!current())return;
       for(const proposal of proposals)if(proposal.readReply)retainReadReply(shell,proposal);
       shell.setState((previous:Shell)=>{
@@ -659,7 +640,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const pending=new Map(proposals.map(proposal=>[proposal.id,proposal]));
         const msgs=previous.msgs.map((message:Shell)=>{
           const card=message.card;
-          if(!card?.proposalId||card.done||card.type==='proposal'&&card.state!=='open')return message;
+          if(!card?.proposalId||card.done||card.type==='proposal'&&card.state!=='open'||
+            cachedDevicePreferences()?.askBeforeAgentActions===false&&!card.smsReview)return message;
           const proposal=pending.get(card.proposalId);
           if(proposal){
             const voiceReview=shell.pendingVoiceSmsReview;
@@ -1897,7 +1879,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   p.renderVals = function () {
     const out = originalVals.call(this);
     if(this.S().view!=='workflows'&&cachedDevicePreferences()?.askBeforeAgentActions===false&&out.msgs)
-      out.msgs=out.msgs.filter((row:Shell)=>!row.c?.proposalId||row.c.done||row.c.state==='done'||row.c.state==='replaced');
+      out.msgs=out.msgs.filter((row:Shell)=>!row.c?.proposalId||row.c.smsReview||row.c.done||row.c.state==='done'||row.c.state==='replaced');
     const composeTarget=this.messageEditTarget||this.messageReplyTarget;
     this.chatImageModal??=createImagePreview(()=>{this.chatImagePreview=null;this.setState({});});
     out.chatImagePreview=out.isOn&&!this.S().secure?this.chatImagePreview||'':'';
@@ -2144,12 +2126,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
     const reviewed=this.pendingVoiceSmsReview;
     this.pendingVoiceSmsReview=undefined;
-    const plain:PlainSmsDraft|undefined=this.plainSmsDraft;
-    this.plainSmsDraft=undefined;
     // The immediate next accepted microphone turn can confirm exactly one displayed Send card.
     // Never send the confirmation to the model or reopen a consumed approval.
     const spokenCommand=text.trim().replace(spokenConfirmationLead,'');
-    const approvalPhrase=(reviewed||plain)?sendReviewedText.exec(spokenCommand):null;
+    const approvalPhrase=reviewed?sendReviewedText.exec(spokenCommand):null;
     if(sendThisText.test(spokenCommand)||approvalPhrase){
       const message=reviewed&&input.approvalSignal&&reviewed.generation===input.talkGeneration&&
         reviewed.conversationId===binding.conversationId&&reviewed.revision===input.context.revision&&
@@ -2159,10 +2139,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           (m.card.type!=='proposal'||m.card.state==='open')):undefined;
       input.approvalSignal?.throwIfAborted();
       this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
-      const namedRecipient=approvalPhrase?.[1],pendingId=message?.card?.proposalId??plain?.proposal.id;
+      const namedRecipient=approvalPhrase?.[1],pendingId=message?.card?.proposalId;
       if(namedRecipient&&(!pendingId||!connectionController.matchesSmsReviewRecipient(pendingId,namedRecipient))){
         if(message)this.pendingVoiceSmsReview=reviewed;
-        if(plain)this.plainSmsDraft=plain;
         const answer="That recipient doesn’t match the current text. Check the recipient shown before sending.";
         const replyId=`voice-review:${turnId}`;
         this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
@@ -2170,7 +2149,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const receipt=message?await this.cardAct(message,input.approvalSignal,message.card.smsReview==='addressed-draft'?'send-draft':undefined):undefined;
       current();
-      const answer=receipt?.summary??(plain&&input.approvalSignal?await sendPlainSmsDraft(plain,input.approvalSignal):message?'I couldn’t confirm the send. Check Messages before trying again.':'Give me the recipient and message you want to send.');
+      const answer=receipt?.summary??(message?'I couldn’t confirm the send. Check Messages before trying again.':'Give me the recipient and message you want to send.');
       const replyId=receipt?`device-receipt:${receipt.proposalId}`:`voice-review:${turnId}`;
       if(!receipt)this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
       return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
@@ -2319,8 +2298,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const awaiting=reply.proposals?.filter(proposal=>proposal.readReply?.origin.requestId===turnId&&proposal.readReply.origin.conversationId===identity.conversationId&&proposal.readReply.origin.inReplyTo===reply.userMessageId);
       if(awaiting&&awaiting.length>1)throw Error('More than one Notes review was returned. Use action history.');
-      rememberPlainSmsDraft(this,reply);
-      for(const proposal of reply.proposals||[]){if(proposal.plainSmsDraft)continue;retainReadReply(this,proposal,identity,reply.userMessageId);sayProposal(this,proposal,belongs);}
+      for(const proposal of reply.proposals||[]){retainReadReply(this,proposal,identity,reply.userMessageId);sayProposal(this,proposal,belongs);}
       for(const completed of reply.completedReads||[]){
         current();retainReadReply(this,completed.proposal,identity,reply.userMessageId);
         await completeReadReply(this,completed.receipt);current();
@@ -2337,13 +2315,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // The SMS card can wait for its owner's input while Talk remains available.
       // Receipt of the card itself never authorizes the SMS.
       const smsReview=!pendingNotice&&!emailCardReady&&reply.proposals?.length===1?reply.proposals[0].smsReview:undefined;
-      const plainDraft=reply.proposals?.some(item=>item.plainSmsDraft===true);
-      const review=!smsReview&&(!!reply.proposals?.length||pendingNotice||emailCardReady);
-      if(!plainDraft&&(smsReview==='send'||smsReview==='addressed-draft')&&input.talkGeneration!==undefined&&input.approvalSignal){
+      const review=(!smsReview||smsReview==='reply-draft')&&(!!reply.proposals?.length||pendingNotice||emailCardReady);
+      if((smsReview==='send'||smsReview==='addressed-draft')&&input.talkGeneration!==undefined&&input.approvalSignal){
         const proposal=reply.proposals![0];
         this.pendingVoiceSmsReview={id:proposal.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:proposal.contextRevision,expiresAt:proposal.expiresAt,details:proposal.description};
       }
-      const speechText=typeof emailOutcome==='string'?emailOutcome:plainDraft?reply.text:smsReview==='draft'?'Who should get this text? Say their full name or choose a recipient on your phone.'
+      const speechText=typeof emailOutcome==='string'?emailOutcome:smsReview==='draft'?'Who should get this text? Say their full name or choose a recipient on your phone.'
         :smsReview==='addressed-draft'?'Your draft is ready. Review it on your phone. You can confirm by voice.'
         :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
         :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
@@ -2380,14 +2357,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
-    const plain:PlainSmsDraft|undefined=this.plainSmsDraft;
-    this.plainSmsDraft=undefined;
-    if(plain&&fromComposer&&!hasBinaryAttachment&&!edit&&sendThisText.test(text.trim())){
-      this.setState((previous:Shell)=>({draft:'',msgs:[...previous.msgs,{id:crypto.randomUUID(),from:'user',text}]}));
-      const answer=await sendPlainSmsDraft(plain);
-      if(this.live&&connectionController.getSelectedConversationId()===plain.binding.conversationId)this.agentSay(answer);
-      return;
-    }
     const noteTitle=fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment
       ?namedNoteOpenRequest(text):undefined;
     if(noteTitle){
@@ -2610,8 +2579,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
       let cameraOpened=false,cameraReceipts=0;
       if(sourceDraft&&sourceSession&&JSON.stringify(sourceSession)===JSON.stringify(connectionController.getSnapshot().session))this.agentSay('Review this answer before saving it with its source.',{type:'generic',icon:'note',title:'Review summary note',sub:sourceDraft.name,sourceSummary:{source:sourceDraft,text:reply.text,session:sourceSession}});
-      rememberPlainSmsDraft(this,reply);
-      for (const proposal of reply.proposals || []) {if(proposal.plainSmsDraft)continue;retainReadReply(this,proposal,identity,reply.userMessageId);sayProposal(this,proposal);}
+      for (const proposal of reply.proposals || []) {retainReadReply(this,proposal,identity,reply.userMessageId);sayProposal(this,proposal);}
       for(const completed of reply.completedReads||[]){
         retainReadReply(this,completed.proposal,identity,reply.userMessageId);
         try{await completeReadReply(this,completed.receipt);}catch{if(this.live&&sameChat())this.agentSay('The note was shared, but its answer is unconfirmed.');}

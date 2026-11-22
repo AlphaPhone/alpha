@@ -202,7 +202,7 @@ import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT, type ContactMatch } from "../telephony/telephony-messages.ts";
 import { smsReviewCopy, smsSendFacts, type SmsReviewPreview } from "../telephony/sms-card-facts.ts";
-import { callOwnerRecipient, directOwnerAction, samePhoneRecipient, smsOwnerRequest } from "./owner-request.ts";
+import { callOwnerRecipient, directOwnerAction, samePhoneRecipient } from "./owner-request.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -235,7 +235,7 @@ export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
  * (direct mode). A reviewable card names its bound message the same way.
  */
 type AlphaProposalCard = DeviceActionProposalCard & {
-  smsReview?: "draft" | "addressed-draft" | "send" | "recipient";
+  smsReview?: "draft" | "addressed-draft" | "send" | "recipient" | "reply-draft";
   smsPreview?: SmsReviewPreview;
 };
 export type ReviewItem = Omit<PendingReviewItem, "proposal"> & {
@@ -663,7 +663,6 @@ type PresentedDeviceReceipt = DeviceOperationReceipt & { presentBrowser?: Browse
 
 type RequestedAction = CurrentDeviceActionRequest & {
   projectView?: ((view: string, signal: AbortSignal) => Promise<boolean>) | "canonical";
-  retainSmsDraft?: true;
 };
 
 type ExecutionResult = Omit<DeviceExecutionResult, "presentBrowser"> & {
@@ -1164,7 +1163,7 @@ export class DeviceActionCoordinator<
           smsReview: "draft" in op ?
             smsRecipient || smsComposeTarget(op).kind === "number" ? "addressed-draft" as const : "draft" as const :
             smsRecipient || smsComposeTarget(op).kind === "number" ? "send" as const : "recipient" as const,
-        } : {}),
+        } : op.type === "sms_reply_selected" ? { smsReview: "reply-draft" as const } : {}),
       };
     if (isSmsSend(op))
       return {
@@ -1510,17 +1509,6 @@ export class DeviceActionCoordinator<
       throw sharedValidatorRefusal(failures[0]);
     return proposals;
   }
-  /** An explicitly requested, addressed draft can stay in chat as plain text. */
-  isOwnerSmsDraft(proposalId:string,messageId:string,text:string):boolean {
-    const entry=this.proposals.get(proposalId),request=smsOwnerRequest(text);
-    if(!entry||entry.proposal.requestMessageId!==messageId||!request||request.send)return false;
-    const operation=entry.proposal.operation;
-    if(!isSmsCompose(operation)||!("draft" in operation))return false;
-    const target=smsComposeTarget(operation);
-    return (target.kind==="number"||!!entry.smsRecipient)&&
-      samePhoneRecipient(request.recipient,target.kind==="number"?target.number:target.query,target.kind==="number")&&
-      (request.body===undefined||request.body===operation.body);
-  }
   /** A spoken name must identify the same resolved recipient shown on the live review. */
   matchesSmsReviewRecipient(proposalId:string,spoken:string):boolean {
     const entry=this.proposals.get(proposalId);
@@ -1553,7 +1541,6 @@ export class DeviceActionCoordinator<
       "browser_navigate",
       "camera_capture_photo",
       "photo_library_select",
-      "sms_reply_selected",
       // The keypad in front, filled in at most: only the owner's Call tap there calls.
       "phone_keypad",
       ...NOTES_ORGANIZE_DIRECT_TYPES,
@@ -1565,34 +1552,14 @@ export class DeviceActionCoordinator<
     for (const [proposalId, entry] of [...this.proposals]) {
       const operation=entry.proposal.operation;
       const owner=proof?.messageId===messageId?proof:undefined;
-      let directSendDraft=false;
-      let directSms=false;
       let callRecipient:ContactMatch|undefined;
       let directCall=false;
       if (
         results.length>=4 || entry.proposal.workflow || entry.proposal.requestMessageId!==messageId ||
         (operationType!==undefined && operation.type!==operationType)
       ) continue;
-      if (owner && (isSmsCompose(operation) || isSmsSend(operation))) {
-        const request=smsOwnerRequest(owner.text);
-        if (request) {
-          if (isSmsCompose(operation)) {
-            const target=smsComposeTarget(operation);
-            const exact=samePhoneRecipient(request.recipient,target.kind==="number"?target.number:target.query,target.kind==="number") &&
-              (target.kind==="number" || !!entry.smsRecipient);
-            if (exact && request.send && request.body===operation.body) {
-              directSms=true;
-              directSendDraft="draft" in operation;
-            } else if (exact && !request.send && "draft" in operation &&
-                (request.body===undefined || request.body===operation.body)) {
-              directSms=true;
-            }
-          } else if (request.send && operation.recipients.length===1 &&
-              samePhoneRecipient(request.recipient,operation.recipients[0],true) && request.body===operation.body) {
-            directSms=true;
-          }
-        }
-      }
+      // Outgoing text actions always require the same visible review and confirmation.
+      if (isSmsCompose(operation) || isSmsSend(operation) || operation.type === "sms_reply_selected") continue;
       if (owner && operation.type==="phone_call") {
         const recipient=callOwnerRecipient(owner.text);
         const target=operation.target;
@@ -1610,12 +1577,10 @@ export class DeviceActionCoordinator<
         directOther=matches?.length===1&&samePhoneRecipient(operation.query.trim().toLowerCase(),matches[0],false);
       }
       if (
-        !directTypes.includes(operation.type) && !directSms && !directCall && !directOther &&
+        !directTypes.includes(operation.type) && !directCall && !directOther &&
         !(owner && directSmsRequest(operation,owner.text))
       )
         continue;
-      // Talk presents a draft for its owner to confirm without leaving the current view.
-      if (proof?.retainSmsDraft && !directSendDraft && isSmsCompose(operation) && "draft" in operation) continue;
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
       // Words that match several tabs need the owner's pick, and only the
@@ -1655,14 +1620,14 @@ export class DeviceActionCoordinator<
         continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
-      if (directSms || directCall || directOther) {
+      if (directCall || directOther) {
         owner?.current();
         if (this.proposals.get(proposalId)!==entry) continue;
         entry.currentRequest=owner;
         if (callRecipient) entry.smsRecipient=callRecipient;
         if (operation.type==="contact_delete") entry.directContactDelete=true;
       }
-      if (entry.proposal.operation.type === "sms_latest_sender" || entry.proposal.operation.type === "sms_compose") proof?.current();
+      if (entry.proposal.operation.type === "sms_latest_sender") proof?.current();
       if (browser) {
         if (
           this.proposals.get(proposalId) !== entry ||
@@ -1680,10 +1645,10 @@ export class DeviceActionCoordinator<
         proof.current();
         entry.currentRequest = proof;
       }
-      const result = await this.approve(proposalId, context, signal, directSendDraft?"send-draft":undefined);
+      const result = await this.approve(proposalId, context, signal);
       results.push(result);
       // One clear outbound or destructive command authorizes one matching effect.
-      if (directSms || directCall || directOther || result.status !== "succeeded" || signal.aborted ||
+      if (directCall || directOther || result.status !== "succeeded" || signal.aborted ||
           (entry.proposal.operation.type === "open_view" && typeof proof?.projectView === "function")) break;
     }
     return results;

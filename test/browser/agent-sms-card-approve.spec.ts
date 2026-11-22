@@ -142,8 +142,8 @@ const state = (page: Page) => page.evaluate(() => {
   return {decisions: f.decisions, sends: f.sends.length, refused: f.refused.length, receipts: f.receipts.map((receipt: any) => receipt.outcome), journalEntries:f.journal.size, sendSms: ((window as any).telephonyCalls as string[]).filter(method => method === 'sendSms').length};
 });
 
-test('Send on the Review SMS card sends the text once, under that card, with no dialog after it', async ({page}) => {
-  const card = await setup(page);
+for(const reviewFirst of [true,false])test(`typed Review SMS sends once with global approvals ${reviewFirst?'on':'off'}`, async ({page}) => {
+  const card = await setup(page,undefined,reviewFirst);
   // Everything the send depends on is on the card itself; it never says to confirm again.
   await expect(card).toContainText(`To: ${NUMBER}`);
   await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);
@@ -270,35 +270,48 @@ test('an addressed SMS draft sends on one explicit tap in chat',async({page})=>{
   expect(await state(page)).toMatchObject({decisions:['reject'],sends:1,sendSms:1});
 });
 
-for(const spoken of ['Send a text to Carson saying, On my way','Can you send a text to Carson and say On my way'])test(`with review off ${spoken} sends once without a card`,async({page})=>{
-  const card=await setup(page,'one',false);
-  const reply=await page.evaluate(text=>(window as any).smsCardFixture.voice(text),spoken);
-  expect(reply.text).toBe('Message sent.');
-  await expect(card).toHaveCount(0);
+for(const reviewFirst of [true,false])test(`with global approvals ${reviewFirst?'on':'off'}, Talk shows and sends the same reviewed text`,async({page})=>{
+  const card=await setup(page,'one',reviewFirst);
+  const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson. On my way.'));
+  expect(reply.speechText??reply.text).toContain('confirm by voice');
+  await expect(card).toContainText(`Carson (${NUMBER})`);
+  await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);
+  await expect(card).toContainText('Say “Send this text”');
+  expect((await state(page)).sendSms).toBe(0);
+  await card.evaluate(node=>node.scrollIntoView({block:'center'}));
+  await expect.poll(()=>card.evaluate(row=>{
+    const clip=row.closest('[data-alpha-transcript]')?.getBoundingClientRect();
+    const rect=row.getBoundingClientRect();
+    return !!clip&&rect.top>=Math.max(clip.top,0)-1&&rect.bottom<=Math.min(clip.bottom,window.innerHeight)+1
+      &&row.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2));
+  })).toBe(true);
+  const confirmed=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
+  expect(confirmed.text).toBe('Message sent.');
+  expect((await state(page)).sendSms).toBe(1);
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
   const sent=await page.evaluate(()=>(window as any).smsCardFixture.sends);
   expect(sent).toHaveLength(1);
   expect(sent[0]).toMatchObject({recipients:[NUMBER],body:BODY});
 });
 
-test('with review off an ambiguous recipient gets a follow-up and no picker or send',async({page})=>{
+test('with global approvals off, an ambiguous recipient still needs a selection',async({page})=>{
   const card=await setup(page,'two',false);
-  const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
-  expect(reply.text).toContain('Which recipient did you mean?');
-  await expect(card).toHaveCount(0);
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
+  await expect(card).toContainText('Choose recipient');
+  await expect(card).not.toContainText('Say “Send this text”');
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
   expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0,journalEntries:0});
+  await card.click();
+  await expect(page.getByRole('group',{name:'Choose a recipient'})).toBeVisible();
+  await expect(page.locator('[data-alpha-proposal-review]').getByRole('button',{name:'Send',exact:true})).toBeDisabled();
 });
 
-test('with review off an explicit draft remains unsent without a card',async({page})=>{
+test('with global approvals off, an explicit draft stays visible and unsent',async({page})=>{
   const card=await setup(page,'one',false);
-  const draft=await page.evaluate(()=>(window as any).smsCardFixture.voice('Draft a text to Carson saying On my way'));
-  expect(draft.text).toContain('Text draft saved.');
-  expect(draft.text).toContain(BODY);
-  await expect(card).toHaveCount(0);
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Draft a text to Carson saying On my way'));
+  await expect(card).toContainText(BODY);
   await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
   expect((await state(page)).sendSms).toBe(0);
-  const sent=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
-  expect(sent.text).toBe('Message sent.');
-  expect((await state(page)).sendSms).toBe(1);
 });
 
 test('a spoken SMS reply can’t tell the owner to approve a missing card',async({page})=>{

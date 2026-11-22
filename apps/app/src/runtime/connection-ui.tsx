@@ -73,7 +73,7 @@ import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSig
 import { DevelopmentCloudAgentProtocol, type CloudPhoneTarget } from './development-cloud-agents';
 import { entitlementErrorText } from '../ui/cloud/subscription-presentation.ts';
 import { deviceActionRefusal } from '../ui/device-actions/device-action-messages.ts';
-import { ownerActionFollowUp,smsOwnerRequest } from '../ui/device-actions/owner-request.ts';
+import { ownerActionFollowUp } from '../ui/device-actions/owner-request.ts';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
 import { offeredByEither, phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
@@ -3652,8 +3652,7 @@ export const connectionController = {
         try { const projectView=projectRequestedView
           ? (findViewActionHandoff(reply.actionResults)?'canonical' as const:projectRequestedView)
           : undefined;
-          const wantsSmsDraft=smsOwnerRequest(authoredRequestText)?.send===false;
-          const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,projectView,...(wantsSmsDraft&&directRequestedActions||channelType==="VOICE_DM"&&!directRequestedActions?{retainSmsDraft:true as const}:{})}:undefined;
+          const authoredRequest=typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)?{messageId:reply.userMessageId,text:authoredRequestText,current:assertCurrent,projectView}:undefined;
           let items = await selected.actions.pendingReview(context, requestSignal,authoredRequest);
           if(!failed&&directRequestedActions&&typeof reply.userMessageId==='string'&&validateUuid(reply.userMessageId)){
             const performed=await selected.actions.performRequested(reply.userMessageId,context,requestSignal,async()=>!(await readDevicePreferences(requestSignal)).askBeforeAgentActions,undefined,authoredRequest);
@@ -3679,12 +3678,10 @@ export const connectionController = {
           cameraProposalOnly=requestedCameraNeedsCameraView(replyProposals?items:turnItems,typeof reply.userMessageId==='string'?reply.userMessageId:undefined,!!findViewActionHandoff(reply.actionResults),replyProposals);
           proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []);
           if(directRequestedActions&&!failed){
-            const saved=authoredRequest&&wantsSmsDraft&&proposals.length===1&&proposals[0].smsReview==='addressed-draft'&&
-              selected.actions.isOwnerSmsDraft(proposals[0].id,authoredRequest.messageId,authoredRequestText)?proposals[0]:undefined;
-            const remaining=proposals.find(proposal=>!completedActions.some(receipt=>receipt.proposalId===proposal.id));
-            if(saved)directReply=`Text draft saved.\n${saved.description.split('\n\n').slice(0,2).join('\n\n')}\n\nSay “Send this text” when it’s ready.`;
-            else if(remaining&&!directReply)directReply=ownerActionFollowUp(remaining,authoredRequestText);
-            proposals=saved?[{...saved,plainSmsDraft:true}]:[];
+            const smsReviews=proposals.filter(proposal=>proposal.smsReview);
+            const remaining=proposals.find(proposal=>!proposal.smsReview&&!completedActions.some(receipt=>receipt.proposalId===proposal.id));
+            if(remaining&&!directReply&&smsReviews.length===0)directReply=ownerActionFollowUp(remaining,authoredRequestText);
+            proposals=smsReviews;
           }
           notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
         catch { update({ message: 'Actions not checked' }); }

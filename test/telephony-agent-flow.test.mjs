@@ -72,26 +72,21 @@ test('the single reviewed SMS recipient stays bound to the first address shown',
   }
 });
 
-test('approvals-off accepts dictated send separators only for the matching recipient and body',async()=>{
+test('both approval settings leave every outgoing text pending until owner confirmation',async()=>{
   setSmsReviewRecipient(async query=>query.toLowerCase()==='carson'?{id:'1',name:'Carson',number:'+15550100200'}:null);
   try {
     const operation={type:'sms_compose',target:{kind:'contact',query:'Carson'},body:'Test.'};
-    for(const [text,mode] of [
-      ['Can you send a text to Carson saying, Test.', 'off'],
-      ['Can you send a text to Carson and say Test.', 'off'],
-      ['Can you send a text to Carson and say Something else.', 'off'],
-      ['Can you send a text to someone else and say Test.', 'off'],
-      ['Can you send a text to Carson and say Test.', 'on'],
-    ]){
+    const text='Send a text to Carson. Test.';
+    for(const directActions of [true,false]){
       const f=fixture({operation,requestMessageId:messageId,result:{kind:'sms-compose',status:'submitted'}});
       const owner={...proof,text};
-      await f.client.pendingReview(context,signal(),owner);
-      const allowed=()=>Promise.resolve(mode==='off');
-      const expected=mode==='off'&&text.includes('Carson')&&text.endsWith('Test.')?1:0;
-      await f.client.performRequested(messageId,context,signal(),allowed,undefined,owner);
-      assert.equal(f.effects,expected,text+' / '+mode);
-      await f.client.performRequested(messageId,context,signal(),allowed,undefined,owner);
-      assert.equal(f.effects,expected,'The same turn cannot send twice.');
+      const [review]=await f.client.pendingReview(context,signal(),owner);
+      assert.equal(review.proposal.smsReview,'send');
+      assert.deepEqual(await f.client.performRequested(messageId,context,signal(),async()=>directActions,undefined,owner),[]);
+      assert.equal(f.effects,0);
+      assert.equal((await f.client.approve(id,context,signal())).status,'succeeded');
+      await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,owner);
+      assert.equal(f.effects,1);
     }
   }finally{setSmsReviewRecipient(async()=>null);}
 });
@@ -100,7 +95,7 @@ test('a confirmed Talk draft retires the editor handoff and journals exactly one
   const number = '+14155550132';
   const target = {kind:'number',number};
   const send = {type:'sms_compose',target,body:'On my way'};
-  const origin = {...proof,text:'Draft a text to '+number,retainSmsDraft:true};
+  const origin = {...proof,text:'Draft a text to '+number};
   const f = fixture({
     operation:{...send,draft:true}, executedOperation:send, requestMessageId:messageId,
     result:{kind:'sms-compose',status:'submitted'},
@@ -290,7 +285,7 @@ test('a latest SMS sender read from Home requires the negotiated capability and 
   assert.equal(f.effects, 1);
 });
 
-test('an addressed sender read and a bound reply draft follow the owner’s approval preference', async()=>{
+test('a sender read follows the owner’s preference and an outgoing reply always requires approval', async()=>{
   const capabilities=['sms.latest-sender.v1','sms.latest-sender.v2','sms.compose.v1','sms.compose.v2'];
   const read={type:'sms_latest_sender',includeAddress:true};
   const sender={kind:'sms-latest-sender',status:'found',address:'+14155550123',threadId:'thread:42'};
@@ -302,9 +297,10 @@ test('an addressed sender read and a bound reply draft follow the owner’s appr
       const f=fixture({operation,result,capabilities,requestMessageId:messageId});
       await f.client.pendingReview(context, signal(),origin);
       const receipts=await f.client.performRequested(messageId,context,signal(),async()=>mode!=='on',undefined,origin);
-      assert.equal(receipts.length,mode==='off'?1:0);
-      assert.equal(f.effects,mode==='off'?1:0);
-      if(mode!=='off')await f.client.approve(id,context,signal());
+      const direct=mode==='off'&&operation.type==='sms_latest_sender';
+      assert.equal(receipts.length,direct?1:0);
+      assert.equal(f.effects,direct?1:0);
+      if(!direct)await f.client.approve(id,context,signal());
       assert.deepEqual(receiptOf(f).result,result);
       await f.client.performRequested(messageId,context,signal(),async()=>true,undefined,origin);
       assert.equal(f.effects,1);
