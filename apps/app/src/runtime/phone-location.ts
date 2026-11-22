@@ -87,8 +87,10 @@ export class PhoneLocationReader {
   * background so the next turn carries a position. Chat turns themselves never look up.
   */
  async warm(signal:AbortSignal):Promise<ClientLocationObservation|undefined>{
+  const generation=this.generation;
   const fix=await this.read(signal);
-  if(fix||!this.ports.network||!this.ports.enabled())return fix;
+  signal.throwIfAborted();
+  if(fix||generation!==this.generation||!this.ports.network||!this.ports.enabled())return fix;
   void this.ports.network.locate().catch(()=>undefined);
   return undefined;
  }

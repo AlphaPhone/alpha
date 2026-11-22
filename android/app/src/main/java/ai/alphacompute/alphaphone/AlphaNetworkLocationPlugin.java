@@ -60,6 +60,9 @@ public final class AlphaNetworkLocationPlugin extends Plugin {
   try{addCells(context,query);}catch(RuntimeException unavailable){/* No telephony or refused. */}
   if(!query.usable()){call.reject("No Wi-Fi or cell signals to locate from","no-signals");return;}
   String fingerprint=Integer.toHexString(query.fingerprint().hashCode());
+  if(Thread.currentThread().isInterrupted()){call.reject("Network location was stopped","unavailable");return;}
+  if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){call.reject("Location permission is not granted","permission-denied");return;}
+  if(!location.isLocationEnabled()){call.reject("Device location is off","location-off");return;}
   // The same visible networks as the caller's last answer: nothing is sent.
   if(fingerprint.equals(call.getString("unchangedFrom",""))){JSObject same=new JSObject();same.put("unchanged",true);same.put("fingerprint",fingerprint);call.resolve(same);return;}
   HttpsURLConnection connection=null;

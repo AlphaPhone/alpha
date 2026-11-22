@@ -24,6 +24,7 @@ export const NETWORK_FIX_RETRY_MS=2*60_000;
 export class NetworkLocationClient {
  private last:NetworkFix|undefined;
  private fingerprint:string|undefined;
+ private resolvedAt=Number.NEGATIVE_INFINITY;
  private checkedAt=Number.NEGATIVE_INFINITY;
  private retryAfter=Number.NEGATIVE_INFINITY;
  private pending:Promise<NetworkFix|undefined>|undefined;
@@ -32,28 +33,34 @@ export class NetworkLocationClient {
  /** The last answer while it may still stand for the phone's position; never a lookup. */
  cached(now=this.ports.now()):NetworkFix|undefined{
   const fix=this.last;
-  return fix&&now-fix.timestamp<=NETWORK_FIX_UNCHANGED_MS?fix:undefined;
+  return fix&&now>=fix.timestamp&&now-this.resolvedAt<=NETWORK_FIX_UNCHANGED_MS?fix:undefined;
  }
  /** A position now: the cached one while recent, else one shared lookup. */
  locate():Promise<NetworkFix|undefined>{
   if(!this.ports.available())return Promise.resolve(undefined);
   const now=this.ports.now();
-  if(this.last&&now-this.checkedAt<NETWORK_FIX_REUSE_MS)return Promise.resolve(this.cached(now));
+  const cached=this.cached(now);
+  if(cached&&now-this.checkedAt<NETWORK_FIX_REUSE_MS)return Promise.resolve(cached);
   if(now<this.retryAfter)return Promise.resolve(this.cached(now));
   const generation=this.generation;
-  const pending=this.pending??=this.ports.bridge.locate(this.last&&this.fingerprint?{unchangedFrom:this.fingerprint}:{}).then(answer=>{
+  const pending=this.pending??=this.ports.bridge.locate(cached&&this.fingerprint?{unchangedFrom:this.fingerprint}:{}).then(answer=>{
    if(generation!==this.generation)return undefined;
    const at=this.ports.now();this.checkedAt=at;
-   if('unchanged' in answer){if(this.last)this.last={...this.last,timestamp:at};return this.cached(at);}
+   if('unchanged' in answer){
+    const confirmed=this.cached(at);
+    if(confirmed&&answer.fingerprint===this.fingerprint)this.last={...confirmed,timestamp:at};
+    return this.cached(at);
+   }
    const {latitude,longitude,accuracy,timestamp}=answer;
-   if(![latitude,longitude,accuracy,timestamp].every(Number.isFinite)||Math.abs(latitude)>90||Math.abs(longitude)>180||accuracy<=0){this.retryAfter=at+NETWORK_FIX_RETRY_MS;return this.cached(at);}
+   if(![latitude,longitude,accuracy,timestamp].every(Number.isFinite)||Math.abs(latitude)>90||Math.abs(longitude)>180||accuracy<=0||timestamp>at||at-timestamp>NETWORK_FIX_UNCHANGED_MS){this.retryAfter=at+NETWORK_FIX_RETRY_MS;return this.cached(at);}
    this.last={latitude,longitude,accuracyMeters:accuracy,timestamp};this.fingerprint=answer.fingerprint;
+   this.resolvedAt=timestamp;
    return this.last;
-  },()=>{if(generation===this.generation)this.retryAfter=this.ports.now()+NETWORK_FIX_RETRY_MS;return this.cached();})
+  },()=>{if(generation!==this.generation)return undefined;this.retryAfter=this.ports.now()+NETWORK_FIX_RETRY_MS;return this.cached();})
    .finally(()=>{if(this.pending===pending)this.pending=undefined;});
   return pending;
  }
- clear(){this.generation++;this.last=undefined;this.fingerprint=undefined;this.checkedAt=Number.NEGATIVE_INFINITY;this.retryAfter=Number.NEGATIVE_INFINITY;this.pending=undefined;}
+ clear(){this.generation++;this.last=undefined;this.fingerprint=undefined;this.resolvedAt=Number.NEGATIVE_INFINITY;this.checkedAt=Number.NEGATIVE_INFINITY;this.retryAfter=Number.NEGATIVE_INFINITY;this.pending=undefined;}
 }
 
 let shared:NetworkLocationClient|undefined;

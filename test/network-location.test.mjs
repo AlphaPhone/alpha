@@ -28,7 +28,11 @@ test('one shared lookup, reused for a while, then confirmed cheaply while the ne
  const confirmed=await client.locate();
  assert.deepEqual(b.calls[1],{unchangedFrom:'abc'},'a later lookup says what it already knows');
  assert.equal(confirmed.timestamp,clock.now,'an unchanged place keeps its answer, freshly confirmed');
- clock.now+=NETWORK_FIX_UNCHANGED_MS+1;assert.equal(client.cached(),undefined,'an old answer stops standing for the phone');
+ clock.now=first.timestamp+NETWORK_FIX_UNCHANGED_MS+1;
+ assert.equal(client.cached(),undefined,'a confirmation cannot extend the original lookup beyond one hour');
+ b.answer={latitude:38,longitude:-123,accuracy:40,fingerprint:'def'};
+ assert.equal((await client.locate()).latitude,38);
+ assert.deepEqual(b.calls[2],{},'an expired fix requests a new position');
 });
 
 test('a failed lookup backs off, and an unavailable plugin is never called',async()=>{
@@ -52,6 +56,12 @@ test('the agent gets the network position when GPS has none, and only the warm-u
  const off=new PhoneLocationReader({enabled:()=>false,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('x');}}});
  assert.equal(await off.read(signal),undefined,'with Alpha location sharing off the agent gets nothing');
  assert.equal(await off.warm(signal),undefined);assert.equal(looked,1,'and nothing is looked up');
+
+ const cancelled=new AbortController();
+ const retired=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('no GPS fix');}}});
+ retired.read=async()=>{cancelled.abort();return undefined;};
+ await assert.rejects(retired.warm(cancelled.signal),{name:'AbortError'});
+ assert.equal(looked,1,'a retired connection cannot start a network lookup');
 });
 
 const [{NativeMapsLocation}]=await loadBrowserModule(['apps/app/src/maps/native-location.ts']);
