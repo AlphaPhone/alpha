@@ -1,0 +1,22 @@
+// spec/platform/index.md, "Story: Talk to the resident agent"
+// The on-device agent's local API, through @elizaos/agent/client: one owner, one deployment identity.
+
+/** The resident is not running and did not start in time. */
+export error ResidentUnavailable { state: "stopped" | "starting"; reason?: string }
+/** The resident answered with a refusal; `retryAfter` is in seconds where it gave one. */
+export error ResidentRefused { status: number; code?: string; message: string; retryAfter?: number }
+
+/** A JSON answer of the resident. */
+export interface ResidentAnswer { readonly status: number; readonly data: unknown }
+
+/** The resident agent's local API. */
+export service Resident {
+  /** The resident's state as it reports it now. */
+  status(): "stopped" | "starting" | "running"!!
+  /** Start the resident where it is stopped, and wait until it runs. */
+  ensureRunning(): void!ResidentUnavailable
+  /** One JSON request; its data is untrusted until a schema decodes it. */
+  json(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): ResidentAnswer!ResidentUnavailable | ResidentRefused
+  /** A streamed POST, such as a chat turn: the response body, chunk by chunk. */
+  stream(path: string, body: unknown): Stream.Stream<Uint8Array, ResidentUnavailable | ResidentRefused>
+}

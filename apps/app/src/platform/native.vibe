@@ -1,0 +1,17 @@
+// spec/platform/index.md, "Story: Reach the phone's native capabilities"
+// The one way shell code reaches an Android plugin. Capacitor's bridge sits behind it in native-capacitor.ts.
+
+/** The plugin is not installed in this build or on this device, such as an AOSP-only plugin on stock Android. */
+export error NativeUnavailable { plugin: string; method: string }
+/** The plugin ran and refused or failed; `code` is the plugin's own code when it gave one. */
+export error NativeFailed { plugin: string; method: string; message: string; code?: string }
+
+/** A native plugin call and its events. */
+export service Native {
+  /** Whether `plugin` is registered in this build and on this device. */
+  available(plugin: string): boolean!!
+  /** One call of `method` on `plugin`; its result is untrusted until a schema decodes it. */
+  invoke(plugin: string, method: string, args?: unknown): unknown!NativeUnavailable | NativeFailed
+  /** The events `plugin` emits under `event`, for as long as the stream is consumed. */
+  listen(plugin: string, event: string): Stream.Stream<unknown, NativeUnavailable>
+}
