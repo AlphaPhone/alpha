@@ -123,7 +123,10 @@ for (const chat of ['full', 'sheet'] as const) {
     for (const app of ['Home', 'Phone', 'Browser'] as const) {
       await test.step(`${app}, chat ${chat}`, async () => {
         await ask(page, app, chat);
-        await expect.poll(async () => (await relay(page)).results, { timeout: 30_000 }).toEqual([{ status: { state: 'awaiting-confirmation', placeName: 'Coit Tower', travelMode: 'drive' } }]);
+        await expect.poll(async () => (await relay(page)).results, { timeout: 30_000 }).toEqual([{ status: {
+          state: 'awaiting-confirmation', placeName: 'Coit Tower', travelMode: 'drive',
+          route: { distanceMeters: 2100, durationSeconds: 540, traffic: 'none' },
+        } }]);
         await expect(page.locator('html')).toHaveAttribute('data-active-view', 'maps');
         await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
         // Opening Maps was the turn's own move: the reply is still open when the agent sends it.
