@@ -32,3 +32,22 @@ const ALPHA_TELEPHONY_UNAVAILABLE = 'Phone, Contacts and Messages are available 
 export function createAospTelephony(plugin: AlphaTelephonyPlugin | null, image: boolean): AospTelephony {
   return createTelephonyClient(plugin, image, { unavailableMessage: ALPHA_TELEPHONY_UNAVAILABLE });
 }
+
+/** The action-journal entry of the card the owner approved in the chat. */
+export type ApprovedCard = {scope: string; proposalId: string};
+/**
+ * The client for one approved card's text. The card the owner approved is the confirmation, so
+ * Android shows no dialog of its own: every native `sendSms` names that card's journal entry, and
+ * AlphaTelephonyBase sends only the exact recipients, text and SIM that entry approved, once
+ * (AlphaApprovedSms). Every other method is the plain client's.
+ */
+export function approvedCardTelephony(plugin: AlphaTelephonyPlugin, card: ApprovedCard): AospTelephony {
+  const journalIdentity = {scope: card.scope, proposalId: card.proposalId};
+  return createAospTelephony(new Proxy(plugin, {
+    get(bridge, method) {
+      if (method === 'sendSms') return (request: Parameters<AlphaTelephonyPlugin['sendSms']>[0]) => bridge.sendSms({...request, journalIdentity} as typeof request);
+      const value = Reflect.get(bridge, method);
+      return typeof value === 'function' ? value.bind(bridge) : value;
+    },
+  }), true);
+}

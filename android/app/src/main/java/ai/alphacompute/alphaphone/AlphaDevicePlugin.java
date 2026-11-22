@@ -989,6 +989,12 @@ public final class AlphaDevicePlugin extends Plugin {
  /** Stops an update download too: disconnect only closes the raw socket, which Android allows on this main thread. A session outlives its owner, for a later tap on any bridge. */
  @Override protected void handleOnDestroy(){retireUpdateBridge();UpdateActivation pending=activation;if(pending!=null&&pending.owner==this)pending.ready.complete(false);diagnosticsWorker.shutdown();updateWorker.shutdownNow();javax.net.ssl.HttpsURLConnection active=updateActive;if(active!=null)active.disconnect();getContext().unregisterReceiver(updateStatus);if(updateOwner==this){updateOwner=null;updateDue=false;updateOpen=false;}super.handleOnDestroy();}
  // End of updater methods for host replay.
+ /** Camera's volume-key shutter: while on, MainActivity takes the volume keys as Camera's shutter. */
+ @PluginMethod public void setVolumeShutter(PluginCall call){
+  Boolean enabled=call.getBoolean("enabled");if(enabled==null){call.reject("Choose on or off.");return;}
+  android.app.Activity activity=getActivity();if(!(activity instanceof MainActivity)){call.reject("Alpha view is unavailable");return;}
+  activity.runOnUiThread(()->{((MainActivity)activity).setVolumeShutter(enabled);call.resolve();});
+ }
  /** Status and navigation icon colors follow Alpha's drawn theme, not only Android's night mode. */
  @PluginMethod public void setSystemBarAppearance(PluginCall call){
   Boolean dark=call.getBoolean("dark");if(dark==null){call.reject("Choose light or dark.");return;}
@@ -997,6 +1003,16 @@ public final class AlphaDevicePlugin extends Plugin {
    if(activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
    androidx.core.view.WindowInsetsControllerCompat bars=androidx.core.view.WindowCompat.getInsetsController(activity.getWindow(),activity.getWindow().getDecorView());
    bars.setAppearanceLightStatusBars(!dark);bars.setAppearanceLightNavigationBars(!dark);call.resolve();
+  });
+ }
+ /** Touch feedback for a renderer control (AlphaHaptics). Android skips it when the owner turned touch feedback off. */
+ @PluginMethod public void haptic(PluginCall call){
+  int feedback=AlphaHaptics.constant(call.getString("kind"),Build.VERSION.SDK_INT);if(feedback<0){call.reject("Unknown feedback");return;}
+  android.app.Activity activity=getActivity();if(activity==null||getBridge()==null){call.reject("Alpha view is unavailable");return;}
+  activity.runOnUiThread(()->{
+   android.view.View view=getBridge().getWebView();
+   if(view==null||activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
+   JSObject result=new JSObject();result.put("performed",view.performHapticFeedback(feedback));call.resolve(result);
   });
  }
 }

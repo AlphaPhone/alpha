@@ -4,13 +4,15 @@ async function nativeContent(page:any,url:string,insets:{top:number;bottom:numbe
  await page.addInitScript(({launcher,residualInsets})=>{
   localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
   const w=window as any;w.androidBridge={};
-  const names=['DailyApps','AlphaBrowser','AlphaConnection','AlphaDevice','AlphaLocalAgent','AlphaHostedResults','AlphaVoiceCloud','AlphaNotifications','ElizaSystem','AlphaCalendar','AlphaNoteDocuments','AlphaNoteAudio','AlphaFiles','AlphaPhotos','DeviceApps','ElizaLocation','AlphaActionJournal','AlphaDeletions'];
-  const methods=['addListener','removeListener','surfaceInfo','readPending','readPendingResult','readDelegationCallback','readSecret','secureRead','secureWrite','secureRemove','get','status','getStatus','getState','state','permissionState','permissions','list','listCalendars','listEvents','listReminders','listBookmarks','getBookmarks','bookmarks','settings','getSettings','buildInfo','capabilities','query','read','readJournal','getPending','readSelection','pending'];
+  const names=['DailyApps','AlphaBrowser','AlphaConnection','AlphaDevice','AlphaLocalAgent','AlphaHostedResults','AlphaVoiceCloud','AlphaNotifications','ElizaSystem','AlphaCalendar','AlphaNoteDocuments','AlphaNoteAudio','AlphaFiles','AlphaPhotos','DeviceApps','ElizaLocation','AlphaActionJournal','AlphaDeletions','ElizaSense'];
+  const methods=['addListener','removeListener','surfaceInfo','readPending','readPendingResult','readDelegationCallback','readSecret','secureRead','secureWrite','secureRemove','get','status','getStatus','getState','state','permissionState','permissions','list','listCalendars','listEvents','listReminders','listBookmarks','getBookmarks','bookmarks','settings','getSettings','buildInfo','capabilities','query','read','readJournal','getPending','readSelection','pending','turnOff'];
   w.Capacitor={Plugins:{},PluginHeaders:names.map(name=>({name,methods:methods.map(name=>({name,rtype:name==='addListener'?'callback':'promise'}))})),nativeCallback:()=> 'fixture-callback',nativePromise:async(_plugin:string,method:string)=>{
    // Standalone bars are outside the WebView; launcher bars remain inside it.
    if(method==='surfaceInfo')return {topInset:residualInsets.top,bottomInset:residualInsets.bottom};
    if(method==='buildInfo')return {launcher};
    if(_plugin==='AlphaDeletions'&&method==='pending')return {deletions:[],deletedOrigins:[]};
+  // An image without the wake listener: the chat-only stop is confirmed, so no startup notice is raised.
+  if(_plugin==='ElizaSense'&&method==='turnOff')return {available:false,reason:'not-installed'};
    if(['secureRead','readSecret'].includes(method))return {value:null};
    return {apps:[],events:[],calendars:[],reminders:[],bookmarks:[],results:[],items:[],entries:[],pending:[],capabilities:[],available:false};
   }};
@@ -118,8 +120,11 @@ for(const width of [412,640])test(`a very short window with the keyboard open ke
  const frame=await nativeContent(page,testInfo.project.use.baseURL as string,{top:0,bottom:0,left:0,right:0},width,915,true,{top:24,bottom:0});
  await frame.locator('html').evaluate(async()=>{
   const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   const render=Component.prototype.renderVals;
   Component.prototype.renderVals=function(){(window as any).noticeLayoutShell=this;return render.call(this);};
+  // Nothing else re-renders the idle Home (the fixture raises no startup notice), so ask for one render.
+  connectionController.close();
  });
  await expect.poll(()=>frame.locator('html').evaluate(()=>!!(window as any).noticeLayoutShell)).toBe(true);
  // The floating dock is up; the soft keyboard then leaves only about 150px of window.

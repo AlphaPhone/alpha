@@ -14,13 +14,22 @@ const POPUPS:Record<string,Popup[]>={
  browser:[['menuModal',out=>!!out.menu,out=>out.closeMenu?.()],['shareModal',out=>!!out.share,out=>out.closeShare?.()]],
  photos:[['infoModal',out=>!!out.infoOpen,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareOpen,out=>out.closeSheet?.()]],
  notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()],['previousNotesModal',out=>!!out.previousNotesMenu,out=>out.closePreviousNotesMenu?.()]],
- files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()],['moveModal',out=>!!out.moveSheet,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()]],
+ files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()]],
  workflows:[['stepModal',out=>!!out.b?.sheetOn,out=>out.b?.closeSheet?.()]],
  settings:[['sheetModal',out=>!!out.hasSheet,out=>out.sheet?.close?.()]],
+ // The quick-reply sheet over a ringing call: Back and Escape close the sheet, not the call screen.
+ phone:[['replyModal',out=>!!out.rsOpen,out=>out.closeReply?.()]],
 };
 function popupFocus(name:string,current:()=>Bag){
  const popups=(POPUPS[name]||[]).map(([key,open,close])=>({key,open,modal:reviewFocus(()=>close(current()))}));
- return (out:Bag)=>{const refs:Bag={};for(const popup of popups){popup.modal.render(popup.open(out));refs[popup.key]=popup.modal.ref;}return refs;};
+ return (out:Bag)=>{
+  const refs:Bag={};
+  // A menu row disappears when it opens a sibling sheet. Carry its surviving opener forward.
+  const replaced=popups.find(popup=>!popup.open(out)&&popup.modal.openedFrom());
+  const opener=replaced?.modal.openedFrom();
+  for(const popup of popups){popup.modal.render(popup.open(out),opener);refs[popup.key]=popup.modal.ref;}
+  return refs;
+ };
 }
 /** Full-screen subviews replace their covered content in accessibility navigation. */
 export function installSubviewAccessibility(views:Bag){
@@ -79,6 +88,13 @@ export function installSubviewAccessibility(views:Bag){
   const popups=popupFocus('settings',()=>output);
   views.settings.render=(state:Bag,api:Bag)=>{const out=output=render(state,api);return {...out,...popups(out)};};
  }
+ {
+  // Phone has one sheet: quick replies over an incoming call.
+  const render=views.phone.render;
+  let output:Bag={};
+  const popups=popupFocus('phone',()=>output);
+  views.phone.render=(state:Bag,api:Bag)=>{const out=output=render(state,api);return {...out,...popups(out)};};
+ }
 
 }
 
@@ -115,8 +131,8 @@ function subviewFocus(read:()=>FocusTarget){
 function reviewFocus(close:()=>void){
  let open=false,opener:HTMLElement|null=null;
  const modal=createInlineModal(close,()=>opener);
- return {...modal,render(next:boolean){
-  if(next&&!open)opener=document.activeElement instanceof HTMLElement?document.activeElement:null;
+ return {...modal,openedFrom:()=>open?opener:null,render(next:boolean,inheritedOpener?:HTMLElement|null){
+  if(next&&!open)opener=inheritedOpener??(document.activeElement instanceof HTMLElement?document.activeElement:null);
   open=next;
  }};
 }

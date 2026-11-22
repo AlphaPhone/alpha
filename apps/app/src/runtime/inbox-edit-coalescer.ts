@@ -1,7 +1,7 @@
-/** Timer port; the Quint replay injects a model clock. */
+/** Timer port, replaceable in tests. */
 export interface EditCoalescerTimers { set(run: () => void, ms: number): unknown; clear(handle: unknown): void; now(): number }
 const systemTimers: EditCoalescerTimers = { set: (run, ms) => setTimeout(run, ms), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>), now: () => Date.now() };
-interface EditCoalescer<T> {
+export interface EditCoalescer<T> {
   /** Replaces the waiting value. The write happens `delay` after the last push, and no later than
    * `maximumWait` after the first push of a burst. */
   push(value: T): void;

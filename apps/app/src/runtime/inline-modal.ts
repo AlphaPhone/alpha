@@ -9,8 +9,10 @@ export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|nu
   if(container===mounted)return;
   dispose?.();dispose=undefined;mounted=container;
   if(!container)return;
-  const dialog=container.matches('[role="dialog"]')?container:container.querySelector<HTMLElement>('[role="dialog"]');
+  // A menu over a scrim owns focus the same way; the arrow keys also move between its entries.
+  const dialog=container.matches('[role="dialog"],[role="menu"]')?container:container.querySelector<HTMLElement>('[role="dialog"],[role="menu"]');
   if(!dialog)return;
+  const menu=dialog.getAttribute('role')==='menu';
   const previous=returnFocus?.()||(document.activeElement instanceof HTMLElement?document.activeElement:null);
   const releases:Array<()=>void>=[],backgrounds:HTMLElement[]=[];
   let branch:HTMLElement=container;
@@ -27,6 +29,12 @@ export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|nu
   const key=(event:KeyboardEvent)=>{
    if(!ownsFocus())return;
    if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();close();return;}
+   if(menu&&['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
+    const items=controls().filter(element=>element.getAttribute('role')==='menuitem');if(!items.length)return;
+    const at=items.indexOf(document.activeElement as HTMLElement);
+    const next=event.key==='Home'?0:event.key==='End'?items.length-1:event.key==='ArrowDown'?(at+1)%items.length:at<0?items.length-1:(at-1+items.length)%items.length;
+    event.preventDefault();items[next].focus();return;
+   }
    if(event.key!=='Tab')return;
    const items=controls(),first=items[0],last=items.at(-1),active=document.activeElement;
    if(!first){event.preventDefault();dialog.focus();}

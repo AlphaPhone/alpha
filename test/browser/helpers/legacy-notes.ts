@@ -1,4 +1,5 @@
 import {expect,test,type Page} from '@playwright/test';
+import {createHash} from 'node:crypto';
 import type {DocumentNotesStore} from '../../../apps/app/src/runtime/browser-notes-document.ts';
 type RetainedNote = Parameters<DocumentNotesStore['replace']>[0][number];
 /** Seed only the isolated test's retained legacy document before selecting that source.
@@ -27,21 +28,21 @@ export async function selectLegacyNotesSource(page:Page){
  await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
  if(await page.getByRole('heading',{name:'Previous notes',exact:true}).isVisible())return;
  await page.getByRole('button',{name:'Notes options',exact:true}).click();
- await page.getByRole('dialog',{name:'Notes options',exact:true}).getByRole('button',{name:'On this phone',exact:true}).click();
+ await page.getByRole('menu',{name:'Notes options',exact:true}).getByRole('menuitem',{name:'On this phone',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Previous notes',exact:true})).toBeVisible();
 }
 
-/** Retained attachment metadata only; no file picker, file contents, or real user store. */
+/** Open a byte-matched fixture through the legacy note’s attachment chip. */
 export async function openLegacyAttachment(page:Page){
- if(test.info().project.name==='production')await seedRetainedNotes(page,[{id:'retained-attachment',kind:'text',title:'Retained attachment',body:'Synthetic summary.',documentSource:{version:1,name:'fixture.txt',mimeType:'text/plain',sha256:'a'.repeat(64),size:1}}]);
- else await page.evaluate(async()=>{
-  const store=await(await import('/src/runtime/browser-notes-document.ts')).openBrowserNotes();
-  await store.replace([{id:'retained-attachment',kind:'text',title:'Retained attachment',body:'Synthetic summary.',documentSource:{version:1,name:'fixture.txt',mimeType:'text/plain',sha256:'a'.repeat(64),size:1}}]);
- });
- await openLegacyNotes(page);
+ const file={name:'fixture.txt',mimeType:'text/plain',buffer:Buffer.from('Fixture file body.')};
+ const record:RetainedNote={id:'retained-attachment',kind:'text',title:'Retained attachment',body:'Synthetic summary.',
+  documentSource:{version:1,name:file.name,mimeType:file.mimeType,sha256:createHash('sha256').update(file.buffer).digest('hex'),size:file.buffer.length}};
+ await openLegacyNotes(page,[record]);
  await page.getByRole('button',{name:'Open Retained attachment',exact:true}).click();
+ const picker=page.waitForEvent('filechooser');
  await page.getByRole('button',{name:'Attachment',exact:true}).click();
- await expect(page.getByRole('dialog',{name:'Note source document',exact:true})).toBeVisible();
+ await (await picker).setFiles(file);
+ await expect(page.getByRole('dialog',{name:'Reviewed attachment',exact:true})).toBeVisible();
 }
 
 /** Seed the isolated browser context through its persisted wire format, never source imports

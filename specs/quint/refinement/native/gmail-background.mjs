@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {captureInputs,checkTraces} from '../check-traces.mjs';
+import {noticeStrings} from './string-resources.mjs';
 import {app,directory,javaTraceCampaign,root} from './java.mjs';
 import {gmailBackgroundPlatform,gmailProduct,gmailShared,providerAdmission} from './gmail-background-platform.mjs';
 import {jsonJar} from '../../../../test/fixtures/jvm-tools.mjs';
@@ -39,7 +40,7 @@ export async function checkNativeGmailBackground(extraSources=[]) {
       capacitor+'Bridge.java',capacitor+'BridgeActivity.java',
       'scripts/prepare-patched-native.ts','test/fixtures/native-source.mjs',
       'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),...generatedSources,...extraSources,
-      ...[harness,'Trace.java','java.mjs','gmail-background-platform.mjs','reminder-delivery-platform.mjs'].map(name=>join(directory,name)),
+      ...[harness,'Trace.java','java.mjs','gmail-background-platform.mjs','reminder-delivery-platform.mjs','string-resources.mjs'].map(name=>join(directory,name)),noticeStrings,
       fileURLToPath(import.meta.url)];
     const driverHashes=captureInputs(sources);
     const host=JSON.parse(readFileSync(join(root,hostPath),'utf8'));

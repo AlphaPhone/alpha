@@ -1,18 +1,15 @@
 import {calendarInstant,calendarWall} from './calendar-time.ts';
-export const calendarRepeats:readonly string[]=['none','daily','weekdays','weekly'];
 export type CalendarRepeat='none'|'daily'|'weekdays'|'weekly';
-interface RecurringCalendarRecord {id:string;begin:number;end:number;timeZone?:string;allDay?:boolean;repeat?:CalendarRepeat}
-type CalendarOccurrence<T> = T & {seriesId?:string;occurrenceBegin?:number};
+export interface RecurringCalendarRecord {id:string;begin:number;end:number;timeZone?:string;allDay?:boolean;repeat?:CalendarRepeat}
+export type CalendarOccurrence<T> = T & {seriesId?:string;occurrenceBegin?:number};
 const DAY=86400000;
-/** A series repeats on UTC dates when all day, otherwise on wall times of its saved zone. */
-export const seriesZone=(row:{allDay?:boolean;timeZone?:string})=>row.allDay?'UTC':row.timeZone||'UTC';
 /** Range expansion only. Stored series are never changed by a calendar query. */
 export function expandCalendarSeries<T extends RecurringCalendarRecord>(row:T,range:{begin:number;end:number},maximum=2000):{events:CalendarOccurrence<T>[];truncated:boolean}{
  if(!Number.isFinite(range.begin)||!Number.isFinite(range.end)||range.end<=range.begin||!Number.isInteger(maximum)||maximum<1||maximum>10000)throw Error('Invalid calendar range.');
  if(!Number.isFinite(row.begin)||!Number.isFinite(row.end)||row.end<=row.begin)throw Error('Invalid event interval.');
- const repeat=row.repeat||'none';if(!calendarRepeats.includes(repeat))throw Error('Invalid event repeat rule.');
+ const repeat=row.repeat||'none';if(!['none','daily','weekdays','weekly'].includes(repeat))throw Error('Invalid event repeat rule.');
  if(repeat==='none')return {events:row.begin<range.end&&row.end>range.begin?[{...row}]:[],truncated:false};
- const zone=seriesZone(row),firstWall=Date.parse(calendarWall(row.begin,zone)+'Z'),duration=row.end-row.begin;
+ const zone=row.allDay?'UTC':row.timeZone||'UTC',firstWall=Date.parse(calendarWall(row.begin,zone)+'Z'),duration=row.end-row.begin;
  const stride=repeat==='weekly'?7:1;
  // Seek near the requested range without iterating decades of historical occurrences.
  // Three civil days of margin cover offset transitions including skipped dates.

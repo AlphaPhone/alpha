@@ -11,14 +11,14 @@ import {setupTelephony} from './telephony-fixture';
 const bridgeEffects = (page: Page) => page.evaluate(() => ((window as any).telephonyInputs as [string, any][])
   .map(([method]) => method).filter(method => ['dial', 'placeCall', 'sendSms', 'contacts.save', 'contacts.remove'].includes(method)));
 
-async function installedExecutor(page: Page) {
+async function installedExecutor(page: Page, options?:Parameters<typeof setupTelephony>[1]) {
   await page.route(/\/src\/runtime\/connection-ui\.tsx/, async route => {
     const response = await route.fetch();
     const body = (await response.text()).replace(/setDeviceExecutor\(executor\)\s*\{\s*deviceExecutor = executor;/, match => `${match} globalThis.__installedDeviceExecutor = executor;`);
     if (!body.includes('__installedDeviceExecutor')) throw Error('setDeviceExecutor not found in connection-ui');
     await route.fulfill({response, body});
   });
-  await setupTelephony(page);
+  await setupTelephony(page,options);
   await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
   await expect.poll(() => page.evaluate(() => typeof (window as any).__installedDeviceExecutor)).toBe('function');
   // The review fence compares the agent session and screen context; hold both steady as a live review would.
@@ -36,12 +36,15 @@ async function installedExecutor(page: Page) {
       selectedObject: {kind: 'sms-subscription', id: '1', revision: smsSubscriptionRevision({slot: 0, carrierName: 'Synthetic Carrier'})}};
     alphaClient.getState = () => ({...state(), context});
     (window as any).__reviewContext = context;
+    // The journal entry of the card the owner approved: the coordinator hands it to the executor,
+    // and Android sends a text only for it (AlphaApprovedSms).
+    (window as any).approvedCard = (proposalId: string) => ({scope: 'c'.repeat(64), proposalId});
   });
 }
 /** Runs each guarded branch of the installed executor once; returns their summaries. */
 const runAll = (page: Page) => page.evaluate(async () => {
-  const w = window as any, run = (operation: unknown) => w.__installedDeviceExecutor(operation, crypto.randomUUID(), w.__reviewContext, new AbortController().signal)
-    .then((result: any) => result.summary ?? result.status, (error: Error) => `threw: ${error.message}`);
+  const w = window as any, run = (operation: unknown) => { const id = crypto.randomUUID(); return w.__installedDeviceExecutor(operation, id, w.__reviewContext, new AbortController().signal, 'b'.repeat(64), undefined, w.approvedCard(id))
+    .then((result: any) => result.summary ?? result.status, (error: Error) => `threw: ${error.message}`); };
   return {
     dial: await run({type: 'phone_dial', target: {kind: 'number', number: '+15550100103'}}),
     call: await run({type: 'phone_call', target: {kind: 'number', number: '+15550100103'}}),
@@ -63,7 +66,8 @@ async function reviewed(page: Page, operation: Record<string, unknown>, pick: st
     shell.setState({chat: 'sheet'});
     shell.propose({id, kind: 'other', title: 'Reviewed action', detail: String(operation.query), button: 'Approve', acts: true, act: {mod: 'alpha', fn: 'execute'}, args: {proposalId: id}, proposalId: id}, 'Review?');
     shell.pendingActionApprovalProposalId = id;
-    w.__reviewed = w.__installedDeviceExecutor(operation, crypto.randomUUID(), w.__reviewContext, new AbortController().signal)
+    const operationId = crypto.randomUUID();
+    w.__reviewed = w.__installedDeviceExecutor(operation, operationId, w.__reviewContext, new AbortController().signal, 'b'.repeat(64), undefined, w.approvedCard(operationId))
       .then((result: any) => result.summary ?? result.status, (error: Error) => `threw: ${error.message}`);
   }, operation);
   const review = page.locator('[data-alpha-proposal-review]').first();
@@ -80,9 +84,18 @@ test.describe('Alpha image: the installed executor refuses side effects during a
     await runAll(page);
     await reviewed(page, textCarmen, 'Carmen');
     expect((await bridgeEffects(page)).sort()).toEqual(['contacts.save', 'dial', 'placeCall', 'sendSms', 'sendSms'].sort());
+    expect(await sentCards(page)).toEqual([true, true]);
   });
 
-  test('a text to one matching contact shows the matched name and number before the native review opens', async ({page}) => {
+  test('a text with no approved card reaches no bridge send', async ({page}) => {
+    await installedExecutor(page);
+    const summary = await page.evaluate(() => (window as any).__installedDeviceExecutor({type: 'sms_send', recipients: ['+15550100103'], body: 'On my way', subscriptionId: 1},
+      crypto.randomUUID(), (window as any).__reviewContext, new AbortController().signal).then((result: any) => result.summary));
+    expect(summary).toBe('Nothing was sent because the approved card could not be found.');
+    expect(await bridgeEffects(page)).toEqual([]);
+  });
+
+  test('a text to one matching contact shows the matched name and number, then sends to the one chosen', async ({page}) => {
     await installedExecutor(page);
     // Dismissed: the owner saw who matched and nothing reached the bridge.
     const dismissed = await reviewed(page, textCarmen, 'Not now', async review => {
@@ -92,10 +105,13 @@ test.describe('Alpha image: the installed executor refuses side effects during a
     });
     expect(dismissed).toBe('Message cancelled.');
     expect(await bridgeEffects(page)).toEqual([]);
-    // Chosen: the same number goes to the native review.
+    // Chosen: the same number is sent at once, under the approved card, with no dialog after it.
     await reviewed(page, textCarmen, 'Carmen');
     expect(await bridgeEffects(page)).toEqual(['sendSms']);
     expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).find(([method]) => method === 'sendSms')![1].recipients)).toEqual(['+15550100103']);
+    expect(await sentCards(page)).toEqual([true]);
+    await expect(page.locator('[data-alpha-proposal-review]')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
   for (const [name, state] of [
@@ -133,7 +149,8 @@ const execute = (page: Page, operation: Record<string, unknown>, view: 'home' | 
   const {alphaClient} = await import('/src/runtime/alpha-client.ts' as string);
   const w = window as any, held = alphaClient.getState(), context = {...held.context, view, selectedObject: undefined};
   alphaClient.getState = () => ({...held, context});
-  const result = w.__lastExecution = await w.__installedDeviceExecutor(operation, crypto.randomUUID(), context, new AbortController().signal);
+  const operationId = crypto.randomUUID();
+  const result = w.__lastExecution = await w.__installedDeviceExecutor(operation, operationId, context, new AbortController().signal, 'b'.repeat(64), undefined, w.approvedCard(operationId));
   return {result: result.telephonyResult, summary: result.summary as string, presents: typeof result.present === 'function'};
 }, {operation, view});
 const present = (page: Page) => page.evaluate(() => (window as any).__lastExecution.present());
@@ -144,16 +161,20 @@ const shell = (page: Page, act: 'goHome') => page.evaluate(act => {
   fiber.stateNode[act]();
 }, act);
 const sent = (page: Page) => page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).filter(([method]) => method === 'sendSms').map(([, input]) => ({recipients: input.recipients, subscriptionId: input.subscriptionId})));
+/** Every native sendSms request names the approved card it sends for: the card is the confirmation. */
+const sentCards = (page: Page) => page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).filter(([method]) => method === 'sendSms').map(([, input]) => input.journalIdentity && Object.keys(input.journalIdentity).sort().join(',') === 'proposalId,scope' && input.journalIdentity.scope === 'c'.repeat(64) && input.journalIdentity.proposalId === input.operationId));
 
 test.describe('Alpha image: a text to a number, a draft, and Contacts from chat (sms.compose.v2, contacts.write.v2, contacts.show.v1, contacts.read.v1)', () => {
-  test('a text to an exact number opens the native review from Home on the default SIM, with no second choice', async ({page}) => {
+  test('a text to an exact number is sent from Home on the default SIM under its approved card, with no second choice or dialog', async ({page}) => {
     await installedExecutor(page);
     await shell(page, 'goHome');
     const {result} = await execute(page, {type: 'sms_compose', target: {kind: 'number', number: '+15550100199'}, body: 'On my way'}, 'home');
-    // The stubbed bridge answers the review with no receipt, so only what reached it is checked.
+    // The stubbed bridge answers with no receipt, so only what reached it is checked.
     expect(result.kind).toBe('sms-compose');
     expect(await sent(page)).toEqual([{recipients: ['+15550100199'], subscriptionId: 1}]);
+    expect(await sentCards(page)).toEqual([true]);
     await expect(page.locator('[data-alpha-proposal-review]')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
   test('a draft-only text opens that conversation with the text in its field, after the receipt, and sends nothing', async ({page}) => {
@@ -166,17 +187,42 @@ test.describe('Alpha image: a text to a number, a draft, and Contacts from chat 
     await expect(page.locator('[data-alpha-messages-title]')).toHaveCount(0);
     await present(page);
     await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Carmen Ruiz');
-    await expect(page.getByRole('textbox', {name: 'Text Carmen', exact: true})).toHaveValue('See you at 7');
+    await expect(page.getByRole('textbox', {name: 'Message draft', exact: true})).toHaveValue('See you at 7');
     // A number with no conversation yet: a new message addressed to it.
     outcome = await execute(page, draft('+15550100177'), 'messages');
     expect(outcome.result).toEqual({kind: 'sms-compose', status: 'drafted'});
     await present(page);
     await expect(page.locator('[data-alpha-messages-recipients]')).toHaveValue('+15550100177');
-    await expect(page.getByRole('group', {name: 'Assistant controls'}).getByRole('textbox')).toHaveValue('See you at 7');
+    await expect(page.getByRole('textbox', {name:'Message draft',exact:true})).toHaveValue('See you at 7');
     await expect.poll(() => page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).some(([method]) => method === 'sendSms'))).toBe(false);
     expect(await bridgeEffects(page)).toEqual([]);
   });
 
+  test('a latest-sender draft has an exact recipient, inline editing, local discard and one Send',async({page})=>{
+    await installedExecutor(page,{preview:true,smsRoleHeld:true});
+    await shell(page,'goHome');
+    const read=await execute(page,{type:'sms_latest_sender',includeAddress:true},'home');
+    expect(read.result).toEqual({kind:'sms-latest-sender',status:'found',address:'+15550100101',threadId:'thread:101'});
+    const draft={type:'sms_compose',draft:true,target:{kind:'number',number:read.result.address},replyThreadId:read.result.threadId,body:'Bring the tripod tomorrow.'};
+    const mismatch=await execute(page,{...draft,replyThreadId:'thread:103'},'home');
+    expect(mismatch.result).toEqual({kind:'sms-compose',status:'unavailable'});
+    const open=await execute(page,draft,'home');expect(open.presents).toBe(true);
+    await present(page);
+    const card=page.getByRole('group',{name:/Message draft to Ada Okafor/});
+    await expect(card).toContainText('+15550100101');
+    await expect(card.getByRole('textbox',{name:'Message draft'})).toHaveValue(draft.body);
+    await card.getByRole('button',{name:'Don’t send',exact:true}).click();
+    await expect(card).toHaveCount(0);
+    const attempts=()=>page.evaluate(()=>(window as any).telephonyInputs.filter((r:any[])=>r[0]==='sendComposedSms').map((r:any[])=>r[1]));
+    expect(await attempts()).toEqual([]);
+    await execute(page,draft,'messages');
+    await card.getByRole('textbox',{name:'Message draft'}).fill('Bring the tripod and plate.');
+    await card.getByRole('button',{name:'Send',exact:true}).click();
+    await expect.poll(async()=>(await attempts()).length).toBe(1);
+    expect((await attempts())[0]).toMatchObject({recipients:['+15550100101'],body:'Bring the tripod and plate.'});
+    await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+    await expect(page.getByText('Bring the tripod and plate.',{exact:true}).first()).toBeVisible();
+  });
   test('adding one number to a contact shows the contact before and after and saves every value it had', async ({page}) => {
     await installedExecutor(page);
     await reviewed(page, {type: 'contact_update', query: 'Ada', add: {phoneNumbers: ['+15550100150']}}, 'Ada Okafor', async review => {

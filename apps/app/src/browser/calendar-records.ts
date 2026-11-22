@@ -1,10 +1,8 @@
 import type {CalendarResponse} from './calendar-response';
 import {calendarInstant,calendarWall} from './calendar-time';
-import {expandCalendarSeries,seriesZone,type CalendarRepeat} from './calendar-recurrence';
+import {expandCalendarSeries,type CalendarRepeat} from './calendar-recurrence';
 import {revision} from './revision';
 export type CalendarRecord={id:string;calendarId:string;title:string;body:string;location:string;begin:number;end:number;revision:string;allDay?:boolean;timeZone?:string;repeat?:CalendarRepeat;who?:string[];attendeeOptions?:Record<string,{optional:boolean}>;responses?:Record<string,CalendarResponse>;video?:boolean;alert?:number|null;seriesId?:string;occurrenceBegin?:number;excluded?:number[]};
-/** Minutes before an event at which it may alert. */
-export const CALENDAR_ALERT_MINUTES:readonly number[]=[0,10,60];
 export function calendarRecord(rows:CalendarRecord[],id:string):CalendarRecord|undefined{
  const direct=rows.find(row=>row.id===id);if(direct)return direct;
  const match=/^(.*):occ:(-?\d+)$/.exec(id);if(!match)return;
@@ -35,7 +33,7 @@ export function onceCalendarSeries(rows:CalendarRecord[],series:CalendarRecord){
 
 /** Keep deleted dates and edited occurrences excluded when a whole series moves. */
 export function remapCalendarExclusions(rows:CalendarRecord[],before:CalendarRecord,next:CalendarRecord){
- const oldZone=seriesZone(before),newZone=seriesZone(next);
+ const oldZone=before.allDay?'UTC':before.timeZone||'UTC',newZone=next.allDay?'UTC':next.timeZone||'UTC';
  const oldDay=Date.parse(calendarWall(before.begin,oldZone).slice(0,10)+'T00:00:00Z'),newWall=Date.parse(calendarWall(next.begin,newZone)+'Z');
  const exclusions=[...(before.excluded||[]),...rows.filter(row=>row.seriesId===before.id).map(row=>row.occurrenceBegin!)];
  return [...new Set(exclusions.map(instant=>{const day=Date.parse(calendarWall(instant,oldZone).slice(0,10)+'T00:00:00Z');return calendarInstant(new Date(newWall+day-oldDay).toISOString().slice(0,-1),newZone,Number.NaN,'forward');}))];

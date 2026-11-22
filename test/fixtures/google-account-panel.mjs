@@ -33,6 +33,7 @@ export async function mountGoogleAccountPanel(rows,{calendarEdits=true,gmailChan
    // No Cloud disconnect runs: only what the panel hands the callsite is recorded.
    disconnect:async connectionId=>{live(binding);p.disconnects.push({connectionId,calendar});return {...(p.onRevoke?await p.onRevoke(binding):p.disconnectResult??{outcome:'disconnected',accounts:[]}),calendarLifecycle:p.onDisconnect?.(calendar,connectionId)??{calendarPause:'unavailable',callbackRetirement:'confirmed',providerDrain:'unavailable',pauseRequest:null}};},
   })},
+  './google-calendar-selection':{clearGoogleCalendarSelectionForConnection:()=>{}},
   './native-connection':{openConnectionBrowser:async()=>{p.opens++;},googleWorkspaceReturnPort:undefined},
   // Like 3800a178e's google-agent-access: a fresh capture with a revision receipt, and a guarded save that rechecks it.
   './google-agent-access':{googleAgentAccess:()=>({...access}),publishGoogleAgentAccess:async()=>{},captureGoogleCalendarAccess:async()=>{await p.onCapture?.();return p.unreadable?undefined:{calendarEdits:access.calendarEdits,receipt:{revision:p.revision}};},setGoogleAgentAccess:async(change,guard)=>{if(saveFails)throw Error('Settings could not be saved');if(guard&&(!guard.current()||access.calendarEdits!==guard.expectedCalendarEdits||guard.receipt.revision!==p.revision))throw Error('Calendar choice changed. Review it again.');p.accessChanges.push({...change});Object.assign(access,change);p.revision++;p.unreadable=false;dom.window.dispatchEvent(new dom.window.Event('alpha:device-settings'));}},

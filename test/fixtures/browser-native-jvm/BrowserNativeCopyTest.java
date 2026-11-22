@@ -1,5 +1,7 @@
 import ai.alphacompute.alphaphone.browser.AlphaBrowserCopy;
 import ai.alphacompute.alphaphone.browser.HostRect;
+import ai.alphacompute.alphaphone.browser.LinkHandoff;
+import ai.alphacompute.alphaphone.browser.LinkHandoff.Action;
 import ai.alphacompute.alphaphone.browser.TabLayer;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +46,38 @@ public final class BrowserNativeCopyTest {
         "the prompt names the asking host");
     check(AlphaBrowserCopy.permissionMessage("a.example", List.of("camera"), false).contains("Clear site"),
         "a remembered choice names Browser's Clear site");
+
+    // What a private tab asks before a tapped link leaves for another app.
+    equal(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE, "Leave private browsing?", "the link prompt asks what the menu handoff asks");
+    check(AlphaBrowserCopy.LEAVE_PRIVATE_LINK.contains("another app") && AlphaBrowserCopy.LEAVE_PRIVATE_LINK.contains("private"),
+        "the link prompt says the link leaves private browsing for another app");
+    equal(AlphaBrowserCopy.OPEN_APP, "Open app", "the link prompt names its action");
+
+    // What a tapped tel:, mailto:, sms:, geo: or app link does (AlphaBrowserPlugin.handoff).
+    // Arguments: fresh pop-up, own tab shown, opener shown, tapped, supported link, private.
+    equal(LinkHandoff.decide(false, true, false, true, true, true), Action.ASK,
+        "a tapped phone link in a private tab asks before leaving private browsing");
+    equal(LinkHandoff.decide(false, true, false, true, true, false), Action.LAUNCH,
+        "a tapped phone link in a normal tab opens the app at once");
+    equal(LinkHandoff.decide(false, true, false, false, true, true), Action.BLOCKED,
+        "a private page's link that opened without a tap is blocked, not asked about");
+    equal(LinkHandoff.decide(false, true, false, false, true, false), Action.BLOCKED, "an untapped link is blocked");
+    equal(LinkHandoff.decide(false, false, true, true, true, true), Action.IGNORE, "a hidden tab's link does nothing");
+    equal(LinkHandoff.decide(false, true, false, true, false, true), Action.UNSUPPORTED,
+        "an unsupported link is refused before any question");
+    equal(LinkHandoff.decide(true, false, true, false, true, true), Action.ASK,
+        "a fresh pop-up from a private page asks; its tap was checked when it opened");
+    equal(LinkHandoff.decide(true, true, false, false, true, false), Action.LAUNCH, "a shown fresh pop-up from a normal page opens");
+    equal(LinkHandoff.decide(true, false, false, true, true, true), Action.CLOSE_POPUP,
+        "a fresh pop-up whose tab and opener are hidden closes without asking");
+    // The owner's answer opens the app only for the page and presentation it was asked about.
+    check(LinkHandoff.answerStillValid(true, true, 7, 7, 3, 3, false, false), "an unchanged page opens the app");
+    check(!LinkHandoff.answerStillValid(true, true, 7, 8, 3, 3, false, false), "a page that moved on opens nothing");
+    check(!LinkHandoff.answerStillValid(true, true, 7, 7, 3, 4, false, false), "another tab shown since opens nothing");
+    check(!LinkHandoff.answerStillValid(false, true, 7, 7, 3, 3, false, false), "a paused Browser opens nothing");
+    check(!LinkHandoff.answerStillValid(true, false, 7, 7, 3, 3, false, false), "a closed tab opens nothing");
+    check(!LinkHandoff.answerStillValid(true, true, 7, 7, 3, 3, true, false), "a closed pop-up opens nothing");
+    check(LinkHandoff.answerStillValid(true, true, 7, 7, 3, 3, true, true), "an open pop-up still shown opens the app");
 
     // What the website sign-in prompt says.
     String refused = AlphaBrowserCopy.signInMessage("a.example", "", AlphaBrowserCopy.Manager.REFUSED, null, false);

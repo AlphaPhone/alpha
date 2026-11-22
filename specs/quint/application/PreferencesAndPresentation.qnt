@@ -26,7 +26,9 @@ module PreferencesAndPresentation {
   action normalText = s' = project({ ...s, textScale: 100 })
   action wide = s' = project({ ...s, width: 1200, freeHeight: 915, visibleHeight: 915 })
   action saveTheme = s' = { ...s, theme: "dark", savedTheme: "dark" }
-  action failedSave = s' = s
+  /// A theme choice whose save fails still applies for the session (Settings › Display); the stored
+  /// choice is unchanged, so a restart returns to it.
+  action failedSave = s' = { ...s, theme: if (s.savedTheme == "dark") "light" else "dark" }
   action restart = s' = { ...s, theme: s.savedTheme, editing: false, visibleHeight: s.freeHeight }
   action step = any { keyboard, closeKeyboard, rotate, largeText, normalText, wide,
     saveTheme, failedSave, restart, s' = s }
@@ -42,6 +44,8 @@ module PreferencesAndPresentation {
   run rotationKeepsGeometryTest = init.then(keyboard).then(rotate).expect(landscape and safety)
   run largeTextTest = init.then(wide).then(largeText).expect(agenda and not(split) and safety)
   run preferenceReadbackTest = init.then(saveTheme).then(failedSave).then(restart).expect(s.theme == "dark" and safety)
+  run failedSaveIsSessionOnlyTest = init.then(failedSave).expect(s.theme == "dark" and s.savedTheme == "light")
+    .then(restart).expect(s.theme == "light" and safety)
   run invalidCalendarResultCanaryTest = init.then(brokenDayCount).expect(not(safety))
   run invalidLargeTextSplitCanaryTest = init.then(largeText).then(brokenLargeTextSplit).expect(not(safety))
   run invalidAgendaCanaryTest = init.then(largeText).then(brokenAgenda).expect(not(safety))

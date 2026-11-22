@@ -73,7 +73,8 @@ try {
  // revision string (added time and size on Android) never reaches the agent.
  assert.ok(wire.context.selectedObject);
  const { revision: selectedRevision, ...selectedItem } = wire.context.selectedObject;
- assert.deepEqual(selectedItem, { kind: 'video', id: 'native-camera-video-fixture-71' });
+ // The id is the library's own id, the one Photos operations name, without the view's row prefix.
+ assert.deepEqual(selectedItem, { kind: 'video', id: 'video-fixture-71' });
  assert.match(selectedRevision ?? '', /^capture-[0-9a-f]{12}-1$/);
  assert.ok(!JSON.stringify(wire).includes('revision-2'));
  assert.equal(wire.context.view, 'photos');

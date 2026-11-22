@@ -4,13 +4,14 @@ import {registerPlugin} from '../platform-plugins';
 import {aospImage} from '../runtime/aosp-image';
 import {createSmsSession,mmsProblemLabel,mmsReceiptLabel,receiptLabel} from '../runtime/image-sms';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
+import {rememberSmsSims} from '../ui/telephony/sms-card-facts';
 import {createAospTelephony,registerTelephonyProfile,MMS_MAX_ATTACHMENTS,reviewMms,reviewSms,type AlphaTelephonyPlugin,type MmsAttachmentDraft,type MmsReview,type SmsMessage,type SmsReviewProblem,type SmsSendResult} from '../runtime/aosp-telephony';
 import {createNativeSmsDraftShelf,reviewedDraft,type ReviewedSms,type SmsDraft,type SmsDraftStore} from '../runtime/native-sms-drafts';
 import {watchReturnToApp} from './native-adapter';
 import {formatDateTime,formatMonthDay,formatTime} from './locale-time';
 import {displayNumber,initials,numberKey,shortWhen,threadTitle} from './telephony-presenters';
 import {createSmsRecipientPicker} from './sms-recipient-picker';
-import {askedDraftPlaced,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,threadChanged,typed,type DraftState} from '../runtime/message-draft';
+import {askedDraftPlaced,discardAskedDraft,draftAdopted,draftStageFit,draftUndone,emptyDraft,readinessLost,reviewFinished,threadChanged,typed,type DraftState} from '../runtime/message-draft';
 import {handoffResultText,sendRefusalText} from '../ui/telephony/telephony-messages';
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 import {placeOwnerCall} from './place-owner-call';
@@ -22,22 +23,22 @@ export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
 export const openSmsThread=()=>openThreadReader?.()??null;
 /** What became of a draft Alpha was asked to put in the open conversation's draft slot. */
 export type AskedDraft='drafted'|'none-selected'|'occupied'|'unavailable';
-let askedDraftWriter:((text:string,number?:string)=>AskedDraft)|null=null;
+let askedDraftWriter:((text:string,number?:string,threadId?:string)=>AskedDraft)|null=null;
 /**
  * Puts a draft the owner asked Alpha for into the open conversation's draft slot (AC-14); with
  * `number`, only when that conversation is with exactly that number. It replaces the slot, the owner's
  * text included, and keeps the previous text for one Undo. 'occupied' means a message is being sent
  * or has pictures attached. It never sends: Send stays the owner's tap.
  */
-export const placeAskedSmsDraft=(text:string,number?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number):'none-selected';
-let draftOpener:((text:string,number:string)=>(()=>void)|null)|null=null;
+export const placeAskedSmsDraft=(text:string,number?:string,threadId?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number,threadId):'none-selected';
+let draftOpener:((text:string,number:string,threadId:string|undefined,current:()=>void)=>Promise<(()=>void)|null>)|null=null;
 /**
  * The step that opens the conversation with exactly `number` (a new message to it when there is
  * none) and puts a draft the owner asked Alpha for in its text field, as `placeAskedSmsDraft` does
  * for the open one; null when Messages cannot be opened here. The step never sends, and when the
  * draft cannot be placed it says so on the phone.
  */
-export const openSmsDraftStep=(text:string,number:string)=>draftOpener?draftOpener(text,number):null;
+export const openSmsDraftStep=(text:string,number:string,threadId:string|undefined,current:()=>void)=>draftOpener?draftOpener(text,number,threadId,current):null;
 let draftUndoer:(()=>boolean)|null=null,draftReader:(()=>SmsDraftView|null)|null=null;
 /** Puts back the text Alpha's last draft replaced. False when there is nothing to undo or a send is in flight. */
 export const undoSmsDraft=():boolean=>draftUndoer?draftUndoer():false;
@@ -63,6 +64,10 @@ const quietNotices=new Set([
 ]);
 const failureNotices=new Set([receiptLabel('failed'),mmsReceiptLabel('failed')]);
 const MMS_PICTURES:Record<string,string>={'image/jpeg':'jpg','image/png':'png','image/gif':'gif'};
+/** The largest picture Messages attaches. */
+const MMS_PICTURE_BYTES=1024*1024;
+/** A picture Messages can attach: a JPEG, PNG or GIF whose size is known and within MMS_PICTURE_BYTES. */
+const mmsPictureFits=(type:string,size:unknown)=>!!MMS_PICTURES[type]&&typeof size==='number'&&Number.isInteger(size)&&size>0&&size<=MMS_PICTURE_BYTES;
 /* Native rejects with these codes before it journals or sends anything, so its message is the
  * reason and the next Send opens a new review. */
 const SMS_NOT_SENT=new Set(['too-long','invalid','busy','unavailable']);
@@ -450,12 +455,15 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  }
  const wakeSmsNotice=()=>{noticeSignal++;noticeRequested=true;void drainSmsNotice();};
  const closeThread=()=>{if(messageMenu){closeMessageMenu();return;}if(!busy&&!deleting){selectedThread=null;session.openThread(null);}};
- const compose=(prefill?:string)=>{
+ /* Pictures or a send in flight: the composer holds the owner's message, so Alpha neither drafts into it nor addresses it. */
+ const occupied=()=>attachments.length>0||!!operationId||!!mmsOperationId;
+ /* `asked`: Alpha opens the new message for a draft. It never clears or readdresses one the owner's pictures occupy. */
+ const compose=(prefill?:string,asked=false)=>{
   if(!editable())return;
   recipientPicker.close();
-  const switching=draftThread!==null;
-  if(switching||(!shelf&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
-  if(shelf&&prefill&&!recipients)recipients=prefill;
+  const switching=draftThread!==null,kept=asked&&!switching&&occupied();
+  if(switching||(!shelf&&!kept&&prefill!==undefined&&recipients!==prefill)){clearDraft();recipients=prefill??'';}
+  if(shelf&&!kept&&prefill&&!recipients)recipients=prefill;
   draftThread=null;composing=true;selectedThread=null;
   if(switching||!retained)loadDraft(null);
   if(session.state.thread)session.openThread(null);else changed();
@@ -510,13 +518,13 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const placeAsked=(text:string):AskedDraft=>{
   if(!draftRecipients().length)return 'unavailable';
   if(!ready())return 'unavailable';
-  if(attachments.length||operationId||mmsOperationId)return 'occupied';
+  if(occupied())return 'occupied';
   const next=askedDraftPlaced(draft,text.trim().slice(0,1600),true);if(next===draft)return 'unavailable';
-  draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();return 'drafted';
+  draft=next;body=next.text;draftRevision++;operationId='';smsReview=null;resetMms(false);notice='';receipt=null;bubbleSent=null;retainDraft();paint();if(owner?.S().chat==='full')owner.setState({chat:'sheet'});return 'drafted';
  };
- askedDraftWriter=(text,number)=>{
+ askedDraftWriter=(text,number,threadId)=>{
   const thread=active?openRow():null;
-  if(!thread)return 'none-selected';
+  if(!thread||threadId!==undefined&&thread.id!==threadId)return 'none-selected';
   if(number!==undefined){
    const key=numberKey(number);
    if(!key||thread.addresses.length!==1||numberKey(thread.addresses[0])!==key)return 'none-selected';
@@ -524,25 +532,33 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   return placeAsked(text);
  };
  /* Opens one conversation for a draft (`sms_compose` with `draft: true`): only the thread with exactly this number, never another as a fallback. */
- draftOpener=(text,number)=>{
+ draftOpener=async(text,number,threadId,current)=>{
   const shell=owner,key=numberKey(number),wanted=normalizePhoneNumber(number);
   if(!shell||!key||!wanted||shell.props?.assistantSurface)return null;
   const here=()=>owner===shell&&inFront()&&!shell.props?.assistantSurface;
   const idle=()=>!here()||editable()&&session.state.status?.permissions.sms==='granted';
-  const place=async()=>{
-   let target:{id:string;addresses:readonly string[]}|null=null,cursor:string|undefined;
-   for(let page=0;page<3&&!target;page++){
-    const result=await client.threadPage(cursor);
-    for(const row of result.rows)if(!isIncompleteSmsRow(row)&&row.addresses.length===1&&numberKey(row.addresses[0])===key){target={id:row.id,addresses:row.addresses};break;}
-    if(!result.next)break;
-    cursor=result.next;
+  let target:{id:string;addresses:readonly string[]}|null=null,cursor:string|undefined;
+  const seen=new Set<string>();
+  do {
+   current();
+   const result=await client.threadPage(cursor);
+   current();
+   if(owner!==shell||document.hidden)return null;
+   for(const row of result.rows){
+    if(!isIncompleteSmsRow(row)&&(!threadId||row.id===threadId)&&row.addresses.length===1&&numberKey(row.addresses[0])===key){target=row;break;}
    }
+   if(target||!result.next)break;
+   if(seen.has(result.next))return null;
+   seen.add(result.next);cursor=result.next;
+  } while(cursor);
+  if(threadId&&!target)return null;
+  const place=async()=>{
    if(owner!==shell||document.hidden)return false;
-   if(!inFront()){const chat=shell.S().chat;shell.openView('messages',undefined,chat==='sheet'||chat==='full'?chat:undefined);await new Promise<void>(resolve=>shell.setState({},()=>resolve()));}
+   if(!inFront()){shell.openView('messages',undefined,'sheet');await new Promise<void>(resolve=>shell.setState({},()=>resolve()));}
    if(!await until(idle)||!here())return false;
-   if(target)chooseThread(target.id,target.addresses);else compose(wanted);
+   if(target)chooseThread(target.id,target.addresses);else compose(wanted,true);
    if(!await until(idle)||!here())return false;
-   if(target)return openRow()?.id===target.id&&placeAsked(text)==='drafted';
+   if(target){const row=openRow();return row?.id===target.id&&row.addresses.length===1&&numberKey(row.addresses[0])===key&&placeAsked(text)==='drafted';}
    if(!composing||session.state.thread||draftThread!==null)return false;
    // A new message the owner left unsent to someone else is theirs: it is not readdressed.
    if(!sameRecipients(normalizeRecipients(inputRecipients()),[wanted])){if(body||attachments.length||operationId||mmsOperationId)return false;changeDraft(()=>{recipients=wanted;});}
@@ -597,7 +613,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   }catch{/* No record or unavailable is never evidence of not sent. */}
  }
  /** `from` is the draft bubble (AC-15): the same review and journal, then the bubble turns solid and Alpha notes the send. */
- async function send(sender=client,from?:SentFrom){if(!inFront()||!editable())return;const token=lifecycle,draft=draftRevision;let sentTo='';busy=true;changed();try{
+ async function send(sender=client,from?:SentFrom){if(!inFront()||!editable())return;const token=lifecycle,draft=draftRevision,recipientId=subject()?.id;let sentTo='';busy=true;changed();try{
   const status=session.state.status;if(!status){notice='Refresh Messages, then review the text again.';return;}
   /* The shared review normalizes and dedupes numbers and takes the only active SIM; a SIM that is no longer active is refused. */
   const checked=reviewSms({recipients:draftRecipients(),body,subscriptionId:sim?Number(sim):undefined},status,'direct');
@@ -626,7 +642,7 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   if(operationId)outgoing.delete(operationId);
   if(operationId&&code&&SMS_NOT_SENT.has(code)&&message){operationId='';smsReview=null;notice=sendRefusalText(error,'Not sent');retainDraft();}else if(operationId&&code==='expired'&&message)notice=sendRefusalText(error,'Not sent');
   else notice=operationId?'May have sent':sendRefusalText(error,'Couldn’t open');}}finally{if(token===lifecycle){busy=false;bubbleSent=null;changed();if(operationId)void reconcile(operationId);}}
-  if(sentTo)noteSent(sentTo);}
+  if(sentTo){noteSent(sentTo);if(from?.by==='alpha'&&recipientId&&inFront()&&subject()?.id===recipientId)api?.toPerson?.();}}
  function confirmMms(id:string,review:MmsReview,status:'submitted'|'sent'){
   finished(status);
   mmsSent={id,review};resetMms(true);draftRevision++;retainDraft();
@@ -671,13 +687,44 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  }catch(error){if(active&&token===lifecycle&&draft===draftRevision)notice=dispatched?'May have sent':sendRefusalText(error,'Couldn’t open');}
  finally{if(token===lifecycle){busy=false;bubbleSent=null;changed();if(mmsOperationId&&dispatched)void reconcileMms(mmsOperationId);}}
   if(sentTo)noteSent(sentTo);}
+ async function readPicture(file:File):Promise<Omit<MmsAttachmentDraft,'name'>>{
+  if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');
+  if(!mmsPictureFits(file.type,file.size))throw Error('Each picture must be smaller than 1 MB.');
+  return {contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())};
+ }
+ function addPictures(pictures:Omit<MmsAttachmentDraft,'name'>[]){
+  if(attachments.length+pictures.length>MMS_MAX_ATTACHMENTS)throw Error('Max 5 pictures');
+  changeDraft(()=>{
+   for(const picture of pictures)attachments.push({...picture,name:`picture-${++pictureSeq}.${MMS_PICTURES[picture.contentType]}`});
+  });
+ }
+ /** Photos and Files offer Messages only for a picture `readPicture` accepts, so none ends in a size refusal. */
+ views.messages.pictureFits=mmsPictureFits;
+ views.messages.sharePicture=async(read:()=>Promise<File>,current:()=>boolean)=>{
+  const shell=owner;
+  if(!shell||shell.props?.assistantSurface||!current()||!editable())throw Error('Messages is unavailable.');
+  const picture=await readPicture(await read());
+  if(shelf)await shelf.flush();
+  if(owner!==shell||!current()||!editable())throw new DOMException('Selection changed','AbortError');
+  shell.openView('messages');
+  await new Promise<void>(resolve=>shell.setState({},()=>resolve()));
+  if(!inFront()||!editable())throw Error('Open Messages to attach the picture.');
+  compose();
+  const visit=lifecycle,ticket=draftTicket;
+  const stillComposing=()=>owner===shell&&visit===lifecycle&&inFront()&&ticket===draftTicket&&composing&&draftThread===null&&!session.state.thread;
+  await until(()=>!stillComposing()||(!draftLoading&&!!session.state.status));
+  if(!stillComposing())throw new DOMException('Messages changed','AbortError');
+  if(!session.state.status?.mmsSend)throw Error('Picture messaging is unavailable.');
+  if(!editable()||body||recipients||attachments.length||operationId||mmsOperationId||(shelf&&!retained))throw Error('Finish your existing message draft before sharing this picture.');
+  addPictures([picture]);
+ };
  /** Picking pictures only changes the draft; nothing is read beyond the files the owner chose. */
  function attach(){if(!active||!editable())return;if(attachments.length>=MMS_MAX_ATTACHMENTS){notice='Max 5 pictures';changed();return;}const token=lifecycle,draft=draftRevision,input=document.createElement('input');input.type='file';input.accept=Object.keys(MMS_PICTURES).join(',');input.multiple=true;
   /* A result that arrives while the page is still hidden waits for it to show again; pagehide always ends the pick. */
   const done=(event?:Event)=>{if(document.hidden&&event?.type!=='pagehide')return;window.removeEventListener('pagehide',done);if(!picking)return;picking=false;sync();};input.oncancel=()=>done();window.addEventListener('pagehide',done);
-  input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files){if(!MMS_PICTURES[file.type])throw Error('Only JPEG, PNG and GIF pictures can be sent.');if(!file.size||file.size>1024*1024)throw Error('Each picture must be smaller than 1 MB.');picked.push({contentType:file.type,bytes:new Uint8Array(await file.arrayBuffer())});}
-   if(!active||token!==lifecycle||draft!==draftRevision||busy)return;if(attachments.length+picked.length>MMS_MAX_ATTACHMENTS)throw Error('Max 5 pictures');
-   for(const item of picked)attachments.push({...item,name:`picture-${++pictureSeq}.${MMS_PICTURES[item.contentType]}`});draftRevision++;operationId='';resetMms(false);receipt=null;notice='';retainDraft();changed();
+  input.onchange=async()=>{done();const files=[...(input.files||[])];input.value='';try{const picked:Omit<MmsAttachmentDraft,'name'>[]=[];for(const file of files)picked.push(await readPicture(file));
+   if(!active||token!==lifecycle||draft!==draftRevision||!editable())return;
+   addPictures(picked);
   }catch(error){if(active&&token===lifecycle){notice=error instanceof Error?error.message:'Unreadable pictures';changed();}}};
   picking=true;input.click();}
  async function handoff(){if(!inFront()||!editable()||operationId||mmsOperationId||attachments.length)return;const token=lifecycle,draft=draftRevision;busy=true;changed();try{
@@ -736,13 +783,21 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
  const bubbleSend=(event?:SendTap)=>{const who=subject();if(!waiting()||!who||!editable())return;submit(event,{by:draft.draft==='asked'?'alpha':'owner',text:body,title:who.title||''});};
  /** AC-14/15/16: the draft bubble in the stage while the chat is open; null otherwise. */
  function bubble(viewApi:Bag|undefined){
-  const open=viewApi?.S?.chat==='sheet'||viewApi?.S?.chat==='full',alpha=viewApi?.name||'Alpha';
+  const open=viewApi?.S?.chat==='sheet'||viewApi?.S?.chat==='full';
   if(!open)return null;
-  if(bubbleSent)return {by:bubbleSent.by,alpha:bubbleSent.by==='alpha',sent:true,label:'Sent',aria:'Sent: '+bubbleSent.text,text:bubbleSent.text,canUndo:false,canAct:false};
-  if(!waiting()||!subject())return null;
-  const by=draft.draft==='asked'?'alpha' as const:'owner' as const;
-  return {by,alpha:by==='alpha',sent:undefined,label:by==='alpha'?`${alpha}'s draft · not sent`:'Your draft',aria:by==='alpha'?`${alpha}'s draft, not sent`:'Your draft, not sent',text:body,canUndo:!!draft.undo,canAct:true,
-   edit:()=>{if(!editable())return;draft=draftAdopted(draft);retainDraft();paint();api?.toPerson?.();},send:bubbleSend,undo:()=>{undoSmsDraft();}};
+  if(bubbleSent)return {by:bubbleSent.by,alpha:bubbleSent.by==='alpha',sent:true,label:'Sent',aria:'Sent: '+bubbleSent.text,text:bubbleSent.text,showText:true,canUndo:false,canAct:false};
+  const who=subject(),asked=draft.draft==='asked';
+  if(!who||(!asked&&!waiting()))return null;
+  const revision=draftRevision, target=who.id;
+  const current=()=>inFront()&&editable()&&draftRevision===revision&&subject()?.id===target;
+  const address=draftRecipients().join(', '),recipient=who.title&&who.title!==address?who.title+' · '+address:address;
+  return {by:asked?'alpha':'owner',alpha:asked,sent:undefined,label:asked?'To '+recipient:'Your draft',
+   aria:asked?'Message draft to '+recipient:'Your draft, not sent',text:body,showText:!asked,ownerEdit:!asked,canUndo:!asked&&!!draft.undo,canAct:true,
+   blocked:!editable()||!!operationId||!!mmsOperationId,sendDisabled:!body.trim()||!editable(),
+   onText:(event:Event)=>{if(current()&&asked&&!operationId&&!mmsOperationId){const value=(event.target as HTMLTextAreaElement).value;changeDraft(()=>{body=value;draft={...draft,text:value};});}},
+   discard:()=>{if(current()&&asked&&!operationId&&!mmsOperationId)changeDraft(()=>{draft=discardAskedDraft(draft);body=draft.text;bubbleSent=null;});},
+   edit:()=>{if(current()){draft=draftAdopted(draft);retainDraft();paint();api?.toPerson?.();}},
+   send:(event:SendTap)=>{if(current())bubbleSend(event);},undo:()=>{if(current())undoSmsDraft();}};
  }
  /** AC-01: the one bottom bar. In a conversation it addresses the person; on the list it filters (AC-22). */
  views.messages.bar=(_st:Bag,_viewApi:Bag):CommsBarSpec=>{
@@ -891,6 +946,8 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   this.smsSelection=()=>{
    if(owner!==this||!inFront())return;
    const subscriptions=session.state.status?.subscriptions??[];
+   // A text card proposed from this context names its SIM (runtime/sms-card-facts.ts).
+   rememberSmsSims(subscriptions);
    const soleSubscription=subscriptions.length===1?subscriptions[0]:undefined;
    const selected=sim?subscriptions.find(row=>String(row.id)===sim):soleSubscription;
    if(selected)return {kind:'sms-subscription',id:String(selected.id),revision:smsSubscriptionRevision(selected)};

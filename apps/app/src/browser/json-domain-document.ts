@@ -9,7 +9,7 @@ function decode<T>(archive:Archive):T|null{
  return archive.raw===null?null:JSON.parse(archive.raw);
 }
 export class BrowserJsonDomainDocument extends BrowserDomainDocument{
- constructor(key:string){super(browserDocuments,key);}
+ constructor(key:string){super(browserDocuments,key,()=>null);}
  async readJson<T>(signal?:AbortSignal):Promise<T|null>{return decode<T>(await this.read(emptyArchive,signal));}
  async editJson<T>(update:(value:T|null)=>T|null,signal?:AbortSignal):Promise<void>{
   await this.edit(emptyArchive,archive=>{const value=update(decode<T>(archive));archive.raw=value===null?null:JSON.stringify(value);},signal);

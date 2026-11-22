@@ -36,11 +36,11 @@ module MapsSelectedRead {
   /// Executor: read only the registered selection, checked before and after the read.
   action executorRead = all {s.phase == "executing", selectionCurrent,
     s' = {...s, read: true, readRevision: s.liveRevision, phase: "journaled", outcome: "succeeded"}}
-  /// A stale selection makes the executor throw before anything is read.
+  /// A stale selection makes the executor refuse as not started; nothing is shared.
   action executorThrows = all {s.phase == "executing", not(selectionCurrent),
-    s' = {...s, phase: "journaled", outcome: "unknown"}}
+    s' = {...s, phase: "journaled", outcome: "failed"}}
   /// The coordinator re-asserts the selection before the receipt leaves the phone.
-  action upload = all {s.phase == "journaled", s.outcome == "unknown" or selectionCurrent,
+  action upload = all {s.phase == "journaled", s.outcome == "failed" or selectionCurrent,
     s' = {...s, phase: "done", uploaded: s.outcome == "succeeded",
       uploadedRevision: if (s.outcome == "succeeded") s.liveRevision else -1}}
   action withhold = all {s.phase == "journaled", s.outcome == "succeeded", not(selectionCurrent),
@@ -53,14 +53,12 @@ module MapsSelectedRead {
   val ReadBoundToLiveRegistrySelection = s.read implies (s.readRevision == s.cardRevision and readable)
   val ReceiptReassertsSelection = s.uploaded implies (s.uploadedRevision == s.cardRevision and s.read)
   val SearchResultsAreNotReadable = s.kind == "map-search" implies (not(s.card) and not(s.read))
-  val safety = NoCoordinatesWithoutApproval and ReadBoundToLiveRegistrySelection and
-    ReceiptReassertsSelection and SearchResultsAreNotReadable
-
-  /// KNOWN DIVERGENCE (app review AGENT-06, phone side): a selection that changed between approval
-  /// and the read makes the executor throw; nothing was read, yet the action is journaled and
-  /// reported as "unknown". Registered as an expected violation.
+  /// The executor throws DeviceActionNotStarted for a stale selection, so the coordinator journals
+  /// it as failed/not started (app review AGENT-06).
   val UnknownOnlyAfterRead = s.outcome == "unknown" implies s.read
-  val UnknownWithoutRead = s.outcome == "unknown" and not(s.read)
+  val safety = NoCoordinatesWithoutApproval and ReadBoundToLiveRegistrySelection and
+    ReceiptReassertsSelection and SearchResultsAreNotReadable and UnknownOnlyAfterRead
+  val FailedWithoutRead = s.outcome == "failed" and not(s.read)
 
   run approvedReadTest = init.then(review).then(approve).then(executorRead).then(upload)
     .expect(safety and s.uploaded and s.outcome == "succeeded")
@@ -70,5 +68,6 @@ module MapsSelectedRead {
   run movedBeforeReceiptTest = init.then(review).then(approve).then(executorRead).then(reselect).then(withhold)
     .expect(safety and s.read and not(s.uploaded))
   run movedBeforeReadTest = init.then(review).then(approve).then(clearSelection).then(executorThrows)
-    .expect(safety and UnknownWithoutRead and not(UnknownOnlyAfterRead))
+    .expect(safety and FailedWithoutRead and not(s.uploaded))
+    .then(upload).expect(safety and not(s.uploaded) and s.phase == "done")
 }

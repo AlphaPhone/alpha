@@ -31,10 +31,11 @@ test('direct requests retain review for destructive, private and external operat
  assert.deepEqual(f.calls,[]);assert.equal(f.proposals.size,types.length,'protected proposals remain available for explicit review');
 });
 test('only the enumerated reversible local actions can run directly',async()=>{
- const types=['create_note','open_view','browser_navigate','camera_capture_photo','photo_library_select'];
- const f=fixture(types.map(type=>[type,'request',undefined,type]));
+ const types=['create_note','open_view','browser_navigate','camera_capture_photo','photo_library_select','second_note'];
+ const f=fixture(types.map(type=>[type,'request',undefined,type==='second_note'?'create_note':type]));
  await f.performRequested('request',{},new AbortController().signal,async()=>true,undefined,{messageId:'request',text:'Open https://example.com/',current:()=>{}});
- assert.deepEqual(f.calls,types.slice(0,4),'the existing four-action batch cap remains in force');
+ // The camera capture keeps its card: these words never asked for a photo (camera-direct-request.test.mjs).
+ assert.deepEqual(f.calls,['create_note','open_view','browser_navigate','photo_library_select'],'the existing four-action batch cap remains in force');
  const last=fixture([['photo_library_select','request',undefined,'photo_library_select']]);await last.performRequested('request',{},new AbortController().signal,async()=>true);assert.deepEqual(last.calls,['photo_library_select']);
 });
 

@@ -33,6 +33,8 @@ final class AlphaMessageNotices {
  private AlphaMessageNotices() {}
  /** The extra that ties a notice to its own "Mark as read" action; shared with MmsStore and MmsResultReceiver. */
  static final String NOTICE_RECEIPT = "ai.eliza.plugins.messages.NOTICE_RECEIPT";
+ /** Shared with the quick-reply notice, which posts on the same channel. */
+ static final String CHANNEL_DESCRIPTION = "New text messages, and replies from a call waiting for your review. The lock screen hides what they say.";
  static final String PUBLIC_TITLE = "New message", UNKNOWN_SENDER = "Unknown sender", SELF = "You", REPLY = "Reply", MARK_READ = "Mark as read";
 
  /** What an MMS without text says in its notice. */
@@ -51,6 +53,7 @@ final class AlphaMessageNotices {
   NotificationManager notifications = context.getSystemService(NotificationManager.class);
   if (notifications == null) return;
   NotificationChannel channel = new NotificationChannel(config.channelId, config.channelName, NotificationManager.IMPORTANCE_HIGH);
+  channel.setDescription(CHANNEL_DESCRIPTION);
   notifications.createNotificationChannel(channel);
   long thread = threadOf(context, message);
   String tag = thread > 0 ? SmsRecords.threadId(thread) : message.toString();

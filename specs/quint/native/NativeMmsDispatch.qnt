@@ -1,26 +1,25 @@
-// Actual Alpha MMS review, shared SMS/MMS ID ownership, and outgoing PDU custody.
-// Binding 1 and 2 differ in reviewed attachment bytes. Binding 3 is SMS.
+// Alpha's MMS send: refused on the agent bridge, sent only from the Messages composer, whose
+// Send is the owner's confirmation. Shared SMS/MMS ID ownership and outgoing PDU custody.
+// Binding 1 and 2 differ in composed attachment bytes. Binding 3 is SMS.
 module NativeMmsDispatch {
   type Record = { binding: int, status: str, dispatching: bool, boot: int, row: bool }
-  type Review = { binding: int, sim: bool }
   type Events = {listeners: Set[int], deliveries: int -> int}
   type State = {
-    groupRecipients: bool, reviewA: Review, reviewB: Review,
-    reply: str, replyKind: str, replyBinding: int, positiveBinding: int, memory: Record, disk: Record, tombstoneBinding: int,
+    groupRecipients: bool, source: str,
+    reply: str, replyKind: str, replyBinding: int, composedBinding: int, memory: Record, disk: Record, tombstoneBinding: int,
     smsAttempts: int, mmsAttempts: int, mmsAccepted: int,
     files: int, mmsBox: int, deletedMms: int, events: Events,
-    role: bool, carrier: bool, size: bool, sim: bool, provider: bool, locked: bool, process: int, boot: int
+    role: bool, carrier: bool, size: bool, provider: bool, locked: bool, process: int, boot: int
   }
   var s: State
   val actors = Set(1,2)
-  val noReview = {binding:0,sim:false}
   val noRecord = {binding:0,status:"none",dispatching:false,boot:0,row:false}
   val noEvents = {listeners:actors,deliveries:actors.mapBy(_=>0)}
 
   action initWith(groupRecipients: bool): bool = s' = {
-    groupRecipients:groupRecipients,reviewA:noReview,reviewB:noReview,reply:"none",replyKind:"none",replyBinding:0,positiveBinding:0,
+    groupRecipients:groupRecipients,source:"none",reply:"none",replyKind:"none",replyBinding:0,composedBinding:0,
     memory:noRecord,disk:noRecord,tombstoneBinding:0,smsAttempts:0,mmsAttempts:0,mmsAccepted:0,files:0,mmsBox:0,deletedMms:0,events:noEvents,
-    role:true,carrier:true,size:true,sim:true,provider:true,locked:false,process:1,boot:1
+    role:true,carrier:true,size:true,provider:true,locked:false,process:1,boot:1
   }
   action init = {
     nondet groupRecipients=Bool.oneOf()
@@ -29,13 +28,10 @@ module NativeMmsDispatch {
 
   pure def isMms(binding: int): bool = binding.in(Set(1,2))
   pure def wireKind(binding: int): str = if (isMms(binding)) "mms-send" else "sms-send"
-  pure def reject(state: State, status: str): State = { ...state,reply:status,replyKind:"none",replyBinding:0,positiveBinding:0 }
+  pure def reject(state: State, status: str): State = { ...state,reply:status,replyKind:"none",replyBinding:0,composedBinding:0 }
   pure def receipt(state: State): State = {
-    ...state,reply:state.memory.status,replyKind:wireKind(state.memory.binding),replyBinding:state.memory.binding,positiveBinding:0
+    ...state,reply:state.memory.status,replyKind:wireKind(state.memory.binding),replyBinding:state.memory.binding,composedBinding:0
   }
-  pure def reviewOf(state: State, actor: int): Review = if (actor==1) state.reviewA else state.reviewB
-  pure def reviewed(state: State, actor: int, review: Review): State =
-    if (actor==1) { ...state,reviewA:review } else { ...state,reviewB:review }
   pure def blocked(state: State, binding: int): bool =
     state.locked or (isMms(binding) and not(state.role and state.carrier))
   pure def retained(state: State): bool = state.memory.binding!=0 or state.tombstoneBinding!=0
@@ -49,62 +45,69 @@ module NativeMmsDispatch {
       receipt({ ...state,memory:record,disk:record })
     }
 
+  // The agent bridge's sendMms. No card proposes an MMS, so nothing can confirm one here:
+  // the bridge refuses it before reading, journaling, staging or sending anything.
   action request(actor: int, binding: int, input: str): bool = all {
-    actors.contains(actor), binding.in(1.to(3)), input=="valid" or (input=="bad-bytes" and isMms(binding)),
-    s' = if (s.locked) reject(s,"unavailable")
-      else if (input=="bad-bytes") reject(s,"invalid")
-      else if (retained(s)) existing(s,binding)
-      else if (reviewOf(s,actor).binding!=0) reject(s,"busy")
-      else if (blocked(s,binding)) decide(s,binding,"denied")
-      else if (isMms(binding) and not(s.size)) reject(s,"too-large")
-      else reject(reviewed(s,actor,{binding:binding,sim:s.sim}),"pending")
-  }
-  action preflightConflict(actor: int, changedField: str): bool = all {
-    actors.contains(actor), changedField.in(Set("body","recipients","sim")), s.memory.binding!=0, not(s.locked),
-    s'=reject(s,"invalid")
-  }
-  action prune = all {
-    isMms(s.memory.binding), s.memory==s.disk, s.memory.status.in(Set("sent","failed")), s.files==0,
-    s'={ ...s,memory:noRecord,disk:noRecord,tombstoneBinding:s.memory.binding }
-  }
-  action cancel(actor: int, exact: bool): bool = all {
-    actors.contains(actor), not(s.locked), reviewOf(s,actor).binding!=0,
-    s' = if (exact) decide(reviewed(s,actor,noReview),reviewOf(s,actor).binding,"cancelled") else s
+    actors.contains(actor), isMms(binding), input.in(Set("valid","bad-bytes")),
+    s' = { ...reject(s,if (s.locked) "unavailable" else "not-approved"),source:"agent" }
   }
 
   val modes = Set("complete","throw-before","throw-after","begin-before","end-before")
-  action approve(actor: int, mode: str): bool = all {
-    actors.contains(actor), modes.contains(mode),
-    val review=reviewOf(s,actor)
-    val binding=review.binding
-    val mms=isMms(binding)
-    all {
-      binding!=0,
-      mode=="complete" or (mms and not(retained(s)) and not(blocked(s,binding)) and review.sim==s.sim and (mode!="end-before" or s.provider)),
-      val state=reviewed(s,actor,noReview)
-      val outcome=if (blocked(s,binding)) decide(state,binding,"denied")
-        else if (retained(s)) existing(state,binding)
-        else if (review.sim!=s.sim or mode=="begin-before") decide(state,binding,"denied")
-        else {
-          val row=if (mms) s.provider else s.role
-          val submitted=mode!="throw-before" and mode!="throw-after"
-          val record={binding:binding,status:if (submitted) "submitted" else "unknown",dispatching:false,boot:s.boot,row:row}
-          val disk=if (mode=="end-before") { ...record,status:"unknown",dispatching:true } else record
-          receipt({ ...state,memory:record,disk:disk,
-            smsAttempts:if (mms) 0 else (if (s.groupRecipients) 2 else 1),
-            mmsAttempts:if (mms) 1 else 0, mmsAccepted:if (mms and mode!="throw-before") 1 else 0,
-            files:if (mms and submitted) 1 else 0,mmsBox:if (mms and row) 4 else 0,
-            deletedMms:if (mms and not(row)) 1 else 0 })
-        }
-      s'={ ...outcome,positiveBinding:binding }
+  // The composer's own send of a validated message: journal admission, dispatch and its receipt.
+  pure def composed(state: State, binding: int, mode: str): State =
+    if (blocked(state,binding)) decide(state,binding,"denied")
+    else if (isMms(binding) and not(state.size)) reject(state,"too-large")
+    else if (mode=="begin-before") decide(state,binding,"denied")
+    else {
+      val mms=isMms(binding)
+      val row=if (mms) state.provider else state.role
+      val submitted=mode!="throw-before" and mode!="throw-after"
+      val record={binding:binding,status:if (submitted) "submitted" else "unknown",dispatching:false,boot:state.boot,row:row}
+      val disk=if (mode=="end-before") { ...record,status:"unknown",dispatching:true } else record
+      receipt({ ...state,memory:record,disk:disk,
+        smsAttempts:if (mms) 0 else (if (state.groupRecipients) 2 else 1),
+        mmsAttempts:if (mms) 1 else 0, mmsAccepted:if (mms and mode!="throw-before") 1 else 0,
+        files:if (mms and submitted) 1 else 0,mmsBox:if (mms and row) 4 else 0,
+        deletedMms:if (mms and not(row)) 1 else 0 })
     }
+
+  // The owner's Send in the Messages composer (binding 3 is a text from the same composer).
+  // A retained operation ID answers from the shared journal before anything is staged.
+  action compose(actor: int, binding: int, input: str, mode: str): bool = all {
+    actors.contains(actor), binding.in(1.to(3)), input=="valid" or (input=="bad-bytes" and isMms(binding)), modes.contains(mode),
+    mode=="complete" or (isMms(binding) and input=="valid" and not(retained(s)) and not(blocked(s,binding)) and s.size
+      and (mode!="end-before" or s.provider)),
+    val outcome=if (s.locked) reject(s,"unavailable")
+      else if (input=="bad-bytes") reject(s,"invalid")
+      else if (retained(s)) existing(s,binding)
+      else composed(s,binding,mode)
+    s' = { ...outcome,composedBinding:binding,source:"composer" }
+  }
+
+  // Two composer sends with one operation ID, both queued before either is admitted: the first
+  // dispatches, and the second recovers only the receipt of exactly its own binding and kind.
+  action composeTogether(first: int, second: int): bool = all {
+    first.in(1.to(3)), second.in(1.to(3)), not(s.locked), not(retained(s)),
+    not(blocked(s,first)), not(blocked(s,second)), s.size,
+    val outcome=existing(composed(s,first,"complete"),second)
+    s' = { ...outcome,composedBinding:second,source:"composer" }
+  }
+
+  action preflightConflict(actor: int, changedField: str): bool = all {
+    actors.contains(actor), changedField.in(Set("body","recipients","sim")), s.memory.binding!=0, not(s.locked),
+    s'={ ...reject(s,"invalid"),source:"composer" }
+  }
+  action prune = all {
+    isMms(s.memory.binding), s.memory==s.disk, s.memory.status.in(Set("sent","failed")), s.files==0,
+    s'={ ...s,memory:noRecord,disk:noRecord,tombstoneBinding:s.memory.binding,source:"none" }
   }
 
   action readback(actor: int, mms: bool): bool = all {
     actors.contains(actor),
-    s' = if (s.locked) reject(s,"unavailable")
+    val outcome=if (s.locked) reject(s,"unavailable")
       else if (s.memory.binding==0 or isMms(s.memory.binding)!=mms) reject(s,"not-found")
       else receipt(s)
+    s' = { ...outcome,source:"none" }
   }
 
   val callbackModes=Set("complete","bad-uri","foreign-kind","failure-conf","unreadable-conf","before","after")
@@ -128,16 +131,17 @@ module NativeMmsDispatch {
             { ...s.events,deliveries:actors.mapBy(actor=>s.events.deliveries.get(actor)+
               (if (s.events.listeners.contains(actor)) 1 else 0)) } else s.events }
       }
-      all {noticeBudget(candidateState.events), s' = candidateState}
+      all {noticeBudget(candidateState.events), s' = { ...candidateState,source:"none" }}
     }
   }
 
-  val controlKinds=Set("role","carrier","size","sim","provider","locked")
+  val controlKinds=Set("role","carrier","size","provider","locked")
   action controls(kind: str, allowed: bool): bool = all {
     controlKinds.contains(kind),
-    s' = if (kind=="role") { ...s,role:allowed } else if (kind=="carrier") { ...s,carrier:allowed }
-      else if (kind=="size") { ...s,size:allowed } else if (kind=="sim") { ...s,sim:allowed }
-      else if (kind=="provider") { ...s,provider:allowed } else { ...s,locked:allowed }
+    val state={ ...s,source:"none" }
+    s' = if (kind=="role") { ...state,role:allowed } else if (kind=="carrier") { ...state,carrier:allowed }
+      else if (kind=="size") { ...state,size:allowed }
+      else if (kind=="provider") { ...state,provider:allowed } else { ...state,locked:allowed }
   }
 
   action restart(reboot: bool): bool = all {
@@ -146,7 +150,7 @@ module NativeMmsDispatch {
     val disk=s.disk
     val recovered=if (disk.dispatching or (reboot and disk.status=="submitted"))
       { ...disk,status:"unknown",dispatching:false } else disk
-    s'=reject({ ...s,boot:boot,process:s.process+1,reviewA:noReview,reviewB:noReview,memory:recovered,disk:recovered,events:noEvents },"none")
+    s'=reject({ ...s,boot:boot,process:s.process+1,memory:recovered,disk:recovered,events:noEvents,source:"none" },"none")
   }
 
   val OneKindOwnsDispatch = s.smsAttempts<=2 and s.mmsAccepted<=s.mmsAttempts and s.mmsAttempts<=1
@@ -158,28 +162,33 @@ module NativeMmsDispatch {
     and (not(isMms(s.disk.binding)) or s.disk.status!="delivered") and (s.replyKind!="mms-send" or s.reply!="delivered")
   val OutboxOnlyForMms = s.mmsBox==0 or isMms(s.tombstoneBinding) or (isMms(s.disk.binding) and s.disk.row)
   val TombstoneRetiresRecord = s.tombstoneBinding==0 or (s.memory.binding==0 and s.disk.binding==0)
-  val ApprovedReceiptMatchesReview = s.positiveBinding==0 or s.replyBinding==0
-    or (s.replyBinding==s.positiveBinding and s.replyKind==wireKind(s.positiveBinding))
+  val ComposedReceiptMatchesSend = s.composedBinding==0 or s.replyBinding==0
+    or (s.replyBinding==s.composedBinding and s.replyKind==wireKind(s.composedBinding))
+  // The agent bridge never yields an MMS receipt: it answers only that nothing was sent.
+  val AgentBridgeRefusesMms = s.source!="agent" or (s.reply.in(Set("not-approved","unavailable")) and s.replyBinding==0)
   val LiveBridgeListeners = s.events.listeners==actors
   val PerBridgeNoticeCapacity = noticeBudget(s.events)
   val safety = OneKindOwnsDispatch and DurableHandoffBinding and PduHeldForAcceptedMms and MmsNeverClaimsDelivery
-    and OutboxOnlyForMms and TombstoneRetiresRecord and ApprovedReceiptMatchesReview and LiveBridgeListeners and PerBridgeNoticeCapacity
+    and OutboxOnlyForMms and TombstoneRetiresRecord and ComposedReceiptMatchesSend and AgentBridgeRefusesMms
+    and LiveBridgeListeners and PerBridgeNoticeCapacity
 
   action step = any {
     nondet actor=actors.oneOf()
-    nondet binding=1.to(3).oneOf()
+    nondet binding=1.to(2).oneOf()
     nondet input=Set("valid","bad-bytes").oneOf()
     request(actor,binding,input),
+    nondet actor=actors.oneOf()
+    nondet binding=1.to(3).oneOf()
+    nondet input=Set("valid","bad-bytes").oneOf()
+    nondet mode=modes.oneOf()
+    compose(actor,binding,input,mode),
+    nondet first=1.to(3).oneOf()
+    nondet second=1.to(3).oneOf()
+    composeTogether(first,second),
     nondet actor=actors.oneOf()
     nondet changedField=Set("body","recipients","sim").oneOf()
     preflightConflict(actor,changedField),
     prune,
-    nondet actor=actors.oneOf()
-    nondet exact=Bool.oneOf()
-    cancel(actor,exact),
-    nondet actor=actors.oneOf()
-    nondet mode=modes.oneOf()
-    approve(actor,mode),
     nondet actor=actors.oneOf()
     nondet mms=Bool.oneOf()
     readback(actor,mms),
@@ -192,60 +201,62 @@ module NativeMmsDispatch {
     restart(false),restart(true),s'=s
   }
 
-  action reviewedA = initWith(false).then(request(1,1,"valid"))
-  action handedA = reviewedA.then(approve(1,"complete"))
+  action composedA = initWith(false).then(compose(1,1,"valid","complete"))
 
-  run conflictingAttachmentCannotClaimAnotherReceiptTest = reviewedA.then(request(2,2,"valid"))
-    .then(approve(1,"complete")).then(approve(2,"complete"))
+  run agentBridgeRefusesMmsTest = initWith(false).then(request(1,1,"valid"))
+    .expect(s.reply=="not-approved" and s.mmsAttempts==0 and s.memory.binding==0 and s.files==0 and s.mmsBox==0)
+    .then(request(2,2,"bad-bytes")).expect(s.reply=="not-approved" and s.disk.binding==0)
+    .then(controls("locked",true)).then(request(1,1,"valid")).expect(s.reply=="unavailable" and s.mmsAttempts==0)
+
+  run conflictingAttachmentCannotClaimAnotherReceiptTest = initWith(false).then(composeTogether(1,2))
     .expect(s.reply=="invalid" and s.replyBinding==0 and s.mmsAttempts==1 and s.files==1)
-    .then(request(2,2,"valid")).expect(s.reply=="invalid")
+    .then(compose(2,2,"valid","complete")).expect(s.reply=="invalid")
 
-  run mmsCannotClaimSmsWireReceiptTest = initWith(false).then(request(1,3,"valid")).then(request(2,1,"valid"))
-    .then(approve(1,"complete")).then(approve(2,"complete"))
+  run mmsCannotClaimSmsWireReceiptTest = initWith(false).then(composeTogether(3,1))
     .expect(s.reply=="invalid" and s.replyBinding==0 and s.smsAttempts==1 and s.mmsAttempts==0 and s.files==0)
     .then(readback(2,true)).expect(s.reply=="not-found")
 
-  run retiredMmsRetainsExactBindingTest = reviewedA.then(request(2,1,"valid")).then(approve(1,"complete"))
-    .then(callback("complete",true)).then(prune).then(approve(2,"complete"))
+  run retiredMmsRetainsExactBindingTest = composedA.then(callback("complete",true)).then(prune)
+    .then(compose(2,1,"valid","complete"))
     .expect(s.reply=="expired" and s.tombstoneBinding==1 and s.files==0 and s.mmsAttempts==1)
-    .then(restart(false)).then(request(2,2,"valid")).expect(s.reply=="invalid")
+    .then(restart(false)).then(compose(2,2,"valid","complete")).expect(s.reply=="invalid")
 
-  run retainedIdRejectsDifferentBodyRecipientsAndSimTest = handedA
+  run retainedIdRejectsDifferentBodyRecipientsAndSimTest = composedA
     .then(preflightConflict(2,"body")).expect(s.reply=="invalid")
     .then(preflightConflict(2,"recipients")).expect(s.reply=="invalid")
     .then(preflightConflict(2,"sim")).expect(s.reply=="invalid" and s.mmsAttempts==1 and s.memory.binding==1)
 
-  run stagedSmsRejectsMmsReceiptTest = reviewedA.then(request(2,3,"valid")).then(approve(1,"complete"))
-    .then(approve(2,"complete")).expect(s.reply=="invalid" and s.mmsAttempts==1 and s.smsAttempts==0)
+  run stagedSmsRejectsMmsReceiptTest = initWith(false).then(composeTogether(1,3))
+    .expect(s.reply=="invalid" and s.mmsAttempts==1 and s.smsAttempts==0)
 
-  run exactMmsReviewRetriesOnceTest = reviewedA.then(request(2,1,"valid")).then(approve(1,"complete"))
-    .then(approve(2,"complete")).expect(s.reply=="submitted" and s.replyBinding==1 and s.mmsAttempts==1 and s.files==1)
+  run exactComposerRetryUsesFirstReceiptTest = initWith(false).then(composeTogether(1,1))
+    .expect(s.reply=="submitted" and s.replyBinding==1 and s.mmsAttempts==1 and s.files==1)
 
-  run invalidAttachmentDoesNotOpenReviewTest = initWith(false).then(request(1,1,"bad-bytes"))
-    .expect(s.reply=="invalid" and s.reviewA.binding==0 and s.mmsAttempts==0)
+  run invalidAttachmentIsNeverJournaledTest = initWith(false).then(compose(1,1,"bad-bytes","complete"))
+    .expect(s.reply=="invalid" and s.memory.binding==0 and s.mmsAttempts==0)
 
-  run carrierFailureOverridesAndroidSuccessTest = handedA.then(callback("bad-uri",true)).then(callback("foreign-kind",true))
+  run carrierFailureOverridesAndroidSuccessTest = composedA.then(callback("bad-uri",true)).then(callback("foreign-kind",true))
     .expect(s.files==1 and s.memory.status=="submitted").then(callback("failure-conf",true))
     .expect(s.memory.status=="failed" and s.files==0 and s.mmsBox==5)
 
-  run providerChildRefusalKeepsRadioAndDeletesPartialRowTest = reviewedA.then(controls("provider",false))
-    .then(approve(1,"complete")).expect(s.deletedMms==1 and s.mmsAttempts==1 and not(s.disk.row))
+  run providerChildRefusalKeepsRadioAndDeletesPartialRowTest = initWith(false).then(controls("provider",false))
+    .then(compose(1,1,"valid","complete")).expect(s.deletedMms==1 and s.mmsAttempts==1 and not(s.disk.row))
     .then(callback("complete",true)).expect(s.memory.status=="sent" and s.mmsBox==0 and s.files==0)
 
-  run failedCallbackWriteDeletesPduButLosesEvidenceOnRestartTest = handedA.then(callback("before",true))
+  run failedCallbackWriteDeletesPduButLosesEvidenceOnRestartTest = composedA.then(callback("before",true))
     .expect(s.files==0 and s.memory.status=="sent" and s.disk.status=="submitted" and s.mmsBox==4)
     .then(restart(false)).expect(s.memory.status=="submitted" and s.mmsAttempts==1)
 
-  run interruptedHandoffRecoversWithoutResendTest = reviewedA.then(approve(1,"end-before")).then(restart(false))
-    .expect(s.disk.status=="unknown" and s.files==1).then(request(2,1,"valid"))
+  run interruptedHandoffRecoversWithoutResendTest = initWith(false).then(compose(1,1,"valid","end-before")).then(restart(false))
+    .expect(s.disk.status=="unknown" and s.files==1).then(compose(2,1,"valid","complete"))
     .expect(s.reply=="unknown" and s.mmsAttempts==1).then(callback("complete",true))
     .expect(s.disk.status=="sent" and s.files==0)
 
-  run bothMmsBridgesReceiveAndRestartRetiresTheirCountersTest = handedA.then(callback("complete",true))
+  run bothMmsBridgesReceiveAndRestartRetiresTheirCountersTest = composedA.then(callback("complete",true))
     .expect(safety and s.events.listeners==actors and s.events.deliveries==Map(1->1,2->1))
     .then(restart(false)).expect(safety and s.events==noEvents)
 
-  run lockedMmsCallbackCannotPublishOrReplayALateNoticeTest = handedA.then(controls("locked",true))
+  run lockedMmsCallbackCannotPublishOrReplayALateNoticeTest = composedA.then(controls("locked",true))
     .then(callback("complete",true)).expect(s.events==noEvents)
     .then(controls("locked",false)).then(callback("complete",true))
     .expect(safety and s.events==noEvents)

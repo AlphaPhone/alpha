@@ -4,15 +4,24 @@
 /// proposals of one message is a sequence of focused proposals sharing `pass`, `passEffects`,
 /// `browserUsed` and the Review-first preference. Transport, durable journal and executor are
 /// observed ports, not simulated providers.
+///
+/// A card reaches approval by one of two routes. `live`: the card the current foreground listing
+/// (or a workflow run) admitted, approved through the live client. `recovered`: a card rebuilt
+/// from a fresh pending listing after the conversation reopened (agent-adapter `recovered` cards,
+/// approved through `connectionController.approvePendingAction`). A recovered card is bound to the
+/// agent session that listed it; a tap re-lists under the current screen and refuses when that
+/// session changed. Both routes end in the same coordinator `approve` over the same journal.
 module DeviceActionReview {
   /// Dispatch-time facts, frozen when the executor port is entered.
-  type Entry = {authority: str, expired: bool, current: bool, sensitive: bool, asks: bool, bound: bool}
+  type Entry = {authority: str, expired: bool, current: bool, sensitive: bool, asks: bool, bound: bool,
+    route: str, sameSession: bool}
   type State = {card: bool, busy: bool, journal: str, identity: bool,
     current: bool, sensitive: bool, expired: bool, aborted: bool,
     reviewFirst: str, bound: bool, op: str, workflow: bool, grounded: bool,
     browserUsed: bool, pass: int, passOpen: bool, passEffects: int, browserAuto: int,
     authority: str, decisions: int, claims: int, dispatches: int, receipts: int,
-    status: str, returned: str, synced: bool, admitted: bool, at: Entry}
+    status: str, returned: str, synced: bool, admitted: bool, at: Entry,
+    route: str, session: int, cardSession: int}
   var s: State
   /// Operation classes. `open_settings` is `open_view` with the Settings view: navigation, never a
   /// settings write. `settings_write` stands for any operation that would change a setting; the
@@ -22,13 +31,15 @@ module DeviceActionReview {
   pure val reviewedOps = Set("create_reminder", "notes_read")
   pure val ops = directOps.union(reviewedOps).union(Set("settings_write"))
   pure val preferences = Set("off", "on", "unreadable")
-  pure val benign: Entry = {authority: "none", expired: false, current: true, sensitive: false, asks: false, bound: true}
+  pure val benign: Entry = {authority: "none", expired: false, current: true, sensitive: false, asks: false, bound: true,
+    route: "none", sameSession: true}
   action init = s' = {card: false, busy: false, journal: "empty", identity: true,
     current: true, sensitive: false, expired: false, aborted: false,
     reviewFirst: "off", bound: true, op: "open_view", workflow: false, grounded: false,
     browserUsed: false, pass: 0, passOpen: true, passEffects: 0, browserAuto: 0,
     authority: "none", decisions: 0, claims: 0, dispatches: 0, receipts: 0,
-    status: "none", returned: "none", synced: false, admitted: false, at: benign}
+    status: "none", returned: "none", synced: false, admitted: false, at: benign,
+    route: "none", session: 0, cardSession: 0}
   val valid = s.current and not(s.sensitive or s.expired or s.aborted)
   /// An unreadable preference is treated as on: the read fails closed.
   val asks = s.reviewFirst != "off"
@@ -46,7 +57,8 @@ module DeviceActionReview {
     s' = {...s, op: op, workflow: workflow, bound: bound, grounded: grounded,
       card: listed, journal: "empty", identity: true, current: true, expired: false,
       authority: "none", decisions: 0, claims: 0, dispatches: 0, receipts: 0,
-      status: "none", returned: "none", synced: false, admitted: false, at: benign}}
+      status: "none", returned: "none", synced: false, admitted: false, at: benign,
+      route: if (listed) "live" else "none", cardSession: s.session}}
   /// A new direct pass (`performRequested` call); another message forgets the Browser attempt.
   action startPass(sameMessage: bool): bool = all {not(s.busy),
     s' = {...s, pass: 0, passOpen: true, passEffects: 0,
@@ -56,16 +68,28 @@ module DeviceActionReview {
   /// The foreground listing never admits a workflow step or an operation outside the contract.
   action review(visible: bool): bool = all {not(s.busy),
     visible implies canList,
-    s' = {...s, card: visible, current: true}}
+    s' = {...s, card: visible, current: true, route: "live", cardSession: s.session}}
   /// A workflow step is admitted only by its own run's review (not driven by the adapter).
   action reviewWorkflow = all {not(s.busy), s.workflow, parses,
-    s' = {...s, card: true, current: true}}
+    s' = {...s, card: true, current: true, route: "live", cardSession: s.session}}
+  /// Recovery after the conversation reopened: the pending listing is read again under the
+  /// current screen. It lists no expired proposal, nothing on a protected screen, and no workflow
+  /// step or operation outside the contract; the card it builds is bound to this agent session.
+  val canRecover = canList and not(s.sensitive) and not(s.expired)
+  action recover = all {canRecover,
+    s' = {...s, card: true, current: true, route: "recovered", cardSession: s.session}}
+  /// The selected agent (its session) changes while no approval is in flight. An in-flight
+  /// approval is retired by the host's AbortSignal (`abort`), not here. One change is enough.
+  action changeAgent = all {not(s.busy), s.session < 1, s' = {...s, session: s.session + 1}}
   action restart = all {not(s.busy), s' = {...s, card: false}}
   action changeContext = all {not(s.busy), s' = {...s, current: false}}
   action sensitive = all {not(s.busy), s' = {...s, sensitive: true, current: false}}
   action expire = s' = {...s, expired: true}
   action abort = s' = {...s, aborted: true}
-  val canApprove = s.card and not(s.busy) and valid
+  /// A recovered card is approved only under the session that listed it ("The agent changed.
+  /// Review this action again."); the approval re-lists, so an expired proposal is not found.
+  val sameSession = s.cardSession == s.session
+  val canApprove = s.card and not(s.busy) and valid and (s.route == "recovered" implies sameSession)
   /// Admission of one proposal by the direct pass, with no card tap.
   val canDirect = canApprove and not(asks) and s.bound and eligible and s.passOpen and s.pass < 4
   val canList = not(s.busy) and parses and not(s.workflow)
@@ -89,7 +113,8 @@ module DeviceActionReview {
   action dispatch = all {s.busy, s.journal == "applying", s.identity, valid,
     s.dispatches == 0, s.authority.in(Set("review", "request")),
     s' = {...s, dispatches: 1,
-      at: {authority: s.authority, expired: s.expired, current: s.current, sensitive: s.sensitive, asks: asks, bound: s.bound},
+      at: {authority: s.authority, expired: s.expired, current: s.current, sensitive: s.sensitive, asks: asks, bound: s.bound,
+        route: s.route, sameSession: sameSession},
       passEffects: s.passEffects + (if (s.authority == "request") 1 else 0),
       browserAuto: s.browserAuto +
         (if (s.authority == "request" and s.op == "browser_navigate") 1 else 0),
@@ -107,9 +132,12 @@ module DeviceActionReview {
     passOpen: s.passOpen and (s.authority != "request" or (result == "succeeded" and not(s.aborted)))}
   action finish(synced: bool): bool = all {s.busy, s.journal == "terminal",
     s' = {...leave(s.status), synced: synced}}
-  /// An unclaimed reservation may survive failure; it is not evidence of an effect.
-  /// The public call still answers "unknown" (see UnknownOnlyAfterDispatch).
-  action abandon = all {s.busy, s' = leave("unknown")}
+  /// A failure outside the executor's own result. An unclaimed reservation may survive it; it is
+  /// not evidence of an effect, so the call answers "failed" unless this attempt dispatched.
+  action abandon = all {s.busy, s' = leave(if (s.dispatches == 1) "unknown" else "failed")}
+  /// The journal already holds an applying or finished attempt for this proposal: it is not
+  /// repeated, and the call cannot say what that earlier attempt did.
+  action duplicate = all {s.busy, s.journal.in(Set("applying", "terminal")), s' = leave("unknown")}
   action step = any {
     prefer("off"), prefer("on"), prefer("unreadable"),
     propose("open_view", false, true, false, false), propose("open_view", false, false, false, false),
@@ -121,10 +149,10 @@ module DeviceActionReview {
     propose("files_open", false, true, false, false), propose("create_reminder", false, true, false, false),
     propose("notes_read", true, true, false, false), propose("settings_write", false, true, false, false),
     startPass(true), startPass(false),
-    review(true), review(false), reviewWorkflow, restart, changeContext, sensitive, expire, abort,
+    review(true), review(false), reviewWorkflow, recover, changeAgent, restart, changeContext, sensitive, expire, abort,
     begin(true), begin(false), refused, directRefused, reserve(true), reserve(false), existing,
     decide, claim, applying, dispatch, settle("succeeded"), settle("failed"), settle("unknown"),
-    upload, finish(true), finish(false), abandon, s' = s}
+    upload, finish(true), finish(false), abandon, duplicate, s' = s}
 
   val effect = s.dispatches == 1
   /// The authority under which this proposal's one effect entered the executor. A later
@@ -157,6 +185,17 @@ module DeviceActionReview {
   val ReceiptAfterTerminalJournal = s.receipts > 0 implies s.journal == "terminal"
   /// The durable journal records "unknown" only for an attempt that entered the executor.
   val UnknownJournalOnlyAfterDispatch = s.status == "unknown" implies effect
+  /// The public call answers "unknown" only for an attempt that entered the executor, or for a
+  /// proposal whose journal already held an applying or finished attempt (app review AGENT-06).
+  val UnknownOnlyAfterDispatch = s.returned == "unknown" implies
+    (effect or s.journal.in(Set("applying", "terminal")))
+  /// Reachable: a failure before dispatch settles the public call as "failed".
+  val FailedWithoutDispatch = s.returned == "failed" and not(effect) and not(s.busy)
+  /// A recovered card's effect ran under the agent session that listed it (app review QUINT-02).
+  val RecoveredApprovalNeedsSameSession = (effect and s.at.route == "recovered" and s.at.authority == "review")
+    implies s.at.sameSession
+  /// ... and the proposal had not expired when it entered the executor.
+  val RecoveredApprovalNeedsUnexpired = (effect and s.at.route == "recovered") implies not(s.at.expired)
   val FiniteOutcome = s.status.in(Set("none", "succeeded", "failed", "unknown")) and
     s.returned.in(Set("none", "succeeded", "failed", "unknown"))
   val safety = DirectOnlyAllowlisted and DirectRunNeedsCurrentRequest and AtMostFourDirectPerMessage and
@@ -164,22 +203,18 @@ module DeviceActionReview {
     ExpiredNeverDispatches and ContextChangeRetiresProposal and SensitiveNeverDispatches and
     SettingsIsNavigationOnly and WorkflowStepsNeverDirect and OneAutoOpenPerMessage and
     AuthorizedEffect and ConsumedBeforeAwait and ReceiptAfterTerminalJournal and
-    UnknownJournalOnlyAfterDispatch and FiniteOutcome
-
-  /// KNOWN DIVERGENCE (app review AGENT-06). The intended rule is false of the pinned coordinator:
-  /// a failure before any dispatch (reservation, decision or claim) still answers "unknown" from
-  /// the public call. It is not part of `safety`; the manifest registers it under
-  /// `expectedViolations` and requires the counterexample `UnknownWithoutDispatch` to be reachable.
-  val UnknownOnlyAfterDispatch = s.returned == "unknown" implies effect
-  val UnknownWithoutDispatch = s.returned == "unknown" and not(effect) and not(s.busy)
+    UnknownJournalOnlyAfterDispatch and UnknownOnlyAfterDispatch and RecoveredApprovalNeedsSameSession and
+    RecoveredApprovalNeedsUnexpired and FiniteOutcome
+  /// An effect approved from a recovered card; `recoveredApprovalTest` reaches it.
+  val RecoveredEffect = effect and s.at.route == "recovered"
 
   run reviewedEffectTest = init.then(review(true)).then(begin(false)).then(reserve(true))
     .then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded"))
     .then(upload).then(finish(true)).expect(safety and s.returned == "succeeded")
   run failedUploadDoesNotReplayTest = init.then(review(true)).then(begin(false)).then(reserve(true))
     .then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded"))
-    .then(upload).then(finish(false)).then(review(true)).then(begin(false)).then(existing).then(abandon)
-    .expect(safety and s.dispatches == 1 and not(s.synced))
+    .then(upload).then(finish(false)).then(review(true)).then(begin(false)).then(existing).then(duplicate)
+    .expect(safety and s.dispatches == 1 and not(s.synced) and s.returned == "unknown")
   run abortBeforeEffectTest = init.then(review(true)).then(begin(false)).then(reserve(true))
     .then(decide).then(claim).then(applying).then(abort).then(settle("failed"))
     .then(upload).then(finish(false)).expect(safety and s.dispatches == 0)
@@ -197,11 +232,11 @@ module DeviceActionReview {
   run reviewedTypeNeverDirectTest = init.then(propose("create_reminder", false, true, false, false))
     .then(review(true)).then(directRefused).expect(safety and s.card and not(canDirect))
   run changedJournalIdentityTest = init.then(review(true)).then(begin(false)).then(reserve(false)).then(abandon)
-    .expect(safety and s.dispatches == 0 and s.returned == "unknown")
-  /// The registered divergence: nothing was dispatched, yet the call answers "unknown".
-  run unknownWithoutDispatchTest = init.then(review(true)).then(begin(true)).then(reserve(true))
+    .expect(safety and s.dispatches == 0 and s.returned == "failed")
+  /// A failure before dispatch (here the decision request) answers "failed" and ends the pass.
+  run failedBeforeDispatchTest = init.then(review(true)).then(begin(true)).then(reserve(true))
     .then(decide).then(abandon)
-    .expect(safety and UnknownWithoutDispatch and not(UnknownOnlyAfterDispatch) and not(s.passOpen))
+    .expect(safety and s.dispatches == 0 and s.returned == "failed" and not(s.passOpen))
   run directOne = review(true).then(begin(true)).then(reserve(true)).then(decide).then(claim)
     .then(applying).then(dispatch).then(settle("succeeded")).then(upload).then(finish(true))
   run nextNote = propose("create_note", false, true, false, true)
@@ -227,4 +262,21 @@ module DeviceActionReview {
   run expiredTest = init.then(review(true)).then(begin(false)).then(reserve(true)).then(decide)
     .then(claim).then(applying).then(expire).then(settle("failed")).then(upload).then(finish(true))
     .expect(safety and s.dispatches == 0 and not(valid))
+  /// QUINT-02: the conversation reopens, the card is rebuilt from a fresh listing and approved.
+  run recoveredApprovalTest = init.then(review(true)).then(restart).then(recover).then(begin(false))
+    .then(reserve(true)).then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded"))
+    .then(upload).then(finish(true))
+    .expect(safety and RecoveredEffect and s.at.sameSession and s.returned == "succeeded")
+  /// A recovered card from another agent session is refused before any journal work.
+  run recoveredAfterAgentChangeTest = init.then(review(true)).then(restart).then(recover).then(changeAgent)
+    .then(refused).expect(safety and s.card and not(canApprove) and s.journal == "empty" and s.dispatches == 0)
+  /// An expired proposal is not listed again, so it cannot be recovered.
+  run expiredNotRecoveredTest = init.then(review(true)).then(restart).then(expire)
+    .expect(safety and not(canRecover) and not(canApprove))
+  /// One effect per proposal across both routes: a recovered approval of an applied proposal is
+  /// answered from the journal and not repeated.
+  run recoveredAfterLiveEffectTest = init.then(review(true)).then(begin(false)).then(reserve(true))
+    .then(decide).then(claim).then(applying).then(dispatch).then(settle("succeeded")).then(upload)
+    .then(finish(false)).then(restart).then(recover).then(begin(false)).then(existing).then(duplicate)
+    .expect(safety and s.dispatches == 1 and s.at.route == "live" and s.returned == "unknown")
 }

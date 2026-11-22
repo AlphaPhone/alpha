@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * Alpha's access to the package-private glue of the shared reviewed SMS/MMS core
- * (plugin-native-messages). Alpha owns the screens, dialogs and notices of its default-SMS-app
+ * (plugin-native-messages). Alpha owns the screens and notices of its default-SMS-app
  * components and of its telephony bridge ({@code ai.alphacompute.alphaphone.AlphaTelephonyBase},
  * {@code AlphaSmsComposeActivity}, {@code AlphaSmsDeliverReceiver}, {@code AlphaMmsResultReceiver},
  * {@code AlphaMessageNotices}); the journal, dispatch, MMS file and read-marker logic stays shared and
@@ -23,23 +23,24 @@ import java.util.List;
 public final class AlphaTelephonyAccess {
  private AlphaTelephonyAccess() {}
 
- // ---- Reviewed sends (SmsTelephony, SmsSendJournal) --------------------------------------------
- // These four were reachable only inside the shared package, behind the shared native review. Each
- // must run only after the owner pressed Send on Alpha's native review (AlphaTelephonyReview in
- // AlphaTelephonyBase, or AlphaSmsComposeActivity) with its unlocked-phone check, or to record that
- // review's cancel or denial. test/native-ui-self-contained.test.mjs admits calls from those two
- // files only.
+ // ---- Confirmed sends (SmsTelephony, SmsSendJournal) -------------------------------------------
+ // These four were reachable only inside the shared package, behind the shared native review. Alpha
+ // shows no such dialog: each must run only for a send the owner already confirmed, either an agent's
+ // card the owner approved in the chat, bound to its journal entry by AlphaApprovedSms in
+ // AlphaTelephonyBase, or the owner's Send in the Messages composer (AlphaTelephonyPlugin's guard, or
+ // AlphaSmsComposeActivity), with the unlocked-phone check, or to record a refusal or cancellation
+ // before dispatch. test/native-ui-self-contained.test.mjs admits calls from those two files only.
 
  /** The platform SmsManager of one subscription. */
  public static SmsManager manager(Context context, int subscriptionId) { return SmsTelephony.manager(context, subscriptionId); }
 
- /** Journals and dispatches a reviewed SMS ({@link SmsTelephony#dispatch}). Only after an owner-confirmed native review. */
+ /** Journals and dispatches a confirmed SMS ({@link SmsTelephony#dispatch}). Only for an owner-confirmed send. */
  public static SmsSendJournal.Record dispatch(Context context, SmsTelephonyConfiguration config, SmsSendJournal journal, String operationId,
    String[] recipients, String body, int subscriptionId, ArrayList<String> parts, SmsTelephony.DispatchGuard guard) throws IOException {
   return SmsTelephony.dispatch(context, config, journal, operationId, recipients, body, subscriptionId, parts, guard);
  }
 
- /** Journals and dispatches a reviewed MMS ({@link SmsTelephony#dispatchMms}). Only after an owner-confirmed native review. */
+ /** Journals and dispatches a confirmed MMS ({@link SmsTelephony#dispatchMms}). Only for an owner-confirmed send. */
  public static SmsSendJournal.Record dispatchMms(Context context, SmsTelephonyConfiguration config, SmsSendJournal journal, String operationId,
    String[] recipients, String body, SmsSendJournal.Attachment[] attachments, byte[] pdu, List<MmsPdu.Part> parts, int subscriptionId,
    SmsTelephony.DispatchGuard guard) throws IOException {
@@ -52,7 +53,7 @@ public final class AlphaTelephonyAccess {
  /** The PDU transaction ID of a reviewed MMS ({@link SmsTelephony#mmsTransaction}). */
  public static String mmsTransaction(String operationId) { return SmsTelephony.mmsTransaction(operationId); }
 
- /** Records a terminal decision (cancelled or denied) before any dispatch ({@link SmsSendJournal#decide}). Only for the native review's own outcome. */
+ /** Records a terminal decision (cancelled or denied) before any dispatch ({@link SmsSendJournal#decide}). Only for a confirmed send that did not dispatch. */
  public static SmsSendJournal.Record decide(SmsSendJournal journal, String operationId, String[] recipients, String body, int subscriptionId,
    String decision, long now, long boot) throws IOException {
   return journal.decide(operationId, recipients, body, subscriptionId, decision, now, boot);

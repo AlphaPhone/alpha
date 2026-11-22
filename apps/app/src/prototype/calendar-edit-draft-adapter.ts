@@ -5,7 +5,6 @@ import {assistantDraftStore} from '../runtime/assistant-draft-store';
 import {encodeCalendarEdit,decodeCalendarEdit,snapshotCalendarEdit,calendarEditIdentity} from '../runtime/calendar-edit-draft';
 import {openDomainRecovery} from '../browser/domain-recovery';
 import {browserDevProfile} from '../browser/dev-profile';
-import {deviceTimeZone} from '../lib/civil-date';
 import {calendarFormDayShift} from './calendar-form-draft-adapter';
 type Bag=Record<string,any>;
 /** Retained existing-item forms use the existing transactional text-draft primitive. */
@@ -13,22 +12,22 @@ export function installCalendarEditDraftAdapter(Component:any,views:Bag,options:
  const enabled=(shell:any)=>options.active?.(shell)??true;
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount,render=views.calendar.render;
  let owner:any;
- const draftBinding=JSON.stringify(['calendar-inline-edit-form',browserDevProfile?'development':'app']);
  p.componentDidMount=function(){
   mount.call(this);owner=this;this.calendarEditDraftText='';
   this.calendarEditDraft=new AssistantDraftController(async binding=>{const store=await assistantDraftStore(binding);return {...store,read:async()=>{const row=await store.read();if(row?.text)decodeCalendarEdit(row.text);return row;},save:async(expected,text)=>{if(text)decodeCalendarEdit(text);return store.save(expected,text);}};},()=>this.calendarEditDraftText,text=>{
    this.calendarEditDraftText=text;
-   if(this.calendarEditDraftRestore&&text){const restored=decodeCalendarEdit(text);this.calendarEditDraftAnchor=new Date();this.calendarEditDraftIdentity=calendarEditIdentity(restored.form);this.vset('calendar',{form:restored.form,open:null,month:null});if(restored.zone!==deviceTimeZone())this.toast('Time zone changed');}
+   if(this.calendarEditDraftRestore&&text){const restored=decodeCalendarEdit(text);this.calendarEditDraftAnchor=new Date();this.calendarEditDraftIdentity=calendarEditIdentity(restored.form);this.vset('calendar',{form:restored.form,open:null,month:null});if(restored.zone!==Intl.DateTimeFormat().resolvedOptions().timeZone)this.toast('Time zone changed');}
   },()=>{if(this.live)this.vset('calendar',{});});
-  if(enabled(this)){this.calendarEditDraftBound=true;void this.calendarEditDraft.open(draftBinding);}
+  if(enabled(this)){this.calendarEditDraftBound=true;void this.calendarEditDraft.open(JSON.stringify(['calendar-inline-edit-form',browserDevProfile?'development':'app']));}
  };
  p.componentDidUpdate=function(previous:Bag){
-  update.call(this,previous);if(!enabled(this))return;if(!this.calendarEditDraftBound){this.calendarEditDraftBound=true;void this.calendarEditDraft.open(draftBinding);}const form=this.vget('calendar').form;
+  update.call(this,previous);if(!enabled(this))return;if(!this.calendarEditDraftBound){this.calendarEditDraftBound=true;void this.calendarEditDraft.open(JSON.stringify(['calendar-inline-edit-form',browserDevProfile?'development':'app']));}const form=this.vget('calendar').form;
   // A closed editor keeps no anchor: the same unchanged item opened again on a later day is a
   // fresh form whose day already counts from today.
   if(!form?.id||!form.alphaCalendarId&&!form.alphaReminderId){this.calendarEditDraftIdentity=undefined;return;}
   if(this.calendarEditDraftIdentity!==calendarEditIdentity(form)){this.calendarEditDraftIdentity=calendarEditIdentity(form);this.calendarEditDraftAnchor=new Date();}
-  const today=new Date(),shift=calendarFormDayShift(this.calendarEditDraftAnchor as Date,today);
+  const today=new Date(),anchor=this.calendarEditDraftAnchor as Date;
+  const shift=calendarFormDayShift(anchor,today);
   if(shift){this.calendarEditDraftAnchor=today;this.vset('calendar',{form:{...form,off:form.off+shift,...(form.reminderEditSchedule?{reminderEditSchedule:[form.reminderEditSchedule[0]+shift,...form.reminderEditSchedule.slice(1)]}:{})}});return;}
   try{const text=encodeCalendarEdit(form,this.calendarEditDraftAnchor);const wasInvalid=this.calendarEditFormValidationError;this.calendarEditFormValidationError=false;if(wasInvalid)this.vset('calendar',{});if(text===this.calendarEditDraftSuppressed)return;this.calendarEditDraftText=text;this.calendarEditDraft?.edit(text);}catch{if(!this.calendarEditFormValidationError){this.calendarEditFormValidationError=true;this.vset('calendar',{});}}
  };
@@ -52,10 +51,10 @@ export function installCalendarEditDraftAdapter(Component:any,views:Bag,options:
   out.editDraftConflict=active&&draft.conflict;
   out.editDraftError=active&&draft.error;out.editDraftListError=!state.form&&draft.error;
   out.editDraftSavedTitle=(()=>{try{return decodeCalendarEdit(draft.savedText).form.title||'Untitled event';}catch{return 'Unavailable';}})();
-  const restore=(saved=false)=>{try{shell.calendarEditDraftRestore=true;if(saved)controller.restoreSaved();else{const restored=decodeCalendarEdit(shell.calendarEditDraftText);shell.calendarEditDraftAnchor=new Date();shell.calendarEditDraftIdentity=calendarEditIdentity(restored.form);api.set({form:restored.form,open:null,month:null});if(restored.zone!==deviceTimeZone())api.toast('Time zone changed');}}catch{api.toast('Can’t restore');}finally{shell.calendarEditDraftRestore=false;}};
+  const restore=(saved=false)=>{try{shell.calendarEditDraftRestore=true;if(saved)controller.restoreSaved();else{const restored=decodeCalendarEdit(shell.calendarEditDraftText);shell.calendarEditDraftAnchor=new Date();shell.calendarEditDraftIdentity=calendarEditIdentity(restored.form);api.set({form:restored.form,open:null,month:null});if(restored.zone!==Intl.DateTimeFormat().resolvedOptions().timeZone)api.toast('Time zone changed');}}catch{api.toast('Can’t restore');}finally{shell.calendarEditDraftRestore=false;}};
   out.discardEditDraft=async()=>{if(state.form)return;const text=shell.calendarEditDraftText,current=()=>owner===shell&&shell.live&&api.isActive()&&!shell.vget('calendar').form&&shell.calendarEditDraftText===text;if(!await confirmCalendarAction(shell,api,'Discard edits?','','Discard edits',current)||!current())return;void controller.consume(text,()=>owner===shell&&shell.live&&api.isActive()&&!shell.vget('calendar').form).catch(()=>{if(owner===shell&&shell.live&&api.isActive())api.toast('Draft changed');});};
   out.resumeEditDraft=()=>restore();out.restoreEditDraft=()=>restore(true);out.replaceEditDraft=()=>controller.keepCurrent();out.retryEditDraft=()=>controller.retry();
-  out.recoverEditDraft=()=>{const recovery=controller.recovery();if(!recovery)return;shell.calendarEditDraftRecovery?.abort();const abort=shell.calendarEditDraftRecovery=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,currentForm:shell.vget('calendar').form?snapshotCalendarEdit(shell.vget('calendar').form):shell.calendarEditDraftText})};},reset:recovery.reset},'calendar edits','Calendar edit recovery','Download first',abort.signal,Capacitor.getPlatform()==='android'?'device':'browser');};
+  out.recoverEditDraft=()=>{const recovery=controller.recovery();if(!recovery)return;shell.calendarEditDraftRecovery?.abort();const abort=shell.calendarEditDraftRecovery=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,currentForm:shell.vget('calendar').form?snapshotCalendarEdit(shell.vget('calendar').form):shell.calendarEditDraftText})};},reset:recovery.reset},'calendar edits','Calendar edit recovery','Download first',abort.signal,undefined,Capacitor.getPlatform()==='android'?'device':'browser');};
   if(out.ev?.edit){const edit=out.ev.edit;out.ev.edit=async()=>{const text=shell.calendarEditDraftText,open=state.open,current=()=>owner===shell&&shell.live&&api.isActive()&&shell.vget('calendar').open===open&&!shell.vget('calendar').form&&shell.calendarEditDraftText===text;if(text&&!await confirmCalendarAction(shell,api,'Replace edits?','','Replace edits',current))return;if(current())return edit();};}
   return out;
  };

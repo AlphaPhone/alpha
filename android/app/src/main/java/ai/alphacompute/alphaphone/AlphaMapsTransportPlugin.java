@@ -41,6 +41,12 @@ public final class AlphaMapsTransportPlugin extends Plugin {
   try{result.put("active",session!=null&&AlphaNavigationService.update(getContext(),session,text(call,"title"),text(call,"text"),navigationStops));}catch(RuntimeException unavailable){result.put("active",false);}
   call.resolve(result);
  }
+ /** Arrival while Maps is off screen: a one-time notice for this bridge's own session, before its Stop. */
+ @PluginMethod public void navigationArrived(PluginCall call){
+  JSObject result=new JSObject();
+  try{result.put("shown",!destroyed&&AlphaNavigationService.arrived(getContext(),navigationStops,text(call,"title"),text(call,"text")));}catch(RuntimeException unavailable){result.put("shown",false);}
+  call.resolve(result);
+ }
  @PluginMethod public void stopNavigation(PluginCall call){
   String session=call.getString("sessionId");JSObject result=new JSObject();
   result.put("stopped",session!=null&&AlphaNavigationService.stop(getContext(),session,navigationStops,"app"));call.resolve(result);

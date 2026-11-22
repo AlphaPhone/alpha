@@ -30,7 +30,7 @@ const operations=f=>f.posts.map(post=>post.operation);
 
 /** The shared sync-control contract in miniature: expected-revision CAS, (key, body) replay, select then resume. */
 async function agent({control={},sources=[source(GRANT,OWNER,{primary:true}),source(GRANT,'team',{accessRole:'writer',summary:'Team'}),source(GRANT,'holidays',{primary:false,accessRole:'reader',summary:'Holidays'})],ownerId='owner'}={}){
- const f={active:true,draft:false,control:{revision:0,paused:true,destination:null,pendingDispatch:null,...control},sources,posts:[],attempts:[],reads:0,links:[],receipts:new Map(),lose:null,heldFeed:null,onCalendars:null,afterPost:null};
+ const f={active:true,draft:false,fingerprint:'same',control:{revision:0,paused:true,destination:null,pendingDispatch:null,...control},sources,posts:[],attempts:[],reads:0,links:[],receipts:new Map(),lose:null,heldFeed:null,onCalendars:null,afterPost:null};
  const port={identity:{origin:'https://calendar.example',ownerId,agentId:'agent'},sessionId:'session',scope:'owner',current:()=>f.active,request:async(path,method,body)=>{
   assertAppRecordRequestAllowed(path,method,body);
   if(method==='GET')f.reads++;
@@ -55,7 +55,7 @@ async function agent({control={},sources=[source(GRANT,OWNER,{primary:true}),sou
   if(f.lose==='after'){f.lose=null;throw Error('Network connection was lost');}
   return reply;
  }};
- f.calendar=new AgentCalendar(()=>port);
+ f.calendar=new AgentCalendar(()=>port,{capture:async()=>({fingerprint:f.fingerprint,present:false,readable:true,pending:false,records:[]}),retainedReadOnly:async()=>true});
  await f.calendar.refresh({});assert.equal(f.calendar.state.status,'ready');f.reads=0;
  f.scope={calendar:f.calendar,current:()=>f.active,canChange:()=>!f.draft};
  f.link=(accounts=[account(OWNER,WRITE)],signal=new AbortController().signal)=>calendarLink.linkGoogleCalendar(f.scope,accounts,signal);
@@ -175,7 +175,10 @@ test('a changeSync check that fails before its control write is not finished and
  const f=await agent();let lists=0;f.onCalendars=()=>{if(++lists===2)f.sources[0].selectionVersion++;};
  const moved=await f.link();assert.equal(moved.outcome,'not-linked');
  assert.equal(moved.message,'Not synced · Calendar destination changed; review sync again');assert.deepEqual(f.attempts,[]);
- f.calendar.retire();
+ // The saved app calendar changes after the review: changeSync's preservation check refuses before the write.
+ const g=await agent();g.onCalendars=()=>{g.fingerprint='other';};
+ const kept=await g.link();assert.equal(kept.outcome,'not-linked');assert.match(kept.message,/^Not synced · Saved app calendar changed/);assert.deepEqual(g.attempts,[]);
+ f.calendar.retire();g.calendar.retire();
 });
 
 test('drafts, owner changes and cancellation stop before the next control write',async()=>{

@@ -82,28 +82,28 @@ public class DailyAppsInstrumentedTest {
   String title="Calendar reminder "+java.util.UUID.randomUUID();
   String reminderId=null;
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)) {
-   ready();evaluate(AppNavigation.request("Workflows"));uiWait(AppNavigation.selected("Workflows"));
-   String newAutomation="document.querySelector('button[aria-label=\"New automation\"]')";
-   uiWait(newAutomation);evaluate(newAutomation+".click()");
+   ready(scenario);evaluate(scenario,AppNavigation.request("Workflows"));uiWait(scenario,AppNavigation.selected("Workflows"));
+   String newAutomation="document.querySelector('button[aria-label=\"Add to Workflows\"]')";
+   uiWait(scenario,newAutomation);evaluate(scenario,newAutomation+".click()");
    String moreOptions="[...document.querySelectorAll('button.automation-more')].find(b=>b.textContent.trim()==='More options')";
    uiWait(moreOptions);evaluate("("+moreOptions+").click()");
    // The on-device reminder action works without an Agent Calendar connection.
-   String deviceReminder="[...document.querySelectorAll('button.workflow-choice')].find(b=>b.textContent.trim()==='Reminder on this phone')";
-   uiWait(deviceReminder);evaluate("("+deviceReminder+").click()");uiWait(AppNavigation.selected("Calendar"));
-   uiWait("document.querySelector('input[aria-label=Title]')");
-   evaluate("(()=>{const e=document.querySelector('input[aria-label=Title]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,"+JSONObject.quote(title)+");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
-   uiWait("document.querySelector('button[aria-label=Tomorrow]')");
-   evaluate("document.querySelector('button[aria-label=Tomorrow]').click()");
-   evaluate("document.querySelector('button[aria-label=\"Save event\"]').click()");
-   uiWait("!document.querySelector('button[aria-label=\"Save event\"]')");
-   begin("Capacitor.Plugins.DailyApps.listReminders()");
-   JSONArray rows=result().getJSONArray("reminders");
+   String deviceReminder="[...document.querySelectorAll('button.workflow-choice')].find(b=>b.textContent.trim()==='Phone reminder')";
+   uiWait(scenario,deviceReminder);evaluate(scenario,"("+deviceReminder+").click()");uiWait(scenario,AppNavigation.selected("Calendar"));
+   uiWait(scenario,"document.querySelector('input[aria-label=Title]')");
+   evaluate(scenario,"(()=>{const e=document.querySelector('input[aria-label=Title]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,"+JSONObject.quote(title)+");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+   uiWait(scenario,"document.querySelector('button[aria-label=Tomorrow]')");
+   evaluate(scenario,"document.querySelector('button[aria-label=Tomorrow]').click()");
+   evaluate(scenario,"document.querySelector('button[aria-label=\"Save event\"]').click()");
+   uiWait(scenario,"!document.querySelector('button[aria-label=\"Save event\"]')");
+   begin(scenario,"Capacitor.Plugins.DailyApps.listReminders()");
+   JSONArray rows=result(scenario).getJSONArray("reminders");
    for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(title.equals(row.getString("title"))){reminderId=row.getString("id");assertEquals("scheduled",row.getString("status"));assertTrue(row.getLong("at")>System.currentTimeMillis());}}
    assertNotNull("Real native record created from Calendar form",reminderId);
    // Saving returns to Calendar; select the record's civil day before opening it.
    long due=ReminderTestAccess.read(context,reminderId).getLong("dueAt");
-   evaluate("document.querySelector('button[aria-label=\"Month view\"]').click()");
-   evaluate("(()=>{const d=new Date("+due+");const now=new Date();if(d.getMonth()!==now.getMonth()||d.getFullYear()!==now.getFullYear())document.querySelector('button[aria-label=\"Next month\"]').click();})()");
+   evaluate(scenario,"document.querySelector('button[aria-label=\"Choose date\"]').click()");
+   evaluate(scenario,"(()=>{const d=new Date("+due+");const now=new Date();if(d.getMonth()!==now.getMonth()||d.getFullYear()!==now.getFullYear())document.querySelector('button[aria-label=\"Next month\"]').click();})()");
    String day="(()=>{const d=new Date("+due+");const label=d.toLocaleDateString('en-US',{weekday:'long'})+' '+d.toLocaleDateString('en-US',{month:'long'})+' '+d.getDate();return [...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')===label);})()";
    uiWait(day);evaluate("("+day+").click()");
    String selected="[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label').startsWith("+JSONObject.quote(title+", ")+"))";

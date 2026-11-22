@@ -207,6 +207,23 @@ export function digestZoneNote(
   if (reviewed === null || device === null || reviewed === device) return '';
   return `Runs at ${loop.spec.localTime} ${loop.spec.timeZone} time, not this device’s current time zone (${deviceZone}). Review the schedule to change it.`;
 }
+/**
+ * The time zones a schedule may use, as a pick list instead of typed IANA names. The chosen and device
+ * zones are always offered first, and UTC is kept where the runtime leaves it out of its list.
+ */
+export function digestZoneChoices(
+  chosen: string,
+  deviceZone: string,
+  supported?: readonly string[]
+): string[] {
+  // The runtime's own list is valid by definition and read once; it is not re-checked on every render.
+  const listed = supported ? supported.filter(validDigestZone) : (runtimeDigestZones ??= (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })());
+  return [...new Set([...[chosen, deviceZone].filter(zone => !!zone && validDigestZone(zone)), ...listed, 'UTC'])];
+}
+let runtimeDigestZones: readonly string[] | undefined;
+function validDigestZone(zone: string): boolean {
+  try { new Intl.DateTimeFormat('en', {timeZone: zone}).format(0); return true; } catch { return false; }
+}
 
 // ---------------------------------------------------------------------------
 // Retained brief

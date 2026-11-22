@@ -358,14 +358,14 @@
     ],
     "stateMapping": {
       "generation/requestGeneration/requestEpoch": "AlphaMapsDeviceNavigation.begin and route callback identity",
-      "locationGranted/fixFresh": "permission and bounded navigation fix freshness",
+      "locationGranted/fixFresh": "permission and bounded navigation fix freshness for route planning; the screen's Start does not wait on them",
       "route/previousRoute/guidance/rerouting": "active guidance, replacement route and failed-reroute preservation",
       "assistant/foreground": "assistant overlay and activity visibility independent of guidance"
     },
     "abstractions": [
       "Two route generations, two owners and boolean fix freshness summarize coordinate geometry and timestamps.",
       "Travel modes, polylines, route-distance calculations and detailed maneuver rendering remain stateless/runtime-tested transformations.",
-      "A route callback must retain its request generation and account epoch. Direct agent start requires separate opt-in."
+      "A route callback must retain its request generation and account epoch. An agent request never starts guidance; it shows the route and Start stays with the user."
     ],
     "path": "specs/quint/services/MapsNavigation.qnt",
     "module": "MapsNavigation",
@@ -376,7 +376,8 @@
       "waitingForLocationTest",
       "staleReplyTest",
       "assistantAndRerouteTest",
-      "accountRetirementTest"
+      "accountRetirementTest",
+      "startWithoutFreshFixTest"
     ],
     "invariants": [
       "GuidanceHasRoute",
@@ -426,7 +427,7 @@
       "Complementary manual-origin, guidance watch and screen-off readback scope. Failed reroutes follow the reviewed current repair and keep prior guidance. No complete implementation refinement or device acceptance is implied.",
       "Three route generations, two owners and boolean fix freshness summarize coordinate geometry and timestamps.",
       "Travel modes, polylines, route-distance calculations and detailed maneuver rendering remain stateless/runtime-tested transformations.",
-      "A route callback must retain its request generation and account epoch. Direct agent start requires separate opt-in.",
+      "A route callback must retain its request generation and account epoch. An agent request never starts guidance; it shows the route and Start stays with the user.",
       "The screen's Start needs a ready route only; guidance then waits for its first fix. A location-permission prompt that keeps a hidden Maps screen, arrival and the off-route notice are in NavigationProgress.",
       "Events that end guidance are drawn one time in four so sampled traces reach reroutes."
     ],
@@ -1469,6 +1470,8 @@
       "approvalDigestRejectedTest",
       "committedUnknownApprovalReplayTest",
       "otherOwnerDecisionRejectedTest",
+      "chatRunStartsPausedDefinitionWithoutReceiptTest",
+      "chatRunRemovedRejectedTest",
       "conflictingNativeTerminalFailsClosedTest"
     ],
     "invariants": [
@@ -1477,6 +1480,7 @@
       "NoProcessForUnadmittedRun",
       "TerminalNotRunning",
       "RecordedDecisionHasCanonicalReceipt",
+      "ChatRunHasNoOwnerReceipt",
       "TypeOK"
     ],
     "stateMapping": {
@@ -1492,7 +1496,8 @@
       "Actual PostgreSQL-compatible SQL and Drizzle queries run in single-process PGlite. Multi-host locking, deployment migrations and installed process supervision remain separate obligations.",
       "Worker result/control and canonical Smithers approval-store ports are controlled. No real external workflow effect, hosted grant, provider or device action is performed.",
       "Actual compiler and cron admission classify selected ready/missed/overlap schedules. Finite disposition inputs do not prove all time zones or clock instants.",
-      "Canonical approval is authoritative. A committed decision may survive a failed host transaction while the execution projection stays pending."
+      "Canonical approval is authoritative. A committed decision may survive a failed host transaction while the execution projection stays pending.",
+      "A chat-mode start (the agent's WORKFLOW run) carries no owner submission, version or idempotency key; each request is a new run and only the first is modeled. Whether the phone keeps this path is an open product decision."
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -1850,6 +1855,14 @@
       "delayedReplyKeepsOwnCommitTest",
       "firstEmptyClearAddsTrashTest",
       "repeatEmptyClearPreservesRevisionTest",
+      "erasedEntryCannotBeRestoredTest",
+      "restoreOfErasedNoteIsRefusedTest",
+      "erasedIdIsNeverReusedTest",
+      "activeNoteCannotBeErasedTest",
+      "staleEraseIsRefusedTest",
+      "expiredEntriesLeaveActiveNotesTest",
+      "activeNoteCannotExpireTest",
+      "emptyTrashEraseKeepsRevisionTest",
       "stoppedStoreCannotAdmitTest"
     ],
     "invariants": [
@@ -2225,6 +2238,7 @@
   {
     "path": "specs/quint/services/CoreConnectorCustody.qnt",
     "module": "CoreConnectorCustody",
+    "verifyBackend": "tlc-bounded",
     "init": "init",
     "step": "step",
     "invariant": "safety",
@@ -4563,7 +4577,9 @@
       "originAutomaticSearchPendingReuseTest",
       "destinationFailureRetryTest",
       "locatedOriginReuseTest",
-      "locatedOriginRetryTest"
+      "locatedOriginRetryTest",
+      "swapEndsTest",
+      "swapNeedsPlannedRouteTest"
     ],
     "invariants": [
       "TypeOK",
@@ -4648,7 +4664,7 @@
       "searching/hasQuery/selected/directions/originMode/navigating": "MapsScreenController flags behind MapsScreenView.mode, mapped to the template's base, results, place, dir, origin and nav; selected distinguishes a provider place, a saved place and the located position",
       "results": "MapsController search phase ready: the rows a result pick needs",
       "locating/watch": "MapsScreenController.locating and the controller's one-fix NativeMapsLocation watch",
-      "originText/origin/routeReady": "MapsScreenController.originText (empty, a typed name, coordinates, a chosen candidate's name or \"Your location\"), MapsController origin and a ready route",
+      "originText/origin/routeReady": "MapsScreenController.originText (empty, a typed name, coordinates, a chosen candidate's name, a saved place's name after a swap or \"Your location\"), MapsController origin and a ready route",
       "screenOff/hidden": "BackgroundNavigation.active() without and with the screen's confirmed session, and document visibility as seen by screen.hidden",
       "lastChoice": "history only: the destination's most recent explicit choice, for the property outside safety",
       "handoffQuery/handoffPending/requests/handoffs": "the Maps view's one-use query, the adapter's pendingHandoff and the searches screen.handoff ran",
@@ -4656,6 +4672,7 @@
       "queryRequests/originRequests": "provider searches for destination text, and provider searches, route requests and location starts created by an origin input control"
     },
     "abstractions": [
+      "swapEnds is the route sheet's swap on a planned route: the starting point becomes the destination (the located position as a fixed point, a saved place as itself, anything else as a place) and the old destination the starting point (a saved place by its saved name, anything else as a chosen name). It is outside step and swapEndsTest and swapNeedsPlannedRouteTest replay it: with it in step the random walks are drawn differently and reach two route outcomes routePlanned does not separate (a route for an earlier origin landing after a refused located fix, and a route failing while a starting-point search is accepted), where the model and the screen disagree only on the accepted and failed input flags. Recent searches repeat a search through the same submit path and are not modeled.",
       "One provider place, one saved place and one origin candidate. Place detail, travel modes, route choices, renaming, sharing, recentering, the map plane and the installed maps app hand-off are not modeled.",
       "openDirections is the route sheet opened without the location permission, or with a starting point typed before the permission read settles; openGrantedDirections is the granted read, which asks for one fix when the starting point is empty and no route exists.",
       "leave is another launcher view taking the screen with Maps coming straight back: settled places, the route sheet and guidance are kept, a pending location request and any request in flight are not. Guidance away from Maps is in MapsNavigationGuidanceReadback.",

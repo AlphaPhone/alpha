@@ -62,7 +62,7 @@ function fakeIndexedDB(){
  return {indexedDB:{open},IDBKeyRange,reads,databases,rows:(store)=>databases.get('alpha.browser.photos.v1').stores.get(store).rows};
 }
 
-// '../browser/edit-receipt' is not stubbed: the receipt removal rules under test are bundled from source.
+// '../browser/edit-receipt' and './photo-crop' are not stubbed: the receipt removal and crop rules are bundled from source.
 const stubs={
  './scan-dialog.css':'',
  '../browser/file-archive':'export const fileArchive = () => new Blob([]);',
@@ -75,7 +75,7 @@ const stubs={
  '../browser/preference-documents':'export const albumDocument = { read: async initial => initial(), edit: async (initial, change) => change(initial()) };',
 };
 const bundled=(await build({entryPoints:[resolve('apps/app/src/prototype/browser-camera.ts')],bundle:true,write:false,format:'iife',globalName:'Photos',platform:'browser',plugins:[{name:'ports',setup(builder){
- builder.onResolve({filter:/.*/},args=>{if(args.kind==='entry-point'||args.path==='../browser/edit-receipt')return;if(!(args.path in stubs))throw new Error(`Unreviewed dependency ${args.path}`);return {path:args.path,namespace:'port'};});
+ builder.onResolve({filter:/.*/},args=>{if(args.kind==='entry-point'||args.path==='../browser/edit-receipt'||args.path==='./photo-crop')return;if(!(args.path in stubs))throw new Error(`Unreviewed dependency ${args.path}`);return {path:args.path,namespace:'port'};});
  builder.onLoad({filter:/.*/,namespace:'port'},args=>({contents:stubs[args.path],loader:'ts'}));
 }}]})).outputFiles[0].text;
 const VIDEO='data:video/webm;base64,'+'QUJD'.repeat(64);

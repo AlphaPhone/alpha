@@ -1,19 +1,19 @@
 import {createImagePreview} from '../runtime/image-preview';
 import {ChatAttachmentPicker,encodeChatAttachments} from './attachment-picker';
-import {storedChatFiles,type ChatFile} from './chat-attachment-files';
+import {storedChatFiles,type ChatFile,type SelectedChatFile} from './chat-attachment-files';
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
 import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {actionResultText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,approvalExpiryText,emptyChatNotice,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,spokenActionReply,workflowReplyText} from '../runtime/action-message-presentation';
 import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -23,7 +23,7 @@ import {telephonyEffectAllowed,type CallStatePlugin} from '../runtime/call-state
 import {EMERGENCY_REFUSAL,imageContactPorts,imageDialHandoff,imageSmsPort,imageSmsSend,imageTelephonyAction} from './image-telephony';
 import {localTurnStatus,batchVoiceProgressEvents,batchVoiceReplyEvents,type BatchProgressCue} from '../runtime/local-agent-stream';
 import {smsSubscriptionRevision} from '../runtime/sms-subscription-revision';
-import {createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
+import {approvedCardTelephony,createAospTelephony,type AlphaTelephonyPlugin} from '../runtime/aosp-telephony';
 import {isSmsSend,validateSmsResult,smsAgentHash,smsDeviceStatus} from '../runtime/sms-agent-contract';
 import {isPhoneDial,dialDeviceStatus,type PhoneDialResult} from '../runtime/phone-dial-contract';
 import {phoneDialResultText,smsSendResultText} from '../ui/telephony/telephony-receipt-text';
@@ -38,6 +38,7 @@ import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
 import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {captureSelectionOpen} from './context-selection';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
 import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime/deletions';
@@ -89,7 +90,7 @@ import {NotesCommitUncertain,isStorageFull} from '../runtime/notes-store';
 import {isNotesOperation,validateNotesOperation,notesTarget} from '../runtime/notes-contract';
 import {isCalendarOperation,validateCalendarResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import { alphaViewKey, alphaViewPaths } from "../product/alpha-product";
-import { workflowSha, validateWorkflowResult } from '../runtime/workflow-device-contract';
+import { workflowSha, validateWorkflowResult, workflowStepScreenCurrent } from '../runtime/workflow-device-contract';
 import { WorkflowReminderOverflow, workflowReminderRows } from '../runtime/workflow-reminder-read';
 import { getMapsSelectedObject, clearMapsSelection } from '../maps/agent-context';
 import { alphaClient, AlphaClientError, type AlphaView } from '../runtime/alpha-client';
@@ -101,8 +102,8 @@ import { registerPlugin } from '../platform-plugins';
 import { SystemBars, SystemBarsStyle } from '@capacitor/core';
 import {mergeConversationDelivery, connectionController, STOPPED_REPLY_NOTICE, STOPPED_CANCELLED_NOTICE, STOPPED_CONFIRMED_NOTICE, STOPPED_UNCHECKED_NOTICE, RESIDENT_STARTING_NOTICE, RESIDENT_RECOVERING_NOTICE, NO_AGENT_SEND, NO_AGENT_VOICE, residentAlwaysPresent, agentPendingText, agentAvailabilityNotice } from '../runtime/connection-ui';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
-import { broaderPageNotice, honestTiles, handoffGate, watchReturnToApp, tileFactsFromSnapshot, tileSettingsPages, type TileFacts, type TileKey } from './native-adapter';
-import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
+import { UNAVAILABLE_CONTROL, broaderPageNotice, honestTiles, handoffGate, watchReturnToApp, tileFactsFromSnapshot, tileSettingsPages, type TileFacts, type TileKey } from './native-adapter';
+import {errorNotice,ERROR_TOAST,PERSISTENT_NOTICE} from '../runtime/error-notice';
 const alphaDevice = registerPlugin<{ snapshot(): Promise<Record<string, unknown>>; openSettings(input: { page: string }): Promise<{ status: string; specific?: boolean }> }>('AlphaDevice');
 const elizaSystem = registerPlugin<{ setFlashlight(input: { enabled: boolean }): Promise<{ available: boolean; enabled: boolean }> }>('ElizaSystem');
 
@@ -285,8 +286,8 @@ function planActionCard(action:unknown):Shell|undefined{
   if(action==='retry')return {type:'generic',icon:'info',title:`Check ${selectedCloudName()} again`,sub:'',planAction:'retry'};
   // AI was believed connected yet the agent answered without it: check what this phone has bound.
   if(action==='provider')return {type:'generic',icon:'info',title:`Check ${selectedCloudName()} again`,sub:'',planAction:'provider'};
-  // Cloud declined a turn for billing: open the account's subscription controls.
-  if(action==='funding')return {type:'generic',icon:'info',title:'Subscription',sub:'',planAction:'funding'};
+  // Cloud declined a turn for billing: open the account's plan controls, named as in Account.
+  if(action==='funding')return {type:'generic',icon:'info',title:'Manage plan',sub:'',planAction:'funding'};
   return undefined;
 }
 /** A saved row keeps its authoritative content and any richer card; only a missing final plan control is enriched. */
@@ -646,15 +647,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       return {msgs:at<0?[...msgs,bubble]:msgs.map((message:Shell,index:number)=>index===at?bubble:message)};
     });
   }
-  function openInternalView(shell:Shell,target:string,chat?:string,{voice=false}:{voice?:boolean}={}):boolean {
+  function openInternalView(shell:Shell,target:string,chat?:string):boolean {
     const view=alphaViewKey(target);
     if(!view||view!=='home'&&!views[view])return false;
-    // Camera is handed the whole screen: an open conversation closes to Camera's own resting bar (the pill
-    // below the shutter row), so the viewfinder and shutter are never under the sheet or the typing dock's
-    // tap-away layer. A photo waiting for review is shown just above that bar (barReviews).
-    // A voice conversation is held by its sheet (voice-adapter chatCurrent): closing it would end the
-    // conversation and refuse the agent's screen change, so voice keeps its detent.
-    if(view==='camera'&&!voice&&(chat==='sheet'||chat==='full')){chat=undefined;shell.cameraHandoff=true;}
+    // The conversation keeps its detent on every view, Camera included: an open sheet stays open and Camera
+    // lays its viewfinder and controls out above it (phone.css .alpha-camera-chat-open).
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
   }
@@ -671,7 +668,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
     const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
       const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat,{voice:!!continuation})){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
+        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
       });
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
@@ -713,7 +710,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(previous)originalSet.call(shell,'notes',{filter:null});
     let binding:CanonicalNotesUi;
     const paint=()=>{if(shell.live&&shell.canonicalNotesUi===binding)shell.setState({},()=>context(shell));};
-    binding=new CanonicalNotesUi(port,{paint,review:paint,committed:()=>paint(),dropped:title=>{if(shell.live)shell.toast(`Your unsaved edit to “${title}” was lost when the agent connection changed.`);}});
+    binding=new CanonicalNotesUi(port,{paint,review:paint,committed:()=>paint(),dropped:title=>{if(shell.live)shell.toast(`Your unsaved edit to “${title}” was lost when the agent connection changed.`,PERSISTENT_NOTICE);}});
     shell.canonicalNotesUi=binding;
     shell.notesReady=binding.refresh().catch(()=>{if(shell.canonicalNotesUi===binding)paint();});
   }
@@ -828,7 +825,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if (view === 'maps') providerSelection = getMapsSelectedObject();
     if (view === 'photos') {
       const state = shell.vget('photos');
-      if (state.open === state.nativePhotoSelection?.id) providerSelection = state.nativePhotoSelection;
+      if (captureSelectionOpen(state.open, state.nativePhotoSelection)) providerSelection = state.nativePhotoSelection;
     }
     if (view === 'inbox') {
       const state = shell.vget('inbox');
@@ -1062,7 +1059,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // The shared read words its result in its own English; Alpha's sentence replaces it.
         return {...result,summary:namedCalendarReadSummary(result)};
       }
-      if(operation.type!=='calendar_availability')return {status:'failed',summary:'This review is not available on this phone yet.'};
+      if(operation.type!=='calendar_availability')return {status:'failed',summary:'This phone can’t review that request, so nothing was shared or changed.'};
       const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
       const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||expectedContext.sensitive||!['home','calendar'].includes(expectedContext.view)||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Availability review context changed');};
       return executeCalendarAvailability(registerPlugin<AvailabilityProvider>('AlphaCalendar'),operation,expectedContext.timeZone,signal,current,availabilityReview);
@@ -1076,8 +1073,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!this.live||document.hidden)throw Error('Files changed');
       return identities;
     });
-    // A refusal proven to happen before any effect returns `failed` with its reason; a throw is
-    // recorded by the coordinator as an unknown outcome and its message never reaches the owner.
+    // A refusal proven to happen before any effect returns `failed` with its reason, or throws
+    // DeviceActionNotStarted, which the coordinator records as not started with its message. Any
+    // other throw is recorded as an unknown outcome and its message never reaches the owner.
     connectionController.setDeviceExecutor(async (operation, operationId, expectedContext, signal, bindingHash, workflowRoute, journalIdentity, agendaSource) => {
       signal.throwIfAborted(); context(this);
       if(operation.type==='notes_list_filter'){
@@ -1108,7 +1106,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           });
         });
       }
-      if (!this.live || JSON.stringify(alphaClient.getState().context) !== JSON.stringify(expectedContext)) throw new Error('Phone context changed');
+      if (!this.live || JSON.stringify(alphaClient.getState().context) !== JSON.stringify(expectedContext)) throw new DeviceActionNotStarted('The screen changed');
       if(isCameraCapture(operation)){
         const ownerSession=connectionController.getSnapshot().session;
         const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||expectedContext.sensitive||expectedContext.view!=='camera'||ownerSession!==connectionController.getSnapshot().session||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Camera request changed');};
@@ -1123,8 +1121,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // approved number and the owner places the call there. Contact targets are not negotiated.
         if(!aospImage||operation.target.kind!=='number'||expectedContext.sensitive||document.hidden)return {status:'failed' as const,summary:'Nothing was dialed because Alpha was not open and unlocked.'};
         const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
-        const fence=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Dial review context changed');};
+        const fence=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The screen changed');};
         // AC-19: Telecom is read right before the dial screen opens, and the review fence runs again after it.
+        // The fence only runs before the dial, so a changed screen refuses as not started.
         const handoff=await imageDialHandoff(operation.target.number,number=>client.dial(number),{allowed:imageEffectAllowed,fence});
         if(!handoff)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};
         const dialResult:PhoneDialResult={kind:'phone-dial',status:handoff.status,handler:handoff.status==='handed-off'?handoff.handler:null,contact:false};
@@ -1135,7 +1134,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // phone; the owner confirms the exact number or the before and after before anything
         // calls, sends or writes, and the agent receives only the outcome.
         if(!aospImage||expectedContext.sensitive||document.hidden)return refuseTelephonyAction(operation,'Nothing was done because Alpha was not open and unlocked.');
-        const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true),book=registerPlugin<any>('AlphaContacts');
+        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true),book=registerPlugin<any>('AlphaContacts');
+        // A text is sent under the approved card's journal entry, which Android checks instead of asking again.
+        const texts=journalIdentity?approvedCardTelephony(plugin,journalIdentity):client;
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
         const ports:TelephonyPorts={
@@ -1143,22 +1144,23 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
           placeCall:number=>client.placeCall(number),
           ...imageContactPorts(book,current),
-          sendSms:imageSmsPort(client,expectedContext,current),
+          sendSms:imageSmsPort(texts,expectedContext,current),
           openThread:openSmsThread,openVoicemail:openVoicemailRead,deleteOpenVoicemail,
-          latestIncomingSender:()=>client.latestIncomingSender(),
+          latestIncomingSender:includeAddress=>client.latestIncomingSender(includeAddress),
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
-          draftInOpenThread:(body,number)=>placeAskedSmsDraft(body,number),
+          draftInOpenThread:(body,number,threadId)=>placeAskedSmsDraft(body,number,threadId),
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
-          // changes the view, so it runs after the receipt and only while this review is still current.
-          draftFor:async(number,body)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?openSmsDraftStep(body,number):null;return step&&(()=>{current();step();});},
+          // changes the view, so it runs after the receipt and only while this review is still current,
+          // once the chat request carrying this turn's reply settles (a view change would cancel it).
+          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&(()=>alphaClient.afterRequestSettles(()=>{current();step();}));},
           showContacts:async query=>{
             const step=showContactsStep(query),access=step?await book.status():null;
             if(!step||access?.available!==true||access.readable!==true)return null;
             const listed=await book.list({query,limit:1});current();
-            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
+            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>alphaClient.afterRequestSettles(()=>{current();step();}):'not-found';
           },
           // The keypad opens after the receipt, like a filtered Contacts list; nothing is dialed.
-          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>{current();step();});},
+          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>alphaClient.afterRequestSettles(()=>{current();step();}));},
           openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
@@ -1166,9 +1168,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(isSmsSend(operation)){
         if(!aospImage||expectedContext.sensitive||document.hidden||expectedContext.view!=='messages'||expectedContext.selectedObject?.kind!=='sms-subscription'||expectedContext.selectedObject.id!==String(operation.subscriptionId))return {status:'failed' as const,summary:'Nothing was sent because no SIM was chosen in Messages.'};
-        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=createAospTelephony(plugin,true);
+        // Approve on the card is the owner's confirmation: Android sends exactly what that card's journal entry approved, with no dialog.
+        if(!journalIdentity)return {status:'failed' as const,summary:'Nothing was sent because the approved card could not be found.'};
+        const plugin=registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),client=approvedCardTelephony(plugin,journalIdentity);
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
-        const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('SMS review context changed');};
+        const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The screen changed');};
+        // `current` runs only before the send (here and in the AC-19 guard), so it refuses as not started.
         const status=await client.status();current();
         const selectedSim=status.subscriptions?.find(sim=>sim.id===operation.subscriptionId);
         if(!selectedSim||expectedContext.selectedObject.revision!==smsSubscriptionRevision(selectedSim))return {status:'failed' as const,summary:'Nothing was sent because the SIM changed.'};
@@ -1176,14 +1181,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         signal.addEventListener('abort',cancel,{once:true});
         try{
           // AC-19: Telecom is read right before the send, and the review fence runs again after it.
-          const native=await imageSmsSend(()=>client.sendSms(operation,operationId),{allowed:imageEffectAllowed,fence:current});
+          // Android refuses a text its approved card does not name before journaling or sending anything.
+          const native=await imageSmsSend(()=>client.sendSms(operation,operationId).catch(error=>{if((error as {code?:unknown}|null)?.code==='not-approved')throw new DeviceActionNotStarted('This text is not the one approved on its card');throw error;}),{allowed:imageEffectAllowed,fence:current});
           if(!native)return {status:'failed' as const,summary:EMERGENCY_REFUSAL};const smsResult=validateSmsResult(operation,native,operationId,await smsAgentHash(operation));return {status:smsDeviceStatus(smsResult),smsResult,summary:smsSendResultText(smsResult.status)};}
         finally{signal.removeEventListener('abort',cancel);}
       }
       if(isClockOperation(operation)){
         if(Capacitor.getPlatform()!=='android'&&!browserDevProfile)return {status:'failed',summary:'Clock handoff is unavailable in browser development.'};
         assertClockTimeZone(operation,expectedContext.timeZone);signal.throwIfAborted();
-        if(expectedContext.sensitive||document.hidden)throw Error('Return to Alpha Phone and review again');
+        if(expectedContext.sensitive||document.hidden)throw new DeviceActionNotStarted('Return to Alpha Phone and review again');
         const clockSession=connectionController.getSnapshot().session;const clockEnrollment=JSON.stringify(connectionController.getWorkflowDeviceTarget());
         const {type,...request}=operation;
         const result=browserDevProfile?await DailyApps.clockHandoff({...request,reviewed:true}):null;
@@ -1193,8 +1199,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status,clockResult,summary:browserDevProfile&&clockResult.status==='opened'?result!.message:clockResult.status==='opened'?(operation.action==='dismiss'||operation.action==='snooze'?'Opened Clock to choose the alarm.':'Sent the request to Clock.'):clockResult.status==='unknown'?'The Clock result is unknown.':clockResult.status==='unavailable'?'No installed Clock app handles this request.':clockResult.status==='denied'?'Android did not allow this Clock request.':'The Clock request was not sent.'};
       }
       if(isMapsOperation(operation)){
-        const mapsResult=readMapsSelection(operation);signal.throwIfAborted();context(this);
-        if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Maps context changed');
+        // A local read of the registered selection: until the result is returned nothing is shared,
+        // so a selection that changed or went away refuses as not started.
+        let mapsResult;try{mapsResult=readMapsSelection(operation);}catch{throw new DeviceActionNotStarted('The selected Maps place changed');}
+        signal.throwIfAborted();context(this);
+        // The selection was read on the phone only; nothing is shared unless the screen still matches.
+        if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The Maps screen changed');
         return {status:'succeeded',summary:'Shared the selected Maps place.',mapsResult};
       }
       if(isFilesOperation(operation)){
@@ -1257,7 +1267,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status:photoLibraryResult.kind==='photo_library_select'&&photoLibraryResult.selected===0?'failed':'succeeded',summary,photoLibraryResult};
       }
       if(isCalendarOperation(operation)){
-        if(operation.type==='calendar_create_local'||operation.type==='calendar_read_next'){if(operation.type==='calendar_read_next'&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()!=='android'||expectedContext.sensitive||document.hidden)throw Error('Return to the supported foreground Calendar');const permission=await registerPlugin<{requestAccess():Promise<{status:string}>;requestWorkflowReadAccess():Promise<{status:string}>}>('AlphaCalendar')[operation.type==='calendar_create_local'?'requestAccess':'requestWorkflowReadAccess']();signal.throwIfAborted();context(this);if(permission.status!=='granted'||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Calendar permission or phone context changed');}
+        if(operation.type==='calendar_create_local'||operation.type==='calendar_read_next'){if(operation.type==='calendar_read_next'&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()!=='android'||expectedContext.sensitive||document.hidden)throw new DeviceActionNotStarted('Open Calendar on the unlocked phone');const permission=await registerPlugin<{requestAccess():Promise<{status:string}>;requestWorkflowReadAccess():Promise<{status:string}>}>('AlphaCalendar')[operation.type==='calendar_create_local'?'requestAccess':'requestWorkflowReadAccess']();signal.throwIfAborted();context(this);if(permission.status!=='granted'||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted(permission.status!=='granted'?'Calendar access is off':'The screen changed');}
         const calendar=registerPlugin<{executeAgent(input:{operation:unknown;operationId:string;journalIdentity?:{scope:string;proposalId:string}}):Promise<{status:string;result?:unknown}>;cancelAgent(input:{operationId:string}):Promise<unknown>}>('AlphaCalendar');
         const cancel=()=>{void calendar.cancelAgent({operationId}).catch(()=>{});};signal.addEventListener('abort',cancel,{once:true});
         let result:{status:string;result?:unknown};try{signal.throwIfAborted();result=await calendar.executeAgent({operation,operationId,journalIdentity});}finally{signal.removeEventListener('abort',cancel);}
@@ -1330,7 +1340,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const readResult=await validateWorkflowResult(operation,{kind:'calendar',events});current();return {status:'succeeded',summary:`Read ${events.length} app Calendar events within the approved range.`,readResult};
       }
       if(operation.type==='read_selected_reminders'||operation.type==='read_selected_notes'||operation.type==='read_calendar_range'){
-        const current=()=>{signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='workflows'||expectedContext.selectedObject?.kind!=='workflow-run')throw new Error('Workflow read context changed');};current();
+        const current=()=>{signal.throwIfAborted();context(this);if(!workflowStepScreenCurrent({live:!!this.live,hidden:document.hidden,current:alphaClient.getState().context,approved:expectedContext,read:true}))throw new Error('Workflow read context changed');};current();
         if(operation.type==='read_selected_reminders'){
           const {reminders}=await DailyApps.listReminders();current();
           try{const readResult=await workflowReminderRows(operation,reminders);current();return {status:'succeeded',summary:`Read ${readResult.reminders.length} reminders for ${operation.day}.`,readResult};}
@@ -1360,7 +1370,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(operation.type==='post_notification'||operation.type==='speak_text'){
         if(connectionController.getWorkflowPresentationProtocol()!==2)return {status:'failed',summary:'This device has not negotiated workflow presentation support.'};
-        signal.throwIfAborted();context(this);if(!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||expectedContext.view!=='workflows')throw Error('Workflow review context changed');
+        signal.throwIfAborted();context(this);if(!workflowStepScreenCurrent({live:!!this.live,hidden:document.hidden,current:alphaClient.getState().context,approved:expectedContext,read:false}))throw Error('Workflow review context changed');
         if(operation.type==='post_notification'&&Capacitor.isNativePlatform()){
           const notices=registerPlugin<{postWorkflow(input:{operationId:string;bindingHash:string;title:string;body:string;route:NonNullable<typeof workflowRoute>}):Promise<{status:unknown}>}>('AlphaNotifications');
           if(!bindingHash||!workflowRoute)throw Error('Workflow notification binding is missing');
@@ -1395,7 +1405,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if(isReminderCreate(operation)){
         const support=await DailyApps.surfaceInfo();signal.throwIfAborted();
-        context(this);if(!this.live||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');
+        context(this);if(!this.live||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The screen changed');
         if(support.reminderCreationVersion!==1)return {status:'failed',summary:'This phone does not support reviewed reminder creation.'};
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
         if(result.status!=='succeeded')return {status:'unknown',summary:'The reminder creation outcome is unknown.'};
@@ -1403,18 +1413,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         return {status:'succeeded',reminderResult,summary:reminderDeliveryProblemText('reminder_create',reminderResult.status)??presentDeviceRecordOperation(operation,expectedContext.timeZone).appliedSummary};
       }
       if(isReminderOperation(operation)){
-        signal.throwIfAborted();context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||document.hidden)throw Error('Reminder context changed');
+        signal.throwIfAborted();context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext)||expectedContext.sensitive||document.hidden)throw new DeviceActionNotStarted('The reminder screen changed');
         const target=await DailyApps.selectedReminder({id:operation.target.reminderId});signal.throwIfAborted();
         if(JSON.stringify(target)!==JSON.stringify(operation.target)) { // property order is normalized below
           for(const key of ['sourceId','sourceRevision','reminderId','occurrenceId','revision','timingVersion'] as const)if(target[key]!==operation.target[key])return {status:'failed',summary:'Nothing was changed because this reminder changed.'};
         }
-        context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Reminder context changed');
+        context(this);if(JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw new DeviceActionNotStarted('The reminder screen changed');
         signal.throwIfAborted();
         if(operation.type==='reminder_cancel'){
           const queued=await deletions.reviewAgentReminder({operationId,bindingHash,operation,journalIdentity});
           if(queued.status==='queued')refreshDeletionViews();
           if(reminderDeletionRefusal(queued.status))return {status:'failed',summary:'Deletion was not queued.'};
-          return {status:queued.status==='cancelled'?'failed':'unknown',summary:queued.status==='queued'?'Deletion queued with 10 seconds to Undo.':queued.status==='cancelled'?'Deletion cancelled before admission.':'The deletion outcome is unconfirmed.'};
+          return {status:queued.status==='cancelled'?'failed':'unknown',summary:queued.status==='queued'?'Deletion queued with 10 seconds to Undo.':queued.status==='cancelled'?'Nothing was deleted.':'The deletion outcome is unconfirmed.'};
         }
         const result=await DailyApps.operateReminder({operationId,bindingHash,operation});
         // Publish the new revision only after the receipt attempt; refreshing here
@@ -1450,11 +1460,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
           present?.();
         };
-        // Showing Browser changes the view, and a view change cancels the active request. A directly
-        // requested open runs inside the chat request that still carries its reply: show Browser after
-        // that request settles, so the reply stays whole instead of "Stopped." with a stop notice.
-        if(!alphaClient.getState().pending){show();return;}
-        const stop=alphaClient.subscribe(()=>{if(alphaClient.getState().pending)return;stop();setTimeout(()=>{try{show();}catch{/* A retired tab keeps its journaled receipt. */}},0);});
+        // A directly requested open runs inside the chat request that still carries its reply.
+        alphaClient.afterRequestSettles(show);
       } };
     });
     context(this);
@@ -1484,7 +1491,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if (this.notesSourceMode === 'legacy' && store) await store.assertCurrent();
     if (!exact()) throw Error('Notes changed');
   };
-  p.componentDidUpdate = function (prev: Shell) { originalUpdate.call(this, prev); const notesView=this.S().view==='notes';if(notesView&&!this.wasCanonicalNotesView&&this.notesSourceMode==='canonical')void this.canonicalNotesUi?.refresh().catch(()=>{});this.wasCanonicalNotesView=notesView; context(this); void connectionController.observeCommittedView();this.composerDraft?.edit(String(this.S().draft||''));const shade=!!this.S().shade;if(shade&&!this.shadeWasOpen)this.refreshTileFacts();this.shadeWasOpen=shade;const chatOpen=this.S().chat==='sheet'||this.S().chat==='full',drafting=!!String(this.S().draft||'').trim();if((chatOpen&&!this.chatWasOpen)||(drafting&&!this.wasDrafting))connectionController.warmInference();this.chatWasOpen=chatOpen;this.wasDrafting=drafting;const cameraBar=this.S().view==='camera'&&(this.S().chat==='hidden'||this.S().chat==='input');if(this.cameraBarShown&&!cameraBar)this.cameraHandoff=false;this.cameraBarShown=cameraBar;const selected=this.messageReplyTarget||this.messageEditTarget;if(selected&&(JSON.stringify(selected.session)!==JSON.stringify(connectionController.getSnapshot().session)||!this.S().msgs.some((m:Shell)=>m.id===selected.messageId&&m.text===selected.text))){cancelMessageContext(this);this.setState({});} };
+  p.componentDidUpdate = function (prev: Shell) { originalUpdate.call(this, prev); const notesView=this.S().view==='notes';if(notesView&&!this.wasCanonicalNotesView&&this.notesSourceMode==='canonical')void this.canonicalNotesUi?.refresh().catch(()=>{});this.wasCanonicalNotesView=notesView; context(this); void connectionController.observeCommittedView();this.composerDraft?.edit(String(this.S().draft||''));const shade=!!this.S().shade;if(shade&&!this.shadeWasOpen)this.refreshTileFacts();this.shadeWasOpen=shade;const chatOpen=this.S().chat==='sheet'||this.S().chat==='full',drafting=!!String(this.S().draft||'').trim();if((chatOpen&&!this.chatWasOpen)||(drafting&&!this.wasDrafting))connectionController.warmInference();this.chatWasOpen=chatOpen;this.wasDrafting=drafting;const selected=this.messageReplyTarget||this.messageEditTarget;if(selected&&(JSON.stringify(selected.session)!==JSON.stringify(connectionController.getSnapshot().session)||!this.S().msgs.some((m:Shell)=>m.id===selected.messageId&&m.text===selected.text))){cancelMessageContext(this);this.setState({});} };
   p.componentWillUnmount = function () {
     this.chatImageModal?.ref(null);
     this.chatAttachmentAbort?.abort();this.chatAttachmentPicker?.dispose();
@@ -1614,7 +1621,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       };
     }
     if(key==='notes'){api.set=(patch:Shell)=>this.vset('notes',patch);api.storageReady=()=>!this.notesStorageFailed&&!this.notesPending; }
-    api.say = () => this.toast('Not available yet. Nothing was sent.');
+    // Marked as unavailable (native-adapter.ts): the gestures and controls that would draft a reply are not offered.
+    api.say = Object.assign(() => this.toast('Not available yet. Nothing was sent.'), { [UNAVAILABLE_CONTROL]: true });
     // Open the real conversation without sending a prompt or uploading content.
     // Keep the current view/selection so a subsequent user message is scoped.
     api.attachReviewedMail = (title:string,from:string,validate:()=>Promise<string>) => {
@@ -1643,6 +1651,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       this.transcriptAttachment={title,selection:JSON.stringify(selection)};
       this.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Summarize this for me'}));
     };
+    api.attachSelectedFile=(selection: SelectedChatFile)=>pickChatAttachments(this, selection);
     api.composeContentQuestion=(draft:string,source?:Source)=>{
       this.reviewedSourceDraft={draft,source:sourceOf(source)};
       context(this);this.setState({chat:'sheet',shade:false,draft});
@@ -1689,29 +1698,54 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.chatAttachmentPicker??=new ChatAttachmentPicker(()=>this.live&&this.setState({}));
     return this.chatAttachmentPicker.choose(signal,maximum,current,returnFocus);
   };
-  async function pickChatAttachments(shell:Shell){
+  const selectedFiles=new WeakMap<ChatFile,{selection:SelectedChatFile; thumbnail?:string}>();
+  async function pickChatAttachments(shell:Shell, selection?:SelectedChatFile){
     const binding=attachmentBinding(),view=shell.S().view;
     const existing:ChatFile[]=shell.fileAttachments??=[];
     const camera=shell.cameraAttachment;
+    // A pick retired by Home, page hide or a connection change only waits for its late read to be discarded.
+    const picking=!!shell.chatAttachmentAbort&&!shell.chatAttachmentAbort.signal.aborted;
+    if(picking||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding){
+      // Ask Alpha from a Files menu closes the menu first, so a refusal here names what blocks it.
+      if(selection)shell.toast(picking?'Already attaching a file.'
+        :shell.draftSendPending?'Wait for the message to finish sending.'
+        :shell.messageEditTarget?'Finish or cancel the message edit first.'
+        :shell.S().typing?'Wait for Alpha to finish replying.'
+        :'Can’t attach the file right now. Try again in a moment.');
+      return;
+    }
+    if (selection && shell.fileAttachmentScope===binding && existing.some(file=>selectedFiles.get(file)?.selection.current())) {
+      shell.setState({chat:'sheet',shade:false});
+      return;
+    }
     const maximum=MAX_CHAT_UPLOAD_ATTACHMENTS-existing.length-(camera?1:0);
     if(maximum<1){shell.toast('Remove an attachment before adding another.');return;}
-    if(shell.chatAttachmentAbort||shell.S().typing||connectionController.getSnapshot().open||shell.messageEditTarget||shell.draftSendPending||shell.composerDraft?.holding)return;
     const abort=shell.chatAttachmentAbort=new AbortController();
-    const current=()=>!abort.signal.aborted&&shell.live&&!document.hidden&&shell.S().view===view&&
+    const current=()=>!abort.signal.aborted&&(!selection||selection.current())&&shell.live&&!document.hidden&&shell.S().view===view&&
       attachmentBinding()===binding&&shell.fileAttachments===existing&&shell.cameraAttachment===camera&&
       !connectionController.getSnapshot().open&&!shell.S().typing&&!shell.messageEditTarget&&!shell.draftSendPending&&!shell.composerDraft?.holding;
     const retire=()=>abort.abort();
     for(const event of ['pagehide','launcher-home','alpha:device-state'])window.addEventListener(event,retire,{signal:abort.signal});
     const unsubscribe=connectionController.subscribe(()=>{if(!current())abort.abort();});
     try{
-      const files:File[]=await shell.chooseLocalAttachments(abort.signal,maximum,current);
+      const selected=selection ? await selection.read(current) : undefined;
+      if (!current() || (selection && !selected)) return;
+      const files:File[]=selected ? [selected] : await shell.chooseLocalAttachments(abort.signal,maximum,current);
       if(!current()||!files.length)return;
       const encoded=await encodeChatAttachments(files);
       if(!current())return;
       if(!attachmentBatchFits([...existing,...encoded],camera?.image)){shell.toast('Choose fewer or smaller files.');return;}
       shell.fileAttachmentScope=binding;
-      shell.fileAttachments=[...existing,...encoded.map(file=>({...file,id:crypto.randomUUID()}))];
-      if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
+      const additions = encoded.map(file=>({...file,id:crypto.randomUUID()}));
+      if (selection && selected) {
+        const file=additions[0];
+        const thumbnail=CHAT_IMAGE_MIME_TYPE_SET.has(file.mimeType)?`data:${file.mimeType};base64,${file.data}`:undefined;
+        selectedFiles.set(file, {selection,thumbnail});
+      }
+      shell.fileAttachments=[...existing,...additions];
+      if (selected) {
+        shell.setState((previous:Shell)=>({chat:'sheet',shade:false,draft:previous.draft?.trim()?previous.draft:'Explain this file'}));
+      } else if(shell.S().chat!=='full')shell.setState({chat:'sheet'});else shell.setState({});
     }catch(error){
       if(current())shell.toast(errorNotice(error,'The attachment could not open.'),ERROR_TOAST);
     }finally{
@@ -1816,13 +1850,30 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.attachFiles=()=>void pickChatAttachments(this);
     out.attachFilesDisabled=!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding||this.messageEditTarget);
     out.hasPendingFiles=!!this.fileAttachments?.length;
-    out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>({
-      id:file.id,name:file.name,removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
+    out.pendingFiles=(this.fileAttachments??[]).map((file:ChatFile)=>{
+      const item=selectedFiles.get(file);
+      return {
+      id:file.id,name:file.name,reviewable:!!item,plain:!item,thumbnail:item?.thumbnail,document:!item?.thumbnail,
+      editLabel:'Edit excerpt from '+file.name,edit:()=>{
+        const binding=attachmentBinding(), draft=this.S().draft;
+        const current=()=>this.live && !document.hidden && this.fileAttachmentScope===binding &&
+          attachmentBinding()===binding && this.fileAttachments?.includes(file) && this.S().draft===draft &&
+          !this.S().typing && !this.draftSendPending && !this.composerDraft?.holding;
+        if(!item || !current())return;
+        if(!item.selection.current()){this.toast('Reopen the file to edit its excerpt.');return;}
+        item.selection.edit((text,source)=>{
+          if(!current())return;
+          this.fileAttachments=this.fileAttachments.filter((entry:ChatFile)=>entry!==file);
+          this.api(this.S().view).composeContentQuestion(text,source);
+        },current,draft==='Explain this file'?undefined:draft);
+      },
+      removeLabel:'Remove '+file.name,disabled:!!(this.S().typing||this.draftSendPending||this.composerDraft?.holding),remove:()=>{
         if(this.S().typing||this.draftSendPending||this.composerDraft?.holding)return;
         this.fileAttachments=(this.fileAttachments??[]).filter((item:ChatFile)=>item!==file);
         this.setState({});
       },
-    }));
+      };
+    });
     out.onKey=(event:KeyboardEvent&{nativeEvent?:KeyboardEvent})=>{
       if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&!event.nativeEvent?.isComposing&&event.keyCode!==229){event.preventDefault();sendFromComposer(this);}
     };
@@ -1848,8 +1899,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const held=!proposalCanAct(c,this.emergencyLive?.()===true);
       // A card that only leads to the screen where the choice is made says Open, not Approve.
       return {...m,hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub,cGeneric:false,cDigest:true,actionReviewClass:'alpha-action-review',cameraReview:c.title===CAMERA_REVIEW_TITLE,rows:[
-        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',icon:ic.right,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
-        {ini:'',who:declining?'Declining…':'Decline',text:'Keep things as they are.',icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
+        {ini:'',who:approving?'Working…':c.title,text:held?'Not during an emergency call.':typeof c.sub==='string'&&c.sub.startsWith(c.title+'\n')?c.sub.slice(c.title.length+1):c.sub,label:approving||held?'':c.reviewDestination?'Open':'Approve',expiry:approving||held?'':approvalExpiryText(c.expiresAt),icon:c.reviewDestination?ic.right:ic.check,keepComposerFocus,disabled:busy||held||waitingForReply,open:()=>{if(!busy&&!held)void this.cardAct(message);}},
+        {ini:'',who:declining?'Declining…':'',text:'Keep things as they are.',label:declining?'':'Decline',ariaLabel:declining?'Declining…':'Decline Keep things as they are.',secondaryAction:true,icon:ic.x,keepComposerFocus,disabled:busy,open:()=>{if(!busy)void this.declineCard(message);}},
       ]};
     });
     // A chat-started workflow run replies with a [WORKFLOW] block: it shows as a card that opens the
@@ -1878,6 +1929,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     out.barReviews=barReview?barReview.rows.map((row:Shell,index:number)=>({...row,key:`${barReview.id}:${index}`})):[];
     out.hasBarReviews=out.barReviews.length>0;
     out.msgs=projectActionMessages(out.msgs||[],live);
+    // Where the resident is always present its availability is already the draft status above, and
+    // routine startup stays quiet until an action needs it; elsewhere the empty chat says why it cannot answer.
+    out.chatEmptyNotice=emptyChatNotice(out.msgs.length,!!connectionController.getSnapshot().session,residentAlwaysPresent?'':agentAvailabilityNotice());
     out.canStopReply=!!this.S().typing&&(alphaClient.getState().pending||this.sendAttempt?.capturing===true);
     // While a reply is pending the composer's send/talk button becomes Stop; Send and Talk stay hidden for the whole turn so a tap after the request ends cannot start voice.
     const turn=!!this.S().typing;
@@ -1969,7 +2023,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!delivered)throw Error('The voice screen change could not be confirmed.');
         return true;
       }
-      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat,{voice:true})){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
+      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
   };
   p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
@@ -1996,7 +2050,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       let provisionalSeen=false;
       try{reply=await alphaClient.send(text,(value,frame)=>{current();streamed=true;
         if(frame?.provisional!==false)provisionalSeen=true;
-        else if(input.onText&&!provisionalSeen)try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
+        else if(input.onText&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
         this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal});}
       finally{batchVoiceProgressEvents.removeEventListener('progress',progress);batchVoiceReplyEvents.removeEventListener('reply',replyStarted);}
       input.onReplyStarted?.();
@@ -2014,6 +2068,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!reply.messageId||!reply.userMessageId||!identity||identity.conversationId!==binding.conversationId||JSON.stringify(identity.session)!==JSON.stringify(binding.session)||!reply.text.trim())throw Error('The voice reply could not be matched to this conversation. Check history before speaking again.');
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
       keepWorkflowChanges(this,reply,belongs);
+      const emailCardReady=await this.stageAgentEmailDraft?.(reply)===true;
       let delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
       let nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
       current();
@@ -2022,7 +2077,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(!delivered&&reply.userMessageId&&input.navigation&&connectionController.requestedCameraNeedsOpening(reply.userMessageId)){
         const live=()=>{signal.throwIfAborted();input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');};
         try{
-          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat,{voice:true})){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
+          delivered=await input.navigation.apply('camera',live,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{live();if(!openInternalView(this,'camera',chat)){resolve(false);return;}this.setState({},()=>{try{live();context(this);const switched=this.S().view==='camera'&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
         }catch{delivered=false;}finally{nextContext=input.navigation.finish(delivered);}
         if(!nextContext)delivered=false;else acceptedContext=nextContext;
         current();
@@ -2042,13 +2097,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       let pendingNotice=false;
       for(const notice of replyNotices(reply)){
         if(delivered&&alphaClient.getState().context.view==='camera'&&notice==='Take photo: '+CAMERA_CONTEXT_NOTICE)continue;
-        pendingNotice=true;this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,done:true},undefined,belongs);
+        pendingNotice=true;this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,deviceActionNotice:true,done:true},undefined,belongs);
       }
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
       const completedActions=reply.completedActions;
       if(completedActions?.length)this.setState({},()=>{if(this.live&&connectionController.voiceConversationCurrent(binding,false))for(const receipt of completedActions)publishCommittedDeviceChanges(receipt,alphaClient,binding.session);});
-      const review=!!reply.proposals?.length||pendingNotice;
-      return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
+      const review=!!reply.proposals?.length||pendingNotice||emailCardReady;
+      const speechText=spokenActionReply(text,reply,emailCardReady);
+      return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
       input.navigation?.finish(false);
       if(streamed&&this.live)this.setState((previous:Shell)=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{msgs:previous.msgs.map((m:Shell)=>m.id===streamId?{...m,streaming:false,interrupted:true}:m)}:null);
@@ -2077,8 +2133,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     let s = this.S(); const text = String(argument ?? s.draft);
     const hasBinaryAttachment=argument===undefined&&!edit&&!!(this.cameraAttachment||filesAtStart?.length);
     if ((!text.trim()&&!hasBinaryAttachment) || s.typing || this.chatAttachmentAbort || this.draftSendPending || this.composerDraft?.holding || !filesCurrent()) return;
-    // A new turn is answered in the conversation: only the turn that handed Camera the screen keeps its replies behind the bar.
-    this.cameraHandoff=false;
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
@@ -2242,6 +2296,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(streamed)this.setState((previous:Shell)=>settlementCurrent()?{msgs:reply.messageId&&previous.msgs.some((m:Shell)=>m.id===reply.messageId)?previous.msgs.filter((m:Shell)=>m.id!==streamedId).map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planCard,identity):m):previous.msgs.map((m:Shell)=>m.id===streamedId?{...m,id:reply.messageId||m.id,messageBinding:reply.messageId?identity:undefined,text:reply.text,streaming:false,...(planCard?{card:planCard}:{})}:m)}:null);else this.agentSay(reply.text,planCard,reply.messageId&&identity?{id:reply.messageId,messageBinding:identity}:undefined,settlementCurrent);
       if(reply.userMessageId&&identity)await new Promise<void>(resolve=>this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m)}:null,resolve));
       keepWorkflowChanges(this,reply,settlementCurrent);
+      await this.stageAgentEmailDraft?.(reply);
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
       let cameraOpened=false,cameraReceipts=0;
       if(sourceDraft&&sourceSession&&JSON.stringify(sourceSession)===JSON.stringify(connectionController.getSnapshot().session))this.agentSay('Review this answer before saving it with its source.',{type:'generic',icon:'note',title:'Review summary note',sub:sourceDraft.name,sourceSummary:{source:sourceDraft,text:reply.text,session:sourceSession}});
@@ -2262,8 +2317,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           try{
             const results=await connectionController.continueRequestedCamera(reply.userMessageId,attempt.stop.signal);
             cameraReceipts=results.length;
-            // The photo was taken on the open viewfinder; its receipt shows in the conversation as any other.
-            if(results.length)this.cameraHandoff=false;
             for(const result of results)if(this.live)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
           }finally{attempt.capturing=false;}
         }
@@ -2272,7 +2325,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // there the pending photo is recovered as its review card when this turn ends.
       for(const notice of replyNotices(reply)){
         if((cameraReceipts>0||cameraOpened&&alphaClient.getState().context.view==='camera')&&notice==='Take photo: '+CAMERA_CONTEXT_NOTICE)continue;
-        this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,done:true});
+        this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,deviceActionNotice:true,done:true});
       }
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
       const completedActions=reply.completedActions;
@@ -2343,7 +2396,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const noticeBinding=recorded.messageBinding&&typeof recorded.messageBinding==='object'?recorded.messageBinding as {conversationId?:unknown;session?:unknown}:null;
         const noticeCurrent=()=>this.live&&sameChat()&&!reconciling&&typeof noticeBinding?.conversationId==='string'&&!!noticeBinding.conversationId&&!!noticeBinding.session&&typeof noticeBinding.session==='object'&&connectionController.getSelectedConversationId()===noticeBinding.conversationId&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(noticeBinding.session);
         if(noticeCurrent())for(const [index,notice] of replyNotices(e).entries()){
-          this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,done:true},{id:`device-notice:${userId}:${index}`},noticeCurrent);
+          this.agentSay(notice,{type:'generic',icon:'info',title:'Phone action not shown here',sub:notice,systemNotice:true,deviceActionNotice:true,done:true},{id:`device-notice:${userId}:${index}`},noticeCurrent);
         }
       }
     }
@@ -2360,8 +2413,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const delivered=(previous.msgs||[]).find((message:Shell)=>message.id===identity.id);
         if(delivered){const enriched=enrichSettledAssistant(delivered,card,identity.messageBinding);return enriched===delivered?null:{msgs:previous.msgs.map((message:Shell)=>message===delivered?enriched:message)};}
       }
-      // While Camera holds the closed bar for a requested photo, replies are added without reopening the sheet over it.
-      const chat = previous.chat === 'full' ? 'full' : this.cameraHandoff&&previous.view==='camera'&&(previous.chat==='hidden'||previous.chat==='input') ? previous.chat : 'sheet';
+      const chat = previous.chat === 'full' ? 'full' : 'sheet';
       // Recovery and a chat reply can publish the same pending action. Decide
       // inside the state update so either arrival order retains one approval.
       if (card?.proposalId && (previous.msgs || []).some((message: Shell) => message.card?.proposalId === card.proposalId)) return { chat };
@@ -2497,7 +2549,6 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           catch{if(this.live&&readLease?.phase==='unconfirmed')this.setState((previous:Shell)=>this.live&&readLease.phase==='unconfirmed'&&connectionController.readReplyCurrent(readLease.binding)?{msgs:previous.msgs.map((m:Shell)=>m.id===message.id?{...m,card:{...m.card,sub:receipt.summary.replace(/[.!]\s*$/,'')+', but its answer is unconfirmed.'}}:m)}:null);}
         }else {
           if(receipt.status!=='succeeded'){this.cancelReadReplyCompletions?.(receipt.proposalId);this.retireReadReplyVoice?.(receipt.proposalId);}
-          if(card.title===CAMERA_REVIEW_TITLE)this.cameraHandoff=false;
           if (this.S().view !== beforeView) this.toast(displaySummary);
           else this.agentSay(displaySummary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
         }
@@ -2507,7 +2558,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!alphaClient.getState().pending)this.notesCommittedHandler?.();
           publishCommittedDeviceChanges(receipt,alphaClient,session);
         }});
-      } catch (e) { if(card.title===CAMERA_REVIEW_TITLE)this.cameraHandoff=false;const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
+      } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
       finally {this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
     } else if (card.go) this.openView(card.go.view, card.go.patch);
   };

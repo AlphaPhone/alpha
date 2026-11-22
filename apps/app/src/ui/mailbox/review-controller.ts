@@ -340,10 +340,22 @@ export function createMailReviewController(
     });
     operation = bound;
     try {
-      await bound.load();
+      const restored = await bound.load();
       if (token !== epoch) return;
-      const restored = bound.snapshot();
-      if (restored) {
+      if (
+        restored?.phase === "preparing" &&
+        restored.proposal.kind === "send" &&
+        restored.review === null &&
+        restored.receipt === null &&
+        restored.source?.draftId === `agent-email:${restored.requestId}` &&
+        restored.composer?.draftId === restored.source.draftId &&
+        /^[a-f0-9]{8}-[a-f0-9]{4}-0[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(restored.requestId)
+      ) {
+        // Older chat drafts used a version-zero message ID. Cloud rejects
+        // that ID before review, so this local prepare never reached dispatch.
+        await bound.clear();
+        if (token !== epoch) return;
+      } else if (restored) {
         status =
           "Saved mail operation. Check its exact review and receipt before continuing.";
         const sent = sentSource(restored);
@@ -385,6 +397,7 @@ export function createMailReviewController(
 
   async function run(
     task: (owned: InboxOperation, check: () => void) => Promise<unknown>,
+    inlineSend = false,
   ) {
     if (busy || !operation) return;
     const token = epoch,
@@ -422,7 +435,7 @@ export function createMailReviewController(
           reported = receipt.requestId;
           if (confirmedSend && receipt.requestId !== alreadySent) {
             visible = false;
-            toast("Sent.");
+            if (!inlineSend) toast("Sent.");
           }
           onReceipt?.(receipt);
           if (receipt.kind === "unarchive" || receipt.kind === "untrash")
@@ -433,7 +446,7 @@ export function createMailReviewController(
       if (token === epoch) {
         notStarted = false;
         const pending = owned.snapshot();
-        if (pending?.proposal.kind === "send" && pending.phase === "dispatching")
+        if (!inlineSend && pending?.proposal.kind === "send" && pending.phase === "dispatching")
           visible = true;
         const aborted =
           error instanceof DOMException && error.name === "AbortError";
@@ -456,7 +469,7 @@ export function createMailReviewController(
               ? classified.message
               : mailOperationText(error, "Mail operation unavailable");
         }
-        if (!visible) toast(status);
+        if (!visible && !inlineSend) toast(status);
       }
     } finally {
       if (token === epoch) {
@@ -518,12 +531,14 @@ export function createMailReviewController(
 
   async function prepare(
     proposal: Bag,
-    source?: Parameters<InboxOperation["prepare"]>[1],
+    source?: NonNullable<Parameters<InboxOperation["prepare"]>[1]> & { requestId?: string },
     mode?: "send-from-composer",
   ) {
-    if (!operation || busy) return;
+    const inlineSend = !!source?.requestId;
+    if (!operation || busy) return inlineSend ? { state: "unsent" as const } : undefined;
     const kind = proposal.kind;
     if (!allowed(proposal)) {
+      if (inlineSend) return { state: "unsent" as const };
       toast(
         "This account has not allowed Gmail changes. Allow them in Settings, then try again. Nothing was changed.",
       );
@@ -553,12 +568,17 @@ export function createMailReviewController(
           check();
         }
         const pending = unsent();
+        if (inlineSend && pending && pending.composer?.draftId !== source.draftId)
+          throw new MailReviewNotice("Finish the current Inbox operation before sending this email.");
         if (
           pending?.phase !== "review" ||
           pending.proposal.kind !== "send" ||
           binding(pending) !== "bound" ||
           pending.composer?.draftId !== source.draftId ||
-          composerContent(pending.proposal) !== composerContent(proposal)
+          composerContent(pending.proposal) !== composerContent(proposal) ||
+          // A chat draft's request ID names its content; an unsent review
+          // under another ID (an earlier Alpha's) is prepared again.
+          (inlineSend && pending.requestId !== source.requestId)
         ) {
           if (pending) await operation.clear();
           check();
@@ -566,7 +586,7 @@ export function createMailReviewController(
           // an unresolved outcome) is left for the owner to resolve in the
           // review sheet, which is opened below; nothing is prepared over it.
           if (operation.snapshot()) {
-            visible = true;
+            visible = !inlineSend;
             throw new MailReviewNotice(
               "Review the saved email action before starting another.",
             );
@@ -576,6 +596,10 @@ export function createMailReviewController(
         check();
         const record = operation.snapshot();
         if (record?.phase !== "review" || record.receipt?.state !== "prepared") return;
+        if (inlineSend && record.requestId !== source.requestId) {
+          await operation.clear();
+          throw new MailReviewNotice("Update Alpha before sending this email.");
+        }
         const email = composer?.() ?? null;
         if (reviewBinding(record, email) !== "bound") {
           await operation.clear();
@@ -586,14 +610,25 @@ export function createMailReviewController(
           throw new MailReviewNotice("Gmail send access changed. Check Settings and try again.");
         }
         dispatchId = record.requestId;
-        await operation.confirm(email);
-      });
+        const requireExactComposer = () => {
+          if (reviewBinding(record, composer?.() ?? null) !== "bound" || !allowed(proposal))
+            throw new MailReviewNotice("Email changed before sending. Check it and tap Send again.");
+        };
+        // Inline drafts stay bound to the active conversation through dispatch.
+        // The regular composer already handed off its confirmed snapshot.
+        if (inlineSend) checkSelectionAtDispatch = requireExactComposer;
+        try {
+          await operation.confirm(email);
+        } finally {
+          if (checkSelectionAtDispatch === requireExactComposer) checkSelectionAtDispatch = null;
+        }
+      }, inlineSend);
       if (owned !== operation) return;
       const record = owned.snapshot();
       if (dispatchId && record?.requestId === dispatchId && record.phase === "observed" && record.receipt?.state === "succeeded") {
         settle();
       } else if (
-        !visible &&
+        !inlineSend && !visible &&
         (record?.phase === "dispatching" ||
           (record?.phase === "observed" && record.receipt?.state !== "succeeded"))
       ) {
@@ -602,7 +637,15 @@ export function createMailReviewController(
         visible = true;
         publish();
       }
-      return;
+      if (!inlineSend) return;
+      if (sentSource(record)?.draftId === source.draftId)
+        return { state: "sent" as const, messageId: record!.receipt!.providerResult!.messageId as string };
+      if (record?.source?.draftId === source.draftId) {
+        if (record.receipt?.state === "rejected") return { state: "rejected" as const };
+        if (record.phase === "dispatching" || record.receipt?.state === "outcome-unknown")
+          return { state: "uncertain" as const };
+      }
+      return { state: "unsent" as const, detail: status };
     }
     visible = true;
     // An unsent review of an earlier version of this email was never

@@ -250,7 +250,7 @@ test('Cloud declining a turn mid-use gives one answer and the popup; after plan 
   await expect(conversation(page).getByText(REFUSED, { exact: true })).toHaveCount(1);
   await expect(page.getByText(/configured AI provider is out of credits|billing needs attention|Manage billing in/)).toHaveCount(0);
   await expect(bubble(page, 'What is on my calendar this week?')).toHaveCount(1);
-  const offer = page.getByRole('button', { name: /^Subscription/ });
+  const offer = page.getByRole('button', { name: /^Manage plan/ });
   await expect(offer).toHaveCount(1);
   // Unrelated transient toasts settle before the screenshot; a long one stays up to 10 s.
   await expect(page.locator('[data-alpha-toast] .drop')).toHaveCount(0, { timeout: 11_000 });

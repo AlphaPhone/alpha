@@ -129,6 +129,16 @@ public final class NoteRecordingServiceTraces {
    command(AlphaNoteRecordingService.ACTION_FINISH,"");trace.step("finish",observe(),0);
    if(!service.shown||!"recording".equals(recorder.status().getString("state")))throw new AssertionError("Blank notification Stop reached the live recording");
   }else if(mode.equals("pause-resume")){
+   // A tap on the notification asks MainActivity to open Notes, where the recording is shown again.
+   Intent tap=PendingIntent.latestActivity();
+   if(tap==null||!AlphaNoteRecordingService.ACTION_SHOW_NOTES.equals(tap.getAction()))throw new AssertionError("The recording notification does not open Notes");
+   // The tap is taken once, and not after it has waited out its window.
+   AlphaNoteRecordingService.offerShowNotes();
+   if(!AlphaNoteRecordingService.consumeShowNotes()||AlphaNoteRecordingService.consumeShowNotes())throw new AssertionError("A notification tap did not open Notes exactly once");
+   // Only the tap's clock moves here; the recording's timers stay where they are.
+   long clock=NoteRecordingPorts.now;AlphaNoteRecordingService.offerShowNotes();NoteRecordingPorts.now+=30_000;
+   boolean expiredOpen=AlphaNoteRecordingService.consumeShowNotes();NoteRecordingPorts.now=clock;
+   if(expiredOpen)throw new AssertionError("An expired notification tap opened Notes");
    command(AlphaNoteRecordingService.ACTION_PAUSE,first);trace.step("toggle",observe(),1,true);
    NoteRecordingPorts.advance(5000);
    command(AlphaNoteRecordingService.ACTION_RESUME,first);trace.step("toggle",observe(),1,false);

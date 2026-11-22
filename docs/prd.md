@@ -74,6 +74,9 @@ routing amendment supersedes its earlier Settings switches; qualification of the
 packaged models and device audio remains separate. The approval itself changes no
 runtime or qualification record. Track implementation gaps and execution results
 against the current source.
+The app is English only today: the renderer declares `lang="en"`, Android has no
+translated resources, right-to-left layout is off (`supportsRtl="false"`) and most
+native notice copy is still in Java. Which languages launch is not yet decided.
 APK builds, native emulator/HOME checks, full AOSP boot, real services, physical
 hardware and user acceptance remain distinct. No existing failure is retired by
 changing the prose.

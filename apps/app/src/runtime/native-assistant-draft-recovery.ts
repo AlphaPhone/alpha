@@ -8,7 +8,7 @@ import {rawSlotDraftRecovery,type DurableDraftRawSlot} from '../ui/state/durable
 export function nativeAssistantDraftRecovery(binding:string,slot:DurableDraftRawSlot){
  const shared=rawSlotDraftRecovery(binding,slot);
  return {
-  async capture(signal?:AbortSignal):Promise<DomainRecovery>{const {snapshot,raw}=await shared.capture(signal);return {snapshot,raw,format:'domain'};},
+  async capture(signal?:AbortSignal):Promise<DomainRecovery>{const {snapshot,raw}=await shared.capture(signal);return {snapshot,raw,format:'domain',legacy:null,legacyChanged:false};},
   reset:(expected:DomainRecovery,signal?:AbortSignal)=>shared.reset(expected,signal),
  };
 }

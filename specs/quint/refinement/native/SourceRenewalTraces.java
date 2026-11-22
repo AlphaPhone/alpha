@@ -65,13 +65,23 @@ public final class SourceRenewalTraces implements AutoCloseable {
  static JSONObject describe(Context c,JSONObject input)throws Exception{
   check(c==active.context&&input.length()==8&&input.getString("action").equals("describe"),"Host uses the exact describe-only boundary");
   JSONObject chosen=new JSONObject(input.toString());chosen.remove("action");
-  boolean exact=false;for(int id=1;id<=4;id++)if(chosen.similar(selection(id)))exact=true;
-  check(exact,"Describe forwards only the exact reviewed tuple");
+  int exact=0;for(int id=1;id<=4;id++)if(chosen.similar(selection(id)))exact=id;
+  check(exact!=0,"Describe forwards only the exact reviewed tuple");
   if(!active.online)throw new IOException("Synthetic resident unavailable");
   if(!input.getString("ownerId").equals("synthetic-owner-"+active.owner))throw new NativeDigestSources.SourceChanged("Owner changed");
   int version=input.getString("sourceId").endsWith("-2")?1:active.revision;
   return new JSONObject().put("revoked",active.revoked).put("revision","synthetic-revision-"+version)
-   .put("expiresAt",Instant.ofEpochMilli(EXPIRY).toString());
+   .put("expiresAt",Instant.ofEpochMilli(EXPIRY).toString()).put("scope",scope(exact));
+ }
+ // Each synthetic source reads a different kind of data, so the title is checked for every kind.
+ static JSONObject scope(int id){
+  JSONArray calendars=id==2?new JSONArray():new JSONArray().put(new JSONObject().put("id","1").put("revision","a".repeat(64)));
+  return new JSONObject().put("calendars",calendars).put("reminders",id!=3).put("timeZone","UTC")
+   .put("window","owner_day_and_overdue_reminders").put("maximumItems",20).put("modelEgress",true);
+ }
+ static String title(int id){
+  return switch(id){case 2 -> "Reminders access for your daily brief expires soon";case 3 -> "Calendar access for your daily brief expires soon";
+   default -> "Calendar and reminders access for your daily brief expires soon";};
  }
 
  JSONObject disk(){return raw==null?new JSONObject():new JSONObject(raw);}
@@ -94,7 +104,7 @@ public static void beforeNotify(String tag,Notification notice){
   check(tag.startsWith(prefix),"Exact redacted renewal tag");
   String key=tag.substring(prefix.length());int id=f.idOf(key);
   check(f.disk().getJSONObject(key).getString("phase").equals("dispatching"),"Notification attempt follows durable dispatch reservation");
-  check(notice.channel.equals("alpha-hosted-results")&&notice.title.equals("A brief source expires soon")&&
+  check(notice.channel.equals("alpha-hosted-results")&&notice.title.equals(title(id))&&
    notice.text.equals("Renew it to keep your brief updated.")&&notice.category.equals("reminder")&&
    notice.visibility==Notification.VISIBILITY_PRIVATE&&notice.icon==1&&notice.onlyOnce&&notice.autoCancel&&notice.timeout==EXPIRY-now&&
    notice.publicNotice.title.equals("Alpha Phone")&&notice.publicNotice.text.equals("Tap to open."),"Redacted notice, timeout and lifecycle flags");

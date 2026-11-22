@@ -63,7 +63,7 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
     await expect(bubble(page, `Failing ${kind}`)).toHaveCount(1);
     if (kind === 'insufficient_credits') {
-      // One answer in the chat, and Subscription opens with plan selection and code entry.
+      // One answer in the chat, and Manage plan opens Account with plan selection and code entry.
       // The fixture confirms zero cash and no active plan; neither is inferred from the other.
       const account = page.getByRole('dialog', { name: 'Account', exact: true });
       await expect(account).toBeVisible();
@@ -79,7 +79,7 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await button(page, 'Expand chat').click();
       // No second billing message; the answer carries the one offer, which reopens the same popup.
       await expect(page.getByRole('button', { name: /^Manage billing in Eliza Cloud/ })).toHaveCount(0);
-      const offer = page.getByRole('button', { name: /^Subscription/ });
+      const offer = page.getByRole('button', { name: /^Manage plan/ });
       await expect(offer).toHaveCount(1);
       await offer.click();
       await expect(account).toBeVisible();
@@ -152,7 +152,7 @@ for (const frame of ['done', 'error'] as const) test(`a provider-less turn witho
   })).toBe(true);
   await plan.click();
   // On the phone's own agent the plan action opens the resident account & plan panel (plan headline,
-  // Recheck, Renew); it carries the Subscription controls.
+  // Recheck, Renew); it carries the plan controls.
   const account = page.getByRole('dialog', { name: 'Account', exact: true });
   await expect(account).toBeVisible();
   await expect(account.getByRole('region', { name: 'Balance and membership', exact: true })).toBeVisible();

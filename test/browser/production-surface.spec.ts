@@ -246,6 +246,62 @@ test('sending chat without a connection opens the chooser', async ({ page }) => 
   await expect(page.getByText(/Development reply|emulator development agent/)).toHaveCount(0);
 });
 
+test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async ({ page }) => {
+  test.setTimeout(120_000);
+  const violations = await trackCsp(page);
+  await page.addInitScript(offline);
+  await page.addInitScript(() => {
+    // Synthetic camera: a canvas stream with one line of text. Capture, scan review, OCR and PDF are the shipped code.
+    const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 600; const context = canvas.getContext('2d')!;
+    const paint = () => { context.fillStyle = 'white'; context.fillRect(0, 0, 1200, 600); context.fillStyle = 'black'; context.font = '60px Arial'; context.fillText('Alpha searchable document', 50, 120); };
+    paint(); setInterval(paint, 50);
+    const devices = navigator.mediaDevices; devices.getUserMedia = async () => canvas.captureStream(20); Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: devices });
+  });
+  await page.goto('/?tools=1');
+  await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
+  await openLegacyNotes(page);
+  await page.getByRole('button', { name: 'New note', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('CSP note');
+  await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open CSP note', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Return to Notes', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
+  await page.getByRole('button', { name: 'Maps', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-active-view', 'maps');
+  await page.waitForTimeout(1000);
+  await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
+  await page.getByRole('button', { name: 'Camera', exact: true }).click();
+  await expect.poll(() => page.locator('[aria-label^="Viewfinder."] video').evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  // Scanning is reached by asking Alpha in Camera: one frame opens scan review, which builds the PDF.
+  const scan = async (openComposer = true) => {
+    if (openComposer) await page.getByRole('button', { name: 'Type', exact: true }).click();
+    const input = page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
+    await expect(input).toBeVisible();
+    await input.fill('Scan this'); await input.press('Enter');
+    await page.getByRole('button', { name: 'Multi-page', exact: true }).click();
+    await expect(page.getByRole('img', { name: 'Document page 1', exact: true })).toBeVisible();
+  };
+  await scan();
+  const imagePdf = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download document PDF', exact: true }).click();
+  expect((await imagePdf).suggestedFilename()).toMatch(/\.pdf$/);
+  const documentReview = page.getByRole('dialog', { name: 'Review scan document' });
+  await documentReview.getByRole('button', { name: 'Close document', exact: true }).click();
+  await expect(documentReview).toHaveCount(0);
+  const textReview = page.getByRole('dialog', { name: 'Review scanned text' });
+  await textReview.getByRole('button', { name: 'Close scan', exact: true }).click();
+  await expect(textReview).toHaveCount(0);
+  // Closing Scan keeps the current composer open.
+  await scan(false);
+  await page.getByRole('button', { name: 'Download searchable PDF', exact: true }).click();
+  const review = page.getByRole('dialog', { name: 'Review searchable PDF' });
+  // Local OCR runs in a worker with WebAssembly: the policy must admit both.
+  await expect(review.getByLabel('Page 1 line 1', { exact: true })).toHaveValue(/Alpha searchable/, { timeout: 90_000 });
+  const searchable = page.waitForEvent('download');
+  await review.getByRole('button', { name: 'Download reviewed searchable PDF', exact: true }).click();
+  expect((await searchable).suggestedFilename()).toMatch(/\.pdf$/);
+  expect(await violations()).toEqual([]);
+});
 
 test('production ignores the development render-failure hook', async ({ page }) => {
   await page.addInitScript(offline);

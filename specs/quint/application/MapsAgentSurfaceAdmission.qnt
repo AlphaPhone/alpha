@@ -1,7 +1,8 @@
 /// An agent navigation request asks the launcher to have Maps in front. The launcher answers
 /// yes only when Maps is the view on an unlocked, visible, non-sensitive launcher screen. It
-/// opens Maps itself only over Home, once per request, and then waits for that open to commit
-/// or for a time limit, whichever is first, before it looks again.
+/// opens Maps itself over Home or any open app, the dialer included (the owner asked from the
+/// chat over it), never while a call rings in, once per request, and then waits for that open
+/// to commit or for a time limit, whichever is first, before it looks again.
 module MapsAgentSurfaceAdmission {
   // phase: idle, waiting (Maps was opened and the answer is owed), admitted, refused.
   type Request = { phase: str, opened: bool }
@@ -12,7 +13,7 @@ module MapsAgentSurfaceAdmission {
     view: str, pendingOpen: bool,
     // What keeps Maps from being shown: a locked or other system screen, a secure screen, the
     // shade, a suspended page, the assistant window, the connection sheet, a hidden page, a
-    // shell that is no longer live.
+    // shell that is no longer live, a call ringing in.
     blocks: Set[str], disposed: bool,
     requests: int -> Request, begun: int,
     // Every time Maps was opened for a request and every yes that was answered, with what the
@@ -21,12 +22,15 @@ module MapsAgentSurfaceAdmission {
   }
   var s: Surface
   pure val Requests = 1.to(3)
-  pure val Views = Set("home", "maps", "other")
-  pure val Blocks = Set("system", "secure", "shade", "suspended", "assistant", "sheet", "hidden", "dead")
+  // "app" is an open app Maps replaces (Browser, Notes); "dialer" is the Phone app, which v612
+  // kept, so "directions to Coit Tower" asked over it was refused.
+  pure val Views = Set("home", "maps", "app", "dialer")
+  pure val OpenableViews = Set("home", "app", "dialer")
+  pure val Blocks = Set("system", "secure", "shade", "suspended", "assistant", "sheet", "hidden", "dead", "ringing")
   pure val idle: Request = { phase: "idle", opened: false }
   pure def blocked(v: Surface): bool = v.disposed or v.blocks != Set()
-  /// Maps can be shown, or opened, only over Home or Maps itself.
-  pure def showable(v: Surface): bool = not(blocked(v)) and v.view.in(Set("home", "maps"))
+  /// Maps can be shown, or opened, over Home, Maps itself or any open app, the dialer included.
+  pure def showable(v: Surface): bool = not(blocked(v))
   pure def look(v: Surface): Look = { view: v.view, blocked: blocked(v) }
   /// The launcher's answer at one moment.
   pure def answered(v: Surface, id: int): Surface = {
@@ -51,7 +55,7 @@ module MapsAgentSurfaceAdmission {
     s' = { ...s, view: view, pendingOpen: false }
   }
   /// A request arrives. It is refused at once when Maps cannot be shown, answered at once when
-  /// Maps is already in front, and otherwise opens Maps over Home and waits.
+  /// Maps is already in front, and otherwise opens Maps over Home or the open app and waits.
   action request = {
     val id = s.begun + 1
     val begun = { ...s, begun: id }
@@ -95,8 +99,8 @@ module MapsAgentSurfaceAdmission {
 
   val TypeOK = s.view.in(Views) and s.blocks.subseteq(Blocks) and s.begun.in(0.to(3)) and
     Requests.forall(id => s.requests.get(id).phase.in(Set("idle", "waiting", "admitted", "refused")))
-  /// Maps is opened only over Home, never over another app, and never on a blocked screen.
-  val OpensOnlyOverUnblockedHome = s.opens.select(open => open != { view: "home", blocked: false }) == List()
+  /// Maps is opened only over Home or an open app, never on a blocked screen.
+  val OpensOnlyOverUnblockedHomeOrApp = s.opens.select(open => open.blocked or not(open.view.in(OpenableViews))) == List()
   /// A yes was answered only with Maps in front of an unblocked launcher.
   val AdmittedOnlyWithMapsShown = s.admissions.subseteq(Set({ view: "maps", blocked: false }))
   /// Each request opens Maps at most once, and only a request that opened it waits.
@@ -106,9 +110,9 @@ module MapsAgentSurfaceAdmission {
   /// An open that commits unobserved belongs to a request that was already answered.
   val LateOpenFollowsOpen = s.lateOpens <= s.opens.length()
   /// A view change waits for a commit only while it is still wanted.
-  val PendingOpenOverHome = s.pendingOpen implies s.view == "home" and s.opens.length() > 0
-  val safety = TypeOK and OpensOnlyOverUnblockedHome and AdmittedOnlyWithMapsShown and OneOpenPerRequest and
-    RequestsInOrder and LateOpenFollowsOpen and PendingOpenOverHome
+  val PendingOpenOverHomeOrApp = s.pendingOpen implies s.view.in(OpenableViews) and s.opens.length() > 0
+  val safety = TypeOK and OpensOnlyOverUnblockedHomeOrApp and AdmittedOnlyWithMapsShown and OneOpenPerRequest and
+    RequestsInOrder and LateOpenFollowsOpen and PendingOpenOverHomeOrApp
 
   val AdmittedAfterOpenWitness = Requests.exists(id => s.requests.get(id) == { phase: "admitted", opened: true })
   val AdmittedWithoutOpenWitness = Requests.exists(id => s.requests.get(id) == { phase: "admitted", opened: false })
@@ -121,8 +125,16 @@ module MapsAgentSurfaceAdmission {
     .expect(s.requests.get(1).phase == "waiting" and s.pendingOpen and s.view == "home")
     .then(commit).expect(s.requests.get(1).phase == "admitted" and s.view == "maps" and safety)
     .then(request).expect(s.requests.get(2) == { phase: "admitted", opened: false } and s.opens.length() == 1 and safety)
-  run neverOpensOverAnotherAppTest = init.then(go("other")).then(request)
-    .expect(s.requests.get(1) == { phase: "refused", opened: false } and s.view == "other" and s.opens == List() and safety)
+  run opensMapsOverAnOpenAppTest = init.then(go("app")).then(request)
+    .expect(s.requests.get(1) == { phase: "waiting", opened: true } and s.pendingOpen and s.view == "app")
+    .then(commit).expect(s.requests.get(1).phase == "admitted" and s.view == "maps" and
+      s.opens == List({ view: "app", blocked: false }) and safety)
+  run opensMapsOverTheDialerTest = init.then(go("dialer")).then(request)
+    .expect(s.requests.get(1) == { phase: "waiting", opened: true } and s.pendingOpen and s.view == "dialer")
+    .then(commit).expect(s.requests.get(1).phase == "admitted" and s.view == "maps" and
+      s.opens == List({ view: "dialer", blocked: false }) and safety)
+  run ringingCallRefusesWithoutOpeningTest = init.then(go("dialer")).then(setBlock("ringing", true)).then(request)
+    .expect(s.requests.get(1) == { phase: "refused", opened: false } and s.view == "dialer" and s.opens == List() and safety)
   run blockedScreenRefusesWithoutOpeningTest = init.then(setBlock("secure", true)).then(request)
     .expect(s.requests.get(1).phase == "refused" and s.opens == List())
     .then(setBlock("secure", false)).then(go("maps")).then(setBlock("sheet", true)).then(request)
@@ -132,8 +144,8 @@ module MapsAgentSurfaceAdmission {
   run timeLimitRefusesAndMapsStillOpensTest = init.then(request).then(timeout(1))
     .expect(s.requests.get(1).phase == "refused" and s.view == "home" and s.pendingOpen)
     .then(commit).expect(s.view == "maps" and s.lateOpens == 1 and safety)
-  run userNavigationReplacesTheOpenTest = init.then(request).then(go("other")).then(commit)
-    .expect(s.requests.get(1).phase == "refused" and s.view == "other" and safety)
+  run userNavigationReplacesTheOpenTest = init.then(request).then(go("dialer")).then(commit)
+    .expect(s.requests.get(1).phase == "refused" and s.view == "dialer" and safety)
   run disposedAdapterAnswersNoTest = init.then(go("maps")).then(dispose).then(request)
     .expect(s.requests.get(1).phase == "refused" and s.admissions == Set() and safety)
   run overlappingRequestsShareTheCommitTest = init.then(request).then(request)

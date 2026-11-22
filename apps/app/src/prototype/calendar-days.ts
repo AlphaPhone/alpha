@@ -1,6 +1,6 @@
 /**
- * Calendar days side by side on a wide canvas (more visible day columns when readable; an agenda at
- * large text). The number of days comes from
+ * Calendar days side by side on a wide canvas (#411, responsive-surface matrix: "More visible
+ * time/day columns if readable; keep agenda fallback at large text"). The number of days comes from
  * the measured canvas width and text size (runtime/canvas-geometry.ts). Each column is the same
  * per-day layout the single-day timeline uses, so event identity, the opened occurrence and its
  * time zone never change with the window; only the lanes are drawn as fractions of the column.
@@ -24,7 +24,7 @@ export function firstCalendarDayOf(day: number, count: number): number {
   //@ ensures day - 1 <= \result && \result <= day
   return count >= 3 ? day - 1 : day;
 }
-const firstCalendarDay = (day: number, count = calendarDayCount()): number => firstCalendarDayOf(day, count);
+export const firstCalendarDay = (day: number, count = calendarDayCount()): number => firstCalendarDayOf(day, count);
 /** The visible columns: `count` consecutive days from the first one; the selected day is one of them. */
 export function visibleCalendarDaysOf(day: number, count: number): number[] {
   //@ verify

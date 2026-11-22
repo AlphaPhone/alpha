@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.eliza.plugins.actionjournal.ActionJournal;
 import ai.eliza.plugins.messages.AlphaTelephonyAccess;
 import ai.eliza.plugins.messages.CallLogRows;
 import ai.eliza.plugins.messages.MessageDeletion;
@@ -48,8 +49,9 @@ import org.json.JSONObject;
 /**
  * Alpha's telephony bridge: phone roles, SIMs and SMS/MMS on the verified Alpha AOSP image (issues
  * #420 and #421). Forked from the shared {@code TelephonyPlugin} (plugin-native-messages, elizaOS pin
- * 1803ea88) so that Alpha owns the native review dialogs it shows; the bridge methods, their checks,
- * their order and their answers are the shared ones. {@link AlphaTelephonyPlugin} subclasses this
+ * 1803ea88) so that Alpha owns how a send is confirmed (the approved card, or the owner's Send in
+ * the Messages composer, never a dialog of its own); the bridge methods, their checks, their order and
+ * their answers are otherwise the shared ones. {@link AlphaTelephonyPlugin} subclasses this
  * under the Capacitor plugin name {@code AlphaTelephony} (annotation on the subclass only, so plugin
  * discovery never lists this abstract base), MainActivity registers it only when its
  * {@link SmsTelephonyConfiguration#admission} holds, and it declares the permission aliases
@@ -75,10 +77,11 @@ import org.json.JSONObject;
  * Effects: {@link #dial} is a handoff to the owner's dialer, which also owns emergency numbers.
  * {@link #placeCall} asks Telecom for a call only while Alpha holds the dialer role and CALL_PHONE,
  * never for an emergency number, and reports only that Telecom accepted the request. A text is sent
- * natively only when SEND_SMS is held (granted on the image, or through the SMS role) and the owner
- * confirms Alpha's own native review of the exact recipients, text, SIM and part count on the unlocked
- * phone (or, for the Messages composer, the owner's composer approval that {@link AlphaTelephonyPlugin}
- * guards); the send then follows {@link SmsTelephony}: "sent" only from sent callbacks, "delivered"
+ * natively only when SEND_SMS is held (granted on the image, or through the SMS role), on the unlocked
+ * phone in front, and only what the owner confirmed: the exact recipients, text and SIM of an agent's
+ * card the owner approved in the chat ({@link AlphaApprovedSms}, bound to that card's journal entry), or
+ * the owner's Send in the Messages composer that {@link AlphaTelephonyPlugin} guards. No native dialog
+ * asks again. The send then follows {@link SmsTelephony}: "sent" only from sent callbacks, "delivered"
  * only from delivery reports, never resent automatically. Without that permission the SMS app handoff
  * remains, and a handoff is never reported as sent. Roles are requested only through Android's own
  * dialog and only when Alpha declares the components the role needs. While Alpha holds the SMS role,
@@ -145,7 +148,7 @@ public abstract class AlphaTelephonyBase extends Plugin {
   return !closed && foreground && lock != null && !lock.isDeviceLocked() && users != null && users.isUserUnlocked()
    && (android.os.Build.VERSION.SDK_INT < 31 || users.isUserForeground()) && getActivity() != null && !getActivity().isFinishing() && !getActivity().isDestroyed();
  }
- private void invalidateReads() { generation.incrementAndGet(); for (android.os.CancellationSignal read : reads) read.cancel(); for (ReviewCall pending : pendingReviews) pending.cancelled = true; stopObserving(); stopObservingVoicemail(); cancelReview(); }
+ private void invalidateReads() { generation.incrementAndGet(); for (android.os.CancellationSignal read : reads) read.cancel(); for (SendCall pending : pendingSends) pending.cancelled = true; stopObserving(); stopObservingVoicemail(); }
  @Override protected void handleOnPause() { foreground = false; invalidateReads(); super.handleOnPause(); }
  @Override protected void handleOnResume() { foreground = true; invalidateReads(); resumeObserving(); resumeObservingVoicemail(); super.handleOnResume(); }
  /** Rejects the call unless the profile admits this install and the phone is unlocked with the host in front. */
@@ -550,10 +553,10 @@ public abstract class AlphaTelephonyBase extends Plugin {
   fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.messages(getContext(), thread, limit, before, cursor, cancel));
  }
 
- /** Reads the masked sender of one incoming SMS through the normal foreground fence. */
+ /** Reads the latest SMS sender through the foreground fence, masked by default. */
  @PluginMethod public void latestIncomingSender(PluginCall call) {
   if (refused(call)) return;
-  fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.latestIncomingSender(getContext(), cancel));
+  fencedRead(call, "sms", "Messages", cancel -> SmsProviderReader.latestIncomingSender(getContext(), cancel, call.getBoolean("includeAddress", false)));
  }
 
  /**
@@ -765,34 +768,24 @@ public abstract class AlphaTelephonyBase extends Plugin {
   call.resolve();
  }
 
- // ---- Reviewed native sends ------------------------------------------------------------------
+ // ---- Approved native sends ------------------------------------------------------------------
 
- private android.app.AlertDialog review;
- private PluginCall reviewCall;
- private Runnable reviewCancelled;
- /** Every queued review keeps its own cancellation owner until its original bridge call settles. */
- private final java.util.Set<ReviewCall> pendingReviews = java.util.concurrent.ConcurrentHashMap.newKeySet();
- private final class ReviewCall extends PluginCall {
+ /** Every queued send keeps its own cancellation owner until its original bridge call settles. */
+ private final java.util.Set<SendCall> pendingSends = java.util.concurrent.ConcurrentHashMap.newKeySet();
+ private final class SendCall extends PluginCall {
   private final PluginCall original;
   private final SmsTelephony.DispatchGuard ownerGuard;
   private volatile boolean cancelled;
-  ReviewCall(PluginCall original) { this(original, null); }
-  ReviewCall(PluginCall original, SmsTelephony.DispatchGuard ownerGuard) {
+  SendCall(PluginCall original) { this(original, null); }
+  SendCall(PluginCall original, SmsTelephony.DispatchGuard ownerGuard) {
    super(null, original.getPluginId(), original.getCallbackId(), original.getMethodName(), original.getData());
    this.original = original;
    this.ownerGuard = ownerGuard;
-   pendingReviews.add(this);
+   pendingSends.add(this);
   }
-  @Override public void resolve() { pendingReviews.remove(this); original.resolve(); }
-  @Override public void resolve(JSObject value) { pendingReviews.remove(this); original.resolve(value); }
-  @Override public void reject(String message, String code, Exception cause, JSObject data) { pendingReviews.remove(this); original.reject(message, code, cause, data); }
- }
- private void cancelReview() {
-  if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { main.post(this::cancelReview); return; }
-  android.app.AlertDialog open = review; Runnable cancelled = reviewCancelled;
-  review = null; reviewCall = null; reviewCancelled = null;
-  if (open != null) { open.setOnDismissListener(null); open.dismiss(); }
-  if (cancelled != null) cancelled.run();
+  @Override public void resolve() { pendingSends.remove(this); original.resolve(); }
+  @Override public void resolve(JSObject value) { pendingSends.remove(this); original.resolve(value); }
+  @Override public void reject(String message, String code, Exception cause, JSObject data) { pendingSends.remove(this); original.reject(message, code, cause, data); }
  }
  /** Why a direct send is not permitted now, or null. Nothing is sent when this is non-null. */
  private String sendBlocker(int subscriptionId) {
@@ -807,14 +800,14 @@ public abstract class AlphaTelephonyBase extends Plugin {
   if (active != null) for (SubscriptionInfo info : active) if (info != null && info.getSubscriptionId() == id && info.getSimSlotIndex() >= 0) return info;
   return null;
  }
- private SmsTelephony.DispatchGuard sendGuard(ReviewCall call, int sub, SubscriptionInfo reviewed,
+ private SmsTelephony.DispatchGuard sendGuard(SendCall call, int sub, SubscriptionInfo chosen,
    java.util.function.BooleanSupplier blocked) {
-  final int slot = reviewed.getSimSlotIndex(), carrier = reviewed.getCarrierId();
+  final int slot = chosen.getSimSlotIndex(), carrier = chosen.getCarrierId();
   return () -> {
    SubscriptionInfo current = activeSubscription(sub);
    if (call.cancelled || !admitted() || !unlockedForeground() || blocked.getAsBoolean()
      || current == null || current.getSimSlotIndex() != slot || current.getCarrierId() != carrier)
-    throw new IllegalStateException("Reviewed SIM or access changed");
+    throw new IllegalStateException("Approved SIM or access changed");
    if (call.ownerGuard != null) call.ownerGuard.check();
   };
  }
@@ -824,18 +817,32 @@ public abstract class AlphaTelephonyBase extends Plugin {
   for (int i = 0; i < out.length; i++) { Object value = recipients.opt(i); if (!(value instanceof String)) return null; out[i] = (String) value; }
   return out;
  }
+ /** The action journal the chat records each approved card in ({@link AlphaApprovedSms}). */
+ protected ActionJournal approvals() { return AlphaActionJournal.get(getContext()); }
+ protected boolean reserveSmsClaim(String operationId, String binding) throws Exception {
+  return new AlphaCredentialStore(getContext()).compareExchangeCredentialSlot(
+   "alpha-sms-operation:claim:v1:" + SmsSendJournal.sha256(operationId), null, binding);
+ }
+ /** Whether this exact number belongs to a contact (Android's own number matching). Runs on {@link SmsTelephony#WORK}. */
+ protected boolean contactNumber(String number) {
+  if (getPermissionState("contacts") != PermissionState.GRANTED) return false;
+  try { return AlphaContactLookup.name(getContext(), number, new android.os.CancellationSignal()) != null; }
+  catch (RuntimeException unreadable) { return false; }
+ }
 
  /**
-  * Sends a reviewed text natively. The operation ID is the caller's idempotency key: a repeated ID
-  * returns its journaled result and never sends again. The owner confirms the exact recipients, text,
-  * SIM and part count in the host's native dialog on the unlocked phone; declining records "cancelled".
-  * The result is the shared `SmsSendResult`; "submitted" proves only that Android accepted the request.
-  * The journal is read and written on {@link SmsTelephony#WORK}, and the platform send calls run there.
-  * The UI thread shows only the review.
+  * Sends an agent-proposed text natively once the owner approved its card in the chat. The approved
+  * card is the confirmation: no dialog follows. The request names the card's journal entry
+  * ({@code journalIdentity}: scope and proposal ID), and {@link AlphaApprovedSms} admits exactly the
+  * recipients, text and SIM that entry approved, once; anything else is refused with "not-approved"
+  * and nothing is journaled or sent. The operation ID is the idempotency key: a repeated ID returns
+  * its journaled result and never sends again. The result is the shared `SmsSendResult`; "submitted"
+  * proves only that Android accepted the request. The journal is read and written on
+  * {@link SmsTelephony#WORK}, and the platform send calls run there.
   */
  @PluginMethod public void sendSms(PluginCall call) {
   if (refused(call)) return;
-  startSms(new ReviewCall(call));
+  startSms(new SendCall(call));
  }
  /**
   * Host-native entry point for a composer where the owner already approved this exact operation.
@@ -844,13 +851,14 @@ public abstract class AlphaTelephonyBase extends Plugin {
   */
  protected final void sendOwnerApprovedSms(PluginCall call, SmsTelephony.DispatchGuard ownerGuard) {
   java.util.Objects.requireNonNull(ownerGuard);
-  if (!refused(call)) startSms(new ReviewCall(call, ownerGuard));
+  if (!refused(call)) startSms(new SendCall(call, ownerGuard));
  }
- private void startSms(ReviewCall call) {
+ private void startSms(SendCall call) {
   String operationId = call.getString("operationId"), body = call.getString("body");
   String[] recipients = numbers(call.getArray("recipients"));
   Object rawSubscription = call.getData().opt("subscriptionId");
   int subscriptionId = rawSubscription instanceof Integer ? (Integer) rawSubscription : -1;
+  final JSONObject approval = call.ownerGuard == null ? call.getData().optJSONObject("journalIdentity") : null;
   try { SmsSendJournal.validate(operationId, recipients, body, subscriptionId); }
   catch (IllegalArgumentException invalid) { call.reject("Invalid reviewed message", "invalid"); return; }
   SmsTelephony.WORK.execute(() -> {
@@ -865,16 +873,18 @@ public abstract class AlphaTelephonyBase extends Plugin {
    catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
    catch (Exception unreadable) { call.reject("The send record could not be read. Nothing was sent.", "unavailable"); return; }
    if (existing != null) { call.resolve(SmsTelephony.result(existing)); return; }
-   main.post(() -> reviewSmsOnMain(call, journal, binding, operationId, recipients, body, subscriptionId));
+   if (call.ownerGuard == null) {
+    try { AlphaApprovedSms.claim(approvals(), this::reserveSmsClaim, approval, operationId, recipients, body, subscriptionId, this::contactNumber, System.currentTimeMillis()); }
+    catch (Exception notApproved) { call.reject("This text is not the one approved on its card. Nothing was sent.", "not-approved"); return; }
+   }
+   main.post(() -> sendSmsOnMain(call, journal, binding, operationId, recipients, body, subscriptionId));
   });
  }
- private void reviewSmsOnMain(ReviewCall call, SmsSendJournal journal, String binding, String operationId, String[] recipients, String body, int subscriptionId) {
-  if (call.cancelled) { decide(call, journal, operationId, recipients, body, subscriptionId, "cancelled", System.currentTimeMillis(), SmsTelephony.boot(getContext())); return; }
-  if (refused(call)) return;
-  if (review != null) { notAttempted(call, operationId, "busy"); return; }
+ private void sendSmsOnMain(SendCall call, SmsSendJournal journal, String binding, String operationId, String[] recipients, String body, int subscriptionId) {
   final long now = System.currentTimeMillis(), boot = SmsTelephony.boot(getContext());
-  String blocked = sendBlocker(subscriptionId);
-  if (blocked != null) { decide(call, journal, operationId, recipients, body, subscriptionId, "denied", now, boot); return; }
+  if (call.cancelled) { decide(call, journal, operationId, recipients, body, subscriptionId, "cancelled", now, boot); return; }
+  if (refused(call)) return;
+  if (sendBlocker(subscriptionId) != null || !unlockedForeground()) { decide(call, journal, operationId, recipients, body, subscriptionId, "denied", now, boot); return; }
   final ArrayList<String> parts;
   try { parts = AlphaTelephonyAccess.manager(getContext(), subscriptionId).divideMessage(body); }
   catch (RuntimeException unavailable) { decide(call, journal, operationId, recipients, body, subscriptionId, "denied", now, boot); return; }
@@ -883,59 +893,19 @@ public abstract class AlphaTelephonyBase extends Plugin {
   SubscriptionInfo sim = activeSubscription(subscriptionId);
   if (sim == null) { decide(call, journal, operationId, recipients, body, subscriptionId, "denied", now, boot); return; }
   final int sub = subscriptionId;
-  final java.util.function.BooleanSupplier blockedNow = () -> sendBlocker(sub) != null;
-  final SmsTelephony.DispatchGuard guard = sendGuard(call, sub, sim, blockedNow);
-  final Runnable dispatch = () -> {
-   if (!admitted() || !unlockedForeground() || blockedNow.getAsBoolean()) {
-    decide(call, journal, operationId, recipients, body, sub, "denied", now, boot);
-    return;
+  final SmsTelephony.DispatchGuard guard = sendGuard(call, sub, sim, () -> sendBlocker(sub) != null);
+  SmsTelephony.WORK.execute(() -> {
+   try { call.resolve(SmsTelephony.result(AlphaTelephonyAccess.dispatch(getContext(), config, journal, operationId, recipients, body, sub, parts, guard))); }
+   catch (Exception unrecorded) {
+    final SmsSendJournal.Record record;
+    try { record = journal.existing(operationId, binding); }
+    catch (SmsSendJournal.Expired expired) { call.reject("This request is too old to read back. Nothing was sent again.", "expired"); return; }
+    catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
+    // If nothing reached Android, close the ID against later dispatch.
+    if (record != null) call.resolve(SmsTelephony.result(record));
+    else decide(call, journal, operationId, recipients, body, sub, call.cancelled ? "cancelled" : "denied", now, boot);
    }
-   SmsTelephony.WORK.execute(() -> {
-    try { call.resolve(SmsTelephony.result(AlphaTelephonyAccess.dispatch(getContext(), config, journal, operationId, recipients, body, sub, parts, guard))); }
-    catch (Exception unrecorded) {
-     final SmsSendJournal.Record record;
-     try { record = journal.existing(operationId, binding); }
-     catch (SmsSendJournal.Expired expired) { call.reject("This request is too old to read back. Nothing was sent again.", "expired"); return; }
-     catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
-     // If nothing reached Android, close the ID against later dispatch.
-     if (record != null) call.resolve(SmsTelephony.result(record));
-     else decide(call, journal, operationId, recipients, body, sub, call.cancelled ? "cancelled" : "denied", now, boot);
-    }
-   });
-  };
-  if (call.ownerGuard != null) { dispatch.run(); return; }
-  String message = AlphaTelephonyReview.smsMessage(recipients, sim.getSimSlotIndex(), clip(sim.getDisplayName()), clip(sim.getCarrierName()), parts.size(), body);
-  reviewCall = call;
-  reviewCancelled = () -> decide(call, journal, operationId, recipients, body, sub, "cancelled", now, boot);
-  try {
-   review = new android.app.AlertDialog.Builder(getActivity())
-    .setTitle(AlphaTelephonyReview.smsTitle(recipients.length))
-    .setMessage(message)
-    .setNegativeButton(AlphaTelephonyReview.CANCEL, null)
-    .setPositiveButton(AlphaTelephonyReview.SEND, (dialog, which) -> {
-     if (reviewCall != call) return;
-     review = null; reviewCall = null; reviewCancelled = null;
-     dispatch.run();
-    })
-    .create();
-   review.setOnDismissListener(dialog -> { if (reviewCall == call) cancelReview(); });
-   if (review.getWindow() != null) review.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-   review.show();
-   // An overlay must not be able to steer the owner's Send tap.
-   android.widget.Button send = review.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
-   if (send != null) send.setFilterTouchesWhenObscured(true);
-  } catch (RuntimeException gone) { review = null; reviewCall = null; reviewCancelled = null; notAttempted(call, operationId, "closed"); }
- }
- /**
-  * Nothing was recorded or sent, so the same operation ID may be reviewed again: another review is
-  * open ("busy"), or the review dialog could not be shown ("closed").
-  */
- private static void notAttempted(PluginCall call, String operationId, String reason) {
-  JSObject result = new JSObject();
-  result.put("kind", "sms-send-not-attempted");
-  result.put("operationId", operationId);
-  result.put("reason", reason);
-  call.resolve(result);
+  });
  }
  private void decide(PluginCall call, SmsSendJournal journal, String operationId, String[] recipients, String body, int subscriptionId, String decision, long now, long boot) {
   SmsTelephony.WORK.execute(() -> {
@@ -944,15 +914,16 @@ public abstract class AlphaTelephonyBase extends Plugin {
   });
  }
 
- /** An invalidated agent approval can cancel only its own outstanding native dialog. */
+ /**
+  * An invalidated agent approval (the chat retired its card, or the action was aborted) cancels only
+  * its own send, while it is still queued before dispatch; it is then recorded "cancelled". A send
+  * already handed to Android keeps its receipt. The bridge name is the shared one.
+  */
  @PluginMethod public void cancelSmsReview(PluginCall call) {
   if (refused(call)) return;
   final String operationId = call.getString("operationId", "");
-  main.post(() -> {
-   for (ReviewCall pending : pendingReviews) if (operationId.equals(pending.getString("operationId"))) pending.cancelled = true;
-   if (reviewCall != null && operationId.equals(reviewCall.getString("operationId"))) cancelReview();
-   call.resolve();
-  });
+  for (SendCall pending : pendingSends) if (operationId.equals(pending.getString("operationId"))) pending.cancelled = true;
+  call.resolve();
  }
 
  /** Bounded receipt metadata only; drafts and phone numbers never enter this history response. */
@@ -1024,22 +995,27 @@ public abstract class AlphaTelephonyBase extends Plugin {
  }
 
  /**
-  * Sends one reviewed MMS to every recipient (a group conversation when there are several), with the
-  * text and image attachments the native dialog shows again. The operation ID is the caller's
-  * idempotency key: a repeat returns its journaled `MmsSendResult` and never sends again. Declining
-  * records "cancelled". "sent" is the carrier's send confirmation; MMS delivery is never claimed.
-  * As for {@link #sendSms}, the journal and the platform send call stay off the UI thread.
+  * The bridge's MMS entry point. No agent card proposes an MMS, so there is no approval that could
+  * confirm one here: pictures and group messages are sent only from the Messages composer, where the
+  * owner's Send is the confirmation ({@link #sendOwnerApprovedMms}). Nothing is journaled or sent.
   */
  @PluginMethod public void sendMms(PluginCall call) {
   if (refused(call)) return;
-  startMms(new ReviewCall(call));
+  call.reject("Send pictures and group messages from the Messages composer. Nothing was sent.", "not-approved");
  }
- /** Host-native entry point for an already approved, exact composer operation. See {@link #sendOwnerApprovedSms}. */
+ /**
+  * Sends one MMS the owner sent from the Messages composer to every recipient (a group conversation
+  * when there are several), with its text and image attachments. The operation ID is the caller's
+  * idempotency key: a repeat returns its journaled `MmsSendResult` and never sends again. A send
+  * retired before dispatch records "cancelled". "sent" is the carrier's send confirmation; MMS
+  * delivery is never claimed. As for {@link #sendSms}, the journal and the platform send call stay
+  * off the UI thread. See {@link #sendOwnerApprovedSms} for the guard.
+  */
  protected final void sendOwnerApprovedMms(PluginCall call, SmsTelephony.DispatchGuard ownerGuard) {
   java.util.Objects.requireNonNull(ownerGuard);
-  if (!refused(call)) startMms(new ReviewCall(call, ownerGuard));
+  if (!refused(call)) startMms(new SendCall(call, ownerGuard));
  }
- private void startMms(ReviewCall call) {
+ private void startMms(SendCall call) {
   String operationId = call.getString("operationId"), body = call.getString("body");
   String[] recipients = numbers(call.getArray("recipients"));
   Object rawSubscription = call.getData().opt("subscriptionId");
@@ -1063,16 +1039,15 @@ public abstract class AlphaTelephonyBase extends Plugin {
    catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
    catch (Exception unreadable) { call.reject("The send record could not be read. Nothing was sent.", "unavailable"); return; }
    if (existing != null) { call.resolve(SmsTelephony.result(existing)); return; }
-   main.post(() -> reviewMmsOnMain(call, journal, binding, operationId, recipients, body, attachments, data, subscriptionId));
+   main.post(() -> sendMmsOnMain(call, journal, binding, operationId, recipients, body, attachments, data, subscriptionId));
   });
  }
- private void reviewMmsOnMain(ReviewCall call, SmsSendJournal journal, String binding, String operationId, String[] recipients, String body, SmsSendJournal.Attachment[] attachments, byte[][] data, int subscriptionId) {
-  if (call.cancelled) { decideMms(call, journal, operationId, recipients, body, attachments, subscriptionId, "cancelled", System.currentTimeMillis(), SmsTelephony.boot(getContext())); return; }
-  if (refused(call)) return;
-  if (review != null) { call.reject("Another message is waiting for review", "busy"); return; }
+ private void sendMmsOnMain(SendCall call, SmsSendJournal journal, String binding, String operationId, String[] recipients, String body, SmsSendJournal.Attachment[] attachments, byte[][] data, int subscriptionId) {
   final long now = System.currentTimeMillis(), boot = SmsTelephony.boot(getContext());
+  if (call.cancelled) { decideMms(call, journal, operationId, recipients, body, attachments, subscriptionId, "cancelled", now, boot); return; }
+  if (refused(call)) return;
   final String[] to = recipients; final int sub = subscriptionId;
-  if (mmsBlocker(sub) != null) { decideMms(call, journal, operationId, to, body, attachments, sub, "denied", now, boot); return; }
+  if (mmsBlocker(sub) != null || !unlockedForeground()) { decideMms(call, journal, operationId, to, body, attachments, sub, "denied", now, boot); return; }
   final List<MmsPdu.Part> parts = AlphaTelephonyAccess.mmsParts(body, attachments, data);
   final byte[] pdu;
   try { pdu = MmsPdu.encodeSendRequest(AlphaTelephonyAccess.mmsTransaction(operationId), java.util.Arrays.asList(recipients), null, parts); }
@@ -1080,68 +1055,20 @@ public abstract class AlphaTelephonyBase extends Plugin {
   if (pdu.length > mmsMaxBytes(sub)) { call.reject("This message is larger than the carrier allows. Remove or shrink an attachment and review again.", "too-large"); return; }
   SubscriptionInfo sim = activeSubscription(sub);
   if (sim == null) { decideMms(call, journal, operationId, to, body, attachments, sub, "denied", now, boot); return; }
-  final java.util.function.BooleanSupplier blockedNow = () -> mmsBlocker(sub) != null;
-  final SmsTelephony.DispatchGuard guard = sendGuard(call, sub, sim, blockedNow);
-  final Runnable dispatch = () -> {
-   if (!admitted() || !unlockedForeground() || blockedNow.getAsBoolean()) {
-    decideMms(call, journal, operationId, to, body, attachments, sub, "denied", now, boot);
-    return;
+  final SmsTelephony.DispatchGuard guard = sendGuard(call, sub, sim, () -> mmsBlocker(sub) != null);
+  SmsTelephony.WORK.execute(() -> {
+   try { call.resolve(SmsTelephony.result(AlphaTelephonyAccess.dispatchMms(getContext(), config, journal, operationId, to, body, attachments, pdu, parts, sub, guard))); }
+   catch (Exception unrecorded) {
+    final SmsSendJournal.Record record;
+    try {
+     record = journal.existing(operationId, binding);
+     if (record != null && !record.group) throw new IllegalStateException("operation reused");
+    } catch (SmsSendJournal.Expired expired) { call.reject("This request is too old to read back. Nothing was sent again.", "expired"); return; }
+    catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
+    if (record != null) call.resolve(SmsTelephony.result(record));
+    else decideMms(call, journal, operationId, to, body, attachments, sub, call.cancelled ? "cancelled" : "denied", now, boot);
    }
-   SmsTelephony.WORK.execute(() -> {
-    try { call.resolve(SmsTelephony.result(AlphaTelephonyAccess.dispatchMms(getContext(), config, journal, operationId, to, body, attachments, pdu, parts, sub, guard))); }
-    catch (Exception unrecorded) {
-     final SmsSendJournal.Record record;
-     try {
-      record = journal.existing(operationId, binding);
-      if (record != null && !record.group) throw new IllegalStateException("operation reused");
-     } catch (SmsSendJournal.Expired expired) { call.reject("This request is too old to read back. Nothing was sent again.", "expired"); return; }
-     catch (IllegalStateException reused) { call.reject("This request was already used for a different message. Nothing was sent.", "invalid"); return; }
-     if (record != null) call.resolve(SmsTelephony.result(record));
-     else decideMms(call, journal, operationId, to, body, attachments, sub, call.cancelled ? "cancelled" : "denied", now, boot);
-    }
-   });
-  };
-  if (call.ownerGuard != null) { dispatch.run(); return; }
-  String message = AlphaTelephonyReview.mmsMessage(recipients, sim.getSimSlotIndex(), clip(sim.getDisplayName()), clip(sim.getCarrierName()), attachments, body);
-  reviewCall = call;
-  reviewCancelled = () -> decideMms(call, journal, operationId, to, body, attachments, sub, "cancelled", now, boot);
-  try {
-   android.widget.LinearLayout previews = new android.widget.LinearLayout(getActivity());
-   previews.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-   int edge = Math.round(72 * getActivity().getResources().getDisplayMetrics().density);
-   for (int i = 0; i < data.length; i++) {
-    android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
-    bounds.inJustDecodeBounds = true;
-    android.graphics.BitmapFactory.decodeByteArray(data[i], 0, data[i].length, bounds);
-    android.graphics.BitmapFactory.Options scaled = new android.graphics.BitmapFactory.Options();
-    scaled.inSampleSize = 1;
-    while (bounds.outWidth / (scaled.inSampleSize * 2) >= edge && bounds.outHeight / (scaled.inSampleSize * 2) >= edge) scaled.inSampleSize *= 2;
-    android.graphics.Bitmap thumb = android.graphics.BitmapFactory.decodeByteArray(data[i], 0, data[i].length, scaled);
-    if (thumb == null) continue;
-    android.widget.ImageView view = new android.widget.ImageView(getActivity());
-    view.setImageBitmap(thumb); view.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
-    view.setContentDescription(AlphaTelephonyReview.attachmentDescription(attachments[i].name));
-    android.widget.LinearLayout.LayoutParams size = new android.widget.LinearLayout.LayoutParams(edge, edge);
-    size.setMargins(edge / 6, edge / 6, 0, 0);
-    previews.addView(view, size);
-   }
-   android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(getActivity())
-    .setTitle(AlphaTelephonyReview.mmsTitle(recipients.length))
-    .setMessage(message)
-    .setNegativeButton(AlphaTelephonyReview.CANCEL, null)
-    .setPositiveButton(AlphaTelephonyReview.SEND, (dialog, which) -> {
-     if (reviewCall != call) return;
-     review = null; reviewCall = null; reviewCancelled = null;
-     dispatch.run();
-    });
-   if (previews.getChildCount() > 0) builder.setView(previews);
-   review = builder.create();
-   review.setOnDismissListener(dialog -> { if (reviewCall == call) cancelReview(); });
-   if (review.getWindow() != null) review.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-   review.show();
-   android.widget.Button send = review.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
-   if (send != null) send.setFilterTouchesWhenObscured(true);
-  } catch (RuntimeException gone) { review = null; reviewCall = null; reviewCancelled = null; call.reject(CLOSED); }
+  });
  }
  private void decideMms(PluginCall call, SmsSendJournal journal, String operationId, String[] recipients, String body, SmsSendJournal.Attachment[] attachments, int subscriptionId, String decision, long now, long boot) {
   SmsTelephony.WORK.execute(() -> {

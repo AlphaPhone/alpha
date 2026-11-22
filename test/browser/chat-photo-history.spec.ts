@@ -30,9 +30,9 @@ test(`the first sent photo stays with its recorded message after ${failed?'a fai
   };
   LocalAgentProtocol.prototype.messages=async()=>({messages:structuredClone(fixture.rows)});
   (window as any).photoHistory={room,fixture};
-  return {hasSession:!!connectionController.getSnapshot().session,history:connectionController.getSnapshot().history??null,selected:connectionController.getSelectedConversationId()??null};
+  return {hasSession:!!connectionController.getSnapshot().session,history:connectionController.getSnapshot().history??null,hasSelection:!!connectionController.getSelectedConversationId()};
  },failed);
- expect(starting).toEqual({hasSession:true,history:null,selected:null});
+ expect(starting).toEqual({hasSession:true,history:null,hasSelection:false});
  await choosePhotoAction(page,'Ask Alpha');
  const draft=page.getByRole('button',{name:'Preview attached photo',exact:true}).getByRole('img');
  const pixels=await draft.getAttribute('src');

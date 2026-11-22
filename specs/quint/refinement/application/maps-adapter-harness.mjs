@@ -29,7 +29,7 @@ const ports = new Map(Object.entries({
   'native.ts': 'export const isAndroid=false;',
   'maps/navigation-voice.ts': 'export class NavigationVoice{enabled=false;update(){}pause(){}toggle(){this.enabled=!this.enabled;}}',
   'maps/share.ts': 'export const shareMap=async()=>"closed";',
-  'maps/map-plane.ts': 'export class MapPlane{update(){}destroy(){}}',
+  'maps/map-plane.ts': 'export class MapPlane{constructor(...args){globalThis.mapsHarness.plane=args;}update(){}resetNorth(){globalThis.mapsHarness.northUps++;}destroy(){}}',
   'maps/regional-provider.ts': 'export const regionalMapsConfigured=false,regionalMap=()=>undefined,regionalDiagnostics=()=>({configured:false,error:""}),initializeRegionalMaps=async()=>{};',
   'maps/cloud-maps.ts': 'const cloud=globalThis.mapsHarness.cloud;export const initializeCloudMaps=()=>cloud.initialize(),cloudMapsCoverage=()=>cloud.coverage,cloudMapsDiagnostics=()=>cloud.diagnostics,cloudMapsBasemap=()=>undefined;',
   'maps/native-location.ts': `const harness=globalThis.mapsHarness;
@@ -67,7 +67,7 @@ export async function bundleMapsAdapter() {
         return ports.has(path) ? {path, namespace: 'port'} : undefined;
       });
       builder.onLoad({filter: /.*/, namespace: 'port'}, args => ({
-        contents: args.path === 'capacitor' ? 'export const Capacitor={isNativePlatform:()=>true,isPluginAvailable:()=>true};'
+        contents: args.path === 'capacitor' ? 'export const Capacitor={isNativePlatform:()=>true,isPluginAvailable:()=>true,getPlatform:()=>"android",PluginHeaders:globalThis.mapsHarness.pluginHeaders};'
           : args.path === 'asset' ? 'export default "fixture-asset.svg";' : ports.get(args.path),
         loader: 'js', resolveDir: repositoryRoot,
       }));
@@ -97,11 +97,12 @@ let mounts = 0;
  * Mounts the adapter. `storage` seeds localStorage; `configure(app, harness)` runs after the
  * bundle is evaluated and before the adapter is installed; `view` is the launcher view in front;
  * `onSet(patch)` is told every Maps view state write, as the shell that renders on one would be.
+ * `pluginHeaders` are the native plugin headers Capacitor injects (none by default: not the image).
  */
-export async function mountMapsAdapter(code, {storage = {}, configure, view = 'maps', onSet} = {}) {
+export async function mountMapsAdapter(code, {storage = {}, configure, view = 'maps', onSet, pluginHeaders} = {}) {
   const saved = {document: globalThis.document, window: globalThis.window, localStorage: globalThis.localStorage};
   const document = globalThis.document = Object.assign(new EventTarget(), {
-    hidden: false, querySelector: () => null,
+    hidden: false, querySelector: () => null, querySelectorAll: () => [],
     documentElement: {classList: {contains: () => false}},
   });
   const window = globalThis.window = Object.assign(new EventTarget(), {open() {}});
@@ -110,7 +111,7 @@ export async function mountMapsAdapter(code, {storage = {}, configure, view = 'm
   const bridgeListeners = new Set();
   const harness = globalThis.mapsHarness = {
     locations: [], locationStarts: 0, locationGranted: true, handoffs: 0, screen: null, host: null, surface: null, inspect: null,
-    held: null, inputTimers: new Set(), retiredInputTimers: [],
+    pluginHeaders, plane: null, northUps: 0, copied: [], held: null, inputTimers: new Set(), retiredInputTimers: [],
     setTimeout(run,delay) { if(delay!==350)return setTimeout(run,delay);const timer={run};this.inputTimers.add(timer);return timer; },
     clearTimeout(timer) { if(this.inputTimers.delete(timer))this.retiredInputTimers.push(timer);else clearTimeout(timer); },
     flushInputTimers() { for(const timer of [...this.inputTimers]){this.inputTimers.delete(timer);timer.run();} },
@@ -132,9 +133,11 @@ export async function mountMapsAdapter(code, {storage = {}, configure, view = 'm
       startNavigation(input) { const start = {...deferred(), sessionId: input.sessionId}; this.starts.push(start); return start.promise; },
       updateNavigation: async () => ({active: true}),
       stopNavigation: async input => { harness.bridge.stops.push(input.sessionId); return {stopped: true}; },
+      /** The arrival notice asked of native while Maps is off screen. */
+      arrivals: [], navigationArrived: async input => { harness.bridge.arrivals.push(input); return {shown: true}; },
       stopped(reason) { const sessionId = this.starts.at(-1)?.sessionId; for (const listener of [...bridgeListeners]) listener({sessionId, reason}); },
     },
-    plugin: name => name === 'AlphaMapsTransport' ? harness.bridge : name === 'AlphaCalendar' ? {list: async () => ({status: 'unknown'})} : {openSettings: async () => {}},
+    plugin: name => name === 'AlphaMapsTransport' ? harness.bridge : name === 'AlphaCalendar' ? {list: async () => ({status: 'unknown'})} : {openSettings: async () => {}, copyText: async input => { harness.copied.push(input.text); }},
   };
   const app = await import('data:text/javascript;base64,' + Buffer.from(code + `\n//${++mounts}`).toString('base64'));
   await configure?.(app, harness);

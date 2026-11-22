@@ -1,4 +1,6 @@
-/// AlphaClient run/send/approve plus revisioned local composer storage.
+/// AlphaClient run/send/approve plus revisioned local composer storage. This is the live-card
+/// approval route only; a recovered card approved through `approvePendingAction` is the `recovered`
+/// route of DeviceActionReview.
 module AssistantConversation {
   type State = { connected: bool, sensitive: bool, epoch: int, revision: int,
     busy: str, capturedEpoch: int, capturedRevision: int, proposal: bool, expired: bool,

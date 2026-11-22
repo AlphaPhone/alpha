@@ -40,6 +40,7 @@ import {
   replyDeviceProposalIds,
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
+import {smsSimLabel} from '../ui/telephony/sms-card-facts';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
 import {isReminderOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
@@ -54,7 +55,7 @@ import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
-export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,replyDeviceProposalIds,requestedCameraNeedsCameraView};
+export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,DeviceActionNotStarted,replyDeviceProposalIds,requestedCameraNeedsCameraView};
 export type {CurrentDeviceActionRequest,DeviceCredential,DeviceJournalIdentity,DeviceOperation,DeviceRecovery,ReviewableDeviceOperation,WorkflowNoticeRoute,WorkflowPresentationOperation};
 /** Foreground reviews (free/busy, Notes search, name-targeted edits) and their validators are
  * the shared device-review contract bound to the shared Notes, Calendar and reminder contracts. */
@@ -81,6 +82,8 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   mapsSelectionCurrent:validateMapsSelectedObject,
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
+  // An SMS card names the SIM it goes from; Approve sends it with no dialog after.
+  simLabel:smsSimLabel,
 };
 /** Runs an approved Browser open or control for the device executor. One that Browser refused
  * before any effect closes the attempt as not started, with Browser's reason; any other failure

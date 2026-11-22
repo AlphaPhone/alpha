@@ -3,6 +3,7 @@ import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import { nextDefaultNoteTitle } from '../runtime/note-default-title';
 import { accessibilityTimeoutScale } from '../runtime/accessibility-timeout';
 import { recordRendererFailure } from '../runtime/crash-log';
+import { errorNotice, ERROR_TOAST } from "../runtime/error-notice";
 import iconCatalog from '../icon-catalog.json';
 import { callsBriefing, matchesCallQuery } from "./telephony-presenters";
 /* Seeds, scripted replies and fixture images. Production builds resolve this
@@ -24,10 +25,10 @@ import { MOBILE_SHELL_CANVAS_WIDTH, MOBILE_SHELL_EDGE, MOBILE_SHELL_HOME_BAR_TOP
 import { emptyHomeShadePull, pullStart, shadeFallback } from "./system-shade";
 import React from "react";
 import { DCLogic } from "./dc-lite.js";
-import { askedDraftPlaced, draftAdopted, draftStageFit, draftUndone, emptyDraft, typed } from "../runtime/message-draft";
+import { askedDraftPlaced, discardAskedDraft, draftAdopted, draftStageFit, draftUndone, emptyDraft, typed } from "../runtime/message-draft";
 import { calendarDayColumns, calendarDayCount, calendarReturnDay, markVisibleWeek, visibleCalendarDays } from "./calendar-days";
 import { calendarFormInputs, calendarFormInputPatch, calendarDefaultEventStart, calendarGuestEmail } from "./calendar-form-inputs";
-import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel } from "../runtime/notes-view";
+import { filterNotes, sortNotes, notePreview, noteDateLabel, notesFilterLabel, checklistText, checklistItems } from "../runtime/notes-view";
 import { WEEKDAYS, MONTHS, formatTime, formatClock, formatHours, formatHoursRange, formatHour, weekdayName, formatShortDate, formatLongDate, formatMonthDay, formatMonthTitle } from "./locale-time";
 import { applyListFilter, clearListFilter, deviceEmergencyLive, endPlacement, setCallPartyResolver, setListFilterHandler } from "../runtime/comms-bar";
 
@@ -37,6 +38,15 @@ function canvasBox(el) { var sc = el && el.closest ? el.closest("[data-screen]")
 var SHELL_TOP_ZONE = 90;
 /* System gesture zones (edge Back, top shade, bottom HOME) belong to the shell (resolveMobileShellSwipe). */
 function inShellGestureZone(px, py) { return px < MOBILE_SHELL_EDGE || px > MOBILE_SHELL_CANVAS_WIDTH - MOBILE_SHELL_EDGE || py < SHELL_TOP_ZONE || py > MOBILE_SHELL_HOME_BAR_TOP; }
+// PROD-03: native-adapter.ts and agent-adapter.ts mark a handler whose only effect is to say the
+// feature is unavailable; dc-lite.js drops an element bound to one.
+var UNAVAILABLE_CONTROL = Symbol.for("alpha.unavailableControl");
+function unavailableControl(fn) { return typeof fn === "function" && fn[UNAVAILABLE_CONTROL] === true; }
+var UNAVAILABLE_CARD_ACT = Object.defineProperty(function () {}, UNAVAILABLE_CONTROL, { value: true });
+function cardActionUnavailable(c) {
+  var view = c && c.act ? VIEWS[c.act.mod] : null;
+  return !!(view && view.actions && unavailableControl(view.actions[c.act.fn]));
+}
 
 var IC = {
   inbox: "M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z",
@@ -749,10 +759,12 @@ function msgSubmit(api, pid) {
 }
 /* Send on the draft bubble (AC-15): the same Send, then the bubble shows as sent and Alpha notes it quietly. */
 function msgBubbleSend(api, pid) {
+  var asked = msgDraft(api.get("messages"), pid).draft === "asked";
   var id = VIEWS.messages.submit(api, pid); if (!id) return;
   api.set({ sentDraft: id });
   api.later(function () { if (api.get("messages").sentDraft === id) api.set({ sentDraft: null }); }, 1200);
   api.note("Sent to " + msgWho(api, pid).name);
+  if (asked && api.get("messages").thread === pid) api.toPerson();
 }
 function msgOpenThread(api, pid, local) {
   var st = api.get("messages"); var u = Object.assign({}, st.unread); delete u[pid];
@@ -993,9 +1005,11 @@ registerView("messages", {
         name: w.name, ini: w.ini, bubbles: bubbles, typing: st.typing === tp,
         who: function () { if (api.person(tp) || messagePeople(api).some(function (p) { return p.id === tp; })) api.open("contacts", { open: tp }); else api.open("contacts", { add: true }); },
         call: function () { api.open("phone", { call: tp }); },
-        draftBubble: open && by && d.text.trim() ? {
-          by: by, alpha: by === "alpha", sent: undefined, text: d.text, canUndo: !!d.undo, canAct: true,
-          label: by === "alpha" ? api.name + "'s draft · not sent" : "Your draft", aria: by === "alpha" ? api.name + "'s draft, not sent" : "Your draft, not sent",
+        draftBubble: open && by && (by === "alpha" || d.text.trim()) ? {
+          by: by, alpha: by === "alpha", sent: undefined, text: d.text, canUndo: false, canAct: true, showText: by !== "alpha", ownerEdit: by !== "alpha", sendDisabled: !d.text.trim(),
+          label: by === "alpha" ? "To " + w.name : "Your draft", aria: by === "alpha" ? "Message draft to " + w.name : "Your draft, not sent",
+          onText: function (event) { if (api.get("messages").thread === tp) msgSetDraft(api, tp, Object.assign({}, msgDraft(api.get("messages"), tp), {text:event.target.value})); },
+          discard: function () { if (api.get("messages").thread === tp) msgSetDraft(api, tp, discardAskedDraft(msgDraft(api.get("messages"), tp))); },
           edit: function () { msgSetDraft(api, tp, draftAdopted(msgDraft(api.get("messages"), tp))); api.toPerson(); },
           send: function () { msgBubbleSend(api, tp); },
           undo: function () { msgSetDraft(api, tp, draftUndone(msgDraft(api.get("messages"), tp))); }
@@ -1278,6 +1292,8 @@ registerView("inbox", {
       if (m.sent) { var r0 = inboxRecips(m.to)[0]; var p0 = r0 ? inboxPerson(api, r0) : null; w.ini = p0 ? p0.ini : (r0 ? r0.charAt(0).toUpperCase() : "?"); }
       var s = api.sw(function (dx, dy) {
         if (st.localMailFolder || m.sent || Math.abs(dx) < Math.abs(dy)) return false;
+        // Swiping right asks for a reply draft; with no way to draft one it does nothing (PROD-03).
+        if (dx >= 0 && unavailableControl(api.say)) return false;
         if (dx < 0) {
           api.set({ slide: { id: m.id, x: -412 } });
           api.later(function () {
@@ -1786,8 +1802,8 @@ registerView("calendar", {
     var f = st.form; var F = null;
     if (f) {
       var fp = function (p) { set({ form: Object.assign({}, f, p) }); };
-      var inputs=calendarFormInputs(f,new Date(api.now));
-      var inputChange=function(kind){return function(event){if(api.get('calendar').form!==f)return;try{fp(calendarFormInputPatch(f,kind,event.target.value,new Date(api.now)));}catch(error){api.toast(error.message);fp({});}};};
+      var inputs=calendarFormInputs(f,new Date(api.now==null?Date.now():api.now));
+      var inputChange=function(kind){return function(event){if(api.get('calendar').form!==f)return;try{fp(calendarFormInputPatch(f,kind,event.target.value,new Date(api.now==null?Date.now():api.now)));}catch(error){api.toast(errorNotice(error,'Choose a valid date and time.'),ERROR_TOAST);fp({});}};};
       var dayChips = [];
       var first = f.off === 0 ? 1 : (f.off > 0 ? Math.max(1, f.off - 3) : f.off - 3);
       var offsets = [0];
@@ -2299,7 +2315,7 @@ registerView("camera", {
       hasLast: !!last, lastBg: lastLook ? lastLook.bg : "", lastTf: lastLook ? lastLook.tf : "", lastFlt: lastLook ? lastLook.flt : "none",
       lastLabel: last && last.kind === "video" ? "Open last video" : "Open last photo",
       openLast: function () { if (last) api.open("photos", { open: last.id, from: "camera", seq: api.secure ? sess.slice() : null, chrome: true, sheet: null, edit: null, sel: null, searching: false }); },
-      showFlip: !st.rec, noFlip: !!st.rec, noLast: !last,
+      showFlip: !st.rec, noLast: !last,
       // Flash and zoom reset before the lens changes, so the new lens never inherits an unsupported setting.
       flip: function () { var s = api.get("camera"); api.set({ flash: false, zoom: 1, front: !s.front }); },
       vfUp: function () {}
@@ -2727,7 +2743,7 @@ registerView("photos", {
       if (ed) {
         var el = phLook(cur, "view", ed);
         vw.ed = {
-          bg: el.bg, tf: el.tf, flt: el.flt,
+          bg: el.bg, tf: el.tf, flt: el.flt, tools: true,
           cropCss: ed.crop ? "background:var(--alpha-white);color:var(--alpha-black)" : "background:rgba(255,255,255,.12);color:var(--alpha-white)",
           cropOn: !!ed.crop,
           rotate: function () { var e2 = api.get("photos").edit; api.set({ edit: Object.assign({}, e2, { rot: ((e2.rot || 0) + 90) % 360 }) }); },
@@ -2763,7 +2779,7 @@ registerView("photos", {
     return {
       hdr: !selecting && !st.searching, isLib: st.tab !== "alb" || !!st.searching, isAlb: st.tab === "alb" && !st.searching, libTab: st.tab !== "alb",
       title: st.tab === "alb" ? "Albums" : "Photos",
-      tabs: [["lib", "Library", IC.photo], ["alb", "Albums", IC.phAlbums]].map(function (t) { var on = (st.tab || "lib") === t[0]; return { id: t[0], label: t[1], d: t[2], on: on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)", pick: function () { api.set({ tab: t[0], sel: null }); } }; }),
+      tabs: [["lib", "Library", IC.photo], ["alb", "Albums", IC.phAlbums]].map(function (t) { var on = (st.tab || "lib") === t[0]; return { id: t[0], label: t[1], d: t[2], iconCss: "mask-image:url(/icons/lucide/" + (t[0] === "lib" ? "images" : "folder") + ".svg)", on: on, css: on ? "background:var(--fg);color:var(--bg)" : "color:var(--fg)", pick: function () { api.set({ tab: t[0], sel: null }); } }; }),
       searching: !!st.searching, q: st.q || "", hasQ: !!(st.q || "").trim(), askLabel: "Ask " + api.name + ": “" + (st.q || "").trim() + "”",
       search: function () { api.set({ searching: true, q: "", sel: null, album: null }); },
       onQ: function (e) { api.set({ q: e.target.value }); },
@@ -3028,7 +3044,8 @@ registerView("maps", {
     var results = st.query != null ? mapsSearch(st.query) : [];
     var mode = st.nav ? "nav" : (dst ? "dir" : (place ? "place" : (st.query != null ? "results" : "base")));
     var SH = { peek: 250, half: 520, full: 811 };
-    var sheetH = mode === "results" ? SH[st.sheet || "half"] : (mode === "place" ? 372 : (mode === "dir" ? 300 : 0));
+    // The place card's phone row (48px and its 4px margin) makes the sheet taller when the place has a number.
+    var sheetH = mode === "results" ? SH[st.sheet || "half"] : (mode === "place" ? (place && place.phone ? 424 : 372) : (mode === "dir" ? 300 : 0));
 
     /* camera */
     var cx = MAPS_ME[0] + 36, cy = MAPS_ME[1] - 40, s = 1, fy = (170 + 805) / 2;
@@ -3122,7 +3139,7 @@ registerView("maps", {
         name: place.name, meta: place.cat + " · " + place.area + " · " + mapsMi(place.mi) + " mi", addr: place.addr, d: IC[place.icon],
         hasHours: !!ph, openTxt: ph ? (ph.open ? "Open" : "Closed") : "", hoursTxt: ph ? ph.text : "", openCss: ph && ph.open ? "color: var(--fg)" : "color: var(--mut)",
         min: mapsFmtMin(place.min[0]),
-        hasPhone: !!place.phone, canDir: !place.far, hasWeb: !!place.web, fixed: mapsFixed(place.id),
+        hasPhone: !!place.phone, phone: place.phone || "", canDir: !place.far, hasWeb: !!place.web, fixed: mapsFixed(place.id),
         saved: saved, starD: IC.star, starCss: saved ? "color: var(--acct)" : "", starFill: saved ? "fill: currentColor" : "", saveLabel: saved ? "Remove from saved" : "Save",
         close: function () { api.set({ place: null, pan: null }); },
         dirs: function () { api.set({ directions: place.id, pan: null }); },
@@ -3215,7 +3232,18 @@ IC.notesWave = IC.notesWave || "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0";
 var NOTES_RED = "var(--alpha-notes-red)";
 
 var NOTES_WAVE = []; (function () { for (var i = 0; i < 56; i++) NOTES_WAVE.push(Math.round(8 + 26 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37)) + (i % 3) * 3)); })();
-var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null };
+var NT = { pend: false, playI: null, undoT: null, holdT: null, held: null, itemKeys: null };
+/* Render keys for the open checklist's items, so removing one item does not hand its row (and the
+   focus in it) to the item below. Keys are view-only: saved items carry no id. A new note's first
+   save swaps its draft id for the saved one; the open checklist keeps its keys across that swap. */
+function notesItemKeys(id, count) {
+  var k = NT.itemKeys;
+  if (k && k.id !== id && String(k.id).indexOf("draft-") === 0) k.id = id;
+  if (!k || k.id !== id) k = NT.itemKeys = { id: id, keys: [], next: 0 };
+  while (k.keys.length < count) k.keys.push("item-" + (++k.next));
+  if (k.keys.length > count) k.keys.length = count;
+  return k.keys.slice();
+}
 
 function notesFmt(sec) { if (!Number.isFinite(sec)) return ""; sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + pad2(sec % 60); }
 /* Live agent Notes (canonical-notes-ui.ts) bind api.canonicalNotes: the same view, saved through the canonical Notes client. */
@@ -3321,7 +3349,7 @@ registerView("notes", {
       return p && n.actions.length ? ["Share the action items with " + p.name.split(" ")[0], "What did we decide?"] : ["What did we decide?"];
     }
     if (n && n.kind === "text") return ["Make this a checklist", "Summarize this note"];
-    return ["Start recording", "Summarize my last recording", "Take a note: call the landlord Friday"];
+    return ["Start recording", "Summarize my last recording", "Take a note"];
   },
   voicePhrase: "Start recording",
   actions: {
@@ -3390,21 +3418,22 @@ registerView("notes", {
         onBody: function (e) { notesUpd(api, n.id, { body: e.target.value }); },
         listCss: n.kind === "list" ? "color: var(--acct)" : "", listLabel: n.kind === "list" ? "Turn into text" : "Turn into checklist",
         toggleList: function () {
-          if (n.kind === "text") notesUpd(api, n.id, { kind: "list", body: "", items: String(n.body || "").split("\n").filter(function (l) { return l.trim(); }).map(function (l) { return { t: l.trim(), done: false }; }) });
-          else notesUpd(api, n.id, { kind: "text", items: [], body: (n.items || []).map(function (i) { return i.t; }).join("\n") });
+          // Checked items become "[x] " lines, so turning a checklist into text and back keeps them checked.
+          if (n.kind === "text") notesUpd(api, n.id, { kind: "list", body: "", items: checklistItems(n.body) });
+          else notesUpd(api, n.id, { kind: "text", items: [], body: checklistText(n.items) });
         },
-        items: (n.items || []).map(function (it, i) {
+        items: (function (items) { var keys = notesItemKeys(n.id, items.length); return items.map(function (it, i) {
           var itemLabel = String(it.t || "").trim() || "item";
           return {
-            t: it.t, done: it.done, idx: i, css: it.done ? "text-decoration: line-through; color: var(--mut)" : "",
+            key: keys[i], t: it.t, done: it.done, idx: i, css: it.done ? "text-decoration: line-through; color: var(--mut)" : "",
             box: it.done ? "background: var(--fg); color: var(--bg)" : "box-shadow: inset 0 0 0 1.5px var(--mut); color: transparent",
             label: (it.done ? "Uncheck " : "Check ") + itemLabel,
             removeLabel: "Remove " + itemLabel,
             toggle: function () { notesUpd(api, n.id, function (x) { return { items: x.items.map(function (y, j) { return j === i ? Object.assign({}, y, { done: !y.done }) : y; }) }; }); },
             onText: function (e) { var v = e.target.value; notesUpd(api, n.id, function (x) { return { items: x.items.map(function (y, j) { return j === i ? Object.assign({}, y, { t: v }) : y; }) }; }); },
-            remove: function () { notesUpd(api, n.id, function (x) { return { items: x.items.filter(function (y, j) { return j !== i; }) }; }); }
+            remove: function () { if (NT.itemKeys && NT.itemKeys.id === n.id) NT.itemKeys.keys.splice(i, 1); notesUpd(api, n.id, function (x) { return { items: x.items.filter(function (y, j) { return j !== i; }) }; }); }
           };
-        }),
+        }); })(n.items || []),
         newItem: st.newItem || "",
         onNew: function (e) { api.set({ newItem: e.target.value }); },
         addItem: function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); },
@@ -3836,7 +3865,7 @@ var FILES_TYPES = {
   audio: { label: "Audio", icon: "wave" },
   archive: { label: "Archive", icon: "filesZip" }
 };
-var FL = { undoT: null, playI: null };
+var FL = { undoT: null };
 
 function filesSplit(name) { var i = name.lastIndexOf("."); return i > 0 ? [name.slice(0, i), name.slice(i)] : [name, ""]; }
 function filesUndoable(api, entries, label) {
@@ -3850,43 +3879,40 @@ function filesNorm(x) { return String(x || "").toLowerCase().replace(/[^a-z0-9]+
 function filesRemove(api, ids) {
   var s = api.get("files"); var entries = [];
   s.files.forEach(function (f, i) { if (ids.indexOf(f.id) >= 0) entries.push({ f: f, idx: i }); });
-  clearInterval(FL.playI);
-  api.set({ files: s.files.filter(function (f) { return ids.indexOf(f.id) < 0; }), open: null, sel: null, sheet: null, renaming: false, playing: false });
+  api.set({ files: s.files.filter(function (f) { return ids.indexOf(f.id) < 0; }), open: null, sel: null, renaming: false });
   filesUndoable(api, entries, entries.length === 1 ? entries[0].f.name + " deleted" : entries.length + " files deleted");
 }
-function filesShare(api, ids, via) {
+/* Fixture Share drafts an email in the fixture Inbox; Move has no fixture destination picker. */
+function filesShare(api, ids) {
   var s = api.get("files"); var fs = s.files.filter(function (f) { return ids.indexOf(f.id) >= 0; });
   var names = fs.map(function (f) { return f.name; });
   var to = fs.length === 1 && fs[0].from ? fs[0].from : null;
-  api.set({ sheet: null, sel: null });
-  if (via === "mail" && VIEWS.inbox) return api.open("inbox", { compose: { to: to, subject: names.length === 1 ? filesSplit(names[0])[0] : names.length + " files", body: "Attached: " + names.join(", "), attach: ids } });
-  if (via === "msg" && VIEWS.messages) return api.open("messages", { compose: to || true, text: names.join(", "), attach: ids });
-  api.toast("Ready to share");
+  api.set({ sel: null });
+  if (VIEWS.inbox) return api.open("inbox", { compose: { to: to, subject: names.length === 1 ? filesSplit(names[0])[0] : names.length + " files", body: "Attached: " + names.join(", "), attach: ids } });
+  if (testMocksEnabled) api.toast("Sharing isn’t available in this preview.");
 }
+function filesMoveUnavailable(api) { if (testMocksEnabled) api.toast("Moving isn’t available in this preview."); }
 function filesCount(list, folder) { return list.filter(function (f) { return f.folder === folder; }).length + FILES_FOLDERS.filter(function (d) { return d.parent === folder; }).length; }
 
 registerView("files", {
   title: "Files", icon: "folder", aliases: ["downloads", "documents", "file"],
   chat: "hidden",
-  state: { files: FILES_SEED, folder: null, open: null, grid: false, sort: "recent", sel: null, sheet: null, renaming: false, rn: "", q: null, menu: false, asked: {}, asking: null, playing: false, pos: 0 },
+  state: { files: FILES_SEED, folder: null, open: null, grid: false, sort: "recent", sel: null, renaming: false, rn: "", q: null, menu: false, asked: {}, asking: null },
   persist: ["files", "grid", "sort"],
   jumps: [[null, "Files"], ["folder", "Folder"], ["preview", "File preview"]],
   preset: function (sub) {
     if (sub === "folder") return { folder: "Downloads" };
     if (sub === "preview") return copy("files").presetPreview || { folder: "Downloads" };
   },
-  immersive: function (st) { return st.sheet ? { noPill: true } : null; },
   back: function (st, api) {
-    if (st.sheet) { api.set({ sheet: null }); return true; }
     if (st.menu) { api.set({ menu: false }); return true; }
     if (st.renaming) { api.set({ renaming: false }); return true; }
-    if (st.open) { clearInterval(FL.playI); api.set({ open: null, playing: false, pos: 0 }); return true; }
+    if (st.open) { api.set({ open: null }); return true; }
     if (st.sel) { api.set({ sel: null }); return true; }
     if (st.folder) { var d = null; FILES_FOLDERS.forEach(function (x) { if (x.id === st.folder) d = x; }); api.set({ folder: d && d.parent ? d.parent : null }); return true; }
     if (st.q !== null && st.q !== undefined) { api.set({ q: null }); return true; }
     return false;
   },
-  onLeave: function () { clearInterval(FL.playI); },
   suggestions: function (st) { return st.open ? ["Summarize this file"] : []; },
   voicePhrase: copy("files").voicePhrase,
 
@@ -3904,7 +3930,7 @@ registerView("files", {
         label: isSel ? ((on ? "Deselect " : "Select ") + f.name) : "Open " + f.name,
         tap: function () {
           if (isSel) { var cur = api.get("files").sel || []; api.set({ sel: cur.indexOf(f.id) >= 0 ? cur.filter(function (x) { return x !== f.id; }) : cur.concat([f.id]) }); return; }
-          clearInterval(FL.playI); api.set({ open: f.id, renaming: false, playing: false, pos: 0 });
+          api.set({ open: f.id, renaming: false });
         }
       };
     }
@@ -3936,7 +3962,7 @@ registerView("files", {
         close: function () { var d = null; FILES_FOLDERS.forEach(function (x) { if (x.id === st.folder) d = x; }); api.set({ folder: d && d.parent ? d.parent : null, sel: null }); },
         viewIcon: st.grid ? IC.filesRows : IC.grid, viewLabel: st.grid ? "Show as list" : "Show as grid",
         toggleView: function () { api.set({ grid: !st.grid }); },
-        hasMenu: true, hasCrumbs: false, openMenu: function () { api.set({ menu: true }); },
+        hasMenu: true, hasCrumbs: false,
         menuRows: [["list", IC.filesRows, "List", !st.grid, { grid: false }], ["grid", IC.grid, "Grid", !!st.grid, { grid: true }], ["recent", IC.clock, "Newest first", st.sort !== "name", { sort: "recent" }], ["name", IC.filesSort, "Name", st.sort === "name", { sort: "name" }]].map(function (m) {
           return { id: m[0], label: m[2], d: m[1], on: m[3], go: function () { api.set(Object.assign({ menu: false }, m[4])); } };
         }),
@@ -3953,47 +3979,15 @@ registerView("files", {
     if (f) {
       var ty = FILES_TYPES[f.type] || FILES_TYPES.pdf;
       var parts = filesSplit(f.name);
-      var paper = api.theme === "dark" ? "var(--alpha-gray-e9)" : "var(--alpha-white)";
-      var pages = [];
-      if (f.type === "pdf" || f.type === "doc") {
-        for (var p = 0; p < Math.min(f.pages || 1, 2); p++) {
-          var lines = []; for (var l = 0; l < (p === 0 ? 8 : 14); l++) lines.push({ w: (l * 37 % 35) + 60 });
-          pages.push({ first: p === 0, rest: p > 0, heading: f.heading || parts[0], rows: (f.rows || []).map(function (r) { return { k: r[0], v: r[1] }; }), lines: lines, num: (p + 1) + " / " + (f.pages || 1) });
-        }
-      }
+      // Fixture documents show their key rows as plain text, as a selected text file does.
+      var textBody = f.type === "pdf" || f.type === "doc" ? [f.heading || parts[0]].concat((f.rows || []).map(function (r) { return r[0] + ": " + r[1]; })).join("\n") : "";
       var fromP = f.from ? api.person(f.from) : null;
       var asked = !!(st.asked || {})[f.id];
-      var wave = []; for (var w = 0; w < 48; w++) wave.push({ h: Math.round(8 + 40 * Math.abs(Math.sin(w * 0.7) * Math.cos(w * 0.29))), c: f.dur && w / 48 < (st.pos || 0) / f.dur ? "var(--acct)" : "var(--s3)" });
-      var saveRn = function () {
-        var v = String(api.get("files").rn || "").trim();
-        if (v) api.set({ files: api.get("files").files.map(function (x) { return x.id === f.id ? Object.assign({}, x, { name: v + parts[1] }) : x; }), renaming: false });
-        else api.set({ renaming: false });
-      };
       pv = {
         name: f.name, base: parts[0], ext: parts[1],
         meta: (f.type === "pdf" ? "PDF" : ty.label) + " · " + f.size + (fromP ? " · from " + fromP.name.split(" ")[0] : "") + " · " + f.folder,
         d: IC[ty.icon],
-        isPages: pages.length > 0, pages: pages, paper: paper,
-        isReceipt: f.scan === "receipt", isPhoto: f.scan === "photo", photoBg: imgBg("p10", "linear-gradient(180deg, var(--alpha-scan-photo-1) 0%, var(--alpha-scan-photo-2) 45%, var(--alpha-scan-photo-3) 62%, var(--alpha-scan-photo-4) 63%, var(--alpha-scan-photo-5) 100%)"), photoSun: IMG.p10 ? "none" : "block", isAudio: f.type === "audio", isArchive: f.type === "archive",
-        receipt: f.receipt ? { shop: f.receipt.shop, rows: f.receipt.rows.map(function (r) { return { k: r[0], v: r[1] }; }), total: f.receipt.total } : null,
-        contents: (f.contents || []).map(function (c) { return { name: c, d: /\/$/.test(c) ? IC.folder : IC.filesDoc }; }),
-        wave: wave, time: Math.floor((st.pos || 0) / 60) + ":" + pad2(Math.floor(st.pos || 0) % 60) + " / " + Math.floor((f.dur || 0) / 60) + ":" + pad2((f.dur || 0) % 60),
-        playIcon: st.playing ? IC.pause : IC.play, playLabel: st.playing ? "Pause" : "Play", playCss: st.playing ? "" : "fill: currentColor",
-        play: function () {
-          if (api.get("files").playing) { clearInterval(FL.playI); api.set({ playing: false }); return; }
-          api.set({ playing: true, pos: (st.pos || 0) >= f.dur ? 0 : (st.pos || 0) });
-          clearInterval(FL.playI);
-          FL.playI = api.every(function () { var s = api.get("files"); var np = (s.pos || 0) + 1; if (np >= f.dur) { clearInterval(FL.playI); api.set({ pos: f.dur, playing: false }); return; } api.set({ pos: np }); }, 250);
-        },
-        transcribe: function () {
-          var id = "memo-" + f.id;
-          if (recordById((api.get("notes").list || []), id)) return api.open("notes", { open: id });
-          var note = { id: id, kind: "voice", title: "Landlord", when: "Yesterday · 6:20 PM", dur: f.dur, pinned: false,
-            lines: [{ s: "me", t: "Note to self: call the landlord Friday.", at: 0 }, { s: "me", t: "The bedroom radiator clanks all night, and ask when the lease renewal is due.", at: 6 }],
-            summary: f.sum.slice(0, 2), actions: [{ t: "Call the landlord Friday", done: false }, { t: "Ask about the lease renewal date", done: false }] };
-          api.setView("notes", { list: [note].concat(api.get("notes").list || []) });
-          api.open("notes", { open: id });
-        },
+        textBody: textBody,
         renaming: !!st.renaming, notRenaming: !st.renaming,
         rn: st.rn,
         startRename: function () { api.set({ renaming: true, rn: parts[0] }); },
@@ -4003,9 +3997,9 @@ registerView("files", {
           if (e.key === "Enter") { e.preventDefault(); saveRn(); }
           if (e.key === "Escape") api.set({ renaming: false });
         },
-        close: function () { clearInterval(FL.playI); api.set({ open: null, renaming: false, playing: false, pos: 0 }); },
-        share: function () { api.set({ sheet: "share", renaming: false }); },
-        move: function () { api.set({ sheet: "move", renaming: false }); },
+        close: function () { api.set({ open: null, renaming: false }); },
+        share: function () { filesShare(api, [f.id]); },
+        move: function () { filesMoveUnavailable(api); },
         del: function () { filesRemove(api, [f.id]); },
         asked: asked, asking: st.asking === f.id, canAsk: !asked && st.asking !== f.id,
         sum: f.sum || [],
@@ -4015,43 +4009,26 @@ registerView("files", {
       };
     }
 
-    /* sheets */
-    var targetIds = f ? [f.id] : (sel || []);
-    var curFolder = f ? f.folder : st.folder;
-    var moveTo = FILES_FOLDERS.map(function (d) {
-      var here = d.id === curFolder;
-      return { id: d.id, name: d.id, d: IC[d.icon] || IC.folder, here: here, notHere: !here, sub: d.parent ? d.parent : "",
-        go: function () {
-          if (here) { api.set({ sheet: null }); return; }
-          var ids = targetIds.slice();
-          api.set({ files: api.get("files").files.map(function (x) { return ids.indexOf(x.id) >= 0 ? Object.assign({}, x, { folder: d.id }) : x; }), sheet: null, sel: null });
-          api.toast((ids.length === 1 ? "Moved" : ids.length + " files moved") + " to " + d.id);
-        } };
-    });
-
     return {
       top: !st.folder, searching: st.q !== null && st.q !== undefined, notSearching: st.q === null || st.q === undefined,
       q: st.q || "", onQ: function (e) { api.set({ q: e.target.value }); }, search: function () { api.set({ q: "" }); }, endSearch: function () { api.set({ q: null }); },
       hasQuery: !!q, noQuery: !q, results: results, noResults: !!q && results.length === 0,
       locs: locs, recent: [],
       // Fixture browse (mock mode only): the fixture folders stand in for categories; Trash is an empty folder.
-      browse: { ready: true, cats: locs.map(function (l) { return { name: l.name, d: l.d, count: l.sub.split(" ")[0], label: l.name, go: l.go }; }), vols: [], trashD: IC.trash, trashCount: "", openTrash: function () { api.set({ folder: "Trash", q: null }); } },
+      browse: { ready: true, allFilesIcon: IC.folder, cats: locs.map(function (l) { return { name: l.name, d: l.d, count: l.sub.split(" ")[0], label: l.name, go: l.go }; }), vols: [], trashD: IC.trash, trashCount: "", openTrash: function () { api.set({ folder: "Trash", q: null }); } },
       storageText: copy("files").storageText || "Storage usage unavailable",
       storageW: copy("files").storageW || "0%",
       inFolder: !!fd, fd: fd,
       isList: !st.grid, isGrid: !!st.grid,
-      isSel: isSel, notSel: !isSel, selectionBusy: false, selectionDisabled: selCount === 0, selCount: selCount === 0 ? "Select" : String(selCount), hasSel: selCount > 0, selOp: selCount > 0 ? "1" : ".35",
+      isSel: isSel, notSel: !isSel, selFiles: isSel, selectionBusy: false, selectionDisabled: selCount === 0, selCount: selCount === 0 ? "Select" : String(selCount), hasSel: selCount > 0, selOp: selCount > 0 ? "1" : ".35",
       exitSel: function () { api.set({ sel: null }); },
       selAll: function () { api.set({ sel: files.filter(function (x) { return x.folder === st.folder; }).map(function (x) { return x.id; }) }); },
-      selShare: function () { if (selCount) api.set({ sheet: "share" }); },
-      selMove: function () { if (selCount) api.set({ sheet: "move" }); },
+      selShare: function () { if (selCount) filesShare(api, sel.slice()); },
+      selMove: function () { if (selCount) filesMoveUnavailable(api); },
       selDel: function () { if (selCount) filesRemove(api, sel.slice()); },
       isPreview: !!pv, pv: pv,
-      moveSheet: st.sheet === "move", shareSheet: st.sheet === "share", moveTo: moveTo,
-      closeSheet: function () { api.set({ sheet: null }); },
-      shareMsg: function () { filesShare(api, targetIds, "msg"); },
-      shareMail: function () { filesShare(api, targetIds, "mail"); },
-      menuOpen: !!st.menu && !!fd, closeMenu: function () { api.set({ menu: false }); },
+      menuOpen: !!st.menu && (st.menu === "file" ? !!pv : !!fd), fileMenu: st.menu === "file" && !!pv, folderMenu: st.menu !== "file", menuLabel: st.menu === "file" ? "File actions" : "Sort and more",
+      openMenu: function () { api.set({ menu: "file" }); }, closeMenu: function () { api.set({ menu: false }); },
       askQ: "Ask " + api.name + ": \u201c" + String(st.q || "").trim() + "\u201d",
       askSearch: function () { var qq = String(api.get("files").q || "").trim(); api.set({ q: null }); api.send("Find the file " + qq); }
     };
@@ -5067,7 +5044,7 @@ var BASE = {
   // Quick-settings facts; tiles stay neutral until a fact is known.
   q: Object.assign({}, QUICK_SETTINGS),
   nGone: [], nSlide: null, bright: 70, theme: null, fs: null, now: Date.now(),
-  charName: ALPHA_PRODUCT.identity.characterName, vs: {}, secure: false, stack: [], toastUndo: false, drawer: false, drawerQ: "",
+  charName: ALPHA_PRODUCT.identity.characterName, vs: {}, secure: false, stack: [], toastUndo: false, notices: [], drawer: false, drawerQ: "",
   msgs: [],
   // AP-16 stage history while the chat is open: where each Alpha stage switch came from (D11).
   stageFrom: []
@@ -5223,17 +5200,57 @@ class Component extends DCLogic {
   stopEvery(grp) { this.I = this.I || {}; (this.I[grp] || []).forEach(clearInterval); this.I[grp] = []; }
   toast(msg, opts) {
     opts = opts || {};
-    // An incoming notice must not replace a restore action the owner can still choose.
-    // Restore callbacks retain their own source/revision checks; queueing never extends
-    // a provider or deletion deadline. Consecutive passive notices share the next slot.
-    if (this.toastActive && this.undoFn) {
+    // A persistent notice (lost work, a privacy state left on) is announced once like a failure and
+    // also stays in the chat's notice area, with no timer, until the owner dismisses it there. It
+    // never holds the toast slot, so other feedback is not held back behind it.
+    if (opts.kind === "persistent") { this.addNotice(msg); opts = { kind: "error" }; }
+    // An incoming notice waits its turn, so a restore action the owner can still choose and an
+    // error are never lost before they are read. A passive notice with another passive notice
+    // waiting yields once it has been shown for the short reading time (1.9 s, scaled), so newer
+    // feedback is not held behind it for long; an Undo or error takes a passive notice's place at
+    // once, so a restore window never starts late. Restore callbacks retain their own
+    // source/revision checks; queueing never extends a provider or deletion deadline. Consecutive
+    // passive notices share the next slot; an Undo or error is never collapsed away, and a notice
+    // identical to the one it would wait behind is not queued again. The queue holds at most three
+    // notices: when it overflows, the oldest notice of the lowest rank goes (passive, then Undo,
+    // then error).
+    var next = { msg: msg, undo: opts.undo || null, kind: opts.kind === "error" ? "error" : undefined }, rank = this.toastRank;
+    var passiveShown = this.toastActive && !this.undoFn && !this.toastKind;
+    if (this.toastActive && !(passiveShown && rank(next) > 0)) {
       var queue = this.toastQueue || (this.toastQueue = []), last = queue[queue.length - 1];
-      var next = { msg: msg, undo: opts.undo || null, kind: opts.kind };
-      if (last && !last.undo && !next.undo) queue[queue.length - 1] = next;
+      var tail = last || { msg: this.toastMessage, undo: this.undoFn, kind: this.toastKind || undefined };
+      if (!next.undo && !tail.undo && tail.msg === msg && tail.kind === next.kind) return;
+      if (last && rank(last) === 0 && rank(next) === 0) queue[queue.length - 1] = next;
       else queue.push(next);
+      if (queue.length > 3) {
+        var drop = 0;
+        queue.forEach(function (row, index) { if (rank(row) < rank(queue[drop])) drop = index; });
+        queue.splice(drop, 1);
+      }
+      if (passiveShown && !this.toastHeld) this.scheduleToast();
       return;
     }
     this.showToast(msg, opts);
+  }
+  toastRank(row) { return row.kind === "error" ? 2 : row.undo ? 1 : 0; }
+  // Persistent notices: at most three, oldest dropped first; the same sentence is listed once.
+  addNotice(msg) {
+    var list = this.persistentNotices || [];
+    if (list.indexOf(msg) >= 0) return;
+    this.persistentNotices = list.concat([msg]).slice(-3);
+    this.setState({ notices: this.persistentNotices.slice() });
+  }
+  dismissNotice(msg) {
+    var doc = typeof document !== "undefined" ? document : null;
+    var fromNotice = !!doc?.activeElement?.closest?.("[data-alpha-persistent-notice]");
+    var sheet = fromNotice ? doc.activeElement.closest(".alpha-chat-notices")?.parentElement : null;
+    this.persistentNotices = (this.persistentNotices || []).filter(function (text) { return text !== msg; });
+    this.setState({ notices: this.persistentNotices.slice() }, function () {
+      // Focus left with the dismissed notice: hand it to the next notice, else the chat header.
+      if (!sheet || !sheet.isConnected || (doc.activeElement && doc.activeElement !== doc.body)) return;
+      var next = sheet.querySelector("[data-alpha-persistent-notice] button") || sheet.querySelector("[data-alpha-chat-home]");
+      if (next) next.focus({ preventScroll: true });
+    });
   }
   showToast(msg, opts) {
     opts = opts || {};
@@ -5243,15 +5260,20 @@ class Component extends DCLogic {
     this.toastHeld = inside; this.toastActive = true;
     this.toastSequence = (this.toastSequence || 0) + 1;
     // Undo stays as long as the reviewed-deletion notice (10 s) so the two restore offers match.
-    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * accessibilityTimeoutScale();
+    var scale = accessibilityTimeoutScale();
+    this.toastDuration = Math.max(opts.undo ? 10000 : 1900, Math.min(12000, String(msg).length * 50 + 500)) * scale;
     this.undoFn = opts.undo || null;
-    this.toastKind = opts.kind === "error" ? "error" : "";
+    this.toastKind = opts.kind === "error" ? "error" : ""; this.toastMessage = msg;
+    this.toastReadMin = opts.undo || this.toastKind ? this.toastDuration : Math.min(this.toastDuration, 1900 * scale);
+    this.toastShownAt = Date.now();
     this.setState({ toast: msg, toastUndo: !!opts.undo }); this.scheduleToast();
   }
   scheduleToast() {
     this.clear("t"); if (!this.toastActive || this.toastHeld) return;
-    var self = this, sequence = this.toastSequence;
-    this.later(function () { if (self.toastSequence === sequence && !self.toastHeld) self.closeToast(); }, this.toastDuration, "t");
+    var self = this, sequence = this.toastSequence, delay = this.toastDuration;
+    // A passive notice with another waiting keeps only what is left of its short reading time.
+    if (!this.undoFn && !this.toastKind && this.toastQueue?.length) delay = Math.max(0, this.toastReadMin - (Date.now() - this.toastShownAt));
+    this.later(function () { if (self.toastSequence === sequence && !self.toastHeld) self.closeToast(); }, delay, "t");
   }
   holdToast() { if (this.toastActive) { this.toastHeld = true; this.clear("t"); } }
   resumeToast() { this.toastHeld = false; if (this.toastActive) this.scheduleToast(); }
@@ -5769,6 +5791,10 @@ class Component extends DCLogic {
     // AC-26: a replaced or finished proposal never acts, however it is reached.
     if (!proposalCanAct(c, this.emergencyLive())) return;
     if ((c.act && DEFERRED_MVP_VIEWS.has(c.act.mod)) || (c.go && DEFERRED_MVP_VIEWS.has(c.go.view))) return this.toast("This action is not available on this phone yet.");
+    // PROD-03: an action that can only say it is unavailable (marked by native-adapter.ts) never
+    // marks its card done; the card opens its view instead when it names one.
+    var action = c.act && VIEWS[c.act.mod] && VIEWS[c.act.mod].actions ? VIEWS[c.act.mod].actions[c.act.fn] : null;
+    if (action && action[Symbol.for("alpha.unavailableControl")] === true) { if (c.go) return this.openView(c.go.view, c.go.patch, c.go.chat || self.defaultChat(c.go.view)); return action(c, this.api(c.act.mod)); }
     var markDone = function () { self.setState({ msgs: self.S().msgs.map(function (x) { return x.id === m.id ? Object.assign({}, x, { card: Object.assign({}, x.card, m.card, { done: true }, c.type === "proposal" ? { state: "done" } : null) }) : x; }) }); };
     if (c.act && VIEWS[c.act.mod] && VIEWS[c.act.mod].actions && VIEWS[c.act.mod].actions[c.act.fn]) {
       if (c.done) { if (c.go) this.openView(c.go.view, c.go.patch, c.go.chat || self.defaultChat(c.go.view)); return; }
@@ -5912,6 +5938,10 @@ class Component extends DCLogic {
 
     var msgs = this.transcriptWindow(S.msgs, panelOpen || (isOn && !!this.chatMotion)).map(function (m) {
       var c = m.card || {}; var t = c.type;
+      // PROD-03: a card whose one action could only say it is unavailable offers no control for it.
+      // Draft, summary, flow and proposal cards keep their content; an agenda, event, note or
+      // generic card is itself the control (template.html), so dc-lite.js drops it whole.
+      var actOff = cardActionUnavailable(c) && !c.go;
       var shown = m.from === "agent" && typeof m.displayText === "string" ? m.displayText : m.text;
       if (typeof shown === "string" && shown.length > 200000) {
         var end = 200000 - (/[\uD800-\uDBFF]/.test(shown[199999]) ? 1 : 0);
@@ -5925,12 +5955,12 @@ class Component extends DCLogic {
         // A quiet local note ("Sent to Maya") reads as a muted line.
         lineClass: m.from === "agent" && m.quiet ? "alpha-agent-line alpha-agent-line-quiet" : "alpha-agent-line",
         gIcon: IC[c.icon] || IC.spark, evIcon: c.act && !c.done ? IC.plus : IC.check, callIni: c.ini || ((c.who || "").split(" ").map(function (w) { return w.charAt(0); }).join("").slice(0, 2)),
-        sumSave: t === "summary" && !c.done && !!c.act, sumOpen: t === "summary" && !c.act && !!c.go,
-        draftActs: !c.done && S.editCard !== m.id,
-        done: !!c.done || (t === "call" && !PN.live), notDone: !(c.done || (t === "call" && !PN.live)),
+        sumSave: t === "summary" && !c.done && !!c.act && !actOff, sumOpen: t === "summary" && !c.act && !!c.go,
+        draftActs: !c.done && S.editCard !== m.id && !actOff,
+        done: !!c.done || (t === "call" && typeof PN !== "undefined" && !PN.live), notDone: !(c.done || (t === "call" && typeof PN !== "undefined" && !PN.live)),
         rows: (c.rows || []).map(function (r) { return Object.assign({}, r, { dot: r.key ? "var(--acc)" : "var(--line)", icon: IC[r.icon] || IC.right, open: function () { if (r.go) self.openView(r.go.view, r.go.patch, r.go.chat); else self.cardAct(m); } }); }),
         bullets: c.bullets || [],
-        act: function () { self.cardAct(m); },
+        act: actOff ? UNAVAILABLE_CARD_ACT : function () { self.cardAct(m); },
         edit: function () { self.setState({ draft: c.body || "", editCard: m.id }); }
       };
     });
@@ -6024,6 +6054,8 @@ class Component extends DCLogic {
       toastRole: S.toastUndo ? undefined : "button", toastTabIndex: S.toastUndo ? undefined : 0,
       toastTap: S.toastUndo ? undefined : function () { self.closeToast(); },
       toastKey: S.toastUndo ? undefined : function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); self.closeToast(); } },
+      // A persistent notice is closed only by its own Dismiss button.
+      notices: (S.notices || []).map(function (text) { return { key: text, text: text, dismiss: function () { self.dismissNotice(text); } }; }),
       doUndo: function () { var f = self.undoFn; self.closeToast(); if (f) f(); },
       hasOngoing: !!ongoing && isOn, ongoing: ongoing || {}, sbWifi: S.q.wifi, sbPlane: S.q.plane,
       goCalendar: function () { self.openView("calendar", copy("shell").homeCalendar || null); },

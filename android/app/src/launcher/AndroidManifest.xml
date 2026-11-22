@@ -104,11 +104,11 @@
   <service android:name=".AlphaRespondViaMessageService" android:enabled="false" android:exported="true" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
    <intent-filter><action android:name="android.intent.action.RESPOND_VIA_MESSAGE" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
   </service>
-  <activity android:name=".AlphaSmsComposeActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="Messages" android:windowSoftInputMode="adjustResize">
+  <activity android:name=".AlphaSmsComposeActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_messages_label" android:windowSoftInputMode="adjustResize">
    <intent-filter><action android:name="android.intent.action.SENDTO" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
   </activity>
   <provider android:name="ai.eliza.plugins.messages.MmsFileProvider" android:authorities="${applicationId}.mms" android:enabled="false" android:exported="false" android:grantUriPermissions="true" />
-  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="Phone">
+  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_phone_label">
    <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
    <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="tel" /></intent-filter>
   </activity>

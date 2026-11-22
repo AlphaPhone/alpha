@@ -69,7 +69,7 @@ test('the typed schedule enable review states the delay window without enabling'
  await setup(page,{active:false});
  const workflows=page.getByRole('region',{name:'Workflows',exact:true});
  await workflows.getByText('Morning notes digest',{exact:true}).first().click();
- await workflows.getByRole('button',{name:'Turn Morning notes digest on or off',exact:true}).click();
+ await workflows.getByRole('switch',{name:'Turn Morning notes digest on or off',exact:true}).click();
  await expect(workflows).toContainText('Android may delay scheduled runs. Runs more than 30 minutes late are marked missed.');
  expect(await posts(page,'/activate')).toBe(0);
 });

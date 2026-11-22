@@ -3,13 +3,15 @@ type Binding = {
  key:string;width:number;height:number;zoomable:boolean;current():boolean;changed():void;
  toggle():void;step(direction:number):void;
 };
+const DOUBLE_TAP_MS = 350;
 
 /** One source-bound gesture state per mounted Photos viewer. No media is modified. */
 export function createPhotoViewport(){
  let binding:Binding|undefined,scale=1,x=0,y=0,frame:HTMLElement|undefined;
  const pointers=new Map<number,Point>();
  let start:Point|undefined,last:Point|undefined,pinch:{distance:number;scale:number;x:number;y:number;center:Point}|undefined;
- let moved=false,suppressTap=false,lastTouch:{at:number;point:Point}|undefined;
+ let moved=false,suppressTap=false,touchPointer=false,lastTouch:{at:number;point:Point}|undefined;
+ let pendingTap:ReturnType<typeof setTimeout>|undefined;
  const valid=()=>!!binding?.current();
  const center=(a:Point,b:Point)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
  const distance=(a:Point,b:Point)=>Math.hypot(a.x-b.x,a.y-b.y);
@@ -21,7 +23,8 @@ export function createPhotoViewport(){
   x=Math.max(-maxX,Math.min(maxX,x));y=Math.max(-maxY,Math.min(maxY,y));
  }
  function publish(){clamp();binding?.changed();}
- function reset(){scale=1;x=y=0;pointers.clear();pinch=undefined;start=last=undefined;lastTouch=undefined;moved=false;suppressTap=false;}
+ function clearPendingTap(){clearTimeout(pendingTap);pendingTap=undefined;}
+ function reset(){clearPendingTap();scale=1;x=y=0;pointers.clear();pinch=undefined;start=last=undefined;lastTouch=undefined;moved=false;suppressTap=false;touchPointer=false;}
  function zoom(value:number,point?:Point){
   if(!valid()||!binding?.zoomable)return;
   const next=Math.max(1,Math.min(4,value));
@@ -33,15 +36,22 @@ export function createPhotoViewport(){
   clear(){reset();binding=undefined;frame=undefined;},
   ref(element:HTMLElement|null){frame=element||undefined;clamp();},
   get scale(){return scale;},get transform(){return `translate(${x}px, ${y}px) scale(${scale})`;},
-  zoomIn(){zoom(scale+.5);},zoomOut(){zoom(scale-.5);},fit(){zoom(1);},
-  tap(){if(!valid())return;if(suppressTap){suppressTap=false;return;}binding?.toggle();},
-  double(event:MouseEvent){if(!valid())return;if(lastTouch&&performance.now()-lastTouch.at<500)return;event.preventDefault();zoom(scale>1?1:2.5,{x:event.clientX,y:event.clientY});},
+  tap(event?:MouseEvent){
+   if(!valid())return;
+   if(suppressTap){suppressTap=false;return;}
+   if(!binding?.zoomable||!event?.detail){binding?.toggle();return;}
+   // Leave the tap available to the pinch or double-tap handler before showing controls.
+   clearPendingTap();
+   pendingTap=setTimeout(()=>{pendingTap=undefined;if(valid())binding?.toggle();},DOUBLE_TAP_MS);
+  },
+  double(event:MouseEvent){clearPendingTap();if(!valid()||touchPointer)return;event.preventDefault();zoom(scale>1?1:2.5,{x:event.clientX,y:event.clientY});},
   down(event:PointerEvent){
    if(!valid()||event.button>0)return;
+   touchPointer=event.pointerType==='touch';
    const point={x:event.clientX,y:event.clientY};pointers.set(event.pointerId,point);
    try{(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);}catch{/* The pointer may already have been retired by the host. */}
    if(pointers.size===1){start=last=point;moved=false;suppressTap=false;}
-   if(pointers.size===2){const[a,b]=[...pointers.values()];pinch={distance:distance(a,b),scale,x,y,center:center(a,b)};moved=true;}
+   if(pointers.size===2){clearPendingTap();lastTouch=undefined;const[a,b]=[...pointers.values()];pinch={distance:distance(a,b),scale,x,y,center:center(a,b)};moved=true;}
   },
   move(event:PointerEvent){
    if(!valid()||!pointers.has(event.pointerId))return;
@@ -53,7 +63,7 @@ export function createPhotoViewport(){
     y=mid.y-r.top-r.height/2-(pinch.center.y-r.top-r.height/2-pinch.y)*scale/pinch.scale;
     moved=true;publish();
    }else if(pointers.size===1&&last){
-    if(start&&distance(start,point)>8)moved=true;
+    if(start&&distance(start,point)>8){clearPendingTap();moved=true;}
     if(scale>1){x+=point.x-last.x;y+=point.y-last.y;publish();}
    }
    last=point;
@@ -63,15 +73,15 @@ export function createPhotoViewport(){
    const point={x:event.clientX,y:event.clientY},wasPinch=!!pinch;pointers.delete(event.pointerId);
    if(!valid()){reset();return;}
    if(pointers.size){last=[...pointers.values()][0];start=last;return;}
-   if(!wasPinch&&scale===1&&start){const dx=point.x-start.x,dy=point.y-start.y;if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.5){moved=true;binding?.step(dx<0?1:-1);}}
+   if(!wasPinch&&scale===1&&start){const dx=point.x-start.x,dy=point.y-start.y;if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.5){clearPendingTap();moved=true;binding?.step(dx<0?1:-1);}}
    if(event.pointerType==='touch'&&!moved){
     const now=performance.now();
-    if(lastTouch&&now-lastTouch.at<350&&distance(lastTouch.point,point)<32){zoom(scale>1?1:2.5,point);moved=true;lastTouch=undefined;}
+    if(lastTouch&&now-lastTouch.at<DOUBLE_TAP_MS&&distance(lastTouch.point,point)<32){clearPendingTap();zoom(scale>1?1:2.5,point);moved=true;lastTouch=undefined;}
     else lastTouch={at:now,point};
    }
    suppressTap=moved||wasPinch;pinch=undefined;start=last=undefined;
   },
-  cancel(){pointers.clear();pinch=undefined;start=last=undefined;suppressTap=true;},
+  cancel(){clearPendingTap();pointers.clear();pinch=undefined;start=last=undefined;suppressTap=true;},
   key(event:KeyboardEvent){
    if(!valid())return;
    if(event.key==='+'||event.key==='='){event.preventDefault();zoom(scale+.5);}

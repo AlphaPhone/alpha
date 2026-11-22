@@ -67,7 +67,7 @@ function revealFocusAboveDocks(
     target !== doc.activeElement ||
     !screen.contains(target) ||
     !isExposed(target) ||
-    target.closest('[role="dialog"],dialog') ||
+    target.closest('[role="dialog"],[role="menu"],dialog') ||
     doc.querySelector(NATIVE_DIALOG_SELECTOR) ||
     (keyboardOnly && !target.matches(":focus-visible")) ||
     docks.some((dock) => dock.contains(target))

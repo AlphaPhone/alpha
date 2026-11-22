@@ -14,7 +14,7 @@ async function installApprovalPort(page) {
     const operation = {type:'create_note', title:'Synthetic approval note', body:'Synthetic contents'};
     const fixture = window.approvalRoutes = {
       armed:false, lists:0, holdLists:false, admitNextList:false, listReplies:[], decisions:0, effects:0,
-      journal:null, finishDecision:null, finishReceipt:null, rejectDecision:false, server:'pending',
+      journal:null, finishDecision:null, finishReceipt:null, uncertainEffect:false, server:'pending',
       unexpected:[],
     };
     const ok = value => ({status:200, body:JSON.stringify(value)});
@@ -78,7 +78,6 @@ async function installApprovalPort(page) {
             fixture.decisions++;
             await new Promise(resolve => { fixture.finishDecision = resolve; });
             fixture.finishDecision = null;
-            if (fixture.rejectDecision) throw Error('Synthetic approval transport failed');
             return reply('approved');
           }
           if (kind === 'claim') return reply('executing', {attemptId:'fixture-attempt'});
@@ -107,6 +106,8 @@ async function approvalTrace({name, page, errors}) {
       const f = window.approvalRoutes;
       if (operation.type !== 'create_note' || operation.title !== 'Synthetic approval note'
         || f.journal?.phase !== 'applying' || f.journal?.operationId !== id) throw Error('Unexpected synthetic native effect');
+      // A native call that loses its answer after dispatch: the coordinator records `unknown`.
+      if (f.uncertainEffect) throw Error('Synthetic native result lost');
       f.effects++;
       f.server = 'done';
       return {status:'succeeded', summary:'Synthetic note created'};
@@ -191,13 +192,17 @@ async function approvalTrace({name, page, errors}) {
     await checkpoint('tapApprove');
   }
   if (name === 'unconfirmed after reload') {
+    // A failure before dispatch closes as not started; only a dispatched effect whose answer is
+    // lost leaves the outcome unconfirmed.
     await page.evaluate(() => {
       const f = window.approvalRoutes;
-      f.rejectDecision = true;
+      f.uncertainEffect = true;
       f.finishDecision();
     });
+    await page.waitForFunction(() => window.approvalRoutes.finishReceipt);
+    await page.evaluate(() => { window.approvalRoutes.finishReceipt(); });
     await waitSettlement();
-    await page.getByText('I couldn’t confirm the result.', {exact:true}).first().waitFor();
+    await page.waitForFunction(id => window.quintShell.S().msgs.find(row => row.card?.proposalId === id)?.card.title === 'Not confirmed', proposalId);
     await checkpoint('unconfirmedReceiptArrives');
     const session = await page.evaluate(() => window.quintActors.connectionController.getSnapshot().session);
     await page.evaluate(() => {

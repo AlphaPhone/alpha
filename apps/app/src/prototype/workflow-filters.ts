@@ -1,15 +1,16 @@
 import {iconStyle} from '../icon-style';
 import {holdPhoneInert} from '../runtime/modal-inert';
 export type WorkflowTypeFilter='all'|'reminders'|'prompts'|'workflows'|'schedules';
-export type WorkflowStatusFilter='all'|'active'|'inactive';
-const WORKFLOW_TYPES=[['all','All types'],['reminders','Reminders'],['prompts','Prompts'],['workflows','Workflows'],['schedules','Schedules']] as const;
-const WORKFLOW_STATUSES=[['all','All'],['active','Active'],['inactive','Inactive']] as const;
+export type WorkflowStatusFilter='all'|'active'|'inactive'|'removed';
+export const WORKFLOW_TYPES=[['all','All types'],['reminders','Reminders'],['prompts','Prompts'],['workflows','Workflows'],['schedules','Schedules']] as const;
+export const WORKFLOW_STATUSES=[['all','All'],['active','Active'],['inactive','Inactive'],['removed','Removed']] as const;
 export function workflowFilterLabel(type:WorkflowTypeFilter,status:WorkflowStatusFilter):string {
  const name=type==='all'?'All workflows':WORKFLOW_TYPES.find(([key])=>key===type)![1];
  return name+(status==='all'?'':` · ${WORKFLOW_STATUSES.find(([key])=>key===status)![1]}`);
 }
 /** Presentation only: choices apply together; dismissing never changes the feed. */
-export function openWorkflowFilters(input:{type:WorkflowTypeFilter;status:WorkflowStatusFilter;current():boolean;apply(type:WorkflowTypeFilter,status:WorkflowStatusFilter):void;refresh():void;busy:boolean;closed?():void}):()=>void {
+/** `removed` offers the Removed status, where removed workflows can be opened and restored; only an agent that keeps them offers it. */
+export function openWorkflowFilters(input:{type:WorkflowTypeFilter;status:WorkflowStatusFilter;removed?:boolean;current():boolean;apply(type:WorkflowTypeFilter,status:WorkflowStatusFilter):void;refresh():void;busy:boolean;closed?():void}):()=>void {
  const previous=document.activeElement as HTMLElement|null,dialog=document.createElement('dialog');dialog.className='workflow-filter-sheet';dialog.setAttribute('aria-label','Filter workflows');
  const phone=document.querySelector<HTMLElement>('.os');if(phone){const theme=getComputedStyle(phone);for(const key of ['bg','fg','mut','line','s2','acc','acct'])dialog.style.setProperty('--'+key,theme.getPropertyValue('--'+key));}
  const release=holdPhoneInert(phone);let done=false,type=input.type,status=input.status;
@@ -29,8 +30,8 @@ export function openWorkflowFilters(input:{type:WorkflowTypeFilter;status:Workfl
   groups.push({element:group,buttons,paint});content.append(heading,group);
  }
  group('Type',WORKFLOW_TYPES,()=>type,value=>type=value);
- group('Status',WORKFLOW_STATUSES,()=>status,value=>status=value,true);
- const refresh=button('');refresh.setAttribute('aria-label','Refresh list');refresh.className='workflow-filter-refresh';refresh.prepend(glyph('rotate-cw'));refresh.disabled=input.busy;refresh.onclick=()=>{const current=input.current();close();if(current)input.refresh();};content.append(refresh);
+ group('Status',WORKFLOW_STATUSES.filter(([key])=>key!=='removed'||input.removed||input.status==='removed'),()=>status,value=>status=value,true);
+ const refresh=button('');refresh.setAttribute('aria-label','Refresh list');refresh.className='workflow-filter-refresh';refresh.prepend(glyph('rotate-cw'));refresh.disabled=input.busy;refresh.onclick=()=>{if(!input.current()){close();return;}close();input.refresh();};content.append(refresh);
  const footer=document.createElement('footer'),apply=button('Done');apply.className='workflow-filter-apply';apply.onclick=()=>{if(input.current())input.apply(type,status);close();};footer.append(apply);dialog.append(header,content,footer);
  dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=close;dialog.onclick=event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)close();}};
  window.addEventListener('alpha-back',back,true);window.addEventListener('pagehide',close);document.addEventListener('visibilitychange',visibility);window.addEventListener('resize',position);

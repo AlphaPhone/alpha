@@ -35,9 +35,11 @@ module PhotosTrash {
     {val visible = {...s, hidden: false}
       s' = if (s.active and not(s.disposed) and not(s.loaded)) start(visible, false) else visible}}
   action leave = s' = {...s, active: false}
+  // Returning to Photos starts a read only when none failed: after a failure the owner retries
+  // (request), as the source's render guard `!st.nativeTrashError` requires.
   action enter = all {s.job < 4, s.epoch < 6,
     {val active = {...s, active: true}
-      s' = if (not(s.loaded) and not(s.loading)) start(active, false) else active}}
+      s' = if (not(s.loaded) and not(s.loading) and not(s.error)) start(active, false) else active}}
   action dispose = s' = {...s, disposed: true}
   action step = any {hide, show, leave, enter, dispose,
     {nondet more = Bool.oneOf(); request(more)},
@@ -56,6 +58,10 @@ module PhotosTrash {
     .then(reply(List({id: 1, rank: 1, revision: 1}), 0, true)).expect(s.loading and s.job == 2 and s.rows == List() and safety)
   run oldHiddenFailureIsQuietTest = init.then(request(false)).then(hide).then(reply(List(), 0, false))
     .expect(not(s.error) and safety)
+  run failedTrashWaitsForRetryTest = init.then(request(false)).then(reply(List(), 0, false)).then(leave).then(enter)
+    .expect(s.error and not(s.loading) and s.job == 1 and safety)
+    .then(request(false)).then(reply(List({id: 1, rank: 1, revision: 1}), 0, true))
+    .expect(not(s.error) and s.loaded and s.job == 2 and safety)
   run disposedReplyDoesNotPublishTest = init.then(request(false)).then(dispose)
     .then(reply(List({id: 1, rank: 1, revision: 1}), 0, true)).expect(s.rows == List() and not(s.loading) and safety)
 }

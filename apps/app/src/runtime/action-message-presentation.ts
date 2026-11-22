@@ -1,5 +1,6 @@
 import {findMapsCardRegions,type MapsCardPlace,type MapsCardSpec} from '../ui/components/chat/message-maps-parser.ts';
 import {guidanceDistance,guidanceDuration} from '../maps/guidance.ts';
+import {formatTime} from '../prototype/locale-time';
 import {systemNoticeText} from '../../../../.eliza/client-features/packages/core/src/types/system-notice.ts';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 /** Display only. Stored messages, proposals and journal receipts are never rewritten. */
@@ -15,7 +16,18 @@ export function checkinDisplayText(message: {role?:unknown;source?:unknown;text?
   if(!prose.trim()||/^[ \t]*(?:```|~~~)|\[\/?CHOICE\b/gim.test(prose))return;
   return prose.trimEnd();
 }
+/** A pending action states when it stops being available; a clock time needs no ticking re-render.
+ * The time follows the device locale and 12/24-hour setting, as every other visible time does. */
+export function approvalExpiryText(expiresAt: unknown, now = Date.now()): string {
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= now) return '';
+  return `Expires at ${formatTime(new Date(expiresAt))}`;
+}
+/** An empty conversation with no agent says so before the owner types, instead of only when Send fails. */
+export function emptyChatNotice(shownMessages: number, hasSession: boolean, pendingText: string): string {
+  return shownMessages === 0 && !hasSession ? pendingText : '';
+}
 const REVIEW_TEXT = 'Review on phone';
+const REVIEW_INSTRUCTION = 'Review this request on your phone before it can run.';
 const LEGACY_BROWSER_RECEIPT = 'Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 // Presentation only: preserve the journal while explaining uncertainty safely.
 export function actionResultText(text: string): string {
@@ -84,12 +96,19 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
   }
   let turn: Message[] = [];
   const finish = () => {
-    const actions = turn.filter(message => message.from === 'agent' && (message.card?.proposalId || message.deviceReceipt));
-    if (!actions.length) return;
-    for (const message of turn) if (message.from === 'agent' && message.text === REVIEW_TEXT) hidden.add(message.id);
+    const visibleActions = turn.filter(message => renderedIds.has(message.id) && message.from === 'agent'
+      && (message.card?.proposalId || message.deviceReceipt || message.card?.deviceActionNotice === true));
+    if (!visibleActions.length) return;
+    // A pending proposal still needs its review instruction. A visible outcome supersedes it.
+    const outcomeShown = visibleActions.some(message => message.deviceReceipt
+      || message.card?.deviceActionNotice === true || message.card?.done === true);
+    for (const message of turn) {
+      if (message.from === 'agent' && (message.text === REVIEW_TEXT
+        || (outcomeShown && message.text === REVIEW_INSTRUCTION))) hidden.add(message.id);
+    }
     // A shown agent reply already answers a requested Browser open. Only a succeeded browser receipt
     // carries browserDestination; failures and other device receipts stay visible.
-    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && typeof message.text === 'string' && message.text.trim())) return;
+    if (!turn.some(message => renderedIds.has(message.id) && message.from === 'agent' && !message.deviceReceipt && !message.card && !message.interrupted && message.text !== REVIEW_TEXT && message.text !== REVIEW_INSTRUCTION && typeof message.text === 'string' && message.text.trim())) return;
     for (const message of turn) if (message.from === 'agent' && message.deviceReceipt === true && !message.card && message.browserDestination) hidden.add(message.id);
   };
   for (const message of source) { if (message.from === 'user') { finish(); turn = []; } turn.push(message); } finish();
@@ -209,6 +228,9 @@ export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];
  directionsFromHere?:boolean;
  /** The exact place the agent resolved. Maps selects it by its provider id and coordinates, under its own name. */
  place?:MapsCardPlace;
+ /** The named place a `places` card's search was made around. Maps searches `mapQuery` around it again,
+  * not around its viewport or the phone, so it shows the places chat listed. */
+ searchNear?:{latitude:number;longitude:number};
  /** How to travel on a `directionsFromHere` card, when the request named it. */
  travelMode?:MapsCardRoute['travelMode'];
  /** A planned route for Maps to draw: both ends as `latitude, longitude`, and how to travel. */
@@ -230,7 +252,8 @@ const point=(place:MapsCardPlace)=>`${place.latitude}, ${place.longitude}`;
 function present(card:MapsCardSpec):MapsChatCard{
  switch(card.kind){
   case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',place:card.place};
-  case 'places':return {kind:card.kind,title:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query};
+  case 'places':return {kind:card.kind,title:card.near?`“${card.query}” near ${card.near.name}`:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query,
+   ...(card.near?{searchNear:{latitude:card.near.latitude,longitude:card.near.longitude}}:{})};
   case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:point(card.destination),
    route:{origin:point(card.origin),destination:point(card.destination),name:card.destination.name,travelMode:card.travelMode}};
   case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',place:card.place};
@@ -306,4 +329,52 @@ export function workflowReplyText(text:string){
  });
  // Ordinary messages keep their exact text, including indentation and trailing paragraphs.
  return {text:removed?rendered.replace(/\n{3,}/g,'\n\n').trim():rendered,runs};
+}
+
+// The owner can ask for technical details, a literal address, or the wording of an email.
+const literalSpeech = /\b(?:verbatim|word for word|as written|read it (?:back|aloud)|spell it out|repeat (?:it|that) exactly)\b/i;
+const asksForField = /\b(?:read(?: back)?|spell(?: out)?|quote|repeat|recite|give me|tell me|what(?:[’']s| is| are))\s+(?:(?:me|out|aloud|the|this|that|my|its|full|exact|whole|entire|last|four)\s+){0,7}(?:(?:event|request|operation|workflow|run|order|thread|record|confirmation|reference)\s+(?:ID|identifier|number)|receipt|identifier|ID|address|number|digits|code|subject|headers?|body|draft|e-?mail|message|text)\b/i;
+// Managed Gmail can prefix the recipient with its connector or account. Model-written
+// email copy typically has just the To and Subject lines, sometimes with bold labels.
+const mailHeaders = /^(?:[ \t]*(?:\*\*)?From:(?:\*\*)?[^\n]*\r?\n)?[ \t]*(?:\[gmail(?: account [^\]\n]+)?\][ \t]*)?(?:\*\*)?To:(?:\*\*)?[^\n]*\r?\n(?:[ \t]*(?:Cc|Bcc):[^\n]*\r?\n)*[ \t]*(?:\*\*)?Subject:(?:\*\*)?[^\n]*/im;
+const introToDraft = /^(?:(?:Got it|Sure|Okay)[.!,:]?\s*)?(?:(?:Here(?:’s|'s| is) (?:the|your|a) (?:email|draft|suggested wording)(?: draft)?|Drafted gmail message to [^\n]+)[.:!]?\s*)?$/i;
+const receiptKey = String.raw`(?:(?:request|proposal|receipt|operation|message|event|draft|run|workflow|record|conversation|thread|external|resource)\s+(?:id|identifier)|uuid|id)`;
+const opaqueValue = "[`\"']?[a-z0-9_-](?:[a-z0-9_.:-]*[a-z0-9_-])?[`\"']?";
+const receiptField = new RegExp(String.raw`(^|\n|[.!?][ \t]+)[ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}(?:[.;](?=\s|$)|(?=[ \t]*\r?$))[ \t]*`, 'gim');
+const receiptAside = new RegExp(String.raw`[ \t]*\([ \t]*${receiptKey}\s*[:=#]\s*${opaqueValue}[ \t]*\)`, 'gi');
+
+/** Presentation for conversation speech. Never mutate the written reply or the action results. */
+export function spokenActionReply(request: string, reply: {
+  text: string; actionResults?: readonly unknown[]; completedActions?: readonly unknown[];
+}, emailCardReady = false): string {
+  const text = reply.text;
+  if (literalSpeech.test(request) || asksForField.test(request)) return text;
+  const results = reply.actionResults ?? [];
+  const asksForMail = /\b(?:draft|compose|write|send|reply)\b/i.test(request) && /\b(?:e-?mail|gmail|inbox)\b/i.test(request);
+  const envelope = mailHeaders.exec(text);
+  if (emailCardReady || (envelope && asksForMail)) {
+    const lead = envelope ? text.slice(0,envelope.index).trim() : '';
+    const rest = envelope ? text.slice(envelope.index+envelope[0].length).trim() : text;
+    const hasMoreWork = /\b(?:and|then|also)\s+(?:check|look up|find|open|create|schedule|book|summarize|tell me|show me)\b/i.test(request);
+    const hasLimitation = /\b(?:(?:failed|unable|couldn[’']t|can[’']t|cannot|could not) (?:to )?(?:send|save|prepare|create|deliver|schedule|open|verify|confirm)|not (?:sent|saved|created|scheduled))\b/i.test(rest);
+    if (rest && !hasMoreWork && introToDraft.test(lead) && !hasLimitation &&
+        results.length <= 1 && !reply.completedActions?.length) {
+      const result = results[0] as {success?: unknown; actionName?: unknown; error?: unknown} | null;
+      if (result?.success === false || result?.error) {
+        if (typeof result.actionName === 'string' && /^MESSAGE(?:_|$)/.test(result.actionName)) {
+          return 'The email action failed. The suggested wording is in the chat.';
+        }
+        return envelope ? (lead+'\n\n'+rest).trim() : text;
+      }
+      // Only the owner's validated local card can confirm that an editable draft is ready.
+      return emailCardReady ? 'Your email draft is ready to review.' : 'The suggested email is in the chat.';
+    }
+    // A compound reply or a refusal can carry additional information after the preview.
+    if (envelope) return (lead+'\n\n'+rest).trim();
+  }
+  if (!results.length && !reply.completedActions?.length) return text;
+  // Only delimited ID fields from action turns. Dates, times, counts, amounts and
+  // numbers in the actual answer remain available to the synthesizer.
+  const spoken = text.replace(receiptAside,'').replace(receiptField,'$1');
+  return spoken === text ? text : spoken.replace(/\n{3,}/g,'\n\n').trim() || 'The details are in the chat.';
 }

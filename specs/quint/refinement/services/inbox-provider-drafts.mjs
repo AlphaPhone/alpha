@@ -361,17 +361,22 @@ export async function runInboxProviderDraftsRefinement(extraSources = []) {
   {
     const {fixture, coordinator, trace} = await setup('native-attachment-bytes-change-during-provider-read', traces);
     await compose(fixture, coordinator, trace);
-    const fileA = {name: 'a.txt', mimeType: 'text/plain', dataBase64: 'YQ=='};
-    assert.equal(coordinator.drafts.attachReviewed(fileA, coordinator.drafts.suggestionTarget().token), true);
-    await fixture.settle();step(trace, 'reviewed local attachment is added without changing modeled text', null, observe(fixture, coordinator));
+    // The composer's own Attach adds the bytes to this draft. A Files or Photos share would start another email.
+    const attached = () => coordinator.drafts.email()?.proposal.attachments.map(file => file.dataBase64);
+    const fileA = {name: 'a.txt', mimeType: 'text/plain', dataBase64: 'YQ==', size: 1};
+    fixture.state.attachments.push(fileA);coordinator.drafts.render().c.attach();
+    await fixture.settle();assert.deepEqual(attached(), ['YQ==']);
+    step(trace, 'reviewed local attachment is added without changing modeled text', null, observe(fixture, coordinator));
     await review(fixture, coordinator, trace);await confirm(fixture, coordinator, trace);
     const gate = deferred();let entered = false;
     fixture.providerState.gates.read = async () => {entered = true;await gate.promise;};
     fixture.advance();coordinator.provider.render().provider.editDraft();await until(() => entered, 'held metadata read');
     step(trace, 'begin provider reference read for the attached email', action('beginRead'), observe(fixture, coordinator));
     coordinator.drafts.render().c.atts[0].rm();
-    const fileB = {name: 'a.txt', mimeType: 'text/plain', dataBase64: 'Yg=='};
-    assert.equal(coordinator.drafts.attachReviewed(fileB, coordinator.drafts.suggestionTarget().token), true);
+    const fileB = {name: 'a.txt', mimeType: 'text/plain', dataBase64: 'Yg==', size: 1};
+    fixture.state.attachments.push(fileB);coordinator.drafts.render().c.attach();
+    // The provider read stays held, so this waits on the composer alone rather than settling every task.
+    await until(() => attached()?.[0] === 'Yg==' && !coordinator.drafts.render().c.busy, 'composer attaches during the held read');
     step(trace, 'same filename now holds different selected bytes', null, observe(fixture, coordinator));
     gate.resolve();await fixture.settle();
     step(trace, 'changed attachment bytes reject provider adoption', action('readReply', 1, 0, false), observe(fixture, coordinator));

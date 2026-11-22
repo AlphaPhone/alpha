@@ -11,12 +11,15 @@ function member(source, regex) {
   return value;
 }
 
+export const actionJournalSources=['ActionJournal','ActionJournalConfiguration']
+  .map(name=>'vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/'+name+'.java');
+
 export function smsMembers(plugin, mms, provider, {includeMms=false, appOwned=false}={}) {
   const namespace=appOwned?'ai.alphacompute.alphaphone':'ai.eliza.plugins.messages';
   const name=appOwned?'AlphaTelephonyBase':'TelephonyPlugin';
   return {
     [namespace.replaceAll('.','/')+'/'+name+'.java']: `package ${namespace};
-${appOwned?'import ai.eliza.plugins.messages.*;':''}
+${appOwned?'import ai.eliza.plugins.messages.*;\nimport ai.eliza.plugins.actionjournal.ActionJournal;\nimport org.json.JSONObject;':''}
 import android.telephony.*;
 import android.content.Intent;
 import com.getcapacitor.*;
@@ -27,7 +30,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 public abstract class ${name} extends Plugin {
  ${between(plugin,' public static final Pattern NUMBER',' /** Runs a request that launches')}
- ${between(plugin,' private android.app.AlertDialog review;',' // ---- Reviewed native MMS')}
+ ${appOwned?between(plugin,' /** Every queued send keeps its own',' // ---- Reviewed native MMS')
+   :between(plugin,' private android.app.AlertDialog review;',' // ---- Reviewed native MMS')}
  ${includeMms?'':'protected final void sendOwnerApprovedMms(PluginCall call,SmsTelephony.DispatchGuard guard){throw new AssertionError("MMS outside SMS fixture");}'}
  ${member(plugin,/^ @Override protected void handleOnDestroy\(\)[^\n]+/m)}
  private void stopObserving(){}
@@ -225,6 +229,19 @@ final class AlphaContactLookup {
   throw new AssertionError("Contacts outside SMS fixture");
  }
 }`,
+  // The chat's approval journal: the pinned shared ActionJournal over a synthetic durable store.
+  // Alpha's result policy only settles entries, which the send path never does.
+  'ai/alphacompute/alphaphone/AlphaActionJournal.java': `package ai.alphacompute.alphaphone;
+import ai.eliza.plugins.actionjournal.ActionJournal;
+import ai.eliza.plugins.actionjournal.ActionJournalConfiguration;
+public final class AlphaActionJournal {
+ public static final java.util.Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
+ private static final ActionJournal instance=new ActionJournal(ActionJournalConfiguration.standard("action-journal:v1"),new ActionJournal.Storage(){
+  public String read(String slot){return slots.get(slot);}
+  public void write(String slot,String value){slots.put(slot,value);}
+ },ActionJournal.BOUNDED_RESULTS);
+ public static ActionJournal get(android.content.Context context){return instance;}
+}`,
   'ai/alphacompute/alphaphone/MainActivity.java': `package ai.alphacompute.alphaphone;
 import android.app.Activity;
 import android.content.Context;
@@ -414,6 +431,7 @@ import android.telephony.*;
 import java.io.File;
 import java.util.*;
 public final class Context {
+ public String claimFault="";
  public boolean admitted=true,send=true,phone=true,read=true,role;
  public int boot=1;
  public final Map<String,String> slots=new java.util.concurrent.ConcurrentHashMap<>();
@@ -523,6 +541,15 @@ final class AlphaCredentialStore {
  private final Context context;
  AlphaCredentialStore(Context context){this.context=context;}
  String readCredentialSlot(String slot){return context.slots.get(slot);}
+ boolean compareExchangeCredentialSlot(String slot,String expected,String value)throws Exception{
+  if(expected!=null)throw new AssertionError("Device operation claims must be write-once");
+  synchronized(context.slots){
+   if(context.claimFault.equals("claim-before"))throw new java.io.IOException("Synthetic claim refusal");
+   if(context.slots.putIfAbsent(slot,value)!=null)return false;
+   if(context.claimFault.equals("claim-after"))throw new java.io.IOException("Synthetic lost claim acknowledgement");
+   return true;
+  }
+ }
  void writeCredentialSlot(String slot,String value)throws Exception{ai.eliza.plugins.messages.SmsDispatchTraces.write(context,slot,value);}
 }`,
   'ai/eliza/plugins/messages/SmsFixtureSupport.java': `package ai.eliza.plugins.messages;

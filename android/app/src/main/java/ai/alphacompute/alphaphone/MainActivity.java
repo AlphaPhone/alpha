@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import androidx.activity.BackEventCompat;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.splashscreen.SplashScreen;
 import androidx.core.graphics.Insets;
@@ -58,6 +59,18 @@ public class MainActivity extends BridgeActivity {
  private void signalNavigationOpen() {
   if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface())
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
+ }
+ /** A tap on the Notes recording notification: the renderer opens Notes once it can show it. */
+ private boolean captureNoteRecordingOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
+  if (AlphaNoteRecordingService.ACTION_SHOW_NOTES.equals(intent.getAction())) {
+   AlphaNoteRecordingService.offerShowNotes();
+   // As for Maps: never replay an already captured tap when the Activity is recreated.
+   intent.setAction(Intent.ACTION_MAIN);
+   return true;
+  }
+  if (isHomeIntent(intent)) AlphaNoteRecordingService.clearShowNotes();
+  return false;
  }
  private boolean captureSmsNoticeOpen(Intent intent) {
   if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
@@ -402,6 +415,7 @@ public class MainActivity extends BridgeActivity {
   // Owner issue 4: the live calls Alpha's InCallService holds, for the WebView's ongoing-call bar.
   if (telephonyAdmitted) registerPlugin(AlphaOngoingCallPlugin.class);
   captureNavigationOpen(getIntent());
+  captureNoteRecordingOpen(getIntent());
   captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());
   rendererDeathsAtCreate = recoveryBudget.deaths();
@@ -467,10 +481,25 @@ public class MainActivity extends BridgeActivity {
      if (!isAssistantSurface()) moveTaskToBack(true); else finish();
     });
    }
+   // Predictive Back (android:enableOnBackInvokedCallback): the renderer previews the layer this
+   // Back would close while the gesture is held. The committed gesture still arrives above.
+   @Override public void handleOnBackStarted(BackEventCompat event) { previewBack("start", event); }
+   @Override public void handleOnBackProgressed(BackEventCompat event) { previewBack("progress", event); }
+   @Override public void handleOnBackCancelled() { previewBack("cancel", null); }
   });
+ }
+ /** Visible for tests: the preview event the renderer receives for a held Back gesture. */
+ static String backPreviewScript(String phase, float progress, boolean rightEdge) {
+  float bounded = Math.max(0f, Math.min(1f, progress));
+  return "window.dispatchEvent(new CustomEvent('alpha-back-preview',{detail:{phase:'" + phase + "',progress:" + bounded + ",edge:'" + (rightEdge ? "right" : "left") + "'}}))";
+ }
+ private void previewBack(String phase, BackEventCompat event) {
+  if (getBridge() == null || getBridge().getWebView() == null) return;
+  getBridge().getWebView().evaluateJavascript(backPreviewScript(phase, event == null ? 0f : event.getProgress(), event != null && event.getSwipeEdge() == BackEventCompat.EDGE_RIGHT), null);
  }
  @Override public void onNewIntent(Intent intent) {
   boolean showMaps = captureNavigationOpen(intent);
+  boolean showNotesRecording = captureNoteRecordingOpen(intent);
   boolean showSmsNotice = captureSmsNoticeOpen(intent);
   AlphaCanonicalNotifications.captureTap(this,intent);
   super.onNewIntent(intent);
@@ -482,6 +511,8 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (showMaps) signalNavigationOpen();
+  if (showNotesRecording && getBridge() != null && getBridge().getWebView() != null)
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:note-recording-open'))", null);
   if (showSmsNotice && getBridge() != null && getBridge().getWebView() != null)
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:sms-notice-open'))", null);
   if (getBridge() != null && !isAssistantSurface() && isHomeIntent(intent))
@@ -493,7 +524,24 @@ public class MainActivity extends BridgeActivity {
  }
  @Override public void onStop() {
   keyboardReturnPending = false;
+  // Camera turns the volume shutter on again when it is ready on screen.
+  volumeShutter = false;
   super.onStop();
+ }
+ /** Set by AlphaDevice.setVolumeShutter on the UI thread while Camera is ready on screen. */
+ private boolean volumeShutter;
+ void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
+ /** While Camera holds them, a volume key press is one shutter press (repeats while held are not);
+  * otherwise the volume keys keep Android's own handling. */
+ @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+  int key = event.getKeyCode();
+  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN)
+    && getBridge() != null && getBridge().getWebView() != null) {
+   if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
+    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
+   return true;
+  }
+  return super.dispatchKeyEvent(event);
  }
  @Override public void onDestroy() {
   if (liveInstance.get() == this) liveInstance = new java.lang.ref.WeakReference<>(null);

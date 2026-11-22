@@ -17,8 +17,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const settle = async () => { for (let turn = 0; turn < 8; turn++) await tick(); };
 
 // The recovery port keeps what the real one would: the encoded record, or nothing when it is refused.
-const fixture = {rows: new Map(), retained: new Map(), edits: [], invalid: false, toasts: [], failShelf: false, encode: encodeInboxUnsaved, read: readInboxUnsaved};
-globalThis.draftCopiesFixture = fixture; globalThis.window = {confirm: () => true};
+// Draft questions go to the titled in-app review (BrowserReviews); the browser's own confirm is never used.
+const fixture = {rows: new Map(), retained: new Map(), edits: [], invalid: false, toasts: [], failShelf: false, encode: encodeInboxUnsaved, read: readInboxUnsaved, reviews: [], answer: () => true, windowConfirms: 0};
+globalThis.draftCopiesFixture = fixture; globalThis.window = {confirm: () => { fixture.windowConfirms++; return true; }};
 const {inboxDrafts} = await bundle('apps/app/src/prototype/inbox-drafts.ts', {
   'inbox-unsaved': `export function inboxUnsaved(owner,publish,restore){const s=globalThis.draftCopiesFixture;return {ready:Promise.resolve(),get available(){return s.retained.has(owner)},peek(){try{return s.retained.has(owner)?s.read(s.retained.get(owner),owner):null;}catch{return null;}},edit(v){s.edits.push(v);try{s.retained.set(owner,s.encode(v));s.invalid=false;}catch{s.invalid=true;}},clear:async()=>{s.retained.delete(owner)},resume(){const v=this.peek();if(v)restore(v);},retire(){},error:false,conflict:false,get status(){return s.invalid?'not retained':'';}};}`,
   'platform-plugins': `export const registerPlugin=()=>({});`,
@@ -26,6 +27,7 @@ const {inboxDrafts} = await bundle('apps/app/src/prototype/inbox-drafts.ts', {
   'inbox-attachment': `export const reviewMailAttachment=()=>{throw Error('Unexpected attachment read')};`,
   'inbox-operation': `export const outgoingAttachmentLimits={maximumFiles:10,maximumTotalBytes:5*1024*1024};export const checkOutgoingAttachments=()=>{};export const attachmentBytes=()=>0;`,
   'inbox-local-store': `export const inboxLocalStore={read:async key=>structuredClone(globalThis.draftCopiesFixture.rows.get(key)||null),compareExchange:async(key,before,next)=>{const s=globalThis.draftCopiesFixture;if(s.failShelf&&key.includes(':shelf:'))throw Error('Synthetic storage failure');if(JSON.stringify(s.rows.get(key)||null)!==JSON.stringify(before))return {status:'conflict'};if(next===null)s.rows.delete(key);else s.rows.set(key,structuredClone(next));return {status:'saved'};}};`,
+  review: `export class BrowserReviews{confirm(id,title,details,confirmLabel,options){const s=globalThis.draftCopiesFixture;const review={id,title,details,confirmLabel,options};s.reviews.push(review);return s.answer(review);}}`,
   'connection-ui': `export const connectionController={getCloudClient:()=>({sessionId:'session-A',credentialId:'credential'}),getSnapshot:()=>({cloudAccount:{environment:'production',userId:'owner',organizationId:'organization',sessionId:'session-A'}})};`,
 });
 const ownerOf = grant => JSON.stringify(['production', 'owner', 'organization', grant]);
@@ -35,7 +37,7 @@ const local = (grant, extra = {}) => ({version: 1, id: 'local-1', revision: 'rev
 const make = () => inboxDrafts(() => {}, text => fixture.toasts.push(text), {prepare: async () => { throw Error('Unexpected provider operation'); }, capabilities: () => ({send: true, providerDrafts: true, from: 'owner@example.invalid'})});
 const chip = (label, pick) => ({label, pick});
 const field = (d, key, value) => d.render().c[key]({target: {value}});
-const reset = () => { fixture.rows.clear(); fixture.retained.clear(); fixture.edits.length = 0; fixture.toasts.length = 0; fixture.invalid = false; fixture.failShelf = false; };
+const reset = () => { fixture.rows.clear(); fixture.retained.clear(); fixture.edits.length = 0; fixture.toasts.length = 0; fixture.invalid = false; fixture.failShelf = false; fixture.reviews.length = 0; fixture.answer = () => true; fixture.windowConfirms = 0; };
 
 test('an earlier version opened from Drafts is retained, and what is saved from it is not labelled earlier', async () => {
   reset(); const grant = 'grant-earlier', owner = ownerOf(grant);
@@ -53,6 +55,50 @@ test('an earlier version opened from Drafts is retained, and what is saved from 
   const saved = fixture.rows.get(savedSlot(grant));
   assert.equal(saved.body, 'New words after the send'); assert.equal('earlierThanSent' in saved, false, 'new content is not an earlier version');
   assert.equal(d.chips(chip).some(row => row.label === 'Earlier version of a sent email'), false);
+});
+
+test('opening an earlier sent version asks through the titled review, which changing account cancels', async () => {
+  reset(); const grant = 'grant-review', owner = ownerOf(grant);
+  fixture.rows.set(await shelfSlot(grant), {version: 1, owner, items: [{draft: local(grant, {id: 'sent-draft', subject: 'Earlier', body: 'Earlier text', earlierThanSent: true}), toQ: ''}]});
+  const d = make(); await d.bind(grant, 'owner@example.invalid');
+  const earlier = () => d.chips(chip).find(row => row.subject === 'Earlier');
+  // Declined: nothing opens.
+  fixture.answer = () => false;
+  earlier().pick(); await settle();
+  assert.equal(fixture.reviews.length, 1);
+  const [asked] = fixture.reviews;
+  assert.equal(asked.id, 'inbox-draft'); assert.equal(asked.title, 'Open an earlier sent version?'); assert.equal(asked.confirmLabel, 'Open draft');
+  assert.match(asked.details, /earlier version of a sent email/);
+  assert.notEqual(d.render().c?.subject, 'Earlier', 'a declined review opens nothing');
+  // Approved only after the account changed: the review was cancelled and its yes is not used.
+  let approve; fixture.answer = () => new Promise(resolve => { approve = () => resolve(true); });
+  earlier().pick(); await settle();
+  const pending = fixture.reviews[1];
+  assert.equal(pending.options.signal.aborted, false); assert.equal(pending.options.current(), true);
+  await d.bind('grant-other', 'other@example.invalid');
+  assert.equal(pending.options.signal.aborted, true, 'changing account cancels the open review');
+  assert.equal(pending.options.current(), false);
+  approve(); await settle();
+  assert.notEqual(d.render().c?.subject, 'Earlier', 'a cancelled review opens nothing');
+  assert.equal(fixture.windowConfirms, 0, 'the browser confirm is never used');
+});
+
+test('setting a draft aside shows its own conflict sentence, and fixed copy for a storage failure', async () => {
+  reset(); const grant = 'grant-aside', owner = ownerOf(grant);
+  const rows = [local(grant, {id: 'first', subject: 'First'}), local(grant, {id: 'second', subject: 'Second'})];
+  fixture.rows.set(await shelfSlot(grant), {version: 1, owner, items: rows.map(draft => ({draft, toQ: ''}))});
+  const d = make(); await d.bind(grant, 'owner@example.invalid');
+  const pick = subject => { d.chips(chip).find(row => row.subject === subject).pick(); return settle(); };
+  await pick('First'); field(d, 'onBody', 'Changed words');
+  // The storage layer's own words never reach the owner.
+  fixture.failShelf = true; await pick('Second');
+  assert.deepEqual(fixture.toasts, ['The draft could not be saved. Your edits remain here.']);
+  assert.equal(d.render().c.subject, 'First', 'the open email stays');
+  // A shelf changed elsewhere is the controller's own sentence.
+  fixture.failShelf = false; fixture.toasts.length = 0;
+  const slot = await shelfSlot(grant); fixture.rows.set(slot, {...fixture.rows.get(slot), items: fixture.rows.get(slot).items.slice(0, 1)});
+  await pick('Second');
+  assert.deepEqual(fixture.toasts, ['Drafts changed in another window. Reload before continuing.']);
 });
 
 test('retained edits are written once per task with the latest copy, and read back without parsing again', async t => {

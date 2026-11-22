@@ -39,6 +39,9 @@ final class System {static long currentTimeMillis(){return MmsDispatchTraces.NOW
   if(!historical)files[product+'DispatchClock.java']=`package ai.alphacompute.alphaphone;
 final class System {static long currentTimeMillis(){return ai.eliza.plugins.messages.MmsDispatchTraces.NOW;}}`;
   edit(product+'SmsFixtureSupport.java','SmsDispatchTraces.write','MmsDispatchTraces.write');
+  // The Messages composer runs in the launcher's own surface, never the assistant's.
+  edit(product+'MainActivity.java','public boolean isAssistantSurface(){throw new AssertionError("Notification handoff outside dispatch fixture");}',
+    'public boolean isAssistantSurface(){return false;}');
   edit('com/getcapacitor/Plugin.java','!event.equals("smsSendUpdated")','!event.equals("mmsSendUpdated")');
   edit('android/content/Context.java',' public File getNoBackupFilesDir()',` public File getCacheDir(){return noBackup;}
  public File getNoBackupFilesDir()`);

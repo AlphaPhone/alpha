@@ -107,7 +107,9 @@ try{
   s.compareExchange=async()=>{throw Error('Synthetic unavailable');};
  });
  await button('Back from draft').click();
- await page.getByText('Synthetic unavailable',{exact:true}).first().waitFor();
+ // A storage failure's own text never reaches the owner; the controller's fixed sentence does.
+ await page.getByText('The draft could not be saved. Your edits remain here.',{exact:true}).first().waitFor();
+ assert.equal(await page.getByText('Synthetic unavailable').count(),0);
  assert.equal(await message.inputValue(),'Keep edits after storage failure');
  assert.equal(draftBySubject(reply)?.body,'Reply draft only');
  await page.evaluate(async()=>{

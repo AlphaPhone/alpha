@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {dirname,join} from 'node:path';
 import {app,root} from './java.mjs';
+import {stringResources} from './string-resources.mjs';
 
 export const renewalBridge=app+'AlphaHostedResultsPlugin.java';
 export const renewalOwner='plugins/plugin-native-notifications/android/src/main/java/ai/eliza/plugins/notifications/NoticeOwner.java';
@@ -13,6 +14,7 @@ function exact(text, first, last) {
 }
 
 export function sourceRenewalPlatform(temporary) {
+  const strings=stringResources();
   const bridge=readFileSync(join(root,renewalBridge),'utf8');
   const files={
     'ai/alphacompute/alphaphone/AlphaHostedResultsPlugin.java':`package ai.alphacompute.alphaphone;
@@ -30,7 +32,7 @@ ${exact(bridge,' @Override protected void handleOnDestroy()', '\n}')}
 import android.content.Context;
 import org.json.*;
 final class MainActivity {}
-final class R {static final class drawable {static final int notification_icon=1;}}
+final class R {static final class drawable {static final int notification_icon=1;} ${strings.rString}}
 final class System {static long currentTimeMillis(){return SourceRenewalTraces.now;}}
 final class AlphaCredentialStore {
  final Context context;
@@ -75,7 +77,7 @@ public final class Context {
  public final NotificationManager manager=new NotificationManager();
  public final KeyguardManager keyguard=new KeyguardManager();
  public Context getApplicationContext(){return this;}
- public int checkSelfPermission(String permission){if(!permission.equals("notify"))throw new AssertionError(permission);return 0;}
+${strings.getString} public int checkSelfPermission(String permission){if(!permission.equals("notify"))throw new AssertionError(permission);return 0;}
  public <T>T getSystemService(Class<T> kind){
   if(kind==NotificationManager.class)return kind.cast(manager);
   if(kind==KeyguardManager.class)return kind.cast(keyguard);

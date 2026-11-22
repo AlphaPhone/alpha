@@ -2,11 +2,8 @@ import {retireGmailBackground} from './gmail-background';
 import type {GmailAccount} from './cloud-protocol';
 import {disconnectGmailAccount, type GmailDisconnectOutcome} from './gmail-mailbox';
 import {calendarSourceKey,type AgentCalendar,type AgentCalendarSyncReview} from './agent-calendar';
+import type {CanonicalCalendarSyncSettings} from './calendar-sync-settings';
 import type {LifeOpsCalendarSummary, LifeOpsLinkedCalendarControl} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
-import {sha256Hex} from '../lib/hash.ts';
-
-/** The Agent Calendar that Settings links to Google, with its owner fence (current) and draft fence (canChange). */
-export type CanonicalCalendarSyncSettings={calendar:AgentCalendar;current():boolean;canChange():boolean};
 
 /** Google accounts for one captured Cloud session, and the same Agent Calendar's lifecycle around them:
  * Connect links it to Google through the canonical sync control (linkGoogleCalendar), and disconnect
@@ -14,7 +11,7 @@ export type CanonicalCalendarSyncSettings={calendar:AgentCalendar;current():bool
  * (disconnectGoogleWithCalendar). Browser and native share this orchestration only; CalendarService
  * remains the record authority. */
 
-interface GoogleDisconnectLease {
+export interface GoogleDisconnectLease {
   origin: string;
   ownerId: string;
   agentId: string;
@@ -26,18 +23,18 @@ interface GoogleDisconnectLease {
  * association, decoded by the strict canonical decoder; never derive it here. */
 type GoogleDisconnectCalendarSource = Pick<LifeOpsCalendarSummary, 'provider' | 'side' | 'grantId' |
   'connectorAccountId' | 'calendarId' | 'selectionVersion' | 'managedGoogleConnectionId'>;
-interface GoogleDisconnectReview {
+export interface GoogleDisconnectReview {
   lease: GoogleDisconnectLease;
   control: LifeOpsLinkedCalendarControl | null;
   sources: readonly GoogleDisconnectCalendarSource[];
 }
-interface GoogleDisconnectPauseRequest {
+export interface GoogleDisconnectPauseRequest {
   operation: 'pause';
   expectedRevision: number;
   idempotencyKey: string;
 }
-type DisconnectCleanupStatus = 'confirmed' | 'unknown' | 'unavailable' | 'not-applicable';
-interface GoogleDisconnectPorts<T> {
+export type DisconnectCleanupStatus = 'confirmed' | 'unknown' | 'unavailable' | 'not-applicable';
+export interface GoogleDisconnectPorts<T> {
   current(): GoogleDisconnectReview | null;
   /** Cloud privacy binding is independent of optional Calendar cleanup availability.
    * When omitted, existing callers retain their single captured-lease check. */
@@ -181,7 +178,7 @@ export async function disconnectGoogleWithCalendar<T>(input: {
   }
 }
 
-type GoogleAccountsCalendarReview = Omit<GoogleDisconnectReview, 'sources'> & {
+export type GoogleAccountsCalendarReview = Omit<GoogleDisconnectReview, 'sources'> & {
   sources: readonly LifeOpsCalendarSummary[];
 };
 
@@ -194,7 +191,7 @@ export interface GoogleDisconnectContext {
 /** Supplied by the active canonical Calendar owner, never a second Calendar store.
  * review/current use official decoded Summary data and the existing owner/session/source generation.
  * pause is the existing canonical updateLinkedCalendarControl, not link-level disconnect. */
-interface GoogleAccountsCalendarLifecycle {
+export interface GoogleAccountsCalendarLifecycle {
   capture(): GoogleAccountsCalendarReview | null;
   current(): GoogleAccountsCalendarReview | null;
   pause(request: GoogleDisconnectPauseRequest, signal: AbortSignal): Promise<LifeOpsLinkedCalendarControl>;
@@ -220,7 +217,7 @@ export function notifyGoogleAccountsChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(GOOGLE_ACCOUNTS_CHANGED));
 }
 
-export function googleDisconnectConfirmation(label: string): string {
+export function googleDisconnectConfirmation(label: string, _serviceName = 'Cloud'): string {
   return `Disconnect ${label}? Mail and events stay.`;
 }
 
@@ -334,10 +331,11 @@ export function createGoogleAccounts(
 
 /** needs-grant: no verified Calendar write grant, so nothing was read or changed. Only synced and syncing are read back.
  * review: the last sync readback with no control write sent after it, kept for the Calendar disconnect lifecycle. */
-type GoogleCalendarLink={outcome:'synced'|'syncing'|'needs-grant'|'not-linked'|'unconfirmed';message:string;review?:AgentCalendarSyncReview};
+export type GoogleCalendarLink={outcome:'synced'|'syncing'|'needs-grant'|'not-linked'|'unconfirmed';message:string;review?:AgentCalendarSyncReview};
 /** Same reviewed transition, same key: a retry replays its receipt; a newer revision is a new operation. */
 async function linkOperationKey(...parts:unknown[]){
- return 'alpha-calendar-connect:'+await sha256Hex(JSON.stringify(parts));
+ const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(parts))));
+ return 'alpha-calendar-connect:'+Array.from(digest,n=>n.toString(16).padStart(2,'0')).join('');
 }
 /** A foreground refresh or another Calendar write holds the control; wait for it instead of failing the link. */
 function calendarSettled(calendar:AgentCalendar,signal:AbortSignal){

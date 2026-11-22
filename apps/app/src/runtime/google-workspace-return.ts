@@ -43,7 +43,7 @@ export function watchGoogleWorkspaceReturn(port:GoogleWorkspaceReturnPort,bindin
   if(!valid())return;if(busy){queued=true;return;}busy=true;
   try{const result=await port.consume(binding);if(!valid()||result.result==='none')return;
    if(!['connected','denied','failed'].includes(result.result)||(result.result==='connected'&&!/^[A-Za-z0-9_-]{1,128}$/.test(result.connectionId??''))||(result.result!=='connected'&&result.connectionId!==undefined))throw Error('Invalid Google return');
-   onReturn({result:result.result,...(result.connectionId?{connectionId:result.connectionId}:{})});
+   if(result.result==='connected'||result.result==='denied'||result.result==='failed')onReturn({result:result.result,...(result.connectionId?{connectionId:result.connectionId}:{})});
   }catch{if(valid())onError();}finally{busy=false;if(queued&&valid()){queued=false;void drain();}}
  };
  const ready=port.subscribe(()=>void drain()).then(handle=>{listener=handle;if(closed)return handle.remove();return drain();},()=>{if(valid())onError();});

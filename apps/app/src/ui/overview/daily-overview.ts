@@ -842,6 +842,8 @@ export function selectOverviewAgenda<T>(
 /** Status of an agent calendar feed controller (the LifeOps calendar contract). */
 type OverviewAgendaFeedStatus =
   | "disconnected"
+  | "transition-required"
+  | "legacy-recovery"
   | "loading"
   | "ready"
   | "partial"
@@ -913,6 +915,16 @@ export function presentOverviewAgendaFeed(
         description: `Connect to view ${source}.`,
         stale: false,
         state: "not-connected",
+      };
+    case "transition-required":
+    case "legacy-recovery":
+      return {
+        title: unverified,
+        read: "",
+        description:
+          "Saved app calendar is retained separately; review the transition.",
+        stale: false,
+        state: "review",
       };
     case "error":
     case "unavailable":

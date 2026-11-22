@@ -891,7 +891,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			const target = event.target;
 			if (
 				!(target instanceof HTMLElement) ||
-				target.closest('[inert],[role="dialog"]') ||
+				target.closest('[inert],[role="dialog"],[role="menu"]') ||
 				document.querySelector("dialog[open]")
 			)
 				return;
@@ -1250,9 +1250,11 @@ export function installChatOverlayMotion(Component: Shell) {
 		// An outside tap lowers the sheet or dock without activating what it uncovers.
 		// A drag has no click, so it collapses on release. Assistive technology can
 		// still activate app controls directly. A comms view stays live above the sheet (staged, or an emergency call): its
-		// controls (draft Send, the call card, list chips) take their own taps (AC-02).
+		// controls (draft Send, the call card, list chips) take their own taps (AC-02). So does portrait Camera,
+		// laid out above the open sheet (phone.css): its viewfinder, shutter, modes and flip stay live.
+		const cameraStaged = s.view === "camera" && !document.documentElement.classList.contains("alpha-landscape");
 		out.scrimPE =
-			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface && !out.comms
+			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface && !out.comms && !cameraStaged
 				? "auto"
 				: "none";
 		const ownedPress = (event: PointerEvent) => {

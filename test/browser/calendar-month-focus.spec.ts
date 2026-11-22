@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 for(const theme of ['light','dark'])for(const height of [915,420])test(`month picker owns keyboard focus ${theme} ${height}`,async({page},info)=>{
  await page.setViewportSize({width:412,height});await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?theme='+theme);await page.getByRole('button',{name:'Calendar',exact:true}).click();
- const trigger=page.getByRole('button',{name:'Month view',exact:true});await trigger.click();const dialog=page.getByRole('dialog',{name:'Choose calendar date'});await expect(dialog).toBeVisible();await expect(page.locator('[data-alpha-layer="pill"]')).toBeHidden();await expect(page.locator('[data-alpha-layer="composer"]')).toBeHidden();
+ const trigger=page.getByRole('button',{name:'Choose date',exact:true});await trigger.click();const dialog=page.getByRole('dialog',{name:'Choose calendar date'});await expect(dialog).toBeVisible();await expect(page.locator('[data-alpha-layer="pill"]')).toBeHidden();await expect(page.locator('[data-alpha-layer="composer"]')).toBeHidden();
  await expect(page.getByRole('region',{name:'Calendar timeline',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'New event',exact:true})).toHaveCount(0);
  await expect.poll(()=>dialog.evaluate(el=>el.contains(document.activeElement))).toBe(true);
  const first=dialog.getByLabel('Calendar month',{exact:true}),last=dialog.getByRole('button').last();await last.focus();await page.keyboard.press('Tab');await expect(first).toBeFocused();await page.keyboard.press('Shift+Tab');await expect(last).toBeFocused();

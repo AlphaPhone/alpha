@@ -10,6 +10,7 @@ import templateHtml from "./template-source";
     popovertarget: "popoverTarget", popovertargetaction: "popoverTargetAction", tabindex: "tabIndex", maxlength: "maxLength", minlength: "minLength", readonly: "readOnly" };
   var HOLE = /\{\{\s*([^}]+?)\s*\}\}/g;
   var WHOLE = /^\{\{\s*([^}]+?)\s*\}\}$/;
+  var UNAVAILABLE_CONTROL = Symbol.for("alpha.unavailableControl");
 
   function lookup(path, scope) {
     if (path === "true") return true;
@@ -156,8 +157,10 @@ import templateHtml from "./template-source";
     }
     var isSvg = n.namespaceURI === "http://www.w3.org/2000/svg";
     var tname = isSvg ? n.localName : tag;
-    var c = kids(n.childNodes, scope);
     var built = props(n, scope, key);
+    // A control whose handler only says it is unavailable (native-adapter.ts) is not shown.
+    for (var name in built) if (/^on[A-Z]/.test(name) && built[name] && built[name][UNAVAILABLE_CONTROL]) return null;
+    var c = kids(n.childNodes, scope);
     // A drawing with no name of its own is decoration for the control or text beside it. Without
     // this it is announced as an unlabelled image (uncatalogued icon paths, the map drawing).
     if (tag === "svg" && !built["aria-label"] && !built["aria-labelledby"] && !built.role && built["aria-hidden"] === undefined) built["aria-hidden"] = "true";

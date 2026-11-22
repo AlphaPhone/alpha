@@ -7,7 +7,7 @@ import {SingleFlightMemo} from "@elizaos/core/read-memo";
 import {browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall,OWN_KEYS_NOT_SET_UP} from './browser-cloud-resident';
 import {appRecordInvalidations} from './app-record-completion';
 import {findViewActionHandoff} from '../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts';
-import {normalizeEffectReceipts} from '../../../../.eliza/client-features/packages/core/src/types/effects.ts';
+import {effectBeforeFailure,effectInterruptedText} from './turn-effect-state.ts';
 import {assertAppRecordRequestAllowed,type AppRecordMethod,type AppRecordPort} from './app-record-route-policy';
 import {AUTOMATIONS_COMMITTED_EVENT,automationsCommitted} from './automation-completion';
 import {OWNER_REMINDER_LIST,OWNER_REMINDER_READBACK,ownerReminderRoute,reminderReadPath,type ReminderNotificationBinding} from './owner-reminder-notification-protocol';
@@ -394,6 +394,7 @@ let sending: AbortController | null = null;
 /** Pre-warm debounce: at most one agent inference warm per interval, reset by a new connection. */
 export const INFERENCE_WARM_INTERVAL_MS = 60_000;
 let lastInferenceWarm = Number.NEGATIVE_INFINITY;
+let developmentVoiceExpiresAt=0;
 const appRequests = new Set<AbortController>();
 const conversationMemory = new Map<string, string>();
 let lastNativeVoiceInference:(NativeInferenceVoiceJoin&{epoch:number;sessionId:string})|undefined;
@@ -460,7 +461,7 @@ const actionReceipts = new Map<string, { sessionId: string; result: Promise<Oper
 const readReplyOwners=new Map<ReadReplyBinding,{actions:DeviceActions;proposalId:string;digest:string;cancelled:boolean}>();
 function retireReadReplies(){for(const binding of [...readReplyOwners.keys()])void connectionController.cancelReadReply(binding).catch(()=>{});}
 let navigationContext:(()=>ContextEnvelope|null)|undefined;
-let requestedCameraContinuation:{messageId:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
+let requestedCameraContinuation:{messageId:string;text:string;selected:Active;session:VerifiedSession;generation:number;conversationId:string;client:ViewNavigationClient;attempt:NavigationAttempt;expiresAt:number;proposalOnly:boolean}|undefined;
 let deviceRecovery: DeviceRecovery | undefined;
 let deviceExecutor: DeviceExecutor = async () => ({ status: 'failed', summary: 'Device action executor is unavailable.' });
 /** Foreground local reviews (free/busy over owner-chosen calendars). The phone shell supplies the
@@ -1216,7 +1217,9 @@ async function connectRemote(kind: 'remote' | 'local', origin: string, code: str
 async function connectDevelopment(profile:DevelopmentProfile,signal:AbortSignal){
  if(!browserDevProfile)throw Error('Development mode required.');
  // This explicitly gated browser fixture implements reminder v2; real peers still negotiate it.
- const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY,NOTES_LIST_FILTER_CAPABILITY]},scope=await actionScope(sessionKey(client.origin,session.ownerId,session.agentId,credential.installationId));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=await workflowDeviceProtocol(signal);save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
+ const identity=await readDevelopmentIdentity(profile,signal);const client=new LocalAgentProtocol(developmentBridge(profile,identity));const {session,name}=await client.connect(signal);signal.throwIfAborted();const credential={...developmentCredential(profile,identity),capabilities:[FILES_CAPABILITY,NOTES_LIST_FILTER_CAPABILITY]},scope=await actionScope(sessionKey(client.origin,session.ownerId,session.agentId,credential.installationId));const actions=new DeviceActions(session,credential,scope,(path,body,signal)=>client.request(path,body,signal),developmentJournal(profile,identity),(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource)=>deviceExecutor(op,id,context,signal,binding,workflowRoute,journalIdentity,agendaSource),(op,id,binding,signal)=>deviceRecovery?deviceRecovery(op,id,binding,signal):Promise.resolve({status:'unknown'}),true,true);await retire();signal.throwIfAborted();await verifyDevelopmentIdentity(identity,signal);const workflowProtocol=await workflowDeviceProtocol(signal);save({kind:'development',profile,...(identity.account?{account:identity.account}:{})});
+ developmentVoiceExpiresAt=Date.now()+3_600_000;
+ activate({kind:'resident',remote:client,origin:client.origin,actions,workflowProtocol},session,name);
  await restoreSavedHistory(signal);
 }
 /** Native's identity read during a bind failed without Cloud refusing the key (transport, 408, 429, 5xx). */
@@ -1646,17 +1649,6 @@ const signInProbeMessage = (environment: CloudEnvironment) => `Checking ${cloudS
 const pairingRetired = () => 'Pairing unavailable';
 /** The one wording for a Cloud sign-in that Cloud refused (401, an expired key). */
 const residentSignInExpired = () => 'Sign-in expired';
-/** A turn that failed after its action committed: the owner is told the action went through, never the generic failure. */
-export const EFFECT_APPLIED_INTERRUPTED = 'Done · reply cut off';
-/** Upstream's post-commit interruption (`TURN_INTERRUPTED_AFTER_EFFECT`), or an effect receipt the reply proves applied and not rolled back. */
-function effectAppliedBeforeFailure(reply:{terminalFailure?:unknown;actionResults?:unknown}):boolean {
-  const code=reply.terminalFailure&&typeof reply.terminalFailure==='object'?(reply.terminalFailure as {code?:unknown}).code:undefined;
-  if(code==='TURN_INTERRUPTED_AFTER_EFFECT')return true;
-  if(!Array.isArray(reply.actionResults))return false;
-  const receipts=reply.actionResults.flatMap(result=>{if(!result||typeof result!=='object'||!('effectReceipts' in result))return [];try{return [...normalizeEffectReceipts((result as {effectReceipts:unknown}).effectReceipts)];}catch{return [];}});
-  const reverted=new Set(receipts.flatMap(receipt=>receipt.outcome==='rolled_back'?receipt.rollback.revertedReceiptIds:[]));
-  return receipts.some(receipt=>receipt.outcome==='applied'&&!reverted.has(receipt.receiptId));
-}
 /** Owner-facing states for upstream's CHAT_FAILURE_KINDS (pinned contracts `chat.ts`). Each says
  * what happened and what to do next; none retries the message. Every known kind has one (replyFailure);
  * only an unknown kind keeps the generic text. */
@@ -2130,8 +2122,10 @@ export const connectionController = {
     // photo waits there as its review card instead of failing the reply. Nothing is taken without a readable direct mode.
     const allowed=async()=>{current();const preferences=await readDevicePreferences(signal).catch(()=>{signal.throwIfAborted();return {askBeforeAgentActions:true};});current();return !preferences.askBeforeAgentActions;};
     if(!await allowed())return [];
-    await pending.selected.actions.pendingReview(context,signal);current();
-    return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo');
+    // The owner's own words prove the photo was asked for: a capture the model proposed for other words keeps its card.
+    const proof:CurrentDeviceActionRequest={messageId,text:pending.text,current};
+    await pending.selected.actions.pendingReview(context,signal,proof);current();
+    return pending.selected.actions.performRequested(messageId,context,signal,allowed,'camera_capture_photo',proof);
   },
   /** The agent proposed this message's photo without showing Camera, and the phone is still on the screen the request was sent from. */
   requestedCameraNeedsOpening(messageId:string):boolean {
@@ -2428,6 +2422,12 @@ export const connectionController = {
     const owned=new AbortController(),first=new AbortController(),current=()=>stoppedVoiceRead===record&&!sending&&!operation;
     const record=stoppedVoiceRead={conversationId:binding.conversationId,controller:owned,repeat:()=>{if(first.signal.aborted||!current())return;first.abort();void read(owned.signal,current).catch(()=>{});}};
     await read(anyAbortSignal([signal,first.signal,owned.signal]),current);
+  },
+  getPairedVoiceBinding(): { origin: string; ownerId: string; expiresAt: number; sessionId: string } | null {
+    if (!testMocksEnabled || !state.session) return null;
+    if (browserDevProfile && selection()?.kind==='development') return {...state.session,expiresAt:developmentVoiceExpiresAt};
+    if (!active || active.kind==='resident' || !active.remote.session || active.remote.session.expiresAt<=Date.now()) return null;
+    return {origin:active.origin,ownerId:state.session.ownerId,expiresAt:active.remote.session.expiresAt,sessionId:state.session.sessionId};
   },
   getCloudEnvironment(): CloudEnvironment | null { return service?.identity.environment ?? null; },
   getCloudClient(): { client: CloudProtocol; sessionId: string; credentialId: string } | null { return service ? { client: service.client, sessionId: service.identity.sessionId, credentialId: service.identity.credentialId } : null; },
@@ -3352,7 +3352,7 @@ export const connectionController = {
       // The agent chose not to answer this turn (an echo it caught, say). That is not a failed reply:
       // the turn ends with nothing to say; voice listens again and chat shows no empty bubble.
       const ignored=('noResponseReason' in reply&&reply.noResponseReason==='ignored')||(channelType==='DM'&&!failed&&typeof reply.text==='string'&&!reply.text.trim());
-      const effectApplied=failed&&effectAppliedBeforeFailure(reply);
+      const effectApplied=failed?effectBeforeFailure(reply):undefined;
       // A completed Calendar read can truthfully fail its coverage guard. Its
       // visible answer and durable message identity remain usable; this is not
       // a transport failure and must not gain a retry prompt or extra card.
@@ -3376,7 +3376,7 @@ export const connectionController = {
         // The turn failed after its action committed (a calendar event exists, say): the owner is
         // told the action went through and the reply was cut off. A mapped provider or Cloud limit
         // keeps its own retry information after that; the generic and plain interrupted texts do not.
-        if(effectApplied){const mapped=responseFailure instanceof AlphaClientError?responseFailure as AlphaClientError&{failureKind?:unknown;serviceLimit?:unknown;planAction?:unknown}:undefined;responseFailure=Object.assign(new AlphaClientError('transport-failed',mapped&&mapped.failureKind!=='interrupted'?`${EFFECT_APPLIED_INTERRUPTED} ${mapped.message}`:EFFECT_APPLIED_INTERRUPTED),{failureKind:typeof mapped?.failureKind==='string'?mapped.failureKind:failureKindOf(reply)??'interrupted'},mapped?.serviceLimit===undefined?{}:{serviceLimit:mapped.serviceLimit},mapped?.planAction===undefined?{}:{planAction:mapped.planAction});}
+        if(effectApplied){const lead=effectInterruptedText(effectApplied);const mapped=responseFailure instanceof AlphaClientError?responseFailure as AlphaClientError&{failureKind?:unknown;serviceLimit?:unknown;planAction?:unknown}:undefined;responseFailure=Object.assign(new AlphaClientError('transport-failed',mapped&&mapped.failureKind!=='interrupted'?`${lead} ${mapped.message}`:lead),{failureKind:typeof mapped?.failureKind==='string'?mapped.failureKind:failureKindOf(reply)??'interrupted'},mapped?.serviceLimit===undefined?{}:{serviceLimit:mapped.serviceLimit},mapped?.planAction===undefined?{}:{planAction:mapped.planAction});}
         if ('failureKind' in responseFailure) retractReadiness();
       }
       for(const key of ['messageId','userMessageId'] as const)if(reply[key]!==undefined&&!validateUuid(reply[key]))throw Error('The agent returned an invalid message identity.');
@@ -3430,7 +3430,7 @@ export const connectionController = {
       }
       // Ask-first phones also open Camera for the requested photo; there it waits as its review card (continueRequestedCamera takes nothing).
       if(!failed&&!message.context.sensitive&&cameraNavigation&&cameraAttempt&&typeof reply.userMessageId==='string'&&(Array.isArray(reply.actionResults)||cameraProposalOnly)){
-        requestedCameraContinuation={messageId:reply.userMessageId,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
+        requestedCameraContinuation={messageId:reply.userMessageId,text:authoredRequestText,selected,session,generation,conversationId:id,client:cameraNavigation,attempt:cameraAttempt,expiresAt:Date.now()+30_000,proposalOnly:cameraProposalOnly};
       }
       // A reply that got through means the last Cloud limit no longer applies.
       if(!failed&&(state.lastServiceLimit||state.fundingRefused))update({lastServiceLimit:null,fundingRefused:false});
@@ -3890,7 +3890,7 @@ export function ConnectionChooser({onPresentation}:{onPresentation?:(visible:boo
   if(residentCloudFlow())return <div className="alpha-connection-scrim"><div className="alpha-connection alpha-connection-native alpha-connection-resume" role="dialog" aria-modal="true" aria-labelledby="connection-title" aria-busy={snapshot.residentStarting||undefined} tabIndex={-1} ref={panel}>
     <header><h1 id="connection-title" className="serif">{planPanel&&snapshot.cloudAccount?'Plan':testMocksEnabled?'Status':'Account'}</h1>{!residentMustSignIn&&<button aria-label="Close connection settings" disabled={snapshot.busy&&!snapshot.residentStarting} onClick={()=>connectionController.close()}><span aria-hidden="true" data-alpha-icon="/icons/lucide/x.svg" style={iconStyle("x")}/></button>}</header>
     {!planPanel&&<ResidentRecoveryPanel snapshot={snapshot}/>}
-    <section aria-label="AI inference" hidden={ownProviderSelected()&&!planPanel}>{!planPanel&&<ul className="alpha-status-rows"><li><span aria-hidden="true" data-alpha-icon="/icons/lucide/cpu.svg" style={iconStyle('cpu')}/><span className="alpha-row-name">AI</span><StatusDot tone={residentAi[0]}>{residentAi[1]}</StatusDot></li></ul>}
+    <section aria-label="AI service" hidden={ownProviderSelected()&&!planPanel}>{!planPanel&&<ul className="alpha-status-rows"><li><span aria-hidden="true" data-alpha-icon="/icons/lucide/cpu.svg" style={iconStyle('cpu')}/><span className="alpha-row-name">AI</span><StatusDot tone={residentAi[0]}>{residentAi[1]}</StatusDot></li></ul>}
       {residentAiStarting?accountCreatedNotice:snapshot.cloudAccount&&!residentSignInRejected?<>
         {accountCreatedNotice}
         {!residentMembershipVisible&&(planPanel||residentNeedsPlan)&&<p>{snapshot.cloudAccount.email||`Account ${snapshot.cloudAccount.userId}`}</p>}

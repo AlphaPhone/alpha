@@ -17,6 +17,7 @@ for(const theme of ['light','dark'])for(const height of [915,420])test(`photo de
  await page.getByRole('button',{name:'Albums',exact:true}).click();
  await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
  await page.getByLabel('Album options',{exact:true}).click();
+ await expect(page.getByRole('button',{name:'Select items',exact:true}).locator('.photo-action-icon')).toHaveCSS('mask-image',/list-checks\.svg/);
  const opener=page.getByRole('button',{name:'Delete all forever',exact:true});await opener.click();
  const dialog=page.getByRole('dialog',{name:'Delete photos forever'}),cancel=dialog.getByRole('button',{name:'Cancel',exact:true}),remove=dialog.getByRole('button',{name:'Delete forever',exact:true});
  await expect(cancel).toBeFocused();await expect(page.getByRole('button',{name:'Back to albums'})).toHaveCount(0);

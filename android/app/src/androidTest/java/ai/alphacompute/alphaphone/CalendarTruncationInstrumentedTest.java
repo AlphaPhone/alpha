@@ -43,7 +43,7 @@ public final class CalendarTruncationInstrumentedTest {
    }
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
     AppNavigation.liveMode();js(AppNavigation.request("Calendar"));until(AppNavigation.selected("Calendar"));AppNavigation.declineStartupAccess();until("document.querySelector('[aria-label=\"Retry calendar and reminders\"]')?.textContent.includes('Calendar results incomplete')");
-    click("Month view");click(target.format(DateTimeFormatter.ofPattern("EEEE MMMM d",Locale.US)));
+    click("Choose date");click(target.format(DateTimeFormatter.ofPattern("EEEE MMMM d",Locale.US)));
     until("document.body.textContent.includes('Calendar results incomplete. Some events may be missing.')");assertEquals("Incomplete provider result never claims free all day","false",js("document.body.textContent.includes('Free all day')"));
     assertEquals("Known later row is genuinely beyond the limit","false",js("document.body.textContent.includes("+JSONObject.quote(hidden)+")"));
     click("Retry calendar and reminders");until("document.querySelector('[aria-label=\"Retry calendar and reminders\"]')?.textContent.includes('Calendar results incomplete')");

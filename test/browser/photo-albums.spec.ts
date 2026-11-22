@@ -4,8 +4,18 @@ test.beforeEach(async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');
  await page.evaluate(async()=>{const {importBrowserPhoto}=await import('/src/prototype/browser-camera.ts');const canvas=document.createElement('canvas');canvas.width=100;canvas.height=80;canvas.getContext('2d')!.fillRect(0,0,100,80);const image=canvas.toDataURL('image/jpeg');const row=await importBrowserPhoto({original:new File([],'fixture.jpg'),image,width:100,height:80},new AbortController().signal);(window as any).albumPhoto=row;});
 });
-test('visible Photos album journey creates with selected media, renames, removes, adds and deletes without deleting the photo',async({page})=>{
- test.setTimeout(60000);await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();await choosePhotoAction(page,'Add to album');let dialog=page.locator('[data-alpha-album-manager]');await dialog.getByRole('button',{name:'New album',exact:true}).click();await dialog.getByRole('textbox',{name:'Album name',exact:true}).fill('Trip');await dialog.getByRole('button',{name:'Save album',exact:true}).click();await expect(dialog).toHaveCount(0);
+test('visible Photos album journey creates with selected media, renames, removes, adds and deletes without deleting the photo',async({page},info)=>{
+ test.setTimeout(60000);await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();await choosePhotoAction(page,'Add to album');let dialog=page.locator('[data-alpha-album-manager]');
+ await expect.poll(()=>dialog.evaluate(el=>Math.abs(el.getBoundingClientRect().bottom-el.parentElement!.getBoundingClientRect().bottom))).toBeLessThan(1);
+ await page.evaluate(()=>document.documentElement.style.setProperty('--native-bottom-inset','24px'));
+ await expect.poll(()=>dialog.evaluate(el=>getComputedStyle(el.closest('.alpha-phone')!,'::after').backgroundColor)).toBe(await dialog.evaluate(el=>getComputedStyle(el).backgroundColor));
+ await expect(dialog.getByText('In Camera',{exact:true})).toBeVisible();
+ await expect(dialog.getByText(/Videos/)).toHaveCount(0);
+ await page.screenshot({path:info.outputPath('photo-album-sheet.png'),animations:'disabled'});
+ await dialog.getByRole('button',{name:'Add to Favorites',exact:true}).click();await expect(dialog).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Remove from favorites',exact:true})).toBeVisible();
+ await choosePhotoAction(page,'Add to album');await expect(dialog.getByText('In Favorites',{exact:true})).toBeVisible();
+ await dialog.getByRole('button',{name:'New album',exact:true}).click();await dialog.getByRole('textbox',{name:'Album name',exact:true}).fill('Trip');await dialog.getByRole('button',{name:'Save album',exact:true}).click();await expect(dialog).toHaveCount(0);
  await page.getByRole('button',{name:'Back from photo',exact:true}).click();await page.getByRole('button',{name:'Albums',exact:true}).click();await page.getByRole('button',{name:'Trip',exact:true}).click();await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(1);
  await page.getByLabel('Album options',{exact:true}).click();await page.getByRole('button',{name:'Rename album',exact:true}).click();dialog=page.locator('[data-alpha-album-manager]');await dialog.getByRole('textbox',{name:'Album name',exact:true}).fill('Journey');await dialog.getByRole('button',{name:'Save album',exact:true}).click();await expect(dialog).toHaveCount(0);
  await page.reload();await page.getByRole('button',{name:'Photos',exact:true}).click();await page.getByRole('button',{name:'Albums',exact:true}).click();await page.getByRole('button',{name:'Journey',exact:true}).click();await page.getByRole('button',{name:/^Photo, /}).click();await choosePhotoAction(page,'Add to album');dialog=page.locator('[data-alpha-album-manager]');await dialog.getByRole('button',{name:'Remove from Journey',exact:true}).click();await expect(dialog).toHaveCount(0);

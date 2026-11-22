@@ -30,12 +30,20 @@ public final class AlphaNoteRecordingService extends Service {
  static final String ACTION_RESUME="ai.alphacompute.alphaphone.notes.recording.RESUME";
  /** Stop in the notification: the microphone is released and the recording is kept for Notes to save. */
  static final String ACTION_FINISH="ai.alphacompute.alphaphone.notes.recording.FINISH";
+ /** A tap on the notification: MainActivity opens Notes, where the open recording is shown again. */
+ static final String ACTION_SHOW_NOTES="ai.alphacompute.alphaphone.notes.recording.SHOW";
  /** True while this service holds the foreground with its notification. */
  private static volatile boolean foreground;
  private static volatile String foregroundRecording;
  private static volatile AlphaNoteRecordingService activeService;
  private volatile int lastStartId;
  static final String EXTRA_RECORDING="recording";
+ /** A notification tap waits this long for a renderer that can show Notes; HOME or one consumption retires it. */
+ private static final long SHOW_NOTES_LIFETIME_MS=30_000;
+ private static long showNotesUntil=-1;
+ static synchronized void offerShowNotes(){showNotesUntil=android.os.SystemClock.elapsedRealtime()+SHOW_NOTES_LIFETIME_MS;}
+ static synchronized void clearShowNotes(){showNotesUntil=-1;}
+ static synchronized boolean consumeShowNotes(){boolean open=showNotesUntil>=0&&android.os.SystemClock.elapsedRealtime()<showNotesUntil;showNotesUntil=-1;return open;}
 
  static void start(Context context,String recordingId){
   try{context.startForegroundService(intent(context,ACTION_START,recordingId));}
@@ -120,31 +128,32 @@ public final class AlphaNoteRecordingService extends Service {
  }
  @Override public void onDestroy(){if(activeService==this){activeService=null;foregroundRecording=null;foreground=false;}super.onDestroy();}
 
- /** "Recording" with a chronometer at the recording's length and Pause, or "Paused" with Resume; Stop in both. */
+ /** "Voice note · Recording" with a chronometer at the recording's length and Pause, or "Voice note · Paused"
+  * with Resume; Stop in both. The words are in res/values/alpha-note-recording.xml. */
  static Notification notification(Context context,JSObject status){
   NotificationManager manager=context.getSystemService(NotificationManager.class);
   // Created each time: on a phone that already has the channel this only adds its description.
-  NotificationChannel channel=new NotificationChannel(CHANNEL,"Notes recording",NotificationManager.IMPORTANCE_LOW);
-  channel.setDescription("Shown while Notes is recording, with Pause and Stop.");
+  NotificationChannel channel=new NotificationChannel(CHANNEL,context.getString(R.string.note_recording_channel),NotificationManager.IMPORTANCE_LOW);
+  channel.setDescription(context.getString(R.string.note_recording_channel_description));
   channel.setShowBadge(false);
   manager.createNotificationChannel(channel);
   String recording=status.optString("recordingId","");boolean paused="paused".equals(status.optString("state"));
-  Intent open=new Intent(context,MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+  Intent open=new Intent(context,MainActivity.class).setAction(ACTION_SHOW_NOTES).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
   PendingIntent content=PendingIntent.getActivity(context,0,open,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent toggle=PendingIntent.getService(context,paused?2:1,intent(context,paused?ACTION_RESUME:ACTION_PAUSE,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent finish=PendingIntent.getService(context,3,intent(context,ACTION_FINISH,recording),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   Notification.Builder builder=new Notification.Builder(context,CHANNEL)
    .setSmallIcon(R.drawable.ic_note_recording)
-   .setContentTitle(paused?"Paused":"Recording")
-   .setContentText("Stop here, then save it in Notes.")
+   .setContentTitle(context.getString(paused?R.string.note_recording_title_paused:R.string.note_recording_title_recording))
+   .setContentText(context.getString(R.string.note_recording_text))
    .setContentIntent(content)
    .setOngoing(true)
    .setOnlyAlertOnce(true)
    .setCategory(Notification.CATEGORY_SERVICE)
    // Nothing here is private: the lock screen shows the state with Pause and Stop.
    .setVisibility(Notification.VISIBILITY_PUBLIC)
-   .addAction(new Notification.Action.Builder(null,paused?"Resume":"Pause",toggle).build())
-   .addAction(new Notification.Action.Builder(null,"Stop",finish).build());
+   .addAction(new Notification.Action.Builder(null,context.getString(paused?R.string.note_recording_resume:R.string.note_recording_pause),toggle).build())
+   .addAction(new Notification.Action.Builder(null,context.getString(R.string.note_recording_stop),finish).build());
   if(paused)builder.setShowWhen(false).setUsesChronometer(false);
   else builder.setUsesChronometer(true).setShowWhen(true).setWhen(System.currentTimeMillis()-Math.max(0,status.optLong("durationMs",0)));
   return builder.build();

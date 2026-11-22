@@ -9,6 +9,10 @@
  * as the phone app there. Telecom keeps emergency calls working through the system dialer if this
  * service fails.
  *
+ * While a call is off the hook on the earpiece the service holds the proximity lock, so the display
+ * and its touch input are off at the owner's ear on every screen, the call screen and Alpha alike
+ * (Telecom does not do this for the call UI). The lock goes with the call, the route or the service.
+ *
  * Installed identity, unchanged from the shared service Alpha configured before: the ringing channel
  * {@value #CHANNEL_ID}, the quiet channel {@value #ONGOING_CHANNEL_ID}, notices tagged by call ID with
  * ID 1, and immutable request-code-0 PendingIntents to the call screen with data
@@ -23,6 +27,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Person;
 import android.os.Build;
+import android.os.PowerManager;
 import android.telecom.CallAudioState;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,11 +52,15 @@ public final class AlphaInCallService extends InCallService {
     /** Calls that are not ringing: dialing, connected and held calls, without sound or heads-up. */
     static final String ONGOING_CHANNEL_ID = "alpha-phone-calls-ongoing";
     static final String CHANNEL_NAME = "Phone calls", ONGOING_CHANNEL_NAME = "Calls in progress";
+    static final String CHANNEL_DESCRIPTION = "Incoming calls. Your ringtone plays from the phone, not from this notice.",
+            ONGOING_CHANNEL_DESCRIPTION = "Calls you are dialing, on, or have on hold. Shown without sound.";
     /** Distinguishes notice actions per call; the call screen reads only the extras. */
     static final String CALL_SCHEME = "alphaphone-call";
-    /** Status-bar icon of call notices: the platform call glyph. */
-    static final int NOTIFICATION_ICON = android.R.drawable.sym_action_call;
+    /** Status-bar icon of call notices: Alpha's monochrome handset, tinted by Android. */
+    static final int NOTIFICATION_ICON = R.drawable.ic_call;
     static final String ANSWER = "Answer", DECLINE = "Decline", END_CALL = "End call";
+    /** The proximity lock's tag in power diagnostics. */
+    static final String PROXIMITY_TAG = "alphaphone:call-proximity";
 
     /** Process-wide registry of active calls keyed by stable id. */
     private static final Map<String, Call> ACTIVE_CALLS =
@@ -65,7 +74,13 @@ public final class AlphaInCallService extends InCallService {
     private final Map<Call, Call.Callback> callbacks = new HashMap<>();
     /** Contact names by call ID and number. An empty name is a lookup that found none or is running. Main thread only. */
     private final Map<String, String> names = new HashMap<>();
+    /** What each call's notice last said, by call ID (AlphaCallPresentation.noticeContent). Main thread only. */
+    private final Map<String, String> posted = new HashMap<>();
     private java.util.concurrent.ExecutorService lookups;
+    /** The last audio state Telecom reported to this service. Main thread only. */
+    private CallAudioState audio;
+    /** Held while the display must turn off at the ear; created on first need. Main thread only. */
+    private PowerManager.WakeLock proximity;
     private static AlphaInCallService activeService;
 
     @Override public void onCreate() {
@@ -74,12 +89,14 @@ public final class AlphaInCallService extends InCallService {
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
         // Telecom provides the ringtone; duplicate channel audio would ring twice.
         channel.setSound(null, null);
+        channel.setDescription(CHANNEL_DESCRIPTION);
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
         // Dialing and connected calls are already on the call screen: their ongoing notice stays in
         // the shade and status bar without a heads-up banner over the screen the owner is using.
         NotificationChannel ongoing = new NotificationChannel(ONGOING_CHANNEL_ID, ONGOING_CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
         ongoing.setSound(null, null);
         ongoing.enableVibration(false);
+        ongoing.setDescription(ONGOING_CHANNEL_DESCRIPTION);
         getSystemService(NotificationManager.class).createNotificationChannel(ongoing);
     }
 
@@ -94,7 +111,37 @@ public final class AlphaInCallService extends InCallService {
     public static void mute(boolean muted) { if (activeService != null) activeService.setMuted(muted); }
     public static void route(int route) { if (activeService != null) activeService.setAudioRoute(route); }
 
-    @Override public void onCallAudioStateChanged(CallAudioState state) { publish(); }
+    @Override public void onCallAudioStateChanged(CallAudioState state) {
+        audio = state;
+        holdProximity();
+        publish();
+    }
+
+    /** Takes or drops the proximity lock for the calls and audio route as they are now. */
+    private void holdProximity() {
+        CallAudioState state = audio != null ? audio : getCallAudioState();
+        int[] states;
+        synchronized (ACTIVE_CALLS) {
+            states = new int[ACTIVE_CALLS.size()];
+            int next = 0;
+            for (Call call : ACTIVE_CALLS.values()) states[next++] = call.getState();
+        }
+        boolean known = state != null;
+        int route = known ? state.getRoute() : 0;
+        if (AlphaCallPresentation.proximityLock(states, known, route)) {
+            if (proximity == null) {
+                PowerManager power = getSystemService(PowerManager.class);
+                // A phone without the sensor keeps its screen on, as before.
+                if (power == null || !power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return;
+                proximity = power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, PROXIMITY_TAG);
+                proximity.setReferenceCounted(false);
+            }
+            if (!proximity.isHeld()) proximity.acquire();
+        } else if (proximity != null && proximity.isHeld()) {
+            proximity.release(AlphaCallPresentation.screenOnAtRelease(states, known, route)
+                ? 0 : PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
+        }
+    }
 
     @Override
     public void onCallAdded(Call call) {
@@ -124,37 +171,45 @@ public final class AlphaInCallService extends InCallService {
     }
 
     private void openCallSurface(String event, String callId, Call call) {
+        holdProximity();
         NotificationManager notifications = getSystemService(NotificationManager.class);
         if ("removed".equals(event) || call.getState() == Call.STATE_DISCONNECTED) {
-            if (callId != null) notifications.cancel(callId, 1);
+            if (callId != null) { posted.remove(callId); notifications.cancel(callId, 1); }
             publish();
             return;
         }
         String label = callerLabel(callId, call.getDetails());
         boolean ringing = call.getState() == Call.STATE_RINGING;
-        // Only a ringing call alerts. Outgoing and connected calls use the quiet channel.
-        Notification.Builder builder = new Notification.Builder(this, ringing ? CHANNEL_ID : ONGOING_CHANNEL_ID)
-            .setSmallIcon(NOTIFICATION_ICON)
-            .setContentTitle(label)
-            .setContentText(AlphaCallPresentation.stateLabel(call.getState()))
-            .setCategory(Notification.CATEGORY_CALL)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .setContentIntent(callIntent(callId, "show"));
-        if (ringing) builder.setFullScreenIntent(callIntent(callId, "show"), true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && ringing) {
-            Person person = new Person.Builder().setName(label).setImportant(true).build();
-            builder.setStyle(Notification.CallStyle.forIncomingCall(person,
-                callIntent(callId, "reject"), callIntent(callId, "answer")));
-        } else {
-            // A Telecom-bound service is not an FGS. Ongoing CallStyle without
-            // a full-screen intent is rejected by Android; use an ordinary
-            // ongoing call notification rather than creating another service.
-            if (ringing) builder.addAction(new Notification.Action.Builder(null, ANSWER, callIntent(callId, "answer")).build());
-            builder.addAction(new Notification.Action.Builder(null, ringing ? DECLINE : END_CALL, callIntent(callId, ringing ? "reject" : "disconnect")).build());
+        // Telecom reports a burst of state and detail changes as a call starts, and most leave the
+        // notice saying what it already says. Posting it again for each one passes Android's per-app
+        // notice rate, and Android then drops updates, which can leave a stale notice (a ringing
+        // notice on an answered call). The notice is posted only when what it says or offers changes.
+        String content = AlphaCallPresentation.noticeContent(label, call.getState());
+        if (!content.equals(posted.put(callId, content))) {
+            // Only a ringing call alerts. Outgoing and connected calls use the quiet channel.
+            Notification.Builder builder = new Notification.Builder(this, ringing ? CHANNEL_ID : ONGOING_CHANNEL_ID)
+                .setSmallIcon(NOTIFICATION_ICON)
+                .setContentTitle(label)
+                .setContentText(AlphaCallPresentation.stateLabel(call.getState()))
+                .setCategory(Notification.CATEGORY_CALL)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setContentIntent(callIntent(callId, "show"));
+            if (ringing) builder.setFullScreenIntent(callIntent(callId, "show"), true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && ringing) {
+                Person person = new Person.Builder().setName(label).setImportant(true).build();
+                builder.setStyle(Notification.CallStyle.forIncomingCall(person,
+                    callIntent(callId, "reject"), callIntent(callId, "answer")));
+            } else {
+                // A Telecom-bound service is not an FGS. Ongoing CallStyle without
+                // a full-screen intent is rejected by Android; use an ordinary
+                // ongoing call notification rather than creating another service.
+                if (ringing) builder.addAction(new Notification.Action.Builder(null, ANSWER, callIntent(callId, "answer")).build());
+                builder.addAction(new Notification.Action.Builder(null, ringing ? DECLINE : END_CALL, callIntent(callId, ringing ? "reject" : "disconnect")).build());
+            }
+            notifications.notify(callId, 1, builder.build());
         }
-        notifications.notify(callId, 1, builder.build());
         publish();
         // Open the call once, preserving the dialer's incoming/outgoing entry behavior.
         // Later state updates refresh the existing screen and notification without
@@ -228,9 +283,12 @@ public final class AlphaInCallService extends InCallService {
         for (String id : callIds()) notifications.cancel(id, 1);
         callbacks.clear();
         names.clear();
+        posted.clear();
         if (lookups != null) lookups.shutdownNow();
         ACTIVE_CALLS.clear();
         CALL_IDS.clear();
+        holdProximity();
+        audio = null;
         if (activeService == this) activeService = null;
         publish();
         super.onDestroy();

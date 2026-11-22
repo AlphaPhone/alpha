@@ -34,6 +34,65 @@ for (const theme of ['light', 'dark']) {
     });
   }
 }
+test('Notes create, edit, reload and delete to Recently deleted', async ({ page }) => {
+  await page.goto('/');
+  await openLegacyNotes(page);
+  // Header: Record and New note only; no search pill, Trash icon or empty-state copy.
+  await expect(page.getByRole('button', { name: 'Search notes', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open Trash', exact: true })).toHaveCount(0);
+  await expect(page.getByText('No notes yet', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Recently deleted', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'New note', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Browser audit note');
+  await page.getByRole('textbox', { name: 'Note', exact: true }).fill('A real local draft.\nSecond line.');
+  // Editor toolbar: Back · Checklist · More (Share is in More); Read aloud and Dictate are not on it.
+  await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Read aloud', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
+  await page.reload();
+  await openLegacyNotes(page);
+  // One-column row: title, then the date and a two-line preview.
+  await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toContainText('A real local draft.');
+  await page.getByRole('button', { name: 'Open Browser audit note', exact: true }).click();
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
+  // Deletion is not immediate erasure: the note waits in Recently deleted for 30 days.
+  await expect(page.getByText('Deleted', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Browser audit note, 30 days left', exact: true })).toBeVisible();
+});
+// Folder controls were removed at the owner's request. Canonical Notes CRUD and
+// retained-device-data isolation remain covered by canonical-notes.spec.ts.
+test('the single Notes list preserves retained folder records across reload',async({page})=>{
+ await page.goto('/');
+ const folderId=await page.evaluate(async()=>{
+  const m=await import('/src/runtime/notes-folders.ts');const id=m.newNotesFolderId();
+  await m.editNotesFolders(doc=>m.addNotesFolder(doc,{id,name:'Kept folder',createdAt:Date.now()}));return id;
+ });
+ await openLegacyNotes(page,[{id:'retained-folder-note',kind:'text',title:'Retained folder note',body:'Keep this content.',folderId}]);
+ const stored=()=>page.evaluate(async()=>({raw:await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw(),folders:await(await import('/src/runtime/notes-folders.ts')).readNotesFolders()}));
+ const before=await stored();expect(JSON.parse(before.raw!).records[0].folderId).toBe(folderId);
+ await expect(page.getByRole('button',{name:'New folder',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Open Retained folder note',exact:true})).toBeVisible();
+ await page.reload();await openLegacyNotes(page);
+ await expect(page.getByRole('button',{name:'Open Retained folder note',exact:true})).toBeVisible();
+ expect(await stored()).toEqual(before);
+});
+for (const [label, text] of [['unicode CRLF', 'Local 🧪 file\r\nExact bytes\n'], ['UTF-8 BOM', '\ufeffLocal 🧪 file\r\nExact bytes\n'], ['empty', '']]) test(`Local text import and complete selected-note download: ${label}`, async ({ page }) => {
+  await page.goto('/');
+  await openLegacyNotes(page);
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button',{name:'Import text note',exact:true}).click();
+  await (await chooser).setFiles({ name:'Owned browser note.txt', mimeType:'text/plain', buffer:Buffer.from(text) });
+  await expect(page.getByRole('textbox',{name:'Note',exact:true})).toHaveValue(text.replaceAll('\r\n','\n'));
+  await page.getByRole('button',{name:'More',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button',{name:'Save file',exact:true}).click();
+  const result=await download;
+  expect(result.suggestedFilename()).toBe('Owned browser note.txt');
+  expect(await readFile((await result.path())!)).toEqual(Buffer.from(['Owned browser note',text].filter(Boolean).join('\n\n'), 'utf8'));
+});
 test('Mock is explicit, its banner does not cover the phone, and exit restores live mode', async ({ page }) => {
   await page.goto('/?mode=mock');
   await expect(page.getByText('Mock mode · simulated data and actions')).toBeVisible();
@@ -121,6 +180,22 @@ test('MVP mock digest and fallback advertise only retained views', async ({page}
   await expect(page.getByRole('heading',{name:'Revised term sheet',exact:true})).toBeVisible();
 });
 
+test('MVP Notes sharing keeps email and export without a deferred SMS dead end',async({page})=>{
+  await page.goto('/');await openLegacyNotes(page);
+  await page.getByRole('button',{name:'New note',exact:true}).click();
+  await page.getByRole('textbox',{name:'Title',exact:true}).fill('MVP share scope');
+  await page.getByRole('textbox',{name:'Note',exact:true}).fill('Local test note');
+  await page.getByRole('button',{name:'More',exact:true}).click();
+  await page.getByRole('menu',{name:'Note actions',exact:true}).getByRole('menuitem',{name:'Share note',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Email',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Save file',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Share',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Share in Messages',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Close share',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu',{name:'Note actions',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Local test note');
+});
 test('the notes:rec deep link no longer opens the old simulated clip recorder', async ({ page }) => {
   await page.goto('/?mode=mock&start=notes:rec');
   await expect(page.getByText('Recording isn’t available in this preview.', { exact: true })).toBeVisible();
