@@ -2,6 +2,8 @@ package ai.alphacompute.alphaphone;
 
 import ai.alphacompute.alphaphone.browser.AlphaBrowserCopy;
 import ai.alphacompute.alphaphone.browser.LinkHandoff;
+import ai.alphacompute.alphaphone.browser.AlphaPageContext;
+import ai.eliza.plugins.browsersurface.BrowserPageReading;
 import ai.alphacompute.alphaphone.browser.AlphaBrowserDownloads;
 import ai.alphacompute.alphaphone.browser.AlphaReviewedReading;
 import ai.alphacompute.alphaphone.browser.AlphaSignInFields;
@@ -1037,6 +1039,37 @@ public class AlphaBrowserPlugin extends Plugin {
   java.util.function.BooleanSupplier current=()->!destroyed&&!paused&&Objects.equals(owner,session)&&Objects.equals(session,call.getString("session"))&&tab!=null&&tabs.get(tab.id)==tab&&!tab.dead&&Objects.equals(presentedId,tab.id)&&tab.web.isShown()&&tab.committed&&!tab.loading&&tab.error.isEmpty()&&Objects.equals(url,tab.url)&&Objects.equals(url,tab.web.getUrl())&&Objects.equals(navigation,String.valueOf(tab.navigation))&&url!=null&&url.startsWith("https://");
   if(!current.getAsBoolean()){call.reject("Load a visible HTTPS page before reading");return;}
   if(question)reading.reviewQuestion(call,tab.id,tab.web,tab.readingWorld,current);else reading.review(call,tab.id,tab.web,tab.readingWorld,current);
+ }); }
+ /**
+  * The open page for one chat turn, without a review: the owner turns this off under Settings,
+  * Privacy, Browser page for Alpha, and the renderer asks only while that is on. Only the tab
+  * Browser presents, with the committed HTTPS page the renderer observed; never a private tab.
+  * A sensitive address, a page without an isolated world, a slow read or a malformed result
+  * resolves as withheld, with the address (no query for a sensitive one) and title only.
+  */
+ @PluginMethod public void pageContext(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+  Tab tab=tabs.get(call.getString("id"));String owner=session,url=call.getString("url"),navigation=call.getString("navigation");
+  java.util.function.BooleanSupplier current=()->!destroyed&&!paused&&Objects.equals(owner,session)&&Objects.equals(session,call.getString("session"))&&tab!=null&&tabs.get(tab.id)==tab&&!tab.dead&&Objects.equals(presentedId,tab.id)&&tab.committed&&!tab.loading&&tab.error.isEmpty()&&Objects.equals(url,tab.url)&&Objects.equals(url,tab.web.getUrl())&&Objects.equals(navigation,String.valueOf(tab.navigation));
+  if(!current.getAsBoolean()){call.reject("Browser page changed","page-changed");return;}
+  if(tab.priv){call.reject("Private tabs are never shared","private-tab");return;}
+  String address=AlphaPageContext.address(url),title=AlphaPageContext.title(tab.web.getTitle());
+  if(address==null){call.reject("Only public HTTPS pages are shared","not-public");return;}
+  java.util.function.Consumer<String> withheld=reason->{JSObject out=new JSObject();out.put("url",AlphaPageContext.SENSITIVE_PAGE.equals(reason)?AlphaPageContext.origin(url):address);out.put("title",title);out.put("withheld",reason);call.resolve(out);};
+  if(BrowserPageReading.sensitiveUrl(url)){withheld.accept(AlphaPageContext.SENSITIVE_PAGE);return;}
+  BrowserReadingWorld world=tab.readingWorld;
+  if(world==null||!world.available()||!world.ready()){withheld.accept(AlphaPageContext.UNREADABLE);return;}
+  final boolean[] answered={false};
+  Runnable unreadable=()->{if(answered[0])return;answered[0]=true;withheld.accept(AlphaPageContext.UNREADABLE);};
+  new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(unreadable,1000);
+  world.evaluate(AlphaPageContext.SCRIPT,encoded->{
+   if(answered[0])return;
+   if(!current.getAsBoolean()){answered[0]=true;call.reject("Browser page changed","page-changed");return;}
+   org.json.JSONObject result;
+   try{result=AlphaPageContext.accept(new org.json.JSONTokener(encoded).nextValue());}catch(Exception error){result=null;}
+   if(result==null){unreadable.run();return;}
+   if(result.has("withheld")){answered[0]=true;withheld.accept(result.optString("withheld"));return;}
+   try{answered[0]=true;JSObject out=JSObject.fromJSONObject(result);out.put("url",address);out.put("title",title);call.resolve(out);}catch(Exception error){answered[0]=false;unreadable.run();}
+  },unreadable);
  }); }
  @PluginMethod public void cancelReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;if(Objects.equals(session,call.getString("session")))reading.cancel();call.resolve();}); }
  /** Releases the approved excerpt once to the host's bound speech request. */
