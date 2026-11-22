@@ -42,6 +42,11 @@ export async function setup(page:Page,detent='sheet',development=false,canonical
   const navigation=f.navigation=new ViewNavigationClient(async(path,body,signal)=>{signal.throwIfAborted();f.requests.push({path,body:structuredClone(body)});if(path.endsWith('interact-claim')){f.claims++;if(f.holdClaim)await new Promise<void>(resolve=>f.releaseClaim=resolve);return {claimId:'claim-'+(body as any).requestId};}f.acks++;if(f.holdAck)await new Promise<void>(resolve=>f.releaseAck=resolve);return {accepted:true};},()=>snapshot.session===f.session&&!snapshot.open,()=>alphaClient.getState().context);
   c.captureViewNavigation=context=>({client:navigation,attempt:navigation.capture(context)});
   const transport={session:f.session,send:async input=>{input.signal.throwIfAborted();if(input.channelType!=='VOICE_DM')throw Error('Only new voice turns expected');f.inputs.push({requestId:input.requestId,context:structuredClone(input.context),text:input.text,conversationId:input.expectedConversationId});
+   if(f.browserDestination){
+    const present=await f.shell.browserNavigateApproved(f.browserDestination,input.signal,true);
+    f.browserDestination=undefined;
+    return {text:'Opening the website.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},completedActions:[{proposalId:crypto.randomUUID(),status:'succeeded',summary:'Opened Browser.',presentBrowser:present}]};
+   }
    if(f.projectBeforeReply){
     f.projected=await input.projectRequestedView?.(f.target,input.signal);
     return {text:'Opened '+f.target+'.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session}};

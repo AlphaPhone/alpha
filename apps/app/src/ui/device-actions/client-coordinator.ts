@@ -654,12 +654,20 @@ function describeForegroundReview(
 
 // ── Coordinator ─────────────────────────────────────────────────────────────
 
+// A local projection of a journaled Browser action. This function is never sent to the agent.
+export type BrowserPresentation = {
+  (chat?: string): boolean | void;
+  selection?: {kind: 'browser-tab'; id: string};
+};
+type PresentedDeviceReceipt = DeviceOperationReceipt & { presentBrowser?: BrowserPresentation };
+
 type RequestedAction = CurrentDeviceActionRequest & {
   projectView?: ((view: string, signal: AbortSignal) => Promise<boolean>) | "canonical";
   retainSmsDraft?: true;
 };
 
-type ExecutionResult = DeviceExecutionResult & {
+type ExecutionResult = Omit<DeviceExecutionResult, "presentBrowser"> & {
+  presentBrowser?: BrowserPresentation;
   foregroundResult?: ForegroundReviewResult;
   cancelledBeforeCapture?: true;
   /**
@@ -1538,7 +1546,7 @@ export class DeviceActionCoordinator<
     allowed: () => Promise<boolean>,
     operationType?: ReviewableDeviceOperation["type"],
     proof?: RequestedAction,
-  ): Promise<DeviceOperationReceipt[]> {
+  ): Promise<PresentedDeviceReceipt[]> {
     const directTypes: readonly ReviewableDeviceOperation["type"][] = [
       "create_note",
       "open_view",
@@ -1553,7 +1561,7 @@ export class DeviceActionCoordinator<
       ...PHOTOS_VIEW_DIRECT_TYPES,
       ...BROWSER_CONTROL_DIRECT_TYPES,
     ];
-    const results: DeviceOperationReceipt[] = [];
+    const results: PresentedDeviceReceipt[] = [];
     for (const [proposalId, entry] of [...this.proposals]) {
       const operation=entry.proposal.operation;
       const owner=proof?.messageId===messageId?proof:undefined;
@@ -1969,7 +1977,7 @@ export class DeviceActionCoordinator<
     signal: AbortSignal,
     approval?: "send-draft",
     approvedDescription?: string,
-  ): Promise<DeviceOperationReceipt> {
+  ): Promise<PresentedDeviceReceipt> {
     if (this.busy) throw new Error("Another device action is being reviewed");
     const reviewed = this.proposals.get(proposalId);
     if (
@@ -2256,8 +2264,11 @@ export class DeviceActionCoordinator<
       }
       // Presentation changes the foreground context and cancels its approval.
       // Run it only after this exact action's receipt attempt, never as a retry.
+      const deferredBrowser = result.status === "succeeded" && reviewed.currentRequest &&
+        (p.operation.type === "browser_navigate" || p.operation.type === "browser_search")
+        ? result.presentBrowser : undefined;
       const presentBrowser = () => {
-        if (result.status !== "succeeded") return;
+        if (result.status !== "succeeded" || deferredBrowser) return;
         try {
           if (p.operation.type === "browser_navigate" || isBrowserControl(p.operation)) {
             if (reviewed.currentRequest) assertCurrent();
@@ -2296,6 +2307,7 @@ export class DeviceActionCoordinator<
               ? result.summary
               : unsyncedSummary(result.summary),
           committedChanges,
+          ...(deferredBrowser ? { presentBrowser: deferredBrowser } : {}),
         };
       }
       presentBrowser();
@@ -2332,6 +2344,7 @@ export class DeviceActionCoordinator<
         status: result.status,
         summary: result.summary,
         committedChanges,
+        ...(deferredBrowser ? { presentBrowser: deferredBrowser } : {}),
         ...(readReply ? { readReply } : {}),
       };
     } catch {

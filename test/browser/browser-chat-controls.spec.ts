@@ -18,6 +18,10 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
   // What the synthetic agent proposes for each message. `bound`: the server tied it to that message,
   // as it does for a direct request; closing a tab is never bound.
   const plan:Record<string,{operation:any;bound:boolean}>={
+   'Open Notes':{operation:{type:'open_view',view:'notes'},bound:true},
+   'Open Browser':{operation:{type:'open_view',view:'browser'},bound:true},
+   'Visit https://example.com/demo':{operation:{type:'browser_navigate',url:'https://example.com/demo'},bound:true},
+   'Visit https://example.com/next':{operation:{type:'browser_navigate',url:'https://example.com/next'},bound:true},
    'Search the web for harbour tides':{operation:{type:'browser_search',query:'harbour tides'},bound:true},
    'Open a new tab':{operation:{type:'browser_tab_new'},bound:true},
    'Switch to the news tab':{operation:{type:'browser_tab_switch',target:'news'},bound:true},
@@ -73,7 +77,7 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
   }};
  });
  const loads:Record<string,number>={};
- await page.route(/^https:\/\/(www\.google\.com|news\.example|shop\.example)\//,route=>{
+ await page.route(/^https:\/\/(www\.google\.com|news\.example|shop\.example|example\.com)\//,route=>{
   const url=new URL(route.request().url()),name=url.hostname==='www.google.com'?'Results for '+url.searchParams.get('q'):url.hostname+url.pathname;
   loads[name]=(loads[name]??0)+1;return route.fulfill({contentType:'text/html',body:`<h1>${name}</h1>`});
  });
@@ -102,6 +106,8 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  // Search, asked from Home: runs without a card and Browser opens on the phone's own search address.
  await ask('Search the web for harbour tides');
  await receipts(1);await browserShown();await showing('Results for harbour tides');
+ await expect(page.getByRole('button',{name:'Minimize chat',exact:true})).toBeVisible();
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toBeFocused();
  const first=await fixture();
  expect(first.posts[0].mode).toBe('direct-request-v1');expect(first.decisions).toEqual(['proposal-1']);
  expect(first.capabilities.split(',').sort()).toEqual(expect.arrayContaining(['browser.history.v1','browser.search.v1','browser.tabs.v1']));
@@ -163,8 +169,34 @@ test('Browser controls proposed from chat act on Browser, and the agent learns o
  await expect(page.getByRole('search',{name:'Find in page'})).toHaveCount(0);
 
  // The agent received outcomes only: no result, tab title, address or search words.
+ // Ask for two URLs in a row on the same Browser tab. Its document changes,
+ // but the assistant, the keyboard focus and the same conversation stay open.
+ const count=await tabs.textContent();
+ for(const path of ['demo','next']){
+  await ask('Visit https://example.com/'+path);
+  await showing('example.com/'+path);
+  await expect(page.getByRole('button',{name:'Minimize chat',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toBeFocused();
+ }
+ await expect(tabs).toHaveText(count!);
+ await page.evaluate(()=>{
+  const f=(window as any).browserControlFixture;
+  f.retainedComposer=document.activeElement;
+  f.composerBlurs=0;
+  f.retainedComposer.addEventListener('blur',()=>f.composerBlurs++);
+ });
+ for(const view of ['Notes','Browser']){
+  await ask('Open '+view);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view',view.toLowerCase());
+  await expect(page.getByRole('button',{name:'Minimize chat',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toBeFocused();
+ }
+ expect(await page.evaluate(()=>{
+  const f=(window as any).browserControlFixture;
+  return document.activeElement===f.retainedComposer&&f.composerBlurs===0;
+ })).toBe(true);
  const done=await fixture();
- expect(done.receipts.map((receipt:any)=>[receipt.id,receipt.outcome])).toEqual([['proposal-1','applied'],['proposal-2','applied'],['proposal-3','applied'],['proposal-4','applied'],['proposal-5','applied'],['proposal-6','applied'],['proposal-7','applied']]);
+ expect(done.receipts.map((receipt:any)=>[receipt.id,receipt.outcome])).toEqual([['proposal-1','applied'],['proposal-2','applied'],['proposal-3','applied'],['proposal-4','applied'],['proposal-5','applied'],['proposal-6','applied'],['proposal-7','applied'],['proposal-9','applied'],['proposal-10','applied'],['proposal-11','applied'],['proposal-12','applied']]);
  for(const receipt of done.receipts)expect(Object.keys(receipt).sort()).toEqual(['id','operationId','outcome']);
  expect(JSON.stringify(done.receipts)).not.toMatch(/example|google|harbour|shop|news/);
 });

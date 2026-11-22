@@ -12,7 +12,8 @@ const secondMessageId = 'a0000000-0000-4000-8000-000000000002';
 test('accepted SDK final state binds one current voice request; raw text cannot supply authority', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-voice-request-'));
   const previous = {fixture: globalThis.__voiceRequestFixture, window: globalThis.window, location: globalThis.location, WebSocket: globalThis.WebSocket};
-  const performed = [], errors = [], requests = [];
+  const performed = [], presented = [], errors = [], requests = [];
+  const showBrowser = () => true;
   let selected = true;
   const fixture = {connection: {
     getSnapshot:()=>({residentInference:"cloud"}),
@@ -21,7 +22,8 @@ test('accepted SDK final state binds one current voice request; raw text cannot 
     voiceRendererClientId: () => 'renderer',
     async refreshDeveloperVoiceHistory() {},
     async performVoiceRequestedActions(binding, id, signal, operationType, proof) {
-      proof.current(); performed.push({binding, id, operationType, proof}); return [];
+      proof.current(); performed.push({binding, id, operationType, proof});
+      return [{status:'succeeded',summary:'Opened Browser.',presentBrowser:showBrowser}];
     },
   }, client: {async stop() {}, async start() {}}};
   const agent = {async request(route) {
@@ -55,7 +57,7 @@ test('accepted SDK final state binds one current voice request; raw text cannot 
     const require=createRequire(import.meta.url);
     const {applyServerEvent,INITIAL_VOICE_SESSION_STATE}=require(reducerPath);
     let state={...INITIAL_VOICE_SESSION_STATE,phase:'listening'};
-    conversation=await require(adapterPath).developmentCartesiaConversation({binding:{conversationId:'conversation',session:{agentId:'agent'}},assertCurrent(){if(!selected)throw new DOMException('Retired','AbortError');},onState(){},onTranscript(){},onError:e=>errors.push(e)});
+    conversation=await require(adapterPath).developmentCartesiaConversation({binding:{conversationId:'conversation',session:{agentId:'agent'}},assertCurrent(){if(!selected)throw new DOMException('Retired','AbortError');},onState(){},onTranscript(){},onError:e=>errors.push(e),async onNavigate(event,show){presented.push({event,show});}});
     const event = frame => {state=applyServerEvent(state,frame);fixture.options.onState(state);fixture.options.onServerEvent(frame);};
     const reply = (traceId,id=messageId) => fixture.options.onServerEvent({t:'reply_complete',traceId,userMessageId:id});
     fixture.options.onServerEvent({t:'stt_final',traceId:'raw-only',text:'Open https://evil.invalid'});reply('raw-only');await tick();assert.equal(performed.length,0);
@@ -67,6 +69,7 @@ test('accepted SDK final state binds one current voice request; raw text cannot 
     reply('turn-one');await tick();assert.equal(performed.length,1);
     const first=performed[0].proof;assert.equal(first.text,final.text);assert.equal(first.messageId,messageId);assert.ok(Object.isFrozen(first));first.current();
     reply('turn-one',secondMessageId);reply('turn-one');await tick();assert.equal(performed.length,1,'one action chain per accepted trace and canonical message');
+    assert.deepEqual(presented,[{event:{viewId:'browser',traceId:'turn-one'},show:showBrowser}]);
     event({t:'stt_partial',traceId:'turn-two',text:'new request'});assert.throws(()=>first.current(),{name:'AbortError'});
     reply('turn-one',secondMessageId);await tick();assert.equal(performed.length,1);
     event({t:'stt_final',traceId:'turn-two',text:'Show my Calendar'});reply('turn-two',secondMessageId);
@@ -75,6 +78,7 @@ test('accepted SDK final state binds one current voice request; raw text cannot 
     selected=true;
     event({t:'stt_final',traceId:'turn-four',text:'Open https://another.invalid'});
     await conversation.stop();conversation=undefined;reply('turn-four',secondMessageId);await tick();assert.equal(performed.length,1);
+    assert.equal(presented.length,1,'no presentation after interruption, account change or Stop');
     assert.ok(errors.every(error=>error.name==='AbortError'));
     assert.equal(requests.length,2,'closed health and renderer only; no provider, consent, mint, model, TTS or duplicate text send');
   } finally {

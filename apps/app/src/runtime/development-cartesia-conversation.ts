@@ -8,10 +8,11 @@ import {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
 export {developmentCartesiaVoiceEnabled} from './development-cartesia-flag';
 import {connectionController} from './connection-ui';
 import type {CurrentDeviceActionRequest} from './device-actions';
+import type {BrowserPresentation} from "../ui/device-actions/client-coordinator";
 import type {VoiceConversationBinding} from './alpha-client';
 export type RealtimeVoiceNavigation = Pick<ViewActionHandoff, "viewId" | "viewPath" | "subview" | "navigationPrepared" | "navigationBinding" | "completedActionHandoffId"> & {traceId:string};
 /** Canonical self-hosted voice owns the runtime turn; this adapter never sends its transcript twice. */
-export async function developmentCartesiaConversation(input:{binding:VoiceConversationBinding;assertCurrent:()=>void;onState:(phase:string,progressText?:string)=>void;onTranscript:(text:string)=>void;onAcceptedTurn?:(text:string)=>void;onError:(error:Error)=>void;onPlaybackUnlockChange?:()=>void;onActionResult?:(summary:string)=>void;getUiContext?:()=>import('@elizaos/host/voice/ui-context').VoiceUiContext;onNavigate?:(event:RealtimeVoiceNavigation)=>Promise<void>}){
+export async function developmentCartesiaConversation(input:{binding:VoiceConversationBinding;assertCurrent:()=>void;onState:(phase:string,progressText?:string)=>void;onTranscript:(text:string)=>void;onAcceptedTurn?:(text:string)=>void;onError:(error:Error)=>void;onPlaybackUnlockChange?:()=>void;onActionResult?:(summary:string)=>void;getUiContext?:()=>import('@elizaos/host/voice/ui-context').VoiceUiContext;onNavigate?:(event:RealtimeVoiceNavigation,presentBrowser?:BrowserPresentation)=>Promise<void>}){
  const own=connectionController.getSnapshot().residentInference==='direct'&&connectionController.getSnapshot().providerStatus?.voiceConfigured===true;
  // This caller is bound below to the selected resident transport, for either inference route.
  const requireTurnTerminal=true;
@@ -140,7 +141,16 @@ export async function developmentCartesiaConversation(input:{binding:VoiceConver
     completedRequest={messageId,traceId,proof};
     if(performedMessages.size>=64)performedMessages.delete(performedMessages.values().next().value!);performedMessages.add(messageId);
     if(performedTurns.size>=64)performedTurns.delete(performedTurns.values().next().value!);performedTurns.add(traceId);
-    navigationTask=navigationTask.then(async()=>{current();if(currentTurn!==traceId||!directActions)return;const receipts=await connectionController.performVoiceRequestedActions(input.binding,messageId,lifecycle.signal,undefined,proof);current();for(const receipt of receipts)input.onActionResult?.(receipt.summary);reconcile();}).catch(error=>{if(!stopped)input.onError(error instanceof Error?error:Error('Voice action could not be verified.'));});
+    navigationTask=navigationTask.then(async()=>{
+     current();if(currentTurn!==traceId||!directActions)return;
+     const receipts=await connectionController.performVoiceRequestedActions(input.binding,messageId,lifecycle.signal,undefined,proof);
+     proof.current();
+     for(const receipt of receipts){
+      if(receipt.presentBrowser){await input.onNavigate?.({viewId:'browser',traceId},receipt.presentBrowser);current();}
+      input.onActionResult?.(receipt.summary);
+     }
+     reconcile();
+    }).catch(error=>{if(!stopped)input.onError(error instanceof Error?error:Error('Voice action could not be verified.'));});
    }
 
   },

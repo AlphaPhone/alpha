@@ -12,6 +12,8 @@ import {createReadingSupport} from '../../../../.eliza/client-features/plugins/p
 import {READING_UNSUPPORTED_MESSAGE} from '../ui/browser/page-reading';
 import {webSourceOf} from './summary-source';
 import {browserCalendarScope} from './agent-calendar-adapter';
+import type {BrowserPresentation} from "../ui/device-actions/client-coordinator";
+import {alphaClient} from '../runtime/alpha-client';
 import { connectionController, agentPendingText } from '../runtime/connection-ui';
 import { BrowserReviews } from '../browser/review';
 import {browserHistoryRanges, browserVisitTimes, historyOutsideInterval, type BrowserHistoryInterval, type SavedBrowserHistory} from '../browser/history';
@@ -666,17 +668,29 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       // Reuse an untouched New tab or the agent's own earlier tab, so opens do not fill the tab limit.
       // "Open x.com in a new tab" keeps the agent's earlier page in its own tab.
       const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab) && !tabInfo(tab), newTab);
-      const id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
+      // Reusing the currently shown tab changes its page before the receipt is sent.
+      const releasePage = reuse === selected && shell.S().view === 'browser'
+        ? alphaClient.admitOwnPageChange(tabs.selection(selected)) : undefined;
+      let id: string | undefined;
+      try {
+        id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
+      } catch (error) {
+        releasePage?.();
+        throw error;
+      }
       if (id) agentTab = id;
-      const present = () => {
+      const present: BrowserPresentation = chat => {
         signal.throwIfAborted();
-        if (!id || disposed || document.hidden || state()?.cur !== (deferPresentation ? selected : id) || !tabs.has(id)) return;
+        if (!id || disposed || document.hidden || state()?.cur !== (deferPresentation ? selected : id) || !tabs.has(id)) return false;
         // Select only after completion; even Browser-origin requests keep their
         // original document context throughout journal and receipt handling.
         if (deferPresentation) shell.vset('browser', {cur: id, editing: false, tabsOpen: false, menu: false, lib: null, share: false});
         // Keep the exact dispatched tab; a normal openView resets its identity.
-        shell.openView('browser', null, null, { restore: true });
+        shell.openView('browser', null, chat, { restore: true });
+        return true;
       };
+      const selection = tabs.selection(id);
+      if (selection) present.selection = selection;
       // Device actions present only after their durable journal and receipt attempt.
       // Ordinary reviewed web sources keep their immediate presentation.
       if (deferPresentation) return present;

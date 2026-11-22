@@ -1,3 +1,4 @@
+import type {BrowserPresentation} from '../ui/device-actions/client-coordinator';
 /** Browser-safe boundary. The composition root supplies an authenticated transport;
  * this module neither invents endpoints nor handles credentials. */
 import {validateNativeNotesReadReplyHint,validateNativeNotesReadReplyOrigin,type NativeNotesReadReplyOrigin,type NativeNotesReadReplyHint} from '../../../../.eliza/client-features/packages/contracts/src/native-notes-query.ts';
@@ -90,7 +91,7 @@ export interface VoiceConversationBinding { conversationId:string;session:Verifi
 export interface ReadReplyBinding extends VoiceConversationBinding {cloudAccount:string}
 /** Local host projection invoked only inside the canonical claimed view effect. Never wire metadata or authority. */
 export interface VoiceNavigationContinuation {
- apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>,expectedNoteId?:string):Promise<boolean>;
+ apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>,expectedSelection?:{kind:string;id:string}):Promise<boolean>;
  finish(delivered:boolean):ContextEnvelope|undefined;
 }
 export interface AgentReply {
@@ -121,6 +122,7 @@ export interface OperationReceipt {
   readReply?:NativeNotesReadReplyHint;
   /** Publish only after the originating UI has delivered this receipt. */
   committedChanges?:ReadonlyArray<'calendar'|'notes'|'reminders'>;
+  presentBrowser?: BrowserPresentation;
 }
 export interface VerifiedSessionTransport {
   /** Must be server-verified, not derived from a user-entered owner ID. */

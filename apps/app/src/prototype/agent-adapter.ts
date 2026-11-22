@@ -2,7 +2,8 @@ import {createImagePreview} from '../runtime/image-preview';
 import {ChatAttachmentPicker,encodeChatAttachments} from './attachment-picker';
 import {storedChatFiles,type ChatFile,type SelectedChatFile} from './chat-attachment-files';
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
-import type {AgentReply,VerifiedSession} from '../runtime/alpha-client';
+import type {BrowserPresentation} from "../ui/device-actions/client-coordinator";
+import type {AgentReply,ContextEnvelope,VerifiedSession} from '../runtime/alpha-client';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
@@ -780,13 +781,26 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       shell.setState({},()=>{try{context(shell);resolve(shell.live&&shell.S().view==='camera'&&!alphaClient.getState().context.sensitive);}catch(error){reject(error);}});
     });
   }
+  function commitNavigation(shell:Shell,view:string,show:()=>boolean,onCommitted?:(value:ContextEnvelope)=>void):Promise<boolean>{
+    if(!show())return Promise.resolve(false);
+    return new Promise((resolve,reject)=>shell.setState({},()=>{
+      try{
+        context(shell);
+        const actual=alphaClient.getState().context;
+        const opened=shell.live&&!document.hidden&&!actual.sensitive&&actual.view===view;
+        if(opened)onCommitted?.(actual);
+        resolve(opened);
+      }catch(error){reject(error);}
+    }));
+  }
   async function deliverChatNavigation(shell:Shell,navigation:ReturnType<typeof connectionController.captureViewNavigation>,results:readonly unknown[]|undefined,current?:()=>void,continuation?:import('../runtime/alpha-client').VoiceNavigationContinuation){
     if(!navigation||!results?.length)return false;
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
     const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
-      const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
-      });
+      const commit=(chat?:string,onCommitted?:(value:ContextEnvelope)=>void)=>{
+        check();
+        return commitNavigation(shell,view,()=>openInternalView(shell,view,chat),onCommitted);
+      };
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
       const chat=shell.S().chat;
@@ -1555,7 +1569,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       if (operation.type === 'open_view') {
         // Navigation changes the view epoch; journal completion still runs after it.
-        if(!openInternalView(this,operation.view))return {status:'failed',summary:'This view is unavailable.'};
+        if(!openInternalView(this,operation.view,this.S().chat))return {status:'failed',summary:'This view is unavailable.'};
         return { status: 'succeeded', summary: presentOpenView(operation.view).appliedSummary };
       }
       const browserControl=isBrowserControl(operation);
@@ -1565,18 +1579,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // The tab the request was made from, when it was made in Browser: page history acts on that page only.
       const tab=expectedContext.view==='browser'?expectedContext.selectedObject:undefined,observed=tab?.kind==='browser-tab'&&tab.revision!==undefined?{id:tab.id,revision:tab.revision}:undefined;
       // Several tabs matching the request's words are listed in this action's own card; the agent never sees them.
-      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
-      return { status: 'succeeded', summary: browserControl?browserControlSummary(operation):browserNavigationSummary(operation.url),presentBrowser:()=>{
-        const show=()=>{
-          if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
-          present?.();
-        };
+      const present=await approvedBrowserOpen<BrowserPresentation|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
+      const show:BrowserPresentation=chat=>{
+        if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||!alphaClient.continuesContext(expectedContext))return false;
+        return present?.(chat);
+      };
+      const presentBrowser:BrowserPresentation=chat=>{
+        if(chat!==undefined)return show(chat);
         // Showing Browser changes the view, and a view change cancels the active request. A directly
         // requested open runs inside the chat request that still carries its reply: show Browser after
         // that request settles, so the reply stays whole instead of "Stopped." with a stop notice.
         if(!alphaClient.getState().pending){show();return;}
         const stop=alphaClient.subscribe(()=>{if(alphaClient.getState().pending)return;stop();setTimeout(()=>{try{show();}catch{/* A retired tab keeps its journaled receipt. */}},0);});
-      } };
+      };
+      presentBrowser.selection=present?.selection;
+      return { status: 'succeeded', summary: browserControl?browserControlSummary(operation):browserNavigationSummary(operation.url),presentBrowser };
     });
     context(this);
   };
@@ -2098,7 +2115,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   };
   // An authenticated voice socket carries only navigation targets, never record parameters.
   // Reuse the same shell projection and post-React context fence as completed chat actions.
-  p.applyRealtimeVoiceNavigation = async function(input:import("../runtime/development-cartesia-conversation").RealtimeVoiceNavigation & {binding:import('../runtime/alpha-client').VoiceConversationBinding;assertCurrent:()=>void;navigation:import('../runtime/alpha-client').VoiceNavigationContinuation}){
+  p.applyRealtimeVoiceNavigation = async function(input:import("../runtime/development-cartesia-conversation").RealtimeVoiceNavigation & {binding:import('../runtime/alpha-client').VoiceConversationBinding;assertCurrent:()=>void;navigation:import('../runtime/alpha-client').VoiceNavigationContinuation;presentBrowser?:BrowserPresentation}){
     input.assertCurrent();const target=alphaViewKey(input.viewId);
     if(input.subview||!target||input.viewPath&&!alphaViewPaths(input.viewId).includes(input.viewPath))throw Error('That voice screen is not available.');
     const current=()=>{input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(input.binding))throw Error('The voice conversation changed.');};
@@ -2111,7 +2128,13 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!delivered)throw Error('The voice screen change could not be confirmed.');
         return true;
       }
-      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
+      const present=input.presentBrowser;
+      delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>{
+        current();
+        return commitNavigation(this,target,()=>present?present(chat)===true:openInternalView(this,target,chat),onCommitted);
+      },present?.selection);
+      return delivered;
+    }finally{input.navigation.finish(delivered);}
   };
   p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;approvalSignal?:AbortSignal;talkGeneration?:number;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
@@ -2175,7 +2198,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         else{
           let opened=false;
           try{
-            opened=await input.navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(this,target,chat,onCommitted),target.id);
+            opened=await input.navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(this,target,chat,onCommitted),{kind:'canonical-note',id:target.id});
           }finally{
             const next=input.navigation.finish(opened);
             if(next)acceptedContext=next;
@@ -2269,8 +2292,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       keepWorkflowChanges(this,reply,belongs);
       const emailOutcome=await this.stageAgentEmailDraft?.(reply,text,belongs);
       const emailCardReady=emailOutcome===true;
-      let delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
-      let nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
+      const present=reply.completedActions?.find(receipt=>receipt.presentBrowser)?.presentBrowser;
+      let delivered=false;
+      try{
+        delivered=present&&input.navigation
+          ?await input.navigation.apply('browser',current,(chat,onCommitted)=>commitNavigation(this,'browser',()=>present(chat)===true,onCommitted),present.selection)
+          :await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
+      }finally{
+        const observed=input.navigation?.finish(delivered);
+        if(observed)acceptedContext=observed;
+      }
+      let nextContext:ContextEnvelope|undefined;
       current();
       // A spoken photo request the agent answered without showing Camera opens Camera here first,
       // through the voice session's own navigation hold, so the photo is taken on the visible viewfinder.
@@ -2513,6 +2545,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(expectedSession&&(JSON.stringify(connectionController.getSnapshot().session)!==JSON.stringify(expectedSession)||document.hidden))throw new NotDispatched('Agent changed. Review this message again.');
       }catch(error){throw error instanceof NotDispatched?error:new NotDispatched(error instanceof Error?error.message:'The agent connection is unavailable. Nothing was sent.');}
       const sourceSession=connectionController.getSnapshot().session;
+      const projectRequestedView=async(target:string,signal:AbortSignal)=>{
+        signal.throwIfAborted();
+        const view=alphaViewKey(target);
+        if(!view||!this.live||document.hidden||attempt.stop.signal.aborted||
+          connectionController.getSnapshot().session!==sourceSession||!ownerStayed()||
+          alphaClient.getState().context.revision!==revision)return false;
+        if(view===(this.S().view||'home'))return true;
+        const release=alphaClient.admitOwnViewChange(view);
+        try{return await commitNavigation(this,view,()=>openInternalView(this,view,this.S().chat));}
+        finally{release();}
+      };
       navigation=connectionController.captureViewNavigation(alphaClient.getState().context);
       if(!transcriptCurrent())throw new NotDispatched('The recording changed. Attach the transcript again.');
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
@@ -2544,7 +2587,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!streamFrame&&!document.hidden)streamFrame=requestAnimationFrame(()=>{streamFrame=0;if(this.live)flushStream();});
         }
         else{streamed=true;this.setState((previous:Shell)=>({turnStatus:'',msgs:[...previous.msgs,{id:streamedId,from:'agent',text:value,card:null,streaming:true}]}));}
-      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images});}
+      },replyTarget,results=>{readyNavigation=results;},{channelType:'DM',requestId:userId,expectedConversationId:filesAtStart?.length?selectedConversation:undefined,images,projectRequestedView});}
       // Before settlement, stop, or failure renders: a late frame must not overwrite the final text.
       finally{localTurnStatus.removeEventListener('label',showStatus);flushStream();}
       // Only the composer's own send holds its draft; a prompt from elsewhere never settles it.
@@ -2582,7 +2625,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{await completeReadReply(this,completed.receipt);}catch{if(this.live&&sameChat())this.agentSay('The note was shared, but its answer is unconfirmed.');}
       }
       try{
-        let delivered=await deliverNavigation(reply.actionResults);
+        const present=reply.completedActions?.find(receipt=>receipt.presentBrowser)?.presentBrowser;
+        let delivered=present&&settlementCurrent()&&!attempt.stop.signal.aborted
+          ?await commitNavigation(this,'browser',()=>present(this.S().chat)===true)
+          :await deliverNavigation(reply.actionResults);
         // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's
         // (bound to this message, or named by the reply's own receipt on an ask-first phone) and no other review of
         // this reply needs the current screen, Camera is opened here.

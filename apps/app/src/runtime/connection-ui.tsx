@@ -3627,7 +3627,7 @@ export const connectionController = {
       if (selected.actions) {
         // A pending action that does not fit this screen, time zone or negotiated support is
         // named to the owner instead of being dropped; it stays unapprovable.
-        try { const projectView=channelType==='VOICE_DM'&&projectRequestedView
+        try { const projectView=projectRequestedView
           ? (findViewActionHandoff(reply.actionResults)?'canonical' as const:projectRequestedView)
           : undefined;
           const wantsSmsDraft=smsOwnerRequest(authoredRequestText)?.send===false;
