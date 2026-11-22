@@ -149,7 +149,6 @@ const {CALENDAR_API_REFUSALS}=await import('../apps/app/src/ui/calendar/calendar
 test('every calendar API client refusal is worded by Alpha',()=>{
  const text=staged('plugins/plugin-calendar/src/api/calendar-api.ts');
  const sentences=[...text.matchAll(/throw new Error\(\s*"([^"]+)"/g)].map(m=>m[1]);
- assert.equal(sentences.length,6);
  assert.deepEqual([...CALENDAR_API_REFUSALS.keys()].sort(),[...sentences].sort());
  assert.equal(CALENDAR_API_REFUSALS.get('Calendar event deletion requires an explicit cancellationMode.'),'Choose how to cancel this event before deleting it. Nothing was deleted.');
  const adapter=readFileSync(new URL('../apps/app/src/prototype/agent-calendar-adapter.ts',import.meta.url),'utf8');

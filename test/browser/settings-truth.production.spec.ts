@@ -226,6 +226,20 @@ test('every Settings row is a control backed by real state, with no fixture valu
  expect((await callNames(page)).filter(name=>name!=='Agent.setGoogleAgentAccess'&&/\.set(?!Flashlight)|\.perform$/i.test(name))).toEqual([]);
 });
 
+test('location for Alpha defaults on and keeps the owner’s choice',async({page})=>{
+ await nativeStub(page,{snapshot:{permissions:{Microphone:true,Location:true,Camera:false,Calendar:true},locationAccess:'precise'}});
+ await openSettings(page,'Privacy');
+ const location=()=>current(page).getByRole('switch',{name:'Location for Alpha',exact:true});
+ await expect(location()).toHaveAttribute('aria-checked','true');
+ await expect(current(page).getByText('Alpha uses your last known location in chats. Hosted models can receive it.',{exact:true})).toBeVisible();
+ await location().click();
+ await expect(location()).toHaveAttribute('aria-checked','false');
+ await openSettings(page,'Privacy');
+ await expect(location()).toHaveAttribute('aria-checked','false');
+ await location().click();
+ await expect(location()).toHaveAttribute('aria-checked','true');
+});
+
 test('Android settings opens the system Settings page from Alpha Settings',async({page})=>{
  await nativeStub(page);
  await openSettings(page);

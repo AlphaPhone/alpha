@@ -975,6 +975,16 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           dis:preferences!=='ready',
           toggle:async()=>{const saved=cachedDevicePreferences();if(!saved){if(devicePreferencesStatus()==='unavailable')api.toast('Couldn’t load');return;}try{await editDevicePreferences(value=>{value.askBeforeAgentActions=!saved.askBeforeAgentActions;});changed();}catch{api.toast('Not saved');}}
         },...(preferences==='unavailable'?[{kNav:true,label:'Recover device settings',lbl:'Recover device settings',hasSub:true,sub:'Back up first',chev:true,noAB:true,go:()=>openDevicePreferencesRecovery()}]:[])]));
+        if(native){
+          const locationOn=cachedDevicePreferences()?.agentLocationEnabled===true;
+          page.groups.push(group([{
+            kTog:true,label:'Location for Alpha',aria:'Location for Alpha',
+            hasSub:true,sub:'Alpha uses your last known location in chats. Hosted models can receive it.',
+            on:locationOn,track:locationOn?'background:var(--acc)':'background:var(--line)',kx:locationOn?20:0,
+            dis:preferences!=='ready',
+            toggle:async()=>{try{await editDevicePreferences(value=>{value.agentLocationEnabled=!value.agentLocationEnabled;});changed();}catch{api.toast('Not saved');}}
+          }]));
+        }
         page.groups.push(group([{kNav:true,label:'Password manager',lbl:'Password manager',chev:true,noAB:true,go:()=>api.set({page:'password-provider'})}]));
         if(PASSWORD_PAGES.includes(state.page)){
           const helpers={info,group,toast:(message:string)=>api.toast(message),set:(patch:Bag)=>api.set(patch),ic:api.ic||{}};
@@ -1212,7 +1222,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const sections = [
         ['Account', ['Accounts', 'Connections', 'AI provider']],
         ['Preferences', ['Display', 'Notifications']],
-        ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts']],
+        ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts', 'Location for Alpha']],
         ['Apps', ['Calendar', 'Password manager', 'Photos']],
         ['Help', ['About']],
       ] as const;

@@ -53,6 +53,9 @@ a Cartesia key is installed; local speech is used otherwise and as the fallback 
 Cloud speech fails (owner decision 2026-11-10, replacing "never an automatic fallback").
 Clef end-of-turn runs in Eliza Cloud (P-60). Production Maps uses Google Maps Platform through Eliza Cloud (P-64).
 Local speech does not imply an offline language model. Hosted inference receives disclosed selected context.
+Location for Alpha is on by default. When Android allows access, ordinary chats
+include the phone's last known location. Hosted inference can receive this
+location. The owner can turn off Location for Alpha under Settings → Privacy.
 Full photo access is local permission scope, not bulk Cloud upload authorization.
 
 Passkeys, Telegram, Discord and Wallet are outside MVP. The Alpha Compute
