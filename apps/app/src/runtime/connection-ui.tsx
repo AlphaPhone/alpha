@@ -39,7 +39,7 @@ import { chatNotesFolders } from './notes-folders';
 import { registerWorkflowDevice, workflowDeviceProtocol, type WorkflowDeviceProtocol } from './workflow-presentation';
 import {ClientObservationSupportSession} from './client-observation-support';
 import {clearPhoneLocation,phoneLocationEnabled,phoneLocationReader} from './phone-location';
-import {browserPageEnabled,browserPageForTurn,observedBrowserTab} from './browser-page-context';
+import {browserPageForTurn,observedBrowserTab} from './browser-page-context';
 import type {ClientBrowserPageObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {developmentIdentity,readDevelopmentIdentity,verifyDevelopmentIdentity,developmentOwnerRecovery,assertDevelopmentIdentity,developmentProfiles,type DevelopmentProfile} from '../browser/development-identity';
 import {developmentCloudKey} from '../browser/development-cloud';
@@ -3574,7 +3574,8 @@ export const connectionController = {
       const notesFolders=this.getAppRecordClient()?await chatNotesFolders():{};
       requestSignal.throwIfAborted();assertCurrent();
       if(message.context.location&&!phoneLocationEnabled())message=turnMessage({...message.context,location:undefined});
-      if(browserPage&&(!browserPageEnabled()||observedBrowserTab(message.context)?.id!==browserPage.tabId||observedBrowserTab(message.context)?.revision!==browserPage.revision))browserPage=undefined;
+      // The preferences read just before this send decide; unreadable ones share no page.
+      if(browserPage&&((actionPreferences as {agentBrowserPageEnabled?:boolean}).agentBrowserPageEnabled!==true||observedBrowserTab(message.context)?.id!==browserPage.tabId||observedBrowserTab(message.context)?.revision!==browserPage.revision))browserPage=undefined;
       const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(browserPage?{browserPage}:{}),...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
       const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');onText?.(value,frame);};

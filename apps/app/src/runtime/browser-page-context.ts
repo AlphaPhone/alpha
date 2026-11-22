@@ -1,4 +1,4 @@
-import {cachedDevicePreferences} from '../browser/device-preferences';
+import {cachedDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import {parseClientBrowserPageObservation,CLIENT_BROWSER_PAGE_TITLE_MAX,CLIENT_BROWSER_PAGE_URL_MAX,type ClientBrowserPageObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import type {ContextEnvelope} from './alpha-client';
 
@@ -41,12 +41,21 @@ export function observedBrowserTab(context:ContextEnvelope):ObservedBrowserTab|u
  return {id:selected.id,revision:selected.revision};
 }
 
+/** The setting for this turn: the cached choice, or the saved one before the cache has loaded.
+ * Unreadable preferences share nothing. */
+async function browserPageAllowed(signal:AbortSignal):Promise<boolean>{
+ const cached=cachedDevicePreferences();
+ if(cached)return cached.agentBrowserPageEnabled===true;
+ try{return (await readDevicePreferences(signal)).agentBrowserPageEnabled===true;}catch{signal.throwIfAborted();return false;}
+}
+
 export interface BrowserPageContextPorts {
- enabled():boolean;
+ /** Whether the owner's setting allows this turn's page; checked before and after the read. */
+ enabled(signal:AbortSignal):boolean|Promise<boolean>;
  source():BrowserPageSource|undefined;
  waitMs:number;
 }
-const defaultPorts:BrowserPageContextPorts={enabled:browserPageEnabled,source:()=>source,waitMs:BROWSER_PAGE_WAIT_MS};
+const defaultPorts:BrowserPageContextPorts={enabled:browserPageAllowed,source:()=>source,waitMs:BROWSER_PAGE_WAIT_MS};
 
 /**
  * The page open in Browser for this turn, bound to the turn's observation by tab id and
@@ -56,7 +65,7 @@ const defaultPorts:BrowserPageContextPorts={enabled:browserPageEnabled,source:()
 export async function browserPageForTurn(context:ContextEnvelope,signal:AbortSignal,ports:BrowserPageContextPorts=defaultPorts):Promise<ClientBrowserPageObservation|undefined>{
  signal.throwIfAborted();
  const tab=observedBrowserTab(context),read=ports.source();
- if(!tab||!read||!ports.enabled())return undefined;
+ if(!tab||!read||!await ports.enabled(signal))return undefined;
  const controller=new AbortController(),cancel=()=>controller.abort(signal.reason);
  signal.addEventListener('abort',cancel,{once:true});
  let timer:ReturnType<typeof setTimeout>|undefined;
@@ -66,7 +75,7 @@ export async function browserPageForTurn(context:ContextEnvelope,signal:AbortSig
    new Promise<undefined>(resolve=>{timer=setTimeout(()=>{controller.abort(new DOMException('Browser page read timed out','TimeoutError'));resolve(undefined);},ports.waitMs);}),
   ]);
   signal.throwIfAborted();
-  if(!page||!ports.enabled())return undefined;
+  if(!page||!await ports.enabled(signal))return undefined;
   const parsed=parseClientBrowserPageObservation(page);
   return parsed.tabId===tab.id&&parsed.revision===tab.revision?parsed:undefined;
  }catch(error){

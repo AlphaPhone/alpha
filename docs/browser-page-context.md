@@ -77,6 +77,25 @@ Brave Leo, Firefox AI chatbot).
 | 7 | Settings toggle and PRD line | production Playwright settings spec |
 | 8 | Builds | `bun run verify`, `bun run android:build:local`, both variants |
 
+## Local results (2026-11-22)
+
+Headless Chromium with a Pixel user agent at 412 px, against 24 public pages.
+The machine was under heavy shared load, so several pages never finished loading
+in either run; those are excluded.
+
+| | Shared excerpt script | Page-context script |
+| --- | --- | --- |
+| Pages refused or empty (of those that loaded) | 9 (Wikipedia, NPR, GitHub, Allrecipes, Reddit refused; MDN, NYT, Yelp empty) | 2 empty (NYT, Yelp), none refused |
+| Structure | one run of text | headings, list items and lines kept |
+| Links | none | up to 20 public HTTPS targets |
+| Script time | not measured | 3–14 ms in the page (ESPN, Craigslist, Wikipedia, NPR, Allrecipes; up to 6,500 elements) |
+
+Bot walls (Amazon, IMDb, DuckDuckGo) return only their wall text with either
+script. Wikipedia's mobile layout shows only the lead section until sections are
+opened, and only visible text is read. The fixture spec
+`test/browser/page-context-script.spec.ts` covers the safety rules on crafted
+pages.
+
 ## Not in this change
 
 - Clicking, typing or scrolling inside pages from chat. Opening a link the

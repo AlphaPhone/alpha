@@ -220,7 +220,9 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     else{const result=await browserReadingSource(info.url,signal);read=result?.blocked?{withheld:'sensitive-page'}:result?{text:result.text,truncated:result.truncated}:{withheld:'unreadable'};}
     signal.throwIfAborted();
     if(!same()||tabInfo(id)?.navigation!==info.navigation)return undefined;
-    const base={tabId:observed.id,revision:observed.revision,capturedAt:Date.now(),url:typeof read?.url==='string'?read.url:address,title:agentPageTitle(typeof read?.title==='string'?read.title:info.title)};
+    // A sensitive page's query may hold its tokens: only its origin and path go.
+    const sensitive=read?.withheld==='sensitive-page',bare=()=>{const url=new URL(address);url.search='';return url.href;};
+    const base={tabId:observed.id,revision:observed.revision,capturedAt:Date.now(),url:sensitive?bare():typeof read?.url==='string'?read.url:address,title:agentPageTitle(typeof read?.title==='string'?read.title:info.title)};
     const content=read?.withheld?{withheld:read.withheld}:{text:read?.text,truncated:read?.truncated,...(read?.selection===undefined?{}:{selection:read.selection}),...(read?.links===undefined?{}:{links:read.links})};
     // A read this contract refuses still tells the agent which page is open.
     try{return parseClientBrowserPageObservation({...base,...content});}

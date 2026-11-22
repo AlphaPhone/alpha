@@ -64,7 +64,8 @@ export interface ResidentStubOptions {
   /** Conversations carry a room, so Stop reaches upstream's turn abort route; the agent answers
    * that no turn was running (`aborted: false`), so the reply may still finish. */
   abortRoute?: boolean;
-  /** Optional observation fields the agent's /api/status declares (absent: no status route). */
+  /** Optional observation fields the agent's /api/status declares (absent: no status route); the
+   * agent then also negotiates userTextFormatVersion 1 at registration. */
   observationSupport?: string[];
 }
 
@@ -198,7 +199,8 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       if (plugin === 'Agent' && method === 'request' && input.path === '/api/agents' && s.start === 'starting') { f.calls.push('Agent.request'); return { status: 200, body: JSON.stringify({ agents: [{ id: '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11', name: 'Alpha', status: 'starting' }] }) }; }
       // The harness still registers the device (it answers the committed-enrollment read from that
       // registration); only the capabilities the agent offers in its answer change.
-      if (plugin === 'Agent' && method === 'request' && input.path === '/api/client-devices/register' && options.offered) { const registered = await base(plugin, method, input); return { ...registered, body: JSON.stringify({ ...JSON.parse(registered.body), capabilities: options.offered }) }; }
+      // An agent that declares observation fields also negotiates the plain-text request format, as the pinned agent does.
+      if (plugin === 'Agent' && method === 'request' && input.path === '/api/client-devices/register' && (options.offered || options.observationSupport)) { const registered = await base(plugin, method, input); return { ...registered, body: JSON.stringify({ ...JSON.parse(registered.body), ...(options.offered ? { capabilities: options.offered } : {}), ...(options.observationSupport ? { userTextFormatVersion: 1 } : {}) }) }; }
       if (plugin === 'DailyApps' && method === 'surfaceInfo' && options.clockRepeatDaysVersion !== undefined) { f.calls.push('DailyApps.surfaceInfo'); return { assistant: false, clockRepeatDaysVersion: options.clockRepeatDaysVersion }; }
       if (plugin === 'Agent' && method === 'request') {
         const answer = await conversations(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : {});
