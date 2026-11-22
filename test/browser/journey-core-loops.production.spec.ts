@@ -665,9 +665,9 @@ test('loop J05 on Android: every turn on a Browser page carries its text, read s
   expect(body.images).toBeUndefined();
   expect(body.metadata.browserPage).toMatchObject({v:1,onScreen:true,url:HARBOUR,title:'Harbour report',text:'Harbour report\n'+fact});
   expect(body.metadata.clientDevice.context).not.toHaveProperty('browserPage');
-  const reads=await native(page,f=>f.browser.reads) as {maxChars:number}[];
+  const reads=await native(page,f=>f.browser.reads) as Record<string,unknown>[];
   expect(reads).toHaveLength(1);
-  expect(reads[0].maxChars).toBe(4000);
+  expect(Object.keys(reads[0]).sort()).toEqual(['id','session']);
   await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
   await expectNoDevelopmentSurface(page);
   expect(await native(page,f=>f.unexpected)).toEqual([]);

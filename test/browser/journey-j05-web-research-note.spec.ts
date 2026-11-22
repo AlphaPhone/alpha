@@ -91,7 +91,7 @@ for(const mode of ['typed','spoken'])test(`a ${mode} turn on a Browser page carr
   expect(external).toEqual([]);
 });
 
-test('any wording gets the same page block, and the page is read once for several turns',async({page})=>{
+test('any wording gets the same page block, read again for each turn',async({page})=>{
   const external:string[]=[],copies:unknown[]=[];
   await begin(page,external,html,copies);
   await sendTyped(page,'What is two plus two?');
@@ -103,7 +103,28 @@ test('any wording gets the same page block, and the page is read once for severa
   expect(authored(first)).toBe('What is two plus two?');
   expect(second.metadata.browserPage).toEqual(first.metadata.browserPage);
   expect(first.metadata.browserPage.text).toContain(fact);
-  expect(copies).toHaveLength(1);
+  expect(copies).toEqual([{url},{url}]);
+  expect(external).toEqual([]);
+});
+
+test('after leaving Browser a turn from Home carries the page, and a workflow step never does',async({page})=>{
+  const external:string[]=[],copies:unknown[]=[];
+  await begin(page,external,html,copies);
+  await returnToApps(page);
+  await sendTyped(page,question);
+  await expect.poll(async()=>(await turns(page)).length).toBe(1);
+  await expect(page.getByRole('button',{name:'Message actions: '+answer,exact:true})).toBeVisible();
+  // A workflow step's generation is not the owner's message: no page, even within the grace.
+  const generated=await page.evaluate(async()=>{const {alphaClient}=await import('/src/runtime/alpha-client.ts');return alphaClient.generateWorkflowText('Summarize','Input',new AbortController().signal);});
+  expect(generated).toBe(answer);
+  const [fromHome,workflow]=await turns(page);
+  expect(authored(fromHome)).toBe(question);
+  expect(fromHome.metadata.browserPage).toMatchObject({v:1,onScreen:false,url,title:'Harbour report'});
+  expect(fromHome.metadata.browserPage.leftSecondsAgo).toBeLessThanOrEqual(120);
+  expect(fromHome.metadata.browserPage.text).toContain(fact);
+  expect(workflow.text).toContain('Generate the text result for this workflow step.');
+  expect(workflow.metadata).not.toHaveProperty('browserPage');
+  expect(copies).toEqual([{url}]);
   expect(external).toEqual([]);
 });
 

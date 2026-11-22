@@ -1140,7 +1140,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (connection.session) {
         alphaClient.attachVerifiedTransport({
           session: connection.session,
-          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,projectRequestedView }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,projectRequestedView)),
+          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,projectRequestedView,workflowStep }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,projectRequestedView,workflowStep)),
           // Remote text is not authority to execute device actions. This path
           // accepts chat only until the server supports verified proposals.
           execute: ({ proposal, context, signal, approval }) => connectionController.execute(proposal, context, signal, approval),

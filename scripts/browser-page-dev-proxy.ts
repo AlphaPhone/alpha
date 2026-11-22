@@ -5,8 +5,10 @@ import {isIP} from 'node:net';
 /** Development server only: a public copy of the page open in the web build's Browser, for the
  * page text agent turns carry (apps/app/src/browser/browser-surface.ts pageText). The sandboxed
  * page frame cannot be read, so this fetches the address again: HTTPS public hosts only, no
- * cookies or credentials, 5 s, at most 3 redirects and 2 MB of HTML or plain text. Android reads
- * the live page itself and never uses this. */
+ * cookies or credentials, 5 s, at most 3 redirects and 2 MB of HTML or plain text. Only the dev
+ * page itself may ask (a loopback peer whose Origin is this server), so a server started with
+ * --host is not an open proxy for the network. Android reads the live page itself and never uses
+ * this. Not covered: DNS rebinding between the address check and the fetch's own lookup. */
 const ROUTE = '/__alpha/page-html', TIMEOUT_MS = 5000, MAX_REDIRECTS = 3, MAX_BYTES = 2 * 1024 * 1024;
 const TYPES = new Set(['text/html', 'application/xhtml+xml', 'text/plain']);
 
@@ -25,6 +27,14 @@ export function privateAddress(address: string): boolean {
     return value === '::' || value === '::1' || /^f[cd]/.test(value) || /^fe[89ab]/.test(value) || value.startsWith('ff');
   }
   return true;
+}
+
+/** A request from the dev page in a browser on this machine: a loopback peer, with an Origin
+ * header naming this server's own host. */
+export function ownPageRequest(remoteAddress: string | undefined, origin: string | undefined, host: string | undefined): boolean {
+  const peer = (remoteAddress ?? '').replace(/^::ffff:/, '');
+  if (!host || !origin || !(peer === '::1' || /^127\./.test(peer))) return false;
+  try { const from = new URL(origin); return (from.protocol === 'http:' || from.protocol === 'https:') && from.host === host; } catch { return false; }
 }
 
 /** A public HTTPS address this proxy may fetch, or undefined. */
@@ -72,6 +82,7 @@ export function browserPageDevProxy(): Plugin {
   return {name: 'alpha-browser-page-dev-proxy', apply: 'serve', configureServer(server) {
     server.middlewares.use(ROUTE, (request, response) => {
       if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
+      if (!ownPageRequest(request.socket.remoteAddress, request.headers.origin, request.headers.host)) { response.statusCode = 403; response.end(); return; }
       let body = '';
       request.setEncoding('utf8');
       request.on('data', chunk => { body += chunk; if (body.length > 8192) request.destroy(); });

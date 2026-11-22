@@ -1,7 +1,8 @@
 // The page text rules (apps/app/src/browser/readable-page.ts) on fixture pages, and the same
 // fixtures through the script Android's AlphaPageText runs in a tab's isolated reading world, so
 // the web and Android readers cannot drift apart. jsdom has no layout, so the script's
-// visibility check passes every element here; BrowserPageTextInstrumentedTest covers it on a device.
+// visibility check passes every element here; BrowserPageTextInstrumentedTest covers it on a device
+// (CSS-hidden and scroll-reveal content, and a sign-in field in a CSS-hidden drawer).
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFileSync, readdirSync} from 'node:fs';
@@ -32,8 +33,9 @@ test('a marketing home page reads its main content first and drops navigation, m
   const lines = page.text.split('\n');
   assert.deepEqual(lines.slice(0, 2), ['Sovereign Intelligence Built from the Ground Up',
     'Alpha Compute empowers enterprise and government to focus on product and innovation while we manage end-to-end SI factory sourcing, GPU allocation, financing, and rapid deployment.']);
-  for (const hidden of ['Infrastructure', 'Energy-02', 'Sign in', 'Careers', 'Menu', 'Hidden promotional', 'Decorative', 'Chart label', 'analytics', 'color:white'])
+  for (const hidden of ['Infrastructure', 'Energy-02', 'Sign in', 'Careers', 'Menu', 'Hidden promotional', 'Chart label', 'analytics', 'color:white'])
     assert.ok(!page.text.includes(hidden), hidden);
+  assert.ok(page.text.includes('Decorative caption'), 'aria-hidden is page content');
   assert.equal(lines.filter(line => line.startsWith('We partner with')).length, 1, 'consecutive duplicate lines are dropped');
   assert.ok(lines.includes('We partner with energy providers, data center operators and silicon vendors.'), 'whitespace collapses');
   assert.ok(page.text.includes('Founded 2021, order 12345678.'), 'the rest of the body follows the main content');
@@ -46,6 +48,14 @@ test('a page with a password or one-time-code field gives no text', () => {
     assert.equal(page.textUnavailable, 'sign-in form on this page', name);
     assert.equal(page.text, undefined, name);
   }
+});
+
+test('a sign-in field in a hidden part of the page does not withhold the text', () => {
+  assert.deepEqual(renderer('hidden-sign-in.html'), {title: 'Trail report', text: 'Trail report\nThe ridge trail reopened on Monday.'});
+});
+
+test('a page behind an open dialog reads in full: dialog libraries set aria-hidden on everything else', () => {
+  assert.deepEqual(renderer('dialog-open.html'), {title: 'Field notes', text: 'Field notes\nThe north meadow flooded twice this spring.\nWe use cookies to improve this site.'});
 });
 
 test('sign-in links, sign-in prose and long numbers are ordinary page text', () => {
@@ -67,8 +77,9 @@ test('long text stops at the limit on a word boundary', () => {
   assert.match(page.text, /word\d{4}$/);
 });
 
-test('Android reads every fixture exactly as the web reader does', () => {
+test('Android reads every fixture exactly as the web reader does, at the same limit', () => {
   assert.ok(SCRIPT, 'AlphaPageText.SCRIPT was found');
+  assert.equal(Number(/public static final int MAX_CHARS = (\d+);/.exec(java)?.[1]), PAGE_TEXT_MAX_CHARS);
   for (const name of readdirSync(fixtures).filter(file => file.endsWith('.html')).sort())
     for (const max of [PAGE_TEXT_MAX_CHARS, 300]) assert.deepEqual(android(name, max), renderer(name, max), `${name} at ${max}`);
 });

@@ -2,6 +2,7 @@
 // first over a controlled tab host, then through the installed Browser adapter.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {readFileSync} from 'node:fs';
 import {PAGE_ABOUT, PAGE_GRACE_MS, PAGE_READ_BUDGET_MS, PAGE_TEXT_MAX_CHARS, capText, cleanPageUrl, createBrowserPageContext} from '../apps/app/src/browser/page-context.ts';
 import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 
@@ -55,6 +56,11 @@ test('the address keeps no user info, fragment or credential-like query value', 
   assert.equal(cleanPageUrl('https://user:pass@shop.example/item/9?id=42&session_id=abc&utm=x&Auth=1&next=%2Fa#reviews'),
     'https://shop.example/item/9?id=42&session_id=…&utm=x&Auth=…&next=%2Fa');
   assert.equal(cleanPageUrl('https://example.com/?code=xyz&q=tacos&api_key=k'), 'https://example.com/?code=…&q=tacos&api_key=…');
+  for (const name of ['otp', 'jwt', 'sid', 'pin', 'authToken', 'access_token', 'X-Amz-Signature', 'X-Amz-Credential', 'sessionid', 'apikey', 'oauth_verifier'])
+    assert.equal(cleanPageUrl(`https://example.com/?${name}=v`), `https://example.com/?${name}=…`, name);
+  // Whole name parts only: a word that merely contains one is kept.
+  const kept = 'author=Ann&keyword=gpu&design=a&zipcode=94107&postcode=1&zip_code=2&monkey=3&country_code=US&pinned=1';
+  assert.equal(cleanPageUrl(`https://example.com/?${kept}`), `https://example.com/?${kept}`);
   assert.equal(cleanPageUrl('javascript:alert(1)'), '');
 });
 
@@ -73,21 +79,37 @@ test('url, title, description and text are capped', async () => {
   assert.deepEqual(capText('short text'), {text: 'short text', truncated: false});
 });
 
-test('after Browser is left the last block applies for two minutes, then never again', async () => {
+const home = {view: 'home', revision: 4, sensitive: false};
+test('after Browser is left its page applies for two minutes, then never again', async () => {
   const {host, context} = fakeHost();
   const onScreen = await turn(context);
   context.left();
   host.now += 119_000;
-  const home = {view: 'home', revision: 4, sensitive: false};
   assert.deepEqual(await turn(context, home), {...onScreen, onScreen: false, leftSecondsAgo: 119});
-  assert.equal(host.reads, 1, 'no new read off screen');
+  assert.equal(host.reads, 2, 'the page is read again, so text changed in place is current');
   host.now += 2_000;
   assert.ok(host.now - 1_000_000 > PAGE_GRACE_MS);
   assert.equal(await turn(context, home), undefined);
+  assert.equal(host.reads, 2);
+});
+
+test('the grace needs no earlier Browser turn and never resends an earlier degraded reading', async () => {
+  // Browsing a page, then asking from another view: no turn was sent while Browser showed it.
+  const answers = [{textUnavailable: 'not readable'}];
+  const {host, context} = fakeHost({read: async () => answers.shift() ?? {title: 'Alpha Compute', text: HERO}});
+  context.left();
+  host.now += 3_000;
+  assert.deepEqual(await turn(context, home), {v: 1, about: PAGE_ABOUT, onScreen: false, leftSecondsAgo: 3, url: 'https://www.alphacompute.ai/', title: 'Alpha Compute', textUnavailable: 'not readable'});
+  // That reading is not kept: the next turn reads the page again.
+  assert.equal((await turn(context, home)).text, HERO);
+  // Returning to Browser and leaving again starts a new window.
+  host.now += 200_000;
+  assert.equal((await turn(context)).onScreen, true);
+  context.left();
+  assert.equal((await turn(context, home)).leftSecondsAgo, 0);
 });
 
 test('the grace ends when the page changes, a private tab shows, the tab closes or data is cleared', async () => {
-  const home = {view: 'home', revision: 4, sensitive: false};
   for (const [name, end] of [
     ['another page', (host) => { host.page = page({navigation: '8', url: 'https://example.com/'}); }],
     ['private tab', (host) => { host.page = page({tab: 'b2', private: true}); }],
@@ -98,7 +120,15 @@ test('the grace ends when the page changes, a private tab shows, the tab closes 
     await turn(context); context.left(); host.now += 5_000;
     end(host, context);
     assert.equal(await turn(context, home), undefined, name);
+    // Once ended, the grace stays ended even if the same page shows again.
+    host.page = page();
+    assert.equal(await turn(context, home), undefined, name);
   }
+  // Leaving while a private tab is current starts no grace at all.
+  const {host, context} = fakeHost({current: page({private: true})});
+  context.left(); host.page = page();
+  assert.equal(await turn(context, home), undefined);
+  assert.equal(host.reads, 0);
 });
 
 test('a page still loading is read once it commits within the budget', async () => {
@@ -111,14 +141,39 @@ test('a page still loading is read once it commits within the budget', async () 
   assert.equal(host.reads, 1);
 });
 
-test('a reader that is not ready yet is asked once more after the next tab change', async () => {
-  let answers = [{textUnavailable: 'loading'}, {title: 'Alpha Compute', text: HERO}];
+test('a reader that is not ready yet is asked again after each tab change until it has text', async () => {
+  // A title or progress update can arrive before the document is ready: the budget, not a retry
+  // count, decides when to stop.
+  const answers = [{textUnavailable: 'loading'}, {textUnavailable: 'loading'}, {title: 'Alpha Compute', text: HERO}];
   const {host, context} = fakeHost({read: async () => answers.shift()});
   const pending = turn(context);
-  await new Promise(resolve => setTimeout(resolve, 20));
-  host.change(page());
+  for (let change = 0; change < 2; change++) { await new Promise(resolve => setTimeout(resolve, 20)); host.change(page()); }
   assert.equal((await pending).text, HERO);
-  assert.equal(host.reads, 2);
+  assert.equal(host.reads, 3);
+});
+
+test('a page only another browser can show is not readable at once, even though it never commits', async () => {
+  const {host, context} = fakeHost({current: page({loading: true, readable: false})});
+  const started = Date.now();
+  assert.equal((await turn(context)).textUnavailable, 'not readable');
+  assert.ok(Date.now() - started < 200, 'no wait for a commit that never comes');
+  assert.equal(host.reads, 0);
+});
+
+test('a password manager\'s site, as the shared reading policy lists them, is never read', async () => {
+  // The shared BrowserPageReading list at the pin (private to that module): every host is refused here.
+  const shared = readFileSync(new URL('../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts', import.meta.url), 'utf8');
+  const services = [...(/const passwordServices = \[([^\]]*)\]/.exec(shared)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  assert.ok(services.length >= 12, 'the shared list was found');
+  for (const service of services) for (const address of [`https://${service}/`, `https://eu.${service}./vault?item=1`]) {
+    const {host, context} = fakeHost({current: page({url: address})});
+    const block = await turn(context);
+    assert.equal(block.textUnavailable, 'password manager page', address);
+    assert.equal(block.text, undefined, address);
+    assert.equal(host.reads, 0, address);
+  }
+  const {context} = fakeHost({current: page({url: 'https://notbitwarden.com/'})});
+  assert.equal((await turn(context)).text, HERO);
 });
 
 test('a page that never commits is sent as loading, and a hung reader as still reading, within the budget', async () => {
@@ -168,16 +223,17 @@ test('the Browser adapter reads the current tab silently through the native page
     const pending = host.host.pageContext(browser, new AbortController().signal);
     await host.settle();
     const call = host.pending.find(item => item.name === 'pageText');
-    assert.deepEqual(call.input, {session: host.session(), id: host.state().cur, maxChars: PAGE_TEXT_MAX_CHARS});
+    assert.deepEqual(call.input, {session: host.session(), id: host.state().cur});
     await host.settleCall('pageText', {value: {url: 'https://www.alphacompute.ai/', title: 'Alpha Compute | Sovereign Intelligence', text: HERO}});
     const block = await pending;
     assert.equal(block.text, HERO);
     assert.equal(host.calls.filter(item => /^review/.test(item.name)).length, 0, 'no reading review or dialog');
-    // Leaving Browser keeps the same page for the grace window.
+    // Leaving Browser keeps the same page for the grace window; it is read again for that turn.
     host.view.onLeave();
-    const later = await host.host.pageContext({view: 'home', revision: 4, sensitive: false}, new AbortController().signal);
-    assert.equal(later.onScreen, false);
-    assert.equal(later.text, HERO);
+    const later = host.host.pageContext({view: 'home', revision: 4, sensitive: false}, new AbortController().signal);
+    await host.settle();
+    await host.settleCall('pageText', {value: {url: 'https://www.alphacompute.ai/', title: 'Alpha Compute | Sovereign Intelligence', text: HERO + ' Updated.'}});
+    assert.deepEqual(await later, {...block, onScreen: false, leftSecondsAgo: 0, text: HERO + ' Updated.'});
   } finally { await host.teardown(); }
 });
 
@@ -202,8 +258,13 @@ test('the Browser adapter never reads a private tab and waits for a loading page
   } finally { await loading.teardown(); }
 });
 
-test('the development page copy is fetched only from public HTTPS hosts, without following redirects elsewhere', async () => {
-  const {fetchPublicPage, privateAddress, publicPageAddress} = await import('../scripts/browser-page-dev-proxy.ts');
+test('the development page copy is fetched only for the dev page itself, only from public HTTPS hosts, without following redirects elsewhere', async () => {
+  const {fetchPublicPage, ownPageRequest, privateAddress, publicPageAddress} = await import('../scripts/browser-page-dev-proxy.ts');
+  assert.equal(ownPageRequest('127.0.0.1', 'http://127.0.0.1:5173', '127.0.0.1:5173'), true);
+  assert.equal(ownPageRequest('::ffff:127.0.0.1', 'http://localhost:5173', 'localhost:5173'), true);
+  for (const [peer, origin, host] of [['192.168.1.20', 'http://192.168.1.5:5173', '192.168.1.5:5173'], ['127.0.0.1', 'https://evil.example', '127.0.0.1:5173'],
+    ['127.0.0.1', undefined, '127.0.0.1:5173'], ['127.0.0.1', 'null', '127.0.0.1:5173'], [undefined, 'http://127.0.0.1:5173', '127.0.0.1:5173']])
+    assert.equal(ownPageRequest(peer, origin, host), false, `${peer} ${origin}`);
   for (const address of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.9', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1'])
     assert.equal(privateAddress(address), true, address);
   assert.equal(privateAddress('93.184.216.34'), false);

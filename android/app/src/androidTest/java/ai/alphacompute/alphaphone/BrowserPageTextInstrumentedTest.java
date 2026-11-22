@@ -29,10 +29,12 @@ import static org.junit.Assert.*;
  * from the test's shouldInterceptRequest wrapper around the tab's own client, so the class runs on an
  * offline emulator. Covered through the real AlphaBrowser plugin and the rendered controls:
  *  - the text is read from the committed document without fetching it again and without a dialog;
- *    frame, form, hidden and navigation content is never read, and a password or one-time-code
- *    field withholds the text;
- *  - the same text is reused for the same navigation and address; a new navigation or an in-page
- *    address change (pushState) reads again; another session or a private tab is refused;
+ *    frame, form, CSS-hidden and navigation content is never read, while content waiting at
+ *    opacity 0 for a scroll reveal and content a dialog marked aria-hidden is; a shown password
+ *    or one-time-code field withholds the text, and one in a CSS-hidden drawer does not;
+ *  - every call reads the live document again, so text changed in place is current, and an
+ *    in-page address change (pushState) reports its new address; another session or a private
+ *    tab is refused;
  *  - a typed turn on the page while inference is unavailable dispatches nothing: the page text
  *    reaches no native call;
  *  - a note that carries a web source keeps it in the native encrypted store across a recreation and
@@ -177,7 +179,7 @@ public final class BrowserPageTextInstrumentedTest {
   assertEquals(url, new JSONTokener(child.child("location.href")).nextValue());
   js("window.__pageArgs={session:window.__pageState.session,id:window.__pageState.id,url:window.__pageState.url,navigation:window.__pageState.navigation}");
  }
- private static final String READ = "Capacitor.Plugins.AlphaBrowser.pageText({session:window.__pageArgs.session,id:window.__pageArgs.id,maxChars:4000})";
+ private static final String READ = "Capacitor.Plugins.AlphaBrowser.pageText({session:window.__pageArgs.session,id:window.__pageArgs.id})";
  private JSONObject read() throws Exception { JSONObject text = call(READ); assertFalse("pageText answers: " + text, text.optBoolean("error")); return text; }
 
  @Test public void pageTextIsReadSilentlyFromTheCommittedDocument() throws Exception {
@@ -187,7 +189,7 @@ public final class BrowserPageTextInstrumentedTest {
    try {
     pages = openBrowser();
     String garden = BASE + "/garden";
-    pages.routes.put(garden, page(ARTICLE, "<iframe srcdoc=\"<p>frame-" + OMITTED + "</p>\"></iframe><nav>nav-" + OMITTED + "</nav><form><button>button-" + OMITTED + "</button><input value='input-" + OMITTED + "'></form><p hidden>hidden-" + OMITTED + "</p><p style='opacity:0'>clear-" + OMITTED + "</p><p>Order 12345678 ships Friday.</p>"));
+    pages.routes.put(garden, page(ARTICLE, "<iframe srcdoc=\"<p>frame-" + OMITTED + "</p>\"></iframe><nav>nav-" + OMITTED + "</nav><form><button>button-" + OMITTED + "</button><input value='input-" + OMITTED + "'></form><p hidden>hidden-" + OMITTED + "</p><p style='display:none'>none-" + OMITTED + "</p><p style='visibility:hidden'>invisible-" + OMITTED + "</p><p style='opacity:0'>Revealed on scroll.</p><div aria-hidden='true'><p>Behind the dialog.</p></div><p>Order 12345678 ships Friday.</p>"));
     open(garden);
     int before = pages.requests.get();
     JSONObject text = read();
@@ -195,10 +197,17 @@ public final class BrowserPageTextInstrumentedTest {
     assertEquals("Orchard report", text.getString("title"));
     assertTrue("The article is read: " + text, text.getString("text").contains(ARTICLE));
     assertTrue("Long numbers are ordinary text", text.getString("text").contains("Order 12345678 ships Friday."));
-    assertFalse("Frame, navigation, form, hidden and transparent content is never read", text.toString().contains(OMITTED));
+    assertFalse("Frame, navigation, form and hidden content is never read", text.toString().contains(OMITTED));
+    assertTrue("Content waiting at opacity 0 for a scroll reveal is read", text.getString("text").contains("Revealed on scroll."));
+    assertTrue("Content a dialog marked aria-hidden is read", text.getString("text").contains("Behind the dialog."));
     assertEquals("Reading uses the loaded document; it never fetches the page again", before, pages.requests.get());
     assertNull("No dialog is shown", currentDialog());
-    // A sign-in field anywhere withholds the text; the address and title stay.
+    // A sign-in field in a CSS-hidden drawer does not withhold the text.
+    String drawer = BASE + "/drawer";
+    pages.routes.put(drawer, page(ARTICLE, "<div style='display:none'><input type='password'></div>"));
+    open(drawer);
+    assertTrue("A hidden sign-in drawer does not withhold the text", read().getString("text").contains(ARTICLE));
+    // A shown sign-in field withholds the text; the address and title stay.
     String signIn = BASE + "/sign-in";
     pages.routes.put(signIn, page(ARTICLE, "<input type='password'>"));
     open(signIn);
@@ -210,7 +219,7 @@ public final class BrowserPageTextInstrumentedTest {
   }
  }
 
- @Test public void pageTextIsReusedForTheSameDocumentAndReadAgainWhenTheAddressChanges() throws Exception {
+ @Test public void pageTextIsReadAgainOnEveryCallAndFollowsAnInPageAddressChange() throws Exception {
   gate(); assumeIsolatedReading();
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
    Pages pages = null; Throwable primary = null;
@@ -220,10 +229,10 @@ public final class BrowserPageTextInstrumentedTest {
     pages.routes.put(garden, page(ARTICLE, ""));
     open(garden);
     assertTrue(read().getString("text").contains(ARTICLE));
-    // The same navigation and address: the cached text, even though the document changed since.
+    // The same document changed in place (a price, a cart, "show more"): the next call reads it.
     assertEquals("true", child.child("document.querySelector('article p').textContent='Changed in place';true"));
-    assertTrue("The same document is not read again within a minute", read().getString("text").contains(ARTICLE));
-    // An in-page navigation changes the address, so it is read again.
+    assertTrue("Text changed in place is current", read().getString("text").contains("Changed in place"));
+    // An in-page navigation changes the address the read reports.
     assertEquals("true", child.child("history.pushState({},'',location.pathname+'?view=2');true"));
     JSONObject moved = read();
     assertEquals(garden + "?view=2", moved.getString("url"));
@@ -232,7 +241,7 @@ public final class BrowserPageTextInstrumentedTest {
     open(garden);
     assertTrue(read().getString("text").contains(ARTICLE));
     // Another browser session is refused.
-    JSONObject foreign = call("Capacitor.Plugins.AlphaBrowser.pageText({session:'another-session',id:window.__pageArgs.id,maxChars:4000})");
+    JSONObject foreign = call("Capacitor.Plugins.AlphaBrowser.pageText({session:'another-session',id:window.__pageArgs.id})");
     assertTrue(foreign.toString(), foreign.optBoolean("error"));
    } catch (Exception | AssertionError failure) { primary = failure; throw failure; } finally { cleanup(pages, primary); }
   }
@@ -247,7 +256,7 @@ public final class BrowserPageTextInstrumentedTest {
     pages = openBrowser();
     JSONObject created = call("Capacitor.Plugins.AlphaBrowser.create({session:window.__pageArgs.session,id:" + JSONObject.quote(id) + ",private:true})");
     assertFalse(created.toString(), created.optBoolean("error"));
-    JSONObject refused = call("Capacitor.Plugins.AlphaBrowser.pageText({session:window.__pageArgs.session,id:" + JSONObject.quote(id) + ",maxChars:4000})");
+    JSONObject refused = call("Capacitor.Plugins.AlphaBrowser.pageText({session:window.__pageArgs.session,id:" + JSONObject.quote(id) + "})");
     assertTrue(refused.toString(), refused.optBoolean("error"));
     assertEquals("Private tabs are not read", refused.getString("message"));
    } catch (Exception | AssertionError failure) { primary = failure; throw failure; } finally {

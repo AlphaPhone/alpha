@@ -1,59 +1,30 @@
 package ai.alphacompute.alphaphone.browser;
 
-import android.net.Uri;
 import com.getcapacitor.JSObject;
-import java.util.Locale;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
 /**
  * The readable text of the page in a Browser tab, for the one Browser page block every agent turn
- * carries while the page applies (apps/app/src/browser/page-context.ts). {@link #SCRIPT} runs only
- * in the tab's isolated reading world ({@code BrowserReadingWorld}); the page cannot reach it. It
- * applies the rules of apps/app/src/browser/readable-page.ts to the live document and also skips
- * elements that are not rendered (test/readable-page.test.mjs runs both on the same fixtures).
+ * carries while the page applies (apps/app/src/browser/page-context.ts, which also keeps password
+ * managers' sites from being read). {@link #SCRIPT} runs only in the tab's isolated reading world
+ * ({@code BrowserReadingWorld}); the page cannot reach it. It applies the rules of
+ * apps/app/src/browser/readable-page.ts to the live document and also skips elements that are not
+ * rendered (test/readable-page.test.mjs runs both on the same fixtures).
  *
  * <p>Main content first, then the rest of the body; navigation, menus, form controls and hidden
- * elements are skipped. A page with a password or one-time-code field gives no text, and neither
- * does a password manager's site. No input value, cookie, storage or frame is read, and nothing is
- * shown to the owner: the text goes into the owner's own turn to their own agent.
+ * elements are skipped. A page with a shown password or one-time-code field gives no text. No
+ * input value, cookie, storage or frame is read, and nothing is shown to the owner: the text goes
+ * into the owner's own turn to their own agent.
  */
 public final class AlphaPageText {
  private AlphaPageText() {}
- /** The renderer's PAGE_TEXT_MAX_CHARS; a caller's maxChars is clamped to it. */
+ /** The renderer's PAGE_TEXT_MAX_CHARS (test/readable-page.test.mjs keeps them equal). */
  public static final int MAX_CHARS = 4000;
- /** The renderer's PAGE_TEXT_CACHE_MS. */
- public static final long CACHE_MS = 60000;
- // The password services of the shared BrowserPageReading policy at the pin.
- private static final String[] PASSWORD_SERVICES = {"pass.proton.me", "account.proton.me",
-  "accounts.google.com", "passwords.google.com", "bitwarden.com", "bitwarden.eu",
-  "1password.com", "lastpass.com", "dashlane.com", "keepersecurity.com", "nordpass.com",
-  "passbolt.com"};
-
- /** A password manager's own site: its text is never read. */
- public static boolean passwordManager(String url) {
-  String host = Uri.parse(url == null ? "" : url).getHost();
-  if (host == null) return false;
-  host = host.toLowerCase(Locale.ROOT);
-  if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
-  for (String service : PASSWORD_SERVICES) if (host.equals(service) || host.endsWith("." + service)) return true;
-  return false;
- }
-
- /** The address without its fragment, for the cache key: an in-page anchor is the same text. */
- public static String withoutFragment(String url) {
-  if (url == null) return "";
-  int hash = url.indexOf('#');
-  return hash < 0 ? url : url.substring(0, hash);
- }
-
- public static int clamp(Integer maxChars) {
-  return maxChars == null ? MAX_CHARS : Math.max(1, Math.min(MAX_CHARS, maxChars));
- }
 
  /** The expression the reading world evaluates. */
- public static String script(int maxChars) {
-  return "(" + SCRIPT + ")(" + clamp(maxChars) + ")";
+ public static String expression() {
+  return "(" + SCRIPT + ")(" + MAX_CHARS + ")";
  }
 
  /** The plugin's answer from the script's JSON result, on top of the tab's address and title. */
@@ -81,7 +52,7 @@ public final class AlphaPageText {
   (max)=>{
   const type=document.contentType;
   if(!['text/html','application/xhtml+xml','text/plain'].includes(type))return {textUnavailable:'not readable'};
-  const SKIPPED='script,style,noscript,template,svg,canvas,iframe,object,embed,nav,[role=navigation],[role=menu],[role=menubar],input,textarea,select,option,button,[hidden],[aria-hidden=true]';
+  const SKIPPED='script,style,noscript,template,svg,canvas,iframe,object,embed,nav,[role=navigation],[role=menu],[role=menubar],input,textarea,select,option,button,[hidden]';
   const SIGN_IN='input[type=password i],[autocomplete*=one-time-code i],[autocomplete*=current-password i],[autocomplete*=new-password i]';
   const BLOCK=/^(?:ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|BR|CAPTION|DD|DETAILS|DIALOG|DIV|DL|DT|FIELDSET|FIGCAPTION|FIGURE|FOOTER|FORM|H[1-6]|HEADER|HGROUP|HR|LEGEND|LI|MAIN|MENU|OL|P|PRE|SECTION|SUMMARY|TABLE|TBODY|TD|TFOOT|TH|THEAD|TR|UL)$/;
   const NODE_LIMIT=20000,TIME_LIMIT_MS=300;
@@ -97,10 +68,10 @@ public final class AlphaPageText {
   const meta=document.querySelector('meta[name=description i]')||document.querySelector('meta[property="og:description" i]');
   const description=(meta&&meta.getAttribute('content'))||'';
   const page={title:document.title,...(description.trim()?{description}:{})};
-  if(document.querySelector(SIGN_IN))return {...page,textUnavailable:'sign-in form on this page'};
+  const shown=e=>typeof e.checkVisibility!=='function'||e.checkVisibility({checkVisibilityCSS:true})||getComputedStyle(e).display==='contents';
+  if([...document.querySelectorAll(SIGN_IN)].some(field=>!field.closest('[hidden]')&&shown(field)))return {...page,textUnavailable:'sign-in form on this page'};
   const body=document.body;
   if(!body)return {...page,text:''};
-  const shown=e=>typeof e.checkVisibility!=='function'||e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})||getComputedStyle(e).display==='contents';
   const main=document.querySelector('main,[role=main],article');
   const writer=lineWriter(),started=Date.now();
   let line='',nodes=0,truncated=false;

@@ -223,7 +223,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Kept separate from dispatch so resolver changes cannot bypass page/owner checks. */
  private java.util.function.Function<Intent,java.util.List<android.content.pm.ResolveInfo>> externalBrowserResolver =
   intent->getContext().getPackageManager().queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY|android.content.pm.PackageManager.GET_RESOLVED_FILTER);
- private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; /** The last page text read for {@link #pageText}, keyed by navigation, address and size. */ String pageTextKey; JSObject pageText; long pageTextAt; }
+ private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
  /** Credentials stay in the framework/provider and the remote document. No bridge API
   * reads fields or replaces Chromium's frame-specific webDomain metadata. The only addition
   * is the committed top-level origin, which the password provider requires to equal the
@@ -341,7 +341,7 @@ public class AlphaBrowserPlugin extends Plugin {
   if(fullscreenTab==t)exitFullscreen(true);
   if(!startedCallback)t.authAttempts=0;
   if(t.readingWorld!=null&&!startedCallback)t.readingWorld.invalidate();
-  t.navigation++;t.pageTextKey=null;t.pageText=null;if(fileTab==t)cancelFile();
+  t.navigation++;if(fileTab==t)cancelFile();
   clearTimeout(t); t.loading=true; t.committed=false; t.error=""; t.httpStatus=0; t.finishedUrl="";
   t.web.setVisibility(View.INVISIBLE); t.message.setText(AlphaBrowserCopy.LOADING); t.message.setVisibility(View.VISIBLE);
   t.timeout=()->{if(t.loading&&!t.dead)fail(t,"This page is taking too long. Check your connection, then reload from the menu.");};
@@ -1007,7 +1007,6 @@ public class AlphaBrowserPlugin extends Plugin {
    String[] site=new String[1];
    site[0]=WebStorageCompat.deleteBrowsingDataForSite(WebViewCompat.getProfile(t.web).getWebStorage(),Uri.parse(t.url).getHost(),()->{JSObject result=new JSObject();result.put("site",site[0]);call.resolve(result);});
    // The site's download entries and (normal profile only) its permission decisions go too.
-   for(Tab tab:tabs.values()){tab.pageTextKey=null;tab.pageText=null;}
    String cleared=site[0]==null?Uri.parse(t.url).getHost():site[0];
    downloads.clearSite(cleared);
    if(!t.priv)try{sessionStore.clearPermissionsForSite(cleared);}catch(Exception unavailable){notice(t,"Website permissions for this site could not be cleared. Use Clear browsing data.");}
@@ -1017,35 +1016,27 @@ public class AlphaBrowserPlugin extends Plugin {
  @PluginMethod public void readingSupport(PluginCall call) { JSObject out=new JSObject();out.put("available",BrowserReadingWorld.supported());call.resolve(out); }
  /**
   * The readable text of a tab's current document for the Browser page block (AlphaPageText), read
-  * silently in its isolated reading world: no dialog, no network. Private tabs are refused. The
-  * last result is reused for the same navigation and address for {@link AlphaPageText#CACHE_MS};
-  * an in-page navigation (pushState) changes the address and so reads again.
+  * silently in its isolated reading world on every call: no dialog, no network and no cache, so
+  * text that changed in place (a price, a cart, "show more") is current. Private tabs are refused.
   */
  @PluginMethod public void pageText(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   if(!Objects.equals(session,call.getString("session"))){call.reject("Expired browser session");return;}
   Tab t=tabs.get(call.getString("id"));
   if(t==null||t.dead){call.reject("Browser tab is unavailable");return;}
   if(t.priv){call.reject("Private tabs are not read");return;}
-  int max=AlphaPageText.clamp(call.getInt("maxChars"));
   String live=t.web.getUrl(),url=live==null?t.url:live;
-  String key=t.navigation+"\n"+AlphaPageText.withoutFragment(url)+"\n"+max;
-  long now=android.os.SystemClock.elapsedRealtime();
-  if(key.equals(t.pageTextKey)&&t.pageText!=null&&now-t.pageTextAt<AlphaPageText.CACHE_MS){call.resolve(t.pageText);return;}
   JSObject page=new JSObject();page.put("url",url);page.put("title",t.web.getTitle()==null?"":t.web.getTitle());
   BrowserReadingWorld world=t.readingWorld;
-  String unavailable=AlphaPageText.passwordManager(url)?"password manager page"
-   :!t.error.isEmpty()||world==null||!world.available()||!url.startsWith("https://")?"not readable"
+  String unavailable=!t.error.isEmpty()||world==null||!world.available()||!url.startsWith("https://")?"not readable"
    :!t.committed||(t.loading&&!world.ready())?"loading"
    :!world.ready()?"not readable":null;
   if(unavailable!=null){page.put("textUnavailable",unavailable);call.resolve(page);return;}
-  long navigation=t.navigation;boolean settled=!t.loading;
-  world.evaluate(AlphaPageText.script(max),encoded->{
+  Runnable unreadable=()->{page.put("textUnavailable","not readable");call.resolve(page);};
+  world.evaluate(AlphaPageText.expression(),encoded->{
    JSObject result;
-   try{result=AlphaPageText.result(encoded,page);}
-   catch(Exception unreadable){page.put("textUnavailable","not readable");call.resolve(page);return;}
-   if(settled&&!t.loading&&!t.dead&&t.navigation==navigation&&!result.getString("text","").isEmpty()){t.pageTextKey=key;t.pageText=result;t.pageTextAt=android.os.SystemClock.elapsedRealtime();}
+   try{result=AlphaPageText.result(encoded,page);}catch(Exception invalid){unreadable.run();return;}
    call.resolve(result);
-  },()->{page.put("textUnavailable","not readable");call.resolve(page);});
+  },unreadable);
  }); }
  @PluginMethod public void reviewReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   Tab tab=tabs.get(call.getString("id"));String owner=session,url=call.getString("url"),navigation=call.getString("navigation");

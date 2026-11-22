@@ -3513,7 +3513,7 @@ export const connectionController = {
     try{current();const conversationId=await ensureSelectedConversation(selected,session,controller.signal,current);current();return {conversationId,session:{...session},connectionEpoch:generation};}
     finally{signal.removeEventListener('abort',cancel);releaseOperation(controller);}
   },
-  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>,projectRequestedView?:RequestedViewProjection): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
+  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>,projectRequestedView?:RequestedViewProjection,workflowStep?:boolean): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
     if(!ownProviderSelected()&&state.cloudAccount&&state.membershipBalance==='zero')throw fundingNeeded();
     // P-43: before the resident has a session, say it is starting (or recovering); nothing is sent.
     if (!active && residentAlwaysPresent) throw noSessionError('');
@@ -3541,8 +3541,9 @@ export const connectionController = {
     try {
       requestSignal.throwIfAborted();
       // Every turn, typed or spoken, carries the page open in Browser while it applies; the model
-      // decides whether the message is about it. Read alongside the awaits below; never throws.
-      const browserPageRead=browserPageContext?.(message.context,requestSignal);
+      // decides whether the message is about it. A workflow step is not the owner's message and
+      // carries none. Read alongside the awaits below; never throws.
+      const browserPageRead=workflowStep?undefined:browserPageContext?.(message.context,requestSignal);
       const assertCurrent=()=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId||(expectedConversationId!==undefined&&conversationMemory.get(conversationKey(session))!==expectedConversationId))throw Error('The connection or conversation changed.');};
       // WebView can keep navigator.onLine=false while this same app has a working network.
       // Only Android confirming no active network refuses a turn; unknown status leaves the

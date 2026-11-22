@@ -172,16 +172,17 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     }catch(error){if(!controller.signal.aborted)report(error);}finally{unsubscribe();if(reading===controller){reading=undefined;void Browser.cancelReading({session}).catch(()=>{});}}
   }
   // The page in the current tab rides every agent turn while it applies (page-context.ts).
-  // A turn waits on the next stateChanged while its page is still loading.
+  // A turn waits on the next stateChanged while its page is still loading. Privacy is read from
+  // both the shell's tab list and the tab host, so a tab either calls private is never read.
   const pageChanges = new Set<() => void>();
   const pageContext = createBrowserPageContext({
     current: () => {
       const id = state()?.cur, info = tabInfo(id);
       if (disposed || !id || !tabs.has(id) || !info?.url) return;
       return {tab: id, navigation: String(info.navigation ?? ''), url: info.url, title: pageTitle(info.title, info.url),
-        private: isPrivate(id) || tabs.isPrivate(id), loading: !info.committed && !info.error, readable: !info.error && !info.externalOnly};
+        private: isPrivate(id) || tabs.isPrivate(id), loading: !info.committed && !info.error && !info.externalOnly, readable: !info.error && !info.externalOnly};
     },
-    read: (page, maxChars) => Browser.pageText({session, id: page.tab, maxChars}),
+    read: page => Browser.pageText({session, id: page.tab}),
     changed: signal => new Promise<void>(resolve => {
       const done = () => { pageChanges.delete(done); signal.removeEventListener('abort', done); resolve(); };
       pageChanges.add(done); signal.addEventListener('abort', done, {once: true});
