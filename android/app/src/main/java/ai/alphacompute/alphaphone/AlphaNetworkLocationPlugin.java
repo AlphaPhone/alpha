@@ -96,6 +96,7 @@ public final class AlphaNetworkLocationPlugin extends Plugin {
  }
 
  private void addWifi(Context context,NetworkLocationQuery query){
+  if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED||context.checkSelfPermission(Manifest.permission.ACCESS_WIFI_STATE)!=PackageManager.PERMISSION_GRANTED)return;
   WifiManager wifi=context.getApplicationContext().getSystemService(WifiManager.class);
   if(wifi==null)return;
   List<ScanResult> results=wifi.getScanResults();
@@ -123,6 +124,7 @@ public final class AlphaNetworkLocationPlugin extends Plugin {
  }
 
  private void addCells(Context context,NetworkLocationQuery query){
+  if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)return;
   TelephonyManager telephony=context.getSystemService(TelephonyManager.class);
   if(telephony==null)return;
   List<CellInfo> cells=telephony.getAllCellInfo();
