@@ -18,6 +18,8 @@ async function read(page:Page,body:string,{before}:{before?:(page:Page)=>Promise
 }
 
 test.use({viewport:{width:412,height:915}});
+// Several tests load more than one fixture page; shared CI and laptop load stretches that.
+test.describe.configure({timeout:120_000});
 
 test('main content keeps its headings, paragraphs and list items as lines',async({page})=>{
  const result=await read(page,'<nav><a href="/a">Home</a> <a href="/b">World</a></nav><main><h1>Octopus arms</h1><p>Each arm tastes what it touches.</p><ul><li>Eight arms</li><li>Three hearts</li></ul><table><tr><td>Lifespan</td><td>1 to 2 years</td></tr></table></main><footer>Copyright</footer>');
