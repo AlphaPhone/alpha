@@ -7,12 +7,12 @@ const {DeviceActions,setFilesReviewIdentity}=await tsImport('../apps/app/src/run
 const context={view:'files',revision:1,sensitive:false};
 const token=letter=>letter.repeat(43);
 const signal=()=>new AbortController().signal;
-function fixture(){
+function fixture(operation={type:'files_move',paths:['Download/reviewed.txt'],dest:'Documents',reviewed:[token('x')]}){
  let state='pending',entry,dispatched;
  const id='files-review',digest='b'.repeat(64),expiresAt=new Date(Date.now()+60000).toISOString();
  const proposal=()=>({id,digest,state,subjectUserId:'owner',requestedBy:'agent',action:'device_action',expiresAt,
   payload:{version:1,action:'device_action',installationId:'device',enrollmentId:'enrollment',
-   operation:{type:'files_move',paths:['Download/reviewed.txt'],dest:'Documents',reviewed:[token('x')]}},
+   operation},
   execution:state==='executing'?{attemptId:'attempt-one'}:undefined});
  const request=async(path,body)=>{
   if(body===undefined)return {proposals:[proposal()]};
@@ -49,4 +49,17 @@ test('an unbound Files proposal cannot be approved or written to the journal',as
  assert.equal(items[0].proposal,null);
  await assert.rejects(f.client.approve(f.id,context,signal()),/Review this action again/);
  assert.equal(f.entry,undefined);assert.equal(f.dispatched,undefined);
+});
+
+test('a phone with base Files access keeps unbound result positions out of approval and execution',async()=>{
+ for(const operation of [{type:'files_share',shown:[1]},{type:'files_move',shown:[1],dest:'Documents'},{type:'files_trash',shown:[1]}]){
+   const f=fixture(operation);
+   assert.deepEqual(await f.client.list(signal()),[]);
+   assert.deepEqual(await f.client.pendingReview(context,signal()),[
+     {proposal:null,notice:"This action isn't available on this phone."},
+   ]);
+   await assert.rejects(f.client.approve(f.id,context,signal()));
+   assert.equal(f.entry,undefined);
+   assert.equal(f.dispatched,undefined);
+ }
 });
