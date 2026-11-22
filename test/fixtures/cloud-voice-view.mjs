@@ -23,7 +23,7 @@ const moduleFiles = ['runtime/voice-selection.ts',
  '../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts',
  'prototype/local-speech-playback.ts','runtime/voice-states.ts','runtime/local-agent-stream.ts',
  'prototype/note-recorder.ts','runtime/note-recorder-driver.ts','runtime/note-default-title.ts',
- 'runtime/voice-call-pause.ts','prototype/voice-adapter.ts'];
+ 'runtime/voice-call-pause.ts','prototype/locale-time.ts','runtime/out-of-funds-notice.ts','prototype/voice-adapter.ts'];
 const modules = new Map(await Promise.all(moduleFiles.map(async file => {
  const entry=path.resolve('apps/app/src',file);
  const built=await build({entryPoints:[entry],bundle:true,write:false,format:'iife',globalName:'__alphaVoiceModule',platform:'browser',target:'es2022',logLevel:'silent',plugins:[{
@@ -89,6 +89,8 @@ export function cloudVoiceViewFixture(options={}){
  box.currentCallState=()=>({inCall:f.inCall??null,emergency:null,emergencyLive:false,watching:f.inCall!==undefined});
  box.callSeenSince=time=>f.callSeenAt!==undefined&&f.callSeenAt>=time;
  load('runtime/voice-call-pause.ts',box);
+ // The out-of-funds line is the real one, with its device-locale reset date.
+ load('prototype/locale-time.ts',box);load('runtime/out-of-funds-notice.ts',box);
  load('prototype/voice-adapter.ts',box);
  const icons={check:'check',mic:'official-mic-path',stop:'stop',play:'play',x:'close',cloud:'cloud',user:'account'};
  class Shell{

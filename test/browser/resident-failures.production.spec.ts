@@ -42,8 +42,8 @@ async function sendRefused(page: Page, text: string) {
 }
 
 const KINDS = {
-  // Cloud's billing refusal of a signed-in account: one answer naming both ways back (cloud-membership-ui.tsx).
-  insufficient_credits: 'Billing declined',
+  // Cloud's billing refusal of a signed-in account: the one out-of-funds line (out-of-funds-notice.ts).
+  insufficient_credits: 'You’re out of plan allowance and credits, so I couldn’t reply.',
   provider_issue: 'Reply failed',
   generation_timeout: 'Reply failed',
   // Bound to an admitted plan, yet the agent ran without a provider: a check of what native bound is offered.

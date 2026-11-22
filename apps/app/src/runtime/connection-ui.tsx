@@ -86,7 +86,8 @@ import { Busy, StatusDot, type StatusTone } from './status-ui';
 import { cloudCredentialStore, cloudSelfRevocationSupported, cloudSignIn, cloudSignInGoogle, cloudSignInPhone, remoteCredentialStore, nativeCloudRequest, nativeRemoteRequest, openConnectionBrowser, removeStoredCloudCredential, secureConnectionStore } from './native-connection';
 import { findStoppedUserTurn, type StoppedUserTurn as StoppedTurn } from '../ui/api/conversation-turn-controller.ts';
 import './connection-ui.css';
-import {CloudMembershipControls,FUNDING_NEEDED,fundingRefusedReply,type MembershipBalance} from './cloud-membership-ui';
+import {CloudMembershipControls,FUNDING_NEEDED,type MembershipBalance} from './cloud-membership-ui';
+import {outOfFundsLimit,outOfFundsNotice,outOfFundsRefusal,outOfFundsResetsAt} from './out-of-funds-notice';
 import {CloudPlanManager,CloudFundsManager} from './cloud-plan-ui';
 import type {BillingAuthorityPort} from './cloud-plans';
 
@@ -1816,7 +1817,8 @@ function effectAppliedBeforeFailure(reply:{terminalFailure?:unknown;actionResult
 }
 /** Owner-facing states for upstream's CHAT_FAILURE_KINDS (pinned contracts `chat.ts`). Each says
  * what happened and what to do next; none retries the message. Every known kind has one (replyFailure);
- * only an unknown kind keeps the generic text. */
+ * `insufficient_credits` has the out-of-funds line (out-of-funds-notice.ts), and only an unknown kind
+ * keeps the generic text. */
 export const REPLY_FAILURES = {
   hosted_unreachable: 'Reply failed',
   provider_unreachable: 'Reply failed',
@@ -1829,7 +1831,6 @@ export const REPLY_FAILURES = {
   persistence_error: 'Reply not saved',
   local_inference: 'No answer',
   coding_failure: 'Unconfirmed',
-  insufficient_credits: 'Billing declined',
 } as const;
 /** Test mocks only: a development agent without a model provider (constant-folded out of production). */
 const NO_PROVIDER_DEVELOPMENT = testMocksEnabled ? 'The agent has no model provider configured. Set one up on the agent; nothing was retried.' : '';
@@ -1867,8 +1868,12 @@ function replyFailure(kind:string|undefined,selected:Active,limit:ServiceLimit|n
   // sheet with its credits and membership code actions opens with a fresh balance once the turn ends.
   const funding=limit?.kind==='billing-refused'&&!!state.cloudAccount;
   if(limit)update({lastServiceLimit:{...limit,observedAt:Date.now()},...(funding?{fundingRefused:true,membershipDismissed:false}:{})});
-  if(funding){void refreshMembershipBalance();return Object.assign(new AlphaClientError('transport-failed',fundingRefusedReply(cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind,planAction:'funding'});}
-  if(limit)return Object.assign(new AlphaClientError('transport-failed',serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind});
+  // Out of plan allowance and credits: the one fixed line Talk posts too (out-of-funds-notice.ts).
+  const outOfFunds=outOfFundsLimit(limit)||!limit&&outOfFundsRefusal({failureKind:kind});
+  const fundsText=()=>outOfFundsNotice('chat',outOfFundsResetsAt(Date.now(),limit,state.residentSubscription,state.membershipPlan));
+  if(funding){void refreshMembershipBalance();return Object.assign(new AlphaClientError('transport-failed',fundsText()),{failureKind:kind??limit.kind,serviceLimit:limit.kind,planAction:'funding'});}
+  if(limit)return Object.assign(new AlphaClientError('transport-failed',outOfFunds?fundsText():serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind});
+  if(outOfFunds)return failed(fundsText());
   if(kind==='rate_limited')return failed(serviceLimitMessage(null,Date.now(),cloudServiceName(cloud.environment)));
   const noProvider=REPLY_FAILURES.no_provider_resident;
   // The on-device agent without Eliza Cloud inference (no plan, offline, signed out): the same honest
@@ -1886,7 +1891,6 @@ function replyFailure(kind:string|undefined,selected:Active,limit:ServiceLimit|n
     // A revoked key reaches the sign-in path through the (throttled) plan check.
     connectionController.recheckPlanAfterRefusal();
   }
-  // insufficient_credits normally arrives as a Cloud billing refusal (readServiceLimit above).
   const text=kind==='provider_issue'||kind==='generation_timeout'?(resident?REPLY_FAILURES.hosted_unreachable:REPLY_FAILURES.provider_unreachable)
     :kind==='no_provider'?(resident||!testMocksEnabled?noProvider:NO_PROVIDER_DEVELOPMENT)
     :kind==='coding_mutation_unverified'||kind==='coding_verification_failed'||kind==='coding_tool_failure'?REPLY_FAILURES.coding_failure

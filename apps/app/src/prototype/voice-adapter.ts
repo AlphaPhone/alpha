@@ -47,6 +47,7 @@ import { createNoteRecorderDriver } from '../runtime/note-recorder-driver';
 import { setNotesRecorderControl, type NotesRecordStart } from './notes-recorder-control';
 import { callSeenSince, currentCallState } from '../runtime/call-state';
 import { VOICE_CALL_ACTIVE, VOICE_CALL_ENDED, createCallReturnNotice, voiceEndedForCall } from '../runtime/voice-call-pause';
+import { outOfFundsLimit, outOfFundsNotice, outOfFundsRefusal, outOfFundsResetsAt } from '../runtime/out-of-funds-notice';
 const voiceServiceName = () => connectionController.getSnapshot().residentInference==='direct'?'Cartesia':cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
 // Reading a note aloud sends only that note's text, never recordings or replies, so Notes names it.
 // Data leaving the phone stays named at the Read action, in four words or fewer.
@@ -613,6 +614,19 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const shell=chat.shell;cleanup();if(shell.live!==false)shell.toast(CALL_PAUSED);
     return true;
   }
+  // Out of plan allowance and credits: Cloud refused this Talk's start or its next minute, or the
+  // agent's turn. The agent has no funds to say so, so Talk ends as at its Stop control and the chat
+  // gets the one fixed line (out-of-funds-notice.ts), as a text chat refusal does. The ended session
+  // reports nothing more (generation), so a retry or reconnect cannot add a second line. Every
+  // other failure keeps its own handling.
+  function outOfFundsStop(failure:unknown,chat:ChatDestination,token:number){
+    if(token!==generation||chatDestination!==chat||mediaUnconfirmed||!outOfFundsRefusal(failure))return false;
+    const shell=chat.shell,held=connectionController.getSnapshot(),limit=(failure as {code?:unknown}).code==='voice-http-429'?cloudVoiceServiceLimit(failure):null;
+    const text=outOfFundsNotice('talk',outOfFundsResetsAt(Date.now(),limit,outOfFundsLimit(held.lastServiceLimit)?held.lastServiceLimit:null,held.residentSubscription,held.membershipPlan));
+    cancelChat(false,true);
+    if(shell.live!==false)shell.setState((previous:Bag)=>({chat:previous.chat==='full'?'full':'sheet',msgs:[...(previous.msgs||[]),{id:crypto.randomUUID(),from:'agent',text,card:null}]}));
+    return true;
+  }
   // A Cloud voice 429 rate limit or 503 warm-up is transient, not the owner's problem: voice stays
   // calm, waits out the server's Retry-After, then listens again with a fresh capture. The refused
   // or answered turn is never resent or replayed, so nothing is charged twice. Twice at most; after
@@ -952,7 +966,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           onState:value=>{
             if(value.phase==='idle'||value.phase==='error')replySpeech?.release();
             if(token!==generation||chatDestination!==chat||conversationVoice!==assistant)return;
-            if(value.phase==='error'&&(callPause((value as BatchVoiceState).error,chat,token)||quietVoiceRetry((value as BatchVoiceState).error,chat,token)))return;
+            if(value.phase==='error'&&(callPause((value as BatchVoiceState).error,chat,token)||quietVoiceRetry((value as BatchVoiceState).error,chat,token)||outOfFundsStop((value as BatchVoiceState).error,chat,token)))return;
             if(value.phase==='speaking')quietRetries=0;
             assistantState=value;conversationState=value as BatchVoiceState;
             if(value.phase==='thinking'&&value.transcript){conversationLastTranscript=value.transcript;conversationLastReply='';}
@@ -992,13 +1006,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         },
         send:sendTurn,
         speak:async input=>{input.signal.throwIfAborted();current();const started=()=>{current();markVoiceTiming('first-audio');input.onStarted();};const pending=local?local.speak(input.text,input.signal,started,true,{conversation:true}):speakCloudSpeechChunks({text:input.text,signal:input.signal,assertCurrent:current,onStarted:started,speak:(text,signal,onStarted)=>cloudDriver!.speak(text,signal,onStarted)});conversationSpeech=pending;try{await pending;input.signal.throwIfAborted();current();}catch(failure){if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}throw failure;}finally{if(conversationSpeech===pending)conversationSpeech=undefined;finishVoiceTurn();}},
-        onState:value=>{if(token!==generation||chatDestination!==chat||conversationVoice!==conversation)return;if(value.phase==='error'&&(callPause(value.error,chat,token)||quietVoiceRetry(value.error,chat,token)))return;
+        onState:value=>{if(token!==generation||chatDestination!==chat||conversationVoice!==conversation)return;if(value.phase==='error'&&(callPause(value.error,chat,token)||quietVoiceRetry(value.error,chat,token)||outOfFundsStop(value.error,chat,token)))return;
           // The loop retires itself (idle) before it reports a failure: keep this frame until the retire
           // settles, so a quiet wait never flashes "Voice conversation stopped." and Start Cloud voice.
           if(value.phase==='idle'&&conversationState.phase!=='idle'){const held=conversationState;void conversation.stop().catch(()=>{}).then(()=>{if(token===generation&&chatDestination===chat&&conversationVoice===conversation&&conversationState===held){conversationState=value;stopClock();refresh();}});return;}if(value.phase==='speaking')quietRetries=0;conversationState=value;if(value.phase==='error')error=voiceStopped(value);if(value.phase==='listening'){stopClock();tick=setInterval(refresh,250);}else stopClock();refresh();},
       });
       conversationVoice=conversation;await conversation.start();current();
-    }catch(failure){if(token!==generation||controller.signal.aborted)return;if(callPause(failure,chat,token)||quietVoiceRetry(failure,chat,token))return;conversationState={phase:'error',error:failure};browserStartup?.finish('failed');const classified=voiceFailure(failure,{transcribing:false,browser:!Capacitor.isNativePlatform()});conversationDenied=classified?.kind==='denied';error=cloudVoiceFailure(failure,{conversation:true})||(classified&&(classified.kind==='denied'||classified.kind==='no-microphone')?classified.message:null)||'Voice could not start. Try again, or use the keyboard.';refresh();}
+    }catch(failure){if(token!==generation||controller.signal.aborted)return;if(callPause(failure,chat,token)||quietVoiceRetry(failure,chat,token)||outOfFundsStop(failure,chat,token))return;conversationState={phase:'error',error:failure};browserStartup?.finish('failed');const classified=voiceFailure(failure,{transcribing:false,browser:!Capacitor.isNativePlatform()});conversationDenied=classified?.kind==='denied';error=cloudVoiceFailure(failure,{conversation:true})||(classified&&(classified.kind==='denied'||classified.kind==='no-microphone')?classified.message:null)||'Voice could not start. Try again, or use the keyboard.';refresh();}
   }
   // Only the owner's Stop keeps an accepted reply. A typed send or a read-aloud that retires voice
   // still aborts the pending voice request, so the chat is free for what replaces it.

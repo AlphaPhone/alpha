@@ -15,7 +15,8 @@ const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5';
 // Synthetic, never a real grant code: 16 Crockford characters once normalized.
 const CODE = 'synt-hetc-0de0-0001', NORMALIZED = 'SYNTHETC0DE00001';
 const NEEDED = 'Choose a plan or enter a membership code to ask Alpha.';
-const REFUSED = 'Billing declined';
+// The chat's one out-of-funds line (out-of-funds-notice.ts); no membership, so no reset date.
+const REFUSED = 'You’re out of plan allowance and credits, so I couldn’t reply.';
 const SHEET_REFUSED = 'Billing declined';
 const composer = (page: Page) => page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
 const conversation = (page: Page) => page.locator('[data-alpha-layer="conversation"]');
