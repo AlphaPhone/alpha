@@ -87,7 +87,7 @@ import { cloudCredentialStore, cloudSelfRevocationSupported, cloudSignIn, cloudS
 import { findStoppedUserTurn, type StoppedUserTurn as StoppedTurn } from '../ui/api/conversation-turn-controller.ts';
 import './connection-ui.css';
 import {CloudMembershipControls,FUNDING_NEEDED,type MembershipBalance} from './cloud-membership-ui';
-import {outOfFundsLimit,outOfFundsNotice,outOfFundsRefusal,outOfFundsResetsAt} from './out-of-funds-notice';
+import {outOfFundsCode,outOfFundsNotice,outOfFundsResetsAt} from './out-of-funds-notice';
 import {CloudPlanManager,CloudFundsManager} from './cloud-plan-ui';
 import type {BillingAuthorityPort} from './cloud-plans';
 
@@ -1774,7 +1774,8 @@ function restoredMessages(items:Record<string,unknown>[]):RestoredMessage[] {
     const notice=item.role==='assistant'?systemNoticeKind(item.text):undefined;
     if(notice)return {id:item.id,from:'agent',text:systemNoticeDisplayText(notice),systemNotice:notice};
     const failureKind=item.role==='assistant'&&item.interrupted!==true&&failureKindOf(item)&&!calendarRefusalKept(item)?failureKindOf(item):undefined;
-    if(failureKind)return {id:item.id,from:'agent',text:Object.hasOwn(RESTORED_FAILURES,failureKind)?RESTORED_FAILURES[failureKind]:'This reply couldn’t be completed.',unfinished:true,failureKind};
+    // Out of funds by Cloud's own code: the live chat's one line, without a reset date that may have passed.
+    if(failureKind)return {id:item.id,from:'agent',text:outOfFundsCode(terminalCodeOf(item))?outOfFundsNotice('chat'):Object.hasOwn(RESTORED_FAILURES,failureKind)?RESTORED_FAILURES[failureKind]:'This reply couldn’t be completed.',unfinished:true,failureKind};
     const displayText=item.source==='lifeops-checkin'?checkinDisplayText(item):undefined;
     return {id:item.id,...(typeof item.forkSourceMessageId==='string'&&typeof item.forkSourceRoomId==='string'?{forkSourceMessageId:item.forkSourceMessageId,forkSourceRoomId:item.forkSourceRoomId,...(typeof item.forkAttachmentMessageId==='string'&&typeof item.forkAttachmentConversationId==='string'?{forkAttachmentMessageId:item.forkAttachmentMessageId,forkAttachmentConversationId:item.forkAttachmentConversationId}:{})}:{}),...(typeof item.clientMessageId==='string'?{clientMessageId:item.clientMessageId}:{}),from:item.role==='user'?'user':'agent',text:item.role==='user'?restoredText(item.text,item.userTextFormat):item.interrupted===true&&!item.text?'This reply did not finish.':item.text,...(item.role==='assistant'&&item.interrupted===true?{unfinished:true as const}:{}),...(displayText===undefined?{}:{displayText})};
   });
@@ -1817,7 +1818,7 @@ function effectAppliedBeforeFailure(reply:{terminalFailure?:unknown;actionResult
 }
 /** Owner-facing states for upstream's CHAT_FAILURE_KINDS (pinned contracts `chat.ts`). Each says
  * what happened and what to do next; none retries the message. Every known kind has one (replyFailure);
- * `insufficient_credits` has the out-of-funds line (out-of-funds-notice.ts), and only an unknown kind
+ * `insufficient_credits` is a Cloud billing refusal (its ServiceLimit), and only an unknown kind
  * keeps the generic text. */
 export const REPLY_FAILURES = {
   hosted_unreachable: 'Reply failed',
@@ -1834,7 +1835,8 @@ export const REPLY_FAILURES = {
 } as const;
 /** Test mocks only: a development agent without a model provider (constant-folded out of production). */
 const NO_PROVIDER_DEVELOPMENT = testMocksEnabled ? 'The agent has no model provider configured. Set one up on the agent; nothing was retried.' : '';
-/** Saved failed replies show this static copy, never the agent's prose or today's plan state. */
+/** Saved failed replies show this static copy, never the agent's prose or today's plan state.
+ * One that Cloud's code says was out of funds shows the chat's out-of-funds line (restoredMessages). */
 export const RESTORED_FAILURES: Record<string,string> = {
   no_provider: 'AI replies were off for this message.',
   insufficient_credits: 'This message was declined for billing.',
@@ -1856,6 +1858,11 @@ function failureKindOf(value:unknown):string|undefined {
   const kind=terminalFailure&&typeof terminalFailure==='object'?(terminalFailure as {kind?:unknown}).kind:undefined;
   return typeof kind==='string'?kind:undefined;
 }
+/** Cloud refused this account for billing: the Subscription sheet with its credits and membership
+ * code actions opens with a fresh balance once the turn ends, for a chat turn and for Talk alike. */
+function fundingRefusal(){update({fundingRefused:true,membershipDismissed:false});void refreshMembershipBalance();}
+/** The chat's out-of-funds line (out-of-funds-notice.ts), with the refusal's reset or else the verified plan's. */
+function chatOutOfFunds(limit:ServiceLimit|null):string {return outOfFundsNotice('chat',outOfFundsResetsAt(Date.now(),limit,state.residentSubscription,state.membershipPlan));}
 /** The error a failed reply surfaces. Cloud's own refusal (rate limit, used allowance, no active
  * plan, billing) carries its retry information and is presented as such; the phone never retries,
  * upgrades or buys anything. Mapped kinds carry `failureKind` (and `serviceLimit` for Cloud limits)
@@ -1864,16 +1871,14 @@ function replyFailure(kind:string|undefined,selected:Active,limit:ServiceLimit|n
   const failed=(text:string,extra:Record<string,unknown>={})=>Object.assign(new AlphaClientError('transport-failed',text),{failureKind:kind},extra);
   if(kind==='interrupted')return failed('Didn’t finish');
   if(selected.kind==='resident'&&(limit?.kind==='subscription-required'||limit?.kind==='billing-refused'))connectionController.recheckPlanAfterRefusal();
-  // A billing refusal of a signed-in account: one answer in the chat, and the Subscription
-  // sheet with its credits and membership code actions opens with a fresh balance once the turn ends.
+  // A billing refusal of a signed-in account: one answer in the chat, and the Subscription sheet.
   const funding=limit?.kind==='billing-refused'&&!!state.cloudAccount;
-  if(limit)update({lastServiceLimit:{...limit,observedAt:Date.now()},...(funding?{fundingRefused:true,membershipDismissed:false}:{})});
-  // Out of plan allowance and credits: the one fixed line Talk posts too (out-of-funds-notice.ts).
-  const outOfFunds=outOfFundsLimit(limit)||!limit&&outOfFundsRefusal({failureKind:kind});
-  const fundsText=()=>outOfFundsNotice('chat',outOfFundsResetsAt(Date.now(),limit,state.residentSubscription,state.membershipPlan));
-  if(funding){void refreshMembershipBalance();return Object.assign(new AlphaClientError('transport-failed',fundsText()),{failureKind:kind??limit.kind,serviceLimit:limit.kind,planAction:'funding'});}
-  if(limit)return Object.assign(new AlphaClientError('transport-failed',outOfFunds?fundsText():serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind});
-  if(outOfFunds)return failed(fundsText());
+  if(limit)update({lastServiceLimit:{...limit,observedAt:Date.now()}});
+  if(funding)fundingRefusal();
+  // That answer is the out-of-funds line Talk posts too only when Cloud's own code says the plan
+  // allowance and credits are used up; a billing hold or a bare billing kind stays 'Billing declined'.
+  const funds=outOfFundsCode(terminalCode);
+  if(limit)return Object.assign(new AlphaClientError('transport-failed',funds?chatOutOfFunds(limit):serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment))),{failureKind:kind??limit.kind,serviceLimit:limit.kind},funding?{planAction:'funding'}:{},funds?{outOfFunds:true}:{});
   if(kind==='rate_limited')return failed(serviceLimitMessage(null,Date.now(),cloudServiceName(cloud.environment)));
   const noProvider=REPLY_FAILURES.no_provider_resident;
   // The on-device agent without Eliza Cloud inference (no plan, offline, signed out): the same honest
@@ -2696,6 +2701,9 @@ export const connectionController = {
     await refreshMembershipBalance();
     if(expected&&service===expected)connectionController.recheckPlanNow();
   },
+  /** Cloud refused Talk's speech session for funds: the Subscription sheet opens as after a refused
+   * chat turn (replyFailure). */
+  noteFundsRefusal(){if(state.cloudAccount)fundingRefusal();},
   /** The chat's offer after a Cloud billing refusal: the same Subscription sheet while the
    * refusal applies (it closes by itself once Cloud admits the account again), else the plan panel. */
   openFunding(){
@@ -3719,7 +3727,9 @@ export const connectionController = {
         // A limit on the request itself is also the account panel's latest Cloud limit, with its retry time.
         const limit = refused ? null : readServiceLimit(error);
         if (limit) update({ lastServiceLimit: { ...limit, observedAt: Date.now() } });
-        const limited = refused ? Object.assign(new AlphaClientError('transport-failed', 'Busy · not sent'), { refusedBeforeTurn: true }) : new AlphaClientError('transport-failed', serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment)));
+        // Cloud's own out-of-funds code (allowance_exhausted) on the refusal: the chat's one out-of-funds line.
+        const funds = !refused && outOfFundsCode((error as { data?: { error?: { code?: unknown } } }).data?.error?.code);
+        const limited = refused ? Object.assign(new AlphaClientError('transport-failed', 'Busy · not sent'), { refusedBeforeTurn: true }) : funds ? Object.assign(new AlphaClientError('transport-failed', chatOutOfFunds(limit)), { outOfFunds: true }) : new AlphaClientError('transport-failed', serviceLimitMessage(limit, Date.now(), cloudServiceName(cloud.environment)));
         // Rate-limited before the post (creating or reading the conversation): still provably unsent.
         mark(limited); throw limited;
       }

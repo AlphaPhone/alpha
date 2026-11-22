@@ -1,8 +1,9 @@
 /**
  * Out of funds: Cloud refused Talk or a chat turn because this account has no plan allowance and
- * no credits left. The agent has no funds to say why, so the chat transcript gets one fixed line
- * instead of model output. Talk and text chat share this one wording. It is an ordinary transcript
- * entry: never a toast, popup, banner, status line or anything near the composer, and never spoken.
+ * no credits left, and said so with its own code. The agent has no funds to say why, so the chat
+ * transcript gets one fixed line instead of model output. Talk and text chat share this one
+ * wording. It is an ordinary transcript entry: never a toast, popup, banner, status line or
+ * anything near the composer, and never spoken.
  *
  * Function exports only: Node contract tests evaluate this source directly.
  */
@@ -10,33 +11,31 @@ import {formatMonthDay} from '../prototype/locale-time.ts';
 
 export type OutOfFundsSurface = 'talk' | 'chat';
 
-/** Cloud's 402 `error.code`, the speech relay's refusal `reason` and an agent reply's failure kind. */
+/**
+ * Cloud's explicit out-of-funds codes: a refusal body's `error.code`, a failed reply's
+ * `terminalFailure.code` and the speech relay's refusal `reason` (the native bridge reports it as
+ * its error code). A derived billing kind is not one: a billing hold (`billing_hold_active`), a
+ * generic `payment_required` and a reply's bare `insufficient_credits` failure kind, which the agent
+ * reports for every Cloud 402, keep the billing wording.
+ */
 const OUT_OF_FUNDS_CODES = new Set(['insufficient_credits', 'allowance_exhausted']);
-/** The shared ServiceLimit kinds Alpha reads the same refusals as (subscription-entitlement.ts). */
-const OUT_OF_FUNDS_LIMITS = new Set(['billing-refused', 'allowance-exhausted']);
 const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' ? value as Record<string, unknown> : null;
 
-/** A shared ServiceLimit (or its kind) that says the plan allowance and credits are used up. */
-export function outOfFundsLimit(limit: unknown): boolean {
-  const kind = typeof limit === 'string' ? limit : record(limit)?.kind;
-  return typeof kind === 'string' && OUT_OF_FUNDS_LIMITS.has(kind);
+/** Whether Cloud's own code says the plan allowance and credits are used up. */
+export function outOfFundsCode(code: unknown): boolean {
+  return typeof code === 'string' && OUT_OF_FUNDS_CODES.has(code);
 }
 
 /**
- * Whether a failure is Cloud refusing this account for funds: a server reason (`insufficient_credits`,
- * `allowance_exhausted`, from the speech bridge or a reply), a Cloud speech HTTP 402 or an allowance
- * 429, or a reply error that carries a billing or allowance ServiceLimit. Anything else, including a
- * 429 rate limit, a billing hold, no plan and every transport or microphone failure, is not.
+ * Whether a Talk failure is Cloud refusing this account for funds: the speech bridge's refusal code,
+ * or an agent turn's reply error that the chat already read as out of funds (`outOfFunds`). Nothing
+ * else is: a Cloud speech HTTP 402 carries no code and can be a billing hold, a speech 429's
+ * `allowance_exhausted` is the plan's voice allowance, and transport and microphone failures are
+ * not about funds.
  */
 export function outOfFundsRefusal(failure: unknown): boolean {
   const row = record(failure);
-  if (!row) return false;
-  const {code, failureKind, serviceLimit} = row;
-  if (typeof code === 'string' && (OUT_OF_FUNDS_CODES.has(code) || code === 'voice-http-402')) return true;
-  const limitCode = code === 'voice-http-429' ? record(row.data)?.limitCode : undefined;
-  if (typeof limitCode === 'string' && OUT_OF_FUNDS_CODES.has(limitCode)) return true;
-  if (typeof failureKind === 'string' && (OUT_OF_FUNDS_CODES.has(failureKind) || OUT_OF_FUNDS_LIMITS.has(failureKind))) return true;
-  return outOfFundsLimit(serviceLimit);
+  return !!row && (row.outOfFunds === true || outOfFundsCode(row.code));
 }
 
 /**
@@ -60,4 +59,9 @@ export function outOfFundsNotice(surface: OutOfFundsSurface, resetsAt: number | 
     try { reset = ` Your allowance resets on ${formatMonthDay(new Date(resetsAt))}.`; } catch { reset = ''; }
   }
   return `You’re out of plan allowance and credits, ${stopped}.${reset}`;
+}
+
+/** The offer beside a billing refusal's chat line, text chat's and Talk's alike: the Subscription sheet. */
+export function subscriptionOfferCard() {
+  return {type: 'generic', icon: 'info', title: 'Subscription', sub: '', planAction: 'funding'};
 }

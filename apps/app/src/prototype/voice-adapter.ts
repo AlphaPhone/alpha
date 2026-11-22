@@ -47,7 +47,7 @@ import { createNoteRecorderDriver } from '../runtime/note-recorder-driver';
 import { setNotesRecorderControl, type NotesRecordStart } from './notes-recorder-control';
 import { callSeenSince, currentCallState } from '../runtime/call-state';
 import { VOICE_CALL_ACTIVE, VOICE_CALL_ENDED, createCallReturnNotice, voiceEndedForCall } from '../runtime/voice-call-pause';
-import { outOfFundsLimit, outOfFundsNotice, outOfFundsRefusal, outOfFundsResetsAt } from '../runtime/out-of-funds-notice';
+import { outOfFundsNotice, outOfFundsRefusal, outOfFundsResetsAt, subscriptionOfferCard } from '../runtime/out-of-funds-notice';
 const voiceServiceName = () => connectionController.getSnapshot().residentInference==='direct'?'Cartesia':cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
 // Reading a note aloud sends only that note's text, never recordings or replies, so Notes names it.
 // Data leaving the phone stays named at the Read action, in four words or fewer.
@@ -616,15 +616,18 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   }
   // Out of plan allowance and credits: Cloud refused this Talk's start or its next minute, or the
   // agent's turn. The agent has no funds to say so, so Talk ends as at its Stop control and the chat
-  // gets the one fixed line (out-of-funds-notice.ts), as a text chat refusal does. The ended session
-  // reports nothing more (generation), so a retry or reconnect cannot add a second line. Every
-  // other failure keeps its own handling.
+  // gets the one fixed line (out-of-funds-notice.ts) with the Subscription offer, as a refused text
+  // chat turn does. A speech refusal also opens the Subscription sheet the way a refused chat turn
+  // does; an agent turn's refusal already went through the chat's own handling (replyFailure). The
+  // ended session reports nothing more (generation), so a retry or reconnect cannot add a second
+  // line. Every other failure keeps its own handling.
   function outOfFundsStop(failure:unknown,chat:ChatDestination,token:number){
     if(token!==generation||chatDestination!==chat||mediaUnconfirmed||!outOfFundsRefusal(failure))return false;
-    const shell=chat.shell,held=connectionController.getSnapshot(),limit=(failure as {code?:unknown}).code==='voice-http-429'?cloudVoiceServiceLimit(failure):null;
-    const text=outOfFundsNotice('talk',outOfFundsResetsAt(Date.now(),limit,outOfFundsLimit(held.lastServiceLimit)?held.lastServiceLimit:null,held.residentSubscription,held.membershipPlan));
+    const shell=chat.shell,held=connectionController.getSnapshot();
+    const text=outOfFundsNotice('talk',outOfFundsResetsAt(Date.now(),held.residentSubscription,held.membershipPlan));
     cancelChat(false,true);
-    if(shell.live!==false)shell.setState((previous:Bag)=>({chat:previous.chat==='full'?'full':'sheet',msgs:[...(previous.msgs||[]),{id:crypto.randomUUID(),from:'agent',text,card:null}]}));
+    if((failure as {outOfFunds?:unknown}).outOfFunds!==true)connectionController.noteFundsRefusal();
+    if(shell.live!==false)shell.setState((previous:Bag)=>({chat:previous.chat==='full'?'full':'sheet',msgs:[...(previous.msgs||[]),{id:crypto.randomUUID(),from:'agent',text,card:subscriptionOfferCard()}]}));
     return true;
   }
   // A Cloud voice 429 rate limit or 503 warm-up is transient, not the owner's problem: voice stays
@@ -915,7 +918,11 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
             // native streaming route, until the bridge reports a failure bound to the session and to
             // the cue's own request. A refused speak call fails only that call: the cue is silence
             // and the turn goes on.
+            // Cloud's funds refusal ends Talk with its one line wherever the capture is: the session
+            // keeps a capture end under Mute to itself, and the shared transport reports a socket's
+            // end only through the last listen's onEnd, open or closed.
             const opened=await listen({...handlers,
+              onEnd:error=>{if(conversationVoice!==assistant||!outOfFundsStop(error,chat,token))handlers.onEnd(error);},
               onSpeechStart:at=>{own.speaking=true;const heard=cueHeard&&pending(cueHeard.turn)&&cueAge(cueHeard)<=CUE_TAIL_MS?cueHeard:undefined;if(!heard)handlers.onSpeechStart(at);else if(heard.settledAt===undefined&&!own.fullDuplex)ignoring=true;else heldAt=at;},
               onSpeechEnd:at=>{own.speaking=false;if(ignoring){ignoring=false;results.push(false);}else{own.release();results.push(true);handlers.onSpeechEnd(at);}handed=false;},
               onSegment:text=>{if(results.shift()!==false)handlers.onSegment(text);},

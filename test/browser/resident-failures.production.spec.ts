@@ -42,8 +42,9 @@ async function sendRefused(page: Page, text: string) {
 }
 
 const KINDS = {
-  // Cloud's billing refusal of a signed-in account: the one out-of-funds line (out-of-funds-notice.ts).
-  insufficient_credits: 'You’re out of plan allowance and credits, so I couldn’t reply.',
+  // Cloud's billing refusal of a signed-in account without Cloud's own code (a hold reads the same):
+  // one answer naming both ways back (cloud-membership-ui.tsx).
+  insufficient_credits: 'Billing declined',
   provider_issue: 'Reply failed',
   generation_timeout: 'Reply failed',
   // Bound to an admitted plan, yet the agent ran without a provider: a check of what native bound is offered.
@@ -121,6 +122,35 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
     expect(foreign).toEqual([]);
   });
 }
+
+// Cloud's own out-of-funds code on the agent's terminal failure: the chat's one out-of-funds line
+// (out-of-funds-notice.ts) in place of Billing declined, with the same Subscription sheet and offer.
+const OUT_OF_FUNDS = 'You’re out of plan allowance and credits, so I couldn’t reply.';
+for (const code of ['insufficient_credits', 'allowance_exhausted'] as const) test(`a resident reply Cloud refuses with ${code} answers with the out-of-funds line once`, async ({ page }) => {
+  test.setTimeout(120_000);
+  const foreign = await connected(page);
+  await setStub(page, { stream: { failure: 'insufficient_credits', frame: 'done', code } });
+  await stub(page, s => { s.accounts[0].balance = 0; s.accounts[0].plan = 'none'; s.persist(); });
+  await send(page, `Failing ${code}`);
+  const account = page.getByRole('dialog', { name: 'Account', exact: true });
+  if (code === 'insufficient_credits') {
+    // A Cloud 402 code is a billing refusal: the Subscription sheet opens as for any billing refusal.
+    await expect(account).toBeVisible();
+    await account.getByRole('button', { name: 'Close Account', exact: true }).click();
+    await expect(account).toHaveCount(0);
+  }
+  await button(page, 'Expand chat').click();
+  await expect(conversation(page).getByText(OUT_OF_FUNDS, { exact: true })).toHaveCount(1);
+  await expect(conversation(page).getByText('Billing declined', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/PRIVATE_PROVIDER_ERROR_CANARY/)).toHaveCount(0);
+  await expect(bubble(page, `Failing ${code}`)).toHaveCount(1);
+  await page.waitForTimeout(1500);
+  await expect(conversation(page).getByText(OUT_OF_FUNDS, { exact: true })).toHaveCount(1);
+  expect(await harness(page, f => f.streams)).toBe(1);
+  expect(await stub(page, s => s.recoveries)).toEqual([]);
+  expect(await harness(page, f => f.unexpected)).toEqual([]);
+  expect(foreign).toEqual([]);
+});
 
 // The on-device agent runs without Eliza Cloud inference when the account has no plan (P-43). A chat
 // turn gets the agent's honest answer in the conversation with the plan actions, never "Set up AI".
