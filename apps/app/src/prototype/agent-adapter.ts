@@ -990,7 +990,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // Password manager pages pause observation entirely: no view, selection or revision.
       sensitive: view === 'wallet' || (view === 'settings' && passwordSurfaceOpen(shell.vget('settings'))) || s.secure === true || s.screen === 'lock' || s.screen === 'off' || document.hidden || shell.pageSuspended === true || connectionController.getSnapshot().open,
       ...(view==='notes'&&shell.notesSelection ? { selectedObject: shell.notesSelection } : previousNotesScope ? { selectedObject:previousNotesScope } : providerSelection ? { selectedObject: providerSelection } : ['files','photos'].includes(view) && shell.vget(view).open === '__native_selected_document' && shell.selectedContext ? { selectedObject: shell.selectedContext } : {}),
-    },telephonySelection);
+    },telephonySelection,view==='browser'?shell.browserOpeningTab?.():undefined);
     const published=alphaClient.getState().context;
     if(!published.sensitive){const key=JSON.stringify([published.view,published.selectedObject??null,telephonySelection]);if(shell.proposalContextKey!==undefined&&shell.proposalContextKey!==key)retireProposalCards(shell);shell.proposalContextKey=key;}
     if(alphaClient.getState().context.sensitive||[...(shell.readReplyLeases?.values()||[])].some((lease:any)=>lease.phase!=='cancelled'&&lease.phase!=='done'&&!connectionController.readReplyCurrent(lease.binding)))shell.cancelReadReplyCompletions?.();

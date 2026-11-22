@@ -61,6 +61,62 @@ for(const detent of ['sheet','full'])test(`a completed website request keeps Tal
  await noPhysicalOrLocalVoice(page);
 });
 
+test('a late native-style document update after Browser opens keeps the original Talk session',async({page})=>{
+ await setup(page);
+ const url='https://voice-browser.example/delayed';
+ let loadPage:()=>void;
+ const released=new Promise<void>(resolve=>{loadPage=resolve;});
+ await page.route(url,async route=>{
+  await released;
+  await route.fulfill({contentType:'text/html',body:'<h1>Delayed page</h1>'});
+ });
+ await page.evaluate(async url=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.browserDestination=url;
+  f.prompt='Visit '+url;
+  const {BrowserSurface}=await import('/src/browser/browser-surface.ts');
+  const original=BrowserSurface.prototype.navigate;
+  BrowserSurface.prototype.navigate=async function(input){
+   await original.call(this,input);
+   const surface=this as any,tab=surface.tab(input);
+   f.reportRedirect=()=>{
+    tab.navigation++;
+    tab.history[tab.position]=url+'/';
+    surface.emit(tab);
+   };
+  };
+ },url);
+ try{
+  await utterance(page);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','browser');
+  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+  const old=await page.evaluate(()=>(window as any).ownedVoiceNavigation.shell.browserSelection());
+  await page.evaluate(()=>(window as any).ownedVoiceNavigation.reportRedirect());
+  await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.shell.browserSelection()?.revision)).not.toBe(old.revision);
+  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+  loadPage!();
+  await expect(page.locator('[data-browser-surface]:visible').frameLocator('iframe').getByRole('heading',{name:'Delayed page'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.shell.browserOpeningTab())).toBeUndefined();
+  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+  await page.evaluate(()=>{
+   const f=(window as any).ownedVoiceNavigation;
+   f.prompt='Summarize the page I have open in one sentence.';
+   f.answer='This is the delayed page.';
+  });
+  await page.waitForTimeout(1600);
+  await utterance(page);
+  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+  expect(await page.evaluate(()=>{
+   const f=(window as any).ownedVoiceNavigation;
+   return {sameRoom:f.inputs.every((input:any)=>input.conversationId===f.room),view:f.inputs.at(-1).context.view,spoken:f.spoken.at(-1)};
+  })).toEqual({sameRoom:true,view:'browser',spoken:'This is the delayed page.'});
+  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ }finally{loadPage!();}
+});
+
 for(const stage of ['claim','ack'])test(`Stop while ${stage} is held retires own navigation without speech or rearm`,async({page},info)=>{await setup(page);await page.evaluate(stage=>{(window as any).ownedVoiceNavigation[stage==='claim'?'holdClaim':'holdAck']=true;},stage);await utterance(page);await expect.poll(()=>page.evaluate(stage=>(window as any).ownedVoiceNavigation[stage==='claim'?'claims':'acks'],stage)).toBe(1);await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await page.evaluate(stage=>(window as any).ownedVoiceNavigation[stage==='claim'?'releaseClaim':'releaseAck'](),stage);await page.waitForTimeout(400);expect(await page.evaluate(()=>({speech:(window as any).cloudNotesVoice.syntheses,starts:(window as any).cloudNotesVoice.starts,acks:(window as any).ownedVoiceNavigation.acks}))).toEqual({speech:0,starts:1,acks:1});const replies=await page.evaluate(()=>(window as any).ownedVoiceNavigation.requests.filter((request:any)=>request.path.endsWith('interact-result')));expect(replies).toHaveLength(1);expect(replies[0].body).toMatchObject({claimId:'claim-'+replies[0].body.requestId,success:stage==='ack',result:{switched:stage==='ack'}});await expect(page.locator('html')).toHaveAttribute('data-active-view',stage==='claim'?'home':'notes');await noPhysicalOrLocalVoice(page);});
 for(const change of ['user-navigation','account','selection'])test(`held ACK refuses voice continuation after ${change}`,async({page})=>{await setup(page);await page.evaluate(()=>(window as any).ownedVoiceNavigation.holdAck=true);await utterance(page);await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.acks)).toBe(1);await page.evaluate(async change=>{const f=(window as any).ownedVoiceNavigation;if(change==='user-navigation')f.shell.openView('calendar');else if(change==='account'){(window as any).cloudNotesVoice.owner='replacement';(await import('/src/runtime/connection-ui.tsx')).connectionController.close();}else{const {alphaClient}=await import('/src/runtime/alpha-client.ts');alphaClient.setViewContext({...alphaClient.getState().context,selectedObject:{kind:'note',id:'new-user-selection',revision:'2'}});}f.releaseAck();},change);await page.waitForTimeout(400);expect(await page.evaluate(()=>({speech:(window as any).cloudNotesVoice.syntheses,starts:(window as any).cloudNotesVoice.starts}))).toEqual({speech:0,starts:1});await noPhysicalOrLocalVoice(page);});
 

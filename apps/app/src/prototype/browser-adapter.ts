@@ -50,6 +50,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   let profileUnsupportedTab:string|undefined;
   // The tab the last approved open loaded into, until the user navigates it from the address bar.
   let agentTab:string|undefined;
+  let openingAgentTab:{id:string;selectionId:string}|undefined;
   let shell: any, lastGeometry = '', disposed = false, sharing = false, confirming = false, clearingData = false;
   let lastPresented:Bag|undefined,presentationFrame:number|undefined,presentationFailed=false;
   // Saving waits for a successful read so a damaged saved record is never overwritten implicitly.
@@ -113,7 +114,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     }).catch(report);
   }
   const state = () => shell?.vget('browser');
-  const refresh = () => { ++snapshotRevision; shell?.vset('browser', { nativeRevision: Date.now() }); };
+  const refresh = (afterCommit?:()=>void) => {
+    ++snapshotRevision;
+    shell?.vset('browser', {nativeRevision: Date.now()}, {afterCommit});
+  };
   const report = (error: unknown) => !disposed && shell?.toast(browserErrorMessage(error));
   const loopbackHost = (host: string) => /^(?:localhost|127(?:\.\d+){3}|\[::1\])$/i.test(host) || /\.localhost$/i.test(host);
   /** Android refuses cleartext pages, so a typed http:// address is tried over HTTPS.
@@ -245,7 +249,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     profileUnsupportedTab=undefined;
     const selectedTab=s.cur;
     const id = newTab ? newTabId() : target ?? s.cur, priv = newTab ? privateTab : isPrivate(id);
-    if (!approvedSignal && id === agentTab) agentTab = undefined;
+    if (!approvedSignal) {
+      openingAgentTab = undefined;
+      if (id === agentTab) agentTab = undefined;
+    }
     // Keep the last committed address durable while a restored page is loading or fails.
     const saved = restored.get(id);
     if (saved) tabs.annotate(id, { savedUrl: saved.url, title: saved.title });
@@ -284,6 +291,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     }
   }
   function closeTab(id: string) {
+    if (openingAgentTab?.id === id) openingAgentTab = undefined;
     const rest = state().tabs.filter((tab: Bag) => tab.id !== id), fallback = newTabId();
     if (tabs.has(id)) void Browser.close({session, id}).catch(report);
     tabs.forget([id]); restored.delete(id); restoringTabs.delete(id);
@@ -298,6 +306,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     return {visible, found: matchingTabs(closing ? visible : visible.filter(tab => tab.id !== s.cur), target, tabPage)};
   }
   async function command(command: string) {
+    openingAgentTab = undefined;
     const id = state()?.cur; if (!id || !tabs.has(id)) return;
     try { await Browser.command({ session, id, command }); } catch (error) { report(error); }
   }
@@ -542,7 +551,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   // tab identities while visiting other apps; a cold start begins with a fresh tab until
   // restoreSession replaces it with saved normal tabs.
   definition.persist = ['tabs', 'cur', 'marks', 'visits', 'visitTimes', 'titles'];
-  definition.onLeave = () => {reviews.cancel(historyClearReview);externalHandoff.retire();stopReading();hide();};
+  definition.onLeave = () => {openingAgentTab=undefined;reviews.cancel(historyClearReview);externalHandoff.retire();stopReading();hide();};
   definition.reply = () => null;
   definition.back = (s: Bag, api: Bag) => {
     if (s.historyClearOpen) { reviews.cancel(historyClearReview); api.set({historyClearOpen: false}); return true; }
@@ -682,6 +691,11 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const present: BrowserPresentation = chat => {
         signal.throwIfAborted();
         if (!id || disposed || document.hidden || state()?.cur !== (deferPresentation ? selected : id) || !tabs.has(id)) return false;
+        // The receipt owns this new foreground tab. Its first native load may
+        // advance the document revision after the view commits.
+        const selectedPage = tabs.selection(id);
+        openingAgentTab = chat!==undefined && tabInfo(id)?.loading && selectedPage
+          ? {id,selectionId:selectedPage.id} : undefined;
         // Select only after completion; even Browser-origin requests keep their
         // original document context throughout journal and receipt handling.
         if (deferPresentation) shell.vset('browser', {cur: id, editing: false, tabsOpen: false, menu: false, lib: null, share: false});
@@ -759,6 +773,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // transmitted merely by opening the agent. Navigation changes the revision
     // so a proposal for an earlier document cannot retain current authority.
     this.browserSelection = () => tabs.selection(state()?.cur);
+    this.browserOpeningTab = () => openingAgentTab?.id===state()?.cur ? openingAgentTab?.selectionId : undefined;
     const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||(b.menu&&!menuOverlaysPage)||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
   let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any;
   void Browser.addListener('findResult',(event:BrowserFindResult)=>{
@@ -790,7 +805,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     }
     // The native page says only that it could not load. Android blocks pages without HTTPS, so say that.
     if(Capacitor.isNativePlatform()&&change.info.error&&!change.previous?.error&&event.id===state()?.cur){try{const failed=new URL(String(change.info.url));if(failed.protocol==='http:'&&!loopbackHost(failed.hostname))shell?.toast('This site has no secure (HTTPS) connection, so it cannot be opened.');}catch{}}
-    refresh();
+    const finished = openingAgentTab?.id===event.id && !event.loading ? openingAgentTab : undefined;
+    refresh(finished ? ()=>{
+      if(openingAgentTab===finished)openingAgentTab=undefined;
+    } : undefined);
   }).then((value:any)=>{listener=value;}).catch(()=>{});
   // target=_blank links and pop-ups that the native browser opened as a tab.
   void Browser.addListener('tabOpened',(event:BrowserTabOpened)=>{

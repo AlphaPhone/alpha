@@ -288,7 +288,7 @@ export class AlphaClient {
     }
   }
   /** A local selection can retire approvals without publishing its identifier to the agent. */
-  setViewContext(context: ViewContext, localSelection: string | null = null): void {
+  setViewContext(context: ViewContext, localSelection: string | null = null, openingBrowserTab?: string): void {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
@@ -303,19 +303,28 @@ export class AlphaClient {
       this.localSelection === null && selection === null && !this.context.selectedObject &&
       next.selectedObject?.kind === "canonical-note-source" && next.selectedObject.id === "notes" &&
       this.context.timeZone === next.timeZone;
+    // A new Browser page can redirect or finish after its agent-owned presentation.
+    // The visible tab still owns Talk, but a turn or approval for the earlier document
+    // must not acquire the new document's authority.
+    const ownBrowserLoad = !!openingBrowserTab && !this.context.sensitive && !next.sensitive &&
+      this.context.view === "browser" && next.view === "browser" &&
+      this.localSelection === null && selection === null &&
+      this.context.selectedObject?.kind === "browser-tab" && this.context.selectedObject.id === openingBrowserTab &&
+      next.selectedObject?.kind === "browser-tab" && next.selectedObject.id === openingBrowserTab &&
+      this.context.timeZone === next.timeZone;
     const ownChange = ownView || this.isOwnPageChange(next, selection), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
     // A view or page change committed by this request keeps its reply in flight.
     // Approvals stay bound to the earlier screen and are retired above.
-    if (ownChange || notesSourceLoaded) {
+    if (ownChange || notesSourceLoaded || ownBrowserLoad) {
       if (ownChange) this.activeRevision = this.context.revision;
       if (this.ownMoves.size >= 32) this.ownMoves.clear();
       this.ownMoves.set(this.context.revision, previous);
     } else this.ownMoves.clear();
-    // A turn submitted before the list was ready keeps its original source
-    // binding. Do not dispatch against the newly published source implicitly.
+    // Passive source updates preserve the conversation and still retire a turn
+    // bound to the previous source. A page question must read the selected revision.
     if (!ownChange) {
       if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;}
     }
