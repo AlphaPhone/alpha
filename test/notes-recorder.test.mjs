@@ -537,5 +537,5 @@ test('audio-first recording never starts automatic transcription even with a loc
 
 test('the native recorder retains finished audio and uncertain recovery records across restart', {skip:jsonJarSkip}, () => {
  const stubs=['android/content/Context','android/os/Build','android/os/Handler','android/os/Looper','android/os/SystemClock','android/util/AtomicFile','android/media/MediaRecorder','android/media/MediaFormat','android/media/MediaCodec','android/media/MediaExtractor','android/media/MediaMuxer','com/getcapacitor/JSObject','com/getcapacitor/JSArray'].map(name=>fixture('note-recorder-jvm/'+name+'.java'));
- assert.match(runJvm([...stubs,nativeSource('AlphaNoteRecorder.java'),nativeSource('AlphaUtil.java'),fixture('NoteRecorderJournalTest.java')],'ai.alphacompute.alphaphone.NoteRecorderJournalTest',{json:true}),/^PASS note recorder journal/);
+ assert.match(runJvm([...stubs,nativeSource('AlphaNoteRecorder.java'),fixture('NoteRecorderJournalTest.java')],'ai.alphacompute.alphaphone.NoteRecorderJournalTest',{json:true}),/^PASS note recorder journal/);
 });

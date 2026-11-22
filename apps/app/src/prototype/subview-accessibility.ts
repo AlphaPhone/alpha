@@ -4,8 +4,6 @@ import {createKeyedListFocus} from './keyed-list-focus';
 /** On a split canvas the open message, note or file sits beside its list, which stays usable. */
 const split=()=>currentSurfaceLayout().split;
 type Bag=Record<string,any>;
-/** Controls that can take focus when a screen opens. */
-const FOCUSABLE='button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
 type Popup=[key:string,open:(out:Bag)=>boolean,close:(out:Bag)=>void];
 /**
  * Menus and sheets drawn over a view behind a scrim. Each one owns focus while it is open:
@@ -15,7 +13,7 @@ type Popup=[key:string,open:(out:Bag)=>boolean,close:(out:Bag)=>void];
 const POPUPS:Record<string,Popup[]>={
  browser:[['menuModal',out=>!!out.menu,out=>out.closeMenu?.()],['shareModal',out=>!!out.share,out=>out.closeShare?.()]],
  photos:[['infoModal',out=>!!out.infoOpen,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareOpen,out=>out.closeSheet?.()]],
- notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()]],
+ notes:[['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()],['askModal',out=>!!out.trashAskOpen,out=>out.trashAskClose?.()],['noteMenu',out=>!!(out.ed?.menuShown||out.vo?.menuShown||out.lk?.menuShown),out=>(out.ed||out.vo||out.lk)?.closeMenu?.()],['previousNotesModal',out=>!!out.previousNotesMenu,out=>out.closePreviousNotesMenu?.()]],
  files:[['menuModal',out=>!!out.menuOpen,out=>out.closeMenu?.()],['moveModal',out=>!!out.moveSheet,out=>out.closeSheet?.()],['shareModal',out=>!!out.shareSheet,out=>out.closeSheet?.()]],
  workflows:[['stepModal',out=>!!out.b?.sheetOn,out=>out.b?.closeSheet?.()]],
  settings:[['sheetModal',out=>!!out.hasSheet,out=>out.sheet?.close?.()]],
@@ -26,29 +24,24 @@ function popupFocus(name:string,current:()=>Bag){
 }
 /** Full-screen subviews replace their covered content in accessibility navigation. */
 export function installSubviewAccessibility(views:Bag){
- {
-  const render=views.inbox.render;
+ for(const name of ['inbox','workflows']){
+  const render=views[name].render;
   let output:Bag={};
   const attachmentModal=reviewFocus(()=>output.attachment?.close());
   const providerModal=reviewFocus(()=>output.provider?.close());
   const mailSelectionModal=reviewFocus(()=>output.mailReview?.close());
-  const focus=focusHistory(),detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read);
-  views.inbox.render=(state:Bag,api:Bag)=>{
+  const focus=focusHistory();
+  const detailFocus=subviewFocus(focus.read),composeFocus=subviewFocus(focus.read),runFocus=subviewFocus(focus.read),builderFocus=subviewFocus(focus.read);
+  const popups=popupFocus(name,()=>output);
+  views[name].render=(state:Bag,api:Bag)=>{
    const out=output=render(state,api);
-   attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
-   mailSelectionModal.render(!!out.mailReview);
-   const review=!!(out.attachmentOpen||out.providerReview||out.mailReview);
-   return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,mailSelectionModal:mailSelectionModal.ref,detailFocus,composeFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
-  };
- }
- {
-  const render=views.workflows.render;
-  let output:Bag={};
-  const focus=focusHistory(),detailFocus=subviewFocus(focus.read),runFocus=subviewFocus(focus.read),builderFocus=subviewFocus(focus.read);
-  const popups=popupFocus('workflows',()=>output);
-  views.workflows.render=(state:Bag,api:Bag)=>{
-   const out=output=render(state,api);
-   return {...out,...popups(out),captureSubviewFocus:focus.capture,detailFocus,runFocus,builderFocus,listCovered:!!(out.detail||out.automation?.detail||out.runOpen||out.builder),detailCovered:!!(out.runOpen||out.builder),runCovered:!!out.builder};
+   if(name==='inbox'){
+    attachmentModal.render(!!out.attachmentOpen);providerModal.render(!!out.providerReview);
+    mailSelectionModal.render(!!out.mailReview);
+    const review=!!(out.attachmentOpen||out.providerReview||out.mailReview);
+    return {...out,captureSubviewFocus:focus.capture,attachmentModal:attachmentModal.ref,providerModal:providerModal.ref,mailSelectionModal:mailSelectionModal.ref,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!((out.detail&&!split())||out.composing||review),detailCovered:!!(out.composing||review),composeCovered:review};
+   }
+   return {...out,...popups(out),captureSubviewFocus:focus.capture,detailFocus,composeFocus,runFocus,builderFocus,listCovered:!!(out.detail||out.automation?.detail||out.runOpen||out.builder),detailCovered:!!(out.runOpen||out.builder),runCovered:!!out.builder};
   };
  }
  for(const [name,keys,coverage] of [
@@ -99,7 +92,7 @@ function subviewFocus(read:()=>FocusTarget){
    const target=read();previous=target.element;scope=target.scope;
    queueMicrotask(()=>{
     if(mounted!==element||!element.isConnected||element.closest('[inert]')||document.querySelector('dialog[open]'))return;
-    element.querySelector<HTMLElement>(FOCUSABLE)?.focus({preventScroll:true});
+    element.querySelector<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]')?.focus({preventScroll:true});
    });
   }else{
    previous=null;scope=null;
@@ -129,7 +122,7 @@ function reviewFocus(close:()=>void){
 }
 
 /**
- * A list-detail split that collapses covers its list. When the list held focus, focus moves
+ * A list-detail split that collapses covers its list (#411). When the list held focus, focus moves
  * into the open item that now fills the screen instead of being dropped to the page. `previous` is
  * the focused element from before the layout changed.
  */
@@ -139,7 +132,7 @@ export function keepFocusOnScreen(previous:Element|null){
  const covered=previous.closest<HTMLElement>('[data-alpha-subview][inert]');
  if(!covered)return;
  const open=Array.from(covered.parentElement?.children||[]).filter((element):element is HTMLElement=>element instanceof HTMLElement&&element.matches('[data-alpha-subview]:not([inert])')).pop();
- open?.querySelector<HTMLElement>(FOCUSABLE)?.focus({preventScroll:true});
+ open?.querySelector<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]')?.focus({preventScroll:true});
 }
 
 type FocusTarget={element:HTMLElement|null;scope:HTMLElement|null};

@@ -3207,11 +3207,11 @@ registerView("maps", {
 
 /* ===== module: notes ===== */
 /* Notes: text, checklist, voice (live transcription + Alpha summary), link clips. Holes are {{notes.*}}. */
-IC.notesPin = "M9 3h6l-1 6 4 4H6l4-4zM12 13v8";
-IC.notesList = "M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17";
-IC.notesBox = "M5 5h14v14H5z";
-IC.notesRecDot = "M12 7.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM12 10a2 2 0 1 1 0 4a2 2 0 1 1 0-4z";
-IC.notesWave = "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0";
+IC.notesPin = IC.notesPin || "M9 3h6l-1 6 4 4H6l4-4zM12 13v8";
+IC.notesList = IC.notesList || "M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17";
+IC.notesBox = IC.notesBox || "M5 5h14v14H5z";
+IC.notesRecDot = IC.notesRecDot || "M12 7.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM12 10a2 2 0 1 1 0 4a2 2 0 1 1 0-4z";
+IC.notesWave = IC.notesWave || "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2M21 12h0";
 var NOTES_RED = "var(--alpha-notes-red)";
 
 var NOTES_WAVE = []; (function () { for (var i = 0; i < 56; i++) NOTES_WAVE.push(Math.round(8 + 26 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37)) + (i % 3) * 3)); })();
@@ -3245,7 +3245,7 @@ function notesClose(api) {
   api.set(notesLeave(api, null));
 }
 /** Leaves the open note as Back does: dictation and the unsent checklist item end with it, and an
- * empty new note is dropped. On a split canvas another note opens beside the list directly. */
+ * empty new note is dropped. On a split canvas (#411) another note opens beside the list directly. */
 function notesLeave(api, next) {
   if (api.canonicalNotes) { void api.canonicalNotes.leave(next); return {}; }
   var s = api.get("notes"); notesStopTimers();
@@ -3371,7 +3371,7 @@ registerView("notes", {
     var ed = null, vo = null, lk = null;
     var common = n ? {
       close: function () { notesClose(api); },
-      pinLabel: n.pinned ? "Unpin" : "Pin",
+      pinIcon: IC.notesPin, pinCss: n.pinned ? "color: var(--acct)" : "", pinLabel: n.pinned ? "Unpin" : "Pin",
       pin: async function () { api.set({ menu: null }); await notesUpd(api, n.id, { pinned: !n.pinned }); },
       share: function () { api.set({ sheet: "share", menu: null }); },
       del: function () { api.set({ menu: null }); notesDelete(api, n.id); },
@@ -3383,7 +3383,6 @@ registerView("notes", {
       onTitle: function (e) { notesUpd(api, n.id, { title: e.target.value }); }
     } : null;
     if (isEdit) {
-      var addItem = function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); };
       ed = Object.assign({}, common, {
         isText: n.kind === "text", isList: n.kind === "list",
         saveStatus: "",
@@ -3408,8 +3407,8 @@ registerView("notes", {
         }),
         newItem: st.newItem || "",
         onNew: function (e) { api.set({ newItem: e.target.value }); },
-        addItem: addItem,
-        newKey: function (e) { if (e.key === "Enter") { e.preventDefault(); addItem(); } },
+        addItem: function () { var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); },
+        newKey: function (e) { if (e.key === "Enter") { e.preventDefault(); var v = String(api.get("notes").newItem || "").trim(); if (!v) return; notesUpd(api, n.id, function (x) { return { items: (x.items || []).concat([{ t: v, done: false }]) }; }); api.set({ newItem: "" }); } },
       });
     }
     if (n && n.kind === "voice") {
@@ -3434,10 +3433,12 @@ registerView("notes", {
         proc: st.proc === n.id, ready: st.proc !== n.id,
         summary: n.summary || [], noSummary: !(n.summary || []).length,
         hasActions: (n.actions || []).length > 0,
+        actCount: (n.actions || []).length === 1 ? "1 action item" : (n.actions || []).length + " action items",
         actions: (n.actions || []).map(function (a, i) {
           return { t: a.t, idx: i, css: a.done ? "text-decoration: line-through; color: var(--mut)" : "", box: a.done ? "background: var(--fg); color: var(--bg)" : "box-shadow: inset 0 0 0 1.5px var(--mut); color: transparent", label: (a.done ? "Uncheck " : "Check ") + a.t,
             toggle: function () { notesUpd(api, n.id, function (x) { return { actions: x.actions.map(function (y, j) { return j === i ? Object.assign({}, y, { done: !y.done }) : y; }) }; }); } };
         }),
+        calIcon: n.onCal ? IC.check : IC.cal, calLabel: n.onCal ? "Added to calendar" : "Add action items to calendar", calText: n.onCal ? "On calendar" : "Add to calendar",
         toCal: function () {
           if (n.onCal) return;
           notesUpd(api, n.id, { onCal: true });
@@ -3457,18 +3458,18 @@ registerView("notes", {
     if (n && n.kind === "link") {
       lk = Object.assign({}, common, {
         clips: n.clips || [], domain: n.domain, when: n.when,
-        visit: function () { api.open("browser", { url: n.url }); }
+        visit: function () { if (VIEWS.browser) api.open("browser", { url: n.url }); else api.toast("Opening " + n.domain); }
       });
     }
 
     var shareSheet = st.sheet === "share" && !!n;
     return {
-      notesTitle: "Notes", canRecord: true, canCreate: true,
+      notesTitle: "Notes", primaryNotes: true, canRecord: true, canCreate: true,
       newNote: function () { notesNew(api, "text"); },
       // The Notes recorder (voice-adapter, note-recorder.ts) handles Record; `record` is its deep-link flag.
       record: function () { api.set({ record: true }); },
       pinnedRows: pinnedRows, otherRows: otherRows, hasPinned: pinnedRows.length > 0, notesHead: pinnedRows.length > 0 && otherRows.length > 0,
-      none: rows.length === 0, emptyTitle: filter ? "No matches" : "No notes",
+      none: rows.length === 0, emptyTitle: filter ? "No matches" : "No notes", emptyMessage: "",
       filterOn: !!filter, filterLabel: filter ? notesFilterLabel(filter, folders) + " · " + shown.length : "",
       clearFilter: function () { api.set({ filter: null }); },
       isEdit: isEdit, ed: ed, isVoice: !!vo, vo: vo, isLink: !!lk, lk: lk,
@@ -3481,8 +3482,8 @@ registerView("notes", {
 /* ===== module: contacts ===== */
 /* Contacts. Holes are {{contacts.*}}. Working copy of people lives in st.list (persisted);
    other apps can read api.get("contacts").list and fall back to PEOPLE. */
-IC.contactsGift = "M4 11h16v9H4zM3 8h18v3H3zM12 8v12M12 8c-1.5-3-5-3.5-5-1.5S12 8 12 8zM12 8c1.5-3 5-3.5 5-1.5S12 8 12 8z";
-IC.contactsNote = "M5 6h14M5 10h14M5 14h9M5 18h6";
+IC.contactsGift = IC.contactsGift || "M4 11h16v9H4zM3 8h18v3H3zM12 8v12M12 8c-1.5-3-5-3.5-5-1.5S12 8 12 8zM12 8c1.5-3 5-3.5 5-1.5S12 8 12 8z";
+IC.contactsNote = IC.contactsNote || "M5 6h14M5 10h14M5 14h9M5 18h6";
 
 function ctIni(first, last) { var s = ((first || "").charAt(0) + (last || "").charAt(0)).toUpperCase(); return s || "#"; }
 function ctMake(p) { var name = ((p.first || "") + " " + (p.last || "")).trim(); return Object.assign({}, p, { name: name || p.phone || "No name", ini: ctIni(p.first, p.last) }); }

@@ -1,8 +1,9 @@
 import {noteFolderOf,type NotesFolder} from './notes-folders-model.ts';
 
 /**
- * Pure Notes list helpers: one-column rows with title, date and a two-line preview, pinned
- * notes first, folder chips and the agent's read-only filter.
+ * Pure Notes list helpers (PLAN.md section 3): one-column rows with title, date and a two-line
+ * preview, pinned notes first, folder chips and the agent's read-only filter. Dependency-free so
+ * test/notes-view.test.mjs exercises it directly.
  */
 type Note={id:string;kind?:unknown;title?:unknown;body?:unknown;items?:unknown;lines?:unknown;summary?:unknown;actions?:unknown;domain?:unknown;clips?:unknown;audio?:unknown;pinned?:unknown;folderId?:unknown;modifiedAt?:unknown;updatedAt?:unknown;createdAt?:unknown};
 export type NotesKind='text'|'list'|'voice'|'link';
@@ -33,7 +34,7 @@ export function notesFilterLabel(filter:NotesFilter,folders:readonly Pick<NotesF
  const folder=filter.folder===undefined?undefined:folders.find(f=>f.id===filter.folder)?.name;
  return [filter.text?`“${filter.text}”`:'',filter.kind?KIND_LABEL[filter.kind]:'',folder??''].filter(Boolean).join(' · ')||'All notes';
 }
-function noteInstant(note:Note):number{
+export function noteInstant(note:Note):number{
  const value=note.modifiedAt??note.updatedAt??note.createdAt;
  const at=typeof value==='number'?value:typeof value==='string'?Date.parse(value):NaN;
  return Number.isFinite(at)?at:-1;

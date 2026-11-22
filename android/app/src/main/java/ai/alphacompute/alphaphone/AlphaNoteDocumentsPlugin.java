@@ -2,7 +2,6 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.media.DocumentBytes;
 import ai.eliza.plugins.media.DocumentDestinations;
 import ai.eliza.plugins.media.DocumentExport;
-import ai.eliza.plugins.media.DocumentFolderTree;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
@@ -12,13 +11,13 @@ import com.getcapacitor.*;
 import com.getcapacitor.annotation.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-/** Explicit SAF text and PDF export. No broad file permission or network. Text and title
+/** Explicit, transient SAF text import/export. No broad file permission or network. Text and title
  * rules, the document pickers and the verified write are the shared native media module's
  * (DocumentExport, DocumentDestinations); Alpha keeps its plugin name and product messages. */
 @CapacitorPlugin(name="AlphaNoteDocuments")
 public final class AlphaNoteDocumentsPlugin extends Plugin {
  private final AtomicBoolean busy=new AtomicBoolean();private final ExecutorService worker=Executors.newSingleThreadExecutor();private volatile boolean closed;
- private static JSObject result(String status,String message){return DocumentFolderTree.result(status,message);}
+ private JSObject result(String status,String message){JSObject r=new JSObject();r.put("status",status);r.put("message",message);return r;}
  private void choose(PluginCall call,Intent intent,String callback){
   if(closed||!busy.compareAndSet(false,true)){call.resolve(result("unavailable","A document operation is already open."));return;}
   try{startActivityForResult(call,intent,callback);}catch(RuntimeException error){busy.set(false);call.resolve(result("unavailable","Android document selection is unavailable."));}
@@ -35,14 +34,14 @@ public final class AlphaNoteDocumentsPlugin extends Plugin {
   catch(Exception error){call.resolve(result("failed","PDF export requires valid PDF bytes of at most 8 MB."));}
  }
  /** Writes once to the chosen document and reads it back; product messages per shared outcome. */
- private void write(PluginCall call,Uri uri,byte[] content){
+ private void write(PluginCall call,Uri uri,byte[] content,String exported,String unverified){
   DocumentExport.Outcome outcome=DocumentDestinations.write(getContext().getContentResolver(),uri,content);
-  if(outcome==DocumentExport.Outcome.EXPORTED){JSObject value=result(outcome.status,"Saved.");value.put("bytes",content.length);call.resolve(value);}
-  else call.resolve(result(outcome.status,outcome==DocumentExport.Outcome.UNVERIFIED?"Save not confirmed. Check the file before trying again.":"The selected destination could not be written."));
+  if(outcome==DocumentExport.Outcome.EXPORTED){JSObject value=result(outcome.status,exported);value.put("bytes",content.length);call.resolve(value);}
+  else call.resolve(result(outcome.status,outcome==DocumentExport.Outcome.UNVERIFIED?unverified:"The selected destination could not be written."));
  }
  @ActivityCallback private void exportedPdf(PluginCall call,ActivityResult response){Uri uri=chosen(call,response);if(uri==null)return;run(call,()->{
   byte[] content;try{content=pdfBytes(call);}catch(RuntimeException invalid){call.resolve(result("failed","The selected destination could not be written."));return;}
-  write(call,uri,content);
+  write(call,uri,content,"Saved.","Save not confirmed. Check the file before trying again.");
  });}
  private Uri chosen(PluginCall call,ActivityResult response){
   if(call==null){busy.set(false);return null;}
@@ -52,7 +51,7 @@ public final class AlphaNoteDocumentsPlugin extends Plugin {
  private void run(PluginCall call,Runnable operation){PluginWorkers.submit(worker,()->{try{if(closed)call.resolve(result("cancelled","Document operation closed."));else operation.run();}finally{busy.set(false);}},()->{busy.set(false);call.resolve(result("cancelled","Document operation closed."));});}
  @ActivityCallback private void exported(PluginCall call,ActivityResult response){Uri uri=chosen(call,response);if(uri==null)return;run(call,()->{
   byte[] content;try{content=DocumentExport.utf8(call.getString("text"));}catch(Exception invalid){call.resolve(result("failed","The selected destination could not be written."));return;}
-  write(call,uri,content);
+  write(call,uri,content,"Saved.","Save not confirmed. Check the file before trying again.");
  });}
  /** A pending PDF export holds the whole file in its call data; Capacitor would copy that into the
   * Activity's saved state, which Android rejects above about 1 MB and ends the process. An export

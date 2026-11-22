@@ -13,6 +13,7 @@ import android.os.SystemClock;
 import android.util.AtomicFile;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -51,7 +52,7 @@ final class AlphaNoteRecorder {
  /** Recording stops, keeping every finished segment, when free space falls below this. */
  static final long MIN_FREE_BYTES=64L*1024*1024;
  private static final int MAX_JOURNAL_BYTES=32*1024*1024;
- static final String ID=AlphaUtil.UUID_CANONICAL;
+ static final String ID="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
  private static AlphaNoteRecorder instance;
  static synchronized AlphaNoteRecorder get(Context context){if(instance==null)instance=new AlphaNoteRecorder(context.getApplicationContext());return instance;}
 
@@ -80,8 +81,7 @@ final class AlphaNoteRecorder {
  void clearListener(Listener value){if(listener==value)listener=null;}
 
  private File root(){File d=new File(context.getNoBackupFilesDir(),"note-recording");if(!d.isDirectory()&&!d.mkdirs())throw new IllegalStateException("Recording storage unavailable");return d;}
- private File segmentFile(int i){return segmentFile(dir,i);}
- private static File segmentFile(File dir,int i){return new File(dir,String.format(Locale.ROOT,"%05d.m4a",i));}
+ private File segmentFile(int i){return new File(dir,String.format(Locale.ROOT,"%05d.m4a",i));}
  private AtomicFile journal(){return new AtomicFile(new File(dir,"segments.json"));}
 
  /** A recording a previous process left behind comes back paused, with its finished segments. */
@@ -99,14 +99,14 @@ final class AlphaNoteRecorder {
      for(int i=0;i<list.length();i++){JSONObject s=list.getJSONObject(i);segments.add(new Segment(Math.max(1,s.getLong("d")),s.has("t")?s.getString("t"):null));}
     }
     if(segments.isEmpty())throw new IOException("No finished audio");
-    for(int i=0;i<segments.size();i++)if(!segmentFile(session,i).isFile())throw new IOException("Segment missing");
+    for(int i=0;i<segments.size();i++)if(!new File(session,String.format(Locale.ROOT,"%05d.m4a",i)).isFile())throw new IOException("Segment missing");
     // The segment that was being written has no journal entry and cannot be read; it is dropped.
     File[] partial=session.listFiles((d,n)->n.endsWith(".m4a")&&parseIndex(n)>=segments.size());
     if(partial!=null)for(File f:partial)f.delete();
     id=session.getName();dir=session;finished.addAll(segments);index=segments.size();
     String recordedOwner=record.optString("ownerDigest","");
     String recordedFolder=record.optString("folderId","");
-    ownerDigest=AlphaUtil.isSha256Hex(recordedOwner)&&validFolder(recordedFolder)?recordedOwner:null;
+    ownerDigest=validOwner(recordedOwner)&&validFolder(recordedFolder)?recordedOwner:null;
     folderId=ownerDigest!=null&&!recordedFolder.isEmpty()?recordedFolder:null;
     canonicalSavePending=record.optBoolean("canonicalSavePending",false);
     state="paused";recovered=true;stopReason=null;
@@ -118,16 +118,23 @@ final class AlphaNoteRecorder {
   }
  }
  private static JSONObject readJournal(InputStream in)throws IOException,org.json.JSONException{
-  return new JSONObject(new String(AlphaUtil.readBounded(in,MAX_JOURNAL_BYTES,"Recording index is too large"),StandardCharsets.UTF_8));
+  var bytes=new ByteArrayOutputStream();
+  byte[] buffer=new byte[8192];
+  for(int count;(count=in.read(buffer))!=-1;){
+   if(count>MAX_JOURNAL_BYTES-bytes.size())throw new IOException("Recording index is too large");
+   bytes.write(buffer,0,count);
+  }
+  return new JSONObject(new String(bytes.toByteArray(),StandardCharsets.UTF_8));
  }
  private static int parseIndex(String name){try{return Integer.parseInt(name.substring(0,name.length()-4));}catch(RuntimeException e){return -1;}}
  private long usableSpace(){try{return root().getUsableSpace();}catch(RuntimeException unavailable){return 0;}}
 
+ private static boolean validOwner(String value){return value!=null&&value.matches("[a-f0-9]{64}");}
  private static boolean validFolder(String value){return value==null||value.isEmpty()||value.matches("f-[A-Za-z0-9_-]{1,64}");}
  synchronized JSObject start(String owner,String destination) throws IOException {
   if(id!=null)throw new IllegalStateException("A recording is already open");
   if(recoveryUnavailable)throw new IOException("recovery");
-  if(!AlphaUtil.isSha256Hex(owner)||!validFolder(destination))throw new IllegalArgumentException("Invalid recording ownership");
+  if(!validOwner(owner)||!validFolder(destination))throw new IllegalArgumentException("Invalid recording ownership");
   if(usableSpace()<MIN_FREE_BYTES)throw new IOException("storage");
   String next=UUID.randomUUID().toString();File folder=new File(root(),next);
   if(!folder.mkdirs())throw new IOException("Recording storage unavailable");
@@ -162,7 +169,7 @@ final class AlphaNoteRecorder {
   if(recorder==null||!"recording".equals(state))return;
   if(currentMs()<SEGMENT_MS-500){scheduleRollover();return;}
   finishCurrent();
-  if(stopIfLowStorage())return;
+  if(usableSpace()<MIN_FREE_BYTES){state="stopped";stopReason="storage";publish();return;}
   try{open(index);}catch(IOException|RuntimeException error){state="stopped";stopReason="error";}
   publish();
  }
@@ -180,31 +187,20 @@ final class AlphaNoteRecorder {
    }else if(what==MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED){
     // The next file was not accepted in time: finalize this one and continue in a fresh recorder.
     finishCurrent();
-    if(stopIfLowStorage())return;
+    if(usableSpace()<MIN_FREE_BYTES){state="stopped";stopReason="storage";publish();return;}
     open(index);publish();
    }
   }catch(IOException|RuntimeException error){end("error",false);}
  }
 
- /** After a finished segment: ends the recording, keeping its segments, when storage is low. */
- private boolean stopIfLowStorage(){
-  if(usableSpace()>=MIN_FREE_BYTES)return false;
-  state="stopped";stopReason="storage";publish();return true;
- }
- /** Stops and releases a recorder; false when it had no audio yet (MediaRecorder.stop throws then). */
- private static boolean stopAndRelease(MediaRecorder active){
-  boolean stopped=false;
-  try{active.stop();stopped=true;}catch(RuntimeException tooShort){/* No audio in this segment yet. */}
-  active.release();
-  return stopped;
- }
  /** Stops the recorder, keeping the segment being written when it is readable. */
  private void finishCurrent(){
   main.removeCallbacks(rollover);
-  if(recorder==null)return;
-  long duration=Math.max(1,currentMs());
-  MediaRecorder active=recorder;recorder=null;
-  boolean kept=stopAndRelease(active);
+  MediaRecorder active=recorder;recorder=null;if(active==null)return;
+  long now=SystemClock.elapsedRealtime();long duration=Math.max(1,now-segmentStarted-pausedTotal-(pausedAt>0?now-pausedAt:0));
+  boolean kept=false;
+  try{active.stop();kept=true;}catch(RuntimeException tooShort){/* No audio in this segment yet. */}
+  active.release();
   File current=segmentFile(index);
   if(kept&&current.isFile()&&current.length()>0){finished.add(new Segment(duration,null));index++;}
   else current.delete();
@@ -214,7 +210,7 @@ final class AlphaNoteRecorder {
 
  private void end(String reason,boolean keepCurrent){
   if(keepCurrent)finishCurrent();
-  else{main.removeCallbacks(rollover);MediaRecorder active=recorder;recorder=null;if(active!=null){stopAndRelease(active);segmentFile(index).delete();}}
+  else{main.removeCallbacks(rollover);MediaRecorder active=recorder;recorder=null;if(active!=null){try{active.stop();}catch(RuntimeException ignored){}active.release();segmentFile(index).delete();}}
   pausedAt=0;pausedTotal=0;
   state="stopped";stopReason=reason;publish();
  }
@@ -255,7 +251,7 @@ final class AlphaNoteRecorder {
  synchronized void discard(){
   main.removeCallbacks(rollover);
   MediaRecorder active=recorder;recorder=null;
-  if(active!=null)stopAndRelease(active);
+  if(active!=null){try{active.stop();}catch(RuntimeException ignored){}active.release();}
   if(dir!=null)deleteTree(dir);
   id=null;dir=null;ownerDigest=null;folderId=null;canonicalSavePending=false;finished.clear();index=0;state="idle";stopReason=null;recovered=false;pausedTotal=0;pausedAt=0;
   publish();

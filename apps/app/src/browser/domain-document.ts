@@ -8,6 +8,8 @@ export type DomainRecovery = {
  snapshot:Snapshot|undefined;
  raw:string|null;
  format:'domain'|'unrecognized';
+ legacy?:string|null;
+ legacyChanged?:boolean;
 };
 const envelope=(raw:string|null):Envelope=>{
  const value=raw===null?null:JSON.parse(raw);

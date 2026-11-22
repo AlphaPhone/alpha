@@ -20,16 +20,21 @@ import {
   type DeviceCredential,
   type DeviceExecutor as SharedDeviceExecutor,
   type DeviceJournalEntry,
+  type DeviceJournalIdentity,
   type DeviceOperation,
   type DeviceRecovery,
   type ForegroundReviewExecutor as SharedForegroundReviewExecutor,
+  type PendingReviewItem as SharedPendingReviewItem,
   publishCommittedDeviceChanges as sharedPublishCommittedDeviceChanges,
   type ReviewableDeviceOperation,
   validateDeviceOperation as sharedValidateDeviceOperation,
+  validateReviewableDeviceOperation as sharedValidateReviewableDeviceOperation,
   type WorkflowNoticeRoute,
+  type WorkflowPresentationOperation,
 } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts';
 import {
   CAMERA_CONTEXT_NOTICE,
+  ContextNotice,
   DeviceActionCoordinator,
   proposalContextNotice as alphaProposalContextNotice,
   replyDeviceProposalIds,
@@ -49,20 +54,22 @@ import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
-export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,replyDeviceProposalIds,requestedCameraNeedsCameraView};
-export type {CurrentDeviceActionRequest,DeviceCredential,DeviceOperation,DeviceRecovery,WorkflowNoticeRoute};
-/** Foreground review types (free/busy, Notes search, name-targeted edits) from the shared device-review contract. */
-export {FOREGROUND_REVIEW_TYPES as FOREGROUND_OPERATION_TYPES} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/foreground-review-contract.ts';
+export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,replyDeviceProposalIds,requestedCameraNeedsCameraView};
+export type {CurrentDeviceActionRequest,DeviceCredential,DeviceJournalIdentity,DeviceOperation,DeviceRecovery,ReviewableDeviceOperation,WorkflowNoticeRoute,WorkflowPresentationOperation};
+/** Foreground reviews (free/busy, Notes search, name-targeted edits) and their validators are
+ * the shared device-review contract bound to the shared Notes, Calendar and reminder contracts. */
+export {FOREGROUND_REVIEW_TYPES as FOREGROUND_OPERATION_TYPES,namedTargetValidators,selectedNotesRead,validateForegroundReviewOperation,validateForegroundReviewResult,type ForegroundReviewOperation,type ForegroundReviewResult,type NamedTargetExactOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/foreground-review-contract.ts';
 export type JournalEntry = DeviceJournalEntry;
 export type ActionJournal = DeviceActionJournal;
 export type DeviceExecutor = SharedDeviceExecutor<ContextEnvelope>;
 export type ForegroundReviewExecutor = SharedForegroundReviewExecutor<ContextEnvelope>;
+export type PendingReviewItem = SharedPendingReviewItem;
 
 /** Review and receipt copy for opening a view, by the name the owner sees rather than its id. */
 export function presentOpenView(view:string){const label=alphaViewLabel(view);return {title:`Open ${label}`,description:`Open ${label} on this phone`,appliedSummary:`Opened ${label} on this phone.`};}
 /** Alpha ships Home and Reminders plus the enabled MVP views. */
 const operations = {admitView:(view:string)=>view==='home'||view==='reminders'||isMvpView(view),parseWorkflowRead};
-const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope,WorkflowPhoneReview> = {
+export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope,WorkflowPhoneReview> = {
   appName:'Alpha',
   // The name the owner says. The agent's character carries the same name, so the server and this
   // phone read "Alpha, open …" as the same direct request.
@@ -82,6 +89,8 @@ export async function approvedBrowserOpen<T>(open:()=>Promise<T>):Promise<T>{
   try{return await open();}catch(error){if(error instanceof BrowserOpenRefused)throw new DeviceActionNotStarted(error.message);throw error;}
 }
 export function validateDeviceOperation(value: unknown): DeviceOperation { return sharedValidateDeviceOperation(value,operations); }
+/** Every proposal operation, including foreground reviews. */
+export function validateReviewableDeviceOperation(value: unknown): ReviewableDeviceOperation { return sharedValidateReviewableDeviceOperation(value,operations); }
 /** Owner-facing reason a pending proposal cannot be reviewed from this screen, or undefined. */
 export function proposalContextNotice(operation:ReviewableDeviceOperation,context:ContextEnvelope):string|undefined{return alphaProposalContextNotice(operation,context,alphaDeviceActionProfile);}
 /** Queue only delivered receipts; publish `alpha:<view>-committed` when the same owner session is idle. */

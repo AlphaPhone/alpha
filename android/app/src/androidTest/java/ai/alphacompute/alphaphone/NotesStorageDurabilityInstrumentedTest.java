@@ -5,12 +5,14 @@ import java.util.*;
 import org.json.*;
 import org.junit.Test;
 import static org.junit.Assert.*;
-/** Notes durability: a distinct storage-full refusal above slot caps, and the encrypted Notes draft
+/** Notes durability: a distinct storage-full refusal above slot caps, the lowered Trash cap, and the encrypted Notes draft
  * surviving a forced commit failure and a fresh Activity/WebView (the renderer state is discarded;
  * the instrumentation process cannot kill its own app process). Unique synthetic content only. */
 public final class NotesStorageDurabilityInstrumentedTest {
  private static String unique(){return UUID.randomUUID().toString();}
- /** A value of exactly n UTF-8 bytes that is a valid JSON string, built from one byte array. */
+ /** A value of exactly n UTF-8 bytes that is a valid JSON string. Built from one byte array: a
+  * StringBuilder holds two bytes per char and copies again in toString, which alone took ~90 MiB of the
+  * 192 MiB app heap at the 30 MiB Trash fixtures this test also keeps live. */
  private static String jsonOfBytes(int n){byte[] bytes=new byte[n];Arrays.fill(bytes,(byte)'x');bytes[0]=bytes[n-1]='"';return new String(bytes,java.nio.charset.StandardCharsets.US_ASCII);}
 
  @Test public void storageFullIsADistinctRefusalThatWritesNothing()throws Exception{
@@ -34,13 +36,45 @@ public final class NotesStorageDurabilityInstrumentedTest {
   assertNull(store.readCredentialSlot(slot));
  }
 
+ /** The Trash slot cap was lowered to the Trash policy limit (30 MiB). A document written under the
+  * old 32 MiB cap stays readable, a write that shrinks it is accepted, and growth above the new cap
+  * is storage-full (JsonCredentialSlots retained limit, elizaOS/eliza#35910). Disposable: the
+  * device's Trash value is saved first and restored byte for byte. */
+ @Test public void loweredTrashCapKeepsOlderOversizeTrashReadableAndShrinkable()throws Exception{
+  org.junit.Assume.assumeTrue("Explicit disposable Notes qualification","1".equals(InstrumentationRegistry.getArguments().getString("notesStorage")));
+  android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  AlphaCredentialStore store=new AlphaCredentialStore(context);
+  String slot=AlphaCredentialStore.NOTES_TRASH;int cap=AlphaCredentialStore.slotLimit(slot),retained=AlphaCredentialStore.retainedLimit(slot);
+  assertEquals("Trash cap is the Trash policy byte limit",30*1024*1024,cap);
+  assertEquals("Data written under the earlier cap stays admitted",32*1024*1024,retained);
+  assertEquals("Other slots keep no retained allowance",AlphaCredentialStore.slotLimit(AlphaCredentialStore.NOTES_RECORDS),AlphaCredentialStore.retainedLimit(AlphaCredentialStore.NOTES_RECORDS));
+  // The earlier host: same encrypted store, the old 32 MiB cap for every slot.
+  ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots older=new ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots(new java.io.File(context.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",name->32*1024*1024);
+  String previous=store.readCredentialSlot(slot);
+  try{
+   String oversize=jsonOfBytes(cap+4096);older.write(slot,oversize);
+   assertEquals("Older oversize Trash is readable under the lower cap",oversize,store.readCredentialSlot(slot));
+   try{store.writeCredentialSlot(slot,jsonOfBytes(cap+8192));fail("Growth above the lower cap accepted");}catch(AlphaCredentialStore.StorageFullException expected){}
+   assertEquals("A refused growth writes nothing",oversize,store.readCredentialSlot(slot));
+   try{store.compareExchangeCredentialSlot(slot,oversize,jsonOfBytes(retained+1));fail("A value above the retained cap accepted");}catch(AlphaCredentialStore.StorageFullException expected){}
+   String smaller=jsonOfBytes(cap+1024);
+   assertTrue("A shrink that is still above the lower cap is accepted",store.compareExchangeCredentialSlot(slot,oversize,smaller));
+   assertEquals(smaller,store.readCredentialSlot(slot));
+   String fits=jsonOfBytes(cap);assertTrue("A value at the lower cap is accepted",store.compareExchangeCredentialSlot(slot,smaller,fits));
+   try{store.writeCredentialSlot(slot,jsonOfBytes(cap+1));fail("Once below the cap, growth above it is refused again");}catch(AlphaCredentialStore.StorageFullException expected){}
+  }finally{
+   if(previous==null)store.removeCredentialSlot(slot);else older.write(slot,previous);
+  }
+  assertEquals(previous,store.readCredentialSlot(slot));
+ }
+
  private String js(String code)throws Exception{return WebViewTestDriver.evaluate(code);}
  private void until(String code,String what)throws Exception{long end=SystemClock.elapsedRealtime()+30000;while(SystemClock.elapsedRealtime()<end){if("true".equals(js("Boolean("+code+")")))return;SystemClock.sleep(100);}
   throw new AssertionError(what+"; draft="+js("document.documentElement.dataset.notesDraftState||'absent'")+" storage="+js("document.documentElement.dataset.notesStorageState||'absent'"));}
  private void click(String label)throws Exception{String q="[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==="+JSONObject.quote(label)+"&&b.getClientRects().length&&!b.disabled)";until(q,"Button "+label);js("("+q+").click()");}
  private void input(String selector,String value,boolean multiline)throws Exception{until("document.querySelector("+JSONObject.quote(selector)+")","Field "+selector);js("(()=>{const e=document.querySelector("+JSONObject.quote(selector)+");Object.getOwnPropertyDescriptor("+(multiline?"HTMLTextAreaElement":"HTMLInputElement")+".prototype,'value').set.call(e,"+JSONObject.quote(value)+");e.dispatchEvent(new Event('input',{bubbles:true}));})()");}
  private void openNotes()throws Exception{AppNavigation.liveMode();js(AppNavigation.request("Notes"));until("window.__alphaTestNavigation?.status==='complete'","Notes navigation");until("document.documentElement.dataset.notesStorageState==='ready'","Notes ready");}
- private JSONObject slot(String name)throws Exception{return NotesSecureFixture.call("Capacitor.Plugins.AlphaConnection.secureRead({slot:"+JSONObject.quote(name)+"})");}
+ private JSONObject slot(String name)throws Exception{JSONObject r=NotesSecureFixture.call("Capacitor.Plugins.AlphaConnection.secureRead({slot:"+JSONObject.quote(name)+"})");return r;}
  private boolean cas(String name,String expected,String value)throws Exception{
   JSONObject args=new JSONObject().put("slot",name).put("expectedValue",expected==null?JSONObject.NULL:expected).put("value",value==null?JSONObject.NULL:value);
   return "saved".equals(NotesSecureFixture.call("Capacitor.Plugins.AlphaConnection.secureCompareExchange("+args+")").getString("status"));
@@ -77,11 +111,13 @@ public final class NotesStorageDurabilityInstrumentedTest {
    phase="open seeded collection in fresh renderer";
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
     openNotes();click("Open Capacity target "+marker);until("document.querySelector('textarea[aria-label=Note]')","Small editor");
-    // A normal-sized edit crosses the genuine collection cap, so storage admission is reached without a huge editor value.
+    // A normal-sized edit crosses the genuine collection cap. The old 33 MiB textarea
+    // forced enormous WebView text layout before storage admission could be exercised.
     phase="small edit and storage-full recovery";
     input("textarea[aria-label=Note]","E".repeat(NotesCapacityFixture.EDIT_BYTES),true);
     until("document.documentElement.dataset.notesStorageState==='full'","Storage-full state");
     until("document.body.textContent.includes('Notes storage is full')","Storage-full message");
+    until("[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Recover browser Notes'&&b.getClientRects().length)","Notes retention guidance offered");
     until("document.documentElement.dataset.notesDraftState==='saved'","Small encrypted recovery draft settled before closing the renderer");
     assertTrue("Saved notes are unchanged",seeded.matches(store.readCredentialSlot(AlphaCredentialStore.NOTES_RECORDS)));
     assertEquals("Unsaved small edit remains on screen",JSONObject.quote("E".repeat(NotesCapacityFixture.EDIT_BYTES)),js("document.querySelector('textarea[aria-label=Note]').value"));

@@ -42,6 +42,8 @@ import { BrowserDeviceControls as DevDeviceControls } from './browser/device-con
 import { captureSimulatedApps, installSimulatedApps } from './browser/simulated-apps';
 import {HostedDigestPanel} from './runtime/hosted-digest-ui';
 import { installClockAdapter } from './prototype/clock-adapter';
+import {installNoteWebSourceAdapter} from './prototype/note-web-source-adapter';
+import {installNoteSourceAdapter} from './prototype/note-source-adapter';
 import {installSharePanelAdapter} from './prototype/share-panel-adapter';
 import {installNotesShareAdapter} from './prototype/notes-share-adapter';
 import { installNotesDocumentAdapter } from './prototype/notes-document-adapter';
@@ -75,6 +77,7 @@ import { ConnectionChooser, connectionController, connectionChooserVisible, resi
 import { protectedPowerLaunchState } from './runtime/power-launch-state';
 import { admitImageSense, imageSenseAvailable, installListenerInvocation, stopWakeListenerForChatOnly } from './runtime/always-on-listener';
 import {GoogleConnectionsPanel,googleConnectionController} from './runtime/google-connection-ui';
+import { installNotesTrashAdapter } from './prototype/notes-trash-adapter';
 import { installNotesFoldersAdapter } from './prototype/notes-folders-adapter';
 import { installInboxCloudAdapter, inboxAttention, subscribeInboxAttention } from './prototype/inbox-cloud-adapter';
 import { installHomeOverviewCards } from './prototype/home-overview-cards';
@@ -150,10 +153,13 @@ if (!fixture) {
   installPrototypeVoiceAdapter(Component, VIEWS);
   installCalendarApprovalAdapter(Component);
   installMapsChatAdapter(Component);
-  installNotesDocumentAdapter(VIEWS);
+  installNotesDocumentAdapter(Component, VIEWS);
   installNotesShareAdapter(VIEWS);
+  installNotesTrashAdapter(Component, VIEWS);
   installNotesFoldersAdapter(Component, VIEWS);
   installCanonicalNotesView(Component,VIEWS);
+  installNoteSourceAdapter(VIEWS);
+  installNoteWebSourceAdapter(VIEWS);
   installPrototypeBrowserAdapter(Component, VIEWS);
   installSettingsAdapter(Component, VIEWS);
   if(!isAndroid){if(devSurfacesEnabled)installBrowserDeviceAdapter(Component);else installBrowserCapabilityTiles(Component);}

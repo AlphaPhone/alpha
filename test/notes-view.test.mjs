@@ -25,6 +25,19 @@ test('folder documents validate strictly and names are unique case-insensitively
  assert.match(folders.newNotesFolderId(),/^f-[0-9a-f-]{36}$/);
 });
 
+test('deleting a folder moves its notes to no folder and never removes a note (FolderRefsValid)',()=>{
+ const list=[{id:'a',kind:'text',title:'A',folderId:'f-1'},{id:'b',kind:'text',title:'B',folderId:'f-2'},{id:'c',kind:'text',title:'C'}];
+ const released=folders.releaseNotesFolder(list,'f-1');
+ assert.equal(released.length,3);
+ assert.equal(Object.hasOwn(released[0],'folderId'),false);
+ assert.equal(released[1],list[1],'other notes are untouched');
+ assert.equal(released[2],list[2]);
+ // A note whose folder no longer exists is shown under no folder.
+ assert.equal(folders.noteFolderOf({id:'x',folderId:'f-gone'},[{id:'f-1'}]),null);
+ assert.equal(folders.noteFolderOf({id:'x',folderId:'f-1'},[{id:'f-1'}]),'f-1');
+ assert.deepEqual(folders.withNoteFolder({id:'x',kind:'text',title:'X'},'f-2'),{id:'x',kind:'text',title:'X',folderId:'f-2'});
+ const same={id:'x',folderId:'f-2'};assert.equal(folders.withNoteFolder(same,'f-2'),same);
+});
 
 test('renaming a folder keeps its id, so its notes stay in it (RenameKeepsMembership, FolderNamesUnique)',()=>{
  const before=doc('Work','Personal'),list=[{id:'a',folderId:'f-1'},{id:'b',folderId:'f-2'},{id:'c'}];
@@ -40,6 +53,12 @@ test('renaming a folder keeps its id, so its notes stay in it (RenameKeepsMember
  assert.throws(()=>folders.renameNotesFolder(before,'f-1','x'.repeat(41)));
 });
 
+test('restore returns a note to its folder, or to no folder when the folder was deleted (RestoreReturnsToFolder)',()=>{
+ const note={id:'n',kind:'text',title:'N',folderId:'f-1'};
+ assert.equal(folders.restoredNoteFolder(note,[{id:'f-1'}]),note);
+ assert.deepEqual(folders.restoredNoteFolder(note,[{id:'f-2'}]),{id:'n',kind:'text',title:'N'});
+ const loose={id:'m',kind:'text',title:'M'};assert.equal(folders.restoredNoteFolder(loose,[]),loose);
+});
 
 test('agent content search matches titles, bodies, checklist items and voice transcripts',()=>{
  const notes=[

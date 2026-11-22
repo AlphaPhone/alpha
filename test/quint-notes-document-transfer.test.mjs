@@ -5,7 +5,8 @@ import {loadProductModule, modelTraces, replayTraces, settle} from '../specs/qui
 
 // NotesDocumentTransfer against installNotesDocumentAdapter in
 // apps/app/src/prototype/notes-document-adapter.ts. Ports: the AlphaNoteDocuments plugin, the
-// Notes view api and document visibility.
+// Notes view api and document visibility. Import is a developer surface, so the module is
+// loaded with test mocks enabled.
 
 const source = 'apps/app/src/prototype/notes-document-adapter.ts';
 const capped = value => Math.min(value, 3);
@@ -13,7 +14,8 @@ const capped = value => Math.min(value, 3);
 async function replayNotesDocumentTransfer({rewrite, ...options} = {}) {
   const traces = modelTraces({path: 'specs/quint/application/NotesDocumentTransfer.qnt', main: 'NotesDocumentTransfer', ...options});
   const product = await loadProductModule(source, {rewrite, stubs: {
-    '../platform-plugins': 'export const registerPlugin=()=>({exportText:input=>globalThis.__alphaNotesDocumentPorts.call("export",input)});',
+    '../build-flags': 'export const testMocksEnabled=true;',
+    '../platform-plugins': 'export const registerPlugin=()=>({importText:()=>globalThis.__alphaNotesDocumentPorts.call("import"),exportText:input=>globalThis.__alphaNotesDocumentPorts.call("export",input)});',
     '../runtime/browser-note-documents': 'export class BrowserNoteDocuments{}',
   }});
   return replayTraces(traces, {
@@ -22,14 +24,15 @@ async function replayNotesDocumentTransfer({rewrite, ...options} = {}) {
       'a receipt waiting for a visible page': state => state.s.receipts.length > 0,
       'a result dropped after Notes was left': state => state.s.settled > 0 && state.s.shown + state.s.dropped + state.s.receipts.length < state.s.settled,
       'a receipt of an earlier visit dropped': state => state.s.dropped > 0,
+      'an imported note with its receipt': state => state.s.imported > 0 && state.s.shown > 0,
       'a second choice refused': state => state.s.refusedBusy > 0,
     },
     // Waiting receipts are closures; their count is the number of visibility listeners held.
     project: ({s}) => ({...s, receipts: s.receipts.length, operation: s.operation.kind}),
     async start() {
       const saved = Object.getOwnPropertyDescriptor(globalThis, 'document'), listeners = new Set();
-      let hidden = false, active = true, epoch = 0, pending;
-      let shown = 0, dropped = 0, settled = 0, refusedBusy = 0, lastShownEpoch = -1;
+      let hidden = false, active = true, epoch = 0, busy = false, pending, stored = true;
+      let shown = 0, dropped = 0, settled = 0, imported = 0, reads = 0, refusedBusy = 0, lastShownEpoch = -1;
       Object.defineProperty(globalThis, 'document', {configurable: true, value: {
         get hidden() { return hidden; },
         addEventListener(type, listener) { if (type === 'visibilitychange') listeners.add(listener); },
@@ -39,19 +42,20 @@ async function replayNotesDocumentTransfer({rewrite, ...options} = {}) {
       const state = {list: [note], open: note.id};
       const api = {
         toast(message) { if (message === 'Busy') refusedBusy = capped(refusedBusy + 1);else { shown++;lastShownEpoch = epoch; } },
-        set() {},
+        set(patch) { if ('noteDocumentBusy' in patch) busy = patch.noteDocumentBusy; },
         get: () => state, isActive: () => active,
+        async saveImportedNote() { reads++;if (stored) imported++;return stored; },
       };
       const views = {notes: {render: () => ({}), onLeave() {}}};
-      product.installNotesDocumentAdapter(views);
+      product.installNotesDocumentAdapter({prototype: {api: () => api}}, views);
       return {
         actions: {
-          async choose() { views.notes.render(state, api).exportText();await settle(); },
-          async settles({outcome}) {
-            const {resolve, reject} = pending;pending = undefined;settled++;
+          async choose({kind}) { const view = views.notes.render(state, api);if (kind === 'import') view.importText();else view.exportText();await settle(); },
+          async settles({outcome, stored: keep}) {
+            const {kind, resolve, reject} = pending;pending = undefined;stored = keep;settled++;
             if (outcome === 'threw') reject(Error('The provider call failed.'));
             else if (outcome === 'refused') resolve({status: 'cancelled', message: 'Nothing was chosen.'});
-            else resolve({status: 'exported', message: 'Exported.'});
+            else resolve(kind === 'import' ? {status: 'read', message: '', text: 'Imported body', name: 'file.txt'} : {status: 'exported', message: 'Exported.'});
             await settle();
           },
           leaveNotes() { active = false;epoch++;views.notes.onLeave(api); },
@@ -65,9 +69,8 @@ async function replayNotesDocumentTransfer({rewrite, ...options} = {}) {
             dropped += waiting - (shown - before);
           },
         },
-        // The adapter is busy exactly while its provider call is outstanding.
-        observe: () => ({active, hidden, epoch, busy: pending !== undefined, operation: pending?.kind ?? 'none', receipts: listeners.size,
-          shown, dropped, settled, refusedBusy, lastShownEpoch}),
+        observe: () => ({active, hidden, epoch, busy, operation: pending?.kind ?? 'none', receipts: listeners.size,
+          shown, dropped, settled, imported, reads, refusedBusy, lastShownEpoch}),
         close() {
           if (saved) Object.defineProperty(globalThis, 'document', saved);else delete globalThis.document;
           delete globalThis.__alphaNotesDocumentPorts;
@@ -77,7 +80,7 @@ async function replayNotesDocumentTransfer({rewrite, ...options} = {}) {
   });
 }
 
-test('Notes export follows every NotesDocumentTransfer model step', {timeout: scaledTimeout(180000)}, async () => {
+test('Notes import and export follow every NotesDocumentTransfer model step', {timeout: scaledTimeout(180000)}, async () => {
   const receipt = await replayNotesDocumentTransfer({traces: 300, maxSteps: 16});
   assert.equal(receipt.traces, 300);
   assert.ok(receipt.steps > 2000, JSON.stringify(receipt));

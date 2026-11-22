@@ -7,25 +7,20 @@ import {noteShareText} from '../../../../.eliza/client-features/plugins/plugin-n
 import type {AppRecordPort} from '../runtime/app-record-route-policy';
 import {agentPendingText,agentAvailabilityNotice,connectionController} from '../runtime/connection-ui';
 import {copySelectedText} from '../runtime/text-share';
-import {CanonicalNotesController} from './canonical-notes-controller';
-import type {NotesPhase} from '../ui/notes/notes-controller.ts';
-import {NotesEditor} from '../ui/notes/notes-editor.ts';
+import {CanonicalNotesController,type NotesPhase} from './canonical-notes-controller';
+import {CanonicalNotesEditor} from './canonical-notes-editor';
 import type {CanonicalNoteSaveIntent} from './note-recorder';
 import {formatDateTime} from './locale-time';
-import {isAbortError,delay} from '../lib/abort';
-import {isOperationId} from '../lib/ids';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 type Bag=Record<string,any>;
 type CanonicalTrashEntry={id:string;title:string;deletedAt:string;revision:number};
 const UNAVAILABLE='Agent offline';
-/** Device-local handles (a recording, a picked document, a web source) never belong to an agent record's view. */
+/** Device-local handles (a recording, a picked document, a web source) belong to Older notes adapters, never to an agent record's view. */
 const LOCAL_HANDLES=['audio','documentSource','webSource'];
 /** View identity and presentation fields, never authored rich metadata. */
 const VIEW_FIELDS=new Set(['id','title','body','kind','canonicalRevision','createdAt','updatedAt','modifiedAt','when','color','bodySeparator','authored']);
-/** Device state (recorder, playback, device Trash, recording deletions) is never read for agent Notes. */
+/** Older notes state (device recorder, playback, device Trash, recording deletions) is never read for agent Notes. */
 const DEVICE_ONLY_STATE={rec:null,proc:null,record:false,playing:false,dict:false,trash:[],trashConfirm:null,trashFull:null,audioDeletionChecked:true,audioDeletionPending:[],audioDeletionRecoveryFailed:false};
-/** Saves that settle() waits out: the in-flight save plus the follow-ups queued for edits typed meanwhile. */
-const MAX_SAVE_FOLLOW_UPS=8;
 const filled=(value:unknown)=>Array.isArray(value)&&value.length>0;
 /** Alpha's card for a record: voice, link and checklist only when the record carries that data, otherwise text. */
 function shownKind(kind:string,data:Bag):string{
@@ -39,7 +34,7 @@ function shownKind(kind:string,data:Bag):string{
 function voiceAudio(data:Bag):{audioId:string;durationMs:number}|undefined{
  const audio=data.audio;
  if(!audio||typeof audio!=='object'||Array.isArray(audio)||Object.keys(audio).some(key=>!['audioId','durationMs'].includes(key)))return;
- if(typeof data.recordingId!=='string'||audio.audioId!==data.recordingId||!isOperationId(audio.audioId)||!Number.isFinite(audio.durationMs)||audio.durationMs<0)return;
+ if(typeof data.recordingId!=='string'||audio.audioId!==data.recordingId||!/^[A-Za-z0-9_-]{1,128}$/.test(audio.audioId)||!Number.isFinite(audio.durationMs)||audio.durationMs<0)return;
  return {audioId:audio.audioId,durationMs:audio.durationMs};
 }
 const stable=(value:unknown):unknown=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable((value as Bag)[key])])):value;
@@ -51,7 +46,7 @@ function domainOf(url:string):string{try{return new URL(url).hostname;}catch{ret
 /** Alpha's own Notes template over the canonical Notes client: one controller, one editor draft. */
 export class CanonicalNotesUi {
  readonly controller:CanonicalNotesController;
- readonly editor:NotesEditor;
+ readonly editor:CanonicalNotesEditor;
  private phase:NotesPhase='loading';
  private reviewPending:false|'read'|'change'=false;
  private failure:'read'|'interact'|null=null;
@@ -86,7 +81,7 @@ export class CanonicalNotesUi {
     }
    },
   });
-  this.editor=new NotesEditor(this.controller,{changed:()=>this.refreshDraftView(),review:()=>this.needsReview(),committed:target=>{this.reviewPending=false;this.failure=null;this.phase='ready';this.hooks.paint();this.hooks.committed?.(target.id);}});
+  this.editor=new CanonicalNotesEditor(this.controller,{changed:()=>this.refreshDraftView(),review:()=>this.needsReview(),committed:target=>{this.reviewPending=false;this.failure=null;this.phase='ready';this.hooks.paint();this.hooks.committed?.(target.id);}});
   // Authenticated same-session change events (runtime/app-record-completion.ts) refresh the collection.
   if(this.controller.current)this.controller.listen(window);
  }
@@ -150,14 +145,14 @@ export class CanonicalNotesUi {
    await copySelectedText(noteShareText({...note,kind:note.kind}).text);
    if(current())api.toast('Draft copied.');
   }catch(error){
-   if(current()&&!isAbortError(error))api.toast(errorNotice(error,'Draft could not be copied.'),ERROR_TOAST);
+   if(current()&&!(error instanceof DOMException&&error.name==='AbortError'))api.toast(errorNotice(error,'Draft could not be copied.'),ERROR_TOAST);
   }
  }
  /** A connection change ends this binding; an unsaved edit is not carried over, so the owner is told. */
  retire():void{const draft=this.editor.draft;if(draft?.version)this.hooks.dropped?.(draft.title||'Untitled');this.editor.close();this.controller.retire();this.baseRows=[];this.rowsValue=[];this.openValue=null;this.trashValue=[];}
  /** Wait out an in-flight save and the follow-up it queued for edits typed meanwhile. */
  private async settle():Promise<void>{
-  for(let attempt=0;attempt<MAX_SAVE_FOLLOW_UPS&&this.controller.pending;attempt++){await new Promise<void>(resume=>this.idleWaiters.push(resume));await delay(0);}
+  for(let attempt=0;attempt<8&&this.controller.pending;attempt++){await new Promise<void>(resume=>this.idleWaiters.push(resume));await new Promise(resume=>setTimeout(resume,0));}
  }
  /** Leaves the open note as Back does: its edits are saved first, an empty new note is dropped. */
  async leave(next:string|null=null):Promise<boolean>{
@@ -192,7 +187,7 @@ export class CanonicalNotesUi {
    id=this.resolve(id);if(this.open!==id)this.editor.open(id);
    const original=this.list.find(row=>row.id===id);if(!original)throw Error('Current canonical note unavailable.');
    const next=typeof patch==='function'?patch(structuredClone(original)):patch;
-   if(next.id!==undefined&&next.id!==id)throw Error('Editor target changed.');
+   if(!next||typeof next!=='object'||Array.isArray(next)||next.id!==undefined&&next.id!==id)throw Error('Editor target changed.');
    const draft=this.editor.draft!,data:Bag={...structuredClone(draft.format?.data??{})};let richChanged=false;
    for(const [key,value]of Object.entries(next))if(!VIEW_FIELDS.has(key)&&!LOCAL_HANDLES.includes(key)){data[key]=value;richChanged=true;}
    const kind=next.kind??draft.format?.kind??'text';
@@ -231,7 +226,7 @@ export class CanonicalNotesUi {
   let canonicalRecordConfirmed=false;
   try{
    if(!current()||this.pending)return false;
-   if(!isOperationId(recordingId)||!Number.isFinite(durationMs)||durationMs<0)return false;
+   if(typeof recordingId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(recordingId)||!Number.isFinite(durationMs)||durationMs<0)return false;
    await this.controller.refresh();
    if(!current()||this.pending)return false;
    const duration=Math.round(durationMs)/1000,audioOnly=typeof intent.retainAudio==='function';
@@ -357,13 +352,13 @@ export class CanonicalNotesUi {
   if(out.vo&&open){const note=this.controller.viewNote(open),audio=note?.format?.kind==='voice'?voiceAudio(note.format.data):undefined;
    const owned=!!audio&&out.vo.playbackAudioId===audio.audioId&&out.vo.hasPlayback===true;
    out.vo={...out.vo,...(owned?{}:{hasPlayback:false,play:()=>api.toast('No audio')}),
-   toCal:()=>{out.vo.closeMenu?.();void this.scheduleDraft(open,'reminder',api);},calLabel:'Review reminder draft',calText:'Review reminder',calIcon:api.ic.cal,
+   toCal:()=>{out.vo.closeMenu?.();void this.scheduleDraft(open,'reminder',api);},calLabel:'Review reminder draft',calText:'Review reminder',calIcon:api.ic?.cal??out.vo.calIcon,
    toEvent:()=>{out.vo.closeMenu?.();void this.scheduleDraft(open,'event',api);},eventLabel:'Review event',eventText:'Review event'};}
   return out;
  }
  /** Decorate this view's API only. No global client or shared NotesStore swap. */
  api(original:Bag):Bag{
-  return {...original,canonicalNotes:this,storageReady:()=>this.controller.current&&this.controller.revision!==null&&!this.controller.pending,
+  return {...original,canonicalNotes:this,notesSourceMode:'canonical',notesTrash:undefined,moveNoteToTrash:undefined,storageReady:()=>this.controller.current&&this.controller.revision!==null&&!this.controller.pending,
    set:(patch:Bag)=>{
     // `record` opens the Notes recorder (voice-adapter.ts); the old simulated recorder state is refused.
     if(patch.rec){original.toast('Not in agent Notes');return false;}
@@ -382,21 +377,23 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  prototype.api=function(key:string){
   const value=api.call(this,key);if(key!=='notes')return value;
   if(this.canonicalNotesUi)return this.canonicalNotesUi.api({...value,reviewCalendarDraft:(draft:Bag)=>this.reviewScannedCalendarDraft?.(draft)??false});
+  // Agent Notes are the default source (agent-adapter.ts); retained notes are an explicit choice.
+  if(this.notesSourceMode==='legacy')return value;
   // Waiting for a connection: an attempted action explains why, nothing is drafted.
-  return {...value,moveNoteToTrash:()=>false,set:(patch:Bag)=>{if(patch.compose||patch.record===true){value.toast(this.vget('notes').storageStatus||agentPendingText(undefined,UNAVAILABLE));return false;}return value.set(patch);}};
+  return {...value,notesSourceMode:'canonical',notesTrash:undefined,moveNoteToTrash:()=>false,set:(patch:Bag)=>{if(patch.compose||patch.record===true){value.toast(this.vget('notes').storageStatus||agentPendingText(undefined,UNAVAILABLE));return false;}return value.set(patch);}};
  };
- const notes=views.notes,render=notes.render,back=notes.back;
- // Back closes the Recently deleted choice first, then Recently deleted itself.
- notes.back=(state:Bag,value:Bag)=>{
-  if(state.trashAsk){value.set({trashAsk:null});return true;}
-  if(state.folder==='deleted'){value.set({folder:null});return true;}
-  return back(state,value);
- };
+ const notes=views.notes,render=notes.render;
  notes.render=(state:Bag,value:Bag)=>{
-  const ui:CanonicalNotesUi|undefined=value.canonicalNotes;
-  if(ui)return ui.decorate(render(state,value),value,state);
+  const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
+  if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
+  const withPreviousNotes=(view:Bag)=>{
+   if(!older||older.selected||view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
+   return {...view,previousNotesAction:older.chooseFromMenu,previousNotesMenu:!!state.previousNotesMenu,
+    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:()=>value.set({previousNotesMenu:false})};
+  };
+  if(ui)return withPreviousNotes(ui.decorate(render(state,value),value,state));
   // A pending New note request waits for the binding instead of drafting into no collection.
   const waiting={...state,...DEVICE_ONLY_STATE,list:[],open:null,compose:false,trashOpen:false,storageStatus:state.storageStatus||agentAvailabilityNotice(undefined,UNAVAILABLE)};
-  return {...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false};
+  return withPreviousNotes({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
  };
 }

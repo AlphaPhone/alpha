@@ -2,7 +2,8 @@
 // Maps "Back to event" identity. Pure rules; the rendered flows are in test/browser.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {addNoteOrigin, findNoteOrigin, noteOriginFor, noteOriginTitle, noteOriginIndex, noteOriginKey, noteOriginLimit, noteOriginOf, removeNoteOrigin, voiceNoteContentRevision} from '../apps/app/src/runtime/note-origin.ts';
+import {addNoteOrigin, findNoteOrigin, noteOriginFor, noteOriginTitle, noteOriginIndex, noteOriginKey, noteOriginLimit, noteOriginOf, removeNoteOrigin, resolveNoteOrigin, voiceNoteChanged, voiceNoteContentRevision} from '../apps/app/src/runtime/note-origin.ts';
+import {recordingRevision} from '../apps/app/src/prototype/summary-source.ts';
 import {mapsEventOriginFor, mapsEventOriginOf, mapsEventReturnOffered, mapsEventStillThere} from '../apps/app/src/runtime/maps-event-return.ts';
 import {encodeCalendarForm, decodeCalendarForm, calendarEditFields, snapshotCalendarForm} from '../apps/app/src/runtime/calendar-form-draft.ts';
 
@@ -66,6 +67,17 @@ test('the index is bounded and a malformed index is refused, never partly truste
     assert.throws(() => noteOriginIndex(bad), /need recovery/);
 });
 
+test('opening the note fails closed when it was deleted, replaced or duplicated', () => {
+  assert.equal(resolveNoteOrigin(origin, [note]).status, 'found');
+  assert.equal(resolveNoteOrigin(origin, [{...note, body: 'Edited later'}]).status, 'found', 'an edited note is still the same note');
+  assert.equal(resolveNoteOrigin(origin, []).status, 'missing');
+  assert.equal(resolveNoteOrigin(origin, undefined).status, 'missing', 'an unread Notes list is missing, not found');
+  assert.equal(resolveNoteOrigin(origin, [{...note, id: 'n2'}]).status, 'missing');
+  assert.equal(resolveNoteOrigin(origin, [{...note, audio: {audioId: 'audio-9'}}]).status, 'missing', 'the same id with another recording is a different note');
+  assert.equal(resolveNoteOrigin(origin, [{id: 'n1', kind: 'text', title: 'Venue meeting'}]).status, 'missing');
+  assert.equal(resolveNoteOrigin(origin, [note, {...note}]).status, 'missing', 'an ambiguous id opens nothing');
+  assert.equal(resolveNoteOrigin({...origin, revision: 'x'}, [note]).status, 'missing');
+});
 
 test('a retained Calendar draft keeps a valid origin and refuses a malformed one', () => {
   const form = {id: null, creationId: '0b0e7d1c-1111-4111-8111-111111111111', title: 'Book the venue', notes: 'Book the venue', where: '', off: 1, t: 9, d: 1, video: false, who: [], cal: 'native:local', repeat: 'none', alert: null, origin};
@@ -104,13 +116,17 @@ test('Maps offers "Back to event" only for the event it was opened from, while C
   assert.equal(mapsEventStillThere(mapsEventOriginFor({...row, alphaCalendarId: 71, nativeEvent: {id: 71, begin: 1000}}, 2), [{id: 71, begin: 1000}]), true, 'numeric provider ids compare by value');
 });
 
-test('a voice-note content revision changes only when the note content changed', async () => {
+test('a voice-note link reports an edit only when the note content changed', async () => {
   const voice = {...note, lines: [{s: 'me', at: 0, t: 'Transcript'}], summary: ['Venue booked'], actions: [{t: 'Book the venue', done: false}], pinned: false};
   const revision = await voiceNoteContentRevision(voice);
   assert.match(revision, /^[a-f0-9]{64}$/);
   assert.ok(noteOriginFor(voice, revision), 'a content revision is a valid link revision');
   for (const flags of [{pinned: true}, {onCal: true}, {actions: [{t: 'Book the venue', done: true}]}, {when: 'Yesterday'}])
-    assert.equal(await voiceNoteContentRevision({...voice, ...flags}), revision, JSON.stringify(flags));
+    assert.equal(await voiceNoteChanged({...voice, ...flags}, revision), false, JSON.stringify(flags));
   for (const edit of [{lines: [{s: 'me', at: 0, t: 'Edited transcript'}]}, {body: 'Edited'}, {title: 'Renamed'}, {summary: ['Venue cancelled']}, {actions: [{t: 'Cancel the venue', done: false}]}, {audio: {audioId: 'audio-1', transcript: 'Other'}}])
-    assert.notEqual(await voiceNoteContentRevision({...voice, ...edit}), revision, JSON.stringify(edit));
+    assert.equal(await voiceNoteChanged({...voice, ...edit}, revision), true, JSON.stringify(edit));
+  // A link made before content revisions hashed the whole record: unchanged stays unchanged, any change may be an edit.
+  const whole = await recordingRevision(voice);
+  assert.equal(await voiceNoteChanged(voice, whole), false);
+  assert.equal(await voiceNoteChanged({...voice, pinned: true}, whole), true);
 });

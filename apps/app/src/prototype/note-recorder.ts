@@ -75,7 +75,7 @@ type NoteRecorderOptions = { pollMs?: number; visible?: () => boolean; live?: No
 /** Text of one finished segment; '' for silence. Throws when the route fails. */
 export type SegmentTranscriber = (segmentId: string, signal: AbortSignal) => Promise<string>;
 /** `failed`: the microphone did not start; the recorder stays open with one error line. */
-type NoteRecorderPhase = 'closed' | 'starting' | 'failed' | 'recording' | 'paused' | 'stopped' | 'finishing';
+export type NoteRecorderPhase = 'closed' | 'starting' | 'failed' | 'recording' | 'paused' | 'stopped' | 'finishing';
 
 const LEVELS = 44;
 const aborted = (error: unknown) => (error as { name?: string })?.name === 'AbortError';

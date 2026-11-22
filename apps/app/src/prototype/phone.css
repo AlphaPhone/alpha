@@ -167,6 +167,9 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .inbox-attachment-content:focus-visible { outline:2px solid var(--acct); outline-offset:-2px; }
 
 .note-editor { box-sizing:border-box; padding-bottom:calc(100px + var(--native-bottom-inset,0px)); }
+.note-source-actions { display:flex; flex-wrap:wrap; gap:8px; margin:4px 24px; flex-shrink:0; }
+.note-source-actions:empty { display:none; }
+.note-source-actions .note-source-trigger { flex:1; margin:0; }
 .note-transcript-action, .note-transcript-progress { margin-top:12px; min-height:48px; font:inherit; }
 .note-transcript-action { align-self:flex-start; padding:0 14px; border-radius:24px; background:var(--s2); color:var(--fg); }
 .note-transcript-action:disabled { color:var(--mut); }
@@ -182,6 +185,7 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .note-transcript-progress button { min-height:48px; padding:0 10px; color:var(--acct); font:inherit; }
 @keyframes note-transcribing { to { transform:rotate(1turn); } }
 @media (prefers-reduced-motion:reduce) { .note-transcript-progress i { animation:none; } }
+.note-source-trigger { flex-shrink:0; min-height:48px; margin:4px 24px; padding:8px 12px; border-radius:16px; background:var(--s2); text-align:left; font:inherit; }
 .note-source-dialog { width:min(480px,calc(100vw - 24px),calc(var(--phone-width,100vw) - 24px)); max-height:min(calc(100dvh - 24px),calc(var(--phone-height,100dvh) - 24px)); box-sizing:border-box; padding:20px; border:0; border-radius:20px; background:var(--source-bg,Canvas); color:var(--source-fg,CanvasText); font:16px 'Public Sans',system-ui,sans-serif; font-size:calc(16px * var(--browser-text-scale,1)); overflow:hidden; }
 .note-source-dialog[open] { display:flex; flex-direction:column; gap:12px; }
 .note-source-dialog h2 { margin:0 0 12px; font-family:Denton,Fraunces,Georgia,serif; font-weight:300; font-size:1.875em; overflow-wrap:anywhere; }
@@ -192,6 +196,9 @@ html:not(.standalone-app) [data-alpha-layer="home"][data-alpha-home-fits="true"]
 .note-source-dialog footer button { flex:1 1 180px; min-width:0; overflow-wrap:normal; }
 .note-source-content:focus-visible { outline:2px solid currentColor; outline-offset:-2px; }
 /* Document actions scroll with their details; Done remains outside the scroll area. */
+.note-source-document-dialog .note-source-content { min-height:44px; }
+.note-source-options { display:flex; flex-wrap:wrap; gap:8px; }
+.note-source-options button { flex:1 1 180px; min-width:min-content; max-width:100%; overflow-wrap:normal; word-break:normal; }
 /* Keep review actions outside the scrolling details at every text size. The body can shrink
  * within the viewport while retaining its own keyboard-scrollable focus region. */
 .alpha-large-text .note-source-dialog footer button { overflow-wrap:anywhere; }
@@ -340,9 +347,20 @@ html.alpha-text-xl:not(.standalone-app) [data-alpha-app-header]:not([data-alpha-
 html.alpha-text-xl:not(.standalone-app) [data-alpha-app-header="main"]:not([data-alpha-browser-header]) { container-type:inline-size; }
 html.alpha-text-xl:not(.standalone-app) [data-alpha-app-header="main"]:not([data-alpha-browser-header]) [data-alpha-app-title] { font-size:min(calc(32px * var(--browser-text-scale,1)), calc((100cqi - 30px) / 4.4 / var(--alpha-text-scale,1) * var(--browser-text-scale,1)))!important; }
 
+.app-header-action-icon { display:none; }
+.standalone-app [data-alpha-app-header] [data-alpha-header-icon-action] { width:52px; height:52px; min-width:52px; min-height:52px; padding:0!important; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.standalone-app [data-alpha-app-header] .app-header-action-label { display:none; }
+.standalone-app [data-alpha-app-header] .app-header-action-icon { display:block; }
+.app-header-context { display:none; }
+.standalone-app [data-alpha-app-header] .app-header-context { display:block; flex:1; }
 /* The lock clock is display text already far above any reading size; at large text it is held to the
  * screen width (divided by the measured scale, which Android text zoom multiplies back) so it is never cut. */
 .alpha-large-text [data-alpha-lock-clock] { font-size:min(132px, calc(31vw / var(--alpha-text-scale,1)))!important; }
+/* The Notes recording timer is display text (72px) that is never smaller than body text at any size.
+ * At large text it is held to the recorder's width (its container): room for "123:45" beside the
+ * live dot, divided by the measured scale and multiplied by the browser text setting so it is drawn
+ * at min(72px x scale, fit) both under Android text zoom and with the browser build's declared sizes. */
+.alpha-large-text [data-alpha-notes-rec-clock] { font-size:min(calc(72px * var(--browser-text-scale,1)), calc((100cqi - 26px) / 3.4 / var(--alpha-text-scale,1) * var(--browser-text-scale,1)))!important; }
 
 .standalone-app .notes-layout { padding-top:0!important; }
 
@@ -621,6 +639,12 @@ html.alpha-text-xl:not(.alpha-landscape) [data-alpha-camera="modes"] button{heig
  * it leave the top of the screen: the Files selection count and the Notes Trash heading. */
 .standalone-app [data-alpha-app-header][data-alpha-header-grow]{height:auto!important}
 [data-alpha-subview="notes-trash"]>div:first-child{height:auto!important;min-height:56px}
+/* Notes cards above 150% text (#701): one column in collection order, and every card's text wraps
+ * instead of clipping at the column edge. */
+.alpha-text-xl [data-alpha-notes-cards] { flex-direction:column; align-items:stretch!important; }
+.alpha-text-xl [data-alpha-notes-cards] > div { display:contents; }
+.alpha-text-xl .note-card :is(div,span) { overflow-wrap:anywhere; }
+.alpha-text-xl .note-card-item { white-space:normal!important; text-overflow:clip!important; }
 
 /* Modal reviews are outside the scaled phone canvas. The software keyboard may
  * shrink/pan only the visual viewport, leaving 100dvh and the dialog's default
@@ -641,10 +665,11 @@ dialog:is(.alpha-operation-review,.alpha-calendar-editor,.alpha-calendar-meeting
  * Match the title and source controls to the text column; preserve portrait gutters. */
 .note-editor > .note-title-column { width:100%; max-width:768px; align-self:center; box-sizing:border-box; }
 .note-editor > textarea { max-width:720px; align-self:center; }
+.note-editor > .note-source-actions { width:calc(100% - 48px); max-width:720px; align-self:center; box-sizing:border-box; }
 .note-editor > .note-checklist-column { width:100%; max-width:744px; align-self:center; box-sizing:border-box; min-height:0; }
 [data-alpha-subview="notes-voice"] > .note-voice-column { width:100%; max-width:768px; align-self:center; box-sizing:border-box; min-height:0; }
 
-/* Responsive surfaces. `alpha-wide` is set from the
+/* Responsive surfaces (#411). `alpha-wide` is set from the
  * measured canvas width (runtime/canvas-geometry.ts), not from orientation. On a wide canvas,
  * lists, readers, editors and settings keep a readable centred column instead of stretching;
  * their scroll containers stay full width so the scroll edge and gestures do not move. Nested

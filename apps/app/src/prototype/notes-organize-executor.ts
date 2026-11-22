@@ -3,7 +3,6 @@ import type {NotesOrganizeOperation} from '../../../../.eliza/client-features/pl
 import {addNotesFolder,findNotesFolderByName,newNotesFolderId,withNoteFolder,type NotesFoldersDocument} from '../runtime/notes-folders-model.ts';
 import type {NotesFilter} from '../runtime/notes-view';
 import {notesRecorderControl,type NotesRecordStart,type NotesRecordStop} from './notes-recorder-control.ts';
-import type {ShellHost,ViewState} from './shell-types';
 
 type Note={id:string;folderId?:unknown;[key:string]:unknown};
 export type NotesRestoreOutcome='restored'|'live'|'gone'|'expired'|'failed'|'busy'|'missing';
@@ -96,15 +95,12 @@ export async function executeNotesOrganize(host:NotesOrganizeHost,operation:Excl
  return summaries[outcome];
 }
 
-/** The shell members the host uses; agent-adapter attaches `live` and makes `vset` honour `exact`. */
-type OrganizeShell=Pick<ShellHost,'S'|'vget'|'openView'>&{live?:boolean;vset(key:string,patch:ViewState,options?:{exact?:boolean}):unknown};
-/** The live shell as an executor host: the folder slot, the filter and the recorder. No device Notes collection backs
- * record, move or restore, so those report Notes unavailable. */
-export function notesOrganizeShellHost(shell:OrganizeShell,folders:{read():Promise<NotesFoldersDocument>;edit(update:(doc:NotesFoldersDocument)=>NotesFoldersDocument):Promise<NotesFoldersDocument>}):NotesOrganizeHost{
+/** The live shell as an executor host: the secure Notes store, the folder slot and the Trash restore path. */
+export function notesOrganizeShellHost(shell:any,folders:{read():Promise<NotesFoldersDocument>;edit(update:(doc:NotesFoldersDocument)=>NotesFoldersDocument):Promise<NotesFoldersDocument>}):NotesOrganizeHost{
  return {
-  ready:()=>false,
-  list:()=>shell.vget<{list?:Note[]}>('notes').list||[],
-  target:()=>Promise.reject(Error('Notes unavailable')),
+  ready:()=>!!shell.live&&!!shell.notesStore&&!shell.notesStorageFailed&&!shell.notesPending,
+  list:()=>shell.vget('notes').list||[],
+  target:noteId=>shell.notesStore.target(noteId),
   commitList:async list=>await shell.vset('notes',{list},{exact:true})===true,
   readFolders:()=>folders.read(),
   editFolders:update=>folders.edit(update),
@@ -113,7 +109,12 @@ export function notesOrganizeShellHost(shell:OrganizeShell,folders:{read():Promi
    const patch={filter,folder:null,open:null,menu:null,folderSheet:null};
    if(shell.S().view==='notes')shell.vset('notes',patch);else shell.openView('notes',patch);
   },
-  restore:async()=>'failed',
+  restore:async noteId=>{
+   const trash=shell.api('notes')?.notesTrash;
+   if(!trash)return 'failed';
+   const entry=await trash.entryFor(noteId);
+   return entry?await trash.restore(entry.id):'missing';
+  },
   recordStart:async()=>{const control=notesRecorderControl();return control?control.start():'failed';},
   recordStop:async()=>{const control=notesRecorderControl();return control?control.stop():'none';},
  };

@@ -19,6 +19,8 @@ public class AlphaNoteAudioPlugin extends Plugin {
  private final android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());
  private final java.util.concurrent.ExecutorService migrationWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
  private volatile boolean destroyed;
+ private volatile String migrationState="pending";
+ private volatile int migrationFailures;
  /**
   * Alpha's installed recording store: note-audio in no-backup storage, metadata in the
   * Keystore-backed slot store under note-audio-metadata:v1:, owned by noteId. These names predate
@@ -35,7 +37,7 @@ public class AlphaNoteAudioPlugin extends Plugin {
  static final RecordingStore.Limits NOTE_RECORDINGS=new RecordingStore.Limits(Long.MAX_VALUE,Long.MAX_VALUE,150_000,AlphaNoteAudioPlugin.AUDIO_BACKSTOP_MS);
  private static RecordingStore recordings(android.content.Context context,RecordingStore.Limits limits){
   AlphaCredentialStore store=new AlphaCredentialStore(context);
-  return new RecordingStore(new File(context.getNoBackupFilesDir(),"note-audio"),Slots.NOTE_AUDIO_METADATA_PREFIX,"noteId",new RecordingStore.Slots(){
+  return new RecordingStore(new File(context.getNoBackupFilesDir(),"note-audio"),"note-audio-metadata:v1:","noteId",new RecordingStore.Slots(){
    @Override public String read(String slot)throws Exception{return store.readCredentialSlot(slot);}
    @Override public void write(String slot,String value)throws Exception{store.writeCredentialSlot(slot,value);}
    @Override public void remove(String slot)throws Exception{store.removeCredentialSlot(slot);}
@@ -43,8 +45,14 @@ public class AlphaNoteAudioPlugin extends Plugin {
  }
  private RecordingStore recordings(){return recordings(getContext());}
  @Override public void load(){
-  // Plugin registration/startup must not synchronously decrypt the collection.
-  main.post(()->{if(destroyed)return;PluginWorkers.submit(migrationWorker,this::sweepTrashOnStart,()->{});});
+  // Plugin registration/startup must not synchronously decrypt an entire old collection.
+  main.post(()->{if(destroyed)return;if(PluginWorkers.submit(migrationWorker,this::migrateLegacyMetadata,()->migrationState="stopped"))PluginWorkers.submit(migrationWorker,this::sweepTrashOnStart,()->migrationState="stopped");});
+ }
+ private void migrateLegacyMetadata(){
+  migrationState="running";
+  try{migrationFailures+=recordings().migrateLegacy(()->destroyed);}
+  catch(Exception retained){migrationFailures++;/* Keep both copies; explicit status reports recovery needed. */}
+  finally{migrationState=destroyed?"stopped":migrationFailures>0?"needs-recovery":"complete";}
  }
  private void sweepTrashOnStart(){
   if(destroyed)return;
@@ -56,10 +64,11 @@ public class AlphaNoteAudioPlugin extends Plugin {
  static final long NOTES_TRASH_RETENTION_MS=30L*24*60*60*1000;
  /** Orphan-recording backstop: twice Trash retention, so the Trash rules (live references, review) always decide first. */
  static final long AUDIO_BACKSTOP_MS=2*NOTES_TRASH_RETENTION_MS;
- static final String NOTES_TRASH_SLOT=Slots.NOTES_TRASH,NOTES_SLOT=Slots.NOTES_RECORDS,PENDING_AUDIO_SLOT=Slots.NOTES_AUDIO_DELETIONS;
+ static final String NOTES_TRASH_SLOT="notes-trash:v1:device",NOTES_SLOT="notes-records:v1:device",PENDING_AUDIO_SLOT="notes-audio-deletions:v1:device";
  private static final String TRASH_PREFIX="{\"version\":1,\"entries\":[",TRASH_SUFFIX="]}";
  private static final String TRASH_WORK="alpha-notes-trash-backstop";
  private static final Object SWEEP_LOCK=new Object();
+ private static final String OPERATION="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
  /** Periodic best-effort upkeep while Alpha is closed; the renderer remains the primary purge path. */
  static void scheduleTrashBackstop(android.content.Context context){
@@ -93,7 +102,7 @@ public class AlphaNoteAudioPlugin extends Plugin {
   synchronized(SWEEP_LOCK){
    AlphaCredentialStore store=new AlphaCredentialStore(context);
    String raw=store.readCredentialSlot(NOTES_TRASH_SLOT);if(raw==null)return 0;
-   List<String> spans=trashEntrySpans(raw);if(spans==null||spans.isEmpty())return 0;
+   java.util.List<String> spans=trashEntrySpans(raw);if(spans==null||spans.isEmpty())return 0;
    String notesRaw=store.readCredentialSlot(NOTES_SLOT);if(notesRaw==null)return 0;
    org.json.JSONArray records=new JSONObject(new JSONObject(notesRaw).getString("currentRaw")).getJSONArray("records");
    Set<String> liveNotes=new HashSet<>(),liveAudio=new HashSet<>();
@@ -113,7 +122,10 @@ public class AlphaNoteAudioPlugin extends Plugin {
     if(due)removed++;else kept.add(span);
    }
    if(removed==0)return 0;
-   return store.compareExchangeCredentialSlot(NOTES_TRASH_SLOT,raw,TRASH_PREFIX+String.join(",",kept)+TRASH_SUFFIX)?removed:0;
+   StringBuilder next=new StringBuilder(TRASH_PREFIX);
+   for(int i=0;i<kept.size();i++){if(i>0)next.append(',');next.append(kept.get(i));}
+   next.append(TRASH_SUFFIX);
+   return store.compareExchangeCredentialSlot(NOTES_TRASH_SLOT,raw,next.toString())?removed:0;
   }
  }
  /**
@@ -155,7 +167,7 @@ public class AlphaNoteAudioPlugin extends Plugin {
      JSONObject target=row.getJSONObject("target"),note=row.getJSONObject("note"),noteAudio=note.getJSONObject("audio");
      String noteId=note.getString("id"),audioId=row.getString("audioId");
      // A row a live renderer still holds (between steps, or shown under review with Restore) is left alone.
-     boolean bound=Boolean.TRUE.equals(row.opt("permanent"))&&!NotesDeletionLease.held(row,now)&&AlphaUtil.isUuid(operation)&&operation.equals(row.getString("id"))
+     boolean bound=Boolean.TRUE.equals(row.opt("permanent"))&&!NotesDeletionLease.held(row,now)&&operation.matches(OPERATION)&&operation.equals(row.getString("id"))
       &&noteId.equals(target.getString("noteId"))&&audioId.equals(noteAudio.getString("audioId"))&&noteId.equals(noteAudio.getString("noteId"));
      boolean tombstoned=false;
      if(bound&&!liveNotes.contains(noteId)&&!liveAudio.contains(audioId)&&collection.equals(target.getString("sourceId")))for(int i=0;i<tombstones.length()&&!tombstoned;i++){
@@ -167,7 +179,10 @@ public class AlphaNoteAudioPlugin extends Plugin {
     if(done)retired++;else kept.add(member);
    }
    if(retired==0)return 0;
-   return store.compareExchangeCredentialSlot(PENDING_AUDIO_SLOT,raw,"{"+String.join(",",kept)+"}")?retired:0;
+   StringBuilder next=new StringBuilder("{");
+   for(int i=0;i<kept.size();i++){if(i>0)next.append(',');next.append(kept.get(i));}
+   next.append('}');
+   return store.compareExchangeCredentialSlot(PENDING_AUDIO_SLOT,raw,next.toString())?retired:0;
   }
  }
  /**
@@ -213,11 +228,13 @@ public class AlphaNoteAudioPlugin extends Plugin {
   return spans;
  }
 
+ @PluginMethod public void migrationStatus(PluginCall call){JSObject result=new JSObject();result.put("state",migrationState);result.put("failedRecords",migrationFailures);call.resolve(result);}
+
  /** Only native recorders can import a stopped clip; the renderer cannot nominate a path. */
  JSObject retain(File source,String recordingId,String noteId,long duration,String transcript)throws Exception {return JSObject.fromJSONObject(recordings().retain(source,recordingId,noteId,duration,transcript));}
  /**
   * Joins a Notes recording's segments and keeps them for the note, on this plugin's worker (after
-  * the startup Trash sweep). The renderer discards the segments once the note itself is saved.
+  * the startup metadata pass). The renderer discards the segments once the note itself is saved.
   */
  void saveNoteRecording(PluginCall call,AlphaNoteRecorder recorder,String id){
   PluginWorkers.submit(migrationWorker,()->{
@@ -263,5 +280,5 @@ public class AlphaNoteAudioPlugin extends Plugin {
  }catch(Exception error){call.reject("Saved recording could not be updated");}});}
  private void stop(){if(preparing!=null){preparing.reject("Playback cancelled");preparing=null;}if(player!=null){player.release();player=null;}playingId=null;}
  @Override protected void handleOnPause(){main.post(this::stop);}
- @Override protected void handleOnDestroy(){destroyed=true;migrationWorker.shutdownNow();main.post(this::stop);}
+ @Override protected void handleOnDestroy(){destroyed=true;migrationWorker.shutdownNow();migrationState="stopped";main.post(this::stop);}
 }

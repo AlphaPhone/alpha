@@ -12,7 +12,7 @@ import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
 /**
- * The note read-aloud route on Android. Through the real Capacitor bridge, the
+ * daily-11: the note read-aloud route on Android. Through the real Capacitor bridge, the
  * renderer's local speech calls synthesize note text with the on-device engine
  * (synthesizeLocal, execution "device"), play it with MediaPlayer, finish with playbackEnded,
  * and a stop request ends a longer passage with playbackStopped. Opt-in with -e localSpeech 1
