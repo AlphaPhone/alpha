@@ -426,15 +426,6 @@ function keepStageLast(scale: number) {
 function reducedMotion() {
 	return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
-/**
- * Voice owns the chat: the shell's voice overlay (S().voice), or the Talk conversation the voice
- * adapter runs in the sheet and on the pill, which leaves S().voice off. No chat drag starts or
- * survives under it (ChatDock DragMatchesShell), so a drag never redraws the text composer or the
- * collapsed bar beneath the voice controls.
- */
-function voiceOwnsChat(shell: Shell): boolean {
-	return shell.S().voice !== "off" || shell.voiceConversationActive?.() === true;
-}
 /** Product gesture binding over shared pure geometry; never owns transcript or editable-control gestures. */
 export function installChatOverlayMotion(Component: Shell) {
 	const p = Component.prototype,
@@ -738,7 +729,7 @@ export function installChatOverlayMotion(Component: Shell) {
 				s.screen !== drag.screen ||
 				// A comms view's hidden chat rests on its bar (D2), the mode the drag started from.
 				(s.chat === "hidden" && this.isCommsView(s.view) ? "input" : s.chat) !== drag.mode ||
-				voiceOwnsChat(this))
+				this.chatOwnedByVoice)
 		)
 			retire(this);
 		const change = this.chatChange;
@@ -884,6 +875,11 @@ export function installChatOverlayMotion(Component: Shell) {
 			s = this.S(),
 			geometry = bounds(),
 			drag: Drag | undefined = this.chatMotion;
+		// Voice owns the chat while its controls hold it: the shell's voice overlay (S().voice), or the
+		// voice adapter's recorder (a Talk conversation, dictation, or the panel retiring either), which
+		// leaves S().voice off. No chat drag starts or survives under it (ChatDock DragMatchesShell), so
+		// a drag never redraws the text composer or the collapsed form beneath the voice controls.
+		shell.chatOwnedByVoice = s.voice !== "off" || !!out.chatRecorder;
 		out.panelH =
 			(drag && paintedHeight(drag)) ??
 			(s.chat === "full"
@@ -993,7 +989,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			out.panelR = drag.height >= drag.full ? "0px" : "30px 30px 0 0";
 		}
 		// An open chat dragged down hands over to the form it collapses to, drawn under it in place.
-		if (drag?.moved && (drag.mode === "sheet" || drag.mode === "full") && !voiceOwnsChat(shell)) {
+		if (drag?.moved && (drag.mode === "sheet" || drag.mode === "full") && !shell.chatOwnedByVoice) {
 			const rest = shell.rest();
 			if (rest === "input") out.showComposer = true;
 			if (rest === "hidden") out.showPill = true;
@@ -1032,7 +1028,7 @@ export function installChatOverlayMotion(Component: Shell) {
 				event.stopPropagation();
 				// Under voice the handle keeps its press and moves nothing: the screen's own swipe
 				// must not lower the sheet from under the voice controls either.
-				if (voiceOwnsChat(shell)) return;
+				if (shell.chatOwnedByVoice) return;
 				if (emptyInput) event.preventDefault();
 				const g = bounds(),
 					// A comms view rests on its bar even when the chat state says hidden (D2).
