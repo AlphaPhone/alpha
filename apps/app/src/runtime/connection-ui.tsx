@@ -77,6 +77,7 @@ import { ownerActionFollowUp,smsOwnerRequest } from '../ui/device-actions/owner-
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
 import { RemoteProtocol, RemoteProtocolError } from './remote-protocol';
 import { offeredByEither, phoneContextMessage, sanitizePhoneContext, selectDeviceCapabilities } from './phone-context';
+import type {BrowserPageContext} from '../browser/page-context';
 import {browserPreviousNotesAvailability,devicePreviousNotesAvailability,type LegacyNotesAvailability} from '../prototype/legacy-notes-access';
 import {browserNotesPort} from './browser-notes-document';
 import {calendarSource,calendarTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
@@ -2122,6 +2123,8 @@ async function refreshActionReview(signal:AbortSignal){
   }catch{signal.throwIfAborted();/* The history stays available from Phone action history. */}
 }
 let viewInteractionExecutor:((view:string,capability:string,params:unknown,signal:AbortSignal,current:()=>void)=>Promise<unknown>)|undefined;
+/** Browser's page context: one block per accepted turn while a page applies (browser/page-context.ts). */
+let browserPageContext:BrowserPageContext|undefined;
 function boundNavigation():ViewNavigationClient|undefined {
  const selected=active,session=state.session,generation=epoch;
  if(!selected||!session||!navigationContext)return undefined;
@@ -2355,6 +2358,7 @@ export const connectionController = {
   observeCommittedView(){return boundNavigation()?.observeCommittedView()??Promise.resolve(false);},
   captureViewNavigation(context:ContextEnvelope){const client=boundNavigation();return client?{client,attempt:client.capture(context)}:undefined;},
   setViewInteractionExecutor(executor:typeof viewInteractionExecutor){viewInteractionExecutor=executor;},
+  setBrowserPageContext(context:BrowserPageContext){browserPageContext=context;},
   setDeviceExecutor(executor: DeviceExecutor) { deviceExecutor = executor; },
   setForegroundExecutor(executor: ForegroundReviewExecutor) { foregroundExecutor = executor; },
   setDeviceReadReview(review:(proposal:ActionProposal,context:ContextEnvelope,signal:AbortSignal)=>Promise<void>){deviceReadReview=review;},
@@ -3536,6 +3540,9 @@ export const connectionController = {
     cancelStoppedReply();
     try {
       requestSignal.throwIfAborted();
+      // Every turn, typed or spoken, carries the page open in Browser while it applies; the model
+      // decides whether the message is about it. Read alongside the awaits below; never throws.
+      const browserPageRead=browserPageContext?.(message.context,requestSignal);
       const assertCurrent=()=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId||(expectedConversationId!==undefined&&conversationMemory.get(conversationKey(session))!==expectedConversationId))throw Error('The connection or conversation changed.');};
       // WebView can keep navigator.onLine=false while this same app has a working network.
       // Only Android confirming no active network refuses a turn; unknown status leaves the
@@ -3573,7 +3580,9 @@ export const connectionController = {
       // The agent that keeps this owner's notes is told the phone's folder names with every message.
       const notesFolders=this.getAppRecordClient()?await chatNotesFolders():{};
       requestSignal.throwIfAborted();assertCurrent();
-      const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
+      const browserPage=await browserPageRead;
+      requestSignal.throwIfAborted();assertCurrent();
+      const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(browserPage?{browserPage}:{}), ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };
       const progress=(value:string,frame?:import('./local-agent-stream').StreamTextFrame)=>{requestSignal.throwIfAborted();if(generation!==epoch||selected!==active||state.session?.sessionId!==session.sessionId)throw Error('The connection changed.');if(!isPhoneReviewInstruction(value))onText?.(value,frame);};
       const replyReady=(results:readonly unknown[]|undefined)=>{assertCurrent();onReplyReady?.(results);};

@@ -852,21 +852,18 @@
   {
     "sources": [
       "apps/app/src/browser/reading-review.ts",
-      "apps/app/src/prototype/browser-adapter.ts",
-      "apps/app/src/browser/page-question.ts"
+      "apps/app/src/prototype/browser-adapter.ts"
     ],
     "stateMapping": {
       "phase/isolated/ready/sensitive": "isolated-world readiness handshake, native extraction and per-page sensitive refusal",
       "token/approved/reviewedExcerpt/consumed": "expiring, single-use review bound to exact extracted bytes",
-      "owner/epoch/navigation/capturedEpoch/capturedNavigation": "current account and page lifetime at consumption",
-      "draft": "explicit page question may stage a bounded public excerpt for the current request"
+      "owner/epoch/navigation/capturedEpoch/capturedNavigation": "current account and page lifetime at consumption"
     },
     "abstractions": [
       "One excerpt represented by identity, two navigation changes and owner changes, and two abstract expiration ticks. Native reading/token and local playback have different wall-clock durations.",
       "Sensitivity heuristics and extraction traversal/byte limits are external predicates with source tests. Sensitivity is decided per page.",
-      "A public page question can use an isolated public fetch without native reading support. An unavailable or sensitive page yields a no-source notice, which is not an excerpt draft.",
       "The web build's reading review has no token or expiry and is modeled in WebReadingReview; the token fields describe the native path.",
-      "An explicit page question authorizes staged public text for that request. Sending and agent-response lifecycle remain in AssistantConversation."
+      "The page text every agent turn carries (browser/page-context.ts) is not a reviewed reading and is outside this model: it is never spoken and needs no token."
     ],
     "path": "specs/quint/services/BrowserReadingState.qnt",
     "module": "BrowserReadingState",
@@ -879,17 +876,14 @@
       "sensitiveDocumentTest",
       "expiredReviewTest",
       "pageNavigationCancelsTest",
-      "questionDraftTest",
-      "sensitiveThenNextPageTest",
-      "unsupportedNativeAllowsPublicQuestionTest"
+      "sensitiveThenNextPageTest"
     ],
     "invariants": [
       "TypeOK",
       "ReviewedSpeech",
       "CurrentReading",
       "SingleUseToken",
-      "SensitiveRefused",
-      "DraftHasReviewedContent"
+      "SensitiveRefused"
     ],
     "bounds": {
       "maxSamples": 1000,

@@ -30,10 +30,12 @@ public final class BrowserReadingNavigationInstrumentedTest {
  private static String host(String js)throws Exception{return WebViewTestDriver.evaluate(js);}
  private static void until(String js)throws Exception{for(int i=0;i<150;i++){if("true".equals(host("Boolean("+js+")")))return;SystemClock.sleep(100);}fail("Browser reading state missing: "+js);}
  private static void click(String label)throws Exception{String q="[...document.querySelectorAll('[data-screen] button')].find(e=>e.getAttribute('aria-label')==="+org.json.JSONObject.quote(label)+"&&e.getClientRects().length)";until(q);host("("+q+").click()");}
+ /** Alpha's words for BrowserPageReading.UNSUPPORTED_MESSAGE (apps/app/src/ui/browser/page-reading.ts). */
+ private static final String ALPHA_UNSUPPORTED="Read aloud is unavailable on this device: its Android System WebView cannot read a page privately. Update Android System WebView.";
  /** A call that records its answer; nothing is sent to a page. */
  private static final class RecordedCall extends com.getcapacitor.PluginCall {
   final AtomicReference<String> message=new AtomicReference<>(),code=new AtomicReference<>();final java.util.concurrent.atomic.AtomicBoolean resolved=new java.util.concurrent.atomic.AtomicBoolean();
-  RecordedCall(){super(null,"AlphaBrowser","reading-unavailable-test","reviewQuestion",new com.getcapacitor.JSObject());}
+  RecordedCall(){super(null,"AlphaBrowser","reading-unavailable-test","reviewReading",new com.getcapacitor.JSObject());}
   @Override public void reject(String msg,String errorCode,Exception ex,com.getcapacitor.JSObject data){message.set(msg);code.set(errorCode);}
   @Override public void resolve(com.getcapacitor.JSObject data){resolved.set(true);}
   @Override public void resolve(){resolved.set(true);}
@@ -42,7 +44,7 @@ public final class BrowserReadingNavigationInstrumentedTest {
   * A provider without isolated-world injection (the SDK emulator's WebView 133 is one) gets no page
   * reading. This asserts the honest state: nothing is injected into the page's own world, the
   * native review refuses with the unavailable answer before any extraction, and the browser says
-  * so in its menu and when either reading action is chosen.
+  * so in its menu and when Read aloud is chosen.
   */
  @Test public void providerWithoutIsolatedWorldSaysReadingIsUnavailableAndInjectsNothing()throws Exception {
   org.junit.Assume.assumeTrue("Explicit isolated provider qualification", "1".equals(InstrumentationRegistry.getArguments().getString("browserIsolatedReading")));
@@ -87,7 +89,7 @@ public final class BrowserReadingNavigationInstrumentedTest {
      // The native review of this loaded, non-sensitive HTTPS document: refused as unavailable, nothing shown.
      // Alpha's reviewed reading (browser/AlphaReviewedReading), the review the Browser opens.
      AlphaReviewedReading reading=new AlphaReviewedReading(web.getContext() instanceof android.app.Activity?(android.app.Activity)web.getContext():null,id->{},false);
-     reading.reviewQuestion(call,"tab",web,world,()->true);
+     reading.review(call,"tab",web,world,()->true);
      java.lang.reflect.Field dialog=AlphaReviewedReading.class.getDeclaredField("dialog");dialog.setAccessible(true);assertNull("No review dialog is shown",dialog.get(reading));
     }catch(Throwable failure){error.set(failure);}});
     if(error.get()!=null)throw new AssertionError(error.get());
@@ -102,15 +104,12 @@ public final class BrowserReadingNavigationInstrumentedTest {
    until("window.__readingSupport!==null");
    assertEquals("{\"available\":false}",(String)new org.json.JSONTokener(host("window.__readingSupport")).nextValue());host("delete window.__readingSupport");
    host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
-   String note="document.querySelector('[data-alpha-browser-menu] [data-alpha-reading-unavailable]')",said="document.querySelector('[data-alpha-toast]').innerText.includes("+org.json.JSONObject.quote(BrowserPageReading.UNSUPPORTED_MESSAGE)+")";
+   String note="document.querySelector('[data-alpha-browser-menu] [data-alpha-reading-unavailable]')",said="document.querySelector('[data-alpha-toast]').innerText.includes("+org.json.JSONObject.quote(ALPHA_UNSUPPORTED)+")";
    click("Menu");until(note+"&&"+note+".getClientRects().length>0");
-   assertEquals("The menu states that page reading is unavailable, in the same words as the native refusal",org.json.JSONObject.quote(BrowserPageReading.UNSUPPORTED_MESSAGE),host(note+".innerText.trim()"));
+   assertEquals("The menu states that Read aloud is unavailable, in Alpha's words for the native refusal",org.json.JSONObject.quote(ALPHA_UNSUPPORTED),host(note+".innerText.trim()"));
    assertEquals("note",(String)new org.json.JSONTokener(host(note+".getAttribute('role')")).nextValue());
    assertEquals("Nothing has been announced before an action is chosen","false",host(said));
    click("Read aloud");until("!document.querySelector('[data-alpha-browser-menu]')");until(said);
-   // The toast leaves by itself; wait for that so the second action's announcement is its own.
-   for(int i=0;i<150&&"true".equals(host(said));i++)SystemClock.sleep(100);assertEquals("The first announcement has left","false",host(said));
-   click("Menu");click("Ask about page");until("!document.querySelector('[data-alpha-browser-menu]')");until(said);
   }
  }
  @Test public void delayedSameOriginAndReloadReadyCannotAdoptOldDocument()throws Exception {

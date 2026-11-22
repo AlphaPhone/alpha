@@ -2,37 +2,42 @@ import {test, expect, type Page} from '@playwright/test';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {returnToApps} from './app-navigation';
 
-// The renderer uses a synthetic public page and an explicit dev-agent reply.
+// The renderer uses a synthetic public page and an explicit dev-agent reply. The sandboxed page
+// frame cannot be read, so the development server's page copy (/__alpha/page-html) is answered here.
 const url = 'https://public-fixture.test/harbour';
-const publicReader = 'https://search.parallel.ai/mcp';
+const pageCopy = '**/__alpha/page-html';
 const fact = 'The ferry leaves at nine from pier four.';
-const html = '<article><h1>Harbour report</h1><p>' + 'Unrelated background. '.repeat(90) + '</p><p>' + fact + '</p></article>';
+const html = '<title>Harbour report</title><nav>Ferries / Timetables / Login</nav><article><h1>Harbour report</h1><p>' + 'Unrelated background. '.repeat(90) + '</p><p>' + fact + '</p></article>';
 const answer = 'The ferry leaves at nine.';
 const question = 'What time does the ferry leave? Use the page you just opened.';
+type Turn = {text:string;attachments:{data:string;name:string}[];metadata:Record<string,any>};
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
 const sourceHeading = (page: Page) => page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading', {name: 'Harbour report', exact: true});
-const turns = (page: Page) => page.evaluate(() => (window as any).pageTurns as {text:string;attachments:{data:string;name:string}[]}[]);
+const turns = (page: Page) => page.evaluate(() => (window as any).pageTurns as Turn[]);
 const composer = (page: Page) => page.locator('[data-alpha-input-bar] textarea');
+// The development profile is an unnegotiated peer, so its wire text carries the legacy observation envelope.
+const authored = (turn: Turn) => { const marker = '[USER MESSAGE]\n', at = turn.text.lastIndexOf(marker); return at < 0 ? turn.text : turn.text.slice(at + marker.length); };
 
-async function begin(page: Page, external: string[], crossOriginReadable: boolean, body = html) {
+async function begin(page: Page, external: string[], body = html, copies: unknown[] = []) {
   page.on('request', request => { const host = new URL(request.url()).hostname; if (/^https?:/.test(request.url()) && !['127.0.0.1', 'localhost', 'public-fixture.test'].includes(host)) external.push(request.url()); });
-  // The frame navigation always loads; the renderer's credential-free re-read is a fetch, which a
-  // site without CORS denies.
-  await page.route(url, route => route.request().resourceType() === 'fetch' && !crossOriginReadable ? route.abort() : route.fulfill({contentType: 'text/html', headers: crossOriginReadable ? {'access-control-allow-origin': '*'} : {}, body}));
-  await page.route(publicReader, route => route.abort());
+  await page.route(url, route => route.fulfill({contentType: 'text/html', body}));
+  await page.route(pageCopy, route => { copies.push(route.request().postDataJSON()); return route.fulfill({contentType: 'text/html', body}); });
   await page.goto('/?mode=dev');
   await page.evaluate(async()=>{
     const {Component}=await import('/src/prototype/model.js');
     const {alphaClient}=await import('/src/runtime/alpha-client.ts');
-    const send=alphaClient.send.bind(alphaClient);
+    const {LocalAgentProtocol}=await import('/src/runtime/local-agent.ts');
     const fixture=window as any;
     fixture.pageTurns=[];
-    alphaClient.send=(...args)=>{
-      fixture.pageTurns.push({text:args[0],attachments:args[4]?.images??[]});
-      return send(...args);
+    // The development agent's request: the authored text, attachments and the turn's metadata.
+    const send=LocalAgentProtocol.prototype.send;
+    LocalAgentProtocol.prototype.send=function(id:string,text:string,options:any={}){
+      fixture.pageTurns.push({text,attachments:options.images??[],metadata:structuredClone(options.metadata??{})});
+      return send.call(this,id,text,options);
     };
+    void alphaClient;
     const render=Component.prototype.renderVals;
-    Component.prototype.renderVals=function(){(window as any).pageQuestionShell=this;return render.call(this);};
+    Component.prototype.renderVals=function(){(window as any).pageShell=this;return render.call(this);};
   });
   await button(page, 'Settings').click();
   await openConnectionDiagnostics(page);
@@ -47,37 +52,36 @@ async function begin(page: Page, external: string[], crossOriginReadable: boolea
   await page.getByRole('textbox', {name: 'Address', exact: true}).press('Enter');
   await expect(sourceHeading(page)).toBeVisible();
 }
-async function startSpokenPageQuestion(page:Page,question:string){
- await page.evaluate(async({question})=>{
-  const w=window as any,shell=w.pageQuestionShell;
+async function startSpokenTurn(page:Page,text:string){
+ await page.evaluate(async({text})=>{
+  const w=window as any,shell=w.pageShell;
   const signal=new AbortController().signal;
   const prepared=await shell.prepareVoiceConversation(signal);
-  w.spokenPageResult=shell.sendVoiceTurn({...prepared,text:question,signal,turnId:crypto.randomUUID(),assertCurrent:()=>{},
+  w.spokenPageResult=shell.sendVoiceTurn({...prepared,text,signal,turnId:crypto.randomUUID(),assertCurrent:()=>{},
    voiceTurnSignal:{nextSpeaker:'agent',agentShouldSpeak:true,source:'fixture'}}).then(()=> 'sent',(error:Error)=>error.name);
- },{question});
+ },{text});
 }
+async function sendTyped(page:Page,text:string){await composer(page).fill(text);await button(page,'Send').click();}
 
-function pageAttachment(turn:{text:string;attachments:{data:string;name:string}[]}){
-  expect(turn.text).toBe(question);
-  expect(turn.attachments.map(attachment=>attachment.name)).toEqual(['Browser page.txt']);
-  return Buffer.from(turn.attachments[0].data,'base64').toString('utf8');
-}
-
-for(const mode of ['typed','spoken'])test(`a ${mode} page question sends one bounded passage without a popup`,async({page})=>{
-  const external:string[]=[];
-  await begin(page,external,true);
+for(const mode of ['typed','spoken'])test(`a ${mode} turn on a Browser page carries the page text as metadata, with no attachment or popup`,async({page})=>{
+  const external:string[]=[],copies:unknown[]=[];
+  await begin(page,external,html,copies);
   await button(page,'Chat actions').click();
   await expect(button(page,'Attach page')).toHaveCount(0);
   await page.keyboard.press('Escape');
-  if(mode==='typed'){
-    await composer(page).fill(question);
-    await button(page,'Send').click();
-  }else await startSpokenPageQuestion(page,question);
+  if(mode==='typed')await sendTyped(page,question);
+  else await startSpokenTurn(page,question);
   await expect.poll(async()=>(await turns(page)).length).toBe(1);
-  const passage=pageAttachment((await turns(page))[0]);
-  expect(passage).toContain(url);
-  expect(passage).toContain(fact);
-  expect(passage.length).toBeLessThan(1250);
+  const [turn]=await turns(page);
+  expect(authored(turn)).toBe(question);
+  expect(turn.text).not.toContain(fact);
+  expect(turn.attachments).toEqual([]);
+  expect(turn.metadata.browserPage).toMatchObject({v:1,onScreen:true,url,title:'Harbour report'});
+  expect(turn.metadata.browserPage.text).toMatch(/^Harbour report\nUnrelated background/);
+  expect(turn.metadata.browserPage.text).toContain(fact);
+  expect(turn.metadata.browserPage.text).not.toContain('Timetables');
+  expect(JSON.stringify(turn.metadata.browserPage).length).toBeLessThan(7000);
+  expect(copies).toEqual([{url}]);
   if(mode==='spoken'){
     await expect.poll(()=>page.evaluate(()=>(window as any).spokenPageResult)).toBe('sent');
     if(await button(page,'Open conversation').isVisible())await button(page,'Open conversation').click();
@@ -87,97 +91,65 @@ for(const mode of ['typed','spoken'])test(`a ${mode} page question sends one bou
   expect(external).toEqual([]);
 });
 
-for(const matches of [true,false])test(`a cross-origin page ${matches?'uses one bounded public excerpt':'rejects a mismatched public excerpt'}`,async({page})=>{
- const external:string[]=[];
- await begin(page,external,false);
- const reads:unknown[]=[];
- await page.route(publicReader,route=>{
-   reads.push(route.request().postDataJSON());
-   const result={results:[{url:matches?url:'https://other.test/',excerpts:[
-     '- [Updates](https://public-fixture.test/ferry/time/leave)\n'+'Background. '.repeat(150),fact,
-   ]}],errors:[]};
-   return route.fulfill({headers:{'access-control-allow-origin':'*'},json:{id:1,jsonrpc:'2.0',result:{content:[{type:'text',text:JSON.stringify(result)}]}}});
- });
- await composer(page).fill(question);await button(page,'Send').click();
- await expect.poll(async()=>(await turns(page)).length).toBe(1);
- const passage=pageAttachment((await turns(page))[0]);
- expect(reads).toEqual([expect.objectContaining({params:{name:'web_fetch',arguments:{
-   urls:[url],objective:'Return a few short excerpts from the main public page content. Omit navigation and forms.',full_content:false,
- }}})]);
- if(matches){
-   expect(passage).toContain(url);
-   expect(passage).toContain(fact);
-   expect(passage).not.toContain('/ferry/time/leave');
-   expect(passage.length).toBeLessThan(1250);
- }else{
-   expect(passage).toContain('No readable public page');
-   expect(passage).not.toContain(url);
-   expect(passage).not.toContain(fact);
- }
- await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
- expect(external).toEqual([publicReader]);
+test('any wording gets the same page block, and the page is read once for several turns',async({page})=>{
+  const external:string[]=[],copies:unknown[]=[];
+  await begin(page,external,html,copies);
+  await sendTyped(page,'What is two plus two?');
+  await expect.poll(async()=>(await turns(page)).length).toBe(1);
+  await expect(page.getByRole('button',{name:'Message actions: '+answer,exact:true}).first()).toBeVisible();
+  await sendTyped(page,'summarize');
+  await expect.poll(async()=>(await turns(page)).length).toBe(2);
+  const [first,second]=await turns(page);
+  expect(authored(first)).toBe('What is two plus two?');
+  expect(second.metadata.browserPage).toEqual(first.metadata.browserPage);
+  expect(first.metadata.browserPage.text).toContain(fact);
+  expect(copies).toHaveLength(1);
+  expect(external).toEqual([]);
 });
 
-test('a sign-in page shares no title, address or page text with the agent',async({page})=>{
+test('a sign-in page sends its address and title but no page text',async({page})=>{
  const external:string[]=[];
- await begin(page,external,true,'<article><h1>Harbour report</h1><p>private synthetic material</p><input type="password" /></article>');
- await composer(page).fill(question);await button(page,'Send').click();
+ await begin(page,external,'<title>Harbour report</title><article><h1>Harbour report</h1><p>private synthetic material</p><input type="password" /></article>');
+ await sendTyped(page,question);
  await expect.poll(async()=>(await turns(page)).length).toBe(1);
- const passage=pageAttachment((await turns(page))[0]);
- expect(passage).toContain('No readable public page');
- expect(passage).not.toContain(url);
- expect(passage).not.toContain('Harbour report');
- expect(passage).not.toContain('private synthetic material');
+ const [turn]=await turns(page);
+ expect(turn.metadata.browserPage).toMatchObject({url,title:'Harbour report',textUnavailable:'sign-in form on this page'});
+ expect(JSON.stringify(turn)).not.toContain('private synthetic material');
  expect(external).toEqual([]);
 });
 
-test('a question in a private tab sends no page address or excerpt',async({page})=>{
- const external:string[]=[];
- await begin(page,external,true);
+test('a turn from a private tab carries no page address or text',async({page})=>{
+ const external:string[]=[],copies:unknown[]=[];
+ await begin(page,external,html,copies);
  // Chrome uses the browser host fixture for private tabs in this test.
  await page.evaluate(()=>{(window as any).Capacitor.isNativePlatform=()=>true;});
  await button(page,'Menu').click();await button(page,'New private tab').click();
  const address=page.getByRole('textbox',{name:'Address',exact:true});
  await address.fill(url);await address.press('Enter');
  await expect(sourceHeading(page)).toBeVisible();
- await startSpokenPageQuestion(page,question);
+ await startSpokenTurn(page,question);
  await expect.poll(async()=>(await turns(page)).length).toBe(1);
- const passage=pageAttachment((await turns(page))[0]);
- expect(passage).toContain('No readable public page');
- expect(passage).not.toContain(url);
- expect(passage).not.toContain(fact);
+ const [turn]=await turns(page);
+ expect(turn.metadata).not.toHaveProperty('browserPage');
+ expect(JSON.stringify(turn)).not.toContain(url);
+ expect(copies).toEqual([]);
  expect(external).toEqual([]);
 });
 
-test('a Browser question unrelated to the page sends no page context',async({page})=>{
+test('a page read that does not finish in time leaves the turn on time, without the text',async({page})=>{
   const external:string[]=[];
-  await begin(page,external,true);
-  await composer(page).fill('What is two plus two?');await button(page,'Send').click();
-  await expect.poll(async()=>(await turns(page)).length).toBe(1);
-  expect((await turns(page))[0]).toEqual({text:'What is two plus two?',attachments:[]});
-  expect(external).toEqual([]);
-});
-
-test('a page change while reading retires an unsent excerpt',async({page})=>{
-  const external:string[]=[];
-  await begin(page,external,true);
-  let release!:()=>void;
-  const reading=new Promise<void>(resolve=>release=resolve);
   let requested=false;
-  await page.route(url,async route=>{
-    if(route.request().resourceType()==='fetch'){requested=true;await reading;}
-    await route.fulfill({contentType:'text/html',headers:{'access-control-allow-origin':'*'},body:html}).catch(()=>{});
-  });
-  await startSpokenPageQuestion(page,question);
-  await expect.poll(()=>requested).toBe(true);
-  const another='https://public-fixture.test/another';
-  await page.route(another,route=>route.fulfill({contentType:'text/html',body:'<h1>Another page</h1>'}));
-  await button(page,'Edit address').click();
-  const address=page.getByRole('textbox',{name:'Address',exact:true});
-  await address.fill(another);await address.press('Enter');
-  await expect(page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading',{name:'Another page'})).toBeVisible();
-  release();
-  await expect.poll(()=>page.evaluate(()=>(window as any).spokenPageResult)).toBe('AbortError');
-  expect(await turns(page)).toEqual([]);
+  await begin(page,external);
+  await page.unroute(pageCopy);
+  await page.route(pageCopy,async route=>{requested=true;await new Promise(resolve=>setTimeout(resolve,4000));await route.fulfill({contentType:'text/html',body:html}).catch(()=>{});});
+  const started=Date.now();
+  await startSpokenTurn(page,question);
+  await expect.poll(async()=>(await turns(page)).length).toBe(1);
+  expect(Date.now()-started).toBeLessThan(3500);
+  expect(requested).toBe(true);
+  const [turn]=await turns(page);
+  expect(turn.metadata.browserPage).toMatchObject({url,textUnavailable:'still reading'});
+  expect(turn.metadata.browserPage).not.toHaveProperty('text');
+  await expect.poll(()=>page.evaluate(()=>(window as any).spokenPageResult)).toBe('sent');
   expect(external).toEqual([]);
 });

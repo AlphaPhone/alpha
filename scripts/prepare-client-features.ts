@@ -99,7 +99,6 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-native-browser-surface/src/page-reading.ts',
   'plugins/plugin-native-browser-surface/src/page-source.ts',
   'plugins/plugin-native-browser-surface/src/tab-host.ts',
-  'plugins/plugin-web-search/src/keyless-web-search.ts',
   'packages/core/src/schema-types.ts',
   'packages/core/src/types/json.ts',
   'packages/core/src/types/system-notice.ts',
