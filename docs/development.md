@@ -885,3 +885,16 @@ idempotent note creation and owner-confirmed recording cleanup
 [Eliza #39950](https://github.com/elizaOS/eliza/pull/39950)).
 The core catalog records the updated Notes source bytes. The mobile policy
 records the lock change for the Maps plugin's contracts dependency.
+
+The next pin, `347d77ee558bfc47d8e546674c6e5f980a7685b9`, adds camera zoom and torch
+while recording and lets the Photos view target the open photo
+([Eliza #39949](https://github.com/elizaOS/eliza/pull/39949)), leases navigation
+claims so a lost claim cannot block navigation for 120 s
+([Eliza #40025](https://github.com/elizaOS/eliza/pull/40025)), lets an honest
+failure report pass recovered-reply grounding
+([Eliza #40026](https://github.com/elizaOS/eliza/pull/40026)) and teaches
+acknowledgments as short cues the closed grammar speaks
+([Eliza #40028](https://github.com/elizaOS/eliza/pull/40028)). The remaining
+commits change staging Steward operator tooling. No hashed core source, mobile
+builder or lock bytes changed. `bun scripts/verify-upstream.ts` verified the
+source at this pin. No model turn, APK or Pixel run is proven by the pin.
