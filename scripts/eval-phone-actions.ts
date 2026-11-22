@@ -12,7 +12,7 @@
  *
  *   bun scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
  *     --token-file <paired-machine-token> --output test-results/phone-actions.json \
- *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--ask-before] [--only <case id>[,...]]
+ *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--ask-before] [--stream] [--only <case id>[,...]]
  *     [--database <resident .elizadb>]
  *
  * Each request is sent the way a phone sends it by default, as one the owner wants done
@@ -29,6 +29,9 @@
  * wording, about actions that are not device proposals (Maps, Notes, Calendar records),
  * or about a real phone. Scores compare only within one case-set revision and profile.
  * With --database the result also carries the tokens the run's model calls used.
+ * With --stream each turn goes through the phone's streaming route instead, and its row records when
+ * the transient acknowledgement status arrived and what it said, the first activity label, the first
+ * reply token and the done frame (milliseconds from the request), as the phone's status line sees them.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -135,7 +138,17 @@ export function judgeTurn(item: PhoneCase, operations: readonly { type?: string 
   return item.reply && !item.reply.test(reply) ? 'content' : 'pass';
 }
 
-export interface CaseRun { id: string; family: string; run: number; outcome: ReturnType<typeof judgeTurn> | 'error'; proposed: string[]; ms: number; replyChars?: number; reply?: string; error?: string }
+/** Milliseconds from the request on the streaming route; ack is the transient acknowledgement status. */
+export interface StreamStats { ack?: string; ackMs?: number; activity?: string; activityMs?: number; firstStatusMs?: number; firstTokenMs?: number; doneMs?: number }
+export interface CaseRun { id: string; family: string; run: number; outcome: ReturnType<typeof judgeTurn> | 'error'; proposed: string[]; ms: number; replyChars?: number; reply?: string; error?: string; stream?: StreamStats }
+const median = (values: readonly number[]) => { const sorted = [...values].sort((a, b) => a - b); return sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] : null; };
+/** Streamed runs only: how many turns got an acknowledgement before their reply, and when. */
+export function summarizeStream(rows: readonly CaseRun[]) {
+  const streamed = rows.filter(row => row.stream);
+  if (!streamed.length) return undefined;
+  const of = (key: keyof StreamStats) => streamed.flatMap(row => typeof row.stream?.[key] === 'number' ? [row.stream[key] as number] : []);
+  return { turns: streamed.length, acknowledged: streamed.filter(row => row.stream?.ack).length, ackMsMedian: median(of('ackMs')), firstTokenMsMedian: median(of('firstTokenMs')), doneMsMedian: median(of('doneMs')) };
+}
 export function summarize(rows: readonly CaseRun[]) {
   const rate = (subset: readonly CaseRun[]) => (subset.length ? subset.filter(row => row.outcome === 'pass').length / subset.length : null);
   const families = [...new Set(rows.map(row => row.family))];
@@ -171,8 +184,8 @@ function loopback(origin: string) {
 interface Proposal { id: string; digest: string; state: string; payload?: { operation?: { type?: string } & Record<string, unknown> } }
 
 /** Sends every case `runs` times; every proposal a turn caused is rejected before the next turn. */
-export async function evaluate({ origin, token, cases = CASES, followUps = FOLLOW_UPS, runs = 1, pauseMs = 0, oneConversation = false, askBefore = false, now = () => new Date() }: {
-  origin: string; token: string; cases?: readonly PhoneCase[]; followUps?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; askBefore?: boolean; now?: () => Date;
+export async function evaluate({ origin, token, cases = CASES, followUps = FOLLOW_UPS, runs = 1, pauseMs = 0, oneConversation = false, askBefore = false, streamMode = false, now = () => new Date() }: {
+  origin: string; token: string; cases?: readonly PhoneCase[]; followUps?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; askBefore?: boolean; streamMode?: boolean; now?: () => Date;
 }) {
   const base = loopback(origin), installationId = randomUUID();
   const device: Record<string, string> = { 'X-Eliza-Device-Id': installationId, 'X-Eliza-Device-Key': randomBytes(32).toString('hex'), 'X-Eliza-Device-Capabilities': selectDeviceCapabilities([], DEVICE_PROFILE).join(',') };
@@ -180,6 +193,45 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
     const response = await fetch(base + pathname, { method: body === undefined ? 'GET' : 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...device }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     if (!response.ok) throw Error(`${pathname.split('/').slice(0, 4).join('/')} returned HTTP ${response.status}`);
     return response.json() as Promise<T>;
+  };
+  // Like the phone (apps/app/src/runtime/local-agent-stream.ts): status labels are the transient
+  // acknowledgement ('thinking') and activity ('running_tool'); the done frame carries the reply.
+  const streamTurn = async (pathname: string, body: unknown, row: CaseRun): Promise<{ text?: string }> => {
+    const sent = Date.now();
+    const response = await fetch(base + pathname, { method: 'POST', headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...device }, body: JSON.stringify(body) });
+    if (!response.ok || !response.body) throw Error(`${pathname.split('/').slice(0, 4).join('/')} returned HTTP ${response.status}`);
+    const reader = response.body.getReader(), decoder = new TextDecoder();
+    let buffer = '', done: { fullText?: string } | undefined;
+    const stats: StreamStats = {};
+    while (!done) {
+      const part = await reader.read();
+      if (part.done) break;
+      buffer += decoder.decode(part.value, { stream: true });
+      let index;
+      while ((index = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, index); buffer = buffer.slice(index + 2);
+        const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+        if (!data) continue;
+        let value; try { value = JSON.parse(data); } catch { continue; }
+        const at = Date.now() - sent;
+        if (value.type === 'status') {
+          const label = typeof value.label === 'string' ? value.label.trim() : '';
+          if (value.kind === 'thinking' && label && stats.ackMs === undefined) { stats.ackMs = at; stats.ack = label.slice(0, 160); }
+          if (value.kind === 'running_tool' && label && stats.activityMs === undefined) { stats.activityMs = at; stats.activity = label.slice(0, 60); }
+          if (stats.firstStatusMs === undefined) stats.firstStatusMs = at;
+        } else if (value.type === 'token') {
+          if (stats.firstTokenMs === undefined && value.provisional !== true) stats.firstTokenMs = at;
+        } else if (value.type === 'error') {
+          throw Error(`stream error ${String(value.failureKind ?? value.code ?? '')}`.trim());
+        } else if (value.type === 'done') {
+          stats.doneMs = at; done = value;
+        }
+      }
+    }
+    await reader.cancel().catch(() => {});
+    row.stream = stats;
+    if (!done) throw Error('stream ended without a done frame');
+    return { text: done.fullText };
   };
   const registered = await call<{ installationId: string; capabilities: string[] }>('/api/client-devices/register', { label: 'Alpha phone-action eval', workflowProtocol: 0 });
   if (registered.installationId !== installationId) throw Error('Device registration was not verified');
@@ -213,7 +265,8 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
           strayProposals += (await rejectUnseen()).length;
           const conversation = shared ?? await open(`Phone-action eval ${item.id}`);
           const context = { view: item.view, revision: 1, sensitive: false, timeZone: 'America/New_York' };
-          const reply = await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, { text: item.text, channelType: 'DM', metadata: { ...(askBefore ? {} : { agentActionMode: 'direct-request-v1' }), uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() });
+          const messageBody = { text: item.text, channelType: 'DM', metadata: { ...(askBefore ? {} : { agentActionMode: 'direct-request-v1' }), uiTimeZone: context.timeZone, clientDevice: { context } }, clientMessageId: randomUUID() };
+          const reply = streamMode ? await streamTurn(`/api/conversations/${encodeURIComponent(conversation)}/messages/stream`, messageBody, row) : await call<{ text?: string }>(`/api/conversations/${encodeURIComponent(conversation)}/messages`, messageBody);
           const operations = (await rejectUnseen()).map(proposal => proposal.payload?.operation ?? {});
           row.proposed = operations.map(operation => operation.type ?? 'unknown');
           row.outcome = judgeTurn(item, operations, String(reply.text ?? ''));
@@ -230,7 +283,7 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
     }
     strayProposals += (await rejectUnseen()).length;
     await call('/api/client-devices/revoke', {}); revoked = true;
-    return { version: 1, kind: 'phone-actions', conversations: oneConversation ? 'one-per-run' : 'one-per-case', actionMode: askBefore ? 'ask-before' : 'direct-request-v1', recordedAt: startedAt.toISOString(), expectedModel: AGENT_MODEL, deviceProfile: DEVICE_PROFILE, negotiatedCapabilities: negotiated, source: sourceBinding(), summary: { ...summarize(rows), strayProposals }, rows };
+    return { version: 1, kind: 'phone-actions', conversations: oneConversation ? 'one-per-run' : 'one-per-case', actionMode: askBefore ? 'ask-before' : 'direct-request-v1', recordedAt: startedAt.toISOString(), expectedModel: AGENT_MODEL, deviceProfile: DEVICE_PROFILE, negotiatedCapabilities: negotiated, source: sourceBinding(), summary: { ...summarize(rows), strayProposals, ...(streamMode ? { acknowledgements: summarizeStream(rows) } : {}) }, rows };
   } finally {
     if (!revoked) await call('/api/client-devices/revoke', {}).catch(() => {});
   }
@@ -241,7 +294,7 @@ if (import.meta.main) {
   const origin = flag('--origin'), tokenFile = flag('--token-file'), output = flag('--output');
   const runs = Number(flag('--runs') ?? 1), pauseMs = Number(flag('--pause-ms') ?? 0);
   if (!origin || !tokenFile || !output || !Number.isInteger(runs) || runs < 1 || !(pauseMs >= 0)) {
-    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--ask-before] [--only <case id>[,...]] [--database <resident .elizadb>]');
+    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--ask-before] [--stream] [--only <case id>[,...]] [--database <resident .elizadb>]');
     process.exit(2);
   }
   const only = flag('--only')?.split(',').filter(Boolean);
@@ -250,7 +303,7 @@ if (import.meta.main) {
     console.error(`Unknown case: ${unknown.join(', ') || '(none named)'}`);
     process.exit(2);
   }
-  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), askBefore: args.includes('--ask-before'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: FOLLOW_UPS.filter(item => only.includes(item.id)) } : {}) });
+  const result = await evaluate({ origin, token: fs.readFileSync(tokenFile, 'utf8').trim(), runs, pauseMs, oneConversation: args.includes('--one-conversation'), streamMode: args.includes('--stream'), askBefore: args.includes('--ask-before'), ...(only ? { cases: CASES.filter(item => only.includes(item.id)), followUps: FOLLOW_UPS.filter(item => only.includes(item.id)) } : {}) });
   const database = flag('--database');
   // The run's own model calls, read from the resident's records after the last turn.
   const usage = database ? audit((await loadCalls(database)).filter(call => call.at >= Date.parse(result.recordedAt))) : null;
