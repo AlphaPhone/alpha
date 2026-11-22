@@ -4,7 +4,7 @@ import {parseClientBrowserPageObservation} from '../../.eliza/client-features/pa
 // Alpha's page-context script exactly as Android runs it: the AlphaPageContext.SCRIPT text block,
 // with its Java escapes undone. Each fixture is served at a public HTTPS address.
 const java=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/browser/AlphaPageContext.java','utf8');
-const script=java.split('public static final String SCRIPT = """')[1].split('""";')[0].split('\n').map(line=>line.replace(/^ {4}/,'')).join('\n').replaceAll('\\\\','\\');
+const script=java.split('public static final String SCRIPT = """')[1].split('""";')[0].split('\n').map(line=>line.replace(/^ {4}/,'')).join('\n').replace(/^\n/,'').replaceAll('\\\\','\\');
 const address='https://public-fixture.test/story';
 
 async function read(page:Page,body:string,{before}:{before?:(page:Page)=>Promise<void>}={}){
