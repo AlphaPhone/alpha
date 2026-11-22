@@ -271,13 +271,23 @@ async function replayOpen(DeviceActions, browserNavigationSummary, options) {
     const receipt = direct ? completion[0] : completion;
     returnedSummary = receipt.summary;
     assert.equal(receipt.status, 'succeeded');
+    const recordedReceipt = r.action('receipt', receiptSucceeds);
+    const presentation = r.action(hidden ? 'presentSkipped' : 'present');
+    if (direct) {
+      assert.equal(host.viewOpens.length, 0);
+      r.step(recordedReceipt);
+      assert.equal(receipt.presentBrowser('sheet'), !hidden);
+      r.step(presentation);
+    } else {
+      assert.equal(receipt.presentBrowser, undefined);
+      r.step(recordedReceipt, presentation);
+    }
     assert.equal(host.viewOpens.length, hidden ? 0 : 1);
     if (!hidden) {
       assert.equal(host.state().cur, navigate()[0].input.id);
-      assert.deepEqual(host.viewOpens[0], ['browser', null, null, {restore:true}]);
+      assert.deepEqual(host.viewOpens[0], ['browser', null, direct ? 'sheet' : undefined, {restore:true}]);
     }
     assert.equal(receipt.summary, receiptSucceeds ? tabCreated : tabCreatedUnsynced);
-    r.step(r.action('receipt', receiptSucceeds), r.action(hidden ? 'presentSkipped' : 'present'));
     return r.trace;
   } finally {
     gate.resolve();
