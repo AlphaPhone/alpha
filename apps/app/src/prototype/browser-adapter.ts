@@ -276,11 +276,19 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       restoreAttempts.delete(id); report(error);
     }
   }
-  function closeTab(id: string) {
-    const rest = state().tabs.filter((tab: Bag) => tab.id !== id), fallback = newTabId();
-    if (tabs.has(id)) void Browser.close({session, id}).catch(report);
-    tabs.forget([id]); restored.delete(id);
-    shell.vset('browser', {tabs: rest.length ? rest : [{id: fallback, hist: ['newtab'], pos: 0}], cur: state().cur === id ? (rest[0]?.id || fallback) : state().cur});
+  function closeTab(id: string) { closeTabs([id]); }
+  // Several tabs close in one state change: Browser's state is applied later, so closing them one
+  // by one would rebuild each list from the state before the previous close. `hidePrivate`: the
+  // tab left showing is never a private one; Browser shows a new tab instead.
+  function closeTabs(ids: string[], hidePrivate = false) {
+    const s = state(), drop = new Set(ids.filter(id => s.tabs.some((tab: Bag) => tab.id === id)));
+    if (!drop.size) return;
+    for (const id of drop) { if (tabs.has(id)) void Browser.close({session, id}).catch(report); restored.delete(id); }
+    tabs.forget([...drop]);
+    const rest = s.tabs.filter((tab: Bag) => !drop.has(tab.id));
+    let cur = drop.has(s.cur) ? rest[0]?.id : s.cur;
+    if (!cur || (hidePrivate && rest.find((tab: Bag) => tab.id === cur)?.priv)) { cur = newTabId(); rest.push({id: cur, hist: ['newtab'], pos: 0}); }
+    shell.vset('browser', {tabs: rest, cur});
   }
   // The open tabs a chat request names by a few words. A private tab is found only for a request
   // made from a private tab. A switch never names the tab that is already showing; from outside
@@ -291,6 +299,18 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     const visible: (Bag & {id: string})[] = s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv);
     return {visible, found: matchingTabs(closing || !inBrowser ? visible : visible.filter(tab => tab.id !== s.cur), target, tabPage)};
   }
+  // The tabs closing every tab closes: all of them, but a private tab only for a request made from
+  // a private tab, as for a named close. Each close-every-tab card lists these once, bound to its
+  // proposal, and its executor closes exactly those tabs or nothing.
+  function closableTabs(): (Bag & {id: string})[] {
+    const s = state(), fromPrivate = shell.S?.().view === 'browser' && isPrivate(s.cur);
+    return s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv);
+  }
+  type ClosingLine = {title: string; host?: string; private?: true};
+  const closingLines = (closing: (Bag & {id: string})[]): ClosingLine[] => closing.map(tab => { const known = tabPage(tab.id); return {title: known?.title || known?.url || (tab.priv ? 'New private tab' : 'New tab'), ...(known?.title && URL.canParse(known.url) ? {host: new URL(known.url).host} : {}), ...(tab.priv ? {private: true as const} : {})}; });
+  // The tabs as a card listed them, by proposal: ids and what the card said of each.
+  const listedForClosing = new Map<string, {key: string; lines: ClosingLine[]}>();
+  const closingKey = (closing: (Bag & {id: string})[]) => JSON.stringify([closing.map(tab => tab.id), closingLines(closing)]);
   async function command(command: string) {
     const id = state()?.cur; if (!id || !tabs.has(id)) return;
     try { await Browser.command({ session, id, command }); } catch (error) { report(error); }
@@ -642,7 +662,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // effect, as BrowserOpenRefused. What would change the tab or page the request was made from
     // (selecting or closing the showing tab, page history) runs in the returned presentation,
     // after the action's journal and receipt, as an approved open's selection does.
-    this.browserControl = async (operation: BrowserControlOperation, input: {signal: AbortSignal; observed?: {id: string; revision: string}; choose: (choice: BrowserTabChoice, signal: AbortSignal) => Promise<number | null>}) => {
+    this.browserControl = async (operation: BrowserControlOperation, input: {signal: AbortSignal; observed?: {id: string; revision: string}; proposalId?: string; choose: (choice: BrowserTabChoice, signal: AbortSignal) => Promise<number | null>}) => {
       const {signal} = input, refuse = (message: string): never => { throw new BrowserOpenRefused(message); };
       signal.throwIfAborted();
       if (operation.type === 'browser_search') return this.browserNavigateApproved(searchAddress(operation.query).href, signal, true);
@@ -655,6 +675,21 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         const id = newTabId();
         shell.vset('browser', {tabs: [...s.tabs, {id, hist: ['newtab'], pos: 0, ...(operation.private ? {priv: true} : {})}]});
         return () => { if (still() && tabOf(id)) show({cur: id, editing: true, addr: ''}); };
+      }
+      if (operation.type === 'browser_tab_close' && operation.all) {
+        const listed = input.proposalId === undefined ? undefined : listedForClosing.get(input.proposalId);
+        if (input.proposalId !== undefined) listedForClosing.delete(input.proposalId);
+        const tabsNow = closableTabs(), closing = tabsNow.map(tab => tab.id);
+        // The owner approved the tabs this card listed, as it listed them: a tab opened, closed or
+        // moved to another page since is not that set, so nothing closes.
+        if (!listed || !closing.length || listed.key !== closingKey(tabsNow)) refuse('Browser\'s tabs changed after you reviewed them. Nothing was closed. Ask again to see the tabs that are open now.');
+        // What is left is private tabs a non-private request did not close: Browser shows a new tab, not one of them.
+        const finish = () => closeTabs(closing, !fromPrivate);
+        // Outside Browser every listed tab closes now. In Browser, as for one tab, the others close
+        // now and the tab showing closes in the presentation, after the action's receipt.
+        if (shell.S?.().view !== 'browser') { finish(); return () => { if (still()) show(); }; }
+        closeTabs(closing.filter(id => id !== selected), !fromPrivate);
+        return () => { if (still()) { finish(); show(); } };
       }
       if (operation.type === 'browser_tab_switch' || operation.type === 'browser_tab_close') {
         const closing = operation.type === 'browser_tab_close', target = operation.target;
@@ -704,6 +739,18 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       return () => { if (still() && tabInfo(selected)?.navigation === navigation) { show(); void command(action); } };
     };
     this.browserTabNeedsChoice = (target: string) => !disposed && !!state() && namedTabs(target, false).found.length > 1;
+    // What a proposal's close-every-tab card lists. A private tab is counted on the card, not named.
+    // The first listing binds the proposal; once Browser's tabs differ from it, that card is
+    // withdrawn (null) rather than redrawn over tabs the owner may already have reviewed.
+    this.browserTabsClosing = (proposalId: string) => {
+      if (disposed || !state()) return null;
+      const closing = closableTabs(), key = closingKey(closing), listed = listedForClosing.get(proposalId);
+      if (listed) return listed.key === key ? listed.lines : null;
+      while (listedForClosing.size >= 16) listedForClosing.delete(listedForClosing.keys().next().value!);
+      const lines = closingLines(closing);
+      listedForClosing.set(proposalId, {key, lines});
+      return lines;
+    };
     // Identity only: visible page content, URL and browsing history are not
     // transmitted merely by opening the agent. Navigation changes the revision
     // so a proposal for an earlier document cannot retain current authority.

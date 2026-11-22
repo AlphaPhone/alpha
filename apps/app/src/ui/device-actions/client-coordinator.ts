@@ -74,7 +74,8 @@ import { authoredCameraCapture } from "@elizaos/plugin-assistant/device-actions/
 import {
   BROWSER_CONTROL_DIRECT_TYPES,
   BROWSER_OPEN_NEW_TAB_CAPABILITY,
-  browserControlCapabilityAvailable,
+  type BrowserTabLine,
+  browserControlFormAvailable,
   describeBrowserControl,
   isBrowserControl,
 } from "@elizaos/plugin-assistant/device-actions/browser-contract";
@@ -236,6 +237,11 @@ function id(value: unknown): string {
 // ── Screen binding ──────────────────────────────────────────────────────────
 
 export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
+/** Closing every tab without a card listing them is never offered. */
+export const TABS_UNLISTED_NOTICE =
+  "Browser couldn't list its open tabs for this request, or they changed after they were listed. Nothing was closed. Ask again.";
+export const NO_TABS_TO_CLOSE_NOTICE =
+  "No tabs are open to close. Nothing was closed.";
 /**
  * A review item with the request binding the agent recorded. A camera capture that only needs
  * Camera open is marked, and names the message that asked for it when the agent bound one
@@ -737,6 +743,16 @@ export class DeviceActionCoordinator<
       /** Whether a tab switch's words match several open tabs on this phone. */
       browserTabNeedsChoice?: (target: string) => boolean;
       /**
+       * The open tabs the close-every-tab card for this proposal lists, read
+       * on this phone. Once listed for a proposal the list does not change:
+       * the executor closes exactly those tabs for it or nothing. null when
+       * Browser cannot say, or its tabs changed after the list was shown. The
+       * agent never receives them.
+       */
+      browserTabsClosing?: (
+        proposalId: string,
+      ) => readonly BrowserTabLine[] | null;
+      /**
        * The names of the phone contacts a contact change or deletion would be
        * offered for, looked up exactly as its executor will; null or a throw
        * when Contacts cannot be read. Without it no such card is offered.
@@ -1005,7 +1021,7 @@ export class DeviceActionCoordinator<
       throw Error("Photos actions were not negotiated with this agent");
     if (
       isBrowserControl(op) &&
-      !browserControlCapabilityAvailable(op.type, this.credential.capabilities)
+      !browserControlFormAvailable(op, this.credential.capabilities)
     )
       throw Error("This Browser action was not negotiated with this agent");
     // An address opened in a tab of its own only when this phone negotiated
@@ -1136,6 +1152,20 @@ export class DeviceActionCoordinator<
   private notice(operation: ReviewableDeviceOperation, context: C) {
     return proposalContextNotice(operation, context, this.profile);
   }
+  /** The tabs a close-every-tab proposal's card lists; undefined for any other
+   * proposal, null when the phone cannot list them for it. */
+  private tabsClosing(
+    proposal: DeviceProposal,
+    list = true,
+  ): readonly BrowserTabLine[] | null | undefined {
+    const op = proposal.operation;
+    if (!isBrowserControl(op) || op.type !== "browser_tab_close" || !op.all)
+      return undefined;
+    if (!list) return null;
+    return this.options.browserTabsClosing?.(proposal.id) ?? null;
+  }
+  /** Close-all proposals whose card listed their tabs in the latest review. */
+  private listedTabCards = new Set<string>();
   private card(
     proposal: DeviceProposal,
     context: C,
@@ -1210,7 +1240,11 @@ export class DeviceActionCoordinator<
     if (isFilesOperation(op)) return { ...base, ...describeFilesOperation(op) };
     if (isPhotosViewOperation(op))
       return { ...base, ...describePhotosViewOperation(op) };
-    if (isBrowserControl(op)) return { ...base, ...describeBrowserControl(op) };
+    if (isBrowserControl(op))
+      return {
+        ...base,
+        ...describeBrowserControl(op, this.tabsClosing(proposal) ?? undefined),
+      };
     const notesDestination =
       (op.type === "notes_delete" || op.type === "notes_update") &&
       !context.sensitive &&
@@ -1293,6 +1327,7 @@ export class DeviceActionCoordinator<
         throw Error("The current device action request changed");
     }
     this.proposals.clear();
+    this.listedTabCards.clear();
     for (const [id, binding] of this.selectedTelephonyRequests)
       if (binding.expiresAt <= Date.now())
         this.selectedTelephonyRequests.delete(id);
@@ -1354,6 +1389,17 @@ export class DeviceActionCoordinator<
                   : {}),
               }
             : {}),
+        });
+        continue;
+      }
+      // Closing every tab is offered only as a card listing what will close.
+      const closing = this.tabsClosing(proposal);
+      if (closing?.length) this.listedTabCards.add(proposal.id);
+      if (closing !== undefined && !closing?.length) {
+        items.push({
+          proposalId: proposal.id,
+          proposal: null,
+          notice: `Close all tabs: ${closing ? NO_TABS_TO_CLOSE_NOTICE : TABS_UNLISTED_NOTICE}`,
         });
         continue;
       }
@@ -1772,6 +1818,7 @@ export class DeviceActionCoordinator<
     );
     signal.throwIfAborted();
     this.proposals.clear();
+    this.listedTabCards.clear();
     return pending.map((p) => {
       this.assertWorkflow(review, p);
       this.proposals.set(p.id, {
@@ -2030,6 +2077,13 @@ export class DeviceActionCoordinator<
       !reviewed.proposal.operation.reviewed
     )
       throw Error("Review these files again before making changes");
+    // Only a close-all card that listed its tabs may be approved. The list is
+    // not read again here: reading it binds a list, and only a card may do that.
+    if (
+      this.tabsClosing(reviewed.proposal, false) !== undefined &&
+      !this.listedTabCards.has(proposalId)
+    )
+      throw Error("Review these tabs again before closing them");
     const p = reviewed.proposal,
       // Minted before `busy` is taken: a context without randomUUID refuses
       // this approval instead of leaving the coordinator busy for good.

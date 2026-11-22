@@ -46,7 +46,7 @@ export function browserControlSummary(operation: BrowserControlOperation): strin
     case 'browser_search': return `Searching the web for “${operation.query}”.`;
     case 'browser_tab_new': return operation.private ? 'Opened a private tab.' : 'Opened a new tab.';
     case 'browser_tab_switch': return 'Switched tabs in Browser.';
-    case 'browser_tab_close': return 'Closed the tab.';
+    case 'browser_tab_close': return operation.all ? 'Closed all tabs.' : 'Closed the tab.';
     case 'browser_find': return `Finding “${operation.text}” in the page.`;
     case 'browser_history': return {back: 'Went back a page.', forward: 'Went forward a page.', reload: 'Reloading the page.', stop: 'Stopped loading the page.'}[operation.action];
   }
