@@ -1231,7 +1231,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const sections = [
         ['Account', ['Accounts', 'Connections', 'AI provider']],
         ['Preferences', ['Display', 'Notifications']],
-        ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts', 'Location for Alpha']],
+        ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts', 'Location for Alpha', 'Browser page for Alpha']],
         ['Apps', ['Calendar', 'Password manager', 'Photos']],
         ['Help', ['About']],
       ] as const;

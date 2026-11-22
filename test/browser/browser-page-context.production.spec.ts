@@ -25,7 +25,7 @@ async function nativeBrowser(page: Page, read: unknown = READ) {
       if (method === 'browsingState') return {};
       if (method === 'navigate') {
         const navigation = ++stub.navigation;
-        setTimeout(() => w.flagOff.emit('AlphaBrowser', 'stateChanged', { session: input.session, id: input.id, private: false, sequence: ++stub.sequence, navigation, url: input.url, title: 'Harbour report', loading: false, committed: true, error: '', canBack: false, canForward: false }), 0);
+        setTimeout(() => w.flagOff.emit('AlphaBrowser', 'stateChanged', { session: input.session, id: input.id, private: false, sequence: ++stub.sequence, navigation: String(navigation), url: input.url, title: 'Harbour report', loading: false, committed: true, error: '', canBack: false, canForward: false }), 0);
         return {};
       }
       if (method === 'pageContext') { stub.reads.push(input); return { url: input.url, title: 'Harbour report', ...read }; }
