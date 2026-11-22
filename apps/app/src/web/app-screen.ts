@@ -27,3 +27,14 @@ export interface AppScreen {
   readonly availability: Availability;
   readonly Screen: ComponentType<ScreenProps>;
 }
+
+/** Where the shell mounts an always-present surface, above every screen. */
+export type SurfaceSlot = "top" | "dock" | "overlay" | "notices";
+
+/** A surface an area keeps mounted across screens: the assistant dock, the call bar, the listener indicator. */
+export interface AppSurface {
+  readonly id: string;
+  readonly slot: SurfaceSlot;
+  readonly availability: Availability;
+  readonly Surface: ComponentType<{ readonly open: (app: AppId, route?: string) => void }>;
+}
