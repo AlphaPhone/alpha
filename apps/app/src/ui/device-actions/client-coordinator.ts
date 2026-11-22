@@ -195,7 +195,10 @@ import {
   validateReviewableDeviceOperation,
 } from "@elizaos/plugin-assistant/device-actions/client-coordinator";
 import { describeClockHandoff } from "../clock/clock-handoff-presentation.ts";
-import { describeFilesOperation } from "../files/files-operation-presentation.ts";
+import {
+  assertFilesReviewTargets,
+  describeFilesOperation,
+} from "../files/files-operation-presentation.ts";
 import { describeNotesOrganizeOperation } from "../notes/notes-organize-presentation.ts";
 import { describeLibraryOperation } from "../photos/library-presentation.ts";
 import { describePhotosViewOperation } from "../photos/photos-view-presentation.ts";
@@ -981,8 +984,11 @@ export class DeviceActionCoordinator<
       throw Error("Notes discovery was not negotiated with this agent");
     if (isLibraryOperation(op) && !this.capability(PHOTO_LIBRARY_CAPABILITY))
       throw Error("Device library access was not negotiated with this agent");
-    if (isFilesOperation(op) && !this.capability(FILES_CAPABILITY))
-      throw Error("Files access was not negotiated with this agent");
+    if (isFilesOperation(op)) {
+      if (!this.capability(FILES_CAPABILITY))
+        throw Error("Files access was not negotiated with this agent");
+      assertFilesReviewTargets(op);
+    }
     if (
       isNotesOrganizeOperation(op) &&
       !this.capability(

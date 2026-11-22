@@ -37,13 +37,19 @@ function filesFilterLabel(op: Omit<FilesFilterOperation, "type">): string {
     .filter(Boolean)
     .join(" · ");
 }
+export function assertFilesReviewTargets(
+  op: FilesAgentOperation,
+): asserts op is Exclude<FilesAgentOperation, { shown: number[] }> {
+  if (op.type !== "files_open" && "shown" in op)
+    throw Error("Choose files by path to review this action.");
+}
+
 /** Owner-facing title and the exact effect of a proposal. */
 export function describeFilesOperation(op: FilesAgentOperation): {
   title: string;
   description: string;
 } {
-  if (op.type !== "files_open" && "shown" in op)
-    return { title: "File names required", description: "Choose files by name for this request." };
+  assertFilesReviewTargets(op);
   switch (op.type) {
     case "files_filter":
       return { title: "Show files", description: filesFilterLabel(op) };

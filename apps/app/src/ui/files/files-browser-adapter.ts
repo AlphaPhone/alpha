@@ -4,6 +4,7 @@ import {
   type FilesAgentRunner,
   filesFilterOf,
 } from "@elizaos/plugin-files/browser/files-agent-contract";
+import { assertFilesReviewTargets } from "./files-operation-presentation";
 import {
   baseName,
   type CategoryFolder,
@@ -1273,12 +1274,11 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
     },
     async run(op: FilesAgentOperation, signal, openFiles) {
       signal.throwIfAborted();
+      assertFilesReviewTargets(op);
       const reviewRequired = {
         status: "failed" as const,
         summary: "Nothing changed because these files changed after review.",
       };
-      if (op.type !== "files_open" && "shown" in op)
-        return { status: "failed", summary: "Choose files by name for this request." };
       if (
         (op.type === "files_move" || op.type === "files_trash") &&
         (!op.reviewed || !reviewingPrimary())
