@@ -1141,7 +1141,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if (connection.session) {
         alphaClient.attachVerifiedTransport({
           session: connection.session,
-          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,projectRequestedView }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,projectRequestedView)),
+          send: ({ text, context, requestId, signal, onText, replyTo, onReplyReady, channelType, expectedConversationId,voiceTurnSignal,images,projectRequestedView,workflowStep }) => trackDispatch(this,()=>connectionController.send(text, context, requestId, signal, onText,replyTo,onReplyReady,channelType,expectedConversationId,voiceTurnSignal,images,projectRequestedView,workflowStep)),
           // Remote text is not authority to execute device actions. This path
           // accepts chat only until the server supports verified proposals.
           execute: ({ proposal, context, signal, approval }) => connectionController.execute(proposal, context, signal, approval),
@@ -2247,13 +2247,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       return delivered&&acceptedContext.view===view;
     }:undefined;
     try{
-      // Explicit questions use the open page or file as a one-turn attachment.
-      // Ordinary voice turns continue to send only the opaque selected-object observation.
+      // An explicit question about the open file sends it as a one-turn attachment. The page open
+      // in Browser rides every turn as metadata (connection-ui send), so it needs nothing here.
       const asksAboutFile=/^(?:(?:hey alpha|alpha|please)[,\s]+)*(?:(?:can|could|would) you (?:please )?)?(?:(?:summari[sz]e|explain|read|translate|tell me about)|(?:what|which|who|where|when|why|how)\b[^.!?\n"“”]*\b(?:according to|based on|from|in|does|is|contains?))\s+(?:this|the (?:open|current|selected)) (?:file|document)\b/iu.test(text.trim());
-      const file:File|undefined=input.context.view==='browser'
-        ?await views.browser.readPageForQuestion?.(text,input.context.selectedObject,signal,current)
-        :input.context.view==='files'&&asksAboutFile
-          ?await views.files.readOpenTextForVoice?.(input.context.selectedObject,current):undefined;
+      const file:File|undefined=input.context.view==='files'&&asksAboutFile
+        ?await views.files.readOpenTextForVoice?.(input.context.selectedObject,current):undefined;
       const images=file?await encodeChatAttachments([file]):undefined;
       current();
       // A turn sent at a pause and taken back unheard when the user kept speaking: its local user
@@ -2562,16 +2560,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
       if(sentAttachment?.fileAttachments?.length&&(!sameChat()||!filesCurrent()||!this.live||document.hidden))
         throw new NotDispatched('The chat attachment changed. Nothing was sent.');
-      const attachmentImages = sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)
+      const images = sentAttachment&&(sentAttachment.fileAttachments?.length||sentAttachment.cameraAttachment)
         ?[...(sentAttachment.fileAttachments??[]).map(({data,mimeType,name})=>({data,mimeType,name})),...(sentAttachment.cameraAttachment?[{data:sentAttachment.cameraAttachment.image.split(',')[1],mimeType:'image/jpeg',name:'Camera photo'}]:[])]
         :undefined;
-      const pageAttachment:File|undefined = fromComposer&&!editTarget&&!attachmentImages&&!mail&&!transcript&&view==='browser'
-        ?await views.browser.readPageForQuestion?.(text,alphaClient.getState().context.selectedObject,attempt.stop.signal,()=>{
-          if(!current())throw new NotDispatched('The page changed. Your message is back in the composer.');
-        })
-        :undefined;
-      const images=pageAttachment?await encodeChatAttachments([pageAttachment]):attachmentImages;
-      if(pageAttachment){context(this);if(!current())throw new NotDispatched('The page changed. Your message is back in the composer.');}
       // The planning label shows only until the first reply text; it is never kept as a message.
       const showStatus=(event:Event)=>{if(this.live&&!streamed&&this.sendAttempt===attempt)this.setState({turnStatus:(event as CustomEvent<string>).detail});};
       localTurnStatus.addEventListener('label',showStatus);

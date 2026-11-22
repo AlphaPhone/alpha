@@ -109,7 +109,8 @@ export function sanitizePhoneContext(input: ContextEnvelope): ContextEnvelope {
 /** Legacy compatibility envelope. A peer that negotiates `userTextFormatVersion: 1`
  * (every resident and local agent at the pin) receives the authored text unchanged and
  * this observation only in `metadata.clientDevice.context`, where the shared contract
- * renders it once per turn. The envelope is sent only to unnegotiated peers in
+ * renders it once per turn. The observation never holds displayed content: the page open in
+ * Browser travels separately as `metadata.browserPage` (browser/page-context.ts). The envelope is sent only to unnegotiated peers in
  * ELIZA_DEV_ALLOW_TEST_MOCKS=1 builds (connection-ui send) and is otherwise used only to
  * recognize history stored by older builds; the user's message follows the separator
  * unchanged. */

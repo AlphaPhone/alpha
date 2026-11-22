@@ -15,6 +15,7 @@ export const BROWSER_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Browser closed", "Browser closed. Open it again to continue."],
   ["Expired browser session", "This Browser session ended. Try again."],
   ["Browser tab is unavailable", "This tab is no longer open."],
+  ["Private tabs are not read", "Alpha doesn’t read private tabs."],
   ["Browser operation failed", "Browser couldn’t do that. Try again."],
   ["Invalid browser identity", "This tab couldn’t be opened."],
   ["Invalid tab", "This tab couldn’t be opened."],
@@ -64,6 +65,7 @@ export const BROWSER_REFUSALS: ReadonlyMap<string, string> = new Map([
     "This page isn’t ready to be read privately. Reload it, then try again.",
   ],
   ["Reading cancelled or page unavailable", "Reading stopped, or the page is no longer available."],
+  // The shared host's sentence at the pin still names its former Ask about page action.
   [
     "Read aloud and Ask about page are unavailable on this device: its Android System WebView cannot read a page privately. Update Android System WebView.",
     READING_UNSUPPORTED_MESSAGE,

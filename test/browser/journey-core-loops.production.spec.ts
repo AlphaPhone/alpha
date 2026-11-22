@@ -46,8 +46,8 @@ async function android(page: Page, options: { clock?: 'opened' | 'unavailable' |
     const persist = () => { sessionStorage.setItem('core-loops-slots', JSON.stringify(slots)); sessionStorage.setItem('core-loops-agent', JSON.stringify(agent)); sessionStorage.setItem('core-loops-device', JSON.stringify(device)); };
     const f = w.coreLoops = { calls: [] as string[], posts: [] as string[], views: [] as string[], conversations: [] as string[], bodies: [] as string[], replies: [] as string[], streams: 0, cancelled: 0, aborts: 0, clock: [] as unknown[], hold: false, release: null as null | (() => void), unexpected: [] as string[],
       // AlphaBrowser: tabs the renderer created, with the address and navigation number each one
-      // committed; `excerpt` is what reviewQuestion returns, and `questions` records its arguments.
-      browser: { tabs: {} as Record<string, { session: string; url: string; navigation: number }>, sequence: 0, created: [] as string[], navigations: [] as string[], questions: [] as unknown[], excerpt: '', title: 'Harbour report' },
+      // committed; `text` is what the silent pageText read returns, and `reads` records its arguments.
+      browser: { tabs: {} as Record<string, { session: string; url: string; navigation: number }>, sequence: 0, created: [] as string[], navigations: [] as string[], reads: [] as unknown[], text: '', title: 'Harbour report' },
       // Commits a navigation of a tab, as WebView does after it loads a page (or the page navigates itself).
       commit: (tab: string, url: string) => {}, slots, device,
       // The native recorder and Cloud transcription, and every reminder or calendar write this page asked for.
@@ -93,7 +93,7 @@ async function android(page: Page, options: { clock?: 'opened' | 'unavailable' |
         { name: 'AlphaVoiceCloud', methods: options.voice || options.signedOut ? withListeners(['checkPermissions', 'startRecording', 'stopRecording', 'getRecordingMetrics', 'cancelRecording', 'transcribeRecording', 'localSpeechStatus', 'transcribeLocalRecording', 'saveRecording', 'cancel', 'synthesize', 'play', 'stopPlayback', 'startNoteRecording', 'noteRecordingStatus', 'pauseNoteRecording', 'resumeNoteRecording', 'stopNoteRecording', 'discardNoteRecording', 'setNoteSegmentText', 'saveNoteRecording']) : promise(['checkPermissions']) },
         ...(options.voice ? [{ name: 'AlphaNoteAudio', methods: promise(['play', 'stop', 'state', 'describe']) },
           { name: 'AlphaCalendar', methods: withListeners(['list', 'requestAccess', 'pendingCreations', 'listAlerts', 'save', 'acknowledgeCreation']) }] : []),
-        { name: 'AlphaBrowser', methods: withListeners(['create', 'navigate', 'present', 'close', 'command', 'bookmarks', 'setBookmark', 'browsingState', 'saveBrowsingState', 'cancelReading', 'reviewQuestion']) },
+        { name: 'AlphaBrowser', methods: withListeners(['create', 'navigate', 'present', 'close', 'command', 'bookmarks', 'setBookmark', 'browsingState', 'saveBrowsingState', 'cancelReading', 'pageText']) },
       ],
       nativeCallback: (plugin: string, method: string, input: any, callback: (value: unknown) => void) => { if (method === 'addListener') listeners.push({ plugin, event: input?.eventName, callback }); return String(listeners.length); },
       nativePromise: async (plugin: string, method: string, input: any) => {
@@ -185,7 +185,7 @@ async function android(page: Page, options: { clock?: 'opened' | 'unavailable' |
           if (method === 'create') { b.created.push(input.id); b.tabs[input.id] = { session: input.session, url: '', navigation: 0 }; return {}; }
           // Only a synthetic public page "loads"; the stub commits it after the call returns.
           if (method === 'navigate') { b.navigations.push(input.url); setTimeout(() => f.commit(input.id, input.url), 0); return {}; }
-          if (method === 'reviewQuestion') { b.questions.push(structuredClone(input)); const tab = b.tabs[input.id]; if (!tab || tab.url !== input.url || tab.navigation !== input.navigation) throw Error('Page changed'); return { text: b.excerpt }; }
+          if (method === 'pageText') { b.reads.push(structuredClone(input)); const tab = b.tabs[input.id]; if (!tab) throw Error('Browser tab is unavailable'); return { url: tab.url, title: b.title, text: b.text }; }
         }
         if (plugin === 'AlphaConnection') {
           if (method === 'secureRead') return { value: slots[input.slot] ?? null };
@@ -646,27 +646,28 @@ async function openRetainedNativeNotes(page:Page){
  await expect(page.getByText('Note text encrypted on this device',{exact:true})).toBeVisible();
 }
 
-test('loop J05 on Android: an explicit Browser question sends one short public passage without a review', async ({ page }) => {
+test('loop J05 on Android: every turn on a Browser page carries its text, read silently on the phone', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page, ['public-fixture.test']);
   const fact = 'The ferry leaves at nine from pier four.';
-  await page.route(HARBOUR,route=>route.fulfill({contentType:'text/html',headers:{'access-control-allow-origin':'*'},body:'<article><h1>Harbour report</h1><p>'+fact+'</p></article>'}));
   await android(page);
   await residentHome(page);
+  await native(page, f => { f.browser.text = 'Harbour report\nThe ferry leaves at nine from pier four.'; });
   await openHarbour(page);
   await native(page, f => { f.replies.push('The ferry leaves at nine.'); });
-  const question='What time does the ferry leave according to this page?';
+  // Any wording: nothing decides from the question whether the page is used.
+  const question='when is it';
   await page.locator('[data-alpha-input-bar] textarea').fill(question);
   await button(page,'Send').click();
   await expect.poll(()=>native(page,f=>f.posts.length)).toBe(1);
   expect(await native(page,f=>f.posts)).toEqual([question]);
   const body=JSON.parse(await native(page,f=>f.bodies[0]));
-  expect(body.images).toHaveLength(1);
-  expect(body.images[0]).toMatchObject({name:'Browser page.txt',mimeType:'text/plain'});
-  const source=Buffer.from(body.images[0].data,'base64').toString('utf8');
-  expect(source).toContain(fact);
-  expect(source.length).toBeLessThan(1250);
-  expect(await native(page,f=>f.browser.questions)).toEqual([]);
+  expect(body.images).toBeUndefined();
+  expect(body.metadata.browserPage).toMatchObject({v:1,onScreen:true,url:HARBOUR,title:'Harbour report',text:'Harbour report\n'+fact});
+  expect(body.metadata.clientDevice.context).not.toHaveProperty('browserPage');
+  const reads=await native(page,f=>f.browser.reads) as Record<string,unknown>[];
+  expect(reads).toHaveLength(1);
+  expect(Object.keys(reads[0]).sort()).toEqual(['id','session']);
   await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
   await expectNoDevelopmentSurface(page);
   expect(await native(page,f=>f.unexpected)).toEqual([]);

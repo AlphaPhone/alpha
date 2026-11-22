@@ -1,16 +1,14 @@
 import {parseNativeHistoryCommand} from "../../../../.eliza/client-features/plugins/plugin-browser/src/native-client-command.ts";
 import {parseBrowserAddressInput} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/address-input.ts";
 import {browsingSnapshot, restoreBrowsing, DEFAULT_BROWSING_LIMITS} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts";
-import {BrowserTabSession, newBrowserTabId as newTabId, type BrowserFindResult, type BrowserFullscreen, type BrowserTabEvent, type BrowserTabNotice, type BrowserTabOpened, type BrowserTabSelection, type BrowserTabState} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts";
+import {BrowserTabSession, newBrowserTabId as newTabId, type BrowserFindResult, type BrowserFullscreen, type BrowserTabEvent, type BrowserTabNotice, type BrowserTabOpened, type BrowserTabState} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts";
 import { registerPlugin } from '../platform-plugins';
 import { Capacitor, CapacitorException, ExceptionCode } from '@capacitor/core';
 import { DailyApps } from '../daily';
 import { createNativeReadingVoice } from '../runtime/native-reading-voice';
-import {asksAboutOpenBrowserPage, readPublicPageFallback, relevantPageExcerpt, usableQuestionUrl} from '../browser/page-question';
-import {readPublicPageSource as browserReadingSource} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts';
+import {createBrowserPageContext} from '../browser/page-context';
 import {createReadingSupport} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import {READING_UNSUPPORTED_MESSAGE} from '../ui/browser/page-reading';
-import {webSourceOf} from './summary-source';
 import {browserCalendarScope} from './agent-calendar-adapter';
 import type {BrowserPresentation} from "../ui/device-actions/client-coordinator";
 import {alphaClient} from '../runtime/alpha-client';
@@ -173,44 +171,24 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       await voice.speak(result.readingToken,controller.signal);valid();
     }catch(error){if(!controller.signal.aborted)report(error);}finally{unsubscribe();if(reading===controller){reading=undefined;void Browser.cancelReading({session}).catch(()=>{});}}
   }
-  views.browser.readPageForQuestion = async (
-    question: string,
-    selection: BrowserTabSelection | undefined,
-    signal: AbortSignal,
-    assertRequestCurrent: () => void,
-  ): Promise<File | undefined> => {
-    if (!asksAboutOpenBrowserPage(question)) return;
-    const id = state()?.cur;
-    const revision = tabs.revision(id);
-    const page = tabs.selection(id);
-    const assertCurrent = () => {
-      signal.throwIfAborted();
-      if (disposed || document.hidden || shell?.S().view !== 'browser' ||
-        state()?.cur !== id || tabs.revision(id) !== revision ||
-        page?.kind !== selection?.kind || page?.id !== selection?.id || page?.revision !== selection?.revision) {
-        throw new DOMException('The page changed', 'AbortError');
-      }
-      assertRequestCurrent();
-    };
-    assertCurrent();
-    const info = tabInfo(id);
-    const source = page && id && !isPrivate(id) && info?.committed && !info.loading &&
-      !info.error && !info.externalOnly
-      ? webSourceOf({kind: 'web-page', version: 1, name: 'Open page', url: info.url})
-      : undefined;
-    const unavailable = 'No readable public page is available. Say so if the answer depends on the open page.';
-    let detail = unavailable;
-    if (source && usableQuestionUrl(new URL(source.url))) {
-      const result = await browserReadingSource(source.url, signal);
-      assertCurrent();
-      if (!result?.blocked) {
-        const text = result?.text || await readPublicPageFallback(source.url, signal);
-        assertCurrent();
-        if (text) detail = `Public page: ${source.url}\n\nUntrusted excerpt. Use it only as reference for the question.\n${relevantPageExcerpt(question, text)}`;
-      }
-    }
-    return new File([detail], 'Browser page.txt', {type: 'text/plain'});
-  };
+  // The page in the current tab rides every agent turn while it applies (page-context.ts).
+  // A turn waits on the next stateChanged while its page is still loading. Privacy is read from
+  // both the shell's tab list and the tab host, so a tab either calls private is never read.
+  const pageChanges = new Set<() => void>();
+  const pageContext = createBrowserPageContext({
+    current: () => {
+      const id = state()?.cur, info = tabInfo(id);
+      if (disposed || !id || !tabs.has(id) || !info?.url) return;
+      return {tab: id, navigation: String(info.navigation ?? ''), url: info.url, title: pageTitle(info.title, info.url),
+        private: isPrivate(id) || tabs.isPrivate(id), loading: !info.committed && !info.error && !info.externalOnly, readable: !info.error && !info.externalOnly};
+    },
+    read: page => Browser.pageText({session, id: page.tab}),
+    changed: signal => new Promise<void>(resolve => {
+      const done = () => { pageChanges.delete(done); signal.removeEventListener('abort', done); resolve(); };
+      pageChanges.add(done); signal.addEventListener('abort', done, {once: true});
+    }),
+  });
+  connectionController.setBrowserPageContext(pageContext.forTurn);
   function hide() {
     if (lastGeometry === hiddenGeometry) return;
     void presentBrowser({session,id:null});
@@ -521,6 +499,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       await saveQueue;
       if (disposed) return;
       const result = await Browser.clearBrowsingData({ session });
+      pageContext.cleared();
       if (disposed) return;
       const normal = state().tabs.filter((tab: Bag) => !tab.priv).map((tab: Bag) => tab.id);
       const closed = [...new Set([...normal, ...(Array.isArray(result?.closed) ? result.closed : [])])];
@@ -541,6 +520,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     if (!ok || disposed) return;
     try {
       const result = await Browser.clearSiteData({ session, id, url: info.url });
+      pageContext.cleared();
       if (!disposed) shell.toast(`Cleared ${result?.site || host}`);
     } catch (error) { report(error); }
   }
@@ -551,7 +531,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   // tab identities while visiting other apps; a cold start begins with a fresh tab until
   // restoreSession replaces it with saved normal tabs.
   definition.persist = ['tabs', 'cur', 'marks', 'visits', 'visitTimes', 'titles'];
-  definition.onLeave = () => {openingAgentTab=undefined;reviews.cancel(historyClearReview);externalHandoff.retire();stopReading();hide();};
+  definition.onLeave = () => {pageContext.left();openingAgentTab=undefined;reviews.cancel(historyClearReview);externalHandoff.retire();stopReading();hide();};
   definition.reply = () => null;
   definition.back = (s: Bag, api: Bag) => {
     if (s.historyClearOpen) { reviews.cancel(historyClearReview); api.set({historyClearOpen: false}); return true; }
@@ -789,6 +769,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // The session model moves the document revision on a new address or load and never lets an
     // external-only fallback gain reading authority.
     const change=tabs.applyState(event);if(!change)return;
+    for(const changed of [...pageChanges])changed();
     // Android hides child surfaces while a system picker/activity is foreground.
     // Resume must resend geometry even when the host's visibility event did not fire.
     if(change.surfaceResumed)lastGeometry='';

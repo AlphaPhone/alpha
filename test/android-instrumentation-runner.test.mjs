@@ -75,7 +75,7 @@ test("argument policy: short names, campaigns refused with their runner and the 
   assert.throws(() => parseInstrumentationArgs(["--home-role", "--classes", "LauncherHome"]), /requires --owned-emulator/);
   assert.throws(() => parseInstrumentationArgs(["--owned-emulator", "--home-role", "--classes", "Shell"]), /no requested class uses the HOME role/);
   assert.throws(() => parseInstrumentationArgs(["--owned-emulator", "--home-role", "--all"]), /cannot be combined with --all/);
-  assert.deepEqual(instrumentArgs(C("BrowserPageQuestion")).slice(-6, -1), ["browserPageQuestion", "1", "-e", "class", C("BrowserPageQuestion")]);
+  assert.deepEqual(instrumentArgs(C("BrowserPageText")).slice(-6, -1), ["browserPageText", "1", "-e", "class", C("BrowserPageText")]);
   assert.throws(() => parseInstrumentationArgs(["--classes", "RealClock"]), /clock-exclusive/);
   assert.equal(parseInstrumentationArgs(["--classes", "RealClock", "--clock-exclusive"]).classes[0], C("RealClock"));
   assert.throws(() => parseInstrumentationArgs(["--all", "--classes", "Shell"]));
@@ -447,7 +447,7 @@ test("round-9 journeys and links: J01, J05, the note link and the Maps return ar
   assert.equal(parseInstrumentationArgs(["--classes", "Maps"]).classes[0], C("Maps"));
   // The note link needs no gate or provider.
   assert.equal(CLASS_REGISTRY.NoteOrigin.args, undefined);
-  assert.doesNotMatch(CLASS_REGISTRY.BrowserPageQuestion.note, /needs network|example\.com/);
+  assert.doesNotMatch(CLASS_REGISTRY.BrowserPageText.note, /needs network|example\.com/);
 });
 
 test("BrowserFlow keeps its live-search opt-in on the production-only APK", () => {

@@ -3,6 +3,8 @@ import { WebPlugin } from '@capacitor/core';
 import {bookmarkDocument,browsingSessionDocument} from './preference-documents';
 import {normalizeBrowsing as normalize} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
 import {browserVisitTimes, historyOutsideInterval, type BrowserHistoryInterval, type SavedBrowserHistory} from './history';
+import {PAGE_READ_BUDGET_MS, PAGE_TEXT_MAX_CHARS, type PageText} from './page-context';
+import {readablePage, readablePlainText} from './readable-page';
 
 function savedBrowserState(input: Partial<SavedBrowserHistory>): SavedBrowserHistory {
   const saved = normalize(input);
@@ -112,4 +114,19 @@ export class BrowserSurface extends WebPlugin {
   async downloads() {window.dispatchEvent(new CustomEvent('alpha:browser-open-view',{detail:'files'}));}
   /** Page reading plays agent audio only (no Web Speech); the voice facade stops that playback. */
   async cancelReading() {}
+  /** The page text for agent turns (page-context.ts). The sandboxed frame cannot be read, so the
+   * development server fetches a public copy (scripts/browser-page-dev-proxy.ts) without cookies
+   * for each turn, given up with the turn's read budget; other web builds have no reader. */
+  async pageText(input:{session:string;id:string}): Promise<PageText> {
+    const tab=this.tab(input),url=tab.history[tab.position];
+    if(tab.private)throw Error('Private tabs are not read');
+    if(!tab.committed||tab.loading)return {url,textUnavailable:tab.error?'not readable':'loading'};
+    if(!import.meta.env.DEV)return {url,textUnavailable:'not readable'};
+    try {
+      const response=await fetch('/__alpha/page-html',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url}),signal:AbortSignal.timeout(PAGE_READ_BUDGET_MS)});
+      if(!response.ok)return {url,textUnavailable:'not readable'};
+      const type=response.headers.get('content-type')?.split(';')[0].trim().toLowerCase(),source=await response.text();
+      return {url,...(type==='text/plain'?readablePlainText(source,PAGE_TEXT_MAX_CHARS):readablePage(new DOMParser().parseFromString(source,'text/html'),PAGE_TEXT_MAX_CHARS))};
+    } catch { return {url,textUnavailable:'not readable'}; }
+  }
 }

@@ -126,7 +126,7 @@ test('suite plans: default classes; reading classes with the gates they need',()
  assert.deepEqual(reading[1].env,{ANDROID_SERIAL:'emulator-5554',ALPHA_DISPOSABLE_WEBVIEW_FIXTURE:'api35-default-x86_64'});
  assert.deepEqual(reading[0].command.slice(1),['scripts/prepare-ci-emulator.ts']);
  assert.deepEqual(READING_CLASSES,['BrowserReadingNavigation']);
- assert.ok(!READING_CLASSES.includes('BrowserPageQuestion'),'a fresh signed-out fixture cannot qualify the account-gated journey');
+ assert.ok(!READING_CLASSES.includes('BrowserPageText'),'a fresh signed-out fixture cannot qualify the account-gated journey');
  const parsedReading=parseInstrumentationArgs(reading[2].command.slice(4));
  assert.deepEqual(parsedReading.classes.map(name=>name.split('.').at(-1)),READING_CLASSES.map(name=>name+'InstrumentedTest'));
  assert.deepEqual(Object.fromEntries(READING_CLASSES.map(name=>[name,CLASS_REGISTRY[name].args])),{BrowserReadingNavigation:{browserIsolatedReading:'1'}});
