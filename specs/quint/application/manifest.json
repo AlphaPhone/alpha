@@ -8483,7 +8483,7 @@
       }
     ],
     "stateMapping": {
-      "view/chat/voice": "shell state S().view, S().chat and S().voice",
+      "view/chat/voice": "shell state S().view and S().chat; voice is S().voice or a live Talk conversation (voiceConversationActive), which leaves S().voice off",
       "drag": "shell.chatMotion: the captured pointer, the detent and view it started in, moved, and the pressed control's tap action",
       "swallowAge/dragAge": "Date.now() minus shell.swallow and shell.chatDraggedAt against the 350 ms window, in ticks",
       "ghost/ghostLabel": "the compatibility click the platform delivers after pointerup, and the control under the finger",
