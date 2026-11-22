@@ -1,6 +1,7 @@
 import {Capacitor} from '@capacitor/core';
 import {cachedDevicePreferences} from '../browser/device-preferences';
 import {registerPlugin} from '../platform-plugins';
+import {networkLocation,type NetworkFix} from './network-location';
 import {parseClientLocationObservation,type ClientLocationObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 
 /** The slice of the native ElizaLocation bridge this reader uses. */
@@ -13,6 +14,8 @@ export interface PhoneLocationPorts {
  enabled():boolean;
  bridge:PhoneLocationBridge;
  now():number;
+ /** Wi-Fi/cell position for when GPS has none; read from its cache except at warm-up. */
+ network?:{cached(now:number):NetworkFix|undefined;locate():Promise<NetworkFix|undefined>};
 }
 /** Reuse a successful native read for this long, even when it returned a cached fix. */
 export const PHONE_LOCATION_REUSE_MS=60_000;
@@ -74,7 +77,20 @@ export class PhoneLocationReader {
  }
  private cachedFix(now:number){
   const fix=this.last;
-  return fix&&now-fix.capturedAt<=PHONE_LOCATION_STALE_MS?fix:undefined;
+  if(fix&&now-fix.capturedAt<=PHONE_LOCATION_STALE_MS)return fix;
+  // No recent GPS fix: an earlier network answer still says where the phone is.
+  const network=this.ports.network?.cached(now);
+  return network?observation({latitude:network.latitude,longitude:network.longitude,accuracy:network.accuracyMeters,timestamp:network.timestamp}):undefined;
+ }
+ /**
+  * The connection warm-up: a GPS read, and only when that has nothing, one network lookup in the
+  * background so the next turn carries a position. Chat turns themselves never look up.
+  */
+ async warm(signal:AbortSignal):Promise<ClientLocationObservation|undefined>{
+  const fix=await this.read(signal);
+  if(fix||!this.ports.network||!this.ports.enabled())return fix;
+  void this.ports.network.locate().catch(()=>undefined);
+  return undefined;
  }
  clear(){this.generation++;this.refreshAfter=Number.NEGATIVE_INFINITY;this.last=undefined;this.pending=undefined;}
 }
@@ -87,7 +103,7 @@ export const phoneLocationEnabled=()=>Capacitor.isNativePlatform()
 /** The app's one reader over the native ElizaLocation plugin. */
 export function phoneLocationReader():PhoneLocationReader {
  if(!shared){
-  shared=new PhoneLocationReader({enabled:phoneLocationEnabled,bridge:registerPlugin<PhoneLocationBridge>('ElizaLocation'),now:Date.now});
+  shared=new PhoneLocationReader({enabled:phoneLocationEnabled,bridge:registerPlugin<PhoneLocationBridge>('ElizaLocation'),now:Date.now,network:networkLocation()});
   window.addEventListener('alpha:device-settings',()=>{if(!phoneLocationEnabled())shared?.clear();});
  }
  return shared;

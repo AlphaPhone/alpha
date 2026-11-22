@@ -1164,7 +1164,7 @@ function activate(next: Active, session: VerifiedSession, name: string) {
     void peer.handshake(controller.signal).catch(()=>{}).finally(()=>appRequests.delete(controller));
     // A cold platform fix can take seconds; start one now so the first turn already has a position.
     if(isAndroid)void refreshDevicePreferences().then(()=>{
-      if(epoch===generation&&active===next)return phoneLocationReader().read(controller.signal);
+      if(epoch===generation&&active===next)return phoneLocationReader().warm(controller.signal);
     }).catch(()=>{});
   }
   startConversationEvents(next,session);
