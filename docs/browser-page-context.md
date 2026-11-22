@@ -1,6 +1,6 @@
 # Browser page context for Alpha
 
-Status: in progress (2026-11-22). Owner request: when the owner talks to Alpha
+Status: implemented, not yet device-tested (2026-11-22). Owner request: when the owner talks to Alpha
 while a Browser page is open, the agent gets that page as context.
 
 ## Where Alpha stood
@@ -47,7 +47,7 @@ Brave Leo, Firefox AI chatbot).
    observation: tab id and revision, address, title, capture time, visible
    text (at most 6,000 characters, head and tail kept with a cut marker),
    optional selection and up to 20 links. Strictly validated and at most
-   12 KB. A peer declares it in `clientTurnObservationSupport` as the optional
+   16 KB. A peer declares it in `clientTurnObservationSupport` as the optional
    field `browserPage`.
 2. **Prompt (elizaOS).** The agent renders it once, for the current message
    only, inside the shared untrusted-content envelope with the page origin. It
@@ -95,6 +95,21 @@ script. Wikipedia's mobile layout shows only the lead section until sections are
 opened, and only visible text is read. The fixture spec
 `test/browser/page-context-script.spec.ts` covers the safety rules on crafted
 pages.
+
+## What has been checked, and what has not
+
+| Check | Result | What it does not prove |
+| --- | --- | --- |
+| Upstream contract and projection tests ([eliza#40067](https://github.com/elizaOS/eliza/pull/40067), merged as `fe5c02faed`) | pass | a model's use of the page |
+| `test/browser/page-context-script.spec.ts`: the Java `SCRIPT` text block in Chromium | 8 of 8 | Android WebView's isolated world |
+| `test/browser-page-context-native.test.mjs`: `AlphaPageContext` validators on the host JVM | pass | the plugin on a device |
+| `test/browser-page-context.test.mjs`: gating, binding, timeout, peer support | 8 of 8 | |
+| Production Playwright, flag-off bundle with a native-plugin stub (page context and Settings) | 21 of 21 | the native read |
+| `bun run android:build --release` and `android:verify` | both variants built and verified; the release dex holds `pageContext` and its refusals | install, emulator or device |
+
+Not yet checked: a real read on the Pixel (the emulator's WebView 133 lacks
+`JS_INJECTION_IN_FRAME_AND_WORLD`, so it can only withhold as `unreadable`), a
+model turn that uses the page, and owner acceptance.
 
 ## Not in this change
 
