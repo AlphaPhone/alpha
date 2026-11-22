@@ -392,3 +392,26 @@ test('a shorthand matching two distinct titles asks for the full title',async({p
   .toEqual(['More than one note matches "grocery". Give me the full title.']);
  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
 });
+
+test('Talk leaves recency to the agent and opens a relative phrase when it is explicitly named',async({page})=>{
+ await setup(page,'sheet',false,true);
+ await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.notes=[
+   {id:'recipes',title:'Most Recent',body:'\nOlder recipes.',color:'yellow',createdAt:'2026-10-01T12:00:00Z',updatedAt:'2026-10-01T12:00:00Z'},
+   {id:'dentist',title:'Dentist appointment',body:'\nNewer note.',color:'yellow',createdAt:'2026-11-21T12:00:00Z',updatedAt:'2026-11-21T12:00:00Z'},
+  ];
+  f.prompt='Open my most recent note.';
+  f.releaseNotesRead();
+ });
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.map((input:any)=>input.text))).toEqual(['Open my most recent note.']);
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor).toHaveCount(0);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.prompt='Open the note “Most Recent”.');
+ await utterance(page);
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Most Recent');
+});

@@ -27,8 +27,10 @@ export function namedNoteOpenRequest(text: string): string | undefined {
     ?? /^open (.+?) in (?:the )?notes(?: app)?$/i.exec(command);
   const target = named?.[1] ?? quotedTitle ?? shorthand?.[1];
   if (!target) return;
-  const generic = /^(?:(?:a|an|the|my) )?(?:this|that|it|new|empty|blank|any|another|some|last|latest|recent|previous|you just (?:made|created)|note|one)(?: (?:note|one))?$/i;
-  if (!named && !quotedTitle && (generic.test(target) || /^(?:a|an|the|my)$/i.test(target))) return;
+  const reference = target.replace(/^(?:a|an|the|my) /i, "").replace(/ (?:note|one)$/i, "");
+  const generic = /^(?:a|an|the|my|this|that|it|new|(?:new )?(?:empty|blank)|any|another|some|first|last|latest|newest|oldest|(?:most |least )?recent|previous|note|one)$/i;
+  const relativeAction = /^(?:(?:i|you|we) just|last|(?:most )?recently) (?:made|created|saved|edited|updated|opened)$/i;
+  if (!named && !quotedTitle && (generic.test(reference) || relativeAction.test(reference))) return;
   const title = unquote(target).trim();
   if (title && !/[\r\n]/.test(title)) return title;
 }
