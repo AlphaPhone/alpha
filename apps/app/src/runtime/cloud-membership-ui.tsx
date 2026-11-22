@@ -5,8 +5,6 @@ import {iconStyle} from '../icon-style';
 export type MembershipBalance='checking'|'zero'|'funded'|'member'|'unavailable';
 /** A plan is needed before the account can use Cloud inference. */
 export const FUNDING_NEEDED='Plan needed';
-/** Cloud declined a turn for this account's billing: the chat's one answer, beside this sheet. */
-export function fundingRefusedReply(serviceName:string):string {void serviceName;return 'Billing declined';}
 import {alphaSubscriptionCopy,type ServiceLimit,type SubscriptionView} from './subscription-entitlement';
 import {useCloudSubscriptionSummary} from '../ui/components/settings/cloud-subscription-summary.tsx';
 function endLabel(endsAt:number):string {

@@ -23,7 +23,10 @@ const moduleFiles = ['runtime/voice-selection.ts',
  '../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts',
  'prototype/local-speech-playback.ts','runtime/voice-states.ts','runtime/local-agent-stream.ts',
  'prototype/note-recorder.ts','runtime/note-recorder-driver.ts','runtime/note-default-title.ts',
- 'runtime/voice-call-pause.ts','prototype/voice-adapter.ts'];
+ 'runtime/voice-call-pause.ts','prototype/locale-time.ts','runtime/out-of-funds-notice.ts','prototype/voice-adapter.ts',
+ // The native Cloud streaming route (options.streaming): the shared transport and assistant session.
+ '../../../.eliza/client-features/packages/voice/src/native-cloud-speech.ts','../../../.eliza/client-features/packages/voice/src/random-id.ts',
+ '../../../.eliza/client-features/packages/voice/src/voice-assistant-session.ts','../../../.eliza/client-features/packages/voice/src/voice-turn-routes.ts','ui/voice/voice-chat-playback.ts'];
 const modules = new Map(await Promise.all(moduleFiles.map(async file => {
  const entry=path.resolve('apps/app/src',file);
  const built=await build({entryPoints:[entry],bundle:true,write:false,format:'iife',globalName:'__alphaVoiceModule',platform:'browser',target:'es2022',logLevel:'silent',plugins:[{
@@ -48,7 +51,7 @@ export function cloudVoiceViewFixture(options={}){
   // Capacitor exposes the method and rejects the call when native speaker gain is unavailable.
   async setSpeechOutputMuted(){throw Error('Fixture has no native speaker gain.');},
   warmSpeechOutput:async()=>{f.speechWarmups=(f.speechWarmups||0)+1;},getRecordingMetrics:async input=>{if(f.metricsError)throw f.metricsError;if(input.recordingId!==f.activeRecording)throw Error('Recording changed');return {recordingId:input.recordingId,peak:f.peak};},startRecording:async()=>{const id='synthetic-clip-'+(++f.starts);const result=f.holdStart?await new Promise(resolve=>f.releaseStart=resolve):{recordingId:id,maxDurationMs:59000};if(f.startError)throw f.startError;f.activeRecording=result.recordingId;f.lastRecording=result.recordingId;return result;},stopRecording:async()=>{f.stops++;f.activeRecording=null;return {recordingId:f.lastRecording,durationMs:1000};},transcribeRecording:async input=>{f.uploads++;f.transcribeInput=input;if(f.error)throw f.error;if(f.holdTranscript)return new Promise(resolve=>f.releaseTranscript=resolve);return {text:f.transcript||'Synthetic Cloud transcript',local:false};},cancelRecording:async()=>{f.recordingCancels.push(f.activeRecording);if(f.holdCaptureCancel)await new Promise(resolve=>f.releaseCaptureCancel=resolve);if(f.captureCancelError)throw f.captureCancelError;f.activeRecording=null;},cancel:async()=>{},stop:async()=>{f.savedAudioStops=(f.savedAudioStops||0)+1;if(f.holdSavedStop)await new Promise(resolve=>f.releaseSavedStop=resolve);if(f.savedStopError)throw f.savedStopError;f.activeSavedAudio=null;},state:async()=>({playing:!!f.activeSavedAudio,audioId:f.activeSavedAudio,positionMs:0}),stopPlayback:async input=>{f.stopPlaybackInputs??=[];f.stopPlaybackInputs.push(input);if(f.holdPlaybackCleanup)await new Promise(resolve=>f.releasePlaybackCleanup=resolve);if(f.playbackCleanupError)throw f.playbackCleanupError;f.activePlayback=null;},synthesize:async input=>{(f.speechInputs??=[]).push(input);f.cloudSpeech++;if(f.error)throw f.error;return {playbackId:'synthetic-'+input.requestId};},play:async input=>{if(input.audioId){f.savedAudioStarts=(f.savedAudioStarts||0)+1;if(f.holdSavedStart)await new Promise(resolve=>f.releaseSavedStart=resolve);f.activeSavedAudio=input.audioId;return;}f.activePlayback=input.playbackId;f.finishPlayback=()=>{f.activePlayback=null;for(const callback of events.get('playbackEnded')||[])callback(input);};if(!f.holdPlayback)queueMicrotask(f.finishPlayback);},addListener:async(name,callback)=>{const callbacks=events.get(name)||new Set();events.set(name,callbacks);callbacks.add(callback);return {remove:async()=>{callbacks.delete(callback);}};},saveRecording:async input=>{f.audioSaves++;return {audioId:input.recordingId,noteId:input.noteId,durationMs:1000,transcript:input.transcript};}};
- const controller={warmInference:()=>{f.prewarms=(f.prewarms||0)+1;},getCloudEnvironment:()=>f.account?(f.environment||'production'):null,getCloudClient:()=>f.account?{sessionId:f.account,credentialId:f.credential}:null,getSnapshot:()=>({kind:f.kind,open:f.open,session:f.agent?{sessionId:f.agent,ownerId:'synthetic-owner',agentId:'synthetic-agent',origin:'https://owned-agent.invalid'}:null}),getPairedVoiceBinding:()=>null,getBrowserSpeechAgent:()=>null,open:()=>{f.agentOpens=(f.agentOpens||0)+1;f.open=true;},openCloudAccount:()=>{f.accountOpens++;f.open=true;},subscribe:callback=>{subscriptions.add(callback);return()=>subscriptions.delete(callback);}};
+ const controller={warmInference:()=>{f.prewarms=(f.prewarms||0)+1;},noteFundsRefusal:()=>{f.fundsRefusals=(f.fundsRefusals||0)+1;},getCloudEnvironment:()=>f.account?(f.environment||'production'):null,getCloudClient:()=>f.account?{sessionId:f.account,credentialId:f.credential}:null,getSnapshot:()=>({kind:f.kind,open:f.open,session:f.agent?{sessionId:f.agent,ownerId:'synthetic-owner',agentId:'synthetic-agent',origin:'https://owned-agent.invalid'}:null}),getPairedVoiceBinding:()=>null,getBrowserSpeechAgent:()=>null,open:()=>{f.agentOpens=(f.agentOpens||0)+1;f.open=true;},openCloudAccount:()=>{f.accountOpens++;f.open=true;},subscribe:callback=>{subscriptions.add(callback);return()=>subscriptions.delete(callback);}};
  const local={ready:async()=>true,playbackReady:async()=>true,speak:async()=>{f.localSpeech++;}};
  const box={openMicrophoneAvailable:()=>f.openMic===true,createLocalReplySpeaker:()=>f.replySpeaker,developmentCloudRealtimeVoiceEnabled:false,developmentCloudVoiceEnabled:false,developmentCartesiaVoiceEnabled:false,testMocksEnabled:false,browserDevProfile:false,Capacitor:{getPlatform:()=>f.platform,isNativePlatform:()=>f.native,isPluginAvailable:()=>true},connectionController:controller,registerPlugin:()=>driver,createOnDeviceVoice:()=>{f.localFactories++;return local;},createPairedVoice:()=>{f.pairedFactories++;return null;},planLocalSpeech:()=>[],recordingLevels:()=>[],localStorage:{getItem:()=>JSON.stringify({kind:f.kind})},document:{hidden:false,documentElement:{dataset:{}},querySelector:selector=>selector==='dialog[open]'?f.reviewOpen||null:f.noteEditor||null,addEventListener(name,listener){let held=documentListeners.get(name);if(!held)documentListeners.set(name,held=new Set());held.add(listener);},removeEventListener(name,listener){documentListeners.get(name)?.delete(listener);}},window:{addEventListener(){},removeEventListener(){},dispatchEvent(){},getSelection:()=>({isCollapsed:true})},queueMicrotask,setInterval:options.clock?.setInterval||setInterval,clearInterval:options.clock?.clearInterval||clearInterval,setTimeout:options.clock?.setTimeout||setTimeout,clearTimeout:options.clock?.clearTimeout||clearTimeout,Date:options.clock?.Date||Date,performance:options.clock?.performance,crypto,structuredClone,AbortController,AbortSignal,DOMException,Event,EventTarget,CustomEvent,URL,TextEncoder,console};
  loadPreparedBatchVoice(box);
@@ -67,6 +70,17 @@ export function cloudVoiceViewFixture(options={}){
  load('runtime/action-message-presentation.ts',box);
  // These scenarios exercise the batch port; native streaming has its own owning drivers.
  box.nativeCloudStreamingAvailable=()=>false;
+ // `streaming`: the native Cloud speech bridge's port (CloudStreamPort) instead. The shared
+ // transport, the shared assistant session and Alpha's turn routes run whole; the scenario owns the
+ // bridge's events.
+ if(options.streaming){
+  load('../../../.eliza/client-features/packages/voice/src/native-cloud-speech.ts',box);
+  const shared=box.createCloudStreamingSpeech;box.createCloudStreamingSpeech=input=>shared(input,options.streaming);
+  box.nativeCloudStreamingAvailable=()=>true;
+  load('../../../.eliza/client-features/packages/voice/src/random-id.ts',box);
+  load('../../../.eliza/client-features/packages/voice/src/voice-assistant-session.ts',box);
+  load('../../../.eliza/client-features/packages/voice/src/voice-turn-routes.ts',box);load('ui/voice/voice-chat-playback.ts',box);
+ }
  load('../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts',box);
  load('runtime/voice-states.ts',box,['voiceFailure','transcriptProvenance','deniedSettingsChoice','DENIED_SETTINGS_LABEL','MEDIA_UNCONFIRMED_NOTICE','speechCleanupNotice']);
  load('prototype/local-speech-playback.ts',box,['installLocalSpeechPlayback','stopLocalSpeechPlayback','currentNoteReading','stopSpeaking','speakNote','readNoteAloud']);
@@ -89,6 +103,8 @@ export function cloudVoiceViewFixture(options={}){
  box.currentCallState=()=>({inCall:f.inCall??null,emergency:null,emergencyLive:false,watching:f.inCall!==undefined});
  box.callSeenSince=time=>f.callSeenAt!==undefined&&f.callSeenAt>=time;
  load('runtime/voice-call-pause.ts',box);
+ // The out-of-funds line is the real one, with its device-locale reset date.
+ load('prototype/locale-time.ts',box);load('runtime/out-of-funds-notice.ts',box);
  load('prototype/voice-adapter.ts',box);
  const icons={check:'check',mic:'official-mic-path',stop:'stop',play:'play',x:'close',cloud:'cloud',user:'account'};
  class Shell{
