@@ -226,6 +226,27 @@ export class AlphaClient {
   private emit(): void {
     for (const listener of this.listeners) listener();
   }
+  /**
+   * Runs `show`, a step that brings another view in front, once no request is in flight. Showing a
+   * view changes the context, and a context change cancels the foreground request (see
+   * `setViewContext`). A device action the request itself performed (a directly requested keypad,
+   * Browser open, SMS draft for another conversation or filtered Contacts list) runs inside that
+   * request while it still carries its reply; showing its view there read as the owner leaving and
+   * ended the reply as "May still finish". Waiting keeps the reply whole. The owner's Stop, leaving
+   * and a changed agent still end the request exactly as before; the step then runs, and a step that
+   * checks it is still current throws once it is not, which retires it (its journaled receipt stands).
+   * A request that started meanwhile is waited for too, so the step never cancels it.
+   */
+  afterRequestSettles(show: () => void): void {
+    // A background workflow generation is never cancelled by a view change (setViewContext), so it
+    // does not hold the step; only a chat request the change would abort does.
+    if (!this.active || this.activeWorkflow) { show(); return; }
+    const stop = this.subscribe(() => {
+      if (this.active && !this.activeWorkflow) return;
+      stop();
+      setTimeout(() => { try { this.afterRequestSettles(show); } catch { /* A retired view keeps its journaled receipt. */ } }, 0);
+    });
+  }
   /** Trusted composition-root API, never exposed to arbitrary remote web content. */
   attachVerifiedTransport(transport: VerifiedSessionTransport, options: { developmentOrigin?: string } = {}): void {
     const session = transport.session;

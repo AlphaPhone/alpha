@@ -1150,16 +1150,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // AC-14: the draft lands in the thread's slot and the chat stays open over it; nothing is sent.
           draftInOpenThread:(body,number,threadId)=>placeAskedSmsDraft(body,number,threadId),
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
-          // changes the view, so it runs after the receipt and only while this review is still current.
-          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&(()=>{current();step();});},
+          // changes the view, so it runs after the receipt and only while this review is still current,
+          // once the chat request carrying this turn's reply settles (a view change would cancel it).
+          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&(()=>alphaClient.afterRequestSettles(()=>{current();step();}));},
           showContacts:async query=>{
             const step=showContactsStep(query),access=step?await book.status():null;
             if(!step||access?.available!==true||access.readable!==true)return null;
             const listed=await book.list({query,limit:1});current();
-            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>{current();step();}:'not-found';
+            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>alphaClient.afterRequestSettles(()=>{current();step();}):'not-found';
           },
           // The keypad opens after the receipt, like a filtered Contacts list; nothing is dialed.
-          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>{current();step();});},
+          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>alphaClient.afterRequestSettles(()=>{current();step();}));},
           openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
@@ -1459,11 +1460,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
           present?.();
         };
-        // Showing Browser changes the view, and a view change cancels the active request. A directly
-        // requested open runs inside the chat request that still carries its reply: show Browser after
-        // that request settles, so the reply stays whole instead of "Stopped." with a stop notice.
-        if(!alphaClient.getState().pending){show();return;}
-        const stop=alphaClient.subscribe(()=>{if(alphaClient.getState().pending)return;stop();setTimeout(()=>{try{show();}catch{/* A retired tab keeps its journaled receipt. */}},0);});
+        // A directly requested open runs inside the chat request that still carries its reply.
+        alphaClient.afterRequestSettles(show);
       } };
     });
     context(this);
