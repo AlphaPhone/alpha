@@ -735,8 +735,11 @@ words, not exclude other verbs.
   by an English keyword floor (section 1).
 - **The device tool still differs by view,** and by two wordings: asking for an
   address in a new tab, and naming the phone's own calendar.
-- **Re-sends stack on the direct route.** After a refusal with no wait hint the
-  OpenAI plugin's own retries and the turn's re-sends multiply: 8 to 12 provider
-  attempts for one step in the no-cap runs. A refused request is not charged, so this
-  costs time and request count, not tokens.
+- **Re-sends stack on the direct route.** After a refusal with no wait hint (the
+  provider's "high traffic" 429) the OpenAI plugin's own retries and the turn's re-send
+  multiply: 4 and then 4 more requests for one step on the generate lane in a November 20
+  resident run (16 of its 22 refusals had no hint). The stream lanes' budget allows 12
+  (loopback, not seen live). The no-cap runs' refusals all carried `Retry-After: 60`
+  and were each sent once. A refused request is not charged, so this costs time and
+  request count, not tokens.
 
