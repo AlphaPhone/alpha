@@ -799,7 +799,7 @@ test.describe('Alpha Cloud cutover flag',()=>{
   expect(sent).toEqual({amountUsd:10,success_url:'https://eliza.app/alphaphone/billing/return',cancel_url:'https://eliza.app/alphaphone/billing/return?cancelled=1'});
  });
 
- const alpha=async(extra:Record<string,unknown>={})=>({...await entitlements({iss:'https://api.alphacompute.ai',aud:'ai.alphacompute.alphaphone',...extra}),alphaCloud:true});
+ const alpha=async(extra:Record<string,unknown>={})=>({...await entitlements({iss:'https://api.alphacompute.cc',aud:'ai.alphacompute.alphaphone',...extra}),alphaCloud:true});
  /** The in-app plan manager opens with the catalogue; nothing opens in a browser until the owner subscribes. */
  async function openPlans(page:Page){
   await expect(page.getByRole('dialog',{name:'Review billing account',exact:true})).toHaveCount(0);
@@ -822,8 +822,8 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await subscribePlus(page);
   expect(await configured(page)).toBe(0);
   const requests=(await calls(page)).filter(c=>c.plugin==='AlphaConnection'&&c.method==='request').map(c=>c.url??'');
-  expect(requests.filter(url=>!url.startsWith('https://api.alphacompute.ai/'))).toEqual([]);
-  expect(requests).toContain('https://api.alphacompute.ai/api/v1/subscriptions/checkout');
+  expect(requests.filter(url=>!url.startsWith('https://api.alphacompute.cc/'))).toEqual([]);
+  expect(requests).toContain('https://api.alphacompute.cc/api/v1/subscriptions/checkout');
  });
 
  test('on: a past-due plan manages payment in the in-app plans',async({page})=>{

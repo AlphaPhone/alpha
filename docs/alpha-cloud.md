@@ -1,10 +1,13 @@
 # Alpha Cloud
 
 Alpha Phone's own Cloud: sign-in, AI inference, voice, subscriptions and billing for
-`ai.alphacompute.alphaphone`, on Cloudflare under `alphacompute.ai`. It is built from the pinned
+`ai.alphacompute.alphaphone`, on Cloudflare under `alphacompute.cc`. It is built from the pinned
 upstream source (`vendor/eliza` at `upstream.lock.json`, exported, never edited) and described by
 data in this repository. The shipped app still uses Eliza Cloud: everything in the app that is
 specific to Alpha Cloud is behind the cutover flag (section 8), which is off by default.
+
+**To deploy it, follow [the deployment runbook](runbooks/alpha-cloud-deploy.md)** (hosts at
+`cloud.alphacompute.cc`, accounts, secrets, commands, verification, rollback).
 
 ## 1. What the Cloud does, and what it does not
 
@@ -26,14 +29,14 @@ ships. Without their keys those screens report the service as unavailable; nothi
 ### Topology
 
 ```
-phone ──https──> api.alphacompute.ai    Cloud API Worker (upstream)   ──Hyperdrive──> Postgres (Cloud)
-                 blob.alphacompute.ai   (same Worker: R2 blobs)        ──REST──> Upstash Redis
-                 login.alphacompute.ai  Steward Worker + container     ──> Postgres (Steward), Resend
-                 cloud.alphacompute.ai  cloud/edge (this repo)         ──service binding──> API
-Stripe ──webhook──> api.alphacompute.ai/api/stripe/webhook
+phone ──https──> api.alphacompute.cc    Cloud API Worker (upstream)   ──Hyperdrive──> Postgres (Cloud)
+                 blob.alphacompute.cc   (same Worker: R2 blobs)        ──REST──> Upstash Redis
+                 login.alphacompute.cc  Steward Worker + container     ──> Postgres (Steward), Resend
+                 cloud.alphacompute.cc  cloud/edge (this repo)         ──service binding──> API
+Stripe ──webhook──> api.alphacompute.cc/api/stripe/webhook
 ```
 
-`cloud.alphacompute.ai` is the app-link host. It serves `/.well-known/assetlinks.json`, the
+`cloud.alphacompute.cc` is the app-link host. It serves `/.well-known/assetlinks.json`, the
 sign-in and checkout returns (`/alphaphone/auth/callback`, `/alphaphone/billing/return`) and the
 browser Google start, all answered by the API from the database registration. Upstream's Pages
 dashboard, speech Worker and admission Worker are not deployed: account and plan management is
@@ -64,20 +67,20 @@ keys for staging and live keys for production.
 
 | Name | Where to get it | Notes |
 |---|---|---|
-| **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.ai` zone, on Workers Paid with Containers | Set `CLOUDFLARE_ACCOUNT_ID` and use a token for that account. Grant Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone read and DNS edit on `alphacompute.ai`. |
+| **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphacompute.cc` zone, on Workers Paid with Containers | Set `CLOUDFLARE_ACCOUNT_ID` and use a token for that account. Grant Workers Scripts, Routes, KV, R2, Hyperdrive and Containers edit, plus Zone read and DNS edit on `alphacompute.cc`. |
 | `DATABASE_URL` | Postgres for Cloud (Neon, Supabase or Railway) | Its own database. Hyperdrive is created from it. |
 | `DATABASE_IDENTITY_EXPECTED_CLUSTER_SHA256`, `DATABASE_IDENTITY_EXPECTED_AUTHORITY_SHA256` | Reviewed output of `database-identity` for that environment | Migration and registration both verify these receipts against the connection they use. |
 | `STEWARD_DATABASE_URL` | A second Postgres database for Steward | Must differ from `DATABASE_URL`. Steward migrates it at start. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Upstash Redis → REST API | Rate limits, auth denylist, speech sessions. |
 | `CEREBRAS_API_KEY` | cloud.cerebras.ai → API keys | Serves `qwen-3.8-27b`. `OPENROUTER_API_KEY` (optional) adds other models. |
 | `CARTESIA_API_KEY`, `CARTESIA_STT_USD_PER_CREDIT` (optional) | play.cartesia.ai → API keys; price per credit from your plan | Without them STT and TTS use Workers AI. |
-| `RESEND_API_KEY` | resend.com, with `alphacompute.ai` verified as a sending domain | Sends sign-in codes from `noreply@alphacompute.ai`. |
+| `RESEND_API_KEY` | resend.com, with `alphacompute.cc` verified as a sending domain | Sends sign-in codes from `noreply@alphacompute.cc`. |
 | `CLOUD_PUBLIC_SERVICE_TERMS_JSON`, `CLOUD_PUBLIC_SERVICE_PRIVACY_JSON` | Alpha Compute's approved Terms and Privacy text | Each value is one line of JSON with `title`, `revision`, and a nonempty `sections` array. Each section has a `title` and a nonempty `paragraphs` array of plain-text strings. Limit each value to 5120 UTF-8 bytes. The API publishes the documents for the in-app sign-in screen. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web application) in an AlphaCompute project | Authorized redirect URIs: `https://login.alphacompute.ai/auth/oauth/google/callback` and `https://api.alphacompute.ai/api/v1/oauth/google/callback` (staging: the `-staging` hosts). Used for sign-in (Steward) and the Gmail/Calendar connector (API). |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web application) in an AlphaCompute project | Authorized redirect URIs: `https://login.alphacompute.cc/auth/oauth/google/callback` and `https://api.alphacompute.cc/api/v1/oauth/google/callback` (staging: the `-staging` hosts). Used for sign-in (Steward) and the Gmail/Calendar connector (API). |
 | `STEWARD_GOOGLE_NATIVE_CLIENT_IDS` (optional) | An Android OAuth client: package `ai.alphacompute.alphaphone`, SHA-1 of the release certificate | JSON `{"alpha-phone": ["<id>.apps.googleusercontent.com"]}`. Only needed for native Google sign-in; the app uses browser sign-in today. |
 | `GOOGLE_MAPS_API_KEY` (optional) | Google Cloud → Maps Platform key restricted to Geocoding, Places and Routes | Without it Maps is unavailable. |
 | `STRIPE_SECRET_KEY` | Stripe → Developers → API keys | `sk_test_` for staging, `sk_live_` for production (the tool refuses a mismatch). |
-| `STRIPE_WEBHOOK_SECRET` | Stripe → Webhooks → add endpoint `https://api.alphacompute.ai/api/stripe/webhook` | Events the Cloud handles: `checkout.session.completed`, `customer.subscription.updated`, `.deleted`, `.pending_update_applied`, `.pending_update_expired`, `invoice.created`, `.paid`, `.payment_failed`, `payment_intent.succeeded`, `.payment_failed`, `charge.refunded`, `charge.dispute.funds_reinstated`. |
+| `STRIPE_WEBHOOK_SECRET` | Stripe → Webhooks → add endpoint `https://api.alphacompute.cc/api/stripe/webhook` | Events the Cloud handles: `checkout.session.completed`, `customer.subscription.updated`, `.deleted`, `.pending_update_applied`, `.pending_update_expired`, `invoice.created`, `.paid`, `.payment_failed`, `payment_intent.succeeded`, `.payment_failed`, `charge.refunded`, `charge.dispute.funds_reinstated`. |
 | `STRIPE_PLUS_PRODUCT_ID`, `STRIPE_PLUS_MONTHLY_PRICE_ID` | Stripe → Products: "Plus", recurring monthly **$30.00 USD**, licensed, no trial | Upstream verifies the exact amount. |
 | `STRIPE_PRO_PRODUCT_ID`, `STRIPE_PRO_MONTHLY_PRICE_ID` | Stripe → Products: "Pro", recurring monthly **$100.00 USD** | Plus includes $25 and Pro $90 of AI usage. These amounts are fixed in upstream's catalogue; other prices need an upstream change. |
 | `STRIPE_PUBLISHABLE_KEY` (optional) | Stripe → API keys | Not needed for the app's hosted checkout. |
@@ -220,7 +223,7 @@ into every build output: `alphaCloudCutover` (renderer, `cloud-deployment.genera
 
 **Off (default; every distributed build).** The app uses the shipped Eliza Cloud and behaves as
 before: Plan, Choose a plan, Add funds and the chat plan card open the hosted billing page; no
-`alphacompute.ai` host, in-app plan route (`/api/v1/subscriptions/plans|checkout`, `/referrals`) or
+`alphacompute.cc` host, in-app plan route (`/api/v1/subscriptions/plans|checkout`, `/referrals`) or
 Stripe page is admitted by either transport; the native billing authority plugin is not registered
 (and refuses if called); the `/alphaphone/billing/return` App Link alias (`AlphaCloudBillingReturn`)
 is declared disabled, so it resolves no intent; `scripts/verify-apks.ts` requires exactly that.
@@ -255,7 +258,7 @@ The cutover release itself, once staging and production pass `smoke` and a flag-
 checks above:
 
 1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/policy.json`'s rows (with `"alphaCloud": true`), which
-   turns the flag on for every build. The App Link host becomes `cloud.alphacompute.ai`.
+   turns the flag on for every build. The App Link host becomes `cloud.alphacompute.cc`.
 2. Append the new storage namespace to `STORAGE_NAMESPACES` and add the namespace migration. Users
    sign in again; Eliza Cloud accounts, subscriptions and Google grants do not move by themselves.
 3. Build, sign and publish through OTA (section 6).
