@@ -14,7 +14,7 @@ export interface PhoneLocationPorts {
  bridge:PhoneLocationBridge;
  now():number;
 }
-/** A fix this recent is reused without asking the platform again. */
+/** Reuse a successful native read for this long, even when it returned a cached fix. */
 export const PHONE_LOCATION_REUSE_MS=60_000;
 /** The platform may answer from a fix this old, which is immediate. */
 export const PHONE_LOCATION_PLATFORM_MAX_AGE_MS=5*60_000;
@@ -38,6 +38,7 @@ function observation(coords:{latitude:number;longitude:number;accuracy?:number;t
  */
 export class PhoneLocationReader {
  private generation=0;
+ private refreshAfter=Number.NEGATIVE_INFINITY;
  private last:ClientLocationObservation|undefined;
  private pending:Promise<ClientLocationObservation|undefined>|undefined;
  constructor(private readonly ports:PhoneLocationPorts){}
@@ -51,9 +52,17 @@ export class PhoneLocationReader {
   if(generation!==this.generation)return undefined;
   if(!granted||!this.ports.enabled()){this.clear();return undefined;}
   const now=this.ports.now();
-  if(this.last&&now-this.last.capturedAt<PHONE_LOCATION_REUSE_MS)return this.last;
+  if(now<this.refreshAfter)return this.cachedFix(now);
   const pending=this.pending??=this.ports.bridge.getCurrentPosition({accuracy:'high',maxAge:PHONE_LOCATION_PLATFORM_MAX_AGE_MS,timeout:10_000})
-   .then(result=>{if(generation!==this.generation||!this.ports.enabled())return undefined;const fix=observation(result.coords);if(fix&&(!this.last||fix.capturedAt>=this.last.capturedAt))this.last=fix;return fix;},()=>undefined)
+   .then(result=>{
+    if(generation!==this.generation||!this.ports.enabled())return undefined;
+    const fix=observation(result.coords);
+    if(fix){
+     if(!this.last||fix.capturedAt>=this.last.capturedAt)this.last=fix;
+     this.refreshAfter=this.ports.now()+PHONE_LOCATION_REUSE_MS;
+    }
+    return fix;
+   },()=>undefined)
    .finally(()=>{if(this.pending===pending)this.pending=undefined;});
   let timer:ReturnType<typeof setTimeout>|undefined,abort:(()=>void)|undefined;
   try{
@@ -61,10 +70,13 @@ export class PhoneLocationReader {
   }finally{if(timer!==undefined)clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
   signal.throwIfAborted();
   if(generation!==this.generation||!this.ports.enabled())return undefined;
-  const last=this.last;
-  return last&&this.ports.now()-last.capturedAt<=PHONE_LOCATION_STALE_MS?last:undefined;
+  return this.cachedFix(this.ports.now());
  }
- clear(){this.generation++;this.last=undefined;this.pending=undefined;}
+ private cachedFix(now:number){
+  const fix=this.last;
+  return fix&&now-fix.capturedAt<=PHONE_LOCATION_STALE_MS?fix:undefined;
+ }
+ clear(){this.generation++;this.refreshAfter=Number.NEGATIVE_INFINITY;this.last=undefined;this.pending=undefined;}
 }
 
 let shared:PhoneLocationReader|undefined;

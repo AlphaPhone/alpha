@@ -26,6 +26,17 @@ test('a granted launcher reports a rounded, canonical last known position',async
  await reader.read(signal());assert.equal(calls.read,1);
 });
 
+test('a native-cached fix does not start another location read on the next turn',async()=>{
+ const {ports:p,calls,state}=ports({now:fix.timestamp+2*PHONE_LOCATION_REUSE_MS});
+ const reader=new PhoneLocationReader(p);
+ assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);
+ assert.equal((await reader.read(signal())).capturedAt,fix.timestamp);
+ assert.equal(calls.read,1);
+ state.now+=PHONE_LOCATION_REUSE_MS+1;
+ await reader.read(signal());
+ assert.equal(calls.read,2);
+});
+
 test('without the permission or the native plugin nothing is read or prompted',async()=>{
  for(const options of [{granted:false},{available:false}]){
   const {ports:p,calls}=ports(options);
