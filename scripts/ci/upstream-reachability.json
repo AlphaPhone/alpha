@@ -2,15 +2,24 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "617b6a7badc0e063bae2490cf853cc173c9d43ca",
-  "head": "617b6a7badc0e063bae2490cf853cc173c9d43ca",
+  "baseCommit": "89baf73d94df6437dd0677543ff23997bd0d8a70",
+  "head": "4a068d6f5384f0cc58abfbca23b4ffb898ab7d8a",
   "recordedAt": "2026-11-22",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...617b6a7badc0e063bae2490cf853cc173c9d43ca",
-  "status": "identical",
-  "aheadBy": 0,
-  "behindBy": 0,
+  "command": "gh api repos/elizaOS/eliza/compare/develop...4a068d6f5384f0cc58abfbca23b4ffb898ab7d8a",
+  "status": "diverged",
+  "aheadBy": 2,
+  "behindBy": 26,
   "mergeBase": "617b6a7badc0e063bae2490cf853cc173c9d43ca",
-  "pinOnlyCommits": [],
+  "pinOnlyCommits": [
+    {
+      "sha": "b72ba685930d163b45c1c0a3211bcce6e6efacbe",
+      "subject": "Show the agent the Browser page the owner has open"
+    },
+    {
+      "sha": "4a068d6f5384f0cc58abfbca23b4ffb898ab7d8a",
+      "subject": "Keep the line-separator case of the Browser page test as an escape"
+    }
+  ],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
@@ -69,5 +78,6 @@
     "https://github.com/elizaOS/eliza/pull/39921",
     "https://github.com/elizaOS/eliza/pull/39942",
     "https://github.com/elizaOS/eliza/pull/39957"
-  ]
+  ],
+  "pendingPullRequest": "https://github.com/elizaOS/eliza/pull/40067"
 }

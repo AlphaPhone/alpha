@@ -885,3 +885,10 @@ idempotent note creation and owner-confirmed recording cleanup
 [Eliza #39950](https://github.com/elizaOS/eliza/pull/39950)).
 The core catalog records the updated Notes source bytes. The mobile policy
 records the lock change for the Maps plugin's contracts dependency.
+
+The next pin, `4a068d6f5384f0cc58abfbca23b4ffb898ab7d8a`, adds the open Browser
+page beside the current-turn observation (`clientDevice.browserPage`) and shows
+it to the agent once per turn, inside the shared untrusted-content envelope
+([Eliza #40067](https://github.com/elizaOS/eliza/pull/40067), not yet on
+develop; see [browser-page-context.md](browser-page-context.md)). No model turn,
+APK or Pixel run is proven by the pin.
