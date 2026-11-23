@@ -242,7 +242,7 @@ export function FilesScreen({ route, onClose }: FilesScreenProps) {
       <main ref={visit} aria-label="Files" className="flex h-full flex-col bg-background text-foreground">
         <header className="flex items-center gap-1 px-2 pt-2">
           <Button variant="ghost" size="icon" aria-label="Back" onClick={back} disabled={busy && browser.selecting}><ArrowLeft className="size-5" /></Button>
-          <h1 className="min-w-0 flex-1 truncate font-serif text-2xl">{title}</h1>
+          <h1 className="min-w-0 flex-1 truncate font-display text-2xl">{title}</h1>
           {browserBuild && browser.place.tag === "Browse" && (
             <Button variant="ghost" size="icon" aria-label="Import a folder" disabled={busy}
               onClick={() => void perform(LibraryImport.use((l) => l.folder())).then((path) => path ? navigate({ tag: "InFolder", path, volume: "" }) : undefined)}>

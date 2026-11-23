@@ -29,7 +29,7 @@ export function HomeAgendaCard({ open }: HomeAgendaCardProps) {
       <button type="button" className={cn(focusRing, "flex w-full flex-col items-start gap-1 p-4 text-left")} aria-label={`Calendar: ${text}${time ? `, ${time}` : ""}`}
         onClick={() => void perform(HomeAgenda.use((agenda) => agenda.tapped())).then(() => open("calendar", card.route))}>
         <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground">{card.state === "HomeSavedEvent" ? "Saved" : "Next"}</span>
-        <span className="font-serif text-xl">{text}</span>
+        <span className="font-display text-xl">{text}</span>
         {time && <span className="flex items-center gap-2 text-sm">{time}{card.video && <Video aria-label="Video meeting" className="size-4" />}</span>}
       </button>
     </Card>

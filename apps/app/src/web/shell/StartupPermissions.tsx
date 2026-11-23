@@ -61,7 +61,7 @@ export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onC
       <Dialog open={open} onOpenChange={(next) => { if (!next) onFinish(); }}>
         <DialogContent closeLabel="Done">
           <span className="flex size-12 items-center justify-center rounded-full bg-secondary"><Check aria-hidden className="size-6" /></span>
-          <DialogTitle className="font-serif text-3xl">All set</DialogTitle>
+          <DialogTitle className="font-display text-3xl">All set</DialogTitle>
           {account}
           {walkthrough.progressError && <p className="text-sm text-warn">Progress couldn’t be saved on this phone.</p>}
           <Button onClick={onFinish}>Done</Button>
@@ -77,7 +77,7 @@ export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onC
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && review) onClose(); }}>
       <DialogContent closeLabel={review ? "Close" : "Not now"} className="grid max-h-[calc(var(--alpha-free-height,100dvh)-2rem)] grid-cols-1 overflow-y-auto">
-        <DialogTitle className="font-serif text-3xl">Access</DialogTitle>
+        <DialogTitle className="font-display text-3xl">Access</DialogTitle>
         {count > 0 && <p role="status" className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Step {count} of {walkthrough.keys.length}</p>}
         <ol className="flex flex-col">
           {walkthrough.keys.map((key, index) => {

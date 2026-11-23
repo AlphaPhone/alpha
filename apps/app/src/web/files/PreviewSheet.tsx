@@ -61,7 +61,7 @@ export function PreviewSheet({ preview, pages, actions, elsewhereLabel, location
         <header className="flex items-center gap-2 px-2">
           <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose} disabled={preview.renaming}><X className="size-5" /></Button>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate font-serif text-xl">{doc.name}</h2>
+            <h2 className="truncate font-display text-xl">{doc.name}</h2>
             <p className="truncate text-sm text-muted-foreground">{meta}</p>
           </div>
           <DropdownMenu>

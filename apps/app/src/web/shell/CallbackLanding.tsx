@@ -21,7 +21,7 @@ export interface CallbackLandingProps {
 export function CallbackLanding({ message, href }: CallbackLandingProps) {
   return (
     <main className="mx-auto flex max-w-md flex-col gap-4 p-6">
-      <h1 className="font-serif text-3xl">Return to Alpha Phone</h1>
+      <h1 className="font-display text-3xl">Return to Alpha Phone</h1>
       <p>{MESSAGES[message]}</p>
       {href !== "" && <Button asChild size="lg"><a href={href} rel="noreferrer">Continue in Alpha Phone</a></Button>}
     </main>

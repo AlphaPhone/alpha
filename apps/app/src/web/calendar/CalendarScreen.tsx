@@ -122,7 +122,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
     <main className="flex h-full flex-col bg-background text-foreground">
       <header data-alpha-app-header="main" className="flex items-center gap-2 px-4 py-2">
         <Button variant="ghost" size="icon" aria-label="Close Calendar" onClick={onClose}><X /></Button>
-        <Button variant="ghost" className="flex-1 justify-start font-serif text-2xl" aria-label="Choose date" onClick={() => go({ type: "openDatePicker" })}>
+        <Button variant="ghost" className="flex-1 justify-start font-display text-2xl" aria-label="Choose date" onClick={() => go({ type: "openDatePicker" })}>
           {formatLongDate(midnightAfter(now, zone, p.day), zone)}
         </Button>
         <Button variant="ghost" size="icon" aria-label="Search events" onClick={() => go({ type: "openSearch" })}><Search /></Button>
@@ -150,7 +150,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
       )}
       {p.searching && (
         <div className="flex items-center gap-2 px-4 py-2">
-          <Input autoFocus className="calendar-search-input" aria-label="Search events" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <Input autoFocus aria-label="Search events" value={query} onChange={(event) => setQuery(event.target.value)} />
           <Button variant="ghost" size="icon" aria-label="Close search" onClick={() => { setQuery(""); go({ type: "closeSearch" }, true); }}><X /></Button>
         </div>
       )}

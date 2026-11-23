@@ -148,7 +148,7 @@ export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, on
           </div>
           {deleting && (
             <div role="dialog" aria-label={decline ? "Decline invitation?" : "Delete event?"} className="flex flex-col gap-3 border-t border-border pt-3">
-              <p className="font-serif text-xl">{decline ? "Decline invitation?" : "Delete event?"}</p>
+              <p className="font-display text-xl">{decline ? "Decline invitation?" : "Delete event?"}</p>
               {scopes.length > 0 && (
                 <RadioGroup value={scope} onValueChange={(value) => setScope(value as RecurrenceScope)} aria-label="Occurrences">
                   {scopes.map((choice) => (

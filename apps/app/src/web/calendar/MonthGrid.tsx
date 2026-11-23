@@ -30,7 +30,7 @@ export function MonthGrid({ rows, day, month, zone, now, onPickDay, onMonth }: M
     <section aria-label={grid.title} className="flex flex-col gap-2 px-4 py-2">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="icon" aria-label="Previous month" onClick={() => onMonth(month - 1)}><ChevronLeft /></Button>
-        <span className="font-serif text-xl">{grid.title}</span>
+        <span className="font-display text-xl">{grid.title}</span>
         <Button variant="ghost" size="icon" aria-label="Next month" onClick={() => onMonth(month + 1)}><ChevronRight /></Button>
       </div>
       <div role="grid" className="grid grid-cols-7 gap-1">
