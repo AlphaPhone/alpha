@@ -26,7 +26,7 @@ const make = effect {
   const machine = try CleanupMachine
   const running = try Semaphore.make(1)
 
-  effect function send(event: CleanupEvent): CleanupView | undefined!! {
+  effect function send(event: CleanupEvent): (CleanupView | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
 

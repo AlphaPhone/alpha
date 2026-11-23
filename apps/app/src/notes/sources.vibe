@@ -40,19 +40,19 @@ const make = effect {
   const attachment = try AttachmentMachine
   const opened = try Ref.make<{ readonly noteId: string; readonly print: string } | undefined>(undefined)
 
-  effect function sendDialog(event: DialogEvent): SourceDialog | undefined!! {
+  effect function sendDialog(event: DialogEvent): (SourceDialog | undefined)!! {
     return try (dialog.send(event) catch () => undefined)
   }
   effect function sendAttachment(event: AttachmentEvent): void!! {
     try (attachment.send(event) catch () => undefined)
   }
 
-  effect function printOf(noteId: string): string | undefined!! {
+  effect function printOf(noteId: string): (string | undefined)!! {
     const note = (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
     return note === undefined ? undefined : JSON.stringify(note)
   }
 
-  effect function fresh(): { noteId: string; row: NoteRow } | undefined!! {
+  effect function fresh(): ({ noteId: string; row: NoteRow } | undefined)!! {
     const held = try Ref.get(opened)
     if (held === undefined) return undefined
     const note = (try collection.current())?.snapshot.notes.find((item) => item.id === held.noteId)

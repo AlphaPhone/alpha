@@ -37,13 +37,13 @@ export service ApprovalNotices {
 /** The open run's phone step: reviewed and decided twice; the agent performs an approved step once through its enrolled phone bridge. */
 export service PhoneSteps {
   /** Read the run's pending phone step and show it; undefined when none waits. */
-  review(runId: string, workflowId: string): StepReview | undefined!!
+  review(runId: string, workflowId: string): (StepReview | undefined)!!
   /** One tap of Approve or Deny; the second of the same choice decides. */
   tap(approve: boolean): void!!
   /** The page went to the background or came back. */
   foreground(front: boolean): void!!
   /** The step the open run shows now, as last reviewed; undefined when none waits. */
-  reviewed(): StepReview | undefined!!
+  reviewed(): (StepReview | undefined)!!
 }
 
 function ownerOf(scope: OwnerScope): string {
