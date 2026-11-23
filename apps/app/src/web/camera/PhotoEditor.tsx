@@ -50,7 +50,7 @@ export function PhotoEditor({ state, can, editor }: PhotoEditorProps) {
                 if (next !== undefined) { event.preventDefault(); setRect(next); }
               }} />
           )}
-          {state.status === "EditUncertain" && <span role="status" className="absolute top-4 rounded-md bg-scrim px-3 py-1 text-sm text-background">Unconfirmed</span>}
+          {state.status === "EditUncertain" && <span role="status" className="absolute top-4 rounded-md bg-scrim/18 dark:bg-scrim/55 px-3 py-1 text-sm text-background">Unconfirmed</span>}
         </div>
         {state.cropping ? (
           <footer className="flex flex-wrap items-center gap-2 px-4 pb-4">
