@@ -170,7 +170,7 @@ it.effect(`A turn tells the agent direct requests are allowed only with review-f
   }))
 })
 
-it.effect("Distinct Maps handoffs still open after the recent effect list fills (spec/assistant/views.md, \"Maps' view is delivered by Maps, at most once per effect\")", () => effect {
+it.effect("Maps handoffs keep distinct effect identities after the cache fills (spec/assistant/views.md, \"Maps' view is delivered by Maps, at most once per effect\")", () => effect {
   const seen: Seen = { calls: [] }
   const keys: number[] = []
   const maps = Layer.succeed(MapsViews, {

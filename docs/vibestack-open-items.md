@@ -53,10 +53,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Shell (integration)
 
-- Fill the assistant's ports in `PortCells` (declared in `src/assistant/ports.vibe`):
-  - `BrowserPages` with `browserPagesFromBrowser`, `MapsViews` with `mapsViewsFromMaps`, `BrowserViews` with `browserViewsFromBrowser` (all in `src/assistant/fills.vibe`);
-  - `AdvertisedCapabilities.names()` with `DeviceCapabilities.advertise(offered)`. Until then no `x-eliza-device-capabilities` header is sent.
-- Requests to `/api/client-devices/proposals` (claim, decision, receipt) and turns must carry `DeviceEnrollment.headers()`. Device actions must be refused while `AgentSession.enrollmentId` is empty, and the ChatOnly phase should show legacy's "Chat only" reason; no UI shows it yet.
+- Qualify the filled `BrowserPages`, `BrowserViews`, `MapsViews` and `AdvertisedCapabilities` ports through a resident and an enrolled phone. The request adapter reads the enrollment and capability headers for typed turns, voice turns and proposal calls. Verify device actions are refused without an enrollment. ChatOnly still needs to show the reason.
 - `AppServices` must contain the Machine services of `gen/clock__notifications` and `gen/clock__reminderTaps`, plus ApprovalReviews, AgentRequests, FilePicker, Notifications and ReminderTaps; their change streams must emit the current value first (assumed by `src/shell/surfaceSheets.vibe`).
 - Browser has no always-mounted sheet; the "Browser shade sheet" was read as the browser build's notification shade in clock-notices. If another Browser sheet was meant, it needs its own surface and Back.
 - `src/shell/assistantHost.vibe` keeps local copies of `learnPeer`/`comparePeer`/`statusRead`, because upstream `./client` does not re-export them.
@@ -84,7 +81,6 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## Voice
 
 - The relay's listener registration is forked with one `yieldNow` before `startCloudSpeech`; upstream awaits a real registration, so an event posted at the very first moment could be missed.
-- Pass the capability header to `Resident.stream` in `src/voice/conversation.vibe` as the assistant does through `AdvertisedCapabilities`.
 
 ## Account
 
@@ -114,14 +110,9 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## Tooling / repository root
 
 - The eliza pin is now vibestack-dp `6451775c35a` (eliza#40258). It exports `workflowDeviceOffer` (`packages/agent/src/device-actions/workflow-offer.vibe`), so the earlier need to move past `c8f273cec1b` is met; `pnpm-lock.yaml` is committed and `pnpm install --frozen-lockfile` passes. `pnpm gen` exits 0.
-- `pnpm typecheck` fails with 493 syntax-phase errors in 93 files (mostly EK0301, `!` beside a union or function type without parentheses, and TS1005/TS1128 around `match (…) { when …: }` blocks). vibelang stops before semantic checking, so the count of type errors behind them is unknown. Browser has 234 of them, account 72, notes 47, inbox 36, every other area under 20.
-- `scripts/generate-licenses.ts --check` crashes: `node_modules/@tesseract.js-data/eng` is not installed (see the OCR item below). The elizaOS entry of the committed notices was edited by hand to name the new pin.
-- The Tesseract OCR assets are not set up:
-  - the files are not served under `apps/app/public/ocr/`;
-  - `vite.config.ts` must add `localOcrAssets()`;
-  - `apps/app/package.json` must list `tesseract.js-core` and `@tesseract.js-data/eng`.
-
-  The root `package.json` also lacks `@electric-sql/pglite`, which `eval-phone-actions.ts --database` needs.
+- The integrated area changes clear the original 493 syntax errors. The renderer lint passes. Run app generation and the pinned SDK build before counting semantic diagnostics, since missing generated modules cause cascading errors at their callers.
+- The app installs Tesseract data and cores and Vite emits them through `localOcrAssets()`. Verify the OCR bundle and its license notices at the same revision as the production renderer.
+- The root `package.json` still lacks `@electric-sql/pglite`, which `eval-phone-actions.ts --database` needs.
 - `scripts/resident` must:
   - register the `workflow-device` and `workflow-native-digests` runtime services;
   - call `registerMapsViews`/`registerMapsSavedPlaces` (`namesAlphaView` is a fixed word list).
