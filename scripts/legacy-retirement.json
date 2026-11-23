@@ -5037,6 +5037,12 @@
    "status": "mapped"
   },
   {
+   "legacy": "test/files-native-query.test.mjs",
+   "area": "files",
+   "spec": "apps/app/spec/files/filter.md",
+   "status": "mapped"
+  },
+  {
    "legacy": "test/files-native-share-admission.test.mjs",
    "area": "files",
    "spec": "apps/app/spec/files/share.md",
