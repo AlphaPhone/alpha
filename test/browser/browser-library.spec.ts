@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 // Browser's Bookmarks and history list: page names, day headings, the filter, and a bookmark saved
-// from a private tab keeping its page name. As in browser-signins.spec.ts, the registered
+// from a private tab keeping its page name, also across a reload (the web build's cold start). As in browser-signins.spec.ts, the registered
 // sandboxed BrowserSurface is a closed stand-in for the native tab host's page events. That
 // stand-in cannot read a sandboxed page's title, so here it reports each page's name as the
 // native host does: the fixture page's title is its decoded path.
@@ -56,6 +56,29 @@ test('a bookmark saved in a private tab keeps the page name while the visit is n
  await expect(row).toContainText('library.example/Lentil%20soup');
  await list.getByRole('button',{name:'History',exact:true}).click();
  await expect(list.getByRole('button',{name:'https://library.example/Lentil%20soup',exact:true})).toHaveCount(0);
+});
+
+test('a bookmark keeps its page name across a cold start; one saved before names shows its site',async({page})=>{
+ test.slow();
+ // A record written before bookmark titles: bare addresses only.
+ await page.evaluate(async()=>{const {bookmarkDocument}=await import('/src/browser/preference-documents.ts');await bookmarkDocument.edit<string[],void>(()=>[],rows=>{rows.splice(0,rows.length,'https://library.example/Old%20page');});});
+ await openBrowser(page);
+ // A private tab is not restored after the restart, so only the bookmark can carry the name.
+ await menu(page,'New private tab');await navigate(page,'Lentil soup');
+ await menu(page,'Bookmark');
+ const saved=()=>page.evaluate(async()=>{const {bookmarkDocument}=await import('/src/browser/preference-documents.ts');return bookmarkDocument.read<unknown[]>(()=>[]);});
+ await expect.poll(saved).toEqual([{url:'https://library.example/Lentil%20soup',title:'Lentil soup'},'https://library.example/Old%20page']);
+ await page.reload();
+ await openBrowser(page);
+ await menu(page,'Bookmarks and history');
+ const list=library(page);
+ const named=list.getByRole('button',{name:'https://library.example/Lentil%20soup',exact:true});
+ await expect(named).toContainText('Lentil soup');
+ const old=list.getByRole('button',{name:'https://library.example/Old%20page',exact:true});
+ await expect(old).toContainText('library.example/Old%20page');
+ await expect(old).not.toContainText('Old page');
+ await list.getByRole('searchbox',{name:'Search bookmarks',exact:true}).fill('lentil');
+ await expect(named).toBeVisible();await expect(old).toHaveCount(0);
 });
 
 test('Show in Files from the Downloads list opens Files at Downloads',async({page})=>{

@@ -77,7 +77,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   function loadBookmarks() {
     if (bookmarkRead) return bookmarkRead;
     bookmarkRead = Browser.bookmarks({session}).then((result: Bag) => {
-      if (!disposed) { if (bookmarkRecovery) { bookmarkRecovery = false; refresh(); } shell?.vset('browser', {marks: result.urls, titles: retainedTitles(state()?.titles, state()?.visits, result.urls)}); bookmarkHydrated = true; }
+      if (!disposed) { if (bookmarkRecovery) { bookmarkRecovery = false; refresh(); } shell?.vset('browser', {marks: result.urls, titles: retainedTitles({...savedBookmarkTitles(result), ...state()?.titles}, state()?.visits, result.urls)}); bookmarkHydrated = true; }
     }).catch(async (error: unknown) => {
       bookmarkHydrated = false;
       if (!disposed && await checkBookmarkRecovery().catch(() => false)) {
@@ -101,14 +101,28 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     bookmarkRefreshQueued = true;
     bookmarkQueue = bookmarkQueue.then(() => disposed ? undefined : loadBookmarks()).catch((error: unknown) => { if (!(bookmarkRefreshBackground && shell?.S().view !== 'browser' && unimplemented(error))) report(error); }).finally(() => { bookmarkRefreshQueued = false; });
   }
-  /** `title` is the page's cleaned name when the owner saves the page showing; a bookmark keeps it even
-   * when the visit itself was not kept (a private tab) or has left history. */
+  /** Names the bookmark store saved with its addresses. A host that predates bookmark titles returns
+   * `urls` only; its bookmarks then show the names known on this phone, or their site. Names known
+   * since Browser started (a page committed again) are newer and take precedence. */
+  function savedBookmarkTitles(result: Bag): Record<string, string> {
+    const urls: string[] = Array.isArray(result?.urls) ? result.urls : [];
+    const entries: unknown[] = Array.isArray(result?.entries) ? result.entries : [];
+    return Object.fromEntries(entries.flatMap((entry: any) => {
+      const url = typeof entry?.url === 'string' ? entry.url : '', title = url && urls.includes(url) ? pageTitle(entry.title, url) : '';
+      return title ? [[url, title]] : [];
+    }));
+  }
+  /** `title` is the page's cleaned name when the owner saves the page showing; the bookmark store
+   * seals it with the address, so it is kept across a cold start, even when the visit itself was not
+   * kept (a private tab: the name goes wherever the address it names goes) or has left history.
+   * Without a name the store keeps the one it has. */
   function saveBookmark(url: string, saved?: boolean, title?: string) {
     bookmarkQueue = bookmarkQueue.then(async () => {
       if (!bookmarkHydrated) await loadBookmarks();
       if (disposed) return;
-      const result = await Browser.setBookmark({session, url, saved: saved ?? !state().marks.includes(url)});
-      const titles = {...state()?.titles, ...(title && result.urls.includes(url) ? {[url]: title} : {})};
+      const save = saved ?? !state().marks.includes(url);
+      const result = await Browser.setBookmark({session, url, saved: save, ...(save && title ? {title} : {})});
+      const titles = {...savedBookmarkTitles(result), ...state()?.titles, ...(title && result.urls.includes(url) ? {[url]: title} : {})};
       if (!disposed) shell.vset('browser', {marks: result.urls, titles: retainedTitles(titles, state()?.visits, result.urls), menu: false});
     }).catch(report);
   }
