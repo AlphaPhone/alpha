@@ -32,8 +32,6 @@ final class RendererCredentialSlots {
   "sms-send-ledger", "alpha-sms-operation",
   // The agent device-execution journal and Clock's review marks are reached only through AlphaActionJournal.
   "device-execution", "clock-agent-review",
-  // Shared password backup recovery keys never leave native code (PasswordSharedBackup).
-  "password-backup-recovery",
   // Which earlier AlphaConnection slots native code already moved into ElizaSecureStore.
   "alpha-legacy-slots",
   // NativeSecureStore's own credential snapshot (upstream sign-in and runtime custody).

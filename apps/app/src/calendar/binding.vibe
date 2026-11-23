@@ -9,8 +9,6 @@ import { HeldDeletions } from "./deletions.vibe"
 import { DeviceCalendar } from "./device.vibe"
 import { CalendarDrafts } from "./drafts.vibe"
 import { readWindow } from "./model.vibe"
-import { LegacyCalendar } from "./preservation.vibe"
-import { CalendarSync } from "./sync.vibe"
 import { civilDay, deviceZone } from "./time.ts"
 
 /** Tell Calendar which account and agent session it serves; Calendar's layer calls this on every change of Account's agent binding. */
@@ -27,9 +25,6 @@ export effect function bindCalendar(binding: AgentBinding) {
   const owner = binding.usable ? binding.owner : ""
   presentation.send({ type: "changeOwner", nextOwner: owner }) catch () => undefined
   try (try CalendarDrafts).bind(owner)
-  try (try LegacyCalendar).bind(owner, binding.session)
-  const drafts = try (try CalendarDrafts).get()
-  try (try CalendarSync).bind(binding, drafts.alive)
 }
 
 /** The window Calendar reads for what is on screen now. */

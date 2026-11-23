@@ -3,7 +3,6 @@ import {installNoteScheduleContract,reviewNoteScheduleContract} from './helpers/
 import {openCloudPlanFromSettings} from './helpers/cloud-plan-settings';
 import {installNativeNavigationFixture} from './helpers/native-navigation-protocol';
 import {selectCalendarSource} from './helpers/browser-calendar';
-import {selectLegacyNotes} from './helpers/legacy-notes';
 import {seedCompletedAccessSetup} from './flag-off-android';
 // Core loops A–F and J01–J05 on the FLAG-OFF bundle (the bytes the distribution APKs package).
 //
@@ -643,80 +642,7 @@ async function askAboutHarbour(page: Page) {
 /** The notes saved in the Keystore-backed Notes slot of the stub (its envelope holds the collection's bytes). */
 const savedNotes = (page: Page) => native(page, f => { const slot = f.slots['notes-records:v1:device']; return slot ? JSON.parse(JSON.parse(slot).currentRaw).records : []; }) as Promise<any[]>;
 
-/** The attachment-summary path uses explicitly selected retained device notes. */
-async function openRetainedNativeNotes(page:Page){
- await native(page,f=>{
-  const key='notes-records:v1:device';
-  if(!f.slots[key])f.slots[key]=JSON.stringify({version:1,archive:{v1:null,v2:null,daily:null},currentRaw:JSON.stringify({version:2,collectionId:crypto.randomUUID(),records:[],deleted:[]})});
- });
- await selectLegacyNotes(page);
- await expect(page.getByRole('heading',{name:'Previous notes',exact:true})).toBeVisible();
- await expect(page.getByText('Note text encrypted on this device',{exact:true})).toBeVisible();
-}
 
-test('loop J05 on Android: a reviewed native page excerpt, a resident answer and an explicit Save leave one web-linked note', async ({ page }) => {
-  test.setTimeout(180_000);
-  const foreign = await fenceNetwork(page);
-  await android(page);
-  await residentHome(page);
-  await openRetainedNativeNotes(page);
-  const tab = await openHarbour(page);
-  await native(page, f => { f.browser.excerpt = 'The ferry leaves at nine from pier four.\nOMIT THIS: internal planning detail.'; f.replies.push('The ferry leaves at nine.'); });
-  await askAboutHarbour(page);
-  const review = page.getByRole('dialog', { name: 'Ask about selected content' });
-  const excerpt = review.getByRole('textbox', { name: 'Content excerpt' });
-  await expect(excerpt).toHaveValue(/OMIT THIS/);
-  // The native reviewed read is bound to the session, the tab and the exact committed navigation.
-  const session = (await native(page, f => f.browser.tabs[f.browser.created.at(-1)].session)) as string;
-  expect(await native(page, f => f.browser.questions)).toEqual([{ session, id: tab, url: HARBOUR, navigation: 1 }]);
-  await excerpt.fill('The ferry leaves at nine from pier four.');
-  await review.getByRole('textbox', { name: 'Question about content' }).fill('When does the ferry leave?');
-  await review.getByRole('button', { name: 'Use in conversation', exact: true }).click();
-  await expect(review).toHaveCount(0);
-  // Composed only: nothing reaches the agent before Send.
-  expect(await native(page, f => f.streams)).toBe(0);
-  await button(page, 'Send').click();
-  await expect(bubble(page, 'The ferry leaves at nine.')).toHaveCount(1);
-  // Exactly one turn, carrying the question, the page it came from and only the reviewed excerpt.
-  expect(await native(page, f => f.posts)).toEqual(['When does the ferry leave?\n\nSource: Harbour report\n\nThe ferry leaves at nine from pier four.']);
-  expect(await native(page, f => f.bodies.join('\n'))).not.toContain('OMIT THIS');
-  // An answer alone saves nothing.
-  expect(await savedNotes(page)).toEqual([]);
-  const card = page.getByRole('button', { name: /^Review summary note/ });
-  await expect(card).toHaveCount(1);
-  await card.click();
-  const summary = page.getByRole('dialog', { name: 'Save summary' });
-  await expect(summary).toContainText('Harbour report');
-  await expect(summary.getByRole('textbox', { name: 'Summary note text' })).toHaveValue('The ferry leaves at nine.');
-  await summary.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(summary).toHaveCount(0);
-  expect(await savedNotes(page)).toEqual([]);
-  await card.click();
-  await summary.getByRole('textbox', { name: 'Summary note title' }).fill('Harbour summary');
-  await summary.getByRole('button', { name: 'Save reviewed note', exact: true }).click();
-  await expect(summary).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Summary note saved/ })).toHaveCount(1);
-  await expect(card).toHaveCount(0);
-  const saved = await savedNotes(page);
-  expect(saved).toHaveLength(1);
-  expect(saved[0]).toMatchObject({ title: 'Harbour summary', body: 'The ferry leaves at nine.', webSource: { kind: 'web-page', version: 1, url: HARBOUR } });
-  expect(JSON.stringify(saved)).not.toContain('OMIT THIS');
-
-  // After a restart the note is still the only one and reopens with its web source.
-  await page.reload();
-  await expect.poll(() => native(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
-  await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
-  await openRetainedNativeNotes(page);
-  await expect(page.getByRole('region', { name: 'Notes' }).getByRole('button', { name: /^Open (?!Trash$)/ })).toHaveCount(1);
-  await button(page, 'Open Harbour summary').click();
-  await expect(page.getByRole('textbox', { name: 'Note', exact: true })).toHaveValue('The ferry leaves at nine.');
-  await button(page, 'Web source linked').click();
-  await expect(page.getByRole('dialog', { name: 'Note web source' })).toContainText(HARBOUR);
-  expect(await native(page, f => f.streams)).toBe(0);
-  await expectNoDevelopmentSurface(page);
-  expect(await native(page, f => f.unexpected)).toEqual([]);
-  expect(foreign).toEqual([]);
-});
 
 // An unusable excerpt (too long or empty) is not a refusal: the review opens with an empty excerpt and
 // Continue disabled until the user pastes, as the web CORS-denied path does (J05-5). Nothing is sent.
@@ -810,74 +736,6 @@ async function openAndroidCalendar(page:Page){
  await selectCalendarSource(page, 'Android calendars');
 }
 
-test('loop B / J02 on Android: explicit recording and transcript summary survive restart without automatic sends', async ({ page }) => {
-  test.setTimeout(240_000);
-  page.setDefaultTimeout(15_000);
-  // Tomorrow crosses the week boundary; the saved day must be reachable after reload.
-  await page.clock.setFixedTime(new Date('2026-11-01T12:00:00Z'));
-  const foreign = await fenceNetwork(page);
-  await android(page, { voice: TRANSCRIPT });
-  await residentHome(page);
-  const writes = () => native(page, f => ({ reminders: f.writes.reminders.length, events: f.writes.events.length }));
-
-  // 1. Recording saves audio only. Transcription is an explicit action on that saved note.
-  await openAndroidCalendar(page);
-  await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  await openRetainedNativeNotes(page);
-  await button(page, 'Record voice note').click();
-  expect(await native(page, f => f.voice.transcriptions)).toEqual([]);
-  expect(await savedNotes(page)).toEqual([]);
-  await button(page, 'Stop recording').click();
-  await expect(button(page, 'Play recording')).toBeVisible();
-  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Venue meeting');
-  await expect.poll(async () => (await savedNotes(page)).filter(n => n.kind === 'voice' && n.title === 'Venue meeting' && !n.body && !!n.audio?.audioId).length).toBe(1);
-  expect(await native(page, f => f.voice.transcriptions)).toEqual([]);
-  await button(page, 'Generate transcript').click();
-  await expect.poll(() => native(page, f => f.voice.transcriptions.length)).toBe(1);
-  await expect.poll(async () => (await savedNotes(page)).filter(n => n.title === 'Venue meeting' && n.body === TRANSCRIPT).length).toBe(1);
-  const recorded = (await savedNotes(page))[0];
-
-  // 2. Attach the retained transcript to a question; selection itself sends nothing.
-  await page.evaluate(reply => { (window as any).coreLoops.replies = [reply]; }, JSON.stringify({ summary: SUMMARY, actions: ACTIONS.split('\n') }));
-  await button(page, 'Ask Alpha about this transcript').click();
-  await expect(page.getByRole('group', {name:'Attached transcript',exact:true})).toBeVisible();
-  expect(await native(page, f => f.posts.length)).toBe(0);
-  await button(page, 'Send').click();
-  const card = page.getByRole('button', { name: /^Review summary note/ });
-  await expect(card).toHaveCount(1, { timeout: 20_000 });
-  expect(await native(page, f => f.posts.length)).toBe(1);
-  // The request carries the exact authorized note reference; the resident reads
-  // its retained transcript through the selected-note protocol.
-  expect(await native(page, f => f.posts[0])).toContain('Summarize this for me');
-  const submitted=JSON.parse(await native(page, f => f.bodies[0]));
-  expect(submitted.metadata.clientDevice.context.selectedObject).toMatchObject({kind:'note',id:recorded.id});
-  expect(submitted.metadata.clientDevice.context.selectedObject.revision).toMatch(/^[a-f0-9]{64}$/);
-  await card.click();
-  const summary = page.getByRole('dialog', { name: 'Save summary' });
-  await expect(summary.getByRole('textbox', { name: 'Summary note text' })).toHaveValue(SUMMARY);
-  await expect(summary.getByRole('textbox', { name: 'Action items' })).toHaveValue(ACTIONS);
-  expect((await savedNotes(page))[0]).toEqual(recorded);
-  await summary.getByRole('button', { name: 'Save recording summary', exact: true }).click();
-  await expect(summary).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Recording summary saved/ })).toHaveCount(1);
-  expect((await savedNotes(page))[0]).toMatchObject({ id: recorded.id, audio: recorded.audio, body: TRANSCRIPT, summary: [SUMMARY], actions: [{ t: 'Book the venue', done: false }, { t: 'Email the caterer', done: false }] });
-  // Saving the summary schedules nothing.
-  expect(await writes()).toEqual({ reminders: 0, events: 0 });
-
-  // The owner removed the scheduling menu controls. Their retained contract is
-  // exercised by note-calendar-handoff.spec.ts and journey-b-voice-note-actions.spec.ts
-  // on the development renderer, never by injecting a hook into production.
-  const retained=(await savedNotes(page))[0];
-  await residentHome(page);
-  await openRetainedNativeNotes(page);
-  await button(page, 'Open Venue meeting').click();
-  expect((await savedNotes(page))[0]).toEqual(retained);
-  await expect(button(page, 'Ask Alpha about this transcript')).toBeVisible();
-  expect(await native(page, f => f.voice.transcriptions)).toEqual([]);
-  expect(await native(page, f => f.posts)).toEqual([]);
-  expect(await writes()).toEqual({reminders:0,events:0});
-  expect(foreign).toEqual([]);
-});
 
 test('loop B / J02 on Android signed out: the Eliza Cloud sign-in comes first and nothing is captured', async ({ page }) => {
   test.setTimeout(120_000);

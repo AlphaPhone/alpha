@@ -12,6 +12,6 @@ Run `python3 prepare.py --fetch` to fetch missing public hash-pinned baseline in
 
 `python3 ../system-entry/apply.py /path/to/frameworks/base --manifest manifest.json`
 
-The tool is read-only unless explicitly given `--apply`. Source policy tests do not prove a compiled SystemUI, booted image, update migration or Pixel behavior. Build and qualify the signed OS together with the keyboard change before deployment; do not replace the launcher's app data.
+The tool is read-only unless explicitly given `--apply`. Build and qualify the signed OS together with the keyboard change before deployment; do not replace the launcher's app data.
 
 The launcher and its tile use `ai.alphacompute.alphaphone`.

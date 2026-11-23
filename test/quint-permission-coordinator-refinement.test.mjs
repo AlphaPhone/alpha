@@ -8,7 +8,7 @@ test('actual permission coordinator traces refine the bounded walkthrough model'
   assert.equal(result.receipt.passed, true);
   assert.equal(result.receipt.inputsUnchanged, true);
   assert.equal(result.receipt.driverInputsBound, true);
-  assert.equal(result.receipt.observedFields.length, 20);
+  assert.equal(result.receipt.observedFields.length, 19);
   for (const name of ['credential-change-held-completion', 'credential-change-held-rejection',
     'stale-completion-keeps-newer-busy', 'stale-rejection-keeps-newer-busy',
     'same-turn-owner-completion', 'same-turn-owner-rejection',

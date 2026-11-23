@@ -6,7 +6,6 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.security.MessageDigest;
 import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -18,10 +17,9 @@ import static org.junit.Assert.*;
 /** Real WebView bridge, encrypted native disk, concurrent claims and Activity recreation. */
 @RunWith(AndroidJUnit4.class)
 public class ActionJournalInstrumentedTest {
- private static String hash(String value)throws Exception{
-  byte[] bytes=MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-  StringBuilder out=new StringBuilder();for(byte b:bytes)out.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return out.toString();
- }
+ /** The credential store's slot files (and their write and backup copies) for these slot names. */
+ private static File slotFolder(){return new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials");}
+ private static void deleteSlots(String... slots){for(String slot:slots)for(String suffix:new String[]{"",".bak",".new"})new File(slotFolder(),AlphaUtil.sha256Hex(slot)+suffix).delete();}
  private JSONObject call(String expression)throws Exception{
   // The bridge can appear in a document that cold-start navigation will replace.
   // Wait for the live document before dispatching; never retry an effect call.
@@ -36,11 +34,10 @@ public class ActionJournalInstrumentedTest {
   throw new AssertionError("Journal bridge did not complete");
  }
  @Test public void journalSurvivesRecreationAndRejectsRepeatedEffects()throws Exception{
-  String scope=hash(UUID.randomUUID().toString()),id=UUID.randomUUID().toString();
+  String scope=AlphaUtil.sha256Hex(UUID.randomUUID().toString()),id=UUID.randomUUID().toString();
   JSONObject request=new JSONObject().put("scope",scope).put("proposalId",id).put("operationId",UUID.randomUUID().toString())
-   .put("operationHash",hash("synthetic-operation")).put("record",new JSONObject().put("title","Synthetic journal plaintext sentinel"));
+   .put("operationHash",AlphaUtil.sha256Hex("synthetic-operation")).put("record",new JSONObject().put("title","Synthetic journal plaintext sentinel"));
   String params=request.toString(),binding=new JSONObject().put("scope",scope).put("proposalId",id).toString();
-  File folder=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials");
   String entrySlot="action-journal:v1:"+scope+":entry:"+id,indexSlot="action-journal:v1:"+scope+":index";
   try(BoundedActivityScenario<MainActivity> activity=BoundedActivityScenario.launch(MainActivity.class)){
    JSONObject reserved=call("Promise.all([Capacitor.Plugins.AlphaActionJournal.reserve("+params+"),Capacitor.Plugins.AlphaActionJournal.reserve("+params+")]).then(entries=>({entries}))");
@@ -48,7 +45,7 @@ public class ActionJournalInstrumentedTest {
    assertEquals("reserved",rows.getJSONObject(0).getJSONObject("entry").getString("phase"));
    JSONObject changedOperation=new JSONObject(params).put("operationId",UUID.randomUUID().toString());
    assertTrue("Replay must retain the original operation identity",call("Capacitor.Plugins.AlphaActionJournal.reserve("+changedOperation+")").has("error"));
-   String encrypted=new String(Files.readAllBytes(new File(folder,hash(entrySlot)).toPath()),StandardCharsets.ISO_8859_1);
+   String encrypted=new String(Files.readAllBytes(new File(slotFolder(),AlphaUtil.sha256Hex(entrySlot)).toPath()),StandardCharsets.ISO_8859_1);
    assertFalse("Journal contents must be encrypted",encrypted.contains("Synthetic journal plaintext sentinel"));
    activity.recreate();
    JSONObject restored=call("Capacitor.Plugins.AlphaActionJournal.get("+binding+")").getJSONObject("entry");
@@ -63,20 +60,17 @@ public class ActionJournalInstrumentedTest {
    done.put("result",new JSONObject().put("changed",true));assertTrue(call("Capacitor.Plugins.AlphaActionJournal.finish("+done+")").has("error"));done.remove("result");
    done.put("status","failed");assertTrue(call("Capacitor.Plugins.AlphaActionJournal.finish("+done+")").has("error"));
    request.put("record",new JSONObject().put("title","Changed immutable proposal"));assertTrue(call("Capacitor.Plugins.AlphaActionJournal.reserve("+request+")").has("error"));
-   request.put("operationHash",hash("changed-operation"));assertTrue(call("Capacitor.Plugins.AlphaActionJournal.reserve("+request+")").has("error"));
-   JSONObject other=new JSONObject(binding).put("scope",hash("other-scope"));assertTrue(call("Capacitor.Plugins.AlphaActionJournal.get("+other+")").isNull("entry"));
+   request.put("operationHash",AlphaUtil.sha256Hex("changed-operation"));assertTrue(call("Capacitor.Plugins.AlphaActionJournal.reserve("+request+")").has("error"));
+   JSONObject other=new JSONObject(binding).put("scope",AlphaUtil.sha256Hex("other-scope"));assertTrue(call("Capacitor.Plugins.AlphaActionJournal.get("+other+")").isNull("entry"));
    assertEquals(1,call("Capacitor.Plugins.AlphaActionJournal.list("+new JSONObject().put("scope",scope)+")").getJSONArray("entries").length());
-  }finally{
-   for(String slot:new String[]{entrySlot,indexSlot})for(String suffix:new String[]{"",".bak",".new"})new File(folder,hash(slot)+suffix).delete();
-  }
+  }finally{deleteSlots(entrySlot,indexSlot);}
  }
  @Test public void mapsReadIsRetainedButRedactedFromHistory()throws Exception{
-  String scope=hash(UUID.randomUUID().toString()),id=UUID.randomUUID().toString(),operationId=UUID.randomUUID().toString();
+  String scope=AlphaUtil.sha256Hex(UUID.randomUUID().toString()),id=UUID.randomUUID().toString(),operationId=UUID.randomUUID().toString();
   JSONObject target=new JSONObject().put("kind","map-place").put("id","maps_"+UUID.randomUUID()).put("revision","1");
   JSONObject operation=new JSONObject().put("type","maps_read_selected").put("target",target);
-  JSONObject request=new JSONObject().put("scope",scope).put("proposalId",id).put("operationId",operationId).put("operationHash",hash(operation.toString())).put("record",new JSONObject().put("operation",operation));
+  JSONObject request=new JSONObject().put("scope",scope).put("proposalId",id).put("operationId",operationId).put("operationHash",AlphaUtil.sha256Hex(operation.toString())).put("record",new JSONObject().put("operation",operation));
   JSONObject binding=new JSONObject().put("scope",scope).put("proposalId",id);
-  File folder=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials");
   String entrySlot="action-journal:v1:"+scope+":entry:"+id,indexSlot="action-journal:v1:"+scope+":index";
   try(BoundedActivityScenario<MainActivity> activity=BoundedActivityScenario.launch(MainActivity.class)){
    assertTrue(call("Capacitor.Plugins.AlphaActionJournal.reserve("+request+")").getBoolean("created"));
@@ -101,9 +95,9 @@ public class ActionJournalInstrumentedTest {
    JSONObject afterHistory=call("Capacitor.Plugins.AlphaActionJournal.get("+binding+")").getJSONObject("entry");
    assertEquals("History projection must not rewrite the durable replay receipt",restored.toString(),afterHistory.toString());
    assertFalse("Identical persisted completion remains idempotent",call("Capacitor.Plugins.AlphaActionJournal.finish("+done+")").has("error"));
-   String encrypted=new String(Files.readAllBytes(new File(folder,hash(entrySlot)).toPath()),StandardCharsets.ISO_8859_1);assertFalse(encrypted.contains("Maps private snapshot sentinel"));
+   String encrypted=new String(Files.readAllBytes(new File(slotFolder(),AlphaUtil.sha256Hex(entrySlot)).toPath()),StandardCharsets.ISO_8859_1);assertFalse(encrypted.contains("Maps private snapshot sentinel"));
    fields.put("label","Changed snapshot");assertTrue(call("Capacitor.Plugins.AlphaActionJournal.finish("+done+")").has("error"));
-  }finally{for(String slot:new String[]{entrySlot,indexSlot})for(String suffix:new String[]{"",".bak",".new"})new File(folder,hash(slot)+suffix).delete();}
+  }finally{deleteSlots(entrySlot,indexSlot);}
  }
 
 }

@@ -32,9 +32,7 @@ revision, affected-file hashes and the existing default-off Alpha bool supplied 
 `home-back-keyboard.patch`. It makes no source changes unless `--apply` is added. Exact
 already-applied source is recognized; drift, symlinks and partial state are rejected.
 
-Host execution and API36 compilation cover the draw guard only. Full Launcher3/SystemUI
-overlay compilation, packaged resource readback, image build/boot and physical verification
-remain separate gates. Test the indicator across light/dark content, Home/app/lockscreen,
+`scripts/stage-alpha-os-branding.py` does not apply this patch. Test the indicator across light/dark content, Home/app/lockscreen,
 keyboard, rotation, transient taskbar states, and long press. Preserve working Home, edge
 Back, IME and accessibility fallback. Confirm bubble-bar affordances still render. No wipe
 or user-setting rewrite is part of this change.

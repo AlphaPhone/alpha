@@ -14,9 +14,12 @@ final class ResidentResultSession {
  interface Guard {void check()throws Exception;}
  static JSONObject snapshot(String owner,String token,long expiry,String root)throws Exception {
   HostedInbox.id(owner);
-  if(token==null||token.isEmpty()||token.length()>8192||token.contains("\r")||token.contains("\n")||
-     root==null||root.isEmpty()||expiry<=System.currentTimeMillis())throw new SecurityException("Resident session unavailable");
+  if(!bearer(token)||root==null||root.isEmpty()||expiry<=System.currentTimeMillis())throw new SecurityException("Resident session unavailable");
   return new JSONObject().put("version",1).put("ownerId",owner).put("token",token).put("expiresAt",expiry).put("runtimeDigest",HostedResultNotices.hash(root));
+ }
+ /** A bounded single-line bearer token. */
+ private static boolean bearer(String token){
+  return token!=null&&!token.isEmpty()&&token.length()<=8192&&!token.contains("\r")&&!token.contains("\n");
  }
  static ResidentResultTransport open(HostedInbox.Store store,JSONObject requested,Runtime runtime,Guard guard)throws Exception {
   // Copy the binding so later caller mutation cannot change authority mid-request.
@@ -28,8 +31,9 @@ final class ResidentResultSession {
    private JSONObject credential()throws Exception {
     guard.check();String raw=store.read(binding.getString("credentialSlot"));
     // Another transport of this binding may already have adopted a restarted runtime.
-    if(raw!=null&&!HostedResultNotices.hash(raw).equals(digest)&&HostedResultNotices.hash(raw).equals(runtime.adopt(digest,null)))digest=HostedResultNotices.hash(raw);
-    if(raw==null||!HostedResultNotices.hash(raw).equals(digest))throw new SecurityException("Resident credential changed");
+    String rawDigest=raw==null?null:HostedResultNotices.hash(raw);
+    if(rawDigest!=null&&!rawDigest.equals(digest)&&rawDigest.equals(runtime.adopt(digest,null)))digest=rawDigest;
+    if(rawDigest==null||!rawDigest.equals(digest))throw new SecurityException("Resident credential changed");
     JSONObject auth=session(raw);String root=runtime.rootToken();
     if(root==null||root.isEmpty())throw new java.io.IOException("Resident runtime not ready");
     if(HostedResultNotices.hash(root).equals(auth.getString("runtimeDigest")))return auth;
@@ -43,7 +47,7 @@ final class ResidentResultSession {
    private JSONObject session(String raw)throws Exception {
     JSONObject auth=new JSONObject(raw);
     if(auth.getInt("version")!=1||!owner.equals(auth.getString("ownerId"))||auth.getLong("expiresAt")<=System.currentTimeMillis())throw new SecurityException("Resident session expired");
-    String token=auth.getString("token");if(token.isEmpty()||token.length()>8192||token.contains("\r")||token.contains("\n"))throw new SecurityException("Invalid resident token");
+    if(!bearer(auth.getString("token")))throw new SecurityException("Invalid resident token");
     return auth;
    }
    // The service mints a new root token at every launch. The same machine session on the same
@@ -88,6 +92,6 @@ final class ResidentResultSession {
    }
   }
   BoundChannel channel=new BoundChannel();channel.check();
-  return new ResidentResultTransport(channel,owner,agent,channel.credential().getString("token"));
+  return new ResidentResultTransport(channel,owner,agent,channel.credential().getString("token"),System::nanoTime);
  }
 }

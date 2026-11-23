@@ -7,8 +7,8 @@ import java.util.concurrent.RejectedExecutionException;
  * The one way a plugin hands work to its own worker. Capacitor can deliver a bridge call the page
  * made just before the activity was destroyed after handleOnDestroy has stopped that worker, and a
  * bounded worker can be full. Executor.execute then throws RejectedExecutionException on the bridge
- * thread, which kills the process (AlphaDevicePlugin, round 8, a326b8dd). Here the refusal runs
- * instead, so the call is answered and nothing is thrown. No Capacitor types: host-tested by javac.
+ * thread, which kills the process. Here the refusal runs instead, so the call is answered and
+ * nothing is thrown.
  */
 final class PluginWorkers {
  private PluginWorkers(){}

@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/calendar/deviceSync.md, "Story: Sync my phone's calendar only with the Google calendar I chose, for the account I use"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
 import { Effect } from "effect";
 import { CalendarDays, Layers, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useState } from "react";
@@ -13,7 +13,6 @@ import {
   closeEditor, closeRow, closeSources, deleteRow, linkSavedNote, newFields, openEditor, openEventLink, openRow, openRowOrigin, openSources, placeRow,
   rowFields, rowTimingLocked, saveEditor, timingChanged,
 } from "../../calendar/screen.vibe";
-import { googleSyncOffer } from "../../calendar/sync.vibe";
 import type { OriginView } from "../../notes/origins.vibe";
 import { newId } from "../../platform/ids.ts";
 import { deviceZone, formatLongDate, midnightAfter } from "../../calendar/time.ts";
@@ -24,11 +23,8 @@ import { CalendarSources } from "./CalendarSources.tsx";
 import { DatePicker } from "./DatePicker.tsx";
 import { EventDetail, eventFacts } from "./EventDetail.tsx";
 import { EventEditor } from "./EventEditor.tsx";
-import { PreservationReview } from "./Surfaces.tsx";
 import { MonthGrid } from "./MonthGrid.tsx";
 import { ScheduleList } from "./ScheduleList.tsx";
-import { DeviceSyncSettings } from "./DeviceSyncSettings.tsx";
-import { SyncSettings } from "./SyncSettings.tsx";
 import { Timeline } from "./Timeline.tsx";
 import { useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
 import { perform } from "../shell/services.ts";
@@ -45,7 +41,6 @@ const SCOPE: Readonly<Record<RecurrenceScope, "instance" | "this_and_following" 
 
 const STATUS_WORDS: Readonly<Record<string, string>> = {
   Disconnected: "Not connected", Loading: "Loading", Ready: "", Partial: "Updating…", Unavailable: "Unavailable", Failed: "Couldn’t load",
-  LegacyRecovery: "Needs review", TransitionRequired: "Review needed",
 };
 
 function draftFields(text: string): DraftFieldsRecord | undefined {
@@ -88,12 +83,11 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   const deviceShown = p.deviceVisible && p.deviceAccess;
   const heldHidden = (row: CalendarRow) => row.source === "agent" && agent.feed?.events.some((event) => `agent:${agentEventKey(event)}` === row.id && heldTargets.has(event.id)) === true;
   const rows = calendarRows(agent, device, zone, now, (row) =>
-    heldHidden(row) || (row.source !== "document" && !rowShown(row.source === "agent", agentHidden, deviceShown)));
+    heldHidden(row) || !rowShown(row.source === "agent", agentHidden, deviceShown));
   const open = rows.find((row) => row.id === p.openEvent);
   const openEvent = open?.source === "agent" ? agent.feed?.events.find((event) => `agent:${agentEventKey(event)}` === open.id) : undefined;
   const openCalendar = openEvent === undefined ? undefined : agent.calendars.find((calendar) => JSON.stringify([calendar.provider, calendar.side, calendar.grantId, calendar.connectorAccountId, calendar.calendarId]) === eventSourceKey(openEvent));
   const facts = eventFacts(openEvent, openCalendar);
-  const sync = googleSyncOffer(agent.calendars);
   const shownOrigin = open !== undefined && origin?.rowId === open.id ? origin.view : undefined;
   const showRow = (row: CalendarRow) => void perform(openRow(row)).then((view) => setOrigin({ rowId: row.id, view }));
   const openLink = (url: string) => void perform(openEventLink(url)).then((how) => { if (how === "web") window.open(url, "_blank", "noopener,noreferrer"); });
@@ -138,7 +132,6 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
       <Tabs value={p.view} onValueChange={(view) => go({ type: "chooseView", view: view as CalendarView }, true)} className="px-4">
         <TabsList>{VIEWS.map((choice) => <TabsTrigger key={choice.view} value={choice.view} disabled={!can({ type: "chooseView", view: choice.view }) && choice.view !== p.view}>{choice.label}</TabsTrigger>)}</TabsList>
       </Tabs>
-      <PreservationReview />
       {(status !== "" || device.status === "limited" || device.status === "failed") && (
         <div role="status" className="flex items-center justify-between gap-2 px-4 py-1 text-sm text-muted-foreground">
           <span>{[status, device.status === "limited" ? "2,000 max" : device.status === "failed" ? "Couldn’t load device calendars" : ""].filter(Boolean).join(" · ")}</span>
@@ -172,10 +165,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
           onOpen={showRow} onPickDay={(day) => go({ type: "chooseDay", day }, true)} />
       )}
       <CalendarSources open={p.sourcesSheet} agentShown={!agentHidden} deviceShown={p.deviceVisible} agentAccess={p.agentAccess && p.owner !== ""} deviceAccess={p.deviceAccess}
-        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => void perform(closeSources())}>
-        {p.owner !== "" && sync.grant !== "NoGoogleGrant" && <SyncSettings grant={sync.grant} destinations={sync.destinations} />}
-        <DeviceSyncSettings />
-      </CalendarSources>
+        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => void perform(closeSources())} />
       <DatePicker open={p.datePicker} rows={rows} day={p.day} month={p.month} zone={zone} now={now}
         onMonth={(month) => go({ type: "chooseMonth", month }, true)} onPickDay={(day) => { go({ type: "chooseDay", day }, true); }} onClose={() => go({ type: "closeDatePicker" })} />
       {p.form === "NoForm" && (

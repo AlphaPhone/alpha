@@ -38,7 +38,6 @@ export {BrowserDaily} from './apps/app/src/browser/daily.ts';
 export {BrowserClock} from './apps/app/src/browser/clock.ts';
 export {calendarDocument} from './apps/app/src/browser/calendar-store.ts';
 export {reminderDocument} from './apps/app/src/browser/reminder-store.ts';
-export {syncRecurrence} from './apps/app/src/browser/calendar-sync-fields.ts';
 export {calendarRange} from './apps/app/src/browser/calendar-records.ts';`;
 const bundled=(await build({stdin:{contents:entry,resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,platform:'neutral',format:'esm',mainFields:['module','main'],loader:{'.css':'empty'},define:{'import.meta.env':'{}'},
  plugins:[{name:'device-edges',setup(build){

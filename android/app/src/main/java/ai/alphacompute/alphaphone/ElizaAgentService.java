@@ -206,27 +206,16 @@ public final class ElizaAgentService extends AgentService {
   return result;
  }
 
- /** One buffered request on the native channel: `{method, path, body?, timeoutMs?}` answered `{status, body}`; the legacy pairing routes are answered for the native owner, which the channel already authenticates. */
+ /** One buffered request on the native channel: `{method, path, body?, timeoutMs?}` answered `{status, body}`; a `native:` bearer reads the owner session the channel already authenticates. */
  public static String requestLocalAgent(String requestJson) throws IOException, JSONException {
   JSONObject request = requestJson == null || requestJson.trim().isEmpty() ? new JSONObject() : new JSONObject(requestJson);
   String path = path(request), method = method(request);
   int timeout = timeout(request, path);
   String body = body(request, method);
-  if ("/api/auth/pair-code".equals(path) && "GET".equals(method)) return answer(200, new JSONObject().put("code", "native"));
-  if ("/api/auth/pair".equals(path) && "POST".equals(method)) return pair(body, timeout);
   JSONObject answered = exchange(method, path, body, timeout);
   if (answered.getInt("status") == 200 && "GET".equals(method) && "/api/auth/status".equals(path)) return authStatus(answered);
   if (answered.getInt("status") == 200 && "GET".equals(method) && "/api/auth/me".equals(path)) return ownerSession(answered, bearer(request));
   return answered.toString();
- }
-
- private static String pair(String body, int timeout) throws IOException, JSONException {
-  JSONObject who = exchange("GET", "/api/auth/me", null, timeout);
-  if (who.getInt("status") != 200) return who.toString();
-  JSONObject identity = new JSONObject(who.getString("body")).getJSONObject("identity");
-  String instance = body == null ? "" : new JSONObject(body).optString("instanceId", "");
-  String token = "native:" + localAgentToken();
-  return answer(200, new JSONObject().put("access", "owner").put("instanceId", instance).put("token", token).put("identityId", identity.getString("id")));
  }
 
  private static String authStatus(JSONObject answered) throws JSONException {

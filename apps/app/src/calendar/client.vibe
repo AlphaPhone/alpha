@@ -1,6 +1,6 @@
-// spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/sync.md, "Story: Change Calendar sync only from a review of the current link"
-// Upstream's calendar and linked-sync clients over the resident agent's authenticated JSON requests.
-import { type CalendarApi, type CalendarFetch, type LinkedSyncApi, createCalendarApi, createLinkedSyncApi } from "@elizaos/plugin-calendar/client"
+// spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"
+// Upstream's calendar client over the resident agent's authenticated JSON requests.
+import { type CalendarApi, type CalendarFetch, createCalendarApi } from "@elizaos/plugin-calendar/client"
 import type { Resident } from "../platform/resident.vibe"
 
 /** One authenticated request to the resident agent, as upstream's clients take it. */
@@ -13,8 +13,7 @@ export function residentFetch(resident: Resident.Shape): CalendarFetch {
   })
 }
 
-/** The calendar and linked-sync clients bound to the resident agent. */
-export function residentClients(resident: Resident.Shape): { readonly calendar: CalendarApi; readonly linked: LinkedSyncApi } {
-  const fetch = residentFetch(resident)
-  return { calendar: createCalendarApi(fetch), linked: createLinkedSyncApi(fetch) }
+/** The calendar client bound to the resident agent. */
+export function residentClients(resident: Resident.Shape): { readonly calendar: CalendarApi } {
+  return { calendar: createCalendarApi(residentFetch(resident)) }
 }

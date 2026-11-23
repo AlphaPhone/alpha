@@ -41,7 +41,6 @@ test("the committed Cuttlefish product names its target, lock, host packages and
   // Pixel 10a (stallion) has its own source lock and production descriptor; the Cuttlefish product never stages against them.
   assert.equal(product.separateLocks.pixel10a, "vendor/eliza/packages/os/android/sources/pixel10a-stallion.json");
   assert.notEqual(product.sourceLock.file, product.separateLocks.pixel10a);
-  assert.equal(read(product.physicalProduct).product, "alpha_stallion_phone");
   assert.equal(fs.existsSync(path.join(root, "android/aosp/pixel10.lock.json")), false, "the unadmitted Pixel 10 placeholder lock is retired");
   // The source lock is the shared reviewed Cuttlefish profile; Alpha keeps no lock of its own.
   assert.equal(product.sourceLock.file, "vendor/eliza/packages/os/android/aosp.lock.json");

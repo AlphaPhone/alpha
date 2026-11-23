@@ -37,7 +37,7 @@ const adapter = async devProfile => {
   return import(pathToFileURL(file).href);
 };
 const product = await adapter(false), development = await adapter(true);
-const MODULES = ['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'wallet', 'workflows'];
+const MODULES = ['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'workflows'];
 
 /** Handler keys template.html binds (on* events and refs) under each reference view, through sc-for aliases. */
 function templateHandlers() {
@@ -78,10 +78,10 @@ test('a product build hides a handler nobody reviewed; the development profile k
   const noop = () => {}, calls = [];
   const simulateTransfer = (...args) => { calls.push(args); return 'done'; };
   const tree = () => ({sheet: {simulateTransfer, close: noop}, rows: [{open: noop}]});
-  const views = {wallet: {render: tree}, notes: {render: tree}};
+  const views = {contacts: {render: tree}, notes: {render: tree}, settings: {render: () => ({})}};
   product.installPrototypeNativeAdapters(null, views);
   const toasts = [], api = {toast: message => toasts.push(message), get: () => ({}), set() {}};
-  const out = views.wallet.render({}, api);
+  const out = views.contacts.render({}, api);
   // Marked, so dc-lite.js shows no control for it (test/unavailable-controls.test.mjs).
   assert.equal(out.sheet.simulateTransfer[MARK], true);
   assert.equal(out.sheet.close, noop);
@@ -93,14 +93,14 @@ test('a product build hides a handler nobody reviewed; the development profile k
   // This phone's own views are not reference views: nothing of theirs is walked.
   assert.equal(views.notes.render({}, api).sheet.simulateTransfer, simulateTransfer);
 
-  const dev = {wallet: {render: tree}};
+  const dev = {contacts: {render: tree}, settings: {render: () => ({})}};
   development.installPrototypeNativeAdapters(null, dev);
-  assert.equal(dev.wallet.render({}, api).sheet.simulateTransfer, simulateTransfer);
+  assert.equal(dev.contacts.render({}, api).sheet.simulateTransfer, simulateTransfer);
 });
 
 test('a React element in a view is rendered as given', () => {
   const element = {$$typeof: Symbol.for('react.transitional.element'), type: () => null, props: {onClick: () => {}}};
-  const views = {files: {render: () => ({banner: element})}};
+  const views = {files: {render: () => ({banner: element})}, settings: {render: () => ({})}};
   product.installPrototypeNativeAdapters(null, views);
   assert.equal(views.files.render({}, {toast() {}, get: () => ({}), set() {}}).banner, element);
 });

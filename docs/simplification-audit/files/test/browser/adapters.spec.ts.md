@@ -1,0 +1,19 @@
+# test/browser/adapters.spec.ts
+- Lines: 17 | Kind: indirection wrapper (T9). Each of its 8 Playwright tests spawns `node scripts/test-*.ts`, and each script launches its own Chromium, or bundles with Vite and then launches Chromium. | Verdict: **DELETE** the wrapper, and handle each script as listed below
+- Covers: nothing of its own. It is the only caller of 8 scripts (checked with `grep`: no `package.json`, workflow or other test references): `test-cloud-delegation.ts` (172 lines), `test-cloud-delegation-return.ts` (37), `test-agent-context-browser.ts` (218), `test-browser-bookmark-recovery.ts` (67), `test-inbox-drafts-browser.ts` (80), `test-maps-context-browser.ts` (57), `test-notes-documents-browser.ts` (42) and `test-hosted-live-source-picker.ts` (30). It runs on the `chromium` project.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 6-16 | T9 / P3 | Each test is a `child_process` running a script that starts a second browser (nested Chromium inside a Playwright worker). Two of the scripts (`test-cloud-delegation`, `test-hosted-live-source-picker`) also run a full `vite build` of a fixture. The process ignores the Playwright fixtures, traces and retries. | Delete the wrapper. Port the surviving scripts to Playwright tests (below). | Low |
+| 2 | – | D5 / A3 | `test-cloud-delegation.ts` and `test-hosted-live-source-picker.ts` mount `CloudDelegationPanel` and `HostedLiveSourcePicker` (`runtime/cloud-delegation-ui.tsx`, `runtime/hosted-live-source-ui.tsx`). Only `hosted-digest-ui.tsx` imports them, and that UI is the retired hosted path gated by `testMocksEnabled && kind==='cloud'` (delete-candidates B296, C4). | Delete both scripts and the `scripts/fixtures/cloud-delegation/*` and `scripts/fixtures/hosted-live-source/*` fixtures together with C4. If C4 keeps the delegation panel, port them to `journeys/connection-cloud.spec.ts`. | Low, if C4 is executed |
+| 3 | – | D1 / A3 | `test-notes-documents-browser.ts` imports `selectLegacyNotes` and counts `exports`/`imports`, so it covers legacy notes and document import/export (D1, D3). | Delete. | none |
+| 4 | – | T6 → port | `test-agent-context-browser.ts`, `test-inbox-drafts-browser.ts`, `test-maps-context-browser.ts` and `test-browser-bookmark-recovery.ts` drive the real rendered adapters against a synthetic transport or storage boundary. These are real journeys, run from the wrong place. | Port each to a Playwright test: `journeys/chat.spec.ts` (agent context envelope), `journeys/inbox.spec.ts` (draft save conflict and restore), `journeys/maps.spec.ts` (context from a map search) and `journeys/browser.spec.ts` (bookmark write retry and recovery). Drop the nested `chromium.launch` and use the Playwright `page` and `baseURL`. | Medium. Behaviour is lost if a script is deleted before it is ported. |
+| 5 | – | – | `test-cloud-delegation-return.ts` loads `apps/app/public/delegation-return.html` through `page.route` and checks the return link. | Port to `journeys/connection-cloud.spec.ts` if `delegation-return.html` survives C4; otherwise delete it together with that page. | Low |
+| 6 | 9-14 | B3 / D5 | Six env knobs (`ALPHA_*_TEST_URL`, `ALPHA_BROWSER_MODULES`, `ALPHA_HOSTED_TEST_OUTPUT`) exist only to pass the base URL to the child process. | They disappear when the scripts are ported. | none |
+
+## Proposed end state
+Delete the file. Of the eight scripts, four (agent context, inbox drafts, maps context, bookmark recovery) become Playwright tests
+in their area journeys, using the shared harness. The delegation return page goes with C4 or into `connection-cloud`. Notes
+documents, cloud delegation and the hosted live-source picker are deleted with the retired features. `scripts/fixtures/playwright.ts`
+loses these callers. Test count drops by 8, and the nested browser plus two Vite builds go from the chromium lane.

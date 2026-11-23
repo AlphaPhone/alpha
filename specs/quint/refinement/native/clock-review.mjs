@@ -18,7 +18,7 @@ const shared='plugins/plugin-native-action-journal/android/src/main/java/ai/eliz
 const clock='plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/clock/';
 const upstreamPaths=[...['ActionJournal','ActionJournalConfiguration','ActionJournalPlugin'].map(name=>shared+name+'.java'),
   clock+'ClockHandoff.java',clock+'ClockDays.java'];
-const compiled=[...['ClockAgentReview','AlphaActionJournal','PluginWorkers'].map(name=>app+name+'.java'),
+const compiled=[...['ClockAgentReview','AlphaActionJournal','AlphaUtil','PluginWorkers'].map(name=>app+name+'.java'),
   ...upstreamPaths.map(path=>'vendor/eliza/'+path)];
 
 export function clockReviewSourceTraces(scenarios) {

@@ -42,7 +42,7 @@ function extractImplementation(){
  const text=readFileSync(source,'utf8');
  const header=text.indexOf('const CALL_PAUSED = '),headerEnd=text.indexOf('const deviceVoice = registerPlugin',header);
  const start=text.indexOf('  async function captureConversationAudio(');
- const end=text.indexOf('  /** Holds a finished transcript',start);
+ const end=text.indexOf('  // A Cloud voice 429 rate limit or 503 warm-up is transient',start);
  const seam='      const earlyStops=new Map<string,VoiceRecordingStopped>();';
  const implementation=text.slice(start,end);
  if(header<0||headerEnd<=header||start<0||end<=start||implementation.split(seam).length!==2)

@@ -74,7 +74,7 @@ android {
   // The shared voice loader configures Phonon-2's in-tree ggml backend.
   // Empty decode threads means one per big core.
   buildConfigField 'String', 'ELIZA_ASR_THREADS', '""'
-  // The source commit each voice latency trial records (issue #395, shared VoiceLatencyProbe via AlphaApplication).
+  // The source commit each voice latency trial records (shared VoiceLatencyProbe via AlphaApplication).
   // A tree with tracked changes is recorded as dirty; the aggregator never accepts dirty trials.
   def sourceGit = { List<String> command ->
    try { providers.exec { commandLine(['git', '-C', rootProject.projectDir.parentFile.absolutePath] + command) }.standardOutput.asText.get().trim() }

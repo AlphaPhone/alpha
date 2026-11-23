@@ -31,7 +31,7 @@ public final class LocalSpeechInstrumentedTest {
   float[] human;try(InputStream in=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("speech-fixture/0.wav")){human=LocalSpeechEngine.readMono16kWav(in);}
   String transcript;
   start=SystemClock.elapsedRealtime();
-  try(SessionSpeech engine=new SessionSpeech(VoiceAssets.install(app).openInference(),true)){
+  try(SessionSpeech engine=new SessionSpeech(models.openInference(),true)){
    evidence.put("loadMs",SystemClock.elapsedRealtime()-start);start=SystemClock.elapsedRealtime();transcript=engine.transcribe(human);evidence.put("humanTranscript",transcript).put("asrMs",SystemClock.elapsedRealtime()-start).put("humanDurationMs",human.length/16);
    String lower=transcript.toLowerCase(Locale.ROOT);for(String word:new String[]{"nightfall","yellow","lamps","light","quarter"})assertTrue("Human recording transcript contains "+word,lower.contains(word));
    assertEquals("Digital silence creates no invented text","",engine.transcribe(new float[16000]));
@@ -46,7 +46,7 @@ public final class LocalSpeechInstrumentedTest {
    try{engine.synthesize("Invalid\0text");fail("NUL text must be rejected");}catch(IllegalArgumentException expected){}
    Debug.MemoryInfo memory=new Debug.MemoryInfo();Debug.getMemoryInfo(memory);evidence.put("processPssKb",memory.getTotalPss()).put("nativeHeapBytes",Debug.getNativeHeapAllocatedSize());
   }
-  try(SessionSpeech reopened=new SessionSpeech(VoiceAssets.install(app).openInference(),true)){assertEquals("Same speech survives engine close/reopen",transcript,reopened.transcribe(human));}
+  try(SessionSpeech reopened=new SessionSpeech(models.openInference(),true)){assertEquals("Same speech survives engine close/reopen",transcript,reopened.transcribe(human));}
   assertNull("Networking remained unavailable",app.getSystemService(ConnectivityManager.class).getActiveNetwork());
   evidence.put("execution","android-process-cpu").put("pass",true).put("physicalMicrophoneVerified",false).put("physicalSpeakerVerified",false);
   } finally { try(Writer out=new FileWriter(new File(folder,"result.json"))){out.write(evidence.toString(2));} }
@@ -58,7 +58,7 @@ public final class LocalSpeechInstrumentedTest {
   VoiceAssets.Bundle models=VoiceAssets.install(app);File folder=new File(app.getExternalFilesDir(null),"local-speech-evidence");assertTrue(folder.isDirectory()||folder.mkdirs());
   float[] human;try(InputStream in=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("speech-fixture/0.wav")){human=LocalSpeechEngine.readMono16kWav(in);}
   java.util.concurrent.atomic.AtomicInteger loads=new java.util.concurrent.atomic.AtomicInteger();
-  LocalSpeechEngine holder=new LocalSpeechEngine(()->{loads.incrementAndGet();return new SessionSpeech(VoiceAssets.install(app).openInference(),true);});
+  LocalSpeechEngine holder=new LocalSpeechEngine(()->{loads.incrementAndGet();return new SessionSpeech(models.openInference(),true);});
   java.util.concurrent.ExecutorService worker=java.util.concurrent.Executors.newSingleThreadExecutor();
   JSONObject evidence=new JSONObject().put("pass",false);
   try {
@@ -77,5 +77,4 @@ public final class LocalSpeechInstrumentedTest {
    Arrays.fill(human,0);try(Writer writer=new FileWriter(new File(folder,"holder-result.json"))){writer.write(evidence.toString(2));}
   }
  }
-
 }

@@ -21,7 +21,6 @@ public class CalendarCrudInstrumentedTest {
  private void click(String label)throws Exception{
   String q="[...document.querySelectorAll('button')].find(e=>e.getAttribute('aria-label')==="+JSONObject.quote(label)+")";until(q+" && !("+q+").disabled");eval("("+q+").click()");
  }
- private void tapVisibleEvent(String title)throws Exception{CalendarUiTestDriver.tapVisibleEvent(title);}
  private List<Long> ids(ContentResolver resolver,String title){
   List<Long> ids=new ArrayList<>();
   try(Cursor c=resolver.query(CalendarContract.Events.CONTENT_URI,new String[]{CalendarContract.Events._ID},CalendarContract.Events.TITLE+"=? AND "+CalendarContract.Events.DELETED+"=0",new String[]{title},null)){if(c!=null)while(c.moveToNext())ids.add(c.getLong(0));}return ids;
@@ -58,7 +57,7 @@ public class CalendarCrudInstrumentedTest {
     assertEquals("Concurrent edit is preserved",created,ids(resolver,external));assertTrue(ids(resolver,updated).isEmpty());
     scenario.recreate();until("document.documentElement.dataset.activeView==='home'");eval(AppNavigation.request("Calendar"));until(AppNavigation.selected("Calendar"));AppNavigation.declineStartupAccess();until("document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(external)+")");
     assertEquals(1,ids(resolver,external).size());
-    tapVisibleEvent(external);until("document.querySelector('button[aria-label=\"Delete event\"]')");
+    CalendarUiTestDriver.tapVisibleEvent(external);until("document.querySelector('button[aria-label=\"Delete event\"]')");
     click("Delete event");nativeWait("Delete calendar event?");assertEquals("Review never deletes",1,ids(resolver,external).size());nativeClick("Cancel");assertEquals(1,ids(resolver,external).size());
     click("Delete event");nativeWait("Delete calendar event?");
     ContentValues changed=new ContentValues();changed.put(CalendarContract.Events.DESCRIPTION,"Changed during delete review");resolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,created.get(0)),changed,null,null);
@@ -81,7 +80,7 @@ public class CalendarCrudInstrumentedTest {
    Calendar when=Calendar.getInstance();when.set(Calendar.HOUR_OF_DAY,12);when.set(Calendar.MINUTE,0);when.set(Calendar.SECOND,0);when.set(Calendar.MILLISECOND,0);
    ContentValues event=new ContentValues();event.put(CalendarContract.Events.CALENDAR_ID,calendarId);event.put(CalendarContract.Events.TITLE,unique);event.put(CalendarContract.Events.DTSTART,when.getTimeInMillis());event.put(CalendarContract.Events.DTEND,when.getTimeInMillis()+3600000);event.put(CalendarContract.Events.EVENT_TIMEZONE,TimeZone.getDefault().getID());android.net.Uri row=resolver.insert(CalendarContract.Events.CONTENT_URI,event);assertNotNull(row);
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-    AppNavigation.liveMode();until("document.documentElement.dataset.activeView");eval(AppNavigation.request("Calendar"));until(AppNavigation.selected("Calendar"));AppNavigation.declineStartupAccess();tapVisibleEvent(unique);click("Delete event");nativeWait("Delete calendar event?");
+    AppNavigation.liveMode();until("document.documentElement.dataset.activeView");eval(AppNavigation.request("Calendar"));until(AppNavigation.selected("Calendar"));AppNavigation.declineStartupAccess();CalendarUiTestDriver.tapVisibleEvent(unique);click("Delete event");nativeWait("Delete calendar event?");
     ContentValues revoked=new ContentValues();revoked.put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,CalendarContract.Calendars.CAL_ACCESS_READ);assertEquals(1,resolver.update(calendar,revoked,null,null));
     nativeClick("Delete event");until("document.querySelector('[data-screen]').textContent.includes('Nothing was deleted')");assertEquals("Calendar ACL revocation preserves exact fixture",1,ids(resolver,unique).size());
    }

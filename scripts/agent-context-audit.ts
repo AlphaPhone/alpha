@@ -154,7 +154,7 @@ export type Audit = ReturnType<typeof audit>;
  * stage inside that window, an upper bound on a prefix cache's hit rate for that text.
  */
 export function audit(calls: RecordedCall[], options: { cacheMinutes?: number; tpm?: number } = {}) {
-  const cacheMs = (options.cacheMinutes ?? 5) * 60_000;
+  const cacheMs = (options.cacheMinutes ?? 10) * 60_000;
   const ordered = [...calls].sort((a, b) => a.at - b.at);
   const rows = ordered.map(call => {
     const text = wireText(call);
@@ -282,10 +282,12 @@ export type ProviderModel = {
   admissionInputFactor: number;
   /** Output tokens a call holds at admission when it sends no cap. */
   uncappedOutputHold: number;
+  /** The most a cap holds at admission: measured, a larger cap holds the same as this. */
+  outputHoldCeiling?: number;
   /** The cap a stage's calls sent, where the log does not record it (runtimes before the usage record). */
   outputReserve?: Record<string, number>;
 };
-export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 5, admissionInputFactor: 1.25, uncappedOutputHold: 16_384 };
+export const CEREBRAS_QWEN: ProviderModel = { uncachedTpm: 150_000, totalTpm: 750_000, cacheBlockTokens: 1024, cacheMinutes: 10, admissionInputFactor: 1.24, uncappedOutputHold: 16_384, outputHoldCeiling: 16_384 };
 
 export type ProviderSimulation = ReturnType<typeof simulateProvider>;
 
@@ -351,9 +353,13 @@ export function simulateProvider(calls: RecordedCall[], model: ProviderModel = C
   });
 
   // Measured: at admission a call holds its whole input, cached or not, estimated high, plus
-  // its output cap, or a fixed amount when it sends none. When it finishes it is charged what
-  // it used: input that missed the cache, and output.
-  const reserve = (row: Row) => row.call.maxTokens ?? model.outputReserve?.[row.stage] ?? model.uncappedOutputHold;
+  // its output cap up to a fixed amount (16,384 on Cerebras: a cap of 40,960, the model's
+  // maximum output, holds the same), which is also what a call that sends no cap holds. When it finishes it is charged what it used: input that missed the
+  // cache, and output.
+  const reserve = (row: Row) => {
+    const cap = row.call.maxTokens ?? model.outputReserve?.[row.stage];
+    return cap === undefined ? model.uncappedOutputHold : Math.min(cap, model.outputHoldCeiling ?? cap);
+  };
   const admitted = (row: Row) => Math.round(model.admissionInputFactor * row.input) + reserve(row);
   const charged = (row: Row) => row.input - row.cached + (row.call.usage?.output ?? 0);
   const byStart = [...rows].sort((a, b) => a.start - b.start);

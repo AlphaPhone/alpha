@@ -13,15 +13,10 @@ The manifest binds both framework files to revision
 Pass `--applied-systemui-patch alpha-protected-power` after applying the patch to
 the build copy. The shared generic `assist` patch touches the same file.
 
-The earlier Android services and SystemUI sources compiled on the preserved stallion
-builder. That result retains its original package and patch hashes. The current
-Alpha Compute component and regenerated patch have source checks only; compile
-them again before image admission. Neither result establishes Binder, hardware,
-microphone, complete image or production-release acceptance.
+The patch has source checks only; compile it before image admission. That does not
+establish Binder, hardware, microphone, complete image or production-release acceptance.
 
 The app component must use the current shared Sense owner/session/generation authority.
-The older d4fbb prototype is not compatible with the newer shared Sense integration and
-must not restore the deleted local invocation wrapper or legacy Agent authority.
 Missing or ineligible protected app components use the existing ordinary assist path.
 
 Before activation, qualify the matching app and native source tuple, whole source

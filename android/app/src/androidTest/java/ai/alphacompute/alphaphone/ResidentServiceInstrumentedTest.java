@@ -65,7 +65,6 @@ public final class ResidentServiceInstrumentedTest {
  }
 
  private JSONObject ownedChild()throws Exception {return ResidentTestFixture.ownedChild(context,fixture.getString("processExecutableSha256"));}
- private void stopped(JSONObject child)throws Exception {ResidentTestFixture.stopped(context,child);}
  private JSONObject owner()throws Exception {return ResidentTestFixture.owner(request("/api/auth/me",null),ownerBearer);}
  private JSONObject agent()throws Exception {return ResidentTestFixture.agent(request("/api/agents",null));}
  private JSONArray history(String id)throws Exception{return request("/api/conversations/"+id+"/messages",null).getJSONArray("messages");}
@@ -85,7 +84,7 @@ public final class ResidentServiceInstrumentedTest {
   assertTrue(BuildConfig.DEBUG);assertEquals("arm64-v8a",Build.SUPPORTED_ABIS[0]);assertTrue("Never run in user0",Process.myUid()/100000>0);
   context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue("Fixture user must be unlocked",context.getSystemService(android.os.UserManager.class).isUserUnlocked());File input=new File(context.getFilesDir(),"resident-provider-input.json");assertTrue(input.isFile());assertEquals(0,Os.stat(input.getPath()).st_mode&0077);assertEquals(Process.myUid(),Os.stat(input.getPath()).st_uid);
   try(InputStream stream=new FileInputStream(input)){fixture=new JSONObject(new String(bounded(stream,16384),StandardCharsets.UTF_8));}assertTrue(input.delete());
-  assertEquals(InstrumentationRegistry.getArguments().getString("residentRunId"),fixture.getString("runId"));assertNull("Fresh credential slot",new AlphaCredentialStore(context).readCredentialSlot("local-agent-provider:v1"));
+  assertEquals(InstrumentationRegistry.getArguments().getString("residentRunId"),fixture.getString("runId"));assertNull("Fresh credential slot",new AlphaCredentialStore(context).readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
   File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so");assertEquals(fixture.getString("bunSha256"),fileHash(bun));
   try(InputStream in=new FileInputStream(bun)){byte[] h=new byte[20];assertEquals(20,in.read(h));assertEquals(0x7f,h[0]&255);assertEquals('E',h[1]);assertEquals('L',h[2]);assertEquals('F',h[3]);assertEquals(2,h[4]);assertEquals(1,h[5]);assertEquals(183,(h[18]&255)|((h[19]&255)<<8));}
   try(InputStream in=context.getAssets().open("agent/agent-bundle.js")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}
@@ -94,7 +93,7 @@ public final class ResidentServiceInstrumentedTest {
   Throwable failure=null;
   try {
     assertFalse(ElizaAgentService.getLocalAgentBootState(context).optBoolean("socketListening"));
-    new AlphaCredentialStore(context).writeCredentialSlot("local-agent-provider:v1",new JSONObject().put("key",fixture.getString("apiKey")).put("model","qwen-3.8-27b").toString());fixture.remove("apiKey");
+    new AlphaCredentialStore(context).writeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,new JSONObject().put("key",fixture.getString("apiKey")).put("model","qwen-3.8-27b").toString());fixture.remove("apiKey");
     startAndEnroll();proof.put("ownerEnrollmentCompleted",true);child=ownedChild();proof.put("firstProcess",child);
     assertEquals(fixture.getString("bundleSha256"),fileHash(new File(context.getFilesDir(),"agent/agent-bundle.js")));
     JSONObject who=owner(),agent=agent();proof.put("ownerAuthenticated",true);String ownerId=who.getJSONObject("identity").getString("id"),agentId=agent.getString("id");
@@ -103,12 +102,12 @@ public final class ResidentServiceInstrumentedTest {
     String label="Resident fixture "+fixture.getString("runId");JSONObject conversation=request("/api/conversations",new JSONObject().put("title",label)).getJSONObject("conversation");String id=conversation.getString("id"),room=conversation.getString("roomId");assertTrue(id.matches("[A-Za-z0-9_-]+"));assertTrue(room.matches("[A-Za-z0-9_-]+"));assertEquals(0,history(id).length());
     JSONObject reply=request("/api/conversations/"+id+"/messages",new JSONObject().put("text",label+": Reply with the value of seven times eight. Do not use tools or create anything.").put("channelType","DM").put("clientMessageId",UUID.randomUUID().toString()));assertFalse("Actual resident reply required",reply.getString("text").trim().isEmpty());assertTrue(reply.getString("text").contains("56"));proof.put("syntheticReplyValidated",true).put("replyLength",reply.getString("text").length()).put("replySha256",hash(reply.getString("text").getBytes(StandardCharsets.UTF_8)));
     proof.put("model",trace(room,reply.getString("userMessageId")));JSONArray before=history(id);assertTrue(before.length()>=2);String historyHash=hash(before.toString().getBytes(StandardCharsets.UTF_8));
-    ElizaAgentService.stop(context);stopped(child);JSONObject old=child;child=null;
+    ElizaAgentService.stop(context);stopped(context,child);JSONObject old=child;child=null;
     startAndEnroll();child=ownedChild();assertNotEquals("Real native process restart",old.getInt("pid"),child.getInt("pid"));
     assertEquals(ownerId,owner().getJSONObject("identity").getString("id"));assertEquals(agentId,agent().getString("id"));assertEquals(historyHash,hash(history(id).toString().getBytes(StandardCharsets.UTF_8)));
     proof.put("secondProcess",child).put("ownerId",ownerId).put("agentId",agentId).put("conversationId",id).put("historySha256",historyHash).put("passed",true);
   } catch(Throwable error) {failure=error;} finally {
-    try {ElizaAgentService.stop(context);stopped(child);proof.put("socketStopped",true).put("serviceStopped",true);}
+    try {ElizaAgentService.stop(context);stopped(context,child);proof.put("socketStopped",true).put("serviceStopped",true);}
     catch(Throwable cleanup) {if(failure==null)failure=cleanup;else failure.addSuppressed(cleanup);proof.put("cleanupFailed",true);}
     // Write a scoped failure record even if stop verification failed; never replace the primary failure.
     try {

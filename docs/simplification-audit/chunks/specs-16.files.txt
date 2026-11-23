@@ -1,0 +1,1 @@
+specs/quint/legacy/manifest.json

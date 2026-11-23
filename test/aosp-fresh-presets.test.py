@@ -368,10 +368,8 @@ public class CompletionTest {
  }
  static class AlphaFreshPresets {
   static boolean eligible(Activity activity){return AlphaFreshSetupPolicy.eligible(activity.complete,activity.managed,activity.primary);}
-  static AlphaFreshSetupPolicy.ImeResult ensureKeyboard(Activity activity){activity.effects.add("keyboard");return activity.keyboard;}
- }
- static class AlphaAppearance {
   static boolean applyPalette(Activity activity){activity.effects.add("palette");activity.afterPalette.run();return activity.paletteAccepted;}
+  static AlphaFreshSetupPolicy.ImeResult ensureKeyboard(Activity activity){activity.effects.add("keyboard");return activity.keyboard;}
  }
  static void open(Activity activity,String action){activity.opened=action;}
 '''+completion+'''

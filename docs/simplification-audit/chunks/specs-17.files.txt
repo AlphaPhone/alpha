@@ -1,0 +1,8 @@
+specs/quint/legacy/maps/README.md
+specs/quint/legacy/maps/check-maps-refinement.mjs
+specs/quint/legacy/notes-view/README.md
+specs/quint/legacy/notes-view/check-notes-view-refinement.mjs
+specs/quint/legacy/photos-library/README.md
+specs/quint/legacy/photos-library/check-photos-library-refinement.mjs
+specs/quint/legacy/settings-nav/README.md
+specs/quint/legacy/settings-nav/check-settings-nav-refinement.mjs

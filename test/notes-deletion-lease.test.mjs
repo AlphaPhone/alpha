@@ -8,4 +8,3 @@ import {nativeSource,fixture,runJvm,jsonJarSkip} from './fixtures/jvm-tools.mjs'
 test('the native passes leave a leased row untouched and finish one whose lease expired',{skip:jsonJarSkip},()=>{
  assert.match(runJvm([nativeSource('NotesDeletionLease.java'),fixture('NotesDeletionLeaseTest.java')],'ai.alphacompute.alphaphone.NotesDeletionLeaseTest',{json:true}),/^PASS notes deletion lease/);
 });
-

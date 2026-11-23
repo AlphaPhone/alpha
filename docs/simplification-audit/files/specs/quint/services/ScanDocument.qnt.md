@@ -1,0 +1,14 @@
+# specs/quint/services/ScanDocument.qnt
+- Lines: 191 | Kind: Quint model (services family, live; 11 tests) | Verdict: KEEP; SIMPLIFY (drop picker/hide half, fix README/manifest drift)
+- Covers: `prototype/scan-document.ts` + `browser/scan-draft.ts`: ordered pages keep their OCR text layer, serialized autosaves with compare-and-set revisions, explicit save/load turns a draft user-owned, confirmed export clears only an auto-draft, unknown export outcomes lock the review, a native picker hides without closing. Sources exist (`scan-document.ts`, `scan-draft.ts`, `scan-pdf.ts`, `scan-searchable-review.ts`, `scan-text-layer.ts`, upstream `plugin-native-camera/src/scan-document.ts`). Duplicates: picker/hide behaviour (`picker`, `hidden`, `hide`, `resume`, `nativePickerVisibilityTest`) is `SystemPickerVisibility.qnt`'s subject; Playwright `test/browser/scan-document.spec.ts`, `scan-draft.spec.ts`, `scan-edges.spec.ts`, `scan-text-draft.spec.ts` drive the same draft/export flows; `test/scan-document-drafts.test.mjs`, `scan-document-draft-ownership.test.mjs` (host). Callers/importers: manifest; harness `refinement/services/scan.mjs` (esbuild-bundles and imports `openScanDocument`, `readScanDraft`, `systemPickerActive`; runs in headless Chromium, so it launches a browser); `services/scan-source-conformance.mjs` + `test/quint-scan-conformance.test.mjs`; services aggregate.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 129-133, 167-168 | T4 | Picker visibility is modelled twice (here and `SystemPickerVisibility`, which also covers dialogs and file pickers). | Remove `picker`/`hidden`/`hide`/`resume` and `nativePickerVisibilityTest`; keep close as plain `close`. | Low |
+| 2 | 156-158 | doc drift | `ExplicitlySavedDraftPreserved` is now part of `safety` and `explicitSaveAfterAutosavePreservedTest` asserts it, but `services/README.md` still says it is kept outside `safety` with a `explicitSaveAfterAutosaveCounterexampleTest` (no such run) and that `scan-source-conformance.mjs` "succeeds when it observes the documented discrepancy". Manifest lists `ExplicitlySavedDraftPreserved` twice in `invariants`. | Fix README and de-duplicate the manifest entry; check `scan-source-conformance.mjs` asserts preservation (its header now says so) and fold it into `scan.mjs` as one more trace. | Low |
+| 3 | harness | cost | Campaign launches Chromium per run. | Keep (it imports real code), but run only when scan sources change. | Low |
+| 4 | — | T4 | Playwright scan specs cover the same draft/export outcomes through the UI. | Owner of `journeys/camera-photos.spec.ts` keeps one UI path per outcome; the model keeps the interleavings. | Low |
+
+## Proposed end state
+~170-line model without the picker half; one harness (scan.mjs, including the explicit-save preservation trace); README text matches the model.

@@ -15,14 +15,17 @@ import static org.junit.Assert.*;
 /** Hashing, process and owner checks shared by the resident service and workflow crash tests. */
 final class ResidentTestFixture {
  private ResidentTestFixture(){}
- static String hash(byte[] bytes)throws Exception {StringBuilder value=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(bytes))value.append(String.format(Locale.ROOT,"%02x",b&255));return value.toString();}
+ static String hash(byte[] bytes){return AlphaUtil.sha256Hex(bytes);}
  static byte[] bounded(InputStream input,int max)throws Exception {ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[8192];int n;while((n=input.read(buf))!=-1){assertTrue("Input exceeds bound",out.size()+n<=max);out.write(buf,0,n);}return out.toByteArray();}
  static String boundedHash(InputStream input,long max)throws Exception {
-  MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];long total=0;int count;
+  MessageDigest digest=AlphaUtil.sha256();byte[] buffer=new byte[65536];long total=0;int count;
   while((count=input.read(buffer))!=-1){assertTrue("Input exceeds bound",count<=max-total);total+=count;digest.update(buffer,0,count);}
-  StringBuilder value=new StringBuilder();for(byte b:digest.digest())value.append(String.format(Locale.ROOT,"%02x",b&255));return value.toString();
+  return AlphaUtil.hex(digest.digest());
  }
- static String fileHash(File file)throws Exception {try(InputStream in=new FileInputStream(file)){MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)digest.update(buf,0,n);StringBuilder s=new StringBuilder();for(byte b:digest.digest())s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}}
+ static String fileHash(File file)throws Exception {try(InputStream in=new FileInputStream(file)){return AlphaUtil.sha256Hex(in);}}
+ static String readUtf8(File file)throws IOException {return new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8);}
+ /** Writes value as UTF-8, syncs it and makes it owner-only. */
+ static void writePrivate(File file,String value)throws Exception {try(FileOutputStream out=new FileOutputStream(file)){out.write(value.getBytes(StandardCharsets.UTF_8));out.getFD().sync();}Os.chmod(file.getPath(),0600);}
  static JSONObject nativeGet(String path,String bearer)throws Exception {
   JSONObject headers=new JSONObject();if(bearer!=null)headers.put("Authorization","Bearer "+bearer);
   return new JSONObject(ElizaAgentService.requestLocalAgent(new JSONObject().put("path",path).put("method","GET").put("headers",headers).put("timeoutMs",10000).toString()));
@@ -47,7 +50,7 @@ final class ResidentTestFixture {
   long end=SystemClock.elapsedRealtime()+30000;
   while(SystemClock.elapsedRealtime()<end){boolean gone=child==null||!new File("/proc/"+child.getInt("pid")).exists();if(!gone)try{gone=!processStart(child.getInt("pid")).equals(child.getString("start"));}catch(IOException raced){gone=true;}
    JSONObject status=ElizaAgentService.getLocalAgentBootState(context);if(gone&&!status.optBoolean("socketListening")&&!status.optBoolean("serviceActive"))return;SystemClock.sleep(100);}
-  fail("Resident process/socket did not stop within30s");
+  fail("Resident process/socket did not stop within 30s");
  }
  /** Checks an /api/auth/me reply is the owner on this bearer, and masks the session id. */
  static JSONObject owner(JSONObject who,String bearer)throws Exception {assertEquals("owner",who.getJSONObject("identity").getString("kind"));assertEquals("OWNER",who.getJSONObject("access").getString("role"));assertTrue("Native owner session mismatch",bearer.equals(who.getJSONObject("session").getString("id")));who.getJSONObject("session").put("id","native-service-session");return who;}

@@ -1,0 +1,15 @@
+# specs/quint/application/CalendarPresentation.qnt
+- Lines: 192 | Kind: Quint model (live, 14 runs, 12 invariants, 4 witnesses) | Verdict: REWRITE (remove deleted Google-selection dimension; give the rest a real harness)
+- Covers: Calendar views and Back order (chat, form, delete sheet, event, menu, search), schedule starting today, latest forced read wins, revoked sources hidden, restored creation draft keeps its id without provider authority, save needs a valid time snapshot. Duplicates: `CanonicalCalendarEditorClose` (form Back order, retained draft), `CanonicalCalendarDraft` (draft identity), `CalendarAgentSelection` (refresh retires state); Playwright Calendar specs (45 of them, T7). Callers/importers: manifest (9 sources, `google-calendar-selection.ts` already removed in the working tree); README:32; harness `contracts.mjs` `calendarPresentation()` (lines 77-90) run only via the application aggregate.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 9, 24, 31-32, 90-91, 97-99, 132, 168-170, 182-184 | A2 / D4 | `hidden: int -> bool`, `hideGoogle`/`showGoogle`, `owner`/`changeOwner`, `googleRowsOwner`, `accountPreferenceIsolationTest`, `accountChangeClosesEventTest` model the per-account Google display-hiding preference. The harness's own assumption says "The previous display-hiding preference was removed from the product", and `runtime/google-calendar-selection.ts` is deleted in this branch. | Delete the hidden map, hide/show actions and the two runs. Keep `GoogleCacheOwnerBound` only if agent-side rows are still owner-scoped in `agent-calendar.ts`; otherwise drop `owner` too. | Low |
+| 2 | harness | coverage / T10 | The harness checks one 2-step trace (`newForm`→`saveDraft`→`restoreDraft`) through `encodeCalendarForm`/`decodeCalendarForm`. The remaining 12 runs (Back order, read generations, schedule) have no code tie. | Replay view/Back/read-generation runs against the real adapters with `calendar-adapter-fixture.mjs` (bundles `calendar-adapter.ts`, `calendar-days.ts`) and `calendar-month-focus.ts`; or cut the model to what is tied and leave Back order to a Calendar Playwright journey. | Medium |
+| 3 | 52-67, 135-137 | T4 | Draft identity (`saveDraft`/`restoreDraft`/`RestoredCreationKeepsId`/`NoRestoredAuthority`) overlaps `CanonicalCalendarDraft` and `CanonicalCalendarEditorClose`. | Keep it in one place: the canonical draft model. | Low |
+| 4 | 2 | A8 | "composed with CalendarSync rather than executed by this model": `CalendarSync` is the client linked-sync model family that D4 deletes. | Reword/delete. | None |
+| 5 | sources | §2.3 | Sources include `prototype/model.js` and `runtime/agent-calendar.ts` (hot files), selecting this model in CI for unrelated edits. | Narrow to the files the new harness executes. | None |
+
+## Proposed end state
+~130-line model of Calendar view/Back/read-generation behaviour without Google display-hiding and without duplicated draft identity, replayed against the bundled calendar adapter; manifest sources narrowed accordingly. If the harness is not written, delete the untied parts and rely on the Calendar journey spec.

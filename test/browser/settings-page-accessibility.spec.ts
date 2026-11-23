@@ -63,8 +63,7 @@ for (const tools of [false, true]) test(`developer-only Settings rows ${tools ? 
  await page.getByRole('button', {name:'Back to Settings', exact:true}).click();
  await page.getByRole('button',{name:'Apps',exact:true}).click();
  await page.getByRole('button', {name:'Calendar', exact:true}).click();
- if (tools) await expect(page.getByText('Calendar backups', {exact:true})).toBeVisible();
- else await expect(page.getByText('Calendar backups', {exact:true})).toHaveCount(0);
+ await expect(page.getByText('Calendar backups', {exact:true})).toHaveCount(0);
 });
 
 test('development license list restores focus to About', async ({page}) => {

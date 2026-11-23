@@ -235,20 +235,6 @@ test('a Google connection without an email or name shows Alpha’s account label
  assert.match(inbox,/account:withGmailAccountLabel\(value\.account\)/);
 });
 
-// --- Calendar sync settings: a failed pause --------------------------------------------------------
-test('a failed Calendar sync pause is worded by Alpha’s sync table, never shown raw',async()=>{
- const host=staged('plugins/plugin-calendar/src/linked-sync/sync-host.ts');
- const {calendarSyncFailureMessage}=await import('../apps/app/src/ui/calendar/sync-host.ts');
- const sentences=[...host.matchAll(/throw Error\(\s*"([^"]+)",?\s*\)/g)].map(m=>m[1]);
- for(const sentence of ['Calendar sync settings changed. Review them again.','Calendar sync settings need recovery. Saved events are retained.'])assert.ok(sentences.includes(sentence),sentence);
- for(const sentence of sentences)assert.notEqual(calendarSyncFailureMessage(new Error(sentence),'FALLBACK'),'FALLBACK',sentence);
- assert.equal(calendarSyncFailureMessage(new Error('Calendar sync settings need recovery. Saved events are retained.'),'F'),'Calendar sync settings need recovery. Saved events are kept.');
- assert.equal(calendarSyncFailureMessage(new Error('A newer storage refusal'),'Couldn’t pause sync. Try again.'),'Couldn’t pause sync. Try again.');
- const settings=source('apps/app/src/runtime/calendar-sync-settings.ts');
- assert.match(settings,/say\(calendarSyncFailureMessage\(error, "Couldn’t pause sync\. Try again\."\)\)/);
- assert.doesNotMatch(settings,/"Couldn’t pause"\)/);
-});
-
 // --- Note read-aloud over Cloud: the staged chunk planner ------------------------------------------
 test('the Cloud speech chunk planner’s refusals read in Alpha’s words',async()=>{
  const chunks=staged('packages/voice/src/cloud-speech-chunks.ts');

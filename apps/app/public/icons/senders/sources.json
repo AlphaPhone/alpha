@@ -10,10 +10,6 @@
       "bytes": 834
     },
     {
-      "domain": "assetdash.com",
-      "error": "HTTPError"
-    },
-    {
       "domain": "cash.app",
       "file": "cash.app.png",
       "source": "https://www.google.com/s2/favicons?domain=cash.app&sz=64",

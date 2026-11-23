@@ -20,19 +20,3 @@ test('Alpha listener components compile with only the shared policy classes and 
  } finally {fs.rmSync(temp,{recursive:true,force:true});}
 });
 
-test('legacy AlphaListener is a thin alias of the shared native control bridge',()=>{
- const root=path.resolve(import.meta.dirname,'..'),source=path.join(root,'vendor/eliza/plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system');
- const temp=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-sense-control-'));
- try {
-  const stubs={
-   'Plugin.java':'package com.getcapacitor; public class Plugin { public void load(){} protected void handleOnPause(){} protected void handleOnDestroy(){} public android.content.Context getContext(){return null;} public android.app.Activity getActivity(){return null;} }',
-   'PluginCall.java':'package com.getcapacitor; public class PluginCall { public void resolve(JSObject value){} public void resolve(){} public void reject(String value){} public String getString(String value){return null;} public Integer getInt(String value){return null;} }',
-   'JSObject.java':'package com.getcapacitor; public class JSObject extends java.util.HashMap<String,Object> {}',
-   'PluginMethod.java':'package com.getcapacitor; @java.lang.annotation.Target(java.lang.annotation.ElementType.METHOD) public @interface PluginMethod {}',
-   'CapacitorPlugin.java':'package com.getcapacitor.annotation; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE) public @interface CapacitorPlugin {String name();}',
-  };
-  const files=Object.entries(stubs).map(([name,text])=>{const file=path.join(temp,name);fs.writeFileSync(file,text);return file;});
-  const sdk=path.join(process.env.ANDROID_HOME??path.join(os.homedir(),'Android/Sdk'),'platforms/android-36/android.jar');
-  execFileSync(javaBinary('javac'),['--release','21','-cp',sdk,'-d',path.join(temp,'out'),...files,...['SenseInvocation','SenseListenerClient','SensePlugin'].map(name=>path.join(source,`${name}.java`)),path.join(root,'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaListenerPlugin.java')],{timeout:scaledTimeout(60000)});
- } finally {fs.rmSync(temp,{recursive:true,force:true});}
-});

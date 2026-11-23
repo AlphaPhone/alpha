@@ -82,7 +82,6 @@ public final class ReminderTapProcessDeathInstrumentedTest {
    assertFalse(new ReminderTestAccess.Taps(context).pending().has("token"));
    assertEquals("Opening detail must not complete the reminder","posted",ReminderTestAccess.read(context,id).getString("status"));
    assertTrue(ReminderTestAccess.Taps.same(captured.getJSONObject("target"),ReminderTestAccess.selected(context,id)));
-   android.os.Bundle evidence=new android.os.Bundle();evidence.putString("reminderTapProcessDeath",new JSONObject().put("beforePid",before.pid).put("beforeStart",before.start).put("afterPid",after.pid).put("afterStart",after.start).put("uid",after.uid).put("postTime",original.getPostTime()).put("notificationSends",1).put("detailVisible",true).put("routeConsumed",true).put("recoveryLaunch","launcher-without-reminder-data").toString());InstrumentationRegistry.getInstrumentation().addResults(evidence);
   }finally{manager.cancel(id,0);/* Fresh-user supervisor owns all durable cleanup. */}
  }
 }

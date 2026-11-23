@@ -11,8 +11,6 @@ import { closes, sheetBack } from "../shell/surfaceBack.ts";
 import { AgentRequestReview, ApprovalReview, UndoNotices } from "./Surfaces.tsx";
 
 export { HomeAgendaCard, type HomeAgendaCardProps } from "./HomeAgendaCard.tsx";
-export { SyncSettings, type SyncSettingsProps } from "./SyncSettings.tsx";
-export { DeviceSyncPanel, DeviceSyncSettings, type DeviceSyncPanelProps } from "./DeviceSyncSettings.tsx";
 
 /** The Calendar app, on every build; Back closes an open review sheet, then its form, delete sheet, event, Calendars sheet, date picker or search, before it leaves Calendar. */
 export const screens: AppScreen[] = [

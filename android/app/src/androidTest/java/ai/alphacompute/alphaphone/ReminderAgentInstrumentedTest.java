@@ -17,25 +17,6 @@ import static org.junit.Assert.*;
 /** Owned synthetic records only. Real Android store and AlarmManager; no timing/clock changes. */
 @RunWith(AndroidJUnit4.class)
 public class ReminderAgentInstrumentedTest {
- @Test public void receiptSurvivesActualProcessReplacement()throws Exception {
-  String phase=InstrumentationRegistry.getArguments().getString("reminderAgentPhase","");org.junit.Assume.assumeTrue("Use owned prepare/verify/cleanup campaign",!phase.isEmpty());
-  Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();android.content.SharedPreferences fixture=c.getSharedPreferences("alpha-reminder-agent-process-fixture",0);
-  String binding=ReminderTestAccess.digest("synthetic-process-owner-device");
-  if(phase.equals("prepare")){
-   assertFalse("Prior fixture requires cleanup",fixture.contains("id"));assertTrue(ReminderTestAccess.allowed(c));
-   String id="agent_process_"+UUID.randomUUID(),op=UUID.randomUUID().toString();assertTrue(fixture.edit().putString("id",id).putString("op",op).putInt("pid",android.os.Process.myPid()).commit());
-   ReminderTestAccess.schedule(c,id,"Process replacement fixture","Synthetic only",System.currentTimeMillis()+3600000);
-   JSONObject operation=new JSONObject().put("type","reminder_snooze").put("target",ReminderTestAccess.selected(c,id));assertTrue(fixture.edit().putString("operation",operation.toString()).commit());
-   JSONObject result=ReminderTestAccess.operate(c,op,binding,operation);assertEquals("succeeded",result.getString("status"));assertTrue(fixture.edit().putString("result",result.toString()).commit());
-  }else if(phase.equals("verify")){
-   assertTrue(fixture.contains("result"));assertNotEquals("Runner must replace process",fixture.getInt("pid",0),android.os.Process.myPid());
-   JSONObject receipt=ReminderTestAccess.operationReceipt(c,fixture.getString("op",null),binding,new JSONObject(fixture.getString("operation",null)));
-   assertEquals(fixture.getString("result",null),receipt.toString());assertEquals(receipt.getJSONObject("result").getLong("at"),ReminderTestAccess.read(c,fixture.getString("id",null)).getLong("at"));
-  }else if(phase.equals("cleanup")){
-   String id=fixture.getString("id",null),op=fixture.getString("op",null);if(id!=null){assertTrue(id.startsWith("agent_process_"));ReminderTestAccess.cancel(c,id);ReminderTestAccess.removeFixture(c,java.util.Collections.singletonList(id),op==null?java.util.Collections.<String>emptyList():java.util.Collections.singletonList(op));}
-   assertTrue(fixture.edit().clear().commit());
-  }else fail("Unknown reminder process phase");
- }
  @Test public void legacyMigrationRetainsRawRecordsAndOccurrenceIdentity()throws Exception {
   Context base=InstrumentationRegistry.getInstrumentation().getTargetContext();String prefix="reminder_migration_"+UUID.randomUUID();
   Context c=new android.content.ContextWrapper(base){@Override public android.content.SharedPreferences getSharedPreferences(String name,int mode){return super.getSharedPreferences(prefix+"_"+name,mode);}};
@@ -67,13 +48,13 @@ public class ReminderAgentInstrumentedTest {
    assertEquals("Updated content",ReminderTestAccess.read(c,id).getString("body"));
    // A newly constructed envelope rereads disk for every call; this must be historical content.
    assertEquals(first.toString(),ReminderTestAccess.operate(c,readId,binding,read).toString());
-   try {ReminderTestAccess.operate(c,readId,ReminderTestAccess.digest("wrong-owner"),read);fail("Changed binding accepted");}catch(IllegalArgumentException expected){}
-   try {ReminderTestAccess.operate(c,UUID.randomUUID().toString(),binding,update);fail("Stale target accepted");}catch(IllegalArgumentException expected){}
+   assertThrows("Changed binding accepted",IllegalArgumentException.class,()->ReminderTestAccess.operate(c,readId,ReminderTestAccess.digest("wrong-owner"),read));
+   assertThrows("Stale target accepted",IllegalArgumentException.class,()->ReminderTestAccess.operate(c,UUID.randomUUID().toString(),binding,update));
    JSONObject snooze=new JSONObject().put("type","reminder_snooze").put("target",ReminderTestAccess.selected(c,id));String snoozeId=UUID.randomUUID().toString();operations.add(snoozeId);
    long before=System.currentTimeMillis();JSONObject snoozed=ReminderTestAccess.operate(c,snoozeId,binding,snooze);long exact=snoozed.getJSONObject("result").getLong("at");assertTrue(exact>=before+600000&&exact<=System.currentTimeMillis()+600000);
    assertEquals(snoozed.toString(),ReminderTestAccess.operate(c,snoozeId,binding,snooze).toString());assertEquals(exact,ReminderTestAccess.read(c,id).getLong("at"));
    String occurrence=ReminderTestAccess.read(c,id).getString("occurrenceId");
-   Intent alarm=new Intent(c,ReminderReceiver.class).setAction("ai.alphacompute.alphaphone.REMIND").setData(Uri.parse("alpha-reminder:"+id+"/"+occurrence));
+   Intent alarm=new Intent(c,ReminderReceiver.class).setAction(AlphaReminders.CONFIGURATION.remindAction).setData(Uri.parse(AlphaReminders.CONFIGURATION.alarmUriPrefix+id+"/"+occurrence));
    assertNotNull("Real scheduled PendingIntent",PendingIntent.getBroadcast(c,0,alarm,PendingIntent.FLAG_NO_CREATE|PendingIntent.FLAG_IMMUTABLE));
    JSONObject done=new JSONObject().put("type","reminder_complete").put("target",ReminderTestAccess.selected(c,id));String doneId=UUID.randomUUID().toString();operations.add(doneId);
    assertEquals("completed",ReminderTestAccess.operate(c,doneId,binding,done).getJSONObject("result").getString("status"));
@@ -91,11 +72,11 @@ public class ReminderAgentInstrumentedTest {
    JSONObject rescheduled=ReminderTestAccess.operate(c,rescheduleId,binding,reschedule);assertEquals("succeeded",rescheduled.getString("status"));assertEquals("scheduled",rescheduled.getJSONObject("result").getString("status"));
    String newOccurrence=ReminderTestAccess.read(c,id).getString("occurrenceId");assertNotEquals(occurrence,newOccurrence);assertEquals(reviewedAt,ReminderTestAccess.read(c,id).getLong("at"));
    assertFalse(ReminderTestAccess.read(c,id).has("completedAt"));assertEquals(completedRow.getJSONArray("history").toString(),ReminderTestAccess.read(c,id).getJSONArray("history").toString());
-   Intent newAlarm=new Intent(c,ReminderReceiver.class).setAction("ai.alphacompute.alphaphone.REMIND").setData(Uri.parse("alpha-reminder:"+id+"/"+newOccurrence));
+   Intent newAlarm=new Intent(c,ReminderReceiver.class).setAction(AlphaReminders.CONFIGURATION.remindAction).setData(Uri.parse(AlphaReminders.CONFIGURATION.alarmUriPrefix+id+"/"+newOccurrence));
    assertNotNull("New occurrence has a real scheduled PendingIntent",PendingIntent.getBroadcast(c,0,newAlarm,PendingIntent.FLAG_NO_CREATE|PendingIntent.FLAG_IMMUTABLE));
    assertEquals(rescheduled.toString(),ReminderTestAccess.operate(c,rescheduleId,binding,reschedule).toString());assertEquals(rescheduled.toString(),ReminderTestAccess.operationReceipt(c,rescheduleId,binding,reschedule).toString());
    assertEquals(newOccurrence,ReminderTestAccess.read(c,id).getString("occurrenceId"));assertEquals(reviewedAt,ReminderTestAccess.read(c,id).getLong("at"));
-   try{ReminderTestAccess.operate(c,UUID.randomUUID().toString(),binding,reschedule);fail("Stale reschedule target accepted");}catch(IllegalArgumentException expected){}
+   assertThrows("Stale reschedule target accepted",IllegalArgumentException.class,()->ReminderTestAccess.operate(c,UUID.randomUUID().toString(),binding,reschedule));
    String beforeOldDelivery=ReminderTestAccess.read(c,id).toString();ReminderTestAccess.deliver(c,id,occurrence);assertEquals(beforeOldDelivery,ReminderTestAccess.read(c,id).toString());
    JSONObject cancel=new JSONObject().put("type","reminder_cancel").put("target",ReminderTestAccess.selected(c,id));String cancelId=UUID.randomUUID().toString();operations.add(cancelId);
    assertEquals("cancelled",ReminderTestAccess.operate(c,cancelId,binding,cancel).getJSONObject("result").getString("status"));
@@ -104,7 +85,7 @@ public class ReminderAgentInstrumentedTest {
    for(boolean scheduleUpdate:new boolean[]{false,true}){
     JSONObject fields=new JSONObject().put("title","Must not revive cancellation").put("body","");if(scheduleUpdate)fields.put("schedule",new JSONObject().put("at",reviewedAt+3600000).put("recurrence",JSONObject.NULL));
     JSONObject cancelledUpdate=new JSONObject().put("type","reminder_update").put("target",ReminderTestAccess.selected(c,id)).put("fields",fields);String rejectedId=UUID.randomUUID().toString();operations.add(rejectedId);
-    try{ReminderTestAccess.operate(c,rejectedId,binding,cancelledUpdate);fail("Cancelled reminder edit accepted");}catch(IllegalArgumentException expected){}
+    assertThrows("Cancelled reminder edit accepted",IllegalArgumentException.class,()->ReminderTestAccess.operate(c,rejectedId,binding,cancelledUpdate));
     assertEquals("unknown",ReminderTestAccess.operationReceipt(c,rejectedId,binding,cancelledUpdate).getString("status"));assertEquals(cancelledSnapshot,ReminderTestAccess.read(c,id).toString());assertEquals(receiptCount,new ReminderTestAccess.Envelope(c).snapshot().getJSONObject("operations").length());
    }
   } finally {

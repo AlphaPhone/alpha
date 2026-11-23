@@ -6,7 +6,7 @@ import type {Page} from '@playwright/test';
  * Why: Chromium's inspector holds the promise of an awaited `page.evaluate` weakly. While a
  * dynamic import inside it was still fetching or compiling a not-yet-loaded module on a busy
  * Vite server, CI saw "page.evaluate: Resulting promise was garbage collected" (chat-voice-mode
- * setup, cloud-personal-onboarding sign-in). Preloading removes that wait from the evaluate, and
+ * setup). Preloading removes that wait from the evaluate, and
  * the loaded namespaces stay referenced from `window.__alphaModules`.
  */
 export async function preloadPageModules(page:Page,paths:readonly string[]){

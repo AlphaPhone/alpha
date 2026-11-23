@@ -5,10 +5,6 @@ import { initial as agentInitial } from "../../../gen/calendar__agent.ts";
 import { initial as reviewInitial } from "../../../gen/calendar__approvals.ts";
 import { initial as heldInitial } from "../../../gen/calendar__deletions.ts";
 import { initial as draftInitial } from "../../../gen/calendar__drafts.ts";
-import { initial as controlInitial } from "../../../gen/calendar__sync.ts";
-import { initial as linkInitial } from "../../../gen/calendar__googleLink.ts";
-import { initial as nativeInitial } from "../../../gen/calendar__nativeSync.ts";
-import { initial as disconnectInitial } from "../../../gen/calendar__disconnect.ts";
 import { initial as actionInitial } from "../../../gen/calendar__deviceActions.ts";
 import { initial as writesInitial } from "../../../gen/calendar__device.ts";
 import { AgentCalendar, type AgentView } from "../../calendar/agent.vibe";
@@ -16,16 +12,14 @@ import { ApprovalReviews, type ApprovalSheet } from "../../calendar/approvals.vi
 import { whileVisible } from "../../calendar/binding.vibe";
 import { HeldDeletions } from "../../calendar/deletions.vibe";
 import { DeviceCalendar, type DeviceRead } from "../../calendar/device.vibe";
-import { DeviceCalendarSync, type DeviceSyncView } from "../../calendar/deviceSync.vibe";
 import { CalendarDrafts } from "../../calendar/drafts.vibe";
 import { HomeAgenda, type HomeAgendaCard } from "../../calendar/home.vibe";
 import { AgentRequests, type RequestSheet } from "../../calendar/requests.vibe";
-import { CalendarSync, type SyncView } from "../../calendar/sync.vibe";
 import { openRoute } from "../../calendar/screen.vibe";
 import { useServiceStream } from "../shell/services.ts";
 
 const keys = {
-  writes: {}, agent: {}, device: {}, drafts: {}, held: {}, approval: {}, requests: {}, actions: {}, sync: {}, home: {}, deviceSync: {},
+  writes: {}, agent: {}, device: {}, drafts: {}, held: {}, approval: {}, requests: {}, actions: {}, home: {},
 };
 
 const agentView: AgentView = { state: agentInitial, feed: undefined, calendars: [], upcoming: undefined, savedAt: undefined, window: undefined };
@@ -64,23 +58,6 @@ export function useRequestSheet(): RequestSheet {
 /** The agent's device action in progress. */
 export function useDeviceAction() {
   return useServiceStream(keys.actions, AgentRequests.use((service) => Effect.succeed(service.actions)), actionInitial);
-}
-
-/** The sync sheet's state. */
-export function useSyncView(): SyncView {
-  return useServiceStream(keys.sync, CalendarSync.use((service) => Effect.succeed(service.changes)),
-    { control: controlInitial, link: linkInitial, device: nativeInitial, disconnect: disconnectInitial, review: undefined, links: undefined });
-}
-
-const deviceSyncShown = DeviceCalendarSync.use((service) =>
-  Effect.ensuring(Effect.andThen(service.refresh(), Effect.never), Effect.ignore(service.cancel())));
-
-/** Device Google Calendar sync while Settings shows it: showing it reads the saved opt-in again, and closing it retires the operation in flight. */
-export function useDeviceSyncView(): DeviceSyncView {
-  return useServiceStream(keys.deviceSync, DeviceCalendarSync.use((service) => Effect.succeed(service.changes)), {
-    available: false, ready: false, status: "Sync is off.", running: false, enabled: false, selection: undefined,
-    destination: { account: "", calendar: "" }, reviewed: undefined, offered: undefined,
-  }, { alongside: deviceSyncShown.pipe(Effect.orDie, Effect.asVoid) });
 }
 
 /** Home's agenda card. */

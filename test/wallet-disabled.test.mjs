@@ -4,7 +4,7 @@ import {readFileSync,existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 import {nativeViewDeclarationsJson} from '../scripts/native-view-policy.ts';
-// AP-13 / #422: Wallet is outside the MVP in both distributions and on the Alpha AOSP image. Its
+// AP-13 / #422: Wallet is not in Alpha in either distribution or on the Alpha AOSP image. Its
 // views, deep links, native/payment adapters and agent actions stay unavailable; no payment, card
 // or pass-wallet effect can be reached from a product build.
 const root=resolve(import.meta.dirname,'..');

@@ -1,8 +1,7 @@
-// spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/device.md, "Nothing is dispatched unless the inspection says the reviewed event is still current"; spec/calendar/nativeSync.md, "Enabling persists consent only for a current lease and the exact journal position it read"
+// spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/device.md, "Nothing is dispatched unless the inspection says the reviewed event is still current"
 // Decoders for the AlphaCalendar Android plugin's answers. spec/os/android/calendar.md owns what the plugin does.
 
 const Id = Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,18}$/))
-const Revision = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const Text = (max: number) => Schema.String.check(Schema.isMaxLength(max))
 const SafeInstant = Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }))
 
@@ -73,14 +72,6 @@ export const SourceReply = Schema.Struct({ status: Schema.Literal("ready"), sour
 /** An editor handoff's answer: a preview receipt, never a write. */
 export const HandoffReply = Schema.Struct({ status: Schema.Literals(["opened", "unavailable", "cancelled"]) })
 
-/** A device sync call's answer. */
-export const SyncReply = Schema.Struct({
-  status: Schema.Literals(["ready", "enabled", "paused", "saved", "queued", "deleted", "undone", "cancelled", "context-changed", "permission-required", "conflict", "unknown", "unavailable"]),
-  lease: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/))),
-  revision: Schema.optionalKey(Revision),
-  phase: Schema.optionalKey(Text(64)),
-})
-
 /** An availability read as the phone answers it; upstream's review decodes each row and the freshness itself. */
 export const AvailabilityReply = Schema.Struct({ status: Text(64), events: Schema.optionalKey(Schema.Unknown), freshness: Schema.optionalKey(Schema.Unknown) })
 
@@ -110,7 +101,6 @@ export const decodeInspect = Schema.decodeUnknownEffect(InspectReply)
 export const decodeRemove = Schema.decodeUnknownEffect(RemoveReply)
 export const decodeSource = Schema.decodeUnknownEffect(SourceReply)
 export const decodeHandoff = Schema.decodeUnknownEffect(HandoffReply)
-export const decodeSync = Schema.decodeUnknownEffect(SyncReply)
 export const decodeAvailability = Schema.decodeUnknownEffect(AvailabilityReply)
 export const decodeAvailabilitySources = Schema.decodeUnknownEffect(AvailabilitySources)
 export const decodeAgentReply = Schema.decodeUnknownEffect(AgentReply)

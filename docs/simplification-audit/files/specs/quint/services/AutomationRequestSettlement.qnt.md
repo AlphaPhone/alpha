@@ -1,0 +1,13 @@
+# specs/quint/services/AutomationRequestSettlement.qnt
+- Lines: 119 | Kind: Quint model, live (6 tests, 7 invariants, 4 witnesses, symbol pins) | Verdict: KEEP; PORT its harness (urgent: it depends on a host test that is being rewritten)
+- Covers: one agent automation row in the Workflows list and its journal entry. Properties: a change is recorded before it is sent and released by reply/refusal/complete list/owner, a run is never settled by a list, a partial list settles nothing, a removal happens once, and one change is retained at a time. Sources: `apps/app/src/prototype/automations-adapter.ts`, `runtime/automations-protocol.ts`, `runtime/workflow-intents.ts` (exist); `sharedSources` upstream `contracts/src/workflow-intents.ts`. Duplicates: `test/automations-unified.test.mjs` (adapter cases, verdict REWRITE as `journeys/workflows.spec.ts`). Callers: harness `refinement/services/automation-request-settlement.mjs` (188 lines), wrapper `test/quint-automation-request-settlement.test.mjs`, aggregate.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | harness 9-30 | T2 / T10 | The harness slices **a test file**: `test/automations-unified.test.mjs` from `'function adapterFixture('` to `'\nconst wait='`, then patches it with `.replace('return {window:context.window', …)`. It also `readFileSync`s `automations-adapter.ts`, strips types, and applies mutation rewrites (`rewrite(source)` must change the text). That host test's reviewer proposes splitting it (protocol cases → `test/integration/automations.test.mjs`, adapter cases → Playwright). If that happens first, this harness breaks. | PORT before or with the test split. Move `adapterFixture` into `test/fixtures/automations-adapter.mjs` as an exported function, and import the adapter through `sourceModule` with its view host injected. The mutation-check (`rewrite`) cases can go. They prove the harness detects a mutation, which is T5. | high (ordering) |
+| 2 | manifest symbols | T10 | Pins generic local names in `automations-adapter.ts`: `settled`, `uncertain`, `allowAnother`, `automationBlock`, `reminderBlock`, `loadedSession`, `locked`, `complete`. Also `AutomationOutcomeError`, `mergeAutomationRows`, … in `automations-protocol.ts`. Words like `locked`/`complete` match almost any file, so these pins prove nothing. | Drop `symbols`. | low |
+| 3 | 80-84 | — | `RunNeverSettledByList` and `PartialListSettlesNothing` encode PRD-relevant "never claim success without proof" rules. These are high-value invariants. | Keep. | none |
+
+## Proposed end state
+Model unchanged, no `symbols`. The harness imports an exported adapter fixture from `test/fixtures/` and the adapter module through esbuild. It no longer reads any test file's text.

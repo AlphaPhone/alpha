@@ -1,0 +1,13 @@
+# specs/quint/services/PlanAdmissionGrace.qnt
+- Lines: 161 | Kind: Quint model (services family, live; 8 tests, 6 witnesses, 10 symbol pins) | Verdict: KEEP model; PORT harness (slices `connection-ui.tsx`)
+- Covers: the stored plan-admission record (`alpha.connection.plan-admission.v1`) and resident Cloud admission: offline grace only under a fresh record of the same sign-in, billing-outage admission from a recent record, past plan ends never written, sign-in refusal/plan end removes the record, redeemed end precedes the record. Sources exist (`runtime/connection-ui.tsx`, `runtime/subscription-entitlement.ts`, upstream `cloud-resident-binding.ts`). Product-reachable (resident Cloud is the product path, D5 keeps it). Duplicates: `ServiceAuthorization.qnt` models the entitlement refresher, not this record; no overlap in invariants. Callers/importers: manifest; harness `refinement/services/plan-admission-grace.mjs` + `plan-admission-ports.mjs`; wrapper `test/quint-plan-admission-grace.test.mjs` + aggregate (T4).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | harness `plan-admission-ports.mjs` 14-26 | T10 / T2 | Harness reads `connection-ui.tsx` as text and cuts six sections at literal anchors (`function readPlanAdmission(` … `/** Notice shown when Cloud inference`, `function signInClient(` … `/**\n * A new key was stored`, `async function admitCloudResident(` … `/**\n * Reads the account and plan again`, `function residentBindingController(` … `/** The packaged-runtime refusal.`, `  async residentRedeem(` … `  /** Checks the plan again`, plus single lines `stopEntitlementRefresh`, `detachService`), strips `export`, strips types and evals in `vm`. All anchors exist today; any reformat (D9 Prettier) or the `connection-ui.tsx` split (D1) breaks it. | PORT: move plan admission (`PLAN_ADMISSION`, `readPlanAdmission`, `writePlanAdmission`, `redeemedPlanEnd`, `residentPlanEnded`, `admitCloudResident`, `residentBindingController`, redeem) into `runtime/connection/plan-admission.ts` with explicit ports (storage, clock, Cloud client, binding hooks) and import it. | High: blocks Stage F split and the formatter. |
+| 2 | manifest symbols | T10 | 10 name pins into `connection-ui.tsx`. | File pin on the new module. | Low |
+| 3 | 85 | — | `refreshFailed` is an explicit stutter (`s' = s`) kept as a named action for trace mapping. | Keep. | — |
+
+## Proposed end state
+Model unchanged. Harness imports `plan-admission.ts` (new module extracted from `connection-ui.tsx`) and drives it with a fake clock/storage/Cloud port; no text anchors; runs once.

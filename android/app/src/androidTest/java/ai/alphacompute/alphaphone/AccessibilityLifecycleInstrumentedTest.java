@@ -4,7 +4,6 @@ import static org.junit.Assert.*;
 
 import android.content.Context;
 import android.content.res.Configuration;
-import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.view.InputDevice;
 import android.view.KeyCharacterMap;
@@ -13,7 +12,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.UiDevice;
 import java.io.File;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -38,7 +36,7 @@ import org.junit.runner.RunWith;
  *   accessibility`, leaves 200% font set, kills the process and reads the first screen of the new
  *   one (Home, or the required sign-in page of a signed-out flag-off build) in order.
  *
- * The views need the test-mocks pair or a phone its owner signed in (P-43). Emulator evidence only,
+ * The views need a phone its owner signed in (P-43). Emulator evidence only,
  * not TalkBack itself, Switch Access or a device.
  */
 @RunWith(AndroidJUnit4.class)
@@ -49,7 +47,6 @@ public final class AccessibilityLifecycleInstrumentedTest {
   for (int i = 0; i < tenths; i++) { if ("true".equals(js("Boolean(" + code + ")"))) return true; SystemClock.sleep(100); }
   return false;
  }
- private static void open(String view) throws Exception { js(AppNavigation.request(view)); assertTrue(view + " opens", until(AppNavigation.selected(view), 200)); }
  private static String foreground() throws Exception {
   String dump = AccessibilityViewsInstrumentedTest.shell("dumpsys activity activities");
   Matcher match = TOP.matcher(dump);
@@ -92,12 +89,10 @@ public final class AccessibilityLifecycleInstrumentedTest {
   assertTrue("The page measures the 200% text it is drawn at (measured " + js(SCALE) + ")", until("Math.abs(" + SCALE + "-2)<0.2", 100));
  }
 
- /** P-43: the views need a phone its owner signed in. */
- private static void assumeViews(String journey) throws Exception { AppNavigation.assumeNoRequiredSignIn(journey); }
-
  /** Android's HOME key from every view, three times, with Alpha brought back by its launcher start each time. */
  @Test public void repeatedHomeAndReturnKeepEveryViewAccessible() throws Exception {
-  assumeViews("Repeated HOME across views");
+  // P-43: the views need a phone its owner signed in.
+  AppNavigation.assumeNoRequiredSignIn("Repeated HOME across views");
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   Assume.assumeFalse("With Alpha selected as HOME the HOME key lands on Alpha Home (AccessibilityHomeRoleInstrumentedTest)", ChatContinuityInstrumentedTest.alphaIsHome(context));
   String previous = AccessibilityViewsInstrumentedTest.fontScale(null);
@@ -108,7 +103,7 @@ public final class AccessibilityLifecycleInstrumentedTest {
    try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
     start();
     for (String view : AccessibilityViewsInstrumentedTest.VIEWS) {
-     open(view);
+     AppNavigation.open(view);
      for (int press = 1; press <= 3; press++) {
       pressHome();
       if (!awaitForeground(false)) { problems.add(view + ": HOME " + press + " did not leave Alpha"); break; }
@@ -133,7 +128,7 @@ public final class AccessibilityLifecycleInstrumentedTest {
 
  /** Each view on its side and back: its screen, every control on screen and its reading order. */
  @Test public void everyViewKeepsItsScreenAndControlsThroughRotation() throws Exception {
-  assumeViews("Rotation across views");
+  AppNavigation.assumeNoRequiredSignIn("Rotation across views");
   String previous = AccessibilityViewsInstrumentedTest.fontScale(null);
   UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
   List<String> problems = new ArrayList<>();
@@ -142,7 +137,7 @@ public final class AccessibilityLifecycleInstrumentedTest {
    try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
     start();
     for (String view : AccessibilityViewsInstrumentedTest.VIEWS) {
-     open(view);
+     AppNavigation.open(view);
      // The launcher is held portrait, so each view is checked upright.
      device.setOrientationNatural();
      boolean upright = true;
@@ -186,7 +181,7 @@ public final class AccessibilityLifecycleInstrumentedTest {
    try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
     AppNavigation.liveMode();
     assertTrue("The page measures the 200% text it is drawn at", until("Math.abs(" + SCALE + "-2)<0.2", 100));
-    if (!requiredSignIn(context)) { js(AppNavigation.request("Settings")); assertTrue("Settings opens before the process dies", until(AppNavigation.selected("Settings"), 200)); }
+    if (!AppNavigation.requiredSignIn()) { js(AppNavigation.request("Settings")); assertTrue("Settings opens before the process dies", until(AppNavigation.selected("Settings"), 200)); }
    }
   } else if ("verify".equals(phase)) {
    JSONObject record = new JSONObject(new String(Files.readAllBytes(fixture.toPath()), StandardCharsets.UTF_8));
@@ -194,14 +189,14 @@ public final class AccessibilityLifecycleInstrumentedTest {
    try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
     AppNavigation.liveMode();
     assertTrue("The new process measures the persisted 200% text (measured " + js(SCALE) + ")", until("Math.abs(" + SCALE + "-2)<0.2", 100));
-    if (requiredSignIn(context)) {
+    if (AppNavigation.requiredSignIn()) {
      assertTrue("The required sign-in page comes back", until("document.querySelector('.alpha-auth-page #cloud-sign-in-title')", 200));
      TalkBackOrder.check(device, "Required Cloud sign-in after process death", TalkBackOrder.Assistant.ABSENT);
     } else {
      js(AppNavigation.request("Home")); assertTrue("Home after process death", until(AppNavigation.selected("Home"), 200));
      AppNavigation.declineStartupAccess();
      TalkBackOrder.check(device, "Home after process death", TalkBackOrder.Assistant.REQUIRED_LAST);
-     open("Settings");
+     AppNavigation.open("Settings");
      TalkBackOrder.check(device, "Settings after process death", TalkBackOrder.Assistant.REQUIRED_LAST);
     }
    }
@@ -212,8 +207,5 @@ public final class AccessibilityLifecycleInstrumentedTest {
     assertTrue(fixture.delete());
    }
   } else fail("Unknown accessibility phase " + phase);
- }
- private static boolean requiredSignIn(Context context) throws Exception {
-  return new AlphaCredentialStore(context).readCredentialSlot("cloud:production") == null;
  }
 }

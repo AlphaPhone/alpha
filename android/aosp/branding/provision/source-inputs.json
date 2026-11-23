@@ -86,14 +86,11 @@
       "url": "https://android.googlesource.com/platform/packages/modules/Permission/+/1093eca7407576c72e51b1a88550ee0667a6e5dc/framework-s/java/android/app/role/RoleControllerService.java"
     }
   ],
-  "settingsUpdateAuthority": "Pinned InputMethodManager.java 4380-4429 recommends direct secure-setting updates; input service 3129-3132 requires selected and enabled methods kept in sync",
-  "homeRoleAuthority": "Pinned RoleManager.java 480,513 exposes privileged get/add holders as current user; Provision already holds WRITE_SECURE_SETTINGS and stages MANAGE_ROLE_HOLDERS",
   "productIcon": {
     "path": "android/app/src/main/res/drawable/app_icon.xml",
     "sha256": "02e6a54ddc755c2be6ed8fb43b2e53430957c45c473cd6ca340615e92eb817ac",
     "logoSource": "apps/app/public/logo-symbol.svg",
     "logoSourceSHA256": "38f8d45db5c244eb0cb0a7361f0801096edcc5efffdbce6ef8b328d5b3eb7173",
-    "reuse": "Byte-exact existing Alpha setup/app icon, not a new renderer",
     "geometry": {
       "vector": {
         "width": "180dp",
@@ -108,7 +105,6 @@
         "scaleY": "0.54"
       },
       "clipPathSHA256": "a76f78f2bfba67850a905faca3b988b030698138f7cb84f5cee1621fa23405fe"
-    },
-    "assetPreservation": "Boot animation remains the explicit owner-admitted asset input; this icon correction does not choose or regenerate it"
+    }
   }
 }

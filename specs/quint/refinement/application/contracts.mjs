@@ -1,79 +1,9 @@
 import assert from 'node:assert/strict';
 import {checkTraces as check, qmap} from '../check-traces.mjs';
-import {bundledSource, sourceModule, sourceContext, memoryStore, deferred, tick, trace, checkpoint, call, captureSources, boundInputs} from './support.mjs';
+import {bundledSource, sourceModule, sourceContext, memoryStore, trace, checkpoint, call, captureSources, boundInputs} from './support.mjs';
 captureSources(['specs/quint/refinement/application/contracts.mjs']);
 const checkTraces = options => check(boundInputs({...options, sources: [...options.sources,
   'specs/quint/refinement/application/contracts.mjs', 'specs/quint/refinement/application/support.mjs']}));
-
-export async function notesLifecycle() {
-  const storeModule = await bundledSource('apps/app/src/runtime/notes-store.ts');
-  const trashModule = await bundledSource('apps/app/src/runtime/notes-trash-policy.ts');
-  const {NotesStore, NOTES_KEY} = storeModule.exports;
-  const policy = trashModule.exports;
-  const traces = [];
-  for (const restore of [false, true]) {
-    const memory = memoryStore();
-    let notes = new NotesStore(memory, [{id: 'note', kind: 'text', title: 'Note', body: 'original'}]);
-    let trash = policy.emptyNotesTrash();
-    const observe = () => ({'s.live': notes.list.length > 0, 's.trash': trash.entries.length > 0,
-      's.trashContent': trash.entries[0]?.note.body || ''});
-    const t = trace(`notes-delete-${restore ? 'restore' : 'expiry'}`, observe(), call('initLegacy'));
-    const target = await notes.target('note');
-    trash = policy.addNotesTrashEntry(trash, {id: 'deletion', note: notes.list[0], target, index: 0, deletedAt: 1000});
-    checkpoint(t, 'write-ahead trash policy retains exact note', call('prepareTrash'), observe());
-    await notes.execute({type: 'notes_delete', target}, 'deletion', new AbortController().signal, () => {});
-    checkpoint(t, 'real store writes deletion tombstone', call('commitDeletion'), observe());
-    notes = new NotesStore(memory); checkpoint(t, 'store reconstructs saved envelope', call('restart'), observe());
-    if (restore) {
-      notes.replace(policy.restoreNotesTrashEntry(notes.list, trash.entries[0]));
-      trash = policy.removeNotesTrashEntries(trash, ['deletion']);
-      checkpoint(t, 'restore exact saved note using source policy', call('restore'), {...observe(), 's.content': notes.list[0].body});
-    } else {
-      const now = 1000 + policy.NOTES_TRASH_RETENTION_MS;
-      const plan = policy.planNotesTrash(trash, new Set(notes.list.map(note => note.id)), now);
-      assert.equal(plan.expired.length, 1);
-      trash = policy.removeNotesTrashEntries(trash, plan.expired.map(entry => entry.id));
-      checkpoint(t, 'exact retention boundary expires trash', [call('age'), call('age'), call('age'), call('maintenance')], observe());
-    }
-    assert.ok(memory.getItem(NOTES_KEY)); traces.push(t);
-  }
-  {
-    const {NotesController} = await sourceModule('apps/app/src/ui/notes/notes-controller.ts');
-    const {NotesEditor} = await sourceModule('apps/app/src/ui/notes/notes-editor.ts');
-    const reading = deferred(), writing = deferred();
-    let phase = 'ready', content = 'original', revision = 0;
-    const note = () => ({id: 'note', title: content, body: '', color: 'yellow', createdAt: '', updatedAt: ''});
-    const snapshot = () => ({notes: [note()], revision});
-    const client = {
-      async readState() { await reading.promise; return snapshot(); },
-      async interact(capability, params) {
-        assert.equal(capability, 'update-note');
-        assert.equal(params.expectedRevision, revision);
-        await writing.promise; content = params.content; revision++;
-        return {state: snapshot(), note: note(), target: {id: 'note', revision}};
-      },
-    };
-    const controller = new NotesController(client, () => true, {phase: value => {phase = value;}, snapshot() {}});
-    const editor = new NotesEditor(controller, {changed() {}, committed() {}, review() {}});
-    const t = trace('canonical controller and editor own one exact revision', {'s.mode': 'canonical'}, call('initCanonical'));
-    const readPending = controller.refresh(); await tick();
-    checkpoint(t, 'canonical read enters the real controller', call('canonicalRefresh'), {'s.canonical.phase': phase});
-    reading.resolve(); await readPending;
-    checkpoint(t, 'source snapshot publishes its exact revision', call('canonicalReadResult', 0, 1, 0, true), {'s.canonical.revision': controller.revision, 's.canonical.phase': phase});
-    editor.open('note');
-    checkpoint(t, 'editor opens the observed note', call('canonicalOpen'), {'s.canonical.draft': editor.draft !== null, 's.canonical.text': editor.draft.title});
-    editor.edit({title: '', body: 'edited'});
-    checkpoint(t, 'actual editor increments the draft version', call('canonicalEdit'), {'s.canonical.version': editor.draft.version, 's.canonical.text': editor.draft.body});
-    const saving = editor.save(); await tick();
-    checkpoint(t, 'save dispatches through the canonical controller', call('canonicalSave'), {'s.canonical.writing': controller.pending, 's.canonical.phase': phase});
-    writing.resolve(); assert.equal(await saving, true);
-    checkpoint(t, 'confirmed source response advances one revision', call('canonicalSaveResult', 0, 1, true), {'s.canonical.revision': controller.revision, 's.canonical.content': controller.viewNote('note').title, 's.canonical.version': editor.draft.version, 's.canonical.phase': phase});
-    controller.retire(); traces.push(t);
-  }
-  return checkTraces({model: 'NotesLifecycle', sources: [...storeModule.sources, ...trashModule.sources], traces, scope: 'bounded-component', assumptions: [
-    'Actual legacy NotesStore/Trash policy and canonical NotesController/NotesEditor execute deletion, reconstruction, expiry and one revision-bound read/edit/save.',
-    'Trash persistence is an in-memory port. Secure-store draft merge, write-ahead crash boundaries, storage failure and lock UI remain separate obligations.']});
-}
 
 export async function calendarPresentation() {
   const formModule = await bundledSource('apps/app/src/runtime/calendar-form-draft.ts');

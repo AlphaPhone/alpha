@@ -55,8 +55,6 @@ async function fixture(code) {
       documents[id] = structuredClone(value);return 'saved';
     },
   }));
-  const preservation = {capture: async () => ({fingerprint: 'empty', present: false, readable: true, pending: false, records: []}),
-    retainedReadOnly: async () => true};
   const source = {provider: 'google', side: 'owner', grantId: 'fixture-grant', connectorAccountId: 'fixture-account',
     accountEmail: null, calendarId: 'primary', summary: 'Fixture calendar', description: null, primary: true,
     accessRole: 'owner', backgroundColor: null, foregroundColor: null, timeZone: 'UTC', selected: true,
@@ -76,7 +74,7 @@ async function fixture(code) {
   };
   // Produce the saved document by completing a real controller refresh. The
   // adapter never fabricates a serialized cache document or saved feed envelope.
-  const writer = new AgentCalendar(port, preservation, () => ({
+  const writer = new AgentCalendar(port, () => ({
     getLifeOpsCalendarFeed: async () => feedFor(0, 0),
     getLifeOpsCalendars: async () => ({calendars: [source]}),
     getLifeOpsNextCalendarEventContext: async () => ({event: null, calendarFeedState: 'complete'}),
@@ -85,7 +83,7 @@ async function fixture(code) {
   assert.ok(documents[0]?.entries.some(entry => entry.value?.feed?.events.length === 1), 'Actual live refresh seeds the cache');
   writer.retire();
 
-  const calendar = new AgentCalendar(port, preservation, (selectedPort, signal) => {
+  const calendar = new AgentCalendar(port, (selectedPort, signal) => {
     const job = {owner, credential, query, signal, local: deferred(), feed: deferred(), sources: deferred(), next: deferred()};
     assert.equal(selectedPort.identity.ownerId, 'owner-' + job.owner);
     jobs.push(job);

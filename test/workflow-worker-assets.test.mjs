@@ -95,7 +95,7 @@ public class WorkerAssetTest {
  }
 }`;
   const harnessPath=path.join(temporary,'WorkerAssetTest.java');fs.writeFileSync(harnessPath,harness);
-  execFileSync(javaBinary('javac'),['--release','8','-d',temporary,path.join(root,'android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowWorkerAssets.java'),harnessPath],{timeout:scaledTimeout(20000)});
+  execFileSync(javaBinary('javac'),['--release','8','-d',temporary,path.join(root,'android/app/src/main/java/ai/alphacompute/alphaphone/WorkflowWorkerAssets.java'),path.join(root,'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaUtil.java'),harnessPath],{timeout:scaledTimeout(20000)});
   assert.match(execFileSync(javaBinary('java'),['-cp',temporary,identity+'.WorkerAssetTest',assets,state],{encoding:'utf8',timeout:scaledTimeout(20000)}),/^PASS extract/);
   if(process.env.ALPHA_WORKFLOW_WORKER_OUTPUT){
    const realAssets=path.join(temporary,'real-assets'),realState=path.join(temporary,'real-agent');

@@ -1,0 +1,7 @@
+apps/app/src/prototype/camera-adapter.ts
+apps/app/src/prototype/canonical-calendar-drafts.ts
+apps/app/src/prototype/canonical-notes-controller.ts
+apps/app/src/prototype/canonical-notes-editor.ts
+apps/app/src/prototype/canonical-notes-ui.ts
+apps/app/src/prototype/chat-overlay-motion-adapter.ts
+apps/app/src/prototype/clock-adapter.ts

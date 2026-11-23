@@ -1,4 +1,4 @@
-// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/preservation.md, "Story: Restore my calendar from a backup without replaying anything"; spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""
+// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""
 import { assert, describe, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
@@ -12,7 +12,6 @@ import { HeldDeletions } from "../../src/calendar/deletions.vibe"
 import { DeviceCalendar } from "../../src/calendar/device.vibe"
 import { CalendarDrafts } from "../../src/calendar/drafts.vibe"
 import { HomeAgenda } from "../../src/calendar/home.vibe"
-import { prepareBackup, prepareSalvage } from "../../src/calendar/preservation.vibe"
 import { agentEventKey } from "../../src/calendar/model.vibe"
 import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
 
@@ -156,20 +155,5 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
       const blocked = try device.save({ ...form, creationId: "c-2" })
       try check(() => assert.deepStrictEqual([lost, blocked, phone.events.length], ["unconfirmed", "duplicate", 0]))
     }
-  })
-
-  it("a backup restores fresh identities and a damaged series not at all (spec/calendar/preservation.md, \"Story: Restore my calendar from a backup without replaying anything\")", () => {
-    let next = 0
-    const revision = () => `r${++next}`
-    const series = { id: "s", calendarId: "local", title: "Run", body: "", location: "", begin: 0, end: 3_600_000, repeat: "daily" }
-    const exception = { id: "s:occ:86400000", calendarId: "local", title: "Run late", begin: 90_000_000, end: 93_600_000, seriesId: "s", occurrenceBegin: 86_400_000 }
-    const restored = prepareBackup(JSON.stringify({ events: [series, exception] }), revision)
-    const salvaged = prepareSalvage(JSON.stringify({ events: [series, { ...exception, begin: "bad" }, { id: "x", calendarId: "local", title: "Solo", begin: 0, end: 1 }] }), revision)
-    assert.deepStrictEqual({
-      ids: restored?.events.map((event) => event.id.startsWith("restored-")),
-      alerts: restored?.events.map((event) => event.alert),
-      kept: salvaged?.restored.events.map((event) => event.title),
-      skipped: salvaged?.skipped.map((row) => row.index),
-    }, { ids: [true, true], alerts: [null, null], kept: ["Solo"], skipped: [1, 2] })
   })
 })

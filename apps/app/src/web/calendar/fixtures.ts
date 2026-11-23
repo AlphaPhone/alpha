@@ -2,7 +2,6 @@
 // Fixture rows for the stories (`*.meta.tsx`); never loaded by the app.
 import { initial as draftInitial, type EditorDraft } from "../../../gen/calendar__drafts.ts";
 import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
-import type { SyncDestination } from "../../calendar/sync.vibe";
 import type { CalendarRow } from "../../calendar/model.vibe";
 import type { EventFacts } from "./EventDetail.tsx";
 import type { ListGroup } from "./layout.ts";
@@ -53,21 +52,3 @@ export const conflictDraft: EditorDraft = { ...openDraft, conflict: true };
 
 /** An editor whose slot cannot be read, in a development build's recovery. */
 export const recoveryDraft: EditorDraft = { ...openDraft, storageError: true, recovery: "RecoveryReady", recoveryCurrent: true };
-
-/** The owner's writable Google calendars. */
-export const destinations: readonly SyncDestination[] = [
-  { connectorAccountId: "google-1", providerCalendarId: "primary", name: "Primary", account: "owner@example.com", version: 1 },
-  { connectorAccountId: "google-1", providerCalendarId: "team", name: "Team", account: "owner@example.com", version: 1 },
-];
-
-/** Two writable Google calendars device sync may choose. */
-export const deviceSyncOffered = [
-  { connectionId: "0f6c2a8e-3b1d-4c5e-9a7f-1e2d3c4b5a69", providerCalendarId: "primary", name: "owner@example.com", account: "owner@example.com" },
-  { connectionId: "0f6c2a8e-3b1d-4c5e-9a7f-1e2d3c4b5a69", providerCalendarId: "team@group.calendar.google.com", name: "Team", account: "owner@example.com" },
-] as const;
-
-/** Device sync off, with a calendar chosen and nothing reviewed yet. */
-export const deviceSyncOff = {
-  available: true, ready: true, status: "Sync is off.", running: false, enabled: false, selection: deviceSyncOffered[0],
-  destination: { account: "", calendar: "" }, reviewed: undefined, offered: undefined,
-};

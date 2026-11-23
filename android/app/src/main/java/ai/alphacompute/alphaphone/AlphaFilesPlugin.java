@@ -18,22 +18,14 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /** Files browser over shared storage with all-files access, or legacy storage permission on API 29.
- * Paths stay volume-relative and are checked by the shared StorageBrowser. A retired SAF folder
- * grant is released on load; selected document capabilities keep their separate grants. */
+ * Paths stay volume-relative and are checked by the shared StorageBrowser. Selected document
+ * capabilities keep their separate grants. */
 @CapacitorPlugin(name="AlphaFiles", permissions={@Permission(alias="legacyStorage",strings={android.Manifest.permission.READ_EXTERNAL_STORAGE,android.Manifest.permission.WRITE_EXTERNAL_STORAGE})})
 public class AlphaFilesPlugin extends Plugin {
- /** Preference used by earlier installs to record their selected SAF folder. */
- static final String PREF="alpha-files-tree";
  private static final String STORAGE_TRASH_FOLDER=".Trash-alpha";
  @Override @PluginMethod public void requestPermissions(PluginCall call){LateLaunch.ask(call,()->super.requestPermissions(call));}
- @Override public void load(){PluginWorkers.submit(storageWorker,this::releaseRetiredTree,()->{});}
- private void releaseRetiredTree(){
-  if(getContext().getSharedPreferences(PREF,Context.MODE_PRIVATE).getAll().isEmpty())return;
-  try{new DocumentFolderTree(getContext(),PREF,uri->null).forget();}catch(Exception ignored){/* Retry on the next load. */}
- }
  private static JSObject result(String status,String message){return DocumentFolderTree.result(status,message);}
  private ContentResolver resolver(){return getContext().getContentResolver();}
- // ---- Storage browser (all-files access) ----
  private final ExecutorService storageWorker=Executors.newSingleThreadExecutor();
  private final StorageBrowser.WatchSlot watch=new StorageBrowser.WatchSlot();
  private final android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -104,12 +96,9 @@ public class AlphaFilesPlugin extends Plugin {
    catch(RuntimeException again){call.resolve(result("unavailable","Android's file access settings are unavailable."));}
   }
  }
- @PermissionCallback private void legacyStorageReturned(PluginCall call){
-  JSObject out=new JSObject();out.put("status","ready");out.put("access",StorageCatalog.access(getContext()));call.resolve(out);
- }
- @ActivityCallback private void storageAccessReturned(PluginCall call,ActivityResult response){
-  if(call==null)return;JSObject out=new JSObject();out.put("status","ready");out.put("access",StorageCatalog.access(getContext()));call.resolve(out);
- }
+ private JSObject accessState(){JSObject out=new JSObject();out.put("status","ready");out.put("access",StorageCatalog.access(getContext()));return out;}
+ @PermissionCallback private void legacyStorageReturned(PluginCall call){call.resolve(accessState());}
+ @ActivityCallback private void storageAccessReturned(PluginCall call,ActivityResult response){if(call!=null)call.resolve(accessState());}
  @PluginMethod public void storageList(PluginCall call){storage(call,b->{
   List<StorageBrowser.Row> rows=b.list(call.getString("path",""));JSArray entries=new JSArray();int n=0;
   for(StorageBrowser.Row r:rows){if(n++>=StorageBrowser.LIST_MAX)break;entries.put(row(r));}
@@ -240,7 +229,8 @@ public class AlphaFilesPlugin extends Plugin {
  /** Watches what is on screen; a change emits storageChanged once per burst. A folder (and the
   * Downloads category, which is the Download folder) is watched with inotify and MediaStore:
   * MediaProvider and DownloadProvider write on the lower filesystem, which may raise no inotify
-  * event on the FUSE path. */
+  * event on the FUSE path. A current refusal retires the previous folder's observers; an older
+  * request cannot stop a newer watch. */
  @PluginMethod public void storageWatch(PluginCall call){long ticket=watch.request();storage(call,b->{
   String path=call.getString("path");String category=call.getString("category");
   java.io.File folder=path!=null?b.resolve(path,true):"downloads".equals(category)?new java.io.File(primaryBrowser().root,StorageCatalog.DOWNLOAD_FOLDER):null;
@@ -259,7 +249,6 @@ public class AlphaFilesPlugin extends Plugin {
    return resources;
   });
   return new JSObject();
- // A current refusal retires the previous folder's observers; an older request cannot stop a newer watch.
  },()->watch.fail(ticket));}
  @PluginMethod public void storageUnwatch(PluginCall call){stopWatching();call.resolve(new JSObject());}
  private void burst(Runnable changed){main.removeCallbacks(changed);main.postDelayed(changed,400);}

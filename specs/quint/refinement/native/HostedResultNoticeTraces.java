@@ -382,7 +382,7 @@ public final class HostedResultNoticeTraces {
    if (i == 2) second = tag;
   }
   f.slots.put(HostedResultNotices.LEDGER, rows.toString());
-  f.ledger.capture(first);
+  f.ledger.capture(first,false);
   JSONObject offered = route(201, 1, "historical-loop-201");
   f.retainRow(offered, 1);
   check("posted".equals(f.ledger.publish(offered)), "Exact source publishes row 201");

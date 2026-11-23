@@ -1,0 +1,17 @@
+specs/quint/native/NavigationProgress.qnt
+specs/quint/native/PhoneCalls.qnt
+specs/quint/native/README.md
+specs/quint/native/RendererBackgroundRebuild.qnt
+specs/quint/native/RendererRecovery.qnt
+specs/quint/native/RendererSpeechChunk.qnt
+specs/quint/native/ResetRecovery.qnt
+specs/quint/native/ResidentRuntime.qnt
+specs/quint/native/ResidentScheduling.qnt
+specs/quint/native/ResidentSchedulingServiceAdmission.qnt
+specs/quint/native/ResidentStartCancel.qnt
+specs/quint/native/ReviewedCopies.qnt
+specs/quint/native/RuntimeUpdatePause.qnt
+specs/quint/native/SavedSignInRecovery.qnt
+specs/quint/native/SharedRecordingAdmission.qnt
+specs/quint/native/SpeechCleanupLatch.qnt
+specs/quint/native/SpeechResources.qnt

@@ -116,7 +116,7 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
     const notificationsUp = try pages.back()
     const general = (try held.get()).page
     try pages.leave()
-    // spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources and Google sync are set"
+    // spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources are set"
     try pages.route("calendar")
     try Effect.try(() => assert.deepStrictEqual(
       { refused, section, up, atRoot, vaultPage, inboxPage, left, notifications, notificationsUp, general, calls },
@@ -613,12 +613,11 @@ it.effect("Delete or reset only on purpose (spec/settings/passwords.md, \"Story:
   }
 })
 
-it.effect("Fill passwords with Alpha, and back them up natively (spec/settings/passwords.md, \"Story: Fill passwords with Alpha, and back them up natively\")", () => effect {
+it.effect("Fill passwords with Alpha (spec/settings/passwords.md, \"Story: Fill passwords with Alpha\")", () => effect {
   let selected = "this-app"
   const { calls, native } = android({
     "ElizaPasswords.status": () => ({ available: true, locked: true, unlockRemainingMs: null, unlockSeconds: 60, biometric: true, autofill: { supported: true, selected } }),
     "ElizaPasswords.openAutofillSettings": { status: "opened" },
-    "ElizaPasswords.sharedBackupReadiness": { ready: false },
     "AlphaBrowser.loginFillStatus": { available: true },
   })
   provide Layer.provideMerge(vault, Layer.mergeAll(vaultMachine(), native)) {
@@ -633,11 +632,9 @@ it.effect("Fill passwords with Alpha, and back them up natively (spec/settings/p
     try v.leave()
     try v.open()
     try v.run("OpeningAutofill", "")
-    // spec/settings/passwords.md, "A shared backup is offered only when its native app is ready, and approved natively"
-    try v.run("ApprovingBackup", "")
     try Effect.try(() => assert.deepStrictEqual(
-      { whileAlpha, shown: [shown.autofill, shown.browserFill, shown.backupReady], afterOther: calls.filter((c) => c.name === "ElizaPasswords.openAutofillSettings").length, approved: calls.some((c) => c.name === "ElizaPasswords.approveSharedBackup") },
-      { whileAlpha: 0, shown: ["AutofillThisApp", true, false], afterOther: 1, approved: false },
+      { whileAlpha, shown: [shown.autofill, shown.browserFill], afterOther: calls.filter((c) => c.name === "ElizaPasswords.openAutofillSettings").length },
+      { whileAlpha: 0, shown: ["AutofillThisApp", true], afterOther: 1 },
     ))
   }
 })

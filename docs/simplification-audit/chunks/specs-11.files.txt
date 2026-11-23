@@ -1,0 +1,9 @@
+specs/quint/legacy/Maps.qnt
+specs/quint/legacy/NotesView.qnt
+specs/quint/legacy/PhotosLibrary.qnt
+specs/quint/legacy/README.md
+specs/quint/legacy/SettingsNav.qnt
+specs/quint/legacy/SignIn.qnt
+specs/quint/legacy/chat-input/README.md
+specs/quint/legacy/chat-input/check-chat-input-refinement.mjs
+specs/quint/legacy/check-view-refresh.mjs

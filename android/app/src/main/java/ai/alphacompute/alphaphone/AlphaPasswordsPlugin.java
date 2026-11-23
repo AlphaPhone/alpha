@@ -3,11 +3,8 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.plugins.passwords.PasswordEditorPolicy;
 import ai.eliza.plugins.passwords.PasswordGenerator;
 import ai.eliza.plugins.passwords.PasswordVaultAccess;
-import ai.eliza.plugins.securestore.nativeonly.PasswordBackupApproval;
 import ai.eliza.plugins.securestore.nativeonly.PasswordFacets;
 import ai.eliza.plugins.securestore.nativeonly.PasswordVaultStore;
-import ai.eliza.plugins.signin.GoogleSignIn;
-import ai.eliza.plugins.signin.SharedPasswordBackup;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
@@ -25,13 +22,6 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -43,19 +33,12 @@ import org.json.JSONObject;
  * generated natively. Reveal and copy act natively and resolve with an acknowledgement. Rejections
  * use fixed messages and codes and never echo inputs; the renderer
  * (apps/app/src/ui/passwords/passwords-presentation.ts) words them by code and by these exact
- * sentences, so they do not change here. A shared backup ({@link PasswordSharedBackup}) is approved
- * only in this app's own native flow: the Google account picker for a fresh Cloud proof and a native
- * confirmation; its proof, key and sealed bytes never reach the renderer.
+ * sentences, so they do not change here.
  */
 @CapacitorPlugin(name = "ElizaPasswords")
 public class AlphaPasswordsPlugin extends Plugin {
   private static final SecureRandom RANDOM = new SecureRandom();
-  private static final long BACKUP_CONFIRM_MILLIS = 120_000;
   private long unlockTicket;
-  private final ExecutorService backupWorker = Executors.newSingleThreadExecutor();
-  private final AtomicBoolean backupBusy = new AtomicBoolean();
-  private volatile boolean backupPicker, destroyed;
-  private volatile android.os.CancellationSignal backupCancellation;
 
   private PasswordVaultAccess access(PluginCall call) {
     try { return PasswordVaultAccess.get(getContext()); }
@@ -289,99 +272,6 @@ public class AlphaPasswordsPlugin extends Plugin {
     catch (Exception failure) { fail(call, failure); }
   }
 
-  /** Whether a shared backup can be offered now (`{ready}`): an admitted vault, a signed-in account and the Cloud's backup for this exact native app. Opens no challenge. */
-  @PluginMethod public void sharedBackupReadiness(PluginCall call) {
-    if (!PasswordVaultGate.admitted(getContext())) { JSObject result = new JSObject(); result.put("ready", false); call.resolve(result); return; }
-    try {
-      backupWorker.execute(() -> {
-        JSObject result = new JSObject();
-        result.put("ready", !destroyed && new PasswordSharedBackup(getContext()).ready());
-        call.resolve(result);
-      });
-    } catch (RejectedExecutionException stopped) { call.reject("Saved passwords are unavailable", "unavailable"); }
-  }
-
-  /**
-   * Backs the unlocked vault up to the signed-in account's shared Cloud backup (`{saved, revision?}`):
-   * one fresh Google proof from the system account picker, the owner's native confirmation, then one
-   * save sealed on this phone. A changed account, a locked vault or a closed screen ends it.
-   */
-  @PluginMethod public void approveSharedBackup(PluginCall call) {
-    PasswordVaultAccess access = vault(call); if (access == null) return;
-    if (!access.unlocked()) { call.reject("Unlock saved passwords first", "locked"); return; }
-    if (!backupBusy.compareAndSet(false, true)) { call.reject("A backup is already in progress", "busy"); return; }
-    AtomicBoolean declined = new AtomicBoolean();
-    backupStep(call, declined, () -> {
-      PasswordSharedBackup backup = new PasswordSharedBackup(getContext());
-      PasswordSharedBackup.Account account = backup.account();
-      if (account == null) throw new PasswordSharedBackup.Refused("Sign in to back up saved passwords", "signed-out");
-      BooleanSupplier active = () -> !destroyed && access.unlocked() && backup.current(account);
-      SharedPasswordBackup.Attempt attempt = PasswordSharedBackup.service().begin(PasswordBackupApproval.Purpose.SAVE, account.owner, active);
-      Activity activity = getActivity();
-      if (activity == null || destroyed) throw new PasswordSharedBackup.Refused("Saved passwords are unavailable", "unavailable");
-      android.os.CancellationSignal cancellation = new android.os.CancellationSignal();
-      backupCancellation = cancellation;
-      backupPicker = true;
-      activity.runOnUiThread(() -> GoogleSignIn.pick(activity, attempt.challenge(), cancellation, picked -> {
-        backupPicker = false;
-        backupStep(call, declined, () -> {
-          if (!(picked instanceof GoogleSignIn.Picked.Token token)) throw new PasswordSharedBackup.Refused("Backup was cancelled", "cancelled");
-          PasswordBackupApproval approval = attempt.approve(token, () -> confirmBackup(activity, active, declined));
-          PasswordBackupApproval.Response response = backup.save(approval, access, active);
-          if (response.status() == 409 || response.status() == 412) throw new PasswordSharedBackup.Refused("The backup changed. Try again", "conflict");
-          if (response.status() < 200 || response.status() >= 300) throw new PasswordSharedBackup.Refused("The backup wasn’t saved", "unavailable");
-          backupBusy.set(false);
-          JSObject result = new JSObject();
-          result.put("saved", true);
-          if (response.revision() != null) result.put("revision", response.revision());
-          call.resolve(result);
-        });
-      }));
-    });
-  }
-
-  private interface BackupStep { void run() throws Exception; }
-
-  private void backupStep(PluginCall call, AtomicBoolean declined, BackupStep step) {
-    try { backupWorker.execute(() -> { try { step.run(); } catch (Exception failure) { backupFailed(call, declined, failure); } }); }
-    catch (RejectedExecutionException stopped) { backupFailed(call, declined, stopped); }
-  }
-
-  private void backupFailed(PluginCall call, AtomicBoolean declined, Exception failure) {
-    backupPicker = false;
-    backupBusy.set(false);
-    if (declined.get()) call.reject("Backup was cancelled", "cancelled");
-    else if (failure instanceof PasswordSharedBackup.Refused refused) call.reject(refused.getMessage(), refused.code);
-    else if (failure instanceof PasswordVaultAccess.Locked || failure instanceof PasswordVaultGate.Locked) call.reject("Unlock saved passwords first", "locked");
-    else call.reject("The backup wasn’t saved", "unavailable");
-  }
-
-  /** The owner's native confirmation of this one backup, shown on the unlocked phone; false when declined, dismissed, timed out or no longer current. */
-  private boolean confirmBackup(Activity activity, BooleanSupplier active, AtomicBoolean declined) {
-    if (!active.getAsBoolean() || activity.isFinishing() || activity.isDestroyed()) return false;
-    CountDownLatch answered = new CountDownLatch(1);
-    AtomicBoolean confirmed = new AtomicBoolean();
-    android.app.AlertDialog[] shown = {null};
-    activity.runOnUiThread(() -> {
-      if (destroyed || activity.isFinishing() || activity.isDestroyed()) { answered.countDown(); return; }
-      shown[0] = new android.app.AlertDialog.Builder(activity)
-        .setTitle(R.string.alpha_passwords_backup_title)
-        .setMessage(activity.getString(R.string.alpha_passwords_backup_message, CloudDeployment.PRODUCTION_NAME))
-        .setNegativeButton(R.string.alpha_passwords_cancel, (dialog, which) -> declined.set(true))
-        .setPositiveButton(R.string.alpha_passwords_backup_confirm, (dialog, which) -> confirmed.set(
-          !((android.app.KeyguardManager) activity.getSystemService(android.content.Context.KEYGUARD_SERVICE)).isDeviceLocked()))
-        .setOnDismissListener(dialog -> answered.countDown())
-        .create();
-      shown[0].show();
-    });
-    boolean settled;
-    try { settled = answered.await(BACKUP_CONFIRM_MILLIS, TimeUnit.MILLISECONDS); }
-    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); settled = false; }
-    if (!settled) activity.runOnUiThread(() -> { if (shown[0] != null) shown[0].dismiss(); });
-    if (!confirmed.get() && settled) declined.set(true);
-    return settled && confirmed.get() && active.getAsBoolean();
-  }
-
   /** Android's own confirmation selects the provider; nothing is set or inferred here. */
   @PluginMethod public void openAutofillSettings(PluginCall call) {
     Activity activity = getActivity();
@@ -401,7 +291,7 @@ public class AlphaPasswordsPlugin extends Plugin {
     try {
       PasswordVaultAccess access = PasswordVaultAccess.get(getContext());
       // The device-credential screen stops the host while an unlock is pending; keep that one.
-      if (!access.pending() && !backupPicker) access.lock(unlockTicket);
+      if (!access.pending()) access.lock(unlockTicket);
     } catch (Exception ignored) { /* Nothing to lock. */ }
     PasswordEditor.dismiss(getActivity());
     SecretSurfaces.dismiss();
@@ -413,10 +303,6 @@ public class AlphaPasswordsPlugin extends Plugin {
   }
 
   @Override protected void handleOnDestroy() {
-    destroyed = true;
-    android.os.CancellationSignal cancellation = backupCancellation;
-    if (cancellation != null) cancellation.cancel();
-    backupWorker.shutdownNow();
     try { PasswordVaultAccess.get(getContext()).lock(unlockTicket); }
     catch (Exception ignored) { /* Nothing to lock. */ }
     PasswordEditor.dismiss(getActivity());

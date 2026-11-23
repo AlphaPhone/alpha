@@ -9,13 +9,12 @@ import org.junit.Test;
 /**
  * Journey J05 composed in one app process on a flag-off build: a page in the native browser ->
  * Menu -> Ask about page -> the native review -> the question editor -> the composer -> Send with no
- * agent connected (nothing is dispatched and the draft is kept) -> a note whose web source is that
- * same page, stored in the encrypted Notes store, survives a recreation and reopens that address.
+ * agent connected (nothing is dispatched and the draft is kept). The former note-web-source step was
+ * removed with the legacy Notes web-source control (simplification decision D1).
  *
  * The page is served from memory by BrowserPageQuestionInstrumentedTest's fixture; no public host is
  * contacted. The agent's answer and the "Review summary note" save that follows it are not covered:
- * a flag-off build on an emulator has no connected agent, so the note is stored in the shape that
- * save writes. Emulator evidence for the native boundary only; not a real page, agent or device.
+ * a flag-off build on an emulator has no connected agent. Emulator evidence for the native boundary only; not a real page, agent or device.
  *
  * Preconditions this emulator does not meet, so the method skips with the reason: the WebView provider
  * must support isolated-world injection (the emulator's WebView 133 does not; the native review
@@ -41,8 +40,6 @@ public final class JourneyJ05InstrumentedTest {
     org.junit.Assert.assertEquals(0, steps.leaks(reviewed).length());
     org.junit.Assert.assertEquals(0, steps.leaks(BrowserPageQuestionInstrumentedTest.ARTICLE).length());
     steps.cleanup(pages, null); pages = null;
-    // The same page, as the summary note's web source.
-    steps.sourceNoteSurvivesRecreationAndReopens(scenario, note, page);
    } catch (Exception | AssertionError failure) { primary = failure; throw failure; } finally {
     try {
      if (pages != null) steps.cleanup(pages, primary);

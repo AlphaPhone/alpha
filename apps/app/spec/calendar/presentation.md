@@ -378,7 +378,7 @@ pure def lawDisconnectedNeverRetries(failed: bool): bool = statusAction(false, f
 ### The Calendars sheet is a modal over the view, opened only with no form or delete sheet open
 
 The header's Calendars button, and Calendar's settings route, open the sheet with the source
-switches and Google Calendar sync. It closes the date picker, and the date picker closes it.
+switches. It closes the date picker, and the date picker closes it.
 
 ```quint
 pure def canOpenSources(s: Presentation): bool =

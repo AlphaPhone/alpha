@@ -1,0 +1,16 @@
+# specs/quint/refinement/services/maps-model-traces.mjs
+- Lines: 219 | Kind: shared formal-replay helper (Quint CLI → ITF traces; generic step-by-step replay) | Verdict: MERGE into one ITF library `specs/quint/refinement/itf.mjs` (this file is the best base: it has witnesses, scenarios, random walks and `replayTraces`)
+- Covers: `modelNames`, `stepParameters`, `scenarioActions`, `modelTraces`, `replayTraces`, `plain`, `repositoryRoot`. Duplicates: `services/identity-comms-traces.mjs` (237 lines, near-verbatim: diff shows only `#meta` filtering, numeric set sort, quoted-string handling in `balanced`, plus `sourceModule`/`settle`), `assistant-model-traces.mjs` (202, same API minus `modelNames`), `services/inbox-workflows-model-traces.mjs` (different API, same job), `application/shell-model-traces.mjs`, `native/itf-replay.mjs`. Callers/importers: `services/maps-connection.mjs`, `maps-guidance-voice.mjs`, `resident-maps-relay-offer.mjs`, `forward-replays.mjs`; `native/maps-location.mjs`, `native/forward-replays.mjs`; `application/maps-share-choice.mjs`, `map-plane-ownership.mjs`; tests `quint-maps-connection`, `quint-maps-guidance-voice`, `quint-native-maps-location`, `quint-map-plane-ownership`, `quint-maps-share-choice`, `quint-resident-maps-relay-offer` (all for `modelNames`).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | whole file | C5 | Three near-identical copies (this, `identity-comms-traces.mjs`, `assistant-model-traces.mjs`). The `identity-comms` variant is a strict superset in robustness (quoted strings in `balanced`, `#meta` stripping, numeric set sort). | Merge into `itf.mjs` using the `identity-comms` `balanced`/`plain` behaviour; verify Maps traces still pass (numeric sort changes the order of number sets, so the Maps projections that compare sets must use the same `plain`). | medium: deep-equal on sorted arrays |
+| 2 | 20-28 | C3 | `plain` lacks `#meta` filtering; harmless today because the replay reads `item[state]` only. | Unified `plain`. | low |
+| 3 | 71-77 | T10 (model text) | `modelNames` regex-scans `.qnt` for `run …Test` and `val …Witness`; tests then assert exact counts (e.g. 8 scenarios, 6 witnesses). | Keep the scan; drop exact-count asserts in wrappers (B5) — the manifest `tests` list is the source of truth. | low |
+| 4 | 124-133 | C3 | `quint()` spawn wrapper and `withDirectory` temp-dir helper duplicate `inbox-workflows-model-traces.mjs:39-50,99-114` and `scripts/check-quint.ts` child runner. | One `runQuint(args)` in the merged library. | none |
+| 5 | 198-214 | B5 | `recordComparedObservation` writes every compared observation into the observed-replay receipt. | Keep only if `observed-replay.mjs` survives the receipt review; otherwise drop. | low |
+| 6 | 17 | — | Seed fixed at `20261107`; same in the twins. | Single constant in the library. | none |
+
+## Proposed end state
+File replaced by `specs/quint/refinement/itf.mjs` (~200 lines): `plain`, `modelNames`, `modelTraces({path, module, scenarios, witnesses, random, steps, state})`, `replayTraces`, `modelWalks`/`modelScenario` (absorbed from `inbox-workflows-model-traces.mjs`), `sourceModule`, `runQuint`. All 14 importers switch their import path; no behaviour change.

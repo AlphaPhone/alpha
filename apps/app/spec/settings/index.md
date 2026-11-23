@@ -127,7 +127,7 @@ pure def lawAnAppPageOpensFromApps(app: AppRow, onPhone: bool): bool =
   appPage(app, onPhone) == Root or parent(appPage(app, onPhone)) == Apps
 ```
 
-### Calendar's row opens Calendar at its Calendars sheet, where its sources and Google sync are set
+### Calendar's row opens Calendar at its Calendars sheet, where its sources are set
 
 Settings mounts no Calendar settings of its own; the `calendar` route opens the same sheet.
 

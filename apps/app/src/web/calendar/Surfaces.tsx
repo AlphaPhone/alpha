@@ -1,16 +1,14 @@
-// spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/preservation.md, "Story: Keep my old app calendar, read only, for each account that chose to"
-import { Effect } from "effect";
+// spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"
 import { useState } from "react";
 import { approvalStatus, type ApprovalStatus } from "../../../gen/calendar__approvals.ts";
 import { checkOffered, shownAnswer } from "../../../gen/calendar__availability.ts";
 import { ApprovalReviews } from "../../calendar/approvals.vibe";
 import { HeldDeletions } from "../../calendar/deletions.vibe";
-import { LegacyCalendar } from "../../calendar/preservation.vibe";
 import { AgentRequests } from "../../calendar/requests.vibe";
 import { formatDateTime } from "../../calendar/time.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button, Checkbox, Sheet, SheetContent, Toast, ToastProvider, ToastViewport } from "../components/ui/index.ts";
-import { useAgentView, useApprovalSheet, useHeld, useRequestSheet } from "./hooks.ts";
+import { useApprovalSheet, useHeld, useRequestSheet } from "./hooks.ts";
 import { perform } from "../shell/services.ts";
 
 /** What the shell gives an always-mounted Calendar surface: a way to open an app. */
@@ -24,9 +22,6 @@ export type ApprovalReviewProps = SurfaceProps;
 
 /** The agent request review's props, as the shell mounts it in the overlay slot. */
 export type AgentRequestReviewProps = SurfaceProps;
-
-/** The saved app calendar review takes nothing: it shows while the agent's Calendar waits for it. */
-export type PreservationReviewProps = Record<string, never>;
 
 /**
  * The Undo notice of the newest held deletion; its window does not end while it is on screen.
@@ -141,26 +136,5 @@ export function AgentRequestReview(_props: AgentRequestReviewProps) {
         </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-/**
- * The review of the saved app calendar before the agent's Calendar starts: keep it read only, for this account.
- * @model spec/calendar/preservation.md
- */
-export function PreservationReview(_props: PreservationReviewProps = {}) {
-  const agent = useAgentView();
-  const [notice, setNotice] = useState("");
-  if (agent.state.status !== "TransitionRequired" && agent.state.status !== "LegacyRecovery") return null;
-  const recovery = agent.state.status === "LegacyRecovery";
-  return (
-    <section aria-label="Saved app calendar" className="flex flex-col gap-2 border-b border-border px-4 py-3">
-      <p className="text-sm">{recovery ? "The saved app calendar needs recovery before the agent’s Calendar can start. Nothing was changed." : "Keep your saved app calendar, read only, alongside the agent’s Calendar."}</p>
-      {notice && <p role="status" className="text-sm text-destructive">{notice}</p>}
-      {!recovery && (
-        <Button className="self-end" onClick={() => void perform(LegacyCalendar.use((service) => Effect.zipRight(service.openReview(), service.confirmReadOnly()))).then(
-          () => setNotice(""), () => setNotice("The saved calendar changed or couldn’t be recorded. Review it again."))}>Keep read only</Button>
-      )}
-    </section>
   );
 }

@@ -29,14 +29,13 @@ final class AlphaCanonicalNotifications {
  private JSONObject session,identity;
  private String owner,fence;
  private NativeNotificationInbox inbox;
- private long attempt;
+ private volatile long attempt;
  private int failures;
  private NativeNotificationDiagnostics.Stage connectStage=NativeNotificationDiagnostics.Stage.CAPTURE_OWNER;
  private AlphaCanonicalNotifications(Context context){this.context=context.getApplicationContext();}
  /** Called by the canonical resident service after provisioning its new private boot token. */
  static void resumeExisting(Context context){
-  if(ownsSession()||(android.os.Build.VERSION.SDK_INT>=33&&context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED))return;
-  NotificationManager manager=context.getSystemService(NotificationManager.class);if(manager==null||!manager.areNotificationsEnabled())return;
+  if(ownsSession()||!notificationsAllowed(context))return;
   Context app=context.getApplicationContext();final int ticket;
   synchronized(AlphaCanonicalNotifications.class){if(restoring||ownsSession())return;restoring=true;ticket=restoration.incrementAndGet();}
   long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);SERIAL.execute(()->restore(app,ticket,deadline));
@@ -57,16 +56,19 @@ final class AlphaCanonicalNotifications {
   restoration.incrementAndGet();stop();
   try{
    AlphaCredentialStore store=new AlphaCredentialStore(context);String saved=store.readCredentialSlot(NativeNotificationSession.SLOT),owner=null;
-   if(saved!=null)try{String value=new JSONObject(saved).optString("projectionOwner","");if(value.matches("[a-f0-9]{64}"))owner=value;}catch(JSONException invalid){}
+   if(saved!=null)try{String value=new JSONObject(saved).optString("projectionOwner","");if(AlphaUtil.isSha256Hex(value))owner=value;}catch(JSONException invalid){}
    store.removeCredentialSlot(NativeNotificationSession.SLOT);
    if(owner!=null)NativeNotificationProjector.retireOwner(context,owner);
   }catch(Exception unavailable){throw new IllegalStateException("Notification recovery authority could not be retired");}
  }
  static boolean ownsSession(){AlphaCanonicalNotifications a=active;return a!=null&&!a.stopped;}
- static void ensure(Context context){
-  if(!AlphaLocalAgentPlugin.enrollmentPresent()||(android.os.Build.VERSION.SDK_INT>=33&&context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED))return;
+ private static boolean notificationsAllowed(Context context){
+  if(android.os.Build.VERSION.SDK_INT>=33&&context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return false;
   NotificationManager manager=context.getSystemService(NotificationManager.class);
-  if(manager==null||!manager.areNotificationsEnabled())return;
+  return manager!=null&&manager.areNotificationsEnabled();
+ }
+ static void ensure(Context context){
+  if(!AlphaLocalAgentPlugin.enrollmentPresent()||!notificationsAllowed(context))return;
   synchronized(AlphaCanonicalNotifications.class){
    if(ownsSession())return;
    AlphaCanonicalNotifications next=new AlphaCanonicalNotifications(context);active=next;SERIAL.execute(next::connect);
@@ -96,7 +98,7 @@ final class AlphaCanonicalNotifications {
    session=AlphaLocalAgentPlugin.captureReminderOwnerSession();
    connectStage=NativeNotificationDiagnostics.Stage.READ_OWNER;
    identity=new NativeOwnerReminderHost(context).read();
-   String nextOwner=HostedResultNotices.hash(identity.toString());
+   String nextOwner=AlphaUtil.sha256Hex(identity.toString());
    if(owner!=null&&!owner.equals(nextOwner))throw new SecurityException("Notification owner changed");
    owner=nextOwner;
    connectStage=NativeNotificationDiagnostics.Stage.FENCE;

@@ -15,7 +15,7 @@ export function generateCalendarSyncEnableTraces(extraSources=[],selected=scenar
   const fixture=calendarSyncEnablePlatform();
   try {
     const compiled=[...['CalendarSyncBridge','CalendarSyncSnapshot','CalendarSyncMutation','CalendarSyncReceiptRecovery',
-      'CalendarSyncConsent','LocalAgentProviderAdmission','HostedResultNotices'].map(name=>app+name+'.java'),...fixture.compiled];
+      'CalendarSyncConsent','LocalAgentProviderAdmission','HostedResultNotices','AlphaUtil','Slots'].map(name=>app+name+'.java'),...fixture.compiled];
     const sources=[...compiled,...fixture.sources,
       ...['AlphaCalendarPlugin','AlphaConnectionPlugin','AlphaCredentialStore','NativeDeletionCoordinator'].map(name=>app+name+'.java'),
       'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),...extraSources,

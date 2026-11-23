@@ -135,5 +135,3 @@ export schema AutofillOpened { status: "opened" }
 /** AlphaBrowser.loginFillStatus. */
 export schema LoginFill { available?: boolean }
 
-/** ElizaPasswords backup readiness, from the vault's shared backup bridge. */
-export schema BackupReadiness { ready?: boolean }

@@ -5,36 +5,32 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.json.JSONObject;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ShellInstrumentedTest {
- private String evaluate(BoundedActivityScenario<MainActivity> scenario, String js) throws Exception {
+ private String evaluate(String js) throws Exception {
   return WebViewTestDriver.evaluate(js);
  }
  @Test public void bundledRendererAndNativeBridgesWork() throws Exception {
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
    String ready = "false";
    for(int i=0; i<100; i++) {
-    ready=evaluate(scenario,"Boolean(document.querySelector('[data-screen]') && window.Capacitor && document.documentElement.dataset.activeView)");
+    ready=evaluate("Boolean(document.querySelector('[data-screen]') && window.Capacitor && document.documentElement.dataset.activeView)");
     if (ready.equals("true")) break;
     SystemClock.sleep(100);
    }
    assertEquals("Bundled renderer must mount offline", "true",ready);
-   evaluate(scenario,"Promise.all([Capacitor.Plugins.ElizaSystem.listLauncherApps(),Capacitor.Plugins.ElizaSystem.getStatus(),Capacitor.Plugins.ElizaSystem.getBuildInfo()]).then(v=>document.body.dataset.nativeResult=JSON.stringify(v)).catch(e=>document.body.dataset.nativeError=String(e))");
+   evaluate("Promise.all([Capacitor.Plugins.ElizaSystem.listLauncherApps(),Capacitor.Plugins.ElizaSystem.getStatus(),Capacitor.Plugins.ElizaSystem.getBuildInfo()]).then(v=>document.body.dataset.nativeResult=JSON.stringify(v)).catch(e=>document.body.dataset.nativeError=String(e))");
    String result="null";
-   for(int i=0;i<100;i++) { result=evaluate(scenario,"document.body.dataset.nativeResult || null"); if(!result.equals("null"))break;SystemClock.sleep(100); }
-   assertNotEquals("Native bridge failed: "+evaluate(scenario,"document.body.dataset.nativeError || null"),"null",result);
+   for(int i=0;i<100;i++) { result=evaluate("document.body.dataset.nativeResult || null"); if(!result.equals("null"))break;SystemClock.sleep(100); }
+   assertNotEquals("Native bridge failed: "+evaluate("document.body.dataset.nativeError || null"),"null",result);
    String payload=(String)new org.json.JSONTokener(result).nextValue();
    org.json.JSONArray values = new org.json.JSONArray(payload);
    assertTrue("Installed apps are discoverable", values.getJSONObject(0).getJSONArray("apps").length()>0);
    assertEquals("ai.alphacompute.alphaphone",values.getJSONObject(1).getString("packageName"));
    assertTrue("The launcher build",values.getJSONObject(2).getBoolean("launcher"));
-   assertFalse("Setup must not claim a connected agent",evaluate(scenario,"document.body.innerText").contains("Agent connected"));
+   assertFalse("Setup must not claim a connected agent",evaluate("document.body.innerText").contains("Agent connected"));
    Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage("ai.alphacompute.alphaphone");
    boolean qualifies = InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().queryIntentActivities(home,0).size()>0;
    assertTrue("The launcher declares HOME",qualifies);
@@ -44,15 +40,15 @@ public class ShellInstrumentedTest {
   AppNavigation.assumeNoRequiredSignIn("Shell composer and native app handoff");
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
    AppNavigation.liveMode();
-   evaluate(scenario,AppNavigation.request("Home"));
+   evaluate(AppNavigation.request("Home"));
    String homeReady="document.documentElement.dataset.activeView==='home'&&!document.querySelector('.alpha-connection-scrim')&&!document.querySelector('.os')?.inert";
-   for(int i=0;i<200;i++){if("true".equals(evaluate(scenario,homeReady)))break;SystemClock.sleep(100);}
-   assertEquals("Home must be interactive before opening the composer","true",evaluate(scenario,homeReady));
-   evaluate(scenario,AppNavigation.type());
+   for(int i=0;i<200;i++){if("true".equals(evaluate(homeReady)))break;SystemClock.sleep(100);}
+   assertEquals("Home must be interactive before opening the composer","true",evaluate(homeReady));
+   evaluate(AppNavigation.type());
    String composer = AppNavigation.composer();
-   for (int i=0;i<50;i++) { if ("true".equals(evaluate(scenario,"!!("+composer+")"))) break; SystemClock.sleep(100); }
-   assertEquals("Actual Type control opens the agent composer", "true", evaluate(scenario,"!!("+composer+")"));
-   evaluate(scenario,"(()=>{const e=("+composer+");Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'Keyboard layout check');e.dispatchEvent(new Event('input',{bubbles:true}));e.focus();})()");
+   for (int i=0;i<50;i++) { if ("true".equals(evaluate("!!("+composer+")"))) break; SystemClock.sleep(100); }
+   assertEquals("Actual Type control opens the agent composer", "true", evaluate("!!("+composer+")"));
+   evaluate("(()=>{const e=("+composer+");Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'Keyboard layout check');e.dispatchEvent(new Event('input',{bubbles:true}));e.focus();})()");
    SystemClock.sleep(200);
    WebViewTestDriver.withActivity(MainActivity.class, activity -> {
     android.view.inputmethod.InputMethodManager ime = (android.view.inputmethod.InputMethodManager) activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
@@ -69,9 +65,9 @@ public class ShellInstrumentedTest {
    }
    assertTrue("Test keyboard must actually be visible",keyboard.get());
    SystemClock.sleep(500);
-   String layout = evaluate(scenario,"JSON.stringify({height:innerHeight,viewport:visualViewport?.height,fields:[...document.querySelectorAll('textarea[data-alpha-composer]')].map(e=>({value:e.value,rect:e.getBoundingClientRect().toJSON(),hidden:!!e.closest('[inert], [aria-hidden=\"true\"]'),send:e.parentElement.querySelector('button[aria-label=Send]')?.getBoundingClientRect().toJSON()}))})");
-   assertEquals("Composer remains above the real Android keyboard: "+layout, "true", evaluate(scenario,"(() => { const input=("+composer+"); const button=input?.parentElement.querySelector('button[aria-label=Send]'); if(!input||!button)return false; const field=input.getBoundingClientRect(); const send=button.getBoundingClientRect(); return field.top >= 0 && field.bottom <= innerHeight && field.width > 100 && send.top >= 0 && send.bottom <= innerHeight; })()"));
-   evaluate(scenario,"Capacitor.Plugins.ElizaSystem.launchApp({packageName:'com.android.settings'})");
+   String layout = evaluate("JSON.stringify({height:innerHeight,viewport:visualViewport?.height,fields:[...document.querySelectorAll('textarea[data-alpha-composer]')].map(e=>({value:e.value,rect:e.getBoundingClientRect().toJSON(),hidden:!!e.closest('[inert], [aria-hidden=\"true\"]'),send:e.parentElement.querySelector('button[aria-label=Send]')?.getBoundingClientRect().toJSON()}))})");
+   assertEquals("Composer remains above the real Android keyboard: "+layout, "true", evaluate("(() => { const input=("+composer+"); const button=input?.parentElement.querySelector('button[aria-label=Send]'); if(!input||!button)return false; const field=input.getBoundingClientRect(); const send=button.getBoundingClientRect(); return field.top >= 0 && field.bottom <= innerHeight && field.width > 100 && send.top >= 0 && send.bottom <= innerHeight; })()"));
+   evaluate("Capacitor.Plugins.ElizaSystem.launchApp({packageName:'com.android.settings'})");
    boolean settingsOpened = false;
    String lastActivityState = "";
    for (int i=0; i<30; i++) {

@@ -34,17 +34,18 @@ async function replayFilesRecentIndex({rewrite = {}, ...options} = {}) {
     '../daily': 'export const DailyApps={forgetSelected:input=>globalThis.__alphaFilesPorts.forget(input)};',
   }});
   return replayTraces(traces, {
-    required: ['accept', 'savedPdf', 'close', 'treeSessionEnds'],
+    required: ['accept', 'savedPdf', 'close'],
     reached: {
       'an export that released an evicted grant': state => state.s.exportReleased.length > 0,
       'an open document pushed out of Recent by an export': state => state.s.opened !== 0 && state.s.rows.length === 2
         && state.s.rows.every(row => row.kind === 'scan-pdf'),
-      'a revoked folder row': state => state.s.rows.some(row => row.status === 'revoked'),
+      'two picked rows that share a name': state => state.s.rows.length === 2
+        && state.s.rows.every(row => row.kind === 'selected') && state.s.rows[0].name === state.s.rows[1].name,
       'a grant released by eviction': state => state.s.released.length > 0,
     },
     project: state => state.s,
     async start() {
-      let clock = 0, serial = 0, sessions = 0, exporting = false;
+      let clock = 0, serial = 0, exporting = false;
       const store = memoryStorage(), index = files.createFilesIndex(store, () => ++clock);
       const issued = new Set(), released = new Set(), exportReleased = new Set();
       const release = id => { assert.ok(issued.has(id) && !released.has(id), `released ${id} twice or without a grant`);released.add(id);if (exporting) exportReleased.add(id); };
@@ -58,8 +59,8 @@ async function replayFilesRecentIndex({rewrite = {}, ...options} = {}) {
       };
       return {
         actions: {
-          accept({kind, id, name, flag}) {
-            const selectionId = `s${++serial}`, recent = !flag ? false : kind === 'tree' ? {kind, treeId: `tree-${id}`} : {kind};
+          accept({name, flag}) {
+            const selectionId = `s${++serial}`, recent = flag ? {kind: 'selected'} : false;
             issued.add(selectionId);
             clear();
             if (recent) for (const evicted of index.record({...recent, name: `Document ${name}`, mimeType: 'text/plain', selectionId})) if (evicted !== selectionId) release(evicted);
@@ -71,21 +72,14 @@ async function replayFilesRecentIndex({rewrite = {}, ...options} = {}) {
             finally { exporting = false; }
           },
           close({flag}) { clear(flag); },
-          // The index operation and the release its contract asks of the caller.
-          treeSessionEnds() {
-            sessions++;
-            const ended = index.revokeTree();
-            if (ended.includes(index.open())) index.setOpen(null);
-            ended.forEach(release);
-          },
         },
         observe() {
           const rows = JSON.parse(store.getItem(files.filesIndexKey) ?? '[]').map(row => ({
-            key: row.kind === 'selected' ? 100 + number(row.selectionId ?? row.key) : row.kind === 'tree' ? 10 + number(row.treeId) : 20 + number(row.name),
+            key: row.kind === 'selected' ? 100 + number(row.selectionId ?? row.key) : 20 + number(row.name),
             kind: row.kind, name: number(row.name), status: row.status, selection: number(row.selectionId)}));
           const ids = set => [...set].map(number).sort((a, b) => a - b);
           return {rows, serial, grants: ids([...issued].filter(id => !released.has(id))), released: ids(released),
-            exportReleased: ids(exportReleased), opened: number(index.open()), sessions};
+            exportReleased: ids(exportReleased), opened: number(index.open())};
         },
         close() { delete globalThis.__alphaFilesPorts; },
       };
@@ -97,7 +91,7 @@ test('Files Recent and scan export follow every FilesRecentIndex model step', {t
   const receipt = await replayFilesRecentIndex({traces: 200, maxSteps: 14});
   assert.equal(receipt.traces, 200);
   assert.ok(receipt.steps > 1000, JSON.stringify(receipt));
-  for (const action of ['accept', 'savedPdf', 'close', 'treeSessionEnds']) assert.ok(receipt.actions[action] > 0, action);
+  for (const action of ['accept', 'savedPdf', 'close']) assert.ok(receipt.actions[action] > 0, action);
 });
 test('a scan export that releases the open document is rejected by the replay', {timeout: scaledTimeout(180000)}, async () => {
   await assert.rejects(replayFilesRecentIndex({traces: 200, maxSteps: 14, rewrite: {'prototype/scan-pdf.ts': text =>

@@ -22,9 +22,8 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `AgentCalendarDeferredDelete` | `DeferredCalendarDeletes.stage`, `undo`, `leave`, `drop`, `prune`, `calendarDeletionHides` | Agent Calendar deletion Undo: a confirmed delete or decline is hidden and waits out the Undo window, Undo sends nothing, one waits at a time (a second confirmation sends the first), leaving the app sends it, a changed account or session drops it unsent, and a sent one stays hidden until a read no longer has it. `test/quint-agent-calendar-deferred-delete.test.mjs` replays the helper |
 | `ShellNavigation` | `ViewNavigationClient.capture`, `deliver`, `cancel`, shell `back`, `goHome`, `openView` | All 19 `AlphaView` values, modal/shade/composer ordering, focus, draft and one completed-action claim. View-specific record bodies use their domain models |
 | `StartupPermissions` | `createStartupPermissionFlow`, `readStartupPermissionMemory`, `readStartupPermissionProgress`, `writeStartupPermissionProgress` | One representative permission transaction, seven ordered native setup steps, durable prompt attempt and progress, legacy completed installation |
-| `PermissionWalkthrough` | `StartupPermissions.allow`, `advance`, `finish`, `savedProgress` | Seven independent permission maps, owner/sequence fences, read-only reactivation, targeted Settings review, durable choices and historical completed records |
+| `PermissionWalkthrough` | `StartupPermissions.allow`, `advance`, `finish`, `savedProgress` | Seven independent permission maps, owner/sequence fences, read-only reactivation, targeted Settings review, durable choices and completed records |
 | `AssistantConversation` | `AlphaClient.run`, `send`, `approve`, `cancel`, `disconnect`, `assistantDraftStore` | One foreground request and one proposal identity that survives a failed or aborted send, expiry, consumption kept across a same-session reload with an explicit agent-journal assumption for other sessions, automatic-workflow survival across ordinary navigation, sensitive-view cancellation, compare-and-exchange composer draft |
-| `NotesLifecycle` | Legacy `editNotesTrash`/`planNotesTrash`, canonical `NotesController`, `NotesEditor`, `NotesSnapshotState`, `CanonicalNotesUi` and the Notes folder document | Separate legacy Trash/CAS and canonical owner/read/write generations, dirty-draft preservation, queued edits, uncertain writes, current selection, stable folder identity and deleted-folder projection |
 | `CanonicalNotesFeedback` | Canonical Notes UI, controller and editor callbacks | Read errors, save review and uncertain mutation outcomes |
 | `CanonicalNotesMutation` | Prepared shared Notes editor and the Alpha host binding | Save-before-delete, queued edits, restore and owner fencing |
 | `CanonicalNotesView` | Canonical Notes UI collection and navigation | Draft projection, Trash, owner visibility and navigation waiters |
@@ -75,7 +74,7 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `ReadAloud` | `installLocalSpeechPlayback` `listen`, `readNoteAloud`, `stopSpeaking`, `stopLocalSpeechPlayback` | One message reading and one note reading that replace each other, the wait for the previous audio to stop, toggle, lost context and the note outcome |
 | `VoiceSurfaceRetirement` | voice-adapter `cleanup`, `retirement`, `stopVoiceConversation`, `dismissRetirement`, `startVoice`, `startTranscription`; `p.send` | The stopping chain after leaving voice, the chat retirement and its dismissal, refused voice starts, a typed message that waits for the chain, unconfirmed media that keeps voice closed |
 | `BrowserTabLifecycle` | adapter `ensure`, `navigate`, `restored`, `restoreAttempts`, `forgetTabs`, `tabOpened`/`tabClosed` listeners, shared `BrowserTabSession` | Renderer tabs against native tabs, creation in flight, the limit on New tab, new-tab navigation, pop-up and after-create recheck, withdrawal when the tab closed or selection moved, two retries of an unloaded restored tab. One navigation in flight |
-| `BrowserSessionPersistence` | `createSessionSaver`, `saveRetryDelay`, adapter `restoreSession`, `saveSession`, `clearBrowsingData` | Hydration gate, change detection, one write in flight with one queued, rejected-write backoff in ticks, priming after restore and clear, writes refused while clearing |
+| `BrowserSessionPersistence` | adapter `restoreSession`, `saveSession`, `clearBrowsingData` | Hydration gate, change detection, one write in flight with one queued, rejected-write backoff in ticks, priming after restore and clear, writes refused while clearing |
 | `BookmarksHydration` | adapter `loadBookmarks`, `refreshBookmarks`, `saveBookmark`, `checkBookmarkRecovery`, `openBookmarkRecovery` | Serial queue of refreshes and writes, one waiting refresh, read-before-write, damaged-list recovery offer reported once per episode, disposal. The list is a version number |
 | `FindInPage` | adapter `openFind`, `closeFind`, `findQuery`, `findStep`, `findResult` listener, native `clearFind` | Find bar and its tab, debounced native search fenced by selected tab, native clearing on navigation and un-presenting, delayed events, closed tabs. Two tabs |
 | `BrowserReviews` | `BrowserReviews.confirm`, `cancel`, `browserScreenLocked` | Two review identities, refusal of a duplicate or hidden request, approval rechecked at the click, one settlement per request, listener cleanup |
@@ -96,15 +95,13 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `DelegationReceiver` | `CloudDelegationPanel` (`run`, `callback`, `recover`, `cancelPending`), `delegationCancelStep`, `AlphaConnectionPlugin.captureDelegationCallback`, `readDelegationCallback`, `clearDelegationCallback` | Retained native return read under a one-step gate or deferred behind it, pending authorization moved to finishing by a code, one completion per code or status check, and Cancel that adopts, clears or cancels by Cloud state |
 | `ViewAdmission` | `applyImageContacts`, `admitImageContacts`, `ENABLED_MVP_VIEWS`, `DEFERRED_MVP_VIEWS`, `refreshImage` | Runtime Contacts admission against the stored shell view: an open view leaves before it is deferred, the view order follows admission, and re-admission never restores a masked view |
 | `SettingsListenerReads` | `listenerReadGate` (`beginAction`, `endAction`, `beginRead`, `readApplies`), `listenerAction`, `refreshCapabilities` | Listener status reads ordered against Pause and Turn off: none starts during an action, an older read is dropped, and the action result is always applied |
-| `NotesTrashSession` | `installNotesTrashAdapter`, `runMaintenance`, `moveToTrash`, `erase`, `deleteForever`, `restore` | Single-flight Trash maintenance joined by foreground callers, one destructive action at a time, erase refused on failed storage, and permanent deletion only for the exact note a full Trash refused |
 | `MediaCopyIntent` | `admitMediaCopyIntent`, `acknowledgeMediaCopyIntent`, `readMediaCopyIntent` | One pending saved-copy request: compare-and-swap admission from empty, exact acknowledgement, recovery after restart, browser revision identity versus Android token-only identity |
-| `FilesRecentIndex` | `createFilesIndex().record`, `revokeTree`, `recentKey`, selection adapter `accept` and `clear`, `exportScanPdf` | Bounded Recent rows, replacement by key and by revoked folder name, grant release on eviction and Forget, grants kept for Recent on close, and the grant an exported scan leaves held |
+| `FilesRecentIndex` | `createFilesIndex().record`, `recentKey`, selection adapter `accept` and `clear`, `exportScanPdf` | Bounded Recent rows, replacement by key, grant release on eviction and Forget, grants kept for Recent on close, and the grant an exported scan leaves held |
 | `PhotosAgentHost` | `runHostItemsRequest`, `resolveRequestedRows`, `createDeviceLibrary().reviewBusy`, camera-adapter `hostVisit` | The main Photos host's `photo_library_select` and `photos_album_create`: items outside the loaded window read before they count as missing, an exact missing count, and selection or the one album review only in the same visible visit, while Photos is free and no library review is open |
 | `PhotoLibraryAgentReview` | `createDeviceLibrary().agent.run`, `confirmReview`, `validCurrent`, `reviewCard`, `leave` | One pending assistant review over the visible library, provider validation fenced by the visit epoch, re-validation at confirm, single dispatch under repeated confirms, pending review retirement on document hide, and Android settlement of an already dispatched change |
 | `AgentPhotoRequest` | `takeRequestedPhoto`, `untilSettled`, `agentRequest` | Mounted Chromium replay checks preview ownership, owner photo/recording exclusions, stale request and abort, exact IndexedDB photo receipts, and post-dispatch uncertainty with and without a committed row |
 | `CameraFocusWrites` | `BrowserCameraFocus.select`, `clear` | Per-track serialized focus writes, taps retired while waiting never reaching the driver, applied target only for the latest tap |
-| `DomainDocumentCreation` | `BrowserDomainDocument.load`, `read`, `edit` | First access to a domain: empty read writes nothing, legacy bytes imported once with their baseline, first edit creates, later legacy write stops access |
-| `NotesDocumentTransfer` | `installNotesDocumentAdapter`, `perform`, `receipt`, `whenVisible` | One document import or export at a time, results dropped after Notes is left, receipts held until the page is visible and shown only in their own visit |
+| `NotesDocumentTransfer` | `installNotesDocumentAdapter`, `perform`, `receipt`, `whenVisible` | One document export at a time, results dropped after Notes is left, receipts held until the page is visible and shown only in their own visit |
 | `BackDispatch` | `updateBackAvailability`, `alphaCanGoBack`, `backHandler`, `modalPanels`, `p.back`, `closeEdit`, `openAllApps`, `back()`, `shellNavigate`, `closeAssistant`, `stopVoice`, `handleOnBackPressed`, `showsHome`, `moveTaskToBack` | host, popover/dialog/panel/inert, view/inner/stack/chat/drawer/shade/voice, menu/homeEdit/homeAdd, outcome/closed/removed/lostLayer |
 | `ChatDock` | `chatRelease`, `settleChatMotion`, `tapChatMotion`, `paintChatMotion`, `retire`, `chatDraggedAt`, `chatSheetShare`, `grabTap`, `closeChat`, `swallowed()`, `openSheet`, `toInput`, `rest()`, `chatPullBinding` | view/chat/voice, drag, swallowAge/dragAge, ghost/ghostLabel, remembered, dismissed |
 | `KeyboardGeometry` | `canvasGeometry`, `keyboardFreeHeight`, `WIDE_CANVAS`, `isEditing` | portrait/keyboard/focused, baseWidth/baseHeight, free/landscape/wide/canvasWidth, primed |
@@ -115,29 +112,6 @@ boundaries. The exact entry-point paths are recorded in `manifest.json`.
 | `PhoneRecents` | `installPhoneAdapter`, `available`, `clear`, `sync`, `async function refresh`, `async function dial`, `epoch`, `needsAccess`, `createAospTelephony`, `normalizePhoneNumber` | mounted/phoneView/hidden/active, epoch/busy/rows/needsAccess/notice, access/reads/dials, requests/prompts/discarded/handoffs |
 | `InertHold` | `holdPhoneInert`, `released`, `previous`, `createInlineModal` | inert/previous/count, holding/released, outside |
 | `ShadePull` | `installSystemShade`, `expandAndroidShade`, `alphaShadeAsking`, `shadePortWithin`, `SHADE_REQUEST_TIMEOUT`, `alphaOverflowPull`, `installOverflowPull`, `openSystemShade`, `simulatedShade` | surface, mounted/home/secure/listening, asking/waiting/late, standIn/requests/fallbacks/opened/ignoredPulls |
-
-## Notes lifecycle modes
-
-`NotesLifecycle` starts either the legacy local Trash/CAS contract or a canonical
-resident Notes contract. The canonical mode has one existing note, one editor
-draft, one current owner, a distinct foreign callback identity and two successive
-folder identities. Three read generations and two writes bound the exploration.
-The legacy mode retains eight storage, queued-write, retained-draft, deletion and restore scenarios.
-
-Canonical scenarios exercise owner retirement, superseded reads, clean and dirty
-refreshes, selection validity and edits typed during a pending save. A queued save
-captures the edit version that requested it. Only an acknowledged write can start
-that captured newer edit automatically. An uncertain write keeps the draft for
-review, while a subsequent explicit save remains available through the public
-editor API. Read completion and a coalesced invalidation's next refresh are
-separate model actions.
-
-The folder contract uses document identity as its compare-and-exchange revision.
-Rename keeps a folder ID. Deletion leaves the note's stored reference intact and
-projects it as unfiled. A newly created folder has a distinct ID and cannot adopt
-that reference. Rich authored values, folder names and content are equality
-classes. New-note creation, canonical Trash operations and complete implementation
-refinement remain outside this bounded variant.
 
 ## Trace conformance
 

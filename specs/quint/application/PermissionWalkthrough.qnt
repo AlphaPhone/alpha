@@ -6,13 +6,13 @@ module PermissionWalkthrough {
   pure val MaxGeneration = 6
   type State = { signedIn: bool, enabled: bool, phase: str, surface: str, states: int -> str,
     attempted: Set[int], persistedAttempted: Set[int], requests: int -> int, sessionRequests: int -> int, progress: int, savedProgress: int,
-    completed: bool, legacyCompleted: bool, pending: int, generation: int,
+    completed: bool, pending: int, generation: int,
     ticket: int, target: int, writeWorks: bool, operations: int -> int,
     progressError: bool, reopened: bool, review: bool, attemptWriteWorks: bool }
   var s: State
   action init = s' = { signedIn: false, enabled: false, phase: "signin", surface: "permissions", states: Keys.mapBy(_ => "checking"),
     attempted: Set(), persistedAttempted: Set(), requests: Keys.mapBy(_ => 0), sessionRequests: Keys.mapBy(_ => 0), progress: 0, savedProgress: 0,
-    completed: false, legacyCompleted: false, pending: -1, generation: 0,
+    completed: false, pending: -1, generation: 0,
     ticket: 0, target: -1, writeWorks: true, operations: Keys.mapBy(_ => -1),
     progressError: false, reopened: false, review: false, attemptWriteWorks: true }
   val selected = if (s.target >= 0) s.target else s.progress
@@ -72,13 +72,11 @@ module PermissionWalkthrough {
       progress: if (finalStep) -1 else s.progress + 1,
       savedProgress: if (written) { if (finalStep) 7 else s.progress + 1 } else s.savedProgress,
       completed: if (written) finalStep else s.completed,
-      legacyCompleted: if (written) false else s.legacyCompleted,
       progressError: if (s.review) s.progressError else not(s.writeWorks) } }
   action finish = all { s.signedIn, s.enabled or s.reopened, s.phase == "ready", s.pending == -1,
     s' = { ...s, phase: "home", surface: "home" } }
-  action restoreCompleted(count: int): bool = all { not(s.signedIn), count.in(Set(4, 5, 6, 7)),
-    s' = { ...s, completed: true, legacyCompleted: count < 7, progress: -1, savedProgress: count, surface: "home" } }
-  action historicalInstall = { nondet count = Set(4, 5, 6).oneOf(); restoreCompleted(count) }
+  action restoreCompleted(count: int): bool = all { not(s.signedIn), count == 7,
+    s' = { ...s, completed: true, progress: -1, savedProgress: count, surface: "home" } }
   action openTarget(key: int): bool = all { s.signedIn, key.in(Keys), s.generation < MaxGeneration,
     s' = { ...s, phase: "permissions", surface: "permissions", target: key, pending: -1,
       generation: s.generation + 1, reopened: true, review: s.completed } }
@@ -102,7 +100,7 @@ module PermissionWalkthrough {
     nondet state = States.oneOf()
     any { mountSignedOut, signIn, signOut, ownerChange, suspend, resume, authSetup(true), authSetup(false), platformState(key, state),
       begin, request, skipPending, result(granted), staleResult(key), retiredResult, advance,
-      finish, historicalInstall, openTarget(key), closeTarget, storageFails,
+      finish, restoreCompleted(7), openTarget(key), closeTarget, storageFails,
       storageRecovers, attemptStorageFails, progressWriteFailed, restart, blockedDismiss }
   }
   val OnePromptPerPermission = Keys.forall(key => s.sessionRequests.get(key) <= 1)
@@ -110,7 +108,7 @@ module PermissionWalkthrough {
     (s.target == -1 or s.target.in(Keys))
   val SignedInActions = s.pending >= 0 implies s.signedIn and (s.enabled or s.reopened) and s.pending.in(Keys) and
     s.ticket == s.generation and s.operations.get(s.pending) == s.ticket
-  val DurableCompletion = s.completed implies s.savedProgress == 7 or (s.legacyCompleted and s.savedProgress.in(Set(4, 5, 6)))
+  val DurableCompletion = s.completed implies s.savedProgress == 7
   val PersistedAttemptsRetained = s.persistedAttempted.subseteq(s.attempted)
   val CurrentSurface = s.phase == (if (s.signedIn) s.surface else "signin")
   val safety = CurrentSurface and OnePromptPerPermission and PersistedAttemptsRetained and OrderedWalkthrough and SignedInActions and DurableCompletion
@@ -126,7 +124,7 @@ module PermissionWalkthrough {
     .expect(s.phase == "home" and s.completed and not(allGranted) and safety)
   run failedProgressWriteTest = init.then(signIn).then(platformStatus(0, true)).then(storageFails)
     .then(restart).expect(s.progress == 0 and s.savedProgress == 0 and s.progressError and safety)
-  run legacyCompletionTest = init.then(historicalInstall).then(signIn).then(authSetup(true)).then(finish)
+  run completedInstallTest = init.then(restoreCompleted(7)).then(signIn).then(authSetup(true)).then(finish)
     .expect(s.phase == "home" and not(allGranted) and safety)
   run failedAttemptWriteRestartTest = init.then(signIn).then(attemptStorageFails).then(platformStatus(0, false))
     .then(begin).then(request).then(result(false)).then(restart).then(platformStatus(0, false))

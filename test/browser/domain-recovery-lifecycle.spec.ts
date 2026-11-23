@@ -5,7 +5,7 @@ for(const name of ['calendar','reminders'] as const)for(const event of ['alpha:d
   await page.goto('/');
   await page.evaluate(async({name,phase})=>{
    const {openDomainRecovery}=await import('/src/browser/domain-recovery.ts');
-   const recovery={snapshot:undefined,legacy:'original',raw:'original',format:'domain' as const,legacyChanged:false};
+   const recovery={snapshot:undefined,raw:'original',format:'domain' as const};
    const pending=(signal?:AbortSignal)=>new Promise<any>(resolve=>{(window as any).recoverySignal=signal;(window as any).releaseRecovery=()=>resolve(recovery);});
    openDomainRecovery({capture:signal=>phase==='capture'?pending(signal):Promise.resolve(recovery),reset:(_,signal)=>new Promise<void>((resolve,reject)=>{(window as any).recoverySignal=signal;(window as any).releaseRecovery=()=>{if(signal?.aborted)reject(signal.reason);else resolve();};})},name,'Recovery lifecycle','Test recovery');
   },{name,phase});

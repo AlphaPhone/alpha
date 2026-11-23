@@ -4,7 +4,7 @@ async function attachDomain(page:Page){
  await page.evaluate(async()=>{
   const {BrowserDomainDocument}=await import('/src/browser/domain-document.ts');
   const {browserDocuments}=await import('/src/browser/documents.ts');
-  (window as any).domain=new BrowserDomainDocument(browserDocuments,'alpha.test.atomic',()=>localStorage.getItem('alpha.test.atomic'));
+  (window as any).domain=new BrowserDomainDocument(browserDocuments,'alpha.test.atomic');
  });
 }
 
@@ -37,7 +37,7 @@ test('cross-tab edits read the last committed value after an asynchronous edit',
 test('missing lock support rejects before initialization or edit and preserves existing data',async({page})=>{
   const result=await page.evaluate(async()=>{
     const domain=(window as any).domain;
-    localStorage.setItem('alpha.test.atomic',JSON.stringify({count:7}));
+    await domain.edit(()=>({count:0}),data=>{data.count=7;});
     Object.defineProperty(navigator,'locks',{value:undefined,configurable:true});
     let initialized=false,edited=false,error='';
     try{await domain.edit(()=>{initialized=true;return {count:0};},data=>{edited=true;data.count++;});}catch(e){error=(e as Error).message;}
@@ -50,7 +50,7 @@ test('missing lock support rejects before initialization or edit and preserves e
 test('failed edit and failed persistence release the lock without committing a partial result',async({page})=>{
   const result=await page.evaluate(async()=>{
     const domain=(window as any).domain;
-    const key='alpha.test.atomic';localStorage.setItem(key,JSON.stringify({count:7}));
+    const key='alpha.test.atomic';await domain.edit(()=>({count:0}),data=>{data.count=7;});
     const failures:string[]=[];
     try{await domain.edit(()=>({count:0}),async data=>{data.count=99;throw Error('Edit failed');});}catch(e){failures.push((e as Error).message);}
     const afterEdit=await domain.readRaw(),original=IDBObjectStore.prototype.put;
@@ -58,9 +58,9 @@ test('failed edit and failed persistence release the lock without committing a p
     try{await domain.edit(()=>({count:0}),data=>{data.count=88;});}catch(e){failures.push((e as Error).name);}finally{IDBObjectStore.prototype.put=original;}
     const afterWrite=await domain.readRaw();
     const receipt=await domain.edit(()=>({count:0}),data=>{data.count++;return data.count;});
-    return {failures,afterEdit,afterWrite,receipt,saved:await domain.read(()=>({count:0})),legacy:localStorage.getItem(key)};
+    return {failures,afterEdit,afterWrite,receipt,saved:await domain.read(()=>({count:0}))};
   });
-  expect(result).toEqual({failures:['Edit failed','QuotaExceededError'],afterEdit:'{"count":7}',afterWrite:'{"count":7}',receipt:8,saved:{count:8},legacy:'{"count":7}'});
+  expect(result).toEqual({failures:['Edit failed','QuotaExceededError'],afterEdit:'{"count":7}',afterWrite:'{"count":7}',receipt:8,saved:{count:8}});
 });
 
 test('closing a tab during an edit releases ownership without publishing its uncommitted state',async({page,context})=>{
@@ -83,8 +83,6 @@ test('rapid cross-tab edits retain every committed item and unique receipt',asyn
  const write=(tab:typeof page,owner:string)=>tab.evaluate(async owner=>{
   const domain=(window as any).domain,receipts:number[]=[];
   for(let i=0;i<25;i++){
-   // Prime a task-local snapshot before requesting the cross-tab lock.
-   localStorage.getItem('alpha.test.atomic');
    receipts.push(await domain.edit(()=>({items:[] as string[]}),data=>{data.items.push(owner+':'+i);return data.items.length;}));
   }
   return receipts;

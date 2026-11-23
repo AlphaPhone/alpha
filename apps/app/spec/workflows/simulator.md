@@ -1,16 +1,16 @@
 # Workflow simulator
 
 With test mocks only, the browser build runs simulated workflows against its own simulated apps
-(messages, inbox, notes, Calendar, wallet, location), so a developer can walk a workflow end to end
-without a phone. Nothing it does leaves the page: a local send saves a simulated message, a receipt
-records a simulated expense, and developer review stands in for the agent where none answers. A
+(messages, inbox, notes, Calendar, location), so a developer can walk a workflow end to end
+without a phone. Nothing it does leaves the page: a local send saves a simulated message, and
+developer review stands in for the agent where none answers. A
 production build never loads it (legacy `simulated-workflows`, `development-workflows`,
 `development-digests`, `workflow-*` browser modules, `DevelopmentDigestPending`).
 
 ## Story: Walk a workflow end to end in the browser without touching anything real
 
 > As a developer, I run a workflow against simulated apps in the browser build, and I want each step
-> bounded, recorded once, and never mistaken for the agent's work or a real send or payment.
+> bounded, recorded once, and never mistaken for the agent's work or a real send.
 
 ### The simulator exists only with test mocks
 
@@ -30,15 +30,6 @@ pure def sendAllowed(d: Destination, senders: int, text: str): bool =
 pure def receiptMatches(saved: bool, sameText: bool, sameRecipient: bool): bool = not(saved) or (sameText and sameRecipient)
 pure val sendersValues = Set(0, 1, 2)
 pure def lawAReplyNeedsOneSender(senders: int, text: str): bool = sendAllowed(ReplyToSender, senders, text) implies senders == 1
-```
-
-### A receipt records a simulated expense of a named merchant and a positive amount, and never pays
-
-```quint
-pure def expenseValid(merchantLength: int, cents: int, cardChosen: bool): bool =
-  merchantLength >= 1 and merchantLength <= 120 and cents >= 1 and cents <= 999999999 and cardChosen
-pure val centsValues = Set(0, 1, 999999999, 1000000000)
-pure def lawNoExpenseWithoutAnAmount(merchantLength: int, cardChosen: bool): bool = not(expenseValid(merchantLength, 0, cardChosen))
 ```
 
 ### Urgency is the agent's exact decision, or a developer's review where no agent answers

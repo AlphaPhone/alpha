@@ -12,7 +12,7 @@ export const recoveryShared=[
   ...['ActionJournal','ActionJournalConfiguration','ActionJournalPlugin','deletion/DeletionReceiptRecovery'].map(name=>journal+name+'.java'),
   ...['NoticeRecovery','NoticeDelivery','NoticeCoordinator','NoticeRoutes','NoticeOwner'].map(name=>notice+name+'.java'),
 ];
-export const recoveryProduct=['AlphaActionJournal','WorkflowNoticeDelivery','WorkflowNoticeTaps'].map(name=>app+name+'.java');
+export const recoveryProduct=['AlphaActionJournal','AlphaUtil','WorkflowNoticeDelivery','WorkflowNoticeTaps','WorkflowNoticeTapsFactory'].map(name=>app+name+'.java');
 
 function slice(text,first,last) {
   const start=text.indexOf(first), end=text.indexOf(last,start+first.length);

@@ -24,7 +24,7 @@ public final class ServiceCredentialTraces {
    result.put(trace.value);
   }
   reset();String before="{\"value\":1}";put("cloud:production",before);AlphaCredentialStore store=new AlphaCredentialStore(new Context());
-  boolean rejected=false;try{store.writeCredentialSlot("cloud:production","x".repeat(AlphaCredentialStore.retainedLimit("cloud:production")+1));}catch(AlphaCredentialStore.StorageFullException expected){rejected=true;}
+  boolean rejected=false;try{store.writeCredentialSlot("cloud:production","x".repeat(AlphaCredentialStore.slotLimit("cloud:production")+1));}catch(AlphaCredentialStore.StorageFullException expected){rejected=true;}
   Trace cap=new Trace("actual retained-cap preflight precedes lifecycle callback",Trace.fields("credential",1));
   cap.step("begin",Trace.fields("phase",rejected?"full":"captured","credential",get("cloud:production").equals(before)?1:2,"requestedStop",AlphaLocalAgentPlugin.requested?1:0),"cloud",2,4);result.put(cap.value);
   return result;

@@ -1,0 +1,10 @@
+specs/quint/native/StreamingPlayback.qnt
+specs/quint/native/TelephonyAttention.qnt
+specs/quint/native/VadSegmentation.qnt
+specs/quint/native/VideoEditReview.qnt
+specs/quint/native/VideoRecorder.qnt
+specs/quint/native/VoiceIpcAssembly.qnt
+specs/quint/native/VoiceSession.qnt
+specs/quint/native/Voicemail.qnt
+specs/quint/native/WorkflowNoticeDelivery.qnt
+specs/quint/native/conformance.mjs

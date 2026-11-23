@@ -116,7 +116,7 @@ export effect function calendarScreenBack() {
   return try calendarBack()
 }
 
-/** Open the Calendars sheet with the source switches and Google Calendar sync. */
+/** Open the Calendars sheet with the source switches. */
 export effect function openSources() {
   return ((try PresentationMachine).send({ type: "openSources" }) catch () => undefined) !== undefined
 }
@@ -346,7 +346,7 @@ export effect function placeRow(row: CalendarRow) {
 /** The route Calendar opens a note's or a scan's draft at, in a new event form. */
 export const DRAFT_ROUTE = "draft"
 
-/** The route Calendar opens its Calendars sheet at, with the source switches and Google Calendar sync. */
+/** The route Calendar opens its Calendars sheet at, with the source switches. */
 export const SETTINGS_ROUTE = "settings"
 
 /** Open Calendar at a route: a handed-over draft's form, or the day it names, then its event once a read has it. */

@@ -474,7 +474,6 @@ private static final class ResidentAttachDiagnostic {
   }catch(Exception error){call.reject("The provider binding could not be cleared.");}finally{if(requestId!=null)providerConfigurations.finish(requestId,configuration);}},()->{if(requestId!=null)providerConfigurations.finish(requestId,configuration);call.reject("Local agent bridge is closed.");});
  }
  static final String CLOUD_PROVIDER_MODEL=LocalAgentProviderAdmission.CLOUD_PROVIDER_MODEL;
- static final String CLOUD_PROVIDER_BASE=LocalAgentProviderAdmission.CLOUD_PROVIDER_BASE;
  /** Binds an existing account credential; no bearer value crosses this method's renderer API. */
  @PluginMethod public void configureCloudProvider(PluginCall call) {
   if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
@@ -522,21 +521,7 @@ private static final class ResidentAttachDiagnostic {
  }
  // The provider rules live in LocalAgentProviderAdmission (host-JVM tested); these names stay for callers.
  static boolean validProviderToken(String token,int maximumLength){return LocalAgentProviderAdmission.validProviderToken(token,maximumLength);}
- static String cloudProviderToken(String saved,String credentialId,long now) throws Exception {return LocalAgentProviderAdmission.cloudProviderToken(saved,credentialId,now);}
  static void applyProviderEnvironment(JSONObject provider,String cloudSaved,java.util.Map<String,String> env,long now) throws Exception {LocalAgentProviderAdmission.applyProviderEnvironment(provider,cloudSaved,env,now);}
- static final String PROVIDER_MODEL_PATTERN=LocalAgentProviderAdmission.PROVIDER_MODEL_PATTERN;
- /**
-  * No admitted plan, Cloud unreachable without a recent plan, or signed out: the agent runs with no
-  * hosted inference. Every provider credential and selector is removed, so no request can reach a
-  * model provider; the pinned upstream runtime answers chat turns as provider-less (no_provider).
-  */
- static void applyUnboundEnvironment(java.util.Map<String,String> env){
-  // The verified product module is credential-independent; shared cleanup
-  // predates that contract and removes the same module for other hosts.
-  String productModule=env.get("ELIZA_NATIVE_GOOGLE_HOST_MODULE");
-  NativeProviderSlot.applyUnboundEnvironment(env);
-  if(productModule!=null)env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",productModule);
- }
  static JSObject providerIdentity(String saved) {
   try{return new JSObject(LocalAgentProviderAdmission.providerIdentity(saved).toString());}
   catch(org.json.JSONException impossible){throw new IllegalStateException(impossible);}
@@ -717,19 +702,9 @@ private static final class ResidentAttachDiagnostic {
   // Pseudonymize secrets and PII using the pinned upstream runtime.
   env.put("ELIZA_SECRET_SWAP_ENABLED","true");
   env.put("ELIZA_PII_SWAP_ENABLED","true");
-  // A phone conversation has one owner, so a contact or credential keeps its reference from turn
-  // to turn. With a fresh reference each turn no two requests shared a prefix, and the hosted
-  // model's per-minute limit counted the whole conversation again on every call.
-  env.put("ELIZA_SECRET_SWAP_STABLE_REFERENCES","true");
-  // No output cap: a call that sends none may write the model's maximum, 40,960 tokens, and holds
-  // 16,384 of the per-minute limit while it runs, the same as any cap of 16,384 or more (measured).
-  // A 4,096 cap cut off calls that reason first: a reminder's planning call spent all of it
-  // reasoning and saved nothing.
-  // The hosted model answers a per-minute refusal with Retry-After 59 and admits the same request
-  // seconds later: its allowance refills 2,500 tokens a second (measured). On an owner's own key
-  // the runtime held the model for the stated minute and failed every turn in it. The runtime
-  // re-sends a refused step once after five seconds, so the hold must end before that.
-  env.put("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","4");
+  // The pinned runtime keeps a contact's or credential's reference stable within a conversation,
+  // sends no output cap on any call, and on an own Cerebras key holds a refused model for at most
+  // 4 s, before its 5 s re-send. None of these needs a launch setting.
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");
@@ -913,7 +888,7 @@ private static final class ResidentAttachDiagnostic {
      try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
     }
     if(readyRoot!=null){
-     // Never repeat uncertain enrollment on this boot. A new boot has its own root and pairing code.
+     // Never repeat uncertain enrollment on this boot. A new boot has its own root.
      try{enroll(epoch,readyRoot);resolveCurrent(call,epoch,new JSObject().put("state","ready"));return;}
      catch(Superseded stale){rejectSuperseded(call);return;}
      catch(RuntimeRootChanged|EnrollmentReadUnavailable retry){rejectStartFailed(call,epoch);return;}
@@ -1021,7 +996,7 @@ private static final class ResidentAttachDiagnostic {
   };
  }
  // Native callers may bind background result reads to an existing enrollment.
- // This is deliberately not a Capacitor method and never initiates pairing.
+ // This is deliberately not a Capacitor method and never enrolls.
  static JSONObject captureResultSession(String expectedOwner) throws Exception {
   synchronized(lifecycleLock){
    String currentRoot=ElizaAgentService.localAgentToken();
@@ -1100,7 +1075,7 @@ private static final class ResidentAttachDiagnostic {
     try{captureReminderOwnerSession();return true;}
     catch(SecurityException changed){
      // A new process bearer retires old calls, not the existing owner's NMS receipts.
-     invalidateCalls();++lifecycleEpoch;AlphaCanonicalNotifications.suspendForRestart();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;
+     invalidateCalls();++lifecycleEpoch;clearEnrollment();
     }
    }
    epoch=lifecycleEpoch;
@@ -1200,20 +1175,19 @@ private static final class ResidentAttachDiagnostic {
   requireCurrent(epoch);
   String root=expectedRoot==null?ElizaAgentService.localAgentToken():expectedRoot;
   synchronized(lifecycleLock){requireEnrollmentRoot(epoch,root);if(root.equals(rootToken)&&ownerToken!=null&&expiresAt>System.currentTimeMillis()+30000){AlphaCanonicalNotifications.ensure(getContext());return ownerToken;}}
-  final JSONObject status,code;
+  // The native channel authenticates the owner; its session is the runtime root under the native prefix.
+  final String token="native:"+root;final JSONObject who;
   try{
-   status=authenticatedStatus(epoch,root);
-   code=enrollmentJson(epoch,"/api/auth/pair-code","GET",null,root,root);
+   authenticatedStatus(epoch,root);
+   who=enrollmentJson(epoch,"/api/auth/me","GET",null,token,root);
   }catch(java.io.IOException unavailable){
-   // No pairing POST was dispatched. The same boot can be checked again.
+   // Only reads were dispatched. The same boot can be checked again.
    throw new EnrollmentReadUnavailable(unavailable);
   }
-  JSONObject paired=enrollmentJson(epoch,"/api/auth/pair","POST",new JSONObject().put("code",code.getString("code")).put("instanceId",status.getString("instanceId")),root,root);
-  if(!"owner".equals(paired.getString("access"))||!status.getString("instanceId").equals(paired.getString("instanceId")))throw new IllegalStateException();
-  String token=paired.getString("token");JSONObject who=enrollmentJson(epoch,"/api/auth/me","GET",null,token,root);
-  if(!"OWNER".equals(who.getJSONObject("access").getString("role"))||!paired.getString("identityId").equals(who.getJSONObject("identity").getString("id"))||!token.equals(who.getJSONObject("session").getString("id")))throw new IllegalStateException();
+  if(!"OWNER".equals(who.getJSONObject("access").getString("role"))||!token.equals(who.getJSONObject("session").getString("id")))throw new IllegalStateException();
+  String identity=who.getJSONObject("identity").getString("id");if(identity.isEmpty())throw new IllegalStateException();
   long expiry=who.getJSONObject("session").getLong("expiresAt");if(expiry<=System.currentTimeMillis())throw new IllegalStateException();
-  synchronized(lifecycleLock){requireEnrollmentRoot(epoch,root);AlphaCanonicalNotifications.suspendForRestart();rootToken=root;ownerToken=token;ownerIdentity=paired.getString("identityId");notificationAgent=null;expiresAt=expiry;AlphaCanonicalNotifications.ensure(getContext());return token;}
+  synchronized(lifecycleLock){requireEnrollmentRoot(epoch,root);AlphaCanonicalNotifications.suspendForRestart();rootToken=root;ownerToken=token;ownerIdentity=identity;notificationAgent=null;expiresAt=expiry;AlphaCanonicalNotifications.ensure(getContext());return token;}
   }
  }
  private static void logRequestFailure(String category,String method,int status,String reason) {
@@ -1225,7 +1199,7 @@ private static final class ResidentAttachDiagnostic {
  private static final String REQUEST_DEADLINE_MESSAGE="Local agent request timed out before dispatch.";
  private static final class RequestDeadlineExpired extends Exception {}
 
- /** Omission preserves the legacy per-dispatch timeout. Explicit budgets include time on the worker queue. */
+ /** Null without timeoutMs (the per-dispatch timeout applies). Explicit budgets include time on the worker queue. */
  private static Long localRequestDeadline(JSONObject input,long entered) {
   if(!input.has("timeoutMs"))return null;
   Object value=input.opt("timeoutMs");

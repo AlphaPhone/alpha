@@ -1,19 +1,13 @@
-// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "Story: Let the agent change an event I named only when it is the one I have open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/calendar/deviceActions.md, "Story: Offer the agent only the Calendar actions this phone runs"
+// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "Story: Let the agent change an event I named only when it is the one I have open"; spec/calendar/deviceActions.md, "Story: Offer the agent only the Calendar actions this phone runs"
 import { assert, describe, it } from "@effect/vitest"
 import type { DeviceEventRecord } from "../../src/calendar/device.schema.vibe"
-import type { CalendarRecord } from "../../src/calendar/feed.schema.vibe"
 import { calendarCapabilities, inReviewedRange, sameTitle, sharedFields } from "../../src/calendar/operations.vibe"
-import { googleSyncOffer } from "../../src/calendar/sync.vibe"
 
 const range = { type: "read_calendar_range", calendarIds: ["1"], start: "2026-11-20T08:00:00.000Z", end: "2026-11-21T08:00:00.000Z", timeZone: "America/Los_Angeles", maximumEvents: 10 } as const
 const event = (fields: Partial<DeviceEventRecord>): DeviceEventRecord => ({
   id: "7", calendarId: "1", title: "Lunch", body: "Bring the slides", location: "Cafe", begin: Date.parse("2026-11-20T20:00:00.000Z"), end: Date.parse("2026-11-20T21:00:00.000Z"),
   revision: "r1", ...fields,
 })
-const calendar = (fields: Partial<CalendarRecord>): CalendarRecord => ({
-  provider: "google", side: "owner", grantId: "grant-1", connectorAccountId: "acct-1", calendarId: "work", accountEmail: "owner@example.com", summary: "Work",
-  description: null, primary: false, accessRole: "writer", timeZone: null, selected: true, includeInFeed: true, ...fields,
-} as CalendarRecord)
 
 describe("Calendar's agent operations (spec/calendar/rangeRead.md, spec/calendar/namedRead.md)", () => {
   it("a range read takes only the reviewed calendars over the reviewed dates, titles and times only (spec/calendar/rangeRead.md, \"Story: Let a reviewed step read my phone's calendars for the range I approved\")", () => {
@@ -30,13 +24,6 @@ describe("Calendar's agent operations (spec/calendar/rangeRead.md, spec/calendar
   it("a named change needs the open event's title to be the name given (spec/calendar/namedRead.md, \"Story: Let the agent change an event I named only when it is the one I have open\")", () => {
     // spec/calendar/namedRead.md, "A named change or deletion runs only for the selected event whose title is the name given"
     assert.deepStrictEqual([sameTitle("Team  Lunch ", "team lunch"), sameTitle("Team lunch", "Dentist"), sameTitle("", "")], [true, false, false])
-  })
-
-  it("Google sync offers only writable Google calendars, and says which grant the agent's calendars show (spec/calendar/sync.md, \"Story: Sync only with my consent for what I reviewed\")", () => {
-    const writable = googleSyncOffer([calendar({}), calendar({ calendarId: "holidays", accessRole: "reader", summary: "Holidays" }), calendar({ provider: "eliza", grantId: "eliza-calendar", calendarId: "primary" })])
-    const readOnly = googleSyncOffer([calendar({ accessRole: "reader" })])
-    assert.deepStrictEqual([writable.grant, writable.destinations.map((d) => d.providerCalendarId), readOnly.grant, googleSyncOffer([]).grant],
-      ["WriteGrant", ["work"], "ReadOnlyGrant", "NoGoogleGrant"])
   })
 
   it("Calendar advertises the local event always, agenda reads only in the browser build, and the rest only when offered (spec/calendar/deviceActions.md, \"Story: Offer the agent only the Calendar actions this phone runs\")", () => {

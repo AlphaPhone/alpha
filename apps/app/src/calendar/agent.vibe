@@ -1,7 +1,7 @@
 // spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/agent.md, "An applied create or change is read back through the same scoped calendar; only a readback that finds it says saved"; spec/calendar/agent.md, "Story: Return to the event I left Calendar from"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
-  type AgentCalendar as AgentState, type FeedReply, type LegacyCheck, type Preservation, type ProviderReply, type Readback, type SourcesReply,
+  type AgentCalendar as AgentState, type FeedReply, type ProviderReply, type Readback, type SourcesReply,
   type UpcomingReply, type WriteKind, type Event as AgentEvent, type WriteOutcome, type EventReturn, type ReturnFeed, Machine as AgentMachine, eventReturn,
 } from "../../gen/calendar__agent.effect.vibe"
 import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
@@ -13,7 +13,6 @@ import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest,
 import { residentClients } from "./client.vibe"
 import { sha256Hex } from "./digest.ts"
 import { type InstantRange, agentEventKey, eventSourceKey, readableSource, windowKey } from "./model.vibe"
-import { LegacyCalendar } from "./preservation.vibe"
 import { isoInstant } from "./time.ts"
 
 /** The agent binding the account area reports: owner key, session, agent id and whether the connection is usable. */
@@ -85,12 +84,11 @@ function query(path: string, fields: Readonly<Record<string, string>>): string {
 
 interface SavedFeed { readonly version: 1; readonly owner: string; readonly window: string; readonly feed: FeedRecord; readonly calendars: readonly CalendarSummary[]; readonly at: number }
 
-/** The agent Calendar service over the resident agent, the agent machine and the saved app calendar check. */
+/** The agent Calendar service over the resident agent and the agent machine. */
 export const agentLayer = Layer.effect(AgentCalendar, effect {
   const machine = try AgentMachine
   const resident = try Resident
   const store = try KeyValueStore.KeyValueStore
-  const legacy = try LegacyCalendar
   const data = try Ref.make<Map<number, { feed?: FeedRecord; calendars?: readonly CalendarSummary[]; upcoming?: EventRecord | null }>>(new Map())
   const windows = try Ref.make<Map<string, CalendarWindow>>(new Map())
   const agent = try Ref.make("")
@@ -121,15 +119,6 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     const after = machine.send(event) catch () => undefined
     try publish()
     return after
-  }
-
-  effect function legacyCheck(): LegacyCheck {
-    const capture = legacy.capture() catch () => undefined
-    if (capture === undefined) return "LegacyFailed"
-    if (!capture.present) return "LegacyClean"
-    if (!capture.readable) return "LegacyUnreadable"
-    if (capture.pending) return "LegacyPending"
-    return "LegacyPresent"
   }
 
   effect function feedFor(window: CalendarWindow, id: number): FeedReply {
@@ -196,13 +185,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     const started = try machine.get()
     const window = (try Ref.get(windows)).get(started.read.query)
     if (started.read.id !== id || window === undefined) return
-    const afterLegacy = try send({ type: "legacyReply", id, result: try legacyCheck() })
-    if (afterLegacy?.read.id === id && afterLegacy.read.phase === "CheckingRetention") {
-      const kept = legacy.retainedReadOnly() catch () => false
-      try send({ type: "retentionReply", id, kept })
-    }
-    const reading = try machine.get()
-    if (reading.read.id === id && reading.read.phase === "Reading") {
+    if (started.read.phase === "Reading") {
       const [feed, calendars, next] = try.all [feedFor(window, id), calendarsFor(id), upcomingFor(window, id)]
       const events = (try Ref.get(data)).get(id)?.feed?.events ?? []
       try send({ type: "feedReply", id, reply: feed })
@@ -264,16 +247,6 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       (error instanceof ResidentRefused && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 ? "refused" : "transport") as Sent
   }
 
-  effect function preserved(): Preservation {
-    const before = try legacy.fingerprint()
-    const capture = legacy.capture() catch () => undefined
-    if (capture === undefined) return "PreservationFailed"
-    if (!capture.present) return "PreservedSame"
-    if (!capture.readable) return "PreservedUnreadable"
-    if (capture.pending) return "PreservedPending"
-    return capture.fingerprint === before ? "PreservedSame" : "PreservedChanged"
-  }
-
   effect function settleWrite(id: number) {
     const after = try machine.get()
     if (after.read.id !== 0) try run(after.read.id)
@@ -286,8 +259,6 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     const started = try send({ type: "startWrite", kind, eventAdmitted: admitted })
     const id = started?.lastWrite ?? 0
     if (started === undefined || started.write.id !== id) return started?.outcome ?? ("WriteBusy" as WriteOutcome)
-    const afterPreservation = try send({ type: "preservationReply", id, result: try preserved() })
-    if (afterPreservation?.write.id !== id) return try settleWrite(id)
     const reply = try sent(call)
     const afterProvider = try send({ type: "providerReply", id, reply: providerReply(reply, try Ref.get(agent)) })
     if (afterProvider?.write.id !== id || typeof reply === "string") return try settleWrite(id)

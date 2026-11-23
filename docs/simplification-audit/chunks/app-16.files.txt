@@ -1,0 +1,17 @@
+apps/app/src/prototype/phone.css
+apps/app/src/prototype/photo-library-adapter.ts
+apps/app/src/prototype/photo-viewport.ts
+apps/app/src/prototype/prototype.css
+apps/app/src/prototype/reminder-adapter.ts
+apps/app/src/prototype/scan-correction-review.ts
+apps/app/src/prototype/scan-dialog.css
+apps/app/src/prototype/scan-document.ts
+apps/app/src/prototype/scan-event-review.ts
+apps/app/src/prototype/scan-event.ts
+apps/app/src/prototype/scan-link-review.ts
+apps/app/src/prototype/scan-page-camera.ts
+apps/app/src/prototype/scan-pdf.ts
+apps/app/src/prototype/scan-review.ts
+apps/app/src/prototype/scan-searchable-review.ts
+apps/app/src/prototype/scan-text-layer.ts
+apps/app/src/prototype/selection-adapter.ts

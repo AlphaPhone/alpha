@@ -1,4 +1,4 @@
-// spec/calendar/agent.md, "A read publishes only when all three replies arrived for the binding it was started for"; spec/calendar/approvals.md, "The status follows the request's state and whether its owner was verified"; spec/calendar/sync.md, "A review is kept only for the binding that read it"
+// spec/calendar/agent.md, "A read publishes only when all three replies arrived for the binding it was started for"; spec/calendar/approvals.md, "The status follows the request's state and whether its owner was verified"
 // Decoders for what the resident agent's Calendar API answers. Every reply is untrusted until one of these accepts it.
 
 const Text = (max: number) => Schema.String.check(Schema.isMaxLength(max))

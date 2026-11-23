@@ -34,7 +34,7 @@ public final class LocalSpeechBridgeInstrumentedTest {
   Assume.assumeTrue("Explicit packaged local bridge opt-in","1".equals(InstrumentationRegistry.getArguments().getString("localSpeechBridge")));
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertNull("Networking must be disabled",context.getSystemService(ConnectivityManager.class).getActiveNetwork());
   File audio=File.createTempFile("local-bridge-fixture-",".m4a",context.getCacheDir());String clip=UUID.randomUUID().toString();
-  try(InputStream in=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("speech-fixture/0-recorder.m4a");OutputStream out=new FileOutputStream(audio)){byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1)out.write(bytes,0,n);}
+  try(InputStream in=InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("speech-fixture/0-recorder.m4a");OutputStream out=new FileOutputStream(audio)){in.transferTo(out);}
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
   // Production capture is mono16k AAC. Raw PCM WAV is not an accepted recorder draft.
   android.media.MediaExtractor fixture=new android.media.MediaExtractor();

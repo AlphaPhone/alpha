@@ -1,0 +1,17 @@
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/VideoInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/VoiceFloatPathDiagnosticInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/VoiceNoteReadAloudInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/VoicePermissionDeniedInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/VoicePermissionRevokeInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/VoiceWorkerSettlementInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WebViewTestDriver.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkerCrashDiagnostic.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowApprovalNoticeInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowApprovalNoticeProcessDeathInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowDraftNativeInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowLegacyReminderUpgradeInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowNoticeOwnerFixture.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowNoticeProcessDeathInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowNoticeProcessRunner.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowNoticeTapInstrumentedTest.java
+android/app/src/androidTest/java/ai/alphacompute/alphaphone/WorkflowPhoneNativeInstrumentedTest.java

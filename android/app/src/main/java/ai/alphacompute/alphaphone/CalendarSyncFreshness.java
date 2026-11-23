@@ -15,9 +15,8 @@ import org.json.JSONArray;
  * device-local the whole read is refused before any instance is queried, so no partial
  * intervals from the remaining calendars are returned.
  *
- * {@link #readAvailability} is the provider part of AlphaCalendarPlugin.readAvailability, kept free
- * of Capacitor so the host JVM test runs this exact order. Permission, foreground, unlock and
- * time-zone checks stay in the plugin.
+ * {@link #readAvailability} is the provider part of AlphaCalendarPlugin.readAvailability. Permission,
+ * foreground, unlock and time-zone checks stay in the plugin.
  */
 final class CalendarSyncFreshness {
  /** CalendarProvider does not prove whether a remote calendar has finished syncing. */
@@ -25,7 +24,7 @@ final class CalendarSyncFreshness {
  private CalendarSyncFreshness(){}
 
  /** Throws {@link FreshnessUnknown} unless every selected calendar is a device-local calendar. */
- static void requireLocal(ContentResolver resolver,JSONArray selected)throws Exception {
+ private static void requireLocal(ContentResolver resolver,JSONArray selected)throws Exception {
   if(selected==null||selected.length()<1)throw new IllegalArgumentException("Invalid availability read");
   for(int i=0;i<selected.length();i++){
    String id=selected.getJSONObject(i).getString("id");

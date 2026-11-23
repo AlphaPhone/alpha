@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -21,7 +22,7 @@ import static org.junit.Assert.*;
 public class StorageCategoriesInstrumentedTest {
  private static final String TRASH_FOLDER=".Trash-fixture";
  private static File tempRoot(Context context){File root=new File(context.getCacheDir(),"storage-categories-"+System.nanoTime());assertTrue(root.mkdirs());return root;}
- private static void file(File file,String text)throws Exception{try(FileOutputStream out=new FileOutputStream(file)){out.write(text.getBytes("UTF-8"));}}
+ private static void file(File file,String text)throws Exception{try(FileOutputStream out=new FileOutputStream(file)){out.write(text.getBytes(StandardCharsets.UTF_8));}}
 
  @Test public void everyCategoryIdIsAnswered()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();

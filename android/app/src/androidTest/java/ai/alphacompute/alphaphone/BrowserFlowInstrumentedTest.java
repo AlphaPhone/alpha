@@ -71,6 +71,10 @@ public class BrowserFlowInstrumentedTest {
   catch(Throwable error){evidence.append("; child-diagnostic-unavailable:").append(error.getClass().getSimpleName());}
   return evidence.toString();
  }
+ /** Waits for the first view, then opens Browser and answers the first-run access panel. */
+ private void openBrowser()throws Exception{
+  until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+ }
  private void page(String suffix)throws Exception{
   for(int i=0;i<300;i++){if("true".equals(child("location.protocol==='https:' && location.hostname==='example.com' && location.search==="+JSONObject.quote(suffix)+" && document.readyState==='complete' && !!document.body && document.body.innerText.trim().length>20")))return;SystemClock.sleep(100);}
   fail("Real HTTPS example.com page did not load: "+suffix+"; "+diagnostics());
@@ -92,7 +96,7 @@ public class BrowserFlowInstrumentedTest {
  @Test public void realHttpsHistoryMenuSharedNormalStorageAndPrivateTabIsolation()throws Exception{
   String token=UUID.randomUUID().toString(),one="?alpha_flow="+token+"-one",two="?alpha_flow="+token+"-two";
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("https://alpha-network-check.invalid/");
    // The address bar closes only after the native tab exists; typing the next
    // address before then races that close and loses the text.
@@ -136,11 +140,6 @@ public class BrowserFlowInstrumentedTest {
   });
   return url.get();
  }
- /** By default this asserts what the product submits: the executable address is refused before any
-  * page exists, and a search becomes https://www.google.com/search?q=<query> in the child WebView.
-  * Nothing here needs the public page to load, so the default campaign can pass offline.
-  * browserFlowLive=1 (an emulator with network) also waits for the real results page and checks
-  * that the provider cannot reach the app bridge; rounds 7 and 8 failed only on that live load. */
  /** The address the shown page's history entry was first asked for, before any redirect the provider made. */
  private String requestedAddress()throws Exception{
   AtomicReference<String> value=new AtomicReference<>();
@@ -152,10 +151,15 @@ public class BrowserFlowInstrumentedTest {
   try{return "search="+child("JSON.stringify({host:location.hostname==='www.google.com'?'www.google.com':location.hostname==='consent.google.com'?'consent.google.com':/(^|\\.)google\\.[a-z.]{2,6}$/.test(location.hostname)?'other-google':'other',path:location.pathname==='/search'?'/search':location.pathname.startsWith('/sorry/')?'/sorry/':'other',hasQ:new URL(location.href).searchParams.has('q'),hasContinue:new URL(location.href).searchParams.has('continue'),textLength:document.body?document.body.innerText.trim().length:-1})");}
   catch(Throwable error){return "search-diagnostic-unavailable:"+error.getClass().getSimpleName();}
  }
+ /** By default this asserts what the product submits: the executable address is refused before any
+  * page exists, and a search becomes https://www.google.com/search?q=<query> in the child WebView.
+  * Nothing here needs the public page to load, so the default campaign can pass offline.
+  * browserFlowLive=1 (an emulator with network) also waits for the real results page and checks
+  * that the provider cannot reach the app bridge. */
  @Test public void submittedSearchUsesRealProviderAndRejectsExecutableAddress()throws Exception{
   boolean live="1".equals(androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("browserFlowLive"));
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("javascript:alert(1)");
    until("document.body.innerText.includes('valid HTTP or HTTPS address without credentials')");
    assertEquals("Rejected address cannot create a page","null",child("true"));
@@ -246,7 +250,7 @@ public class BrowserFlowInstrumentedTest {
  }
  /** Opens Browser and loads the in-memory fixture at {@code path} in the presented tab. */
  private void openSameDocument(String path)throws Exception{
-  until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+  openBrowser();
   // The first address only creates the tab; it fails offline, before the fixture client exists.
   address(SAME+"start");until("!document.querySelector('input[aria-label=Address]')");
   for(int i=0;i<50&&presentedTab()==null;i++)SystemClock.sleep(100);

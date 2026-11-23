@@ -1,0 +1,16 @@
+# scripts/ci/fixtures/recovery-idle-52ab.json
+- Lines: 18 (218 KB; JSON array of 4 rows `{power, policy}`; `power` 48-53 KB each, `policy` ~3 KB each) | Kind: test fixture (captured API35 emulator `dumpsys power` + `dumpsys window policy`) | Verdict: KEEP, MOVE to `test/fixtures/android-recovery/idle-transition-api35.json` with its only consumer
+- Covers: a real user0 -> user10 switch where PowerManager lags the keyguard binding and the display then dozes/sleeps; it proves `admit_display` (`scripts/ci/recovery_ui_guard.py`) waits read-only while power is still bound to user0, writes the owned `screen_off_timeout` once, and re-wakes at most twice without retrying an insecure or regressed state. Duplicates: none (`recovery-policy-52ab.txt` covers the keyguard-sentinel transition, `recovery-dismiss-52ab-v2.json` the asleep-to-awake dismiss ordering). Callers/importers: only `scripts/ci/test-recovery-ui-guard.py:68` (`CAPTURED_IDLE`, rows used whole at :78 and individually `[1]` :80/:86, `[3]` :84/:85). Repo grep for `recovery-idle` outside docs: that single hit.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | all | T9 / location | Fixture of a Python unit test of a CI helper sits in `scripts/ci/fixtures/`. The consumer runs twice: `npm test` (`test/python-suites.test.mjs:25`) and `resident-android.yml:567-570` (`recovery-ui` job, which runs on main push/schedule as well as build dispatch, not dispatch-only). | Move with `test-recovery-ui-guard.py` to `test/fixtures/android-recovery/`; run the test once (from `npm test`); delete the workflow step "Qualify owned secondary recovery guards". | Low: only one `Path(__file__).parent/...` read to update; no pin/manifest names the path. |
+| 2 | name | naming | `52ab` is a run/commit fragment. | Rename `idle-transition-api35.json` (naming consistent with the sibling report for `recovery-dismiss-52ab-v2.json`). | None. |
+| 3 | rows | - | Row content verified: row0 power user0/Awake + policy `currentUser=-10000`,`mCurrentUserId=0`; row1 power user0 + policy user10; row2 power user10 `Dozing`; row3 power user10 `Asleep`, `SCREEN_STATE_OFF`. Every row is exercised and the ordered assertions (`f.reads==7`, `len(f.effects)==3`) depend on exactly four rows. | Keep all rows and their order. | Changing row count/order breaks :78-:86. |
+| 4 | power text | B5 / size | ~95 % of bytes are irrelevant wake-lock history; but the guard asserts `mUserId`/`mForegroundProfile` occur exactly once, so the whole dump is the evidence that real output has no other match. | Keep verbatim (recommended). If size matters, trim only to lines matching `^\s*m[A-Z]\w*=` per row; never reduce to the three read keys. | Over-trimming removes the uniqueness evidence. |
+
+## Proposed end state
+- Same bytes at `test/fixtures/android-recovery/idle-transition-api35.json`, read by the moved `test/recovery-ui-guard.test.py`.
+- The guard test runs once (npm test), not again in `resident-android.yml`.
+- If the owner later deletes the `recovery-ui` emulator lane and `scripts/ci/pending-recovery-ui.py`, delete `recovery_ui_guard.py`, its test and all four `recovery-*` fixtures together; until then this is the only real-capture coverage of the power-lags-keyguard transition.

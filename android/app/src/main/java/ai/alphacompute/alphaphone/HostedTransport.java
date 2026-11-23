@@ -9,20 +9,17 @@ import org.json.*;
 /** Bounded read/receipt transport. No login, refresh, registration, execution or provider grants. */
 final class HostedTransport implements HostedInbox.DeliveryTransport {
  interface Guard {void check()throws Exception;}
- interface Connections {HttpURLConnection open(URL url)throws Exception;}
- private final Connections connections;
  private final HostedInbox.Store store;private final JSONObject binding;private final Guard guard;
  private final long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);
  private volatile boolean stopped;private volatile HttpURLConnection connection;
  private final ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();
- HostedTransport(HostedInbox.Store store,JSONObject binding,Guard guard){this(store,binding,guard,url->(HttpURLConnection)url.openConnection());}
- HostedTransport(HostedInbox.Store store,JSONObject binding,Guard guard,Connections connections){this.connections=connections;this.store=store;this.binding=binding;this.guard=guard;timer.schedule(this::close,60,TimeUnit.SECONDS);}
+ HostedTransport(HostedInbox.Store store,JSONObject binding,Guard guard){this.store=store;this.binding=binding;this.guard=guard;timer.schedule(this::close,60,TimeUnit.SECONDS);}
  public void close(){stopped=true;HttpURLConnection c=connection;if(c!=null)c.disconnect();timer.shutdownNow();}
  public void check()throws Exception {if(stopped||System.nanoTime()>=deadline)throw new IOException("Delivery stopped");guard.check();String value=store.read(binding.getString("credentialSlot"));if(value==null||!HostedResultNotices.hash(value).equals(binding.getString("credentialDigest")))throw new SecurityException("Reconnect required");}
  private JSONObject credential()throws Exception {check();JSONObject c=new JSONObject(store.read(binding.getString("credentialSlot")));if(c.has("expiresAt")&&c.getDouble("expiresAt")<=System.currentTimeMillis())throw new SecurityException("Reconnect required");return c;}
  static URI origin(String value)throws Exception {URI u=new URI(value);if(u.getHost()==null||u.getRawUserInfo()!=null||u.getRawQuery()!=null||u.getRawFragment()!=null||!(u.getRawPath().isEmpty()||u.getRawPath().equals("/"))||u.getPort()==0||u.getPort()>65535)throw new SecurityException("Invalid origin");if(!"https".equals(u.getScheme()))throw new SecurityException("HTTPS required");return u;}
  private JSONObject call(String base,String path,JSONObject body,boolean device)throws Exception {
-  check();JSONObject auth=credential();HttpURLConnection c=connections.open(new URL(base+path));connection=c;
+  check();JSONObject auth=credential();HttpURLConnection c=(HttpURLConnection)new URL(base+path).openConnection();connection=c;
   try{c.setInstanceFollowRedirects(false);c.setUseCaches(false);int timeout=(int)Math.max(1,Math.min(15000,TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime())));c.setConnectTimeout(timeout);c.setReadTimeout(timeout);c.setRequestMethod(body==null?"GET":"POST");c.setRequestProperty("Accept","application/json");c.setRequestProperty("Authorization","Bearer "+auth.getString("token"));
    if(device){JSONObject d=new JSONObject(store.read(binding.getString("deviceSlot")));if(!HostedResultNotices.hash(d.toString()).equals(binding.getString("deviceDigest")))throw new SecurityException("Device binding changed");c.setRequestProperty("X-Eliza-Device-Id",d.getString("installationId"));c.setRequestProperty("X-Eliza-Device-Key",d.getString("key"));c.setRequestProperty("X-Eliza-Device-Capabilities","calendar.local-event.v1,notes.local-record.v1");if(binding.getString("mode").equals("cloud"))c.setRequestProperty("X-Eliza-Phone-Protocol","1");}
    if(body!=null){byte[] bytes=body.toString().getBytes(StandardCharsets.UTF_8);c.setRequestProperty("Content-Type","application/json");c.setDoOutput(true);c.setFixedLengthStreamingMode(bytes.length);check();try(OutputStream out=c.getOutputStream()){out.write(bytes);}}

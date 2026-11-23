@@ -16,26 +16,26 @@ logs or notices, and the agent observes nothing while the page holds vault data.
 ```quint
 type Unavailable = NoScreenLock | Unsupported | NotAdmitted | DeviceLocked | LegacyAuthorization | LegacyKey | BridgeMissing
 type Phase = Closed | Checking | VaultUnavailable({ reason: Unavailable }) | Locked | Unlocked | Damaged
-type Task = NoTask | Unlocking | Locking | Editing | Removing | Revealing | Copying | Resetting | OpeningAutofill | ApprovingBackup
+type Task = NoTask | Unlocking | Locking | Editing | Removing | Revealing | Copying | Resetting | OpeningAutofill
 type Entry = { id: str, label: str, username: str, sites: List[str], revision: int }
 type Autofill = AutofillUnread | AutofillThisApp | AutofillOther | AutofillNone | AutofillUnsupported
 type Vault = {
   visit: int, phase: Phase, entries: List[Entry], selected: str, task: Task, confirmReset: bool, confirmRemove: str,
-  autofill: Autofill, browserFill: bool, backupReady: bool, observed: bool,
+  autofill: Autofill, browserFill: bool, observed: bool,
 }
 pure val initial: Vault = {
   visit: 0, phase: Closed, entries: List(), selected: "", task: NoTask, confirmReset: false, confirmRemove: "",
-  autofill: AutofillUnread, browserFill: false, backupReady: false, observed: true,
+  autofill: AutofillUnread, browserFill: false, observed: true,
 }
 pure val entriesValues = Set(List()).union(Set(List({ id: "a", label: "Bank", username: "ann", sites: List("bank.example"), revision: 1 })))
 pure val visitValues = Set(1, 2)
 pure val phaseValues = Set(Locked).union(Set(Damaged)).union(Set(VaultUnavailable({ reason: NoScreenLock })))
 pure def holdsData(v: Vault): bool = v.phase == Unlocked or v.entries.length() > 0
 pure def openPage(v: Vault): Vault = { ...initial, visit: v.visit + 1, phase: Checking, observed: false }
-pure def canStatusRead(v: Vault, visit: int, phase: Phase, autofill: Autofill, browserFill: bool, backupReady: bool): bool =
+pure def canStatusRead(v: Vault, visit: int, phase: Phase, autofill: Autofill, browserFill: bool): bool =
   visit == v.visit and v.phase != Closed and v.task == NoTask and phase != Closed and phase != Checking and phase != Unlocked
-pure def statusRead(v: Vault, visit: int, phase: Phase, autofill: Autofill, browserFill: bool, backupReady: bool): Vault =
-  { ...v, phase: if (v.phase == Damaged) Damaged else phase, entries: List(), selected: "", autofill: autofill, browserFill: browserFill, backupReady: backupReady }
+pure def statusRead(v: Vault, visit: int, phase: Phase, autofill: Autofill, browserFill: bool): Vault =
+  { ...v, phase: if (v.phase == Damaged) Damaged else phase, entries: List(), selected: "", autofill: autofill, browserFill: browserFill }
 pure def alwaysEntriesOnlyWhileUnlocked(v: Vault): bool = v.entries.length() > 0 implies v.phase == Unlocked
 pure def alwaysTheAgentObservesNothingWhileDataIsHeld(v: Vault): bool = holdsData(v) implies not(v.observed)
 ```
@@ -49,7 +49,6 @@ pure def canBeginTask(v: Vault, task: Task, id: str): bool =
     else if (task == Resetting) v.phase == Damaged and v.confirmReset
     else if (task == Removing) v.phase == Unlocked and v.confirmRemove == id and id != ""
     else if (task == OpeningAutofill) v.phase != Closed and v.autofill != AutofillUnsupported and v.autofill != AutofillThisApp
-    else if (task == ApprovingBackup) v.phase == Unlocked and v.backupReady
     else v.phase == Unlocked)
 pure def beginTask(v: Vault, task: Task, id: str): Vault = { ...v, task: task, confirmRemove: if (task == Removing) v.confirmRemove else "" }
 pure val idValues = Set("", "a")
@@ -133,10 +132,10 @@ pure def alwaysAResetIsAskedOnlyOfADamagedVault(v: Vault): bool = v.confirmReset
 pure def sometimesResetting(v: Vault): bool = v.task == Resetting
 ```
 
-## Story: Fill passwords with Alpha, and back them up natively
+## Story: Fill passwords with Alpha
 
-> As the owner, I make Alpha Android's autofill service, see whether Alpha's browser can fill a
-> page's sign-in form, and approve a shared backup in the vault's own native flow.
+> As the owner, I make Alpha Android's autofill service and see whether Alpha's browser can fill a
+> page's sign-in form.
 
 ### Use for autofill is offered only while Alpha is not already the selected service
 
@@ -145,10 +144,4 @@ Android's confirmation finishes at once for the service already selected.
 ```quint
 pure def lawAutofillIsOfferedOnlyToSelectAlpha(v: Vault): bool =
   canBeginTask({ ...v, task: NoTask, autofill: AutofillThisApp }, OpeningAutofill, "") == false
-```
-
-### A shared backup is offered only when its native app is ready, and approved natively
-
-```quint
-pure def lawNoBackupWithoutItsNativeApp(v: Vault): bool = not(canBeginTask({ ...v, backupReady: false }, ApprovingBackup, ""))
 ```

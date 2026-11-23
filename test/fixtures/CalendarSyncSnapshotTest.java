@@ -73,8 +73,7 @@ public final class CalendarSyncSnapshotTest {
    check(ids(family.family).equals(List.of(42L,43L))&&ids(family.attendees).equals(List.of(8L))&&ids(family.reminders).equals(List.of(10L))&&family.properties.isEmpty());
    // Each compare-and-swap assertion selects exactly the rows it expects in the same SQL.
    for(ContentProviderOperation op:family.assertions())check(sql.count(op.uri,op.selection,op.args)==op.count);
-   // A timed event with zero milliseconds in a zone west of UTC. Its semantic form is printed for
-   // the renderer digest test (test/native-calendar-sync-port.test.mjs).
+   // A timed event with zero milliseconds in a zone west of UTC.
    long start=java.time.Instant.parse("2026-10-15T19:00:00Z").toEpochMilli();
    sql.insert("events","_id",50L,"calendar_id",7L,"title","Synthetic timed event","description","","eventLocation","","dtstart",start,"dtend",start+3600000L,"eventTimezone","America/New_York","allDay",0L,"deleted",0L);
    org.json.JSONObject timedRow=read(sql,50).semantic();check(timedRow.getString("startAt").equals("2026-10-15T19:00:00.000Z"));

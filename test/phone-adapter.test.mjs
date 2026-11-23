@@ -129,11 +129,6 @@ test('voicemail deletion rechecks approval and dispatches once even if the list 
  rows=[];model().nativeRefresh();await settle();assert.equal(model().vm.open,false);
  complete({status:'deleted'});assert.equal(await accepted,'deleted');
 });
-test('Contacts opens only where Contacts is admitted',async()=>{
- const {views}=mount({status:status()});await settle();const opened=[],toasts=[];const api={open:view=>opened.push(view),toast:text=>toasts.push(text)};
- globalThis.mvpViews=[];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,[]);assert.deepEqual(toasts,['Unavailable']);
- globalThis.mvpViews=['contacts'];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,['contacts']);globalThis.mvpViews=[];
-});
 test('rows without a dialable number cannot dial',()=>{const rows=phoneRows([{...call,number:'',cachedName:null}],()=>{throw Error('dialed');});assert.equal(rows[0].noDial,true);rows[0].dial();assert.match(rows[0].label,/Unknown caller/);});
 test('the image bar filters Recents in memory, keeps an Alpha filter as a clearable chip and briefs from new rows only',async()=>{
  const other={...call,id:'5',number:'+16465550100',cachedName:'Ben Ode',type:'outgoing',isNew:false};

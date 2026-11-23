@@ -152,12 +152,7 @@ public final class AlphaDevicePlugin extends Plugin {
  }
 
  private final java.util.concurrent.ExecutorService diagnosticsWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
- /**
-  * Runs problem-log work off the bridge thread. A call that the page made just before the activity
-  * was destroyed can arrive after handleOnDestroy has stopped the worker; the executor then throws
-  * on the bridge thread and the process dies (seen once on the API 36 emulator in
-  * LauncherHomeInstrumentedTest). Such a call is answered with a rejection instead.
-  */
+ /** Runs problem-log work off the bridge thread; a call that arrives after handleOnDestroy stopped the worker is rejected. */
  private void diagnostics(PluginCall call,Runnable work){
   PluginWorkers.submit(diagnosticsWorker,work,()->call.reject("Problem log is unavailable"));
  }
@@ -174,9 +169,7 @@ public final class AlphaDevicePlugin extends Plugin {
     for(String asset:new String[]{"agent/alpha-source.json","agent/agent-bundle.js","agent/workflow-worker/manifest.json","agent/workflow-worker/files.sha256"}){String hash=assetSha256(asset);if(hash!=null)hashes.put(asset,hash);}
     out.put("runtimeHashes",hashes);
     try(java.io.InputStream in=getContext().getAssets().open("agent/alpha-source.json")){
-     java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[8192];int count,total=0;
-     while((count=in.read(buffer))!=-1){total+=count;if(total>64*1024)throw new java.io.IOException();bytes.write(buffer,0,count);}
-     String base=new org.json.JSONObject(new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8)).optString("base","");
+     String base=new org.json.JSONObject(new String(AlphaUtil.readBounded(in,64*1024,null),java.nio.charset.StandardCharsets.UTF_8)).optString("base","");
      if(base.matches("[0-9a-f]{40}"))out.put("upstreamPin",base);
     }catch(Exception notPackaged){/* Developer APKs may omit the packaged runtime. */}
     call.resolve(out);
@@ -184,11 +177,8 @@ public final class AlphaDevicePlugin extends Plugin {
   });
  }
  private String assetSha256(String asset){
-  try(java.io.InputStream in=getContext().getAssets().open(asset)){
-   java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];int count;
-   while((count=in.read(buffer))!=-1)digest.update(buffer,0,count);
-   return hex(digest.digest());
-  }catch(Exception absent){return null;}
+  try(java.io.InputStream in=getContext().getAssets().open(asset)){return AlphaUtil.sha256Hex(in);}
+  catch(Exception absent){return null;}
  }
  /** User-initiated share of already redacted diagnostics. Android's chooser decides the destination. */
  @PluginMethod public void shareDiagnostics(PluginCall call){

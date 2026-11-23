@@ -75,8 +75,7 @@ final class ShareFlowAssertions {
    if(!chosen){for(var node:nodes())if(node.isScrollable())node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);SystemClock.sleep(200);}
   }
   assertTrue("Select the test-only local recipient through Android's real chooser",chosen);
-  byte[] hash=java.security.MessageDigest.getInstance("SHA-256").digest(expected);StringBuilder hex=new StringBuilder();for(byte b:hash)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
-  String marker="SHA-256: "+hex;boolean received=false;deadline=SystemClock.elapsedRealtime()+15000;
+  String marker="SHA-256: "+AlphaUtil.sha256Hex(expected);boolean received=false;deadline=SystemClock.elapsedRealtime()+15000;
   while(!received&&SystemClock.elapsedRealtime()<deadline){
    for(var node:nodes()){
     String text=String.valueOf(node.getText());
@@ -90,5 +89,4 @@ final class ShareFlowAssertions {
   InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
   awaitMainForeground();
  }
-
 }

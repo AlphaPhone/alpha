@@ -35,6 +35,8 @@ public class CalendarAgentCrudInstrumentedTest {
   fail("Alpha Activity did not regain foreground focus before Calendar review");
  }
  private void begin(JSONObject operation)throws Exception{awaitReviewForeground();eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.executeAgent({operation:"+operation+",operationId:"+JSONObject.quote(java.util.UUID.randomUUID().toString())+"}).then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");}
+ /** Calls an AlphaCalendar method; its value or {error} lands in window.__calendarAgentResult. */
+ private void invoke(String method,String args)throws Exception{eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar."+method+"("+args+").then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");}
  private JSONObject perform(JSONObject operation,String button)throws Exception{begin(operation);nativeClick(button);return result();}
  /** Alpha's review wording (CalendarProviderPlugin, from elizaOS/eliza#35913): the review names the calendar and its account and,
   * for a change, says no attendee is involved. Checked on screen before the button is pressed. */
@@ -76,15 +78,15 @@ public class CalendarAgentCrudInstrumentedTest {
   assertNotEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.READ_CALENDAR));
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();until("document.documentElement.dataset.activeView");
-   awaitReviewForeground();eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.requestWorkflowReadAccess().then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   awaitReviewForeground();invoke("requestWorkflowReadAccess","");
    nativeClick("Allow");assertEquals("granted",result().getString("status"));
    assertEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.READ_CALENDAR));
-   awaitReviewForeground();eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.workflowCalendars().then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   awaitReviewForeground();invoke("workflowCalendars","");
    assertEquals("ready",result().getString("status"));
   }
  }
 
- // Patch 0041: direct save of all-day, chosen-zone and RRULE events with provider readback,
+ // Direct save of all-day, chosen-zone and RRULE events with provider readback,
  // and the ACTION_INSERT handoff intercepted before any editor opens. Disposable rows only.
  private long eventId(Context context,String creationId){try(Cursor row=context.getContentResolver().query(CalendarContract.Events.CONTENT_URI,new String[]{CalendarContract.Events._ID},CalendarContract.Events.CUSTOM_APP_URI+"=?",new String[]{AlphaCalendarPlugin.CONFIGURATION.creationUriPrefix+"options/"+creationId},null)){return row!=null&&row.moveToFirst()?row.getLong(0):0;}}
  private android.content.ContentValues provider(Context context,long id){String[] fields={CalendarContract.Events.ALL_DAY,CalendarContract.Events.EVENT_TIMEZONE,CalendarContract.Events.RRULE,CalendarContract.Events.DURATION,CalendarContract.Events.DTSTART,CalendarContract.Events.DTEND,CalendarContract.Events.TITLE};android.content.ContentValues out=new android.content.ContentValues();try(Cursor row=context.getContentResolver().query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,id),fields,null,null,null)){assertTrue(row!=null&&row.moveToFirst());for(int i=0;i<fields.length;i++)out.put(fields[i],row.isNull(i)?null:row.getString(i));}return out;}
@@ -97,9 +99,9 @@ public class CalendarAgentCrudInstrumentedTest {
    long day=java.time.LocalDate.now(java.time.ZoneOffset.UTC).plusDays(3).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();
    String allDay=java.util.UUID.randomUUID().toString();creations.add(allDay);
    JSONObject event=new JSONObject().put("title","All-day options "+allDay).put("body","Synthetic").put("location","").put("begin",day).put("end",day+86400000L).put("allDay",true).put("timeZone","UTC").put("rrule","");
-   eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.saveOptions({creationId:"+JSONObject.quote(allDay)+",separateCreation:true,calendarId:'local',event:"+event+"}).then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   invoke("saveOptions","{creationId:"+JSONObject.quote(allDay)+",separateCreation:true,calendarId:'local',event:"+event+"}");
    JSONObject saved=result();assertEquals("saved",saved.getString("status"));assertEquals(allDay,saved.getString("creationId"));long id=Long.parseLong(saved.getString("id"));ids.add(id);
-   eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.readOptions({id:"+JSONObject.quote(Long.toString(id))+"}).then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   invoke("readOptions","{id:"+JSONObject.quote(Long.toString(id))+"}");
    JSONObject read=result();assertTrue(read.getBoolean("allDay"));assertEquals("UTC",read.getString("timeZone"));assertEquals("",read.getString("rrule"));
    android.content.ContentValues row=provider(context,id);assertEquals("1",row.getAsString(CalendarContract.Events.ALL_DAY));assertEquals(Long.toString(day),row.getAsString(CalendarContract.Events.DTSTART));assertEquals(Long.toString(day+86400000L),row.getAsString(CalendarContract.Events.DTEND));
    // Explicit IANA zone that differs from the device, and a simple weekly RRULE, on the local calendar.
@@ -127,7 +129,7 @@ public class CalendarAgentCrudInstrumentedTest {
    AppNavigation.liveMode();until("document.documentElement.dataset.activeView");awaitReviewForeground();
    long begin=System.currentTimeMillis()+86400000L;begin-=begin%60000;
    JSONObject event=new JSONObject().put("title","Handoff fixture").put("body","Synthetic").put("location","Hall").put("begin",begin).put("end",begin+1800000L).put("allDay",false).put("timeZone","Europe/Paris").put("rrule","FREQ=MONTHLY;BYMONTHDAY=15").put("attendees",new org.json.JSONArray().put("guest@example.com")).put("alerts",new org.json.JSONArray().put(10));
-   eval("window.__calendarAgentResult=null;Capacitor.Plugins.AlphaCalendar.insertHandoff({event:"+event+"}).then(value=>window.__calendarAgentResult=value,error=>window.__calendarAgentResult={error:String(error)})");
+   invoke("insertHandoff","{event:"+event+"}");
    JSONObject result=result();
    org.junit.Assume.assumeFalse("A Calendar editor must resolve ACTION_INSERT","unavailable".equals(result.getString("status")));
    assertEquals("opened",result.getString("status"));assertFalse("Alerts are not a standard insert extra",result.getBoolean("alertsPrefilled"));

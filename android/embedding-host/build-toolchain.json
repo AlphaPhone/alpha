@@ -1,7 +1,5 @@
 {
-  "schema": 1,
   "ndk": "28.2.13676358",
   "cmake": "4.0.3",
-  "engineRepository": "https://github.com/elizaOS/llama.cpp.git",
-  "remapBuildPath": true
+  "engineRepository": "https://github.com/elizaOS/llama.cpp.git"
 }

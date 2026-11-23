@@ -1,0 +1,13 @@
+specs/quint/services/TaskSchedulerRuntime.qnt
+specs/quint/services/TaskServiceLifecycle.qnt
+specs/quint/services/TriggerCursor.qnt
+specs/quint/services/WebReadingReview.qnt
+specs/quint/services/WorkflowAuthoring.qnt
+specs/quint/services/WorkflowEngineAdmission.qnt
+specs/quint/services/WorkflowExecution.qnt
+specs/quint/services/WorkflowExecutionAuditAdmission.qnt
+specs/quint/services/WorkflowLifecycleChange.qnt
+specs/quint/services/WorkflowNoticeTaps.qnt
+specs/quint/services/WorkflowScheduleTasks.qnt
+specs/quint/services/WorkflowWakeups.qnt
+specs/quint/services/WorkflowWorkerStaging.qnt

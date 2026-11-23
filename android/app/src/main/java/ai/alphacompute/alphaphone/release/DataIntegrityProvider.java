@@ -31,9 +31,10 @@ import javax.crypto.spec.SecretKeySpec;
  * do not; this is not a debug or test-mocks surface.
  */
 public final class DataIntegrityProvider extends ContentProvider {
- public static final String PATH = "domains";
- public static final String END = "#end";
- static final String[] COLUMNS = {"domain", "key", "digest"};
+ // Row format parsed by upstream parseIntegrityExport (apk-release-record.mjs).
+ private static final String PATH = "domains";
+ private static final String END = "#end";
+ private static final String[] COLUMNS = {"domain", "key", "digest"};
  private static final Pattern NONCE = Pattern.compile("[0-9a-f]{32,128}");
  // Android may clear these at any time; they are not app data.
  private static final List<String> SKIPPED = List.of("cache", "code_cache");
@@ -49,7 +50,7 @@ public final class DataIntegrityProvider extends ContentProvider {
  }
 
  /** Every regular file under {@code root} except caches, then one end row carrying the file count. */
- static MatrixCursor export(File root, byte[] nonce)throws IOException, GeneralSecurityException {
+ private static MatrixCursor export(File root, byte[] nonce)throws IOException, GeneralSecurityException {
   List<String> files=new ArrayList<>();
   collect(root, "", files);
   Collections.sort(files);
@@ -70,7 +71,6 @@ public final class DataIntegrityProvider extends ContentProvider {
    String relative=prefix+child.getName();
    if(prefix.isEmpty()&&SKIPPED.contains(child.getName()))continue;
    // Links are never followed: the export covers this app's own storage only.
-   if(Files.isSymbolicLink(child.toPath()))continue;
    if(Files.isDirectory(child.toPath(), LinkOption.NOFOLLOW_LINKS))collect(child, relative+"/", out);
    else if(Files.isRegularFile(child.toPath(), LinkOption.NOFOLLOW_LINKS))out.add(relative);
   }

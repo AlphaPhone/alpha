@@ -17,9 +17,8 @@ collects three replies: the feed of events, the calendars, and the next event. A
 captures the binding and its kind.
 
 ```quint
-type FeedStatus = Disconnected | Loading | Ready | Partial | Unavailable | Failed | LegacyRecovery | TransitionRequired
-type ReadPhase = NoRead | CheckingLegacy | CheckingRetention | Reading
-type LegacyCheck = LegacyClean | LegacyPresent | LegacyUnreadable | LegacyPending | LegacyFailed
+type FeedStatus = Disconnected | Loading | Ready | Partial | Unavailable | Failed
+type ReadPhase = NoRead | Reading
 type FeedReply = FeedAwaited | FeedComplete | FeedPartial | FeedUnavailable | FeedFailed | FeedRefused | FeedForeign | FeedWrongWindow
 type SourcesReply = SourcesAwaited | SourcesReadable | SourcesHidden | SourcesBlocked | SourcesNone | SourcesFailed
 type UpcomingReply = UpcomingAwaited | UpcomingEvent | UpcomingEmpty | UpcomingPartial | UpcomingFailed | UpcomingForeign | UpcomingEnded
@@ -28,9 +27,9 @@ type ReadError = NoReadError | LoadError | FeedLoadError | UpcomingLoadError | A
 type ReadJob = { id: int, owner: str, session: int, query: str, revalidating: bool, phase: ReadPhase,
   feed: FeedReply, sources: SourcesReply, upcoming: UpcomingReply }
 type WriteKind = CreateEvent | UpdateEvent | DeleteEvent
-type WritePhase = NoWrite | Preserving | Dispatched | ReadingBack
+type WritePhase = NoWrite | Dispatched | ReadingBack
 type WriteJob = { id: int, epoch: int, owner: str, session: int, kind: WriteKind, phase: WritePhase }
-type WriteOutcome = NoOutcome | WriteBusy | WriteNotAdmitted | WriteOwnerChanged | PreservationChanged | WriteTransport
+type WriteOutcome = NoOutcome | WriteBusy | WriteNotAdmitted | WriteOwnerChanged | WriteTransport
   | WriteForeign | WriteRefused | WriteUnknown | WriteQueuedForApproval | Saved | SentUnverified | Deleted | DeletedByReceipt | NotDeleted
 type AgentCalendar = {
   portOwner: str, portSession: int, portUsable: bool,
@@ -99,7 +98,7 @@ pure def startRead(window: str, s: AgentCalendar): AgentCalendar =
   val epoch = s.epoch + 1
   val same = bindingCurrent(s) and s.query == window
   val keep = same and (s.status == Ready or s.status == Partial)
-  val job = { id: epoch, owner: s.portOwner, session: s.portSession, query: window, revalidating: keep, phase: CheckingLegacy,
+  val job = { id: epoch, owner: s.portOwner, session: s.portSession, query: window, revalidating: keep, phase: Reading,
     feed: FeedAwaited, sources: SourcesAwaited, upcoming: UpcomingAwaited }
   if (not(s.portUsable)) { ...emptied(Disconnected, s), epoch: epoch, read: noRead, trailing: "", query: "" }
   else if (keep) { ...s, epoch: epoch, read: job, trailing: "", upcomingFresh: false, error: NoReadError }
@@ -129,10 +128,7 @@ pure def retire(s: AgentCalendar): AgentCalendar =
     outcomeId: if (s.write.id != 0) s.write.id else s.outcomeId }
 ```
 
-### A saved app calendar that cannot be read, or has unsettled changes, stops the agent reads until it is recovered
-
-A readable saved calendar that the owner has not chosen to keep read only asks for that review
-first. See [preservation](./preservation.md).
+### A failed read keeps the feed shown when it was only read again; an integrity failure never does
 
 ```quint
 pure def failure(integrity: bool, s: AgentCalendar): AgentCalendar =
@@ -141,27 +137,6 @@ pure def failure(integrity: bool, s: AgentCalendar): AgentCalendar =
     upcoming: NoUpcoming, upcomingEpoch: 0, upcomingFresh: false }
 pure def finishRead(trailing: str, s: AgentCalendar): AgentCalendar =
   if (trailing != "") startRead(trailing, { ...s, read: noRead, trailing: "" }) else { ...s, read: noRead }
-pure def canLegacyReply(s: AgentCalendar, id: int, result: LegacyCheck): bool = s.read.id == id and s.read.phase == CheckingLegacy
-pure def legacyReply(s: AgentCalendar, id: int, result: LegacyCheck): AgentCalendar =
-  if (not(readOwned(s))) { ...s, read: noRead, trailing: "" }
-  else match result {
-    | LegacyFailed => finishRead(s.trailing, failure(false, s))
-    | LegacyUnreadable => finishRead(s.trailing, { ...s, status: LegacyRecovery, feed: FeedAwaited, feedEpoch: 0 })
-    | LegacyPending => finishRead(s.trailing, { ...s, status: LegacyRecovery, feed: FeedAwaited, feedEpoch: 0 })
-    | LegacyPresent => { ...s, read: { ...s.read, phase: CheckingRetention } }
-    | LegacyClean => { ...s, read: { ...s.read, phase: Reading } }
-  }
-pure def canRetentionReply(s: AgentCalendar, id: int, kept: bool): bool = s.read.id == id and s.read.phase == CheckingRetention
-pure def retentionReply(s: AgentCalendar, id: int, kept: bool): AgentCalendar =
-  if (not(readOwned(s))) { ...s, read: noRead, trailing: "" }
-  else if (kept) { ...s, read: { ...s.read, phase: Reading } }
-  else finishRead(s.trailing, { ...s, status: TransitionRequired, feed: FeedAwaited, feedEpoch: 0 })
-pure def sometimesTransitionRequired(s: AgentCalendar): bool = s.status == TransitionRequired
-```
-
-### A failed read keeps the feed shown when it was only read again; an integrity failure never does
-
-```quint
 pure def lawIntegrityFailureDropsTheFeed(s: AgentCalendar): bool = failure(true, s).feedEpoch == 0
 pure def lawRereadFailureKeepsTheFeed(s: AgentCalendar): bool =
   s.read.revalidating implies failure(false, s).feedEpoch == s.feedEpoch
@@ -246,26 +221,9 @@ pure def startWrite(s: AgentCalendar, kind: WriteKind, eventAdmitted: bool): Age
   val id = s.lastWrite + 1
   val refusal = admission(s, kind, eventAdmitted)
   if (refusal != NoOutcome) { ...s, lastWrite: id, outcome: refusal, outcomeId: id }
-  else { ...s, lastWrite: id, write: { id: id, epoch: s.epoch, owner: s.portOwner, session: s.portSession, kind: kind, phase: Preserving },
+  else { ...s, lastWrite: id, write: { id: id, epoch: s.epoch, owner: s.portOwner, session: s.portSession, kind: kind, phase: Dispatched },
     outcome: NoOutcome, outcomeId: id }
 pure def alwaysActiveWriteIsCurrentEpoch(s: AgentCalendar): bool = s.write.id != 0 implies (s.write.epoch == s.epoch and s.write.phase != NoWrite)
-```
-
-### Before a write is sent, the saved app calendar is checked unchanged
-
-```quint
-type Preservation = PreservedSame | PreservedChanged | PreservedPending | PreservedUnreadable | PreservationFailed
-pure def settled(outcome: WriteOutcome, s: AgentCalendar): AgentCalendar =
-  val done = { ...s, write: noWrite, outcome: outcome, outcomeId: s.write.id, deferred: "" }
-  if (s.deferred != "") startRead(s.deferred, done) else done
-pure def ownerLoss(s: AgentCalendar): WriteOutcome = WriteOwnerChanged
-pure def canPreservationReply(s: AgentCalendar, id: int, result: Preservation): bool = s.write.id == id and s.write.phase == Preserving
-pure def preservationReply(s: AgentCalendar, id: int, result: Preservation): AgentCalendar =
-  if (result == PreservationFailed) settled(WriteTransport, s)
-  else if (not(writeCurrent(s))) settled(ownerLoss(s), s)
-  else if (result != PreservedSame) settled(PreservationChanged, s)
-  else { ...s, write: { ...s.write, phase: Dispatched } }
-pure def sometimesPreservationStopsAWrite(s: AgentCalendar): bool = s.outcome == PreservationChanged
 ```
 
 ### The provider's answer is read for the account that sent it; a create whose answer was lost is unknown, never resent
@@ -275,6 +233,10 @@ approval queue with exactly its reviewed fields, and its card opens the [approva
 
 ```quint
 type ProviderReply = ProviderApplied | ProviderUnknown | ProviderForeign | ProviderRefused | ProviderTransport | ProviderQueued
+pure def settled(outcome: WriteOutcome, s: AgentCalendar): AgentCalendar =
+  val done = { ...s, write: noWrite, outcome: outcome, outcomeId: s.write.id, deferred: "" }
+  if (s.deferred != "") startRead(s.deferred, done) else done
+pure def ownerLoss(s: AgentCalendar): WriteOutcome = WriteOwnerChanged
 pure def canProviderReply(s: AgentCalendar, id: int, reply: ProviderReply): bool = s.write.id == id and s.write.phase == Dispatched
 pure def providerReply(s: AgentCalendar, id: int, reply: ProviderReply): AgentCalendar =
   match reply {

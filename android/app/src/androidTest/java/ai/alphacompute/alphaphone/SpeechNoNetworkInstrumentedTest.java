@@ -18,10 +18,8 @@ import android.system.Os;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -104,21 +102,18 @@ public final class SpeechNoNetworkInstrumentedTest {
   Assume.assumeTrue("An active validated network is required so that an egress attempt would be observable",caps!=null&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)&&caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
   assertNotEquals("Per-UID traffic accounting must be supported",TrafficStats.UNSUPPORTED,TrafficStats.getUidTxBytes(Process.myUid()));
 
-  JSONObject evidence=new JSONObject().put("pass",false).put("execution","android-process-cpu").put("networkAvailable",true)
-   .put("physicalMicrophoneVerified",false).put("physicalSpeakerVerified",false);
-  File folder=new File(app.getExternalFilesDir(null),"speech-no-network-evidence");assertTrue(folder.isDirectory()||folder.mkdirs());
   ExecutorService worker=Executors.newSingleThreadExecutor(r->new Thread(r,"speech-no-network-worker"));
   ExecutorService listeners=Executors.newSingleThreadExecutor();
   StrictMode.VmPolicy previousVm=StrictMode.getVmPolicy();
   try{
    // Idle baseline of comparable length: the process must be quiet without speech.
-   Window idle=new Window().start();SystemClock.sleep(3000);idle.stop();evidence.put("idle",idle.json());
+   Window idle=new Window().start();SystemClock.sleep(3000);idle.stop();
    Assume.assumeTrue("The app process is not network-quiet without speech; egress cannot be attributed: "+idle.json(),idle.quiet());
 
    Window speech=new Window();
    StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder().detectCleartextNetwork().detectUntaggedSockets()
     .penaltyListener(listeners,(Violation v)->speech.violations.add("vm:"+v.getClass().getSimpleName())).build());
-   speech.start();long started=SystemClock.elapsedRealtime();
+   speech.start();
    JSONObject result=worker.submit(()->{
     StrictMode.ThreadPolicy previousThread=StrictMode.getThreadPolicy();
     StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder().detectNetwork()
@@ -142,9 +137,7 @@ public final class SpeechNoNetworkInstrumentedTest {
     }finally{StrictMode.setThreadPolicy(previousThread);}
     return out;
    }).get(300,TimeUnit.SECONDS);
-   evidence.put("speechMs",SystemClock.elapsedRealtime()-started);
    speech.stop();StrictMode.setVmPolicy(previousVm);
-   evidence.put("speech",speech.json()).put("result",result);
    Assume.assumeFalse("The native speech engine is not packaged in this APK; no egress claim is made: "+result.optString("engineUnavailable"),result.has("engineUnavailable"));
    // The work really ran: the known human fixture is recognized and speech was synthesized.
    String lower=result.getString("transcript").toLowerCase(Locale.ROOT);
@@ -156,10 +149,8 @@ public final class SpeechNoNetworkInstrumentedTest {
    assertTrue("Local speech opened no socket: "+speech.json(),speech.opened.isEmpty());
    assertTrue("Local speech raised no StrictMode network violation: "+speech.json(),speech.violations.isEmpty());
    assertNotNull("The network stayed available for the whole window",connectivity.getActiveNetwork());
-   evidence.put("pass",true);
   }finally{
    StrictMode.setVmPolicy(previousVm);worker.shutdownNow();listeners.shutdownNow();java.util.Arrays.fill(human,0);
-   try(Writer out=new FileWriter(new File(folder,"result.json"))){out.write(evidence.toString(2));}
   }
  }
 }

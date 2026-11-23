@@ -1,4 +1,3 @@
-import {openLegacyNotes} from './helpers/legacy-notes';
 import {test,expect} from '@playwright/test';
 import {installCloudVoiceFixture} from './cloud-voice-fixture';
 test.beforeEach(async({page})=>{await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:navigator.mediaDevices});});await page.goto('/?mode=dev&tools=1&shell=launcher');});
@@ -21,8 +20,4 @@ test('video microphone policy releases owned recording tracks and preserves the 
 test('media volume applies to owned playback and survives reload without controlling host volume',async({page})=>{
  await page.evaluate(()=>{const media=document.createElement('video');media.dataset.testMedia='true';document.querySelector('.os')!.append(media);media.dispatchEvent(new Event('play'));});await expect.poll(()=>page.locator('[data-test-media]').evaluate((m:HTMLVideoElement)=>m.volume)).toBe(.7);
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaDevice').openSettings({page:'sound'});});await page.getByRole('dialog',{name:'sound settings'}).getByRole('slider',{name:'music',exact:true}).fill('20');await expect.poll(()=>page.locator('[data-test-media]').evaluate((m:HTMLVideoElement)=>m.volume)).toBe(.2);await page.reload();expect(await page.evaluate(async()=>{const {browserMediaVolume}=await import('/src/browser/audio-settings.ts');return browserMediaVolume();})).toBe(.2);
-});
-test('disabling microphone exits the rendered Notes recording state',async({page})=>{
- await installCloudVoiceFixture(page);
- await page.evaluate(()=>{const ctx=new AudioContext(),sink=ctx.createMediaStreamDestination();Object.defineProperty(navigator.mediaDevices,'getUserMedia',{configurable:true,value:async()=>sink.stream});(window as any).microphoneContext=ctx;});await openLegacyNotes(page);await page.getByRole('button',{name:'Record voice note',exact:true}).click();const recorder=page.locator('[data-alpha-subview="notes-recorder"]');await expect(recorder).toHaveAttribute('data-recorder-state','recording');await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaDevice').setSensor({field:'microphoneEnabled',enabled:false});});await expect(recorder).toHaveAttribute('data-recorder-state','stopped');await expect(recorder.getByRole('alert')).toHaveText('The microphone stopped.');await expect(recorder.getByRole('button',{name:'Pause',exact:true})).toHaveCount(0);await page.evaluate(()=>(window as any).microphoneContext.close());
 });

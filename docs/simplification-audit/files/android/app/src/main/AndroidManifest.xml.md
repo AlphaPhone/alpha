@@ -1,0 +1,23 @@
+# android/app/src/main/AndroidManifest.xml
+- Lines: 147 | Role: shared (both flavors) application manifest: permissions, package-visibility queries, services, receivers, providers, activities and App Link filters. | Verdict: SIMPLIFY
+- Importers: AGP merge for both flavors (standalone overlay removes telephony/contacts permissions; launcher overlay adds HOME and role components). Text/path pins (regex or parse this file): `test/alpha-system-entry.test.mjs`, `test/android-host.test.mjs`, `test/android-instrumentation-runner.test.mjs`, `test/aosp-cloud-power-defaults.test.mjs`, `test/aosp-image-capability.test.mjs`, `test/aosp-provisioning-overlay.test.mjs`, `test/aosp-secure-camera-policy.test.mjs`, `test/aosp-sms.test.mjs`, `test/app-update.test.mjs`, `test/ci-affected.test.mjs`, `test/cloud-readiness.test.mjs`, `test/cloud-sign-in-flow.test.mjs`, `test/digest-missed-run-now.test.mjs`, `test/files-legacy-storage.test.mjs`, `test/fixtures/google-browser-auth/native-sign-in.test.mjs`, `test/google-workspace-return-native.test.mjs`, `test/keyboard-dictation.test.mjs`, `test/login-surfaces.test.mjs`, `test/notes-recorder.test.mjs`, `test/photo-library.test.mjs`, `test/pilot-update-export.test.mjs`, `test/power-sense-entry.test.mjs`, `test/product-identity.test.mjs`, `test/release-signing.test.mjs`, `test/reset-startup.test.mjs`, `test/settings-truth.test.mjs`, `test/system-shade.test.mjs`, `test/voice-in-chat-only.test.mjs`, `scripts/source-snapshot.ts`, `specs/quint/native/manifest.json`, `specs/quint/refinement/native/{assistant-entry,reminder-delivery,reviewed-copies,text-scale-lifecycle}.mjs`; `scripts/apk.ts` audits the merged APK manifest.
+
+## Findings
+| # | Lines | Pattern | Finding (with snippet) | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 91-97, 123-129 | A4 / A5 | `.AlphaQuickSettingsTile`, `.AlphaAssistActivity`, `.AlphaPowerVoiceActivity` all `android:enabled="false"`; nothing in the repo enables them (P-78; `scripts/stage-aosp.ts`). Comment at 93 admits "Disabled with AlphaAssistActivity, its only target". | Owner decision on P-78. If deferred: delete the three elements (17 lines), the classes, `launcher/AndroidManifest.xml:62-63`, `proguard-rules.pro` keeps, `scripts/apk.ts` tile/assist checks and their tests. | Medium: many source-text tests (`test/apk-alpha-tile-policy`, `test/power-sense-entry`, `test/alpha-system-entry`, `test/aosp-cloud-power-defaults`, `test/launcher-orientation`) and AOSP patches name them. |
+| 2 | 64-66 | A8 / D11 | Comment "Alpha's own Phone view, calls and call permissions stay MVP-DEFERRED" contradicts PRD AP-08 (Phone P0 on AOSP) and the launcher manifest. | Rewrite: "Standalone Home Phone shortcut opens the user's dialer; the AOSP image's own Phone view is declared in the launcher manifest." | None |
+| 3 | 30-32 | A8 | Comment "Alpha can access the voicemail provider as the default dialer..." sits on a `tools:node="remove"` for `ADD_VOICEMAIL`; reads as the opposite of what the element does. | "Merged from the shared phone module; Alpha registers no voicemail source." | None |
+| 4 | 26-29 | A8 | Comment block with no element ("Contacts exist only on the Alpha AOSP image ... launcher manifest declares READ_CONTACTS") — narration of where things are not. | Delete (the launcher manifest documents it). | None |
+| 5 | 48 | D8 | Three `<intent>` query blocks on one line. | One per line (formatter). | `test/*` regexes that match `<intent>` text may need adjusting. |
+| 6 | 103 | A1? | `.release.DataIntegrityProvider` "for pilot updates" — tied to the pre-rename pilot inventory. | Owner question: keep only if the pilot export is still used under the new package. | Low |
+| 7 | 84 | — | `android:requestLegacyExternalStorage="true"` plus WRITE_EXTERNAL_STORAGE maxSdk 29: API 29 Files path (minSdk 29). Specified behaviour. | Keep. | — |
+
+## Local types and helpers
+None (manifest). Literals repeated elsewhere: `"alphaphone"` scheme / `cloud-delegation` host (134) also in `AlphaConnectionPlugin:30`, `AlphaBrowserStores:23,37`; `/alphaphone/auth/callback` (143) also in `AlphaCloudSignInPlugin:38`; `ai.alphacompute.alphaphone.sense` (47, 74) in Sense client code.
+
+## Proposed end state
+~128 lines: dormant tile/assist/power elements removed (after owner decision), stale MVP-DEFERRED/voicemail/Contacts narration rewritten or dropped, queries one per line. All live permissions, services, providers, App Link filters and placeholders unchanged.
+
+## Verification
+The tests listed above (most regex this file), `scripts/apk.ts` merged-manifest audit, `npm run verify`, `npm run android:build:local` for standalone and launcher.

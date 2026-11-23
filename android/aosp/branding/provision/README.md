@@ -55,9 +55,10 @@ a preserved unrelated selection does not prove that factory default.
 The settings and update path come from pinned Android 17 source. The null-token fallback
 in `InputMethodManager.setInputMethod` explicitly recommends direct secure-setting updates;
 the input service requires the selected method to be enabled. Provision already holds
-`WRITE_SECURE_SETTINGS`. Managed-device checks use the calling-user owner query rather than
+`WRITE_SECURE_SETTINGS`; staging adds `MANAGE_ROLE_HOLDERS` for the current-user Home role
+request. Managed-device checks use the calling-user owner query rather than
 `isDeviceManaged()` (which can require `MANAGE_USERS`). No management permission is added.
-`source-inputs.json` records exact primary-source revisions/hashes and these boundaries.
+`source-inputs.json` records the exact primary-source revisions and hashes.
 
 Palette writes occur only while first-run eligibility holds and no palette is saved.
 Write failure cannot report successful completion. Existing colors and IME choices remain
@@ -94,9 +95,8 @@ data, provisioning bit or live device setting.
 Add `--apply` only for an owner-reviewed source checkout. Preimages are rechecked before
 the first write; changed existing source is retained beside the new receipt. For a staged
 tree, pass its preserved receipt with `--prior-receipt` and `--prior-receipt-sha256`.
-Unknown file contents fail closed. Use a new receipt path. Historical task-local staging
-scripts remain evidence; this source-owned entrypoint replaces their branding/Provision
-preparation for the next producer. It does not apply the separate policy patches or build.
+Unknown file contents fail closed. Use a new receipt path. Staging does not apply the
+separate policy patches or build.
 
 Focused local checks reuse installed Java and exact cached inputs/assets:
 

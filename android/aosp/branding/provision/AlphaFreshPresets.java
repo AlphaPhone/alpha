@@ -11,6 +11,8 @@ import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import java.util.Objects;
 
+import static com.android.provision.AlphaFreshSetupPolicy.nonempty;
+
 /** Privileged Provision adapter; never invoked for a completed or enterprise provisioning branch. */
 final class AlphaFreshPresets {
     private AlphaFreshPresets() {}
@@ -38,6 +40,16 @@ final class AlphaFreshPresets {
                     policy.getDeviceOwnerComponentOnCallingUser() != null || users.isManagedProfile(),
                     Process.myUserHandle().isSystem());
         } catch (IllegalStateException | SecurityException unavailable) { return false; }
+    }
+
+    static boolean applyPalette(Context context) {
+        // Android's existing theme engine owns colors, contrast, light/dark and control states.
+        return Settings.Secure.putString(context.getContentResolver(),
+                Settings.Secure.THEME_CUSTOMIZATION_OVERLAY_PACKAGES,
+                "{\"android.theme.customization.system_palette\":\"0000FF\","
+                + "\"android.theme.customization.accent_color\":\"0000FF\","
+                + "\"android.theme.customization.theme_style\":\"TONAL_SPOT\","
+                + "\"android.theme.customization.color_source\":\"preset\"}");
     }
 
     static AlphaFreshSetupPolicy.ImeResult ensureKeyboard(Activity activity) {
@@ -74,5 +86,4 @@ final class AlphaFreshPresets {
             return AlphaFreshSetupPolicy.ImeResult.FAILED;
         }
     }
-    private static boolean nonempty(String value) { return value != null && !value.isEmpty(); }
 }

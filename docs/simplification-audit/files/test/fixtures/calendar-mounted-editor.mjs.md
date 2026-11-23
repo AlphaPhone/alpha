@@ -1,0 +1,15 @@
+# test/fixtures/calendar-mounted-editor.mjs
+- Lines: 240 | Kind: e2e harness inside node:test (starts a Vite dev server and Chromium, patches main.tsx and camera-adapter.ts source at transform time, monkey-patches renderer singletons in-page) | Verdict: REWRITE as the calendar journey fixture under Playwright (`test/browser/journeys/calendar.spec.ts` + shared harness)
+- Covers: mounted Calendar with a closed GET-only record port (notes, calendars, feed, next-context), owner/session switching, held draft open/clear gates, visibility, snapshot of draft state. Duplicates: the Playwright harness already starts Vite and Chromium (`test/browser` projects); this is a second e2e stack run by `npm test` (research P12/§20). Callers/importers: `test/calendar-mounted-edit-admission.test.mjs`, `calendar-mounted-editor.test.mjs`, `camera-rapid-leave.test.mjs`, `fixtures/calendar-draft-handoff.mjs`, live Quint `camera-preview-retirement.mjs`, `canonical-calendar-draft-handoff.mjs`, `canonical-calendar-editor-close.mjs`, `notes-recorder-media-admission.mjs`, and legacy `specs/quint/refinement/legacy/calendar-navigation.mjs`, `camera-session.mjs`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 181-190 | T10/D7 | Vite transform rewrites product source at anchors `'shell = value;'` (main.tsx) and `'  function hideAccess(){'` (camera-adapter.ts) to expose `window.quintMountedCalendar`/`quintMountedCamera` (both anchors present today). | Expose one dev-only observation hook behind `ELIZA_DEV_ALLOW_TEST_MOCKS` (or read state through the DOM); no source rewriting. | High for model.js/main.tsx splits. |
+| 2 | 16-159 | T6 | `installCalendar` imports `/src/runtime/connection-ui.tsx`, `/src/browser/documents.ts`, etc. in-page and replaces `browserDocuments.read/compareExchange`, `calendar.refresh`, `shell.toast`, `connectionController.getAppRecordClient` (849-site pattern). | Use the shared harness's record-port fake via the supported test-mocks agent; gates become harness routes. | High: large rewrite. |
+| 3 | 194 | P1/T9 | Runs real Chromium from `node:test` inside `npm test`; slow (60-120 s timeouts) and outside the Playwright projects' retries/reporting. | Move to Playwright. | Medium: runtime cost notable. |
+| 4 | 172-204 | - | Mutates `process.env` (ELIZA_DEV_ALLOW_TEST_MOCKS, ALPHA_BROWSER_CLOUD_PROFILE) process-wide for the server start. | Gone with the move (Playwright config sets env). | Low |
+| 5 | 233 | - | Good: refuses foreign network and non-GET record requests. | Keep in the journey fixture. | - |
+
+## Proposed end state
+A Playwright fixture `calendarRecordPort` on the shared harness that serves the four GET endpoints and exposes hold/release gates through the test-mocks agent; journeys drive the UI. The Quint calendar/camera harnesses run their replays through that Playwright fixture (or through an integration-level controller) instead of rewriting source. Legacy `calendar-navigation`/`camera-session` drivers are retired with `specs/quint/legacy` (P6) and do not justify keeping this file.

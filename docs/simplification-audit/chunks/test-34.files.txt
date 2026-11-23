@@ -1,0 +1,16 @@
+test/fixtures/google-cancel-boundary.mjs
+test/fixtures/hosted-digest-refresh.jsx
+test/fixtures/isolated-native-campaign.mjs
+test/fixtures/jvm-tools.mjs
+test/fixtures/kotlin-tools.mjs
+test/fixtures/legacy-cloud-recovery/LegacyCloudRecoveryTest.java
+test/fixtures/legacy-cloud-recovery/ProviderCancellationTest.java
+test/fixtures/legacy-cloud-recovery/ProviderConditionalClearTest.java
+test/fixtures/legacy-cloud-recovery/ProviderOwnKeysTest.java
+test/fixtures/legacy-cloud-recovery/RendererRecoverySlotsTest.java
+test/fixtures/legacy-cloud-recovery/StoreIntegrationTest.java
+test/fixtures/lifeops-scheduled-task-route.mjs
+test/fixtures/mobile-uuid-build.mjs
+test/fixtures/modal-scrim-chromium.mjs
+test/fixtures/native-google-host-builder-port.mjs
+test/fixtures/native-source.mjs

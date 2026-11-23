@@ -22,8 +22,7 @@ final class ResetBeforeDispatch {
  /**
   * Best effort and within the coordinator's budget, run only while a confirmed reset is pending:
   * Alpha's own calendar, then this phone's Eliza Cloud key(s) (each step capped at 8 s on an
-  * interrupted daemon worker).
-  * The transport is injectable for host tests.
+  * interrupted daemon worker). The transport is injectable for host tests.
   */
  static DataReset.BeforeDispatch create(CloudKeyRevocation.Transport transport){
   CloudKeyRevocation.ResetStep<Context> cloud=CloudKeyRevocation.resetStep(()->AlphaCloudSignInPlugin.REGISTRATION,AlphaCredentialStore::readSlotBeforeAttach,transport);

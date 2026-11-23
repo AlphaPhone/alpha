@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {build} from 'esbuild';
 
 // The agent answers GET /api/client-devices/view-profile with
@@ -8,18 +7,6 @@ import {build} from 'esbuild';
 // and Contacts are offered only to a request that carries views.telephony.v1. On v609 the phone
 // negotiated with its bootstrap header ("calendar.local-event.v1,notes.local-record.v1"), so the
 // image enrolled no telephony view and chat refused "open messages / the phone app / contacts".
-
-const source=readFileSync(new URL('../apps/app/src/runtime/connection-ui.tsx',import.meta.url),'utf8');
-
-test('every enrollment sets the full capability header before it negotiates enabled views',()=>{
- const calls=[...source.matchAll(/negotiateEnabledViews\(/g)].map(match=>match.index).filter(index=>!source.slice(index-30,index).includes('import'));
- assert.equal(calls.length,3,'remote, resident and Cloud enrollment');
- for(const at of calls){
-  const before=source.slice(0,at),last=before.lastIndexOf('X-Eliza-Device-Capabilities');
-  const line=before.slice(before.lastIndexOf('\n',last)+1,before.indexOf('\n',last));
-  assert.match(line,/=\s*await deviceCapabilities\(/,`negotiation at ${source.slice(0,at).split('\n').length} reads the bootstrap header: ${line.trim()}`);
- }
-});
 
 async function image(){
  const saved=[globalThis.Capacitor,globalThis.androidBridge];

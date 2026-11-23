@@ -183,3 +183,10 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - owner-route-parity's reference reading.
 - **No tests:** no camera test covers a chat that stays open during the reveal.
 - **No meta file:** MapsScreen, MapPlane and the runtime-bound telephony screens (PhoneScreen, MessagesScreen, ContactsScreen, CallBar, UndoNotice, ReviewRows, PhoneInfoPanel) have no `.meta.tsx`.
+
+## After merging develop through #1449 (#1422 retirement)
+
+- Android code that #1422 itself kept: `PairedAgentCredential`, `PairedSpeechContract`, `HostedTransport`, the paired branch in `AlphaVoiceCloudPlugin`, `ConnectionRoutes.retiredPairing`, `CalendarSyncBridge` and Android `AlphaCalendar.sync`. **OWNER:** retire these too, now that client Calendar linked sync is gone from the app?
+- `owner-routes.json` still lists `/api/lifeops/calendar/sync-control` and `/links`.
+- Some androidTest files still call `AlphaConnection.secureWrite`/`secureRemove`, which the branch removed.
+- `docs/simplification-audit/**` (4,666 files) came in with #1422 and describes the legacy renderer.

@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "The delete sheet belongs to an open event that may be changed, and never sits under a form"; spec/calendar/editor.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"; spec/calendar/availability.md, "Nothing is preselected, and Check is offered only for one to sixteen ticked calendars"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/calendar/availability.md, "The answer sheet shows free or busy with each busy interval, and shares times only"; spec/calendar/sync.md, "Sync status words follow the readback, never the request"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
+// spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "The delete sheet belongs to an open event that may be changed, and never sits under a form"; spec/calendar/editor.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"; spec/calendar/availability.md, "Nothing is preselected, and Check is offered only for one to sixteen ticked calendars"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/calendar/availability.md, "The answer sheet shows free or busy with each busy interval, and shares times only"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
 // What Bombadil checks of the Calendar app in every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -85,16 +85,6 @@ const share = extract(({ document }) => {
 
 /** An availability answer is offered for sharing only with the note that it shares times only. */
 export const calendarAvailabilitySharesTimesOnly = always(() => share.current);
-
-const sync = extract(({ document }) => {
-  const section = document.querySelector('section[aria-label="Google Calendar sync"]');
-  if (section === null) return true;
-  const synced = [...section.querySelectorAll('[role="status"]')].some((node) => node.textContent?.trim() === "Synced");
-  return !synced || section.querySelector('button[aria-label="Check pending operation"]') === null;
-});
-
-/** Sync never reads "Synced" while a change is still waiting to be dispatched. */
-export const calendarSyncedNeverWithPendingChange = always(() => sync.current);
 
 const overlays = extract(({ document }) => {
   const dialogs = [...document.querySelectorAll('[role="dialog"]')];

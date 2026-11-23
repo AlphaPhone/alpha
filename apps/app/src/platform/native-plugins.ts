@@ -61,9 +61,9 @@ export const nativePlugins = {
       "checkPermissions", "requestPermissions", "requestAccess", "requestWorkflowReadAccess", "list", "inspect", "open",
       "save", "saveOptions", "readOptions", "insertHandoff", "pendingCreations", "acknowledgeCreation", "remove",
       "inspectDeletion", "removeScoped", "prepareAgentSource", "executeAgent", "cancelAgent", "availabilitySources",
-      "readAvailability", "sync",
+      "readAvailability",
     ],
-    events: ["calendarSyncChanged"],
+    events: [],
   },
   AlphaCallState: { reach: "AnyNative", methods: ["callState"], events: ["callState"] },
   AlphaCloudSignIn: {
@@ -230,7 +230,6 @@ export const nativePlugins = {
     reach: "AnyNative",
     methods: [
       "status", "unlock", "lock", "list", "openEditor", "remove", "reset", "reveal", "copy", "openAutofillSettings",
-      "sharedBackupReadiness", "approveSharedBackup",
     ],
     events: [],
   },

@@ -12,9 +12,8 @@ const voiceModules={
  connection:'/src/runtime/connection-ui.tsx',
  model:'/src/prototype/model.js',
  timing:'/src/runtime/voice-timing.ts',
- selection:'/src/runtime/voice-selection.ts',
 };
-async function setup(page:Page,options:{playback:'starts'|'fails';policy?:'auto-send'|'review'}){
+async function setup(page:Page,options:{playback:'starts'|'fails'}){
  await page.route('https://**/*',route=>route.abort());
  await page.addInitScript(()=>{
   localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
@@ -24,11 +23,10 @@ async function setup(page:Page,options:{playback:'starts'|'fails';policy?:'auto-
  await page.goto('/');
  await expect(page.locator('textarea[data-alpha-composer]')).toBeEnabled();
  await preloadPageModules(page,Object.values(voiceModules));
- await page.evaluate(({playback,policy,modules})=>{
+ await page.evaluate(({playback,modules})=>{
   const loaded=(window as any).__alphaModules;
   const {BrowserVoice}=loaded[modules.browser],{connectionController:c}=loaded[modules.connection],{Component}=loaded[modules.model];
   loaded[modules.timing].clearVoiceTiming();
-  if(policy)loaded[modules.selection].setVoiceSendPolicyForTests(policy);
   const f=(window as any).timingFixture;f.playback=playback;
   const snapshot={...c.getSnapshot(),open:false,busy:false,session:{origin:'https://owned.invalid',ownerId:'owner',agentId:'agent',sessionId:'synthetic-agent'}};c.getSnapshot=()=>snapshot as any;
   c.getCloudEnvironment=()=>'production';c.getCloudClient=()=>({sessionId:'synthetic-cloud',credentialId:'synthetic-credential',client:{}} as any);
@@ -95,10 +93,3 @@ test('closing voice while the transcript is pending records the turn as abandone
  expect(await page.evaluate(()=>(window as any).timingFixture.sends)).toBe(0);
 });
 
-test('under the review policy a discarded transcript is abandoned after transcript-ready, with no send mark',async({page})=>{
- await setup(page,{playback:'starts',policy:'review'});await talk(page);await utterance(page);
- await expect(voice(page)).toHaveAttribute('data-voice-state','review');
- await voice(page).getByRole('button',{name:'Discard voice message',exact:true}).click();await expect(voice(page)).toHaveCount(0);
- const rows=await records(page);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({entry:'conversation',policy:'review',outcome:'abandoned'});
- expect(Object.keys(rows[0].marks)).toEqual(['recording-end','transcript-ready']);expect(await page.evaluate(()=>(window as any).timingFixture.sends)).toBe(0);
-});

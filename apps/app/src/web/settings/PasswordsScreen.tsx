@@ -1,5 +1,5 @@
-// spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Story: Delete or reset only on purpose"; spec/settings/passwords.md, "Story: Fill passwords with Alpha, and back them up natively"
-import { ArrowLeft, Copy, Eye, Fingerprint, Globe, KeyRound, Lock, Pencil, Plus, RotateCw, Trash2, UploadCloud } from "lucide-react";
+// spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Story: Delete or reset only on purpose"; spec/settings/passwords.md, "Story: Fill passwords with Alpha"
+import { ArrowLeft, Copy, Eye, Fingerprint, Globe, KeyRound, Lock, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { Task, Vault } from "../../../gen/settings__passwords.ts";
 import { Button, EmptyState, Input, ScrollArea } from "../components/ui/index.ts";
@@ -74,7 +74,6 @@ export function PasswordsScreen({ vault, acts, onClose }: PasswordsScreenProps) 
                 {shown.length === 0 && <SettingRow label={vault.entries.length ? "No matching passwords" : "No saved passwords"} />}
                 {shown.map((e) => <SettingRow key={e.id} label={e.label} state={{ word: e.username }} icon={<Globe aria-hidden className="size-5" />} ariaLabel={`Open ${e.label}`} onOpen={() => acts.openEntry(e.id)} />)}
               </Section>
-              {vault.backupReady && <Section><SettingRow label="Back up passwords" icon={<UploadCloud aria-hidden className="size-5" />} busy={busy("ApprovingBackup")} onOpen={() => acts.run("ApprovingBackup", "")} /></Section>}
             </>
           )}
           {phase.tag === "Unlocked" && entry && (

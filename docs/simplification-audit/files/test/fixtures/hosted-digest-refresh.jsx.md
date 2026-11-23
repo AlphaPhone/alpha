@@ -1,0 +1,20 @@
+# test/fixtures/hosted-digest-refresh.jsx
+- Lines: 214 | Kind: Quint refinement fixture (in-browser port for the real `HostedDigestPanel`, bundled by esbuild and run in Chromium by the harness) | Verdict: KEEP while the HostedDigestRefresh / HostedDigestMutation / SourceRenewalQuestion models are live; SIMPLIFY and MOVE beside the harness
+- Covers: the fake world (connection selection, workflow client, secure storage journal, native renewal plugin, inbox, 15 s poll interval) that lets `specs/quint/refinement/application/hosted-digest-refresh.mjs` mount the actual `apps/app/src/runtime/hosted-digest-ui.tsx` and replay traces of `specs/quint/application/HostedDigestRefresh.qnt` and `HostedDigestMutation.qnt`. Duplicates: none for this fixture; the *tests* that drive it are duplicated (see #4). Callers/importers: path string in `specs/quint/refinement/application/hosted-digest-refresh.mjs:10` (bundled, not imported), reached by `hosted-digest-mutation.mjs`, `source-renewal-question.mjs`, `application/index.mjs`, and host tests `test/hosted-digest-refresh-ownership.test.mjs`, `test/hosted-digest-mutation-ownership.test.mjs`, `test/quint-hosted-digest-refresh.test.mjs`, `test/quint-source-renewal-question.test.mjs`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 3-4 | — | Imports the real `HostedDigestPanel`, `HostedSourceRejected`, `latestRetainedDigest`. Good: this is import-based, not text-sliced. The coupling problem is in the harness, which replaces ~20 module specifiers of `hosted-digest-ui.tsx` with string stubs (`./connection-ui`, `./cloud-delegation-ui`, `./native-connection`, `../build-flags` …, harness lines 13-40+). | Keep the fixture; in the harness, inject ports through a props/context seam on `HostedDigestPanel` instead of stubbing specifiers (T10). | Medium: every import added to `hosted-digest-ui.tsx` breaks the harness. |
+| 2 | 12-22 | T8 | Monkey-patches `window.setInterval`/`clearInterval` and intercepts only `delay === 15000`. Pins the poll period as a literal. | Export the poll period constant from `hosted-digest-ui.tsx` and compare to it, or use Playwright `page.clock`. | Low. |
+| 3 | 53, 59-60, 161 | A1 (D1) | `seed(id, phase)` and `pendingValue(id, phase)` allow a journal record with no `phase` ("older build" record, delete-candidates B297, owner question Q-LEG-11). If B297 is executed, the phase-less branch here and in the model go. | Make `phase` required when B297 lands; update model + Lemma `digestPhaseDiscardable` together. | Medium: model and Lemma proof must change in the same commit. |
+| 4 | — | T4, T9 | Four host tests reach this fixture; `quint-hosted-digest-refresh.test.mjs` (13 lines) only invokes the harness the aggregate Quint runner already runs, and the two `*-ownership.test.mjs` replay hand-written scenarios through the same port. | Keep one entry (the manifest-driven Quint runner); fold the hand-written ownership scenarios into model traces or delete them. | Low. |
+| 5 | 289-292 of product | A3/D5 | The panel's `testMocksEnabled && connection.kind==='cloud'` branch (B296) is stubbed off here (`testMocksEnabled=false`). Owner question Q-HOST-5 asks whether hosted digests / Cloud read delegation are in PRD scope at all. | If the owner retires hosted digests, DELETE this fixture with both models and the four tests. | High if guessed wrong; keep until answered. |
+| 6 | 7-11 | D8 | Twenty-odd module-level mutable variables declared in three comma lists. | Group into one `world` object reset per scenario; enables running scenarios without reloading the page. | Low. |
+
+## Proposed end state
+Fixture stays as the Chromium port for the hosted-digest models, moved to
+`specs/quint/refinement/application/fixtures/hosted-digest-refresh.jsx` (it belongs to the harness, not `test/`).
+State in one `world` object; poll period imported from the panel; `phase` required once B297 lands. The harness
+passes ports through an explicit seam rather than ~20 specifier stubs. One host entry point (the Quint runner), not four.
+Delete everything together if Q-HOST-5 retires hosted digests.

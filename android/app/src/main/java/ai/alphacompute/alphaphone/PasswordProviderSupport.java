@@ -16,12 +16,18 @@ final class PasswordProviderSupport {
     // The original publisher's signing certificate.
     static final String CERTIFICATE = "dcc9439ec1a6c6a8d0203f3423ee42bcc8b970628e53cb73a0393f398dd5b853";
 
-    static boolean trusted(Context context) {
-        byte[] certificate = new byte[CERTIFICATE.length() / 2];
-        for (int i = 0; i < certificate.length; i++) {
-            certificate[i] = (byte) Integer.parseInt(CERTIFICATE.substring(i * 2, i * 2 + 2), 16);
+    private static final byte[] CERTIFICATE_BYTES = decode(CERTIFICATE);
+
+    private static byte[] decode(String hex) {
+        byte[] bytes = new byte[hex.length() / 2];
+        for (int i = 0; i < bytes.length; i++) {
+            bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
         }
-        return context.getPackageManager().hasSigningCertificate(PACKAGE, certificate, PackageManager.CERT_INPUT_SHA256);
+        return bytes;
+    }
+
+    static boolean trusted(Context context) {
+        return context.getPackageManager().hasSigningCertificate(PACKAGE, CERTIFICATE_BYTES, PackageManager.CERT_INPUT_SHA256);
     }
 
     static JSObject status(Context context) {

@@ -48,8 +48,7 @@ pure def lawOnlyANativeCancelIsSilent(status: NativeStatus, sentence: NativeSent
 
 ### Settings offers no backup, import or export of the owner's data
 
-Reset is the one way to recover from data that cannot be read; passwords leave the vault only
-through the vault's own native backup approval.
+Reset is the one way to recover from data that cannot be read; passwords never leave the vault.
 
 ```quint
 type DataAction = EraseAll | Backup | Import | Export
