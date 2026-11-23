@@ -76,6 +76,33 @@ Brave Leo, Firefox AI chatbot).
 6. **Settings.** Settings → Privacy → Browser page for Alpha (on by default,
    like Location for Alpha). The PRD records the decision.
 
+## Latency
+
+A chat turn should not wait on the page. The send path reads it the way it reads
+the phone's position:
+
+- **Captured ahead of the turn (native).** Browser captures the shown tab's page
+  700 ms after it loads, and again when the assistant opens over Browser (unless
+  a capture under 20 s old holds). Each capture is kept in memory for its tab and
+  revision, up to 10 minutes; only a turn sends one. With Browser page for Alpha
+  off, nothing is captured or kept, and private tabs are never read.
+- **A turn joins, it does not wait.** With a capture of the same tab and revision
+  in hand, a turn waits at most 250 ms for a fresh read (so a selection or scroll
+  since the capture is usually included), then sends the capture. Only with none
+  in hand does it wait for a read, at most 1.2 s. Concurrent captures of one page
+  share one read.
+- **The fresh status read runs beside the reads.** A turn with an optional field
+  (Calendar day, position or page) compares a fresh `/api/status`; it is now
+  fetched at the same time as the position and page, not after them. The device
+  preferences and Notes folder names the message carries are read at the start of
+  the send too.
+- **Model side.** The page is rendered once, in the current turn's segment after
+  the history, so it never changes the conversation prefix a provider caches; at
+  most 6,000 characters of text (about 1,500 tokens).
+
+The end-to-end spec makes every native read after the first take 8 s: the turn
+still sends at once, with the page captured when it loaded.
+
 ## Todo and how each is checked
 
 | # | Item | Check |

@@ -23,6 +23,55 @@ export type BrowserPageSource = (tab:ObservedBrowserTab,signal:AbortSignal)=>Pro
 
 /** A chat turn waits at most this long for the page; without it the turn goes without the page. */
 export const BROWSER_PAGE_WAIT_MS=1_200;
+/** With a capture of the same tab and revision in hand, a turn waits at most this long for a fresher one. */
+export const BROWSER_PAGE_FRESH_WAIT_MS=250;
+/** A capture older than this is not used for a turn. */
+export const BROWSER_PAGE_CACHE_MAX_AGE_MS=10*60_000;
+
+const cacheKey=(tab:ObservedBrowserTab)=>`${tab.id}\n${tab.revision}`;
+/**
+ * Browser's captures of the open page, so a chat turn rarely waits on a read: Browser captures a
+ * page once it has settled and again when the assistant opens over it, and a turn joins a read
+ * already running. Captures stay in memory on the phone; only a turn sends one.
+ */
+export class BrowserPageCache {
+ private entry:{key:string;page:ClientBrowserPageObservation;at:number}|undefined;
+ private running:{key:string;promise:Promise<ClientBrowserPageObservation|undefined>;controller:AbortController}|undefined;
+ constructor(private readonly read:BrowserPageSource,private readonly now:()=>number=Date.now){}
+ clear(){this.entry=undefined;this.running?.controller.abort();this.running=undefined;}
+ /** The kept capture of this tab and revision, when recent enough. */
+ cached(tab:ObservedBrowserTab):ClientBrowserPageObservation|undefined{
+  const entry=this.entry;
+  return entry&&entry.key===cacheKey(tab)&&this.now()-entry.at<=BROWSER_PAGE_CACHE_MAX_AGE_MS?entry.page:undefined;
+ }
+ /** Age in milliseconds of the kept capture of this tab and revision, or undefined. */
+ age(tab:ObservedBrowserTab):number|undefined{const entry=this.entry;return entry?.key===cacheKey(tab)?this.now()-entry.at:undefined;}
+ /** Reads the page of this tab now, joining a read already running for it, and keeps the result. */
+ refresh(tab:ObservedBrowserTab):Promise<ClientBrowserPageObservation|undefined>{
+  const key=cacheKey(tab);
+  if(this.running?.key===key)return this.running.promise;
+  this.running?.controller.abort();
+  const controller=new AbortController();
+  const promise=this.read(tab,controller.signal).then(page=>{
+   if(page&&page.tabId===tab.id&&page.revision===tab.revision)this.entry={key,page,at:this.now()};
+   return page;
+  },()=>undefined).finally(()=>{if(this.running?.promise===promise)this.running=undefined;});
+  this.running={key,promise,controller};
+  return promise;
+ }
+ /**
+  * The page for a chat turn: a fresh read when it lands within `freshMs`, else the kept capture
+  * of the same tab and revision. With none kept the turn waits on the read (its own budget bounds it).
+  */
+ async forTurn(tab:ObservedBrowserTab,signal:AbortSignal,freshMs=BROWSER_PAGE_FRESH_WAIT_MS):Promise<ClientBrowserPageObservation|undefined>{
+  signal.throwIfAborted();
+  const kept=this.cached(tab),fresh=this.refresh(tab);
+  if(!kept)return fresh;
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([fresh,new Promise<undefined>(resolve=>{timer=setTimeout(()=>resolve(undefined),freshMs);})])??kept;}
+  finally{if(timer!==undefined)clearTimeout(timer);}
+ }
+}
 
 let source:BrowserPageSource|undefined;
 /** Browser registers its reader while it is installed; the returned function removes it. */
