@@ -30,6 +30,7 @@
   "test/avatar-initials-audit.test.mjs",
   "test/ci-pin-bound-scripts.test.mjs",
   "test/ci-ruleset-readback.test.mjs",
+  "test/cloud-auth-wire.test.mjs",
   "test/cloud-worker.test.mjs",
   "test/cuttlefish-launcher-postboot.test.mjs",
   "test/deliver-app-update.test.mjs",

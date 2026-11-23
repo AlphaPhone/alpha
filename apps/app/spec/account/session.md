@@ -52,6 +52,27 @@ pure def alwaysNothingBeforeLoad(s: Session): bool = not(s.loaded) implies (s.ph
 pure def sometimesStaging(s: Session): bool = s.environment == Staging and s.phase == SignedIn
 ```
 
+### The native host signs in on the wire of the deployment it addresses
+
+Eliza Cloud, the shipped deployment, is signed in to through Steward: `/steward/auth/*` routes bound
+to the deployment's tenant, answered with a Steward session. Alpha Cloud signs in through the
+Vibestack Cloud's `/api/v1/auth/*` routes (`signInRoutes` in elizaOS/eliza `spec/cloud/client.md`).
+The host sends only the fields each route accepts. Email and SMS first-factor requests and browser
+Google sign-in name the registered client ID and use flat PKCE fields. A verified first factor
+returns an opaque session with its own access expiry or a second-factor challenge. Cloud sends an
+SMS code for that challenge only when the host asks for one. Alpha Cloud has no tenant.
+The native host (`CloudAuthWire`) takes the wire from the build's deployment, so a completed sign-in on
+either Cloud ends in the same device key (`/api/v1/app-auth/connect`, `mobile/token`, `mobile/ack`),
+and the billing authority keeps the session its code returned for at most an hour on either wire.
+
+```quint
+type SignInWire = StewardWire | ElizaAuthWire
+pure def signInWireOf(d: Deployment): SignInWire = if (d == AlphaCloud) ElizaAuthWire else StewardWire
+pure def tenantNeeded(w: SignInWire): bool = w == StewardWire
+pure def lawAlphaCloudIsSignedInToOnItsOwnRoutes(d: Deployment): bool = (signInWireOf(d) == ElizaAuthWire) iff (d == AlphaCloud)
+pure def lawOnlyStewardNeedsATenant(d: Deployment): bool = tenantNeeded(signInWireOf(d)) iff (d == ElizaCloud)
+```
+
 ### A signed-in account is the one Cloud named for the saved key
 
 The session adopts an account only with a user, an organization, a local key generation and an

@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.alphacompute.alphaphone.cloud.CloudAuthWire;
 import ai.alphacompute.alphaphone.cloud.CloudCredentialSlots;
 import ai.alphacompute.alphaphone.cloud.CloudSignInConfig;
 import ai.alphacompute.alphaphone.cloud.CloudSignInEnvironment;
@@ -11,7 +12,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * browser launch are Alpha's own). The client owns email/SMS codes, native Google, MFA, the mobile
  * App Auth tail, acknowledgement resume, replaced-key revocation and readiness. This class supplies
  * the registration: the `ai.alphacompute.alphaphone` App Auth client and its
- * `/alphaphone/auth/callback` return, the production deployment, its product name, the installed storage names below and its
+ * `/alphaphone/auth/callback` return, the production deployment and the sign-in wire it serves (Steward on Eliza Cloud,
+ * the Vibestack Cloud's own routes on Alpha Cloud: CloudAuthWire), its product name, the installed storage names below and its
  * Keystore credential store. The minted key follows the resident's credential-intent rule.
  *
  * The `cloud:<environment>` slot stays renderer-readable, as the Cloud sign-in hand-off's key always
@@ -28,7 +30,7 @@ public final class AlphaCloudSignInPlugin extends AlphaCloudSignInClient {
   .logTag("AlphaCloudSignIn").readinessPreferences("alpha-cloud-signin-readiness-" + CloudDeployment.STORAGE_NAMESPACE)
   .pendingSlot(PENDING_SLOT).receiptSlotPrefix("cloud-signin:v1:ack:").credentialSlotPrefix("cloud:")
   .environment(new CloudSignInEnvironment("production", CloudDeployment.PRODUCTION_API_HOST, CloudDeployment.PRODUCTION_WEB_HOST,
-   CloudDeployment.PRODUCTION_TENANT, CloudDeployment.PRODUCTION_NAME, CALLBACK_PATH))
+   CloudDeployment.PRODUCTION_TENANT, CloudDeployment.PRODUCTION_NAME, CALLBACK_PATH, CloudAuthWire.of(CloudDeployment.ALPHA_CLOUD_CUTOVER)))
   .build();
  static String receiptSlot(CloudSignInEnvironment environment) { return REGISTRATION.receiptSlot(environment); }
 

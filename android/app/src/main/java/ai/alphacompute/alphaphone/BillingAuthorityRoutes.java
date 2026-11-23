@@ -74,6 +74,26 @@ final class BillingAuthorityRoutes {
   }
  }
 
+ /**
+  * The session a verified code issued and when it stops being usable, never later than one hour from
+  * now: the Vibestack Cloud's opaque session (`{status: "signed_in", accessToken, accessExpiresAt}`,
+  * apps/app/spec/account/session.md "The native host signs in on the wire of the deployment it
+  * addresses") or Steward's JWT, possibly under `data`, with its `exp`. Anything else is not accepted.
+  */
+ static String[] session(JSONObject body, long now) {
+  if (body != null && "signed_in".equals(body.opt("status"))) {
+   Object token = body.opt("accessToken"), expires = body.opt("accessExpiresAt");
+   if (!(token instanceof String) || ((String) token).isEmpty() || ((String) token).length() > 16384 || !(expires instanceof Number))
+    throw new SecurityException("Code not accepted");
+   long expiresAt = ((Number) expires).longValue();
+   if (expiresAt <= now) throw new SecurityException("Code not accepted");
+   return new String[] {(String) token, Long.toString(Math.min(expiresAt, now + 60 * 60 * 1000L))};
+  }
+  Object token = body == null ? null : body.opt("token");
+  if (!(token instanceof String) && body != null && body.optJSONObject("data") != null) token = body.optJSONObject("data").opt("token");
+  if (!(token instanceof String)) throw new SecurityException("Code not accepted");
+  return new String[] {(String) token, Long.toString(sessionExpiry((String) token, now))};
+ }
  /** When a Steward session stops being usable: its JWT `exp`, never later than one hour from now. */
  static long sessionExpiry(String token, long now) {
   String[] parts = token == null ? new String[0] : token.split("\\.");
@@ -266,17 +286,16 @@ final class BillingAuthorityRoutes {
    Reply verified = ports.verifyCode(pending[0], code, pending[1]);
    if (verified.status == 400 || verified.status == 401) throw new SecurityException("Wrong code");
    if (verified.status < 200 || verified.status >= 300) throw new SecurityException("Code not accepted");
-   Object token = verified.body.opt("token");
-   if (!(token instanceof String) && verified.body.optJSONObject("data") != null) token = verified.body.getJSONObject("data").opt("token");
-   if (!(token instanceof String)) throw new SecurityException("Code not accepted");
-   long expiresAt = sessionExpiry((String) token, ports.now());
-   Reply user = ports.request("GET", "/api/v1/user", null, (String) token);
+   String[] issued = session(verified.body, ports.now());
+   String token = issued[0];
+   long expiresAt = Long.parseLong(issued[1]);
+   Reply user = ports.request("GET", "/api/v1/user", null, token);
    if (user.status != 200 || !sameAccount(user.body.optJSONObject("data"), account.userId, account.organizationId)) {
     session.clear();
     throw new SecurityException("A different account");
    }
    // The phone may have signed out or switched accounts while the code was checked.
-   if (!session.bind(key(), account, (String) token, expiresAt)) throw new SecurityException("A different account");
+   if (!session.bind(key(), account, token, expiresAt)) throw new SecurityException("A different account");
    return status();
   }
 
