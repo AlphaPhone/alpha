@@ -4,6 +4,7 @@ import { linkStored, originLabel, originOpensEdited, originResolution, originRet
 import { NotesCollection } from "./collection.vibe"
 import type { NotesFilter } from "./list.vibe"
 import { decodeOrigins, type OriginIndex } from "./notes.schema.vibe"
+import { sha256Hex } from "./platform.ts"
 import { compareExchangeSlot, readSlot, slots } from "./slots.vibe"
 
 /** What Notes asks the shell to open in another app; nothing is saved or sent by the request itself. */
@@ -54,11 +55,62 @@ export service NotesOrigins {
   open(kind: "reminder" | "event", recordId: string): ("opened" | "edited" | "gone" | "unavailable")!!
 }
 
-effect function index(): { raw: string | undefined; links: OriginIndex["links"] }!! {
+/** The most links the index keeps; past it the oldest make room (legacy `NOTE_ORIGIN_LIMIT`). */
+export const ORIGIN_LIMIT = 200
+
+type Links = OriginIndex["links"]
+
+/** The stored index as read: its links, the raw text it was read from, and whether it could be read at all. */
+interface StoredIndex { readonly raw: string | undefined; readonly links: Links; readonly readable: boolean }
+
+const legacyKey = /^(event|reminder):(.{1,256})$/s
+
+/**
+ * The links of an index an earlier version stored, keyed by `<kind>:<id>` with each link's fields and `savedAt` flattened
+ * into one record; undefined when it is not that shape. An agent event was keyed by its event key, which this version names
+ * by the key's digest, as Calendar does.
+ */
+effect function legacyLinks(raw: string): (Links | undefined)!! {
+  const parsed: unknown = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
+  const document = parsed as { readonly version?: unknown; readonly links?: unknown }
+  if (document.version !== 1 || Object.keys(document).some((key) => key !== "version" && key !== "links")) return undefined
+  const stored = document.links
+  if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return undefined
+  const entries = Object.entries(stored as Record<string, unknown>)
+  if (entries.length > ORIGIN_LIMIT) return undefined
+  const links: Array<Links[number]> = []
+  for (const [key, row] of entries) {
+    const match = legacyKey.exec(key)
+    const link = noteLinkOf(row)
+    const savedAt = typeof row === "object" && row !== null && "savedAt" in row ? (row as { readonly savedAt: unknown }).savedAt : undefined
+    if (match === null || link === undefined || typeof savedAt !== "number" || !Number.isSafeInteger(savedAt) || savedAt < 0) return undefined
+    const kind = match[1] === "event" ? "event" as const : "reminder" as const
+    const id = match[2]
+    const recordId = kind === "event" ? `agent-event:${try (tryPromise(() => sha256Hex(id)) catch () => "")}` : id
+    if (recordId === "agent-event:" || recordId.length > 200) return undefined
+    links.push({ kind, recordId, link, linkedAt: savedAt })
+  }
+  return links
+}
+
+effect function index(): StoredIndex!! {
   const raw = try (readSlot(slots.origins) catch () => undefined)
-  if (raw === undefined) return { raw, links: [] }
+  if (raw === undefined) return { raw, links: [], readable: true }
   const decoded = try (decodeOrigins(raw) catch () => undefined)
-  return { raw, links: decoded?.links ?? [] }
+  if (decoded !== undefined) return { raw, links: decoded.links, readable: true }
+  const earlier = try legacyLinks(raw)
+  return earlier === undefined ? { raw, links: [], readable: false } : { raw, links: earlier, readable: true }
+}
+
+/** `links` with `added` kept for its record unless that record already has one, holding at most `ORIGIN_LIMIT`, the oldest first out. */
+export function keepFirst(links: Links, added: Links[number]): Links {
+  if (links.some((row) => row.kind === added.kind && row.recordId === added.recordId)) return links
+  const next = [...links, added]
+  const overflow = next.length - ORIGIN_LIMIT
+  if (overflow <= 0) return next
+  const oldest = new Set([...links].sort((a, b) => a.linkedAt - b.linkedAt).slice(0, overflow))
+  return next.filter((row) => !oldest.has(row))
 }
 
 /** The origin links over the device's origin slot. */
@@ -71,8 +123,9 @@ export const originsLayer = Layer.effect(NotesOrigins, effect {
     return stored === undefined ? undefined : noteLinkOf(stored.link)
   }
 
-  effect function edit(update: (links: OriginIndex["links"]) => OriginIndex["links"]): boolean!! {
+  effect function edit(update: (links: Links) => Links): boolean!! {
     const before = try index()
+    if (!before.readable) return false
     const next: OriginIndex = { version: 1, links: update(before.links) }
     return try (compareExchangeSlot(slots.origins, before.raw, JSON.stringify(next)) catch () => false)
   }
@@ -90,8 +143,10 @@ export const originsLayer = Layer.effect(NotesOrigins, effect {
     effect remember(kind: "reminder" | "event", recordId: string, link: unknown, saved: boolean) {
       const origin = noteLinkOf(link)
       if (origin === undefined || recordId === "" || !saved) return false
-      const written = try edit((links) => [...links.filter((row) => !(row.kind === kind && row.recordId === recordId)), { kind, recordId, link: origin, linkedAt: Date.now() }])
-      const readBack = written && (try find(kind, recordId)) !== undefined
+      const linkedAt = try Clock.currentTimeMillis
+      const written = try edit((links) => keepFirst(links, { kind, recordId, link: origin, linkedAt }))
+      const kept = written ? try find(kind, recordId) : undefined
+      const readBack = kept !== undefined && JSON.stringify(kept) === JSON.stringify(origin)
       return linkStored(saved, readBack)
     },
     effect forget(kind: "reminder" | "event", recordId: string, terminalReceipt: boolean) {

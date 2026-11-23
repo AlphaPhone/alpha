@@ -75,6 +75,7 @@ const followForeground = Layer.effectDiscard(effect {
   const filter = try NotesListFilter
   const editor = try NotesEditor
   const trash = try TrashMachine
+  const collection = try NotesCollection
   const inNotes = (state: ForegroundState) => state.visible && state.view === "notes"
   try fork.scoped Stream.runForEach(Stream.changesWith(foreground.changes, (a, b) => a.view === b.view && a.visible === b.visible), (state) => effect {
     const open = state.view === "notes"
@@ -84,6 +85,8 @@ const followForeground = Layer.effectDiscard(effect {
     if (inNotes(state)) {
       try filter.newVisit()
       try recorder.adopt()
+      // spec/notes/collection.md: the collection is read again when the owner enters Notes or Alpha returns on Notes.
+      try collection.refresh()
     }
   })
   const scenes = Stream.map(Stream.zipLatest(Stream.zipLatest(foreground.changes, editor.drafts), trash.changes), ([[state, draft], view]) => sceneOf(state, draft !== undefined, view.opened))
