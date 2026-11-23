@@ -311,15 +311,20 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     if (content.split(before).length !== 2) throw Error('Review changed browser address re-export: ' + name);
     project(name, content.replace(before, 'from "../../../packages/contracts/src/browser-address-input.ts";'));
   }
-  // The browser command parser reads the turn observation through the contracts
-  // package. Plain Node has no package alias, so bind that one reviewed value
-  // import to the exact authenticated leaf in this prepared tree.
+  // Keep the shared history parser and its observation reader. The owner's
+  // reload policy consumes server-side message security and stays in the SDK.
   {
     const name = 'plugins/plugin-browser/src/native-client-command.ts';
-    const before = 'import { readClientTurnObservation } from "@elizaos/contracts/client-turn-observation";';
     const content = text(name);
-    if (content.split(before).length !== 2) throw Error('Review changed browser observation import: ' + name);
-    project(name, content.replace(before, 'import { readClientTurnObservation } from "../../../packages/contracts/src/client-turn-observation.ts";'));
+    const serverPolicy = '\nconst OPEN_SUBACTIONS = ';
+    const parser = 'import {\n  readClientBrowserPage,\n  readClientTurnObservation,\n} from "@elizaos/contracts/client-turn-observation";';
+    const grounding = /^import \{[^}]+\} from "@elizaos\/contracts\/browser-request-grounding";\n/m;
+    const core = /^import \{[^}]+\} from "@elizaos\/core";\n/m;
+    if (content.split(serverPolicy).length !== 2 || content.split(parser).length !== 2 ||
+        !grounding.test(content) || !core.test(content))
+      throw Error('Review changed browser history projection: ' + name);
+    project(name, content.split(serverPolicy)[0].replace(grounding, '').replace(core, '')
+      .replace(parser, 'import { readClientTurnObservation } from "../../../packages/contracts/src/client-turn-observation.ts";') + '\n');
   }
   // Upstream voice sessions import the shared random-id helper by its emitted .js name. Plain
   // Node (tests and scripts that strip types) cannot map that to the copied .ts source, so the
@@ -451,7 +456,7 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {
-    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?16:0, files,
+    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?17:0, files,
   };
   const parent = path.join(root, '.eliza'), destination = path.join(parent, 'client-features');
   regularPath(parent, true);
