@@ -49,8 +49,10 @@ Landed on Alpha develop:
 
 - The pin moved to `17e742d454` (#1443), then `a3a19afd17` (#1448), then `7a124190a1` (#1453).
   It now carries every merge above.
-- **Voice cue hold**, #1450 (item 6):
-  - A voice cue waits 300 ms, so a reply already on its way replaces it.
+- **Voice cue**, #1450 (item 6); its 300 ms hold was then removed, since the owner wants voice to
+  play as soon as possible:
+  - A voice cue starts speaking as soon as its status arrives. A reply that is ready before the
+    cue's audio starts replaces it.
   - A cue that is audible finishes before the reply speaks, bounded at 2.5 s.
   - A cue still being synthesised is dropped.
 

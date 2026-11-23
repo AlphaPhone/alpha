@@ -60,9 +60,6 @@ export function genuineBatchProgress(value: BatchProgressCue): boolean {
   return value.kind === 'thinking' ? bounded(value.label) : value.kind === 'running_action'
     ? bounded(value.actionName) : value.kind === 'running_tool' && bounded(value.toolName);
 }
-/** A cue waits this long before speaking, so a reply that is already on its way is not preceded by
- * a cue it would clip; a reply within the hold means the cue is never spoken. */
-export const BATCH_CUE_HOLD_MS = 300;
 /** A cue already audible finishes before reply speech, but never holds a ready reply longer than this. */
 export const BATCH_CUE_REPLY_BOUND_MS = 2500;
 export function createBatchProgressAcknowledgment(input: {
@@ -79,16 +76,16 @@ export function createBatchProgressAcknowledgment(input: {
   const cue = new AbortController();
   let used = false, final = false, retired = false, playing = false, ended = false;
   let pending: Promise<void> = Promise.resolve();
-  let wake: (() => void) | undefined, bound: ReturnType<typeof setTimeout> | undefined;
+  let bound: ReturnType<typeof setTimeout> | undefined;
   const check = () => { input.signal.throwIfAborted(); input.assertCurrent(); };
   const microphoneClear = () => input.captureRetired === null || input.captureRetired();
-  const cancel = () => { retired = true; wake?.(); cue.abort(input.signal.reason ?? new DOMException('Voice cue retired.', 'AbortError')); };
+  const cancel = () => { retired = true; cue.abort(input.signal.reason ?? new DOMException('Voice cue retired.', 'AbortError')); };
   input.signal.addEventListener('abort', cancel, { once: true });
   if (input.signal.aborted) cancel();
-  // The reply is ready. A held cue, or one still being synthesised, is never heard; an audible cue
-  // finishes, within the bound.
+  // The reply is ready. A cue not yet started, or one still being synthesised, is never heard; an
+  // audible cue finishes, within the bound.
   const preempt = () => {
-    final = true; wake?.();
+    final = true;
     if (cue.signal.aborted || ended) return;
     if (!playing) cue.abort(new DOMException('Final voice reply superseded its cue.', 'AbortError'));
     else if (bound === undefined)
@@ -102,12 +99,9 @@ export function createBatchProgressAcknowledgment(input: {
       const label = value.label!;
       try { check(); if (!microphoneClear()) return; } catch { cancel(); return; }
       used = true;
-      // The hold lets a reply that arrives soon after the status replace the cue instead of clipping it.
-      pending = new Promise<void>(resolve => {
-        const timer = setTimeout(resolve, BATCH_CUE_HOLD_MS);
-        wake = () => { clearTimeout(timer); resolve(); };
-      }).then(async () => {
-        wake = undefined;
+      // The cue speaks at once. One microtask lets an already-ready final/token preempt queued
+      // prospective speech.
+      pending = Promise.resolve().then(async () => {
         if (final || retired || cue.signal.aborted) return;
         check();
         if (!microphoneClear()) throw Error('Voice capture was not retired before acknowledgement.');
