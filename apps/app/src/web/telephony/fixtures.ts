@@ -1,4 +1,5 @@
 // States the telephony components reach, for their stories (`*.meta.tsx`) only; production never loads them.
+import type { ContactId, ContactVersion } from "@elizaos/os/bridges/contacts";
 import type { Actions } from "../../../gen/telephony__actions.ts";
 import type { Attention } from "../../../gen/telephony__attention.ts";
 import type { CallBar } from "../../../gen/telephony__callBar.ts";
@@ -9,6 +10,7 @@ import type { MessageRow, Messages } from "../../../gen/telephony__messages.ts";
 import type { Phone } from "../../../gen/telephony__phone.ts";
 import type { PhoneFacts } from "../../../gen/telephony__phoneInfo.ts";
 import type { Voicemail } from "../../../gen/telephony__voicemail.ts";
+import type { ReviewDetails } from "../../telephony/actions.vibe";
 import type { OpenCard } from "../../telephony/comms.vibe";
 import type { UndoView } from "../../telephony/undo.vibe";
 
@@ -172,3 +174,20 @@ export const phoneFactsUnread: PhoneFacts = { ...phoneFacts, phoneState: false, 
 export const phoneFactsFailed: PhoneFacts = { ...phoneFacts, phase: "InfoFailed", lines: [], holders: { phoneApp: "", phoneAlpha: false, smsApp: "", smsAlpha: false }, voicemail: "VoicemailUnknown" };
 /** The read in flight. */
 export const phoneFactsReading: PhoneFacts = { ...phoneFactsFailed, phase: "InfoReading" };
+
+/** A text's body, quoted above the numbers to choose from. */
+export const reviewBody: ReviewDetails = { body: "Running late, start without me" };
+/** More contacts matched than the review lists. */
+export const reviewMore: ReviewDetails = { more: 8 };
+/** A contact's number replaced: its fields as the phone holds them and as they would be saved. */
+export const reviewChange: ReviewDetails = {
+  changes: {
+    "7:replace": {
+      before: {
+        id: "7" as ContactId, lookup: "k7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", starred: false,
+        phoneNumbers: [{ number: "4155550100", type: "mobile" }], emailAddresses: [{ address: "maya@example.com", type: "home" }], version: "a".repeat(64) as ContactVersion,
+      },
+      after: { displayName: "Maya Chen", phoneNumbers: [{ number: "4155550123", type: "mobile" }], emailAddresses: [{ address: "maya@example.com", type: "home" }] },
+    },
+  },
+};
