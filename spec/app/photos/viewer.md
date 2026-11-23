@@ -176,6 +176,17 @@ pure def canReload(s: Viewer, by: Actor): bool = by == Owner and showing(s) and 
 pure def reload(s: Viewer, by: Actor): Done = reading(s.open, s)
 ```
 
+### While an item is being read, nothing of it plays, zooms, shows its info or is edited
+
+Discovered by the proof: without it, an item read anew could seem to keep
+the position, zoom or "replace the original" of the one before.
+
+```quint
+pure def alwaysNothingOfAnItemBeingRead(s: Viewer): bool =
+  s.read.status == R::Loading
+    implies (s.position == 0 and s.zoom == 1 and not(s.playing) and not(s.info) and not(s.editing) and not(s.replace))
+```
+
 ### The owner swipes to the next or previous item Photos lists, and on the lock screen only within its session
 
 Photos says which item is next to the one open.
