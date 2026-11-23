@@ -144,6 +144,7 @@ public final class AlphaNavigationService extends Service {
    .setVisibility(Notification.VISIBILITY_PUBLIC)
    .build();
   manager.notify(ARRIVAL_NOTIFICATION_ID, notice);
+  StoreChanges.changed(StoreChanges.Store.NOTIFICATIONS);
   return true;
  }
 

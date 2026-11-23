@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {readPixel10aComposition} from './aosp-pixel10a.ts';
-import {stageSenseApk, VOICE_HOST_RECORD} from '../vendor/eliza/packages/os/scripts/android/sense-listener.mjs';
-export {FORBIDDEN,INDICATOR_EXEMPT_ROLES,UNPRIVILEGED,VOICE_HOST_RECORD,LISTENER_BUNDLE_MANIFEST,apkPermissions,checkListenerDescriptor,checkListenerOverlay,checkListenerPermissions,checkListenerSpeechBundle,checkListenerSpeechNatives,listenerPackage,privappPermissions,verifyAospListener} from '../vendor/eliza/packages/os/scripts/android/sense-listener.mjs';
+import {stageSenseApk, VOICE_HOST_RECORD} from './os-ported/os/sense-listener.mjs';
+export {FORBIDDEN,INDICATOR_EXEMPT_ROLES,UNPRIVILEGED,VOICE_HOST_RECORD,LISTENER_BUNDLE_MANIFEST,apkPermissions,checkListenerDescriptor,checkListenerOverlay,checkListenerPermissions,checkListenerSpeechBundle,checkListenerSpeechNatives,listenerPackage,privappPermissions,verifyAospListener} from './os-ported/os/sense-listener.mjs';
 
 interface ListenerStageOptions {
  root: string;

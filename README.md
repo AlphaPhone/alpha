@@ -38,16 +38,19 @@ git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url
 ```
 
 ```bash
-cd alpha && bun install --frozen-lockfile
+cd alpha && pnpm install --frozen-lockfile
 ```
 
 ```bash
-bun run dev:ui
+pnpm dev
 ```
+
+You need Node 26 and pnpm 10.24. `pnpm check` checks the specs, `pnpm test` runs the tests and
+`pnpm verify` runs everything a pull request must pass.
 
 > [!TIP]
 > Forgot `--recurse-submodules`? Run `git submodule update --init --recursive`
-> inside the folder, then `bun install --frozen-lockfile` again.
+> inside the folder, then `pnpm install --frozen-lockfile` again.
 
 ## What you get
 
@@ -93,26 +96,26 @@ You need JDK 21, Python 3 for toolchain bootstrapping, and the Android SDK
 (platform 36, build-tools 36.0.0), with `JAVA_HOME` and `ANDROID_HOME` set.
 
 ```bash
-bun run android:build:inputs
+pnpm android:build:inputs
 ```
 
 ```bash
-bun run android:build:local
+pnpm android:build:local
 ```
 
 ```bash
-bun run android:verify
+pnpm android:verify
 ```
 
 The first command lists anything that is missing. The second prepares the agent
 and builds the debug APK and its instrumentation APK into `artifacts/`; add
-`-- --release` (`bun run android:build:local -- --release`) to build the release
+`-- --release` (`pnpm android:build:local -- --release`) to build the release
 APK too, as CI does. The third checks their contents and signatures.
 
 While iterating on a phone, rebuild after that first `android:build:local` with:
 
 ```bash
-bun run android:build:fast -- --install
+pnpm android:build:fast -- --install
 ```
 
 It reuses the staged agent runtime and native outputs, runs the web build, sync and
@@ -143,8 +146,8 @@ Issues and pull requests are welcome.
 1. Fork the repository and create a branch.
 2. Make your change. Shared runtime changes belong upstream in elizaOS, not in
    `vendor/eliza`.
-3. Run `bun run verify`. If you touched Android, also run
-   `bun run android:build:local`.
+3. Run `pnpm verify`. If you touched Android, also run
+   `pnpm android:build:local`. Area behaviour lives in `apps/app/spec/<area>/`.
 4. Open a pull request that says what you changed and how you tested it.
 
 Found a security problem? Please do not open a public issue. Contact the team

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /** Record an operator-run wireless launcher replacement using read-only ADB commands. */
 import assert from 'node:assert/strict';
 import {sha256} from './sha256.ts';
@@ -15,7 +15,7 @@ import {inspectUpdateApk} from './update-apk-admission.ts';
 import {APP_UPDATE_TAG, appUpdateManifestUrl, isPublishedUpdateApkUrl} from './update-channel.ts';
 import {verifiedBootProblem} from './verify-pixel10a-image.ts';
 import {readAutomaticInstallHistory} from './wireless-install-history.ts';
-import {releaseRecordProblems} from '../vendor/eliza/packages/os/scripts/android/aosp-ota-update.mjs';
+import {releaseRecordProblems} from './os-ported/os/aosp-ota-update.mjs';
 
 type Adb = ReturnType<typeof adbFor>;
 type Distribution = 'sideload' | 'image-preinstalled';

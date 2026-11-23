@@ -1,0 +1,128 @@
+// spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"
+import {
+  NOTES_LIST_FILTER_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_RECORD_CAPABILITY, type NotesDeviceContext, type NotesOrganizeOperation,
+  decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeContextAllowed, notesOrganizeOffered, notesOrganizeRunsDirectly,
+} from "@elizaos/plugin-notes/organize"
+import type { NoteJson } from "@elizaos/plugin-notes/types"
+import {
+  type ReceiptStatus, type RestoreResult, folderCreateReceipt, moveReceipt, recordStartReceipt, recordStopReceipt, restoreReceipt,
+} from "../../gen/notes__organize.effect.vibe"
+import { recordNoteRevision } from "@elizaos/plugin-notes/client"
+import { NotesCollection } from "./collection.vibe"
+import { NotesEditor } from "./editor.vibe"
+import { NotesFolders } from "./folders.vibe"
+import { NotesListFilter } from "./listFilter.vibe"
+import { NotesHandoff } from "./origins.vibe"
+import { NotesRecorder } from "./recorder.vibe"
+import { NotesTrash } from "./trash.vibe"
+
+/** The receipt of one organisation operation: its status and Alpha's one-line summary. */
+export interface OrganizeReceipt { readonly status: "succeeded" | "failed" | "unknown"; readonly summary: string }
+
+/** An admitted proposal: the operation, its review card and whether it may run without one. */
+export interface OrganizeAdmission { readonly operation: NotesOrganizeOperation; readonly title: string; readonly description: string; readonly direct: boolean }
+
+/** The phone's executor of the agent's Notes organisation operations. */
+export service NotesOrganize {
+  capabilities(): readonly string[]!!
+  admit(input: unknown, context: NotesDeviceContext, ownMessage: boolean, workflow: boolean, reviewFirst: boolean): OrganizeAdmission | undefined!!
+  execute(operation: NotesOrganizeOperation): OrganizeReceipt!!
+}
+
+const statusOf = (status: ReceiptStatus): OrganizeReceipt["status"] =>
+  status === "ReceiptSucceeded" ? "succeeded" : status === "ReceiptFailed" ? "failed" : "unknown"
+
+const capabilityList = [NOTES_RECORD_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_LIST_FILTER_CAPABILITY] as const
+
+/** The organisation executor over the Notes services. */
+export const organizeLayer = Layer.effect(NotesOrganize, effect {
+  const collection = try NotesCollection
+  const editor = try NotesEditor
+  const folders = try NotesFolders
+  const filter = try NotesListFilter
+  const trash = try NotesTrash
+  const recorder = try NotesRecorder
+  const handoff = try NotesHandoff
+
+  effect function execute(operation: NotesOrganizeOperation): OrganizeReceipt!! {
+    if (operation.type === "notes_record") {
+      if (operation.action === "start") {
+        const started = try recorder.recordStart()
+        const status = recordStartReceipt(started === "started" ? "StartedRecording" : started === "already" ? "AlreadyRecording" : "StartFailed")
+        return { status: statusOf(status), summary: started === "started" ? "Recording" : started === "already" ? "A voice note is already recording." : "Mic failed" }
+      }
+      const stopped = try recorder.recordStop()
+      const status = recordStopReceipt(stopped === "saved" ? "StopSaved" : stopped === "retained" ? "StopRetained" : stopped === "none" ? "NothingRecording" : "StopFailed")
+      return { status: statusOf(status), summary: stopped === "saved" ? "Saved the voice note." : stopped === "retained" ? "Recording saved"
+        : stopped === "none" ? "No voice note is recording." : "Not saved" }
+    }
+    if (operation.type === "notes_filter") {
+      const folder = operation.folder === undefined ? undefined : try (folders.findByName(operation.folder) catch () => undefined)
+      if (operation.folder !== undefined && folder === undefined) return { status: "failed", summary: `No folder “${operation.folder}”` }
+      try handoff.request({ kind: "open-notes", filter: {
+        ...(operation.text === undefined ? {} : { text: operation.text }), ...(operation.kind === undefined ? {} : { kind: operation.kind }),
+        ...(folder === undefined ? {} : { folder: folder.id }),
+      } })
+      return { status: "succeeded", summary: "Filtered" }
+    }
+    if (operation.type === "notes_list_filter") {
+      const ran = try filter.run()
+      return { status: ran, summary: ran === "succeeded" ? "Filtered" : ran === "failed" ? "Notes changed" : "Unconfirmed" }
+    }
+    if (operation.type === "notes_folder_create") {
+      const existed = (try (folders.findByName(operation.name) catch () => undefined)) !== undefined
+      const made = existed ? undefined : try (folders.create(operation.name) catch () => undefined)
+      const readBack = existed || (made !== undefined && (try (folders.findByName(operation.name) catch () => undefined)) !== undefined)
+      const status = folderCreateReceipt(existed, existed || made !== undefined, readBack)
+      return { status: statusOf(status), summary: existed ? `“${operation.name}” exists` : status === "ReceiptSucceeded" ? `Created “${operation.name}”` : status === "ReceiptFailed" ? "Not created" : "Unconfirmed" }
+    }
+    if (operation.type === "notes_move") {
+      const folder = operation.folder === null ? null : try (folders.findByName(operation.folder) catch () => undefined)
+      const current = try collection.current()
+      const note = current?.snapshot.notes.find((item) => item.id === operation.target.noteId)
+      let reviewed = ""
+      if (note !== undefined) reviewed = try (tryPromise(() => recordNoteRevision(note)) catch () => "")
+      const targetCurrent = current !== undefined && reviewed !== "" && reviewed === operation.target.revision
+      const folderId = folder === null ? "" : folder?.id ?? ""
+      const already = note !== undefined && ((note.format?.data.folderId as NoteJson | undefined) ?? "") === folderId
+      const found = folder !== undefined
+      const where = operation.folder === null ? "no folder" : `“${operation.folder}”`
+      if (!found || !targetCurrent || note === undefined || already) {
+        const status = moveReceipt(found, targetCurrent, note !== undefined, already, false)
+        return { status: statusOf(status), summary: !found ? `No folder “${operation.folder ?? ""}”` : note === undefined ? "Note gone" : !targetCurrent ? "Note changed" : `The note is already in ${where}.` }
+      }
+      const data: Record<string, NoteJson> = { ...(note.format?.data ?? {}) }
+      if (folderId === "") delete data.folderId
+      else data.folderId = folderId
+      const reply = try (collection.interact("update-note", { id: note.id, expectedRevision: current.snapshot.revision, format: { kind: note.format?.kind ?? "text", data } }) catch () => undefined)
+      const status = moveReceipt(true, true, true, false, reply?.target?.id === note.id)
+      return { status: statusOf(status), summary: status === "ReceiptSucceeded" ? `Moved the note to ${where}.` : "Unconfirmed" }
+    }
+    const entry = try trash.entryFor(operation.noteId)
+    const live = (try collection.current())?.snapshot.notes.some((note) => note.id === operation.noteId) ?? false
+    const result: RestoreResult = live ? "RestoreAlreadyLive" : entry === undefined ? "RestoreMissing" : (try editor.restore(entry.id)) ? "RestoreDone" : "RestoreUnconfirmed"
+    const summaries: Record<RestoreResult, string> = {
+      RestoreDone: "Restored", RestoreAlreadyLive: "The note is already in Notes.", RestoreNotInTrash: "Not in trash", RestoreMissing: "The note is not in Recently deleted.",
+      RestoreExpired: "Permanently deleted", RestoreBusy: "Trash busy", RestoreUnconfirmed: "Unconfirmed",
+    }
+    return { status: statusOf(restoreReceipt(result)), summary: summaries[result] }
+  }
+
+  return {
+    capabilities: () => succeed(capabilityList),
+    effect admit(input: unknown, context: NotesDeviceContext, ownMessage: boolean, workflow: boolean, reviewFirst: boolean) {
+      const operation = try (decodeNotesOrganizeOperation(input) catch () => undefined)
+      if (operation === undefined || !notesOrganizeOffered(operation.type, capabilityList) || !notesOrganizeContextAllowed(context, operation.type)) return undefined
+      if (operation.type === "notes_list_filter") {
+        const admission = try filter.propose({ ...(operation.text === undefined ? {} : { text: operation.text }), ...(operation.kind === undefined ? {} : { kind: operation.kind }) }, ownMessage, workflow)
+        if (admission === "refused") return undefined
+      }
+      const card = describeNotesOrganizeOperation(operation)
+      return { operation, ...card, direct: !reviewFirst && notesOrganizeRunsDirectly(operation.type, ownMessage, workflow) }
+    },
+    effect execute(operation: NotesOrganizeOperation) {
+      if (operation.type === "notes_list_filter") try filter.approve()
+      return try execute(operation)
+    },
+  }
+})

@@ -43,6 +43,7 @@ final class AlphaCredentialStore {
   if(Slots.NOTES_AUDIO_DELETIONS.equals(name))return 1024*1024;
   if(name!=null&&name.matches(Slots.NOTE_AUDIO_METADATA_PREFIX+"[A-Za-z0-9_-]{1,100}"))return 512*1024;
   if(NOTES_RECORDS.equals(name))return 32*1024*1024;
+  if(DeviceExecutionJournal.SLOT.equals(name))return DeviceExecutionJournal.SLOT_BYTES;
   // Restorable copies of deleted notes, purged thirty days after deletion. The cap is the Trash
   // policy's byte limit (runtime/notes-trash-policy.ts NOTES_TRASH_MAX_BYTES).
   if(NOTES_TRASH.equals(name))return NOTES_TRASH_BYTES;
@@ -122,6 +123,7 @@ final class AlphaCredentialStore {
     if(Slots.CLOUD_PRODUCTION.equals(name)&&authorityChanged)slots.remove(CloudDeployment.storageSlot(GoogleWorkspaceReturn.SLOT));
     if(committed==null)slots.remove(CloudDeployment.storageSlot(name));
     else slots.write(CloudDeployment.storageSlot(name),committed);
+    if(authorityChanged)new Thread(ElizaAgentService::credentialChanged,"AlphaCredentialChanged").start();
     return true;
    }
   });

@@ -1,13 +1,13 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.plugins.agent.connection.CloudConnectionPolicy;
+import ai.alphacompute.alphaphone.connection.CloudConnectionPolicy;
 
 /**
  * Alpha's renderer transport route policy: the shared plugin-native-agent CloudConnectionPolicy with Alpha's
  * Eliza Cloud deployment hosts (CloudDeployment, generated from scripts/cloud-deployment-policy.ts) and Google consent as
  * the one external provider. A flag-off build contacts only https://api.eliza.app; a dedicated Cloud agent runtime
  * and a paired remote agent are refused from the URL alone (P-22/P-31, #406). Native Eliza Cloud sign-in sends its
- * fixed routes only through the shared sign-in client (ai.eliza.auth.cloud.CloudSignInRoutes, registered by
+ * fixed routes only through the shared sign-in client (ai.alphacompute.alphaphone.cloud.CloudSignInRoutes, registered by
  * AlphaCloudSignInPlugin); this transport admits none of them, nor the Cloud sign-in hand-off.
  */
 final class ConnectionRoutes {

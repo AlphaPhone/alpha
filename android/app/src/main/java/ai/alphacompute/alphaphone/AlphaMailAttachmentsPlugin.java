@@ -81,7 +81,6 @@ public final class AlphaMailAttachmentsPlugin extends Plugin {
    },()->call.resolve(result),()->call.reject("Selected photo changed or is unavailable. Review it again.")));
   }catch(Exception unavailable){call.reject("Selected photo changed or is unavailable. Choose a permitted PNG, JPEG or WebP source up to 5 MiB and review it again.");}
  });}
- @PluginMethod public void cancelPhotoSelected(PluginCall call){cancelPhotoReads();call.resolve();}
  private void cancelPhotoReads(){photoGeneration.incrementAndGet();for(InputStream stream:photoStreams){try{stream.close();}catch(IOException ignored){}}photoStreams.clear();}
  @Override protected void handleOnPause(){cancelPhotoReads();super.handleOnPause();}
  @PluginMethod public void cancel(PluginCall call){generation.incrementAndGet();cancelPhotoReads();copies.clear();call.resolve();}

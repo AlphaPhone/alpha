@@ -1,0 +1,101 @@
+// spec/browser/handoff.md, "Story: Open the page I see in another browser"
+import { type Event, type HandoffEffect, type ShownPage, Machine, machine } from "../../gen/browser__handoff.effect.vibe"
+import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
+import { isSettled } from "../../gen/browser__page.effect.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { Toasts } from "../shell/toasts.vibe"
+import { HANDOFF_NOTICES, refusalText } from "./messages.ts"
+import { BrowserPresenter } from "./presentation.vibe"
+import { BrowserReviews } from "./reviews.vibe"
+import { BrowserTabs } from "./session.vibe"
+import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
+
+/** Open in another browser for the page the owner sees. */
+export service BrowserHandoff {
+  /** The menu's Open in another browser. */
+  openExternal(): void!!
+  /** Follows the Browser view's visits, retiring a handoff whose view was left or hidden; never returns. */
+  follow(): void!!
+}
+
+const PRESENTATION_SETTLES = "150 millis"
+
+function browserShown(state: ForegroundState): boolean {
+  return state.visible && !state.locked && state.screen === "home" && state.view === "browser"
+}
+
+/** The selected tab's page as a handoff reads it. */
+export function shownOf(s: Session, visible: boolean): ShownPage {
+  const tab = curTab(s)
+  return {
+    visible, tab: s.cur, url: tab.page.url, navigation: tab.page.navigation, revision: tab.revision,
+    settled: tab.stage === "Live" && isSettled(tab.page), secure: tab.page.secure, priv: tab.profile === "Private",
+  }
+}
+
+/** BrowserHandoff over its machine in memory. */
+export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
+  const handoff = try Machine
+  const tabs = try BrowserTabs
+  const host = try TabHost
+  const reviews = try BrowserReviews
+  const presenter = try BrowserPresenter
+  const foreground = try Foreground
+  const toasts = try Toasts
+
+  effect function shown() {
+    return shownOf(try tabs.get(), browserShown(try foreground.get()))
+  }
+
+  effect function perform(out: HandoffEffect) {
+    match (out) {
+      when { tag: "AskLeavePrivate", let url }: {
+        const approved = try reviews.confirm("external-browser", "LeavePrivate", url)
+        try send({ type: "reviewed", approved })
+      }
+      when { tag: "Dispatch", let tab, let url, let navigation, let priv }: {
+        const opened = host.call("openExternalBrowser", { id: tab, url, navigation, privateConfirmed: priv }) catch (error) => error
+        if (opened instanceof BrowserCallFailed) try toasts.show(refusalText(opened.message))
+        try send({ type: "dispatched", ok: !(opened instanceof BrowserCallFailed) })
+      }
+      when { tag: "Notice", let problem }: if (problem !== "NotOpened") try toasts.show(HANDOFF_NOTICES[problem])
+    }
+  }
+
+  effect function send(event: Event) {
+    const change = handoff.send(event) catch () => undefined
+    if (change !== undefined) for (const out of change.out) try perform(out)
+  }
+
+  effect function presentationSettled() {
+    try presenter.forget()
+    try sleep(PRESENTATION_SETTLES)
+  }
+
+  return {
+    effect openExternal() {
+      try tabs.dispatch({ type: "closeMenu" })
+      try send({ type: "startHandoff", shown: try shown() })
+      if ((try handoff.get()).phase === "PreparingReview") {
+        try presentationSettled()
+        try send({ type: "prepared", shown: try shown() })
+      }
+      if ((try handoff.get()).phase === "Presenting") {
+        try presentationSettled()
+        try send({ type: "presented", shown: try shown() })
+      }
+      if ((try handoff.get()).phase === "CleaningUp") {
+        try presenter.forget()
+        try send({ type: "cleaned" })
+      }
+    },
+    effect follow() {
+      let was = false
+      for try (const state of foreground.changes) {
+        const now = browserShown(state)
+        if (was && !now) try send({ type: "retire" })
+        was = now
+      }
+    },
+  }
+}), machine())

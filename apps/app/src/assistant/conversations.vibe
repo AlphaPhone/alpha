@@ -1,0 +1,79 @@
+// spec/assistant/conversation.md, "A history reload of the same session keeps what was consumed; any other disconnect forgets it"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"
+import { pageSize } from "../../gen/assistant__search.effect.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { AgentUnreachable, ask } from "./transport.vibe"
+import { ConversationList, CreatedConversation, HistoryPage, SearchPage, type ConversationRow, type HistoryRow, type SearchHit } from "./payloads.schema.vibe"
+
+/** A conversation id the resident gave, or a path segment that is not one. */
+export error NotAConversation { id: string }
+
+/** The resident answered with something that is not the shape asked for. */
+export error UnreadableAnswer { path: string }
+
+const conversationId = /^[A-Za-z0-9_-]{1,128}$/
+const messageId = /^[A-Za-z0-9_-]{1,128}$/
+
+effect function segment(id: string) {
+  if (!conversationId.test(id)) throw new NotAConversation({ id })
+  return encodeURIComponent(id)
+}
+
+effect function decoded<A>(path: string, schema: Schema.Codec<A, unknown>, data: unknown) {
+  return try mapError(Schema.decodeUnknownEffect(schema)(data), () => new UnreadableAnswer({ path }))
+}
+
+/** The owner's conversations on the resident agent. */
+export service Conversations {
+  /** The published conversations, most recently updated first. */
+  list(): readonly ConversationRow[]!AgentUnreachable | UnreadableAnswer
+  /** A new, empty conversation. */
+  create(): ConversationRow!AgentUnreachable | UnreadableAnswer
+  /** The newest page of a conversation, or the page before a cursor. */
+  history(id: string, before?: { readonly before: number; readonly beforeId?: string }): { readonly messages: readonly HistoryRow[]; readonly hasMore: boolean }!AgentUnreachable | UnreadableAnswer | NotAConversation
+  /** The messages around one message, for a search hit. */
+  around(id: string, message: string): readonly HistoryRow[]!AgentUnreachable | UnreadableAnswer | NotAConversation
+  /** One page of search hits across every conversation. */
+  search(query: string, offset: number): readonly SearchHit[]!AgentUnreachable | UnreadableAnswer
+  /** A fork of a conversation at the owner's own message, whose stored text must be what the owner saw. */
+  branch(id: string, message: string, requestId: string, expectedText: string): ConversationRow!AgentUnreachable | UnreadableAnswer | NotAConversation
+}
+
+/** Conversations over the resident's local API. */
+export const conversationsLayer = Layer.effect(Conversations, effect {
+  const resident = try Resident
+  const run = <A, E>(work: Effect.Effect<A, E, Resident>) => Effect.provideService(work, Resident, resident)
+  return {
+    list: () => run(effect {
+      const data = try ask("GET", "/api/conversations")
+      return (try decoded("/api/conversations", ConversationList, data)).conversations
+    }),
+    create: () => run(effect {
+      const data = try ask("POST", "/api/conversations", {})
+      return (try decoded("/api/conversations", CreatedConversation, data)).conversation
+    }),
+    history: (id: string, before?: { readonly before: number; readonly beforeId?: string }) => run(effect {
+      const at = try segment(id)
+      const cursor = before === undefined ? ""
+        : `?before=${Math.max(0, Math.trunc(before.before))}${before.beforeId !== undefined && messageId.test(before.beforeId) ? `&beforeId=${encodeURIComponent(before.beforeId)}` : ""}&limit=200`
+      const path = `/api/conversations/${at}/messages${cursor}`
+      const page = try decoded(path, HistoryPage, try ask("GET", path))
+      return { messages: page.messages, hasMore: page.hasMore === true }
+    }),
+    around: (id: string, message: string) => run(effect {
+      const at = try segment(id)
+      if (!messageId.test(message)) throw new NotAConversation({ id: message })
+      const path = `/api/conversations/${at}/messages?around=${encodeURIComponent(message)}`
+      return (try decoded(path, HistoryPage, try ask("GET", path))).messages
+    }),
+    search: (query: string, offset: number) => run(effect {
+      const path = `/api/conversations/messages/search?q=${encodeURIComponent(query.trim())}&limit=${pageSize}&offset=${Math.max(0, Math.trunc(offset))}`
+      return (try decoded(path, SearchPage, try ask("GET", path))).messages
+    }),
+    branch: (id: string, message: string, requestId: string, expectedText: string) => run(effect {
+      const at = try segment(id)
+      const path = `/api/conversations/${at}/fork`
+      const data = try ask("POST", path, { messageId: message, requestId, expectedText })
+      return (try decoded(path, CreatedConversation, data)).conversation
+    }),
+  }
+})

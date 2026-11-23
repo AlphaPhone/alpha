@@ -111,7 +111,7 @@ def verify_native_source(native, files, pin, source_root=None):
     require(recipe["models"] == voice["models"] and recipe["asrSlot"] == voice["asrSlot"] and
             recipe["toolchain"] == json.loads(product("android/embedding-host/build-toolchain.json")),
             "Native models or toolchain differ from reviewed product source")
-    expected = {**recipe["sourceTrees"], "plugins/plugin-local-inference/native/llama.cpp": recipe["engineCommit"]}
+    expected = {**recipe["sourceTrees"], "packages/os/android/local-inference/llama.cpp": recipe["engineCommit"]}
     for commit in {pin["sdkCommit"], native["producer"]["sdkCommit"]}:
         try:
             result = subprocess.run(["git", "--no-replace-objects", "-C", str(sdk), "rev-parse",
@@ -187,28 +187,28 @@ def native_evidence(data, pin, candidate, source_root=None):
         require(component["identity"] == package and component["forkPin"] == recipe["engineCommit"],
                 "Candidate native input component identity differs")
     expected_trees = {
-        "packages/app/scripts", "plugins/plugin-native-inference/src/model-catalog", "bun.lock",
+        "packages/os/android/local-inference/scripts", "packages/os/android/local-inference/model-catalog", "pnpm-lock.yaml",
         'package.json',
         'packages/agent/package.json',
-        'packages/app/package.json',
-        'packages/app/platforms/android/app/src/main/elizavoice-jni/CMakeLists.txt',
-        'packages/app/platforms/android/app/src/main/elizavoice-jni/elizavoice-jni.cpp',
-        'packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaVoiceNative.java',
-        'packages/app/scripts/aosp/compile-libllama-paths.ts',
-        'packages/app/scripts/aosp/compile-libllama.ts',
-        'packages/app/scripts/aosp/compile-shim.ts',
-        'packages/app/scripts/aosp/vulkan-source-contract.ts',
-        'packages/app/scripts/aosp/zig-toolchain.ts',
-        'packages/app/scripts/build-helpers/arm64-simd.ts',
-        'packages/app/scripts/build-helpers/elizavoice-build-flags.ts',
-        'packages/app/scripts/build-helpers/omnivoice-merged.ts',
-        'packages/app/scripts/build-helpers/verify-fused-symbols.ts',
-        'packages/app/scripts/lib/repo-root.ts',
-        'packages/app/scripts/paradee-voice/build-native.ts',
-        'packages/app/scripts/stage-elizavoice-lib.ts',
-        'packages/app/scripts/voice/build-phonon2-gguf.ts',
-        'plugins/plugin-local-inference/native/android',
-        'plugins/plugin-native-inference/src/model-catalog/voice-model-versions.json',
+        'packages/os/android/local-inference/package.json',
+        'packages/os/android/local-inference/elizavoice-jni/CMakeLists.txt',
+        'packages/os/android/local-inference/elizavoice-jni/elizavoice-jni.cpp',
+        'packages/os/android/local-inference/src/main/java/ai/elizaos/app/ElizaVoiceNative.java',
+        'packages/os/android/local-inference/scripts/aosp/compile-libllama-paths.ts',
+        'packages/os/android/local-inference/scripts/aosp/compile-libllama.ts',
+        'packages/os/android/local-inference/scripts/aosp/compile-shim.ts',
+        'packages/os/android/local-inference/scripts/aosp/vulkan-source-contract.ts',
+        'packages/os/android/local-inference/scripts/aosp/zig-toolchain.ts',
+        'packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts',
+        'packages/os/android/local-inference/scripts/build-helpers/elizavoice-build-flags.ts',
+        'packages/os/android/local-inference/scripts/build-helpers/omnivoice-merged.ts',
+        'packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts',
+        'packages/os/android/local-inference/scripts/lib/repo-root.ts',
+        'packages/os/android/local-inference/scripts/paradee-voice/build-native.ts',
+        'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts',
+        'packages/os/android/local-inference/scripts/voice/build-phonon2-gguf.ts',
+        'packages/os/android/local-inference',
+        'packages/os/android/local-inference/model-catalog/voice-model-versions.json',
     }
     require(set(recipe["sourceTrees"]) == expected_trees and
             all(matches(COMMIT, value) for value in recipe["sourceTrees"].values()),
@@ -218,7 +218,7 @@ def native_evidence(data, pin, candidate, source_root=None):
                        "android/paradee-voice/asr-inputs.json", "scripts/native-build-inputs.ts", "scripts/android-identity.ts",
                        "scripts/build-embedding-host.ts", "scripts/prepare-embedding-host.ts",
                        "scripts/embedding-native-contract.ts", "scripts/embedding-build-remap.ts",
-                       "scripts/android-stage-voice-models.ts", "scripts/local-agent-source.ts",
+                       "scripts/android-stage-voice-models.ts",
                        "scripts/voice-host.ts", "scripts/paradee-runtime.ts", "scripts/android-abis.ts", "scripts/copy-file-clone.ts", "scripts/stage-embedding-host.ts"}
     # Older canonical native producers bind the original 16 inputs. New producers
     # add the complete identity bundle.

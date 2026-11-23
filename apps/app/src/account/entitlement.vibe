@@ -1,0 +1,267 @@
+// spec/account/plan.md, "Story: Use my plan's AI on the phone"; spec/account/plan.md, "An answer read for an earlier sign-in changes nothing"; spec/account/plan.md, "The phone's agent host alone confirms what its inference is"; spec/account/plan.md, "Story: See a plan change soon after I make it"
+import {
+  type Admission, type AdmissionEffect, type EndsAt, type SignedPlan, type SnapshotPlan,
+  Machine as PlanMachine, admittedKind, admits, enabled, stored as storedPlan
+} from "../../gen/account__plan.effect.vibe"
+import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type SubscriptionView } from "@elizaos/cloud/client"
+import { Build } from "../platform/build.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
+import { buildCloudEnvironment } from "../platform/build-live.vibe"
+import { Cloud, CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { authorityOf, deployment } from "./deployment.ts"
+import { bindInference, unbindInference } from "./inference.vibe"
+import { CloudSession, ownerOf } from "./session.vibe"
+
+/** Cloud's answer could not be read, or did not arrive. */
+error PlanUnread { offline: boolean; signedOut: boolean; absent: boolean }
+
+/** How long a verified plan record keeps the binding through an outage. */
+const offlineWindow = 7 * 24 * 60 * 60 * 1000
+
+/** What the account sheet shows of the plan: upstream's subscription view of the last snapshot read. */
+export interface PlanSummary {
+  readonly owner: number
+  readonly view: SubscriptionView | undefined
+  readonly planEndsAt: number | null
+}
+
+/** The plan admission of the signed-in account and its rechecks. */
+export service Entitlement {
+  readonly changes: Stream.Stream<Admission>
+  readonly summaries: Stream.Stream<PlanSummary>
+  current(): Admission!!
+  summary(): PlanSummary!!
+  /** Follow the session, the app's network as AppLifecycle reports it, and the minute clock; runs for the app's life. */
+  run(): void!!
+  /** The app came to the foreground, or left it. */
+  foreground(visible: boolean): void!!
+  /** A Stripe page opened: the next return checks the plan once at once. */
+  paymentPageOpened(): void!!
+  /** A plan action finished or a code was redeemed: check the plan now when the rules allow. */
+  recheck(): void!!
+  /** A redeemed code reported its grant's end for this sign-in. */
+  redeemed(planEndsAt: number | null): void!!
+}
+
+function refusal(error: CloudUnavailable | CloudSignedOut): PlanUnread {
+  if (error._tag === "CloudSignedOut") return new PlanUnread({ offline: false, signedOut: true, absent: false })
+  return new PlanUnread({ offline: error.status === 0, signedOut: error.status === 401, absent: [404, 405, 501].includes(error.status) })
+}
+
+effect function read(cloud: Cloud.Shape, path: string) {
+  return try mapError(cloud.json("GET", path), refusal)
+}
+
+function signedOf(status: "active" | "past_due" | "none"): SignedPlan {
+  return status === "active" ? "SignedActive" : status === "past_due" ? "SignedPastDue" : "SignedNone"
+}
+
+function snapshotOf(view: SubscriptionView | undefined): SnapshotPlan {
+  if (view === undefined) return "SnapshotUnread"
+  const plan = view.plan
+  if (plan.tag === "PlanOnCredits") return "SnapshotCredits"
+  if (plan.tag === "PlanPaid") return plan.warning ? "SnapshotPastDue" : "SnapshotActive"
+  if (plan.tag === "PlanNone") return "SnapshotNoPlan"
+  return "SnapshotUnread"
+}
+
+function endOf(planEndsAt: number | null, now: number): EndsAt {
+  return planEndsAt === null ? "NoEnd" : planEndsAt > now ? "FutureEnd" : "PastEnd"
+}
+
+/** The entitlement service over the stored admission machine. */
+export const entitlementService = Layer.effect(Entitlement, effect {
+  const machine = try PlanMachine
+  const session = try CloudSession
+  const native = try Native
+  const cloud = try Cloud
+  const build = try Build
+  const lifecycle = try AppLifecycle
+  const scope = try Scope.Scope
+  const host = try Semaphore.make(1)
+  const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
+  const summary = try SubscriptionRef.make<PlanSummary>({ owner: 0, view: undefined, planEndsAt: null })
+  const failures = try Ref.make(0)
+  const expiresAt = try Ref.make(0)
+  const verifiedAt = try Ref.make(0)
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+    return step !== undefined
+  }
+
+  effect function bind() {
+    const s = try session.current()
+    const ok = try Semaphore.withPermit(host, bindInference(native, s.account.credentialId))
+    try send({ type: "hostAnswered", removing: false, ok })
+  }
+
+  effect function unbind() {
+    const ok = try Semaphore.withPermit(host, unbindInference(native))
+    try send({ type: "hostAnswered", removing: true, ok })
+  }
+
+  effect function admitting() {
+    const credential = (try machine.get()).credential
+    admit(credential) catch effect () => { try send({ type: "checkFailed", credential }) }
+  }
+
+  effect function perform(out: ReadonlyArray<AdmissionEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when "ReadPlan": fork.in(scope) admitting();
+        when "BindInference": fork.in(scope) bind();
+        when "UnbindInference": fork.in(scope) unbind();
+      }
+    }
+  }
+
+  effect function signedPlan(now: number) {
+    const keysBody = try read(cloud, "/api/v1/subscription/entitlement-keys")
+    const keys = parseEntitlementKeys(keysBody)
+    if (keys === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
+    const body = try read(cloud, "/api/v1/subscription/entitlement")
+    const token = typeof body === "object" && body !== null && typeof (body as { entitlement?: unknown }).entitlement === "string" ? (body as { entitlement: string }).entitlement : ""
+    const checked = tryPromise(() => checkEntitlement(token, { keys, issuer: authority.api, audience: authority.entitlementAudience, now })) catch () => undefined
+    if (checked === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
+    return { signed: signedOf(checked.plan.status), planEndsAt: checked.planEndsAt, expires: checked.expiresAt }
+  }
+
+  effect function snapshotView(now: number) {
+    const body = try read(cloud, "/api/v1/billing/limits")
+    const snapshot = snapshotFromResponse(body) catch () => undefined
+    return snapshot === undefined ? undefined : subscriptionView(snapshot, now)
+  }
+
+  effect function admit(credential: number) {
+    if (credential === 0 || credential !== (try session.owner())) {
+      try send({ type: "checkFailed", credential })
+      return
+    }
+    const now = try Clock.currentTimeMillis
+    const signed = signedPlan(now) catch (error) => error
+    if (signed instanceof PlanUnread && signed.signedOut) {
+      if ((try send({ type: "signInRejected", credential })) && credential === (try session.owner())) try session.rejected()
+      return
+    }
+    if (signed instanceof PlanUnread && signed.offline) {
+      try send({ type: "admitOffline", credential })
+      return
+    }
+    const view = snapshotView(now) catch () => undefined
+    if (credential !== (try session.owner())) {
+      try send({ type: "checkFailed", credential })
+      return
+    }
+    try SubscriptionRef.set(summary, { owner: credential, view, planEndsAt: signed instanceof PlanUnread ? null : signed.planEndsAt })
+    const signedKind: SignedPlan = signed instanceof PlanUnread ? (signed.absent ? "SignedAbsent" : "SignedInvalid") : signed.signed
+    if (signed instanceof PlanUnread && !signed.absent && view === undefined) {
+      try send({ type: "admitBillingOutage", credential })
+      return
+    }
+    const kind = admittedKind(signedKind, snapshotOf(view))
+    if (kind === "AdmissionUnknown") {
+      try send({ type: "admitBillingOutage", credential })
+      return
+    }
+    if (admits(kind)) {
+      const end = endOf(signed instanceof PlanUnread ? null : signed.planEndsAt, now)
+      const accepted = try send({ type: "verified", credential, kind: kind === "AdmitCredits" ? "CreditsPlan" : "ActivePlan", reported: kind === "AdmitCredits" || end === "PastEnd" ? "NoEnd" : end })
+      if (!accepted) return
+      try Ref.set(expiresAt, signed instanceof PlanUnread ? 0 : signed.expires)
+      try Ref.set(failures, 0)
+      try Ref.set(verifiedAt, now)
+      return
+    }
+    const before = try machine.get()
+    try send(before.binding === "CloudBound" || before.binding === "KeptOffline" ? { type: "planEnded", credential } : { type: "needsPlan", credential })
+  }
+
+  effect function refreshLoop() {
+    while (true) {
+      const now = try Clock.currentTimeMillis
+      const until = try Ref.get(expiresAt)
+      const failed = try Ref.get(failures)
+      try sleep(Duration.millis(nextRefreshDelay(Math.max(0, until - now), failed)))
+      const a = try machine.get()
+      if (a.binding !== "CloudBound") continue
+      const credential = a.credential
+      const at = try Clock.currentTimeMillis
+      const signed = signedPlan(at) catch () => undefined
+      if (signed === undefined || !admits(admittedKind(signed.signed, "SnapshotUnread"))) {
+        try Ref.update(failures, (n) => n + 1)
+        continue
+      }
+      try Ref.set(failures, 0)
+      try Ref.set(expiresAt, signed.expires)
+      const end = endOf(signed.planEndsAt, at)
+      try send({ type: "refreshVerified", credential, kind: "ActivePlan", reported: end === "PastEnd" ? "NoEnd" : end })
+    }
+  }
+
+  effect function tryCheck() {
+    const a = try machine.get()
+    if (enabled(a, { type: "requestCheck" })) try send({ type: "requestCheck" })
+  }
+
+  effect function minuteClock() {
+    while (true) {
+      try sleep("1 minute")
+      try send({ type: "elapse", minutes: 1 })
+      const a = try machine.get()
+      if (a.record.present && a.record.age === "FreshRecord") {
+        const now = try Clock.currentTimeMillis
+        const at = try Ref.get(verifiedAt)
+        if (at > 0 && now - at > offlineWindow) try send({ type: "windowPasses" })
+        const s = try SubscriptionRef.get(summary)
+        if (s.planEndsAt !== null && s.planEndsAt <= now) try send({ type: "endPasses" })
+      }
+    }
+  }
+
+  effect function followSession() {
+    for try (const s of Stream.changesWith(Stream.map(session.changes, ownerOf), (a, b) => a === b)) {
+      const a = try machine.get()
+      if (s === 0 && a.credential !== 0) try send({ type: "signOut" })
+      if (s !== 0 && s !== a.credential) try send({ type: "signIn", credential: s })
+      try SubscriptionRef.set(summary, { owner: s, view: undefined, planEndsAt: null })
+    }
+  }
+
+  effect function followNetwork() {
+    for try (const network of Stream.changes(Stream.map(lifecycle.changes, (app) => app.network))) {
+      if (network === "NetUnknown") continue
+      const online = network === "NetOnline"
+      try send({ type: "network", online })
+      if (online) try tryCheck()
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    summaries: SubscriptionRef.changes(summary),
+    current: () => machine.get(),
+    summary: () => SubscriptionRef.get(summary),
+    effect run() {
+      try.all [ignore(followSession()), ignore(followNetwork()), refreshLoop(), minuteClock()]
+    },
+    effect foreground(visible: boolean) {
+      try send({ type: "visibility", visible })
+      if (visible) try tryCheck()
+    },
+    effect paymentPageOpened() { try send({ type: "paymentPageOpened" }) },
+    recheck: tryCheck,
+    effect redeemed(planEndsAt: number | null) {
+      const now = try Clock.currentTimeMillis
+      const end = endOf(planEndsAt, now)
+      if (end !== "PastEnd") try send({ type: "codeRedeemed", reported: end })
+      try tryCheck()
+    }
+  }
+})
+
+/** The entitlement service with its admission record, stored on the device and bound to the sign-in inside it. */
+export const entitlementLayer = Layer.provideMerge(entitlementService, storedPlan(ownerKey("device", "account/plan-admission")))

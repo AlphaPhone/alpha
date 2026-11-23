@@ -1,0 +1,334 @@
+// spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"; spec/account/enrollment.md, "Each connection enrolls once, and a result for an earlier connection changes nothing"; spec/account/enrollment.md, "The workflow protocol starts at what the phone can present and steps down only on a 409, never below 2"; spec/account/enrollment.md, "A registration is used only when it names the connected agent as the installation"; spec/account/enrollment.md, "The enabled views are agreed against the profile revision the phone read"; spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
+import {
+  type EnrollEffect, type Enrollment, Machine as EnrollmentMachine, contextConfirmed, enabled, enabledViews, imageViews,
+  machine as enrollmentMachine, registrationVerified, viewChangeConfirmed
+} from "../../gen/account__enrollment.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
+import { Native } from "../platform/native.vibe"
+import { SecureSlotExchange, SecureSlotRead } from "../platform/native.schema.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentHeaders } from "../platform/resident.vibe"
+import { ResidentControl, type ResidentSession } from "../platform/resident-control.vibe"
+import { DeviceCapabilities } from "../shell/assistantHost.vibe"
+import { deviceKeyWellFormed, deviceSlot, enrollmentIdWellFormed, freshDeviceKey, residentOrigin } from "./device-key.ts"
+import { DeviceContext, DeviceCredential, PresentationAnswer, Registered, ViewDiscovery, ViewWritten, type ViewProfile } from "./enrollment.schema.vibe"
+import { CloudSession } from "./session.vibe"
+
+/** The device slot could not be read or written, or held something that is not a device key. */
+error DeviceSlotRefused
+
+/** The enrollment the agent confirmed for this phone: whom and which connection it was made under, the installation, the enrollment, the capabilities the phone advertises and the workflow protocol it registered. */
+export interface EnrolledDevice {
+  readonly owner: string
+  readonly agent: string
+  readonly generation: number
+  readonly installationId: string
+  readonly enrollmentId: string
+  readonly capabilities: readonly string[]
+  readonly workflowProtocol: number
+  /** The agent takes the phone's user text format version 1. */
+  readonly userTextFormat: boolean
+}
+
+interface Attempt {
+  readonly connection: number
+  readonly verified: ResidentSession
+  readonly slot: string
+  readonly stored: string
+  readonly key: string
+  readonly headers: ResidentHeaders
+  readonly registered?: Registered
+}
+
+interface Confirmed {
+  readonly enrolled: EnrolledDevice
+  readonly headers: ResidentHeaders
+}
+
+/** The phone's enrollment with its resident agent, made once for each verified connection. */
+export service DeviceEnrollment {
+  /** The enrollment as spec/account/enrollment.md keeps it, then each change of it. */
+  readonly changes: Stream.Stream<Enrollment>
+  current(): Enrollment!!
+  /** The enrollment the agent confirmed for the connection now, or undefined while there is none and the phone is chat only. */
+  enrolled(): EnrolledDevice | undefined!!
+  /** The device headers a request to the resident carries for this enrollment, or undefined while there is none. */
+  headers(): ResidentHeaders | undefined!!
+  /** Follow the resident's connection and enroll each verified one; runs for the app's life. */
+  run(): void!!
+}
+
+const SECURE = "ElizaSecureStore"
+const REGISTER_PATH = "/api/client-devices/register"
+const CONTEXT_PATH = "/api/client-devices/context"
+const PROFILE_PATH = "/api/client-devices/view-profile"
+const BASE_CAPABILITIES = "calendar.local-event.v1,notes.local-record.v1"
+const PRESENTATION_PLUGINS = ["AlphaNotifications", "AlphaVoiceCloud"] as const
+const PRESENTATION_TIMEOUT = "2 seconds"
+const VIEW = /^[a-z][a-z_]{0,31}$/
+const REVISION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+
+/** The views an agent's answer lists, sorted, or undefined where the list is not a short list of distinct view names. */
+export function viewsOf(value: readonly string[]): readonly string[] | undefined {
+  if (value.length > 32 || value.some((view) => !VIEW.test(view)) || new Set(value).size !== value.length) return undefined
+  return [...value].sort()
+}
+
+/** A profile the agent holds, none for null, or `invalid` where its version, revision or views are not well formed. */
+export function profileOf(profile: ViewProfile | null): { readonly revision: string; readonly views: readonly string[] } | undefined | "invalid" {
+  if (profile === null) return undefined
+  const views = viewsOf(profile.views)
+  if (profile.version !== 1 || !REVISION.test(profile.revision) || views === undefined) return "invalid"
+  return { revision: profile.revision, views }
+}
+
+/** The views the phone wants of those an agent supports: Alpha's enabled views, and the image's own only on the Alpha image. */
+export function wantedViews(supported: readonly string[], variant: "launcher" | "aosp" | "browser"): readonly string[] {
+  const enabledHere = new Set<string>([...enabledViews, ...(variant === "aosp" ? imageViews : [])])
+  return supported.filter((view) => enabledHere.has(view))
+}
+
+function sameViews(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((view, at) => view === b[at])
+}
+
+/** The headers a registration carries: the agent the connection verified as the device id, the phone's key and the base capabilities. */
+export function registrationHeaders(agent: string, key: string): ResidentHeaders {
+  return { "x-eliza-device-id": agent, "x-eliza-device-key": key, "x-eliza-device-capabilities": BASE_CAPABILITIES }
+}
+
+/** The enrollment service over its in-memory machine. */
+export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
+  const machine = try EnrollmentMachine
+  const native = try Native
+  const resident = try Resident
+  const control = try ResidentControl
+  const build = try Build
+  const session = try CloudSession
+  const capabilities = try DeviceCapabilities
+  const scope = try Scope.Scope
+  const onDevice = build.info.variant !== "browser"
+  const attempt = try Ref.make<Attempt | undefined>(undefined)
+  const device = try Ref.make<Confirmed | undefined>(undefined)
+  const connections = try Ref.make(0)
+  const presentationReady = try Ref.make(false)
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+    return step !== undefined
+  }
+
+  effect function perform(out: ReadonlyArray<EnrollEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when { tag: "Register", let protocol }: try register(protocol);
+        when { tag: "NegotiateViews" }: try negotiate();
+        when { tag: "CommitEnrollment" }: try commit();
+      }
+    }
+  }
+
+  effect function stillCurrent(connection: number) {
+    return (try machine.get()).connection === connection
+  }
+
+  effect function fail(connection: number) {
+    if (enabled(try machine.get(), { type: "failed", ofConnection: connection })) try send({ type: "failed", ofConnection: connection })
+  }
+
+  effect function probe() {
+    const asked = effect {
+      const answers = try all(PRESENTATION_PLUGINS.map((plugin) => Effect.flatMap(native.invoke(plugin, "workflowPresentationCapabilities", {}), Schema.decodeUnknownEffect(PresentationAnswer))), { concurrency: "unbounded" })
+      return answers.every((answer) => answer.protocol === 2) ? "ready" as const : "older" as const
+    } catch () => "older" as const
+    return timeout(asked, PRESENTATION_TIMEOUT) catch () => "stalled" as const
+  }
+
+  effect function presentation() {
+    if (!onDevice || (try Ref.get(presentationReady))) return true
+    for (let round = 0; round < 2; round++) {
+      const result = try probe()
+      if (result === "stalled") continue
+      if (result === "ready") try Ref.set(presentationReady, true)
+      return result === "ready"
+    }
+    return false
+  }
+
+  effect function readSlot(slot: string) {
+    const read = try Schema.decodeUnknownEffect(SecureSlotRead)(try native.invoke(SECURE, "get", { key: slot }))
+    return typeof read.value === "string" ? read.value : undefined
+  }
+
+  effect function swapSlot(slot: string, expected: string | null, value: string) {
+    const answer = try Schema.decodeUnknownEffect(SecureSlotExchange)(try native.invoke(SECURE, "compareAndExchange", { key: slot, expected, value }))
+    return answer.exchanged
+  }
+
+  effect function credentialAt(slot: string) {
+    try adoptLegacySlot(slot, slot)
+    const stored = try readSlot(slot)
+    if (stored !== undefined) {
+      const kept = try Schema.decodeUnknownEffect(DeviceCredential)(try Effect.try(() => JSON.parse(stored) as unknown))
+      if (!deviceKeyWellFormed(kept.key)) throw new DeviceSlotRefused()
+      return { stored, key: kept.key }
+    }
+    const key = freshDeviceKey()
+    const created = JSON.stringify({ key })
+    if (!(try swapSlot(slot, null, created))) throw new DeviceSlotRefused()
+    return { stored: created, key }
+  }
+
+  effect function register(protocol: number): void!! {
+    const connection = (try machine.get()).connection
+    const held = try Ref.get(attempt)
+    if (held === undefined || held.connection !== connection) {
+      try fail(connection)
+      return
+    }
+    const label = onDevice ? "Alpha Phone" : "Alpha browser development"
+    const said = resident.json("POST", REGISTER_PATH, { label, workflowProtocol: protocol }, held.headers) catch (error) => error
+    if (!(try stillCurrent(connection))) return
+    if (said instanceof ResidentRefused) {
+      const stepDown = said.status === 409 && said.code !== "registration_refused" && enabled(try machine.get(), { type: "protocolRefused", ofConnection: connection })
+      if (stepDown) try send({ type: "protocolRefused", ofConnection: connection })
+      else try fail(connection)
+      return
+    }
+    if (said instanceof ResidentUnavailable) {
+      try fail(connection)
+      return
+    }
+    const registered = Schema.decodeUnknownEffect(Registered)(said.data) catch () => undefined
+    const viewVersion = registered?.viewProfileVersion ?? 0
+    if (registered === undefined || !registrationVerified(registered.installationId === held.verified.agent, enrollmentIdWellFormed(registered.enrollmentId), viewVersion)) {
+      try fail(connection)
+      return
+    }
+    const advertised = try capabilities.advertise(registered.capabilities ?? [])
+    try Ref.set(attempt, { ...held, registered, headers: { ...held.headers, "x-eliza-device-capabilities": advertised.join(",") } })
+    try send({ type: "registered", ofConnection: connection, viewProfile: viewVersion === 1 })
+  }
+
+  effect function agreeViews(headers: ResidentHeaders) {
+    const read = try resident.json("GET", PROFILE_PATH, undefined, headers)
+    const discovery = try Schema.decodeUnknownEffect(ViewDiscovery)(read.data)
+    const supported = viewsOf(discovery.supportedViews)
+    const prior = profileOf(discovery.profile)
+    if (discovery.version !== 1 || supported === undefined || prior === "invalid") return false
+    const wanted = wantedViews(supported, build.info.variant)
+    if (prior !== undefined && sameViews(prior.views, wanted)) return true
+    const written = try resident.json("POST", PROFILE_PATH, { version: 1, views: wanted, expectedRevision: prior?.revision ?? null }, headers)
+    const answer = try Schema.decodeUnknownEffect(ViewWritten)(written.data)
+    const confirmed = profileOf(answer.profile)
+    if (answer.version !== 1 || confirmed === undefined || confirmed === "invalid") return false
+    return viewChangeConfirmed(prior !== undefined, sameViews(confirmed.views, wanted), prior === undefined || confirmed.revision !== prior.revision)
+  }
+
+  effect function negotiate(): void!! {
+    const connection = (try machine.get()).connection
+    const held = try Ref.get(attempt)
+    if (held === undefined || held.connection !== connection) {
+      try fail(connection)
+      return
+    }
+    const confirmed = agreeViews(held.headers) catch () => false
+    if (!(try stillCurrent(connection))) return
+    try send({ type: "viewsSettled", ofConnection: connection, confirmed })
+  }
+
+  effect function confirm(held: Attempt, registered: Registered) {
+    const saved = JSON.stringify({ key: held.key, installationId: registered.installationId, enrollmentId: registered.enrollmentId })
+    if (saved !== held.stored && !(try swapSlot(held.slot, held.stored, saved))) return false
+    if (!onDevice) return true
+    const read = try resident.json("GET", CONTEXT_PATH, undefined, held.headers)
+    const context = try Schema.decodeUnknownEffect(DeviceContext)(read.data)
+    const s = try session.current()
+    const subjects = [held.verified.owner, ...(s.phase === "SignedIn" || s.phase === "ActivationPending" ? [s.account.userId] : [])]
+    return contextConfirmed(
+      context.agentId === held.verified.agent, context.installationId === registered.installationId,
+      context.enrollmentId === registered.enrollmentId, subjects.includes(context.subjectUserId)
+    )
+  }
+
+  effect function commit(): void!! {
+    const s = try machine.get()
+    const connection = s.connection
+    const held = try Ref.get(attempt)
+    const registered = held?.registered
+    if (held === undefined || registered === undefined || held.connection !== connection) {
+      try fail(connection)
+      return
+    }
+    const matched = confirm(held, registered) catch () => false
+    if (!(try stillCurrent(connection))) return
+    if (matched) {
+      try Ref.set(device, {
+        headers: held.headers,
+        enrolled: {
+          owner: held.verified.owner, agent: held.verified.agent, generation: held.verified.generation,
+          installationId: registered.installationId, enrollmentId: registered.enrollmentId,
+          capabilities: (held.headers["x-eliza-device-capabilities"] ?? "").split(",").filter((name) => name !== ""),
+          workflowProtocol: s.protocol, userTextFormat: registered.userTextFormatVersion === 1,
+        },
+      })
+    }
+    try send({ type: "committed", ofConnection: connection, matched })
+  }
+
+  effect function enroll(verified: ResidentSession) {
+    const connection = try Ref.updateAndGet(connections, (n) => n + 1)
+    try Ref.set(device, undefined)
+    const ready = try presentation()
+    const loaded = effect {
+      const slot = try tryPromise(() => deviceSlot(residentOrigin(onDevice), verified.owner, verified.agent))
+      const credential = try credentialAt(slot)
+      return { slot, ...credential }
+    } catch () => undefined
+    try Ref.set(attempt, loaded === undefined ? undefined : {
+      connection, verified, slot: loaded.slot, stored: loaded.stored, key: loaded.key, headers: registrationHeaders(verified.agent, loaded.key),
+    })
+    if (enabled(try machine.get(), { type: "connect", connection, presentation: ready })) try send({ type: "connect", connection, presentation: ready })
+  }
+
+  effect function lost() {
+    try Ref.set(attempt, undefined)
+    try Ref.set(device, undefined)
+    if (enabled(try machine.get(), { type: "disconnect" })) try send({ type: "disconnect" })
+  }
+
+  effect function follow() {
+    let last = ""
+    for try (const r of control.changes) {
+      if (r.phase !== "Connected") {
+        if (last !== "") try lost()
+        last = ""
+        continue
+      }
+      const verified = try control.session()
+      if (verified === undefined) continue
+      const named = JSON.stringify([verified.owner, verified.agent, verified.generation, verified.epoch])
+      if (named === last) continue
+      last = named
+      fork.in(scope) enroll(verified)
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    current: () => machine.get(),
+    effect enrolled() {
+      const held = try Ref.get(device)
+      return (try machine.get()).phase === "Enrolled" ? held?.enrolled : undefined
+    },
+    effect headers() {
+      const held = try Ref.get(device)
+      return (try machine.get()).phase === "Enrolled" ? held?.headers : undefined
+    },
+    run: follow,
+  }
+})
+
+/** The enrollment service with its machine in memory: every process enrolls again on its first verified connection. */
+export const enrollmentLayer = Layer.provideMerge(enrollmentService, enrollmentMachine())

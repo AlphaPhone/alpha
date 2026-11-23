@@ -1,0 +1,129 @@
+// spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"
+import { assert, it } from "@effect/vitest"
+import { agentSessionOf } from "../../src/account/bindings.vibe"
+import { DeviceEnrollment, profileOf, viewsOf, wantedViews } from "../../src/account/enrollment.vibe"
+import { ResidentRefused } from "../../src/platform/resident.vibe"
+import { type Calls, enrolling, found, secureStore, signedInNative, until } from "./platform.vibe"
+
+const presenting = {
+  "AlphaNotifications.workflowPresentationCapabilities": { protocol: 2 },
+  "AlphaVoiceCloud.workflowPresentationCapabilities": { protocol: 2 }
+}
+
+const discovery = { version: 1, supportedViews: ["calendar", "home", "notes", "phone", "wallet"], profile: null }
+
+function registeredAnswer(agent: string) {
+  return { installationId: agent, enrollmentId: "a".repeat(64), capabilities: ["calendar.local-event.v1"], viewProfileVersion: 1 }
+}
+
+// spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"
+it.live(`Enroll under the phone's own key and use it only once the agent's context confirms it (spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone")`, () => effect {
+  const calls: Calls = []
+  const slots = new Map<string, string>()
+  const native = { ...signedInNative, ...secureStore(slots), ...presenting }
+  const resident = {
+    "POST /api/client-devices/register": registeredAnswer("agent-1"),
+    "GET /api/client-devices/view-profile": discovery,
+    "POST /api/client-devices/view-profile": (body: unknown) => ({ version: 1, profile: { version: 1, revision: "rev-2", views: (body as { views: Array<string> }).views } }),
+    "GET /api/client-devices/context": { agentId: "agent-1", installationId: "agent-1", enrollmentId: "a".repeat(64), subjectUserId: "owner-1" }
+  }
+  provide enrolling(calls, native, undefined, { resident }) {
+    try scoped(effect {
+      const enrollment = try DeviceEnrollment
+      fork.scoped enrollment.run()
+      const done = try found(try until(enrollment.changes, (e) => e.phase === "Enrolled" || e.phase === "ChatOnly"))
+      const enrolled = try enrollment.enrolled()
+      const headers = try enrollment.headers()
+      const register = calls.find((c) => c.name === "POST /api/client-devices/register")
+      const wrote = calls.find((c) => c.name === "POST /api/client-devices/view-profile")?.args as { views?: Array<string>; expectedRevision?: unknown } | undefined
+      const saved = [...slots.entries()]
+      const key = register?.headers?.["x-eliza-device-key"] ?? ""
+      // spec/account/enrollment.md, "The workflow protocol starts at what the phone can present and steps down only on a 409, never below 2"
+      // spec/account/enrollment.md, "The enabled views are agreed against the profile revision the phone read"
+      // spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
+      try Effect.try(() => assert.deepStrictEqual({
+        phase: done.phase, protocol: (register?.args as { workflowProtocol?: number } | undefined)?.workflowProtocol,
+        deviceId: register?.headers?.["x-eliza-device-id"], keyShape: /^[a-f0-9]{64}$/.test(key),
+        slot: saved.length === 1 && saved[0]![0].startsWith("device:") && JSON.parse(saved[0]![1]).key === key && JSON.parse(saved[0]![1]).enrollmentId === "a".repeat(64),
+        views: wrote, contextCarriedKey: calls.find((c) => c.name === "GET /api/client-devices/context")?.headers?.["x-eliza-device-key"] === key,
+        enrolled: enrolled === undefined ? undefined : [enrolled.installationId, enrolled.enrollmentId, enrolled.workflowProtocol],
+        headerKey: headers?.["x-eliza-device-key"] === key,
+        session: agentSessionOf({ owner: "owner-1", agent: "agent-1", generation: 1, epoch: 1 }, enrolled),
+        otherConnection: agentSessionOf({ owner: "owner-1", agent: "agent-1", generation: 2, epoch: 1 }, enrolled).enrollmentId
+      }, {
+        phase: "Enrolled", protocol: 5, deviceId: "agent-1", keyShape: true, slot: true,
+        views: { views: ["calendar", "home", "notes"], expectedRevision: null }, contextCarriedKey: true,
+        enrolled: ["agent-1", "a".repeat(64), 5], headerKey: true,
+        session: { origin: "resident", owner: "owner-1", agent: "agent-1", session: "1:1", installationId: "agent-1", enrollmentId: "a".repeat(64) },
+        otherConnection: ""
+      }))
+    })
+  }
+})
+
+// spec/account/enrollment.md, "The workflow protocol starts at what the phone can present and steps down only on a 409, never below 2"
+it.live(`Step the workflow protocol down on a 409 and keep a saved key (spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone")`, () => effect {
+  const calls: Calls = []
+  const slots = new Map<string, string>()
+  const native = { ...signedInNative, ...secureStore(slots), ...presenting }
+  const resident = {
+    "POST /api/client-devices/register": (body: unknown) => (body as { workflowProtocol: number }).workflowProtocol >= 4
+      ? new ResidentRefused({ status: 409, code: "unsupported_workflow_protocol", message: "unsupported" })
+      : { installationId: "agent-1", enrollmentId: "enrollment-1" },
+    "GET /api/client-devices/context": { agentId: "agent-1", installationId: "agent-1", enrollmentId: "enrollment-1", subjectUserId: "owner-1" }
+  }
+  provide enrolling(calls, native, undefined, { resident }) {
+    try scoped(effect {
+      const enrollment = try DeviceEnrollment
+      fork.scoped enrollment.run()
+      const done = try found(try until(enrollment.changes, (e) => e.phase === "Enrolled" || e.phase === "ChatOnly"))
+      const enrolled = try enrollment.enrolled()
+      const asked = calls.filter((c) => c.name === "POST /api/client-devices/register").map((c) => (c.args as { workflowProtocol: number }).workflowProtocol)
+      try Effect.try(() => assert.deepStrictEqual(
+        { phase: done.phase, stepDowns: done.stepDowns, asked, protocol: enrolled?.workflowProtocol, negotiated: calls.some((c) => c.name.endsWith("/view-profile")) },
+        { phase: "Enrolled", stepDowns: 2, asked: [5, 4, 3], protocol: 3, negotiated: false }
+      ))
+    })
+  }
+})
+
+// spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
+it.live(`Stay chat only when the context names another owner or the registration another installation (spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone")`, () => effect {
+  effect function outcome(resident: Record<string, unknown>) {
+    const calls: Calls = []
+    const native = { ...signedInNative, ...secureStore(new Map()) }
+    provide enrolling(calls, native, undefined, { resident }) {
+      return try scoped(effect {
+        const enrollment = try DeviceEnrollment
+        fork.scoped enrollment.run()
+        const done = try found(try until(enrollment.changes, (e) => e.phase === "Enrolled" || e.phase === "ChatOnly"))
+        return { phase: done.phase, protocol: (calls.find((c) => c.name === "POST /api/client-devices/register")?.args as { workflowProtocol?: number } | undefined)?.workflowProtocol, enrolled: try enrollment.enrolled(), headers: try enrollment.headers() }
+      })
+    }
+  }
+  const otherOwner = try outcome({
+    "POST /api/client-devices/register": { installationId: "agent-1", enrollmentId: "enrollment-1" },
+    "GET /api/client-devices/context": { agentId: "agent-1", installationId: "agent-1", enrollmentId: "enrollment-1", subjectUserId: "someone-else" }
+  })
+  const otherInstallation = try outcome({ "POST /api/client-devices/register": { installationId: "agent-2", enrollmentId: "enrollment-1" } })
+  const refused = try outcome({ "POST /api/client-devices/register": new ResidentRefused({ status: 409, code: "registration_refused", message: "refused" }) })
+  try Effect.try(() => assert.deepStrictEqual(
+    [otherOwner, otherInstallation, refused].map((o) => [o.phase, o.enrolled, o.headers]),
+    [["ChatOnly", undefined, undefined], ["ChatOnly", undefined, undefined], ["ChatOnly", undefined, undefined]]
+  ))
+  try Effect.try(() => assert.strictEqual(otherOwner.protocol, 1))
+})
+
+// spec/account/enrollment.md, "The enabled views are agreed against the profile revision the phone read"
+it.effect(`Agree only Alpha's enabled views, the image's own only on the image (spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone")`, () => effect {
+  const supported = viewsOf(["phone", "calendar", "wallet", "home", "messages"]) ?? []
+  try Effect.try(() => assert.deepStrictEqual({
+    launcher: wantedViews(supported, "launcher"), aosp: wantedViews(supported, "aosp"),
+    repeated: viewsOf(["home", "home"]), malformed: viewsOf(["Home"]),
+    none: profileOf(null), badRevision: profileOf({ version: 1, revision: "", views: [] }), kept: profileOf({ version: 1, revision: "r1", views: ["notes", "home"] })
+  }, {
+    launcher: ["calendar", "home"], aosp: ["calendar", "home", "messages", "phone"],
+    repeated: undefined, malformed: undefined,
+    none: undefined, badRevision: "invalid", kept: { revision: "r1", views: ["home", "notes"] }
+  }))
+})

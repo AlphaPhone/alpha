@@ -1,10 +1,10 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Reports what a phone's resident agent sent to its text model, from a copy of the
  * on-device database (`files/.eliza/workspace/.elizadb`). It measures recorded requests;
  * it does not call a model and proves nothing about replies or action choice.
  *
- *   bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>]
+ *   node scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>]
  *       [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>]
  *       [--reserve <stage>=<tokens>[,...]] [--json <file>] [--show-text]
  *
@@ -579,7 +579,7 @@ if (import.meta.main) {
   };
   const directory = args.find((arg, at) => !arg.startsWith('--') && !args[at - 1]?.startsWith('--'));
   if (!directory) {
-    console.error('Usage: bun scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=[<unchanged chars>+]<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
+    console.error('Usage: node scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=[<unchanged chars>+]<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
     process.exit(2);
   }
   const since = value('--since') ? Date.parse(value('--since')!) : 0;

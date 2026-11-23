@@ -12,8 +12,8 @@ on:
       - capacitor.config.ts
       - vite.config.ts
       - package.json
-      - bun.lock
-      - bunfig.toml
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
       - upstream.lock.json
       - .gitmodules
       - vendor/eliza
@@ -38,9 +38,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26.13.0"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.4.2"
+      - name: Install pnpm
+        run: npm install --global pnpm@10.24.0
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -62,26 +61,20 @@ jobs:
           # Native engine wrappers (prepare-embedding-host) require the CMake release of the qualified build.
           python3 -m pip install cmake==4.0.3
           test "$(cmake --version | head -1)" = "cmake version 4.0.3"
-      - run: bun install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       # The Calendar bridge needs the pinned org.json jar.
       - name: Prepare normal host-test JSON
         timeout-minutes: 1
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
-        run: bun test/fixtures/kotlin-tools.mjs --prepare
-      - run: bun test --timeout=600000 vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
+        run: node test/fixtures/kotlin-tools.mjs --prepare
+      - run: pnpm exec vitest run --timeout=600000 vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
       # The normal chain builds and verifies its native source/model inputs.
       - name: Record tracked source frame before the Android build
         timeout-minutes: 1
         env:
           ALPHA_CALENDAR_BRIDGE_EXPECTED_HEAD: ${{ github.sha }}
         run: python scripts/ci/calendar-bridge.py --source-frame
-      - name: Acquire hash-pinned Android Bun with step-only authentication
-        timeout-minutes: 12
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALPHA_LOCAL_AGENT_SOURCE_DIR: ${{ github.workspace }}/vendor/eliza
-        run: python3 scripts/ci/acquire-resident-bun.py
       - name: Build the launcher APKs
         env:
           ELIZA_DEV_ALLOW_TEST_MOCKS: ""
@@ -89,7 +82,7 @@ jobs:
           ALPHA_RUNTIME_GIT_CACHE: ${{ github.workspace }}/vendor/eliza
           # A clean release R8 pass exhausted the default 2 GiB heap on this runner.
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
-        run: bun run android:build:local -- --release
+        run: pnpm android:build:local --release
       - name: Qualify generated native admission and staged wallet exclusion
         shell: bash
         run: |
@@ -130,9 +123,9 @@ jobs:
           TMPDIR: ${{ runner.temp }}/digest-restart
         run: |
           mkdir -p "$TMPDIR"
-          bun run agent:test-digest-restart
+          pnpm agent:test-digest-restart
       - name: Export the portable worker dependency proof
-        run: bun scripts/ci/export-browser-proof.ts worker
+        run: node --conditions=eliza-source --import vibelang/register scripts/ci/export-browser-proof.ts worker
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-proof-worker-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -141,8 +134,8 @@ jobs:
           if-no-files-found: error
       - name: Require flag-off APKs
         run: |
-          bun scripts/audit-production-bundle.ts web-dist
-          bun - <<'NODE'
+          node --conditions=eliza-source --import vibelang/register scripts/audit-production-bundle.ts web-dist
+          node --input-type=module - <<'NODE'
           const fs = require('node:fs');
           const manifest = JSON.parse(fs.readFileSync('artifacts/apk-manifest.json', 'utf8'));
           if (manifest.testMocks !== false || manifest.demoEntryPoints !== false) throw new Error('APKs must be testMocks:false and demoEntryPoints:false');

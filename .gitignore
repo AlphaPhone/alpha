@@ -13,7 +13,7 @@ android/app/src/main/assets/
 .DS_Store
 
 # Android host generated from android/consumer-host.json by the upstream generator
-# (bun scripts/android-host.ts; every Android build regenerates it)
+# (pnpm android:host; every Android build regenerates it)
 android/.eliza-consumer-host.json
 android/.eliza-consumer-profile.json
 android/build.gradle
@@ -48,5 +48,12 @@ __pycache__/
 
 # Quint model-checker intermediate output
 /_apalache-out/
-# Content-addressed Quint run and model-metadata cache (scripts/quint-cache.ts)
 /.cache/
+
+# Workspace tool caches and generated declarations
+.turbo/
+.vibe/
+storybook-static/
+# Alpha Cloud rendered Wrangler configurations and Worker bundles
+cloud/rendered/
+cloud/dist/

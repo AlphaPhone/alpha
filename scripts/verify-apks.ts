@@ -2,10 +2,10 @@ import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './an
 /**
  * Verify the launcher APKs of one build and record the result in apk-manifest.json.
  *
- *   bun scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
+ *   node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
  *
  * It verifies the debug APK, and the release APK unless the build record says the build was
- * debug-only (`release: false`, a local `bun run android:build:local`).
+ * debug-only (`release: false`, a local `pnpm android:build:local`).
  * The APKs in artifacts/ must be flag-off (testMocks:false), pass the shared production
  * bundle audit, carry no development hooks and package the authenticated resident runtime
  * and on-device voice.
@@ -28,7 +28,7 @@ import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './an
  * This is APK-build evidence only; it does not install or run anything.
  */
 import fs from "node:fs";
-import {renderSensePermissions} from "../vendor/eliza/packages/os/scripts/android/pixel10a-product.ts";
+import {renderSensePermissions} from "./os-ported/os/pixel10a-product.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {sha256, sha256File} from "./sha256.ts";
@@ -42,9 +42,9 @@ import {
 } from "./apk.ts";
 import type {ApkMode, ApkVariant} from "./apk.ts";
 import { androidEnv, tool } from "./toolchain.ts";
-import { readApkEntries } from "../vendor/eliza/packages/app/scripts/mobile/artifact-inspection/apk-distribution.mjs";
+import { readApkEntries } from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
-import { BUN_ENTRY } from "./generate-licenses.ts";
+import { RUNTIME_ENTRY } from "./generate-licenses.ts";
 import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
 import { licenceFlagLines, licenceFlagRecords } from "./licence-policy.ts";
 import { packagedGzipProblems } from "./android-gzip-assets.ts";
@@ -54,9 +54,8 @@ import {embeddingApkProblems,type EmbeddingManifest} from './stage-embedding-hos
 import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage } from "./aosp-listener.ts";
 
-import {cloudVoiceAdmission} from '../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs';
-import { preparePatchedNative, nativePatchReceipt, verifyNativePatchReceipt } from './prepare-patched-native.ts';
-const USAGE = "Usage: bun scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
+import {cloudVoiceAdmission} from './os-ported/os/apk-release-record.mjs';
+const USAGE = "Usage: node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
 interface RuntimePackaging {
   apk: string;
   runtime: "PACKAGED";
@@ -142,7 +141,7 @@ const webViewFiltersAllowed = [
   `${identity.appId}.AlphaCloudBillingReturn https://${callbackHost}/alphaphone/billing/return`,
 ];
 const buildRecordFile = path.join(directory, "build-config.json");
-if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run bun run android:build first.`);
+if (!fs.existsSync(buildRecordFile)) throw new Error(`Missing ${buildRecordFile}. Run pnpm android:build first.`);
 const buildRecord: BuildRecord = JSON.parse(fs.readFileSync(buildRecordFile, "utf8"));
 const configuredIdentity = JSON.parse(fs.readFileSync('app.config.json', 'utf8')).appId;
 if (buildRecord.applicationId !== undefined && buildRecord.applicationId !== identity.appId ||
@@ -160,8 +159,6 @@ if (buildRecord.release !== undefined && typeof buildRecord.release !== "boolean
   throw new Error(`${buildRecordFile} records release=${buildRecord.release}; expected a boolean`);
 // A debug-only build (upstream consumer `release: false`) has no release APK to verify.
 const modes: ApkMode[] = buildRecord.release === false ? ["debug"] : ["debug", "release"];
-
-const admittedNativePatches = preparePatchedNative();
 
 function releaseFile(dir: string) {
   const signed = path.join(dir, `${variant}-release.apk`);
@@ -203,7 +200,7 @@ for (const mode of modes) {
     // Shared web bundle audit on the exact packaged payload.
     const payload = extractWebPayload(file);
     let flags: ReturnType<typeof readBuildFlags> | undefined;
-    // A PACKAGED distribution must ship notices regenerated with --packaged-runtime (Bun and
+    // A PACKAGED distribution must ship notices regenerated with --packaged-runtime (Node.js and
     // the bundled agent/worker packages); the committed notices carry only the umbrella entry.
     let runtimeNotices = false;
     // The font check is recorded in full; only its `blockers` (policy constant) affect distributable.
@@ -218,7 +215,7 @@ for (const mode of modes) {
     try {
       const notices = path.join(payload.public, "licenses", "third-party-notices.json");
       const entries = fs.existsSync(notices) ? JSON.parse(fs.readFileSync(notices, "utf8")) : [];
-      runtimeNotices = Array.isArray(entries) && entries.some(entry => entry?.name === BUN_ENTRY);
+      runtimeNotices = Array.isArray(entries) && entries.some(entry => entry?.name === RUNTIME_ENTRY);
       licenceFlags = licenceFlagRecords(entries);
       for (const line of licenceFlagLines(entries)) flagLines.add(line);
     } catch { runtimeNotices = false; }
@@ -235,8 +232,6 @@ for (const mode of modes) {
     } finally {
       fs.rmSync(payload.root, { recursive: true, force: true });
     }
-    try { verifyNativePatchReceipt(execFileSync('unzip', ['-p', file, 'assets/native-patches.json'], {encoding:'utf8',stdio:['ignore','pipe','pipe']}), admittedNativePatches); }
-    catch (error) { problems.push(`Native patch provenance: ${message(error)}`); }
     try { verifyOwnerRouteTable(file); }
     catch (error) { problems.push(`Owner route table: ${message(error)}`); }
     try {
@@ -433,7 +428,6 @@ fs.writeFileSync(
       mappings,
       instrumentation,
       upstream: readUpstreamPin(process.cwd()),
-      nativePatches: nativePatchReceipt(admittedNativePatches),
       results,
       runtimePackaging,
       listener,
@@ -446,7 +440,7 @@ console.log(JSON.stringify(results, null, 2));
 const undistributable = release.filter(row => !row.distributable);
 if (undistributable.length)
   console.warn(`Not distributable: ${undistributable.map(row => `${row.file} (${(blockersByApk.get(row.file) ?? []).map(item =>
-    item === "notices lack the packaged runtime" ? `${item} (run bun scripts/generate-licenses.ts --packaged-runtime after staging)` : item).join(", ")})`).join("; ")}`);
+    item === "notices lack the packaged runtime" ? `${item} (run node scripts/generate-licenses.ts --packaged-runtime after staging)` : item).join(", ")})`).join("; ")}`);
 // Licence flags are warnings: recorded per APK above, printed once here, never a failure.
 for (const line of flagLines) console.warn(line);
 const fontItems = new Map(release.flatMap(row => [...row.fontLicenceCheck.items, ...row.fontLicenceCheck.resolved].map(item => [item, row.fontLicenceCheck.blocksDistribution] as const)));

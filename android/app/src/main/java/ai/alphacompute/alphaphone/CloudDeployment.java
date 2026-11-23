@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
-/** Generated from scripts/cloud-deployment-policy.ts. Run bun scripts/cloud-deployment.ts. */
+/** Generated from cloud/deployment.json by cloud/src/deployment.vibe. Run pnpm cloud:deployment. */
 final class CloudDeployment {
  private CloudDeployment() {}
  static final String PRODUCTION_API = "https://api.eliza.app";

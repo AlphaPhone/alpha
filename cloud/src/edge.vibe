@@ -1,0 +1,76 @@
+// spec/cloud/returnPages.md, "A return URL on the web origin shows ReturnToApp only for the one enabled registration of the served environment that holds it"; spec/cloud/returnPages.md, "An address that shows no page is a final 404, and a web-origin address whose registry cannot be read is a retryable 503"; spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
+import { EdgeRequest, EdgeResponse } from "./edge-platform.ts"
+
+/** The API Worker as the web host reaches it: a Cloudflare service binding, never a public fetch. */
+export interface ApiService {
+  fetch(request: Request): Promise<Response>
+}
+
+/** The web host Worker's bindings: the origins of its environment, the same the API Worker reads, and the service binding to that API Worker. */
+export interface EdgeEnv {
+  readonly CLOUD_ENVIRONMENT: "production" | "staging"
+  readonly PUBLIC_API_ORIGIN: string
+  readonly WEB_ORIGIN: string
+  readonly API: ApiService
+}
+
+/** What the web host does with one address: answer its own health, forward it to the API Worker as the web origin, or refuse it. */
+export type EdgeRoute =
+  | { readonly tag: "Health" }
+  | { readonly tag: "Forward"; readonly target: URL }
+  | { readonly tag: "NotFound" }
+
+const hopByHop = new Set(["host", "forwarded", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade"])
+
+/** Classifies an address: only the web origin's own https addresses are forwarded, each to the same path and query on the API origin. */
+export function edgeRoute(url: URL, env: EdgeEnv): EdgeRoute {
+  if (url.protocol !== "https:" || url.username || url.password) return { tag: "NotFound" }
+  if (url.origin !== env.WEB_ORIGIN) return { tag: "NotFound" }
+  if (url.pathname === "/health") return { tag: "Health" }
+  const target = URL.parse(`${url.pathname}${url.search}`, env.PUBLIC_API_ORIGIN)
+  if (target === null || target.origin !== env.PUBLIC_API_ORIGIN) return { tag: "NotFound" }
+  return { tag: "Forward", target }
+}
+
+/** The headers sent on to the API Worker: the caller's own, without hop-by-hop or earlier forwarding headers, naming the web host it was asked for. */
+export function forwardedHeaders(incoming: Headers, webHost: string): Headers {
+  const headers = new Headers()
+  incoming.forEach((value, name) => {
+    const lower = name.toLowerCase()
+    if (!hopByHop.has(lower) && !lower.startsWith("x-forwarded-")) headers.set(lower, value)
+  })
+  headers.set("x-forwarded-host", webHost)
+  headers.set("x-forwarded-proto", "https")
+  return headers
+}
+
+const noStore = { "Cache-Control": "no-store" }
+
+/** The web host Worker: its own health, and every other web-origin address answered by the API Worker, through its service binding, as the web origin (return pages, asset links). */
+export const edgeWorker = {
+  async fetch(request: Request, env: EdgeEnv): Promise<Response> {
+    const url = new URL(request.url)
+    const route = edgeRoute(url, env)
+    switch (route.tag) {
+      case "Health":
+        return EdgeResponse.json({ ok: true }, { headers: noStore })
+      case "NotFound":
+        return new EdgeResponse("Not Found", { status: 404, headers: noStore })
+      case "Forward": {
+        const bodied = request.method !== "GET" && request.method !== "HEAD"
+        try {
+          return await env.API.fetch(new EdgeRequest(route.target, {
+            method: request.method,
+            headers: forwardedHeaders(request.headers, url.host),
+            redirect: "manual",
+            ...(bodied ? { body: request.body } : {}),
+          }))
+        } catch {
+          return EdgeResponse.json({ error: "service_unavailable" }, { status: 503, headers: { ...noStore, "Retry-After": "30" } })
+        }
+      }
+    }
+  },
+}
+
+export default edgeWorker

@@ -1,0 +1,35 @@
+// spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole"
+import { readReplyStream } from "@elizaos/agent/client"
+
+const encoder = new TextEncoder()
+
+async function* frames(values: readonly unknown[]): AsyncGenerator<Uint8Array> {
+  for (const value of values) yield encoder.encode(`data: ${JSON.stringify(value)}\n\n`)
+}
+
+/**
+ * Whether the reply-stream reader of the checked-out agent client hears the agent's `acknowledgment` frame and a tool
+ * frame's owner label, both added by elizaOS/eliza#40293. The reader of the committed pin decodes every frame strictly
+ * and fails the turn on either, so a test that streams them runs only where the reader has them. An agent on that older
+ * wire never sends them, and the tool-frame fallback, which is tested without them, is what runs there.
+ */
+export async function readerHearsAcknowledgments(): Promise<boolean> {
+  let acknowledged: string | undefined
+  let label: string | undefined
+  // Declared apart from the call, so the older reader's hooks, which have no `onAcknowledgment`, accept them too.
+  const hooks = {
+    onAcknowledgment: (text: string) => { acknowledged = text },
+    onTool: (_name: string, named?: string) => { label = named },
+  }
+  const outcome = await readReplyStream(frames([
+    { type: "acknowledgment", text: "Sure." },
+    { type: "tool", name: "CALENDAR", label: "Using Calendar" },
+    { type: "done", fullText: "", messageId: "m1", userMessageId: "u1", agentName: "Alpha", actionResults: [] },
+  ]), hooks)
+  return outcome.kind === "Done" && acknowledged === "Sure." && label === "Using Calendar"
+}
+
+/** What a test that streams acknowledgment frames adds to its title where the reader cannot hear them, and is skipped. */
+export function unlessAcknowledgmentsHeard(heard: boolean): string {
+  return heard ? "" : " (skipped: the agent client's reply reader predates the acknowledgment frame)"
+}

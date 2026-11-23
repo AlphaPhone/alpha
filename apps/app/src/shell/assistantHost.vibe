@@ -1,0 +1,234 @@
+// spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
+import { AssistantHost, type AgentIdentity, type PeerFacts, type ScreenFacts } from "../assistant/host.vibe"
+import { DeviceExecutors, type OperationPorts } from "../assistant/review.vibe"
+import { AccountBindings, ownRouteOf, usableSession } from "../account/bindings.vibe"
+import { Entitlement } from "../account/entitlement.vibe"
+import { AiProvider } from "../account/provider.vibe"
+import { CloudSession } from "../account/session.vibe"
+import { browserDeviceCapabilities } from "../browser/operations.vibe"
+import { PLUGIN as BROWSER_TAB_HOST } from "../browser/tabHost.vibe"
+import { calendarCapabilities } from "../calendar/operations.vibe"
+import { cameraCapabilities } from "../camera/agentContext.vibe"
+import { clockCapabilities } from "../clock/operations.vibe"
+import { FilesAgent } from "../files/agent.vibe"
+import { inboxCapabilities } from "../inbox/handoffs.vibe"
+import { mapsDeviceCapabilities } from "../maps/agent.vibe"
+import { NotesOrganize } from "../notes/organize.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { CallWatch } from "../telephony/call-bar.vibe"
+import { TelephonyActions } from "../telephony/actions.vibe"
+import { advertisedOf as telephonyAdvertised } from "../telephony/operations.vibe"
+import { VoiceConversation } from "../voice/conversation.vibe"
+import type { AppId } from "../web/app-screen.ts"
+import { appOfKey } from "./apps.vibe"
+import { Foreground } from "./foreground.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+
+/** Apps whose screen the assistant never observes. */
+export const PRIVATE_APPS: ReadonlySet<string> = new Set(["passwords", "account"])
+
+/** What a client knows of the agent process it talks to: nothing yet, the one instance it learned, or ordinary context only. */
+export type PeerSupport = { readonly tag: "NotLearned" } | { readonly tag: "SamePeer"; readonly instance: string } | { readonly tag: "OrdinaryOnly" }
+
+/** One authenticated status read: the process instance it named, none, or a failed read. */
+export type StatusRead = { readonly tag: "Read"; readonly instance: string } | { readonly tag: "NoInstance" } | { readonly tag: "ReadFailed" }
+
+/** The first learn of a connection: the instance a status names, ordinary context for a status that names none, and nothing from a failed read. */
+export function learnPeer(support: PeerSupport, read: StatusRead): PeerSupport {
+  if (support.tag !== "NotLearned") return support
+  return read.tag === "Read" ? { tag: "SamePeer", instance: read.instance } : read.tag === "NoInstance" ? { tag: "OrdinaryOnly" } : support
+}
+
+/** A turn's comparison: the learned instance stays only while the status names exactly it; anything else ends optional fields. */
+export function comparePeer(support: PeerSupport, read: StatusRead): PeerSupport {
+  if (support.tag !== "SamePeer") return support
+  return read.tag === "Read" && read.instance === support.instance ? support : { tag: "OrdinaryOnly" }
+}
+
+/** The status read of an agent's `GET /api/status` answer. */
+export function statusReadOf(status: unknown): StatusRead {
+  const instance = typeof status === "object" && status !== null && !Array.isArray(status) ? (status as { serverInstanceId?: unknown }).serverInstanceId : undefined
+  return typeof instance === "string" && instance !== "" ? { tag: "Read", instance } : { tag: "NoInstance" }
+}
+
+function connectionOf(identity: AgentIdentity): string {
+  return JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+}
+
+const ORDINARY: PeerFacts = { optionalFields: false, takesLocation: false }
+
+/** The shell's side of the assistant: the verified agent session, the screen in front, the views it opens and its toasts. */
+export const assistantHostLive = Layer.effect(AssistantHost, effect {
+  const navigation = try Navigation
+  const foreground = try Foreground
+  const notices = try Notices
+  const session = try CloudSession
+  const bindings = try AccountBindings
+  const provider = try AiProvider
+  const entitlement = try Entitlement
+  const calls = try CallWatch
+  const voice = try VoiceConversation
+  const resident = try Resident
+  const learned = try Ref.make<{ readonly connection: string; readonly support: PeerSupport }>({ connection: "", support: { tag: "NotLearned" } })
+
+  effect function status() {
+    const answer = resident.json("GET", "/api/status") catch () => undefined
+    return answer === undefined || answer.status < 200 || answer.status >= 300 ? { tag: "ReadFailed" } as StatusRead : statusReadOf(answer.data)
+  }
+
+  effect function peer() {
+    const identity = try bindings.identity()
+    if (identity === undefined) return ORDINARY
+    const connection = connectionOf(identity)
+    const kept = try Ref.get(learned)
+    let support: PeerSupport = kept.connection === connection ? kept.support : { tag: "NotLearned" }
+    if (support.tag === "NotLearned") support = learnPeer(support, try status())
+    if (support.tag === "SamePeer") support = comparePeer(support, try status())
+    try Ref.set(learned, { connection, support })
+    const sends = support.tag === "SamePeer"
+    return { optionalFields: sends, takesLocation: sends } satisfies PeerFacts
+  }
+
+  fork.scoped (effect {
+    let inPrivate = false
+    let locked = false
+    for try (const front of foreground.changes) {
+      const nowPrivate = PRIVATE_APPS.has(front.view)
+      if ((nowPrivate && !inPrivate) || (front.locked && !locked)) try voice.left()
+      inPrivate = nowPrivate
+      locked = front.locked
+    }
+  })
+
+  effect function open(app: AppId, route: string | undefined) {
+    const before = (try navigation.get()).chat
+    const opened = try navigation.open(app, route)
+    if (opened && (before === "Sheet" || before === "Full")) try navigation.moveChat(before)
+    return opened
+  }
+
+  return {
+    identity: () => bindings.identity(),
+    effect screen() {
+      const nav = try navigation.get()
+      const front = try foreground.get()
+      const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
+      const privateView = PRIVATE_APPS.has(nav.app)
+      const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
+      const connectionDialog = (try bindings.idle()).signInOpen || nav.layers.some((layer) => layer.id.startsWith("account"))
+      return {
+        exposure: { privateView, locked: front.locked, hidden: nav.hidden, connectionDialog },
+        observation: { view, revision: nav.revision, sensitive: privateView || front.locked },
+        onCalendar: nav.app === "calendar",
+        contextKey: `${view}:${route}`,
+      } satisfies ScreenFacts
+    },
+    peer,
+    effect inference() {
+      if (ownRouteOf(try provider.current())) return { where: "OwnKeyHosted" as const, provider: "Your provider" }
+      const cloud = usableSession(try session.current()) && (try entitlement.current()).host !== "HostRemoved"
+      return cloud ? { where: "CloudHosted" as const, provider: "Eliza Cloud" } : { where: "OwnKeyHosted" as const, provider: "Your provider" }
+    },
+    effect emergency() { return !(try calls.allowed()) },
+    effect openView(app: string, route?: string) {
+      const known = appOfKey(`alpha:${app}`)
+      if (known === undefined) return false
+      if (!(try navigation.get()).voice) return try open(known as AppId, route)
+      let opened = false
+      try voice.followScreen(() => effect {
+        opened = try open(known as AppId, route)
+        return opened
+      }, () => opened)
+      return opened
+    },
+    toast: (text: string) => notices.show(text),
+  }
+})
+
+/** The executors of every area as one: each operation belongs to the first family that validates it, and one no family validates is refused. */
+export function composeExecutors(families: readonly OperationPorts[]): OperationPorts {
+  const owner = (operation: unknown) => families.find((family) => family.validate(operation) !== undefined)
+  return {
+    validate: (operation) => owner(operation)?.validate(operation),
+    execute: (operation, call) => owner(operation)?.execute(operation, call) ?? Promise.resolve({ kind: "refused", code: "unsupported" }),
+    readBack: (operation, call) => owner(operation)?.readBack(operation, call) ?? Promise.resolve({ kind: "refused", code: "unsupported" }),
+    describe: (operation) => owner(operation)?.describe(operation) ?? { title: "Action", detail: "" },
+    classOf: (operation) => owner(operation)?.classOf(operation) ?? "SettingsWrite",
+    target: (operation, text) => owner(operation)?.target(operation, text) ?? { tag: "NoTarget" },
+    summarize: (operation, result) => owner(operation)?.summarize(operation, result) ?? "",
+    itemize: (operation, proposalId) => owner(operation)?.itemize?.(operation, proposalId),
+    handoff: (operation) => owner(operation)?.handoff?.(operation) ?? true,
+    present: (operation, call) => owner(operation)?.present?.(operation, call),
+  }
+}
+
+/** The capabilities this phone advertises in `x-eliza-device-capabilities`; unprovided, it advertises none, so the agent offers only ordinary turns. */
+export service DeviceCapabilities {
+  /** Of the capabilities the agent `offered`, those this phone advertises: each area's own selection. */
+  advertise(offered: readonly string[]): readonly string[]!!
+  static readonly defaultValue = () => ({
+    advertise: (_offered: readonly string[]) => succeed([] as readonly string[]),
+  })
+}
+
+/** The phone's device capabilities over every area that advertises its own, for the shell's fills once the last of those areas is built. */
+export const deviceCapabilities = effect {
+  const files = try FilesAgent
+  const notes = try NotesOrganize
+  const telephony = try TelephonyActions
+  const clock = try clockCapabilities
+  const build = try Build
+  const native = try Native
+  const tabHost = build.info.variant !== "browser" && (try (native.available(BROWSER_TAB_HOST) catch () => false))
+  const port: DeviceCapabilities.Shape = {
+    effect advertise(offered: readonly string[]) {
+      const advertised = [
+        ...(try files.advertise(offered)),
+        ...(try notes.capabilities()).filter((capability) => offered.includes(capability)),
+        ...calendarCapabilities(offered, build.info.variant),
+        ...telephonyAdvertised(try (telephony.capabilities() catch () => [] as readonly string[]), offered),
+        ...browserDeviceCapabilities(offered, tabHost),
+        ...inboxCapabilities(offered),
+        ...mapsDeviceCapabilities(offered),
+        ...cameraCapabilities.filter((capability) => offered.includes(capability)),
+        ...(try (clock.advertise(offered) catch () => [] as readonly string[])),
+      ]
+      return [...new Set(advertised)] as readonly string[]
+    },
+  }
+  return port
+}
+
+/** Where each area's executors are registered once that area's services are built, so areas after the assistant can run device operations. */
+export service ExecutorFamilies {
+  /** Adds one area's executors; an operation goes to the first registered family that validates it. */
+  register(family: OperationPorts): void!!
+}
+
+/** The device executors over `families` and every family registered later, with the registry that adds them. */
+export function deviceExecutorsLive(families: readonly OperationPorts[]) {
+  const registered: OperationPorts[] = [...families]
+  return Layer.mergeAll(
+    Layer.succeed(DeviceExecutors, { ports: composeExecutors(registered) }),
+    Layer.succeed(ExecutorFamilies, {
+      register: (family: OperationPorts) => sync(() => { if (!registered.includes(family)) registered.push(family) }),
+    }),
+  )
+}
+
+/** Builds one area's `operationPorts` over its services and registers it; a family that cannot be built is left out, so its operations are refused. */
+export effect function registerFamily<E, R>(family: Effect.Effect<OperationPorts, E, R>) {
+  const registry = try ExecutorFamilies
+  const ports = family catch () => undefined
+  if (ports !== undefined) try registry.register(ports)
+}
+
+/** Registers several families in order; the runtime runs it after the last of their areas. */
+export function registerExecutors<E, R>(families: readonly Effect.Effect<OperationPorts, E, R>[]) {
+  return Layer.effectDiscard(effect {
+    for (const family of families) try registerFamily(family)
+  })
+}

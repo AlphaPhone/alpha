@@ -1,0 +1,103 @@
+// spec/shell/toasts.md, "Story: Read what just happened, at my own pace"
+import { Machine as ToastsMachine, type Event as ToastsEvent, type Toasts } from "../../gen/shell__toasts.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { TimeoutAnswer } from "./native.schema.vibe"
+import { pageEvents, pageHidden } from "./page.ts"
+
+/** What a toast may carry besides its sentence. */
+export interface ToastOptions {
+  /** A failure: announced assertively and kept its whole time. */
+  readonly failure?: boolean
+  /** The Undo the toast offers, run once if the owner takes it. */
+  readonly undo?: () => void!!
+}
+
+/** Toasts and persistent notices for every area: say what happened, offer an Undo, keep what must not be missed. */
+export service Notices {
+  /** Shows a toast in turn; an Undo or a failure takes a passive toast's place. */
+  show(message: string, options?: ToastOptions): void!!
+  /** Lists a notice the owner must dismiss, and announces it once. */
+  persist(message: string): void!!
+  /** Dismisses a listed notice. */
+  dismiss(message: string): void!!
+  /** Holds the toast while focus or a pointer is inside it. */
+  hold(): void!!
+  /** Lets a held toast run its time again. */
+  release(): void!!
+  /** Runs the shown toast's Undo and closes it. */
+  takeAction(): void!!
+  /** One toasts event, such as a launcher report; false where the rules refuse it. */
+  send(event: ToastsEvent): boolean!!
+}
+
+/** Android's recommended timeout for a five-second base, as a percent scale; 0 when it gave none. */
+effect function readTimeoutScale() {
+  const native = try Native
+  if (!(try native.available("AlphaDevice"))) return 0
+  const answer = effect { return try Schema.decodeUnknownEffect(TimeoutAnswer)(try native.invoke("AlphaDevice", "recommendedTimeout", { baseMs: 5000 })) } catch () => ({ timeoutMs: 0 })
+  return Number.isFinite(answer.timeoutMs) && answer.timeoutMs > 0 ? Math.round(answer.timeoutMs / 50) : 0
+}
+
+effect function sendTo(machine: ToastsMachine.Shape, event: ToastsEvent) {
+  const sent = machine.send(event) catch () => undefined
+  return sent !== undefined
+}
+
+effect function refreshScale(machine: ToastsMachine.Shape) {
+  const asked = machine.send({ type: "request" }) catch () => undefined
+  if (asked === undefined) return
+  const id = asked.latest
+  try sendTo(machine, { type: "reply", id, scale: try readTimeoutScale() })
+}
+
+effect function followResume(machine: ToastsMachine.Shape) {
+  for try (const _ of pageEvents("visibilitychange", "document")) {
+    if (!pageHidden()) try refreshScale(machine)
+  }
+}
+
+effect function expireLater(machine: ToastsMachine.Shape, seq: number, delay: number) {
+  try sleep(Duration.millis(delay))
+  try sendTo(machine, { type: "expire", seq })
+}
+
+/** The notices service over the toasts machine: each shown toast's one timer, and Android's timeout setting. */
+export const noticesLive = Layer.effect(Notices, effect {
+  const machine = try ToastsMachine
+  const scope = try Scope.Scope
+  const actions = new Map<string, () => void!!>()
+  let made = 0
+  let timer: Fiber.Fiber<void> | undefined
+  fork.scoped followResume(machine)
+  try refreshScale(machine)
+  fork.scoped (effect {
+    for try (const state of machine.changes) {
+      if (timer !== undefined) try Fiber.interrupt(timer)
+      timer = undefined
+      if (state.shown.message !== "" && !state.held && state.delay > 0) timer = fork.in(scope) expireLater(machine, state.seq, state.delay)
+      for (const id of [...actions.keys()]) {
+        if (state.shown.undo !== id && !state.queued.some((t) => t.undo === id)) actions.delete(id)
+      }
+    }
+  })
+  const send = (event: ToastsEvent) => sendTo(machine, event)
+  return {
+    effect show(message: string, options?: ToastOptions) {
+      const undo = options?.undo === undefined ? "" : `undo-${++made}`
+      if (options?.undo !== undefined) actions.set(undo, options.undo)
+      try send({ type: "showToast", message, chars: message.length, undo, failure: options?.failure === true && undo === "" })
+    },
+    effect persist(message: string) { try send({ type: "persist", message, chars: message.length }) },
+    effect dismiss(message: string) { try send({ type: "dismiss", message }) },
+    effect hold() { try send({ type: "hold" }) },
+    effect release() { try send({ type: "resume" }) },
+    effect takeAction() {
+      const state: Toasts = try machine.get()
+      const undo = actions.get(state.shown.undo)
+      if (!(try send({ type: "takeAction", seq: state.seq }))) return
+      actions.delete(state.shown.undo)
+      if (undo !== undefined) try undo()
+    },
+    send,
+  }
+})

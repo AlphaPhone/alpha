@@ -1,0 +1,27 @@
+// spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
+import { assert, describe, it } from "@effect/vitest"
+import { sha256Hex } from "../src/digest.ts"
+import { EdgeResponse } from "../src/edge-platform.ts"
+import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+const profile = JSON.stringify({ version: 1, name: "Alpha Cloud" })
+const assetsHolding = (text: string | undefined) => ({
+  fetch: (request: Request) => Promise.resolve(new URL(request.url).pathname === `/${PROFILE_ASSET}` && text !== undefined
+    ? new EdgeResponse(text, { status: 200 })
+    : new EdgeResponse("Not Found", { status: 404 })),
+})
+
+describe("Alpha Cloud's profile asset", () => {
+  it.effect("reads the profile only when the asset is the text CLOUD_PROFILE_SHA256 names", () => effect {
+    // spec/cloud/deployment.md, "A Worker serves only after the server's own start checks pass and its bindings agree with its profile"
+    const read = try tryPromise(() => readProfileAsset(assetsHolding(profile), sha256Hex(profile)))
+    try check(() => assert.strictEqual(read, profile))
+    const stale = try tryPromise(() => readProfileAsset(assetsHolding(`${profile} `), sha256Hex(profile)))
+    try check(() => assert.strictEqual(stale, undefined))
+    const missing = try tryPromise(() => readProfileAsset(assetsHolding(undefined), sha256Hex(profile)))
+    try check(() => assert.strictEqual(missing, undefined))
+    const unpinned = try tryPromise(() => readProfileAsset(assetsHolding(profile), ""))
+    try check(() => assert.strictEqual(unpinned, undefined))
+  })
+})

@@ -1,0 +1,62 @@
+// spec/workflows/deviceSteps.md, "A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates"
+import { decodeAccess, decodeList, type DeviceEventRecord } from "../calendar/device.schema.vibe"
+import { Native } from "../platform/native.vibe"
+import { type CalendarRange, eventsInRange, readSpan, workflowCalendarRange, workflowInMeeting } from "./calendar-range.ts"
+
+const PLUGIN = "AlphaCalendar"
+
+/** A named range could not be read: an unknown label, no Calendar read access, a phone that cannot read it, or more events than one read returns. */
+export error CalendarRangeRefused { reason: "label" | "permission" | "unavailable" | "truncated"; message: string }
+
+/** The phone's events of one named range, with the range they were read for. */
+export interface RangeRead {
+  readonly range: CalendarRange
+  readonly events: ReadonlyArray<DeviceEventRecord>
+}
+
+const refusal = (reason: CalendarRangeRefused["reason"]) => new CalendarRangeRefused({
+  reason,
+  message: reason === "label" ? "That calendar range isn’t one a workflow reads."
+    : reason === "permission" ? "Allow Calendar access to read this range."
+    : reason === "truncated" ? "Calendar input exceeds the supported range. Choose fewer dates."
+    : "The phone’s calendar couldn’t be read.",
+})
+
+/** Workflows' named calendar ranges over the phone's own calendars: today, tomorrow, the next three days, this week, and whether a meeting is under way. */
+export service WorkflowCalendar {
+  /** The phone's events in the range `label` names, read from local midnight; an all-day event counts by its civil dates. */
+  read(label: string): RangeRead!CalendarRangeRefused
+  /** Whether a meeting with a call link or guests is under way now. */
+  inMeeting(): boolean!CalendarRangeRefused
+}
+
+/** The named ranges over the AlphaCalendar plugin's range read, asking for workflow read access first. */
+export const workflowCalendar = Layer.effect(WorkflowCalendar, effect {
+  const native = try Native
+
+  effect function list(begin: number, end: number) {
+    if (!(try native.available(PLUGIN))) throw refusal("unavailable")
+    const access = effect { return try decodeAccess(try native.invoke(PLUGIN, "requestWorkflowReadAccess")) } catch () => undefined
+    if (access?.status !== "granted") throw refusal("permission")
+    const raw = try mapError(native.invoke(PLUGIN, "list", { begin, end }), () => refusal("unavailable"))
+    const answer = try mapError(decodeList(raw), () => refusal("unavailable"))
+    if (answer.status === "permission-required") throw refusal("permission")
+    if (answer.status !== "ready") throw refusal("unavailable")
+    if (answer.truncated) throw refusal("truncated")
+    return answer.events
+  }
+
+  return {
+    effect read(label: string) {
+      const range = workflowCalendarRange(label, new Date(try Clock.currentTimeMillis))
+      if (range === undefined) throw refusal("label")
+      const span = readSpan(range)
+      const events = try list(span.begin, span.end)
+      return { range, events: eventsInRange(events, range) }
+    },
+    effect inMeeting() {
+      const now = try Clock.currentTimeMillis
+      return workflowInMeeting(try list(now, now + 1), now)
+    },
+  }
+})

@@ -1,0 +1,201 @@
+// spec/telephony/voicemail.md, "Story: See my voicemail only when my carrier offers it"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/voicemail.md, "Playing marks a voicemail heard, and nothing plays during a call or behind the lock"; spec/telephony/voicemail.md, "A transcript is made on this phone or not at all"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/phone.md, "The Voicemail tab exists only while the carrier's visual voicemail is ready"
+import type { VoicemailId, VoicemailListing } from "@elizaos/os/bridges/phone"
+import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { Machine as VoicemailMachine, type Event as VoicemailEvent, type Voicemail, type VoicemailAnswer, type VoicemailWritten } from "../../gen/telephony__voicemail.effect.vibe"
+import { callerOf, displayNames, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+import { VoicemailTranscriber } from "./ports.vibe"
+import { DeletionUndo } from "./undo.vibe"
+import { base64Of, bytesOf, wavWindows } from "./wav.ts"
+
+/** The longest transcript kept for a voicemail. */
+export const TRANSCRIPT_MAX = 8000
+
+/** What Alpha may read of the open voicemail (`voicemail_read_selected`). */
+export interface OpenVoicemailRead {
+  readonly caller: string | null
+  readonly date: number
+  readonly durationSeconds: number
+  readonly transcriptState: "ready" | "pending" | "unavailable" | "failed"
+  readonly engine: "device" | "carrier" | null
+  readonly transcript: string | null
+}
+
+/** The voicemail tab's effects over the phone's voicemail store. */
+export service VoicemailView {
+  /** One visit of Phone: while it is in front on an unlocked phone, the carrier's state and rows, kept current by the provider observer; lock or background stop playback and forget them. */
+  visit(): void!!
+  /** The owner's Refresh. */
+  refresh(): void!!
+  /** Open or close a voicemail; opening fetches its audio and transcribes it on the phone. */
+  open(id: string): void!!
+  /** Try the open voicemail's audio again. */
+  retryAudio(): void!!
+  /** Play the open voicemail, marking it heard. */
+  play(): void!!
+  /** The open voicemail's decoded WAV, while it is open. */
+  wav(): Uint8Array | undefined!!
+  /** Delete the open voicemail the owner confirmed. */
+  confirmDelete(): void!!
+  /** Alpha's request to delete the open voicemail: the owner confirms on the phone. */
+  deleteSelected(): "deleted" | "none-selected" | "cancelled" | "failed" | "unavailable"!!
+  /** The open voicemail as Alpha may read it, or null when none is open. */
+  readSelected(): OpenVoicemailRead | null!!
+}
+
+/** A listing as the machine's answer. */
+export function listedAnswer(listing: VoicemailListing): VoicemailAnswer {
+  return {
+    tag: "VoicemailListed",
+    carrier: listing.carrier,
+    blocked: listing.gate === "WriteUnsettled",
+    voicemails: listing.voicemails.map((row) => ({
+      id: row.id, number: row.number, title: row.cachedName ?? "", date: row.date, seconds: row.durationSeconds,
+      fresh: !row.heard, hasAudio: row.audio === "AudioOnPhone", carrierText: row.carrierTranscript ?? "",
+    })),
+  }
+}
+
+/** The machine's answer for a write report or refusal. */
+export function writtenOf(outcome: unknown): VoicemailWritten {
+  if (outcome instanceof TelephonyRefused) return refusalTag(outcome) === "VoicemailRefused" && (outcome.cause as { reason?: string }).reason === "unknown-voicemail" ? "VoicemailGone" : "VoicemailKept"
+  const written = (outcome as { written?: string }).written
+  return written === "Applied" ? "VoicemailRemoved" : written === "Uncertain" ? "VoicemailUnconfirmed" : "VoicemailKept"
+}
+
+const settledDelete = (v: Voicemail, id: string) => !v.opened.confirming && !v.opened.deleting || v.opened.openId !== id
+
+/** The voicemail tab over its machine, the phone bridge and the on-device recognizer. */
+export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
+  const bridgeCall = callerOf(try TelephonyBridges)
+  const voicemail = try VoicemailMachine
+  const phone = try PhoneMachine
+  const calls = try CallBarMachine
+  const recognizer = try VoicemailTranscriber
+  const undo = try DeletionUndo
+  const front = try frontChanges()
+  const audio = try Ref.make<{ ticket: number; wav: Uint8Array } | undefined>(undefined)
+  const tell = (event: VoicemailEvent) => voicemail.send(event) catch () => undefined
+
+  effect function publish(listing: VoicemailListing) {
+    const names = try displayNames(bridgeCall, "phone", listing.voicemails.filter((row) => !row.cachedName).map((row) => row.number))
+    const named = { ...listing, voicemails: listing.voicemails.map((row) => ({ ...row, cachedName: row.cachedName || names[row.number] || null })) }
+    const asked = try tell({ type: "listAsked" })
+    if (asked === undefined) return
+    const answered = try tell({ type: "listAnswered", ticket: asked.epoch, answer: listedAnswer(named) })
+    try (phone.send({ type: "carrierRead", ready: answered?.carrier === "CarrierReady" }) catch () => undefined)
+  }
+
+  effect function read(kind: "AutomaticRead" | "ExplicitRead") {
+    const listing = try (bridgeCall("refreshVoicemail", (c) => c.phone.refreshVoicemail(kind)) catch () => undefined)
+    if (listing !== undefined) try publish(listing)
+    else {
+      const asked = try tell({ type: "listAsked" })
+      if (asked !== undefined) try tell({ type: "listAnswered", ticket: asked.epoch, answer: { tag: "VoicemailUnreadable" } })
+      try (phone.send({ type: "carrierRead", ready: false }) catch () => undefined)
+    }
+  }
+
+  effect function transcribe(ticket: number, wav: Uint8Array) {
+    const ready = try recognizer.ready()
+    const asked = try tell({ type: "transcriptAsked", ready })
+    if (asked === undefined || asked.opened.transcript !== "TranscriptRunning") return
+    const parts: string[] = []
+    for (const window of wavWindows(wav)) {
+      const text = try (recognizer.transcribe(base64Of(window)) catch () => "")
+      if ((try voicemail.get()).opened.ticket !== ticket) return
+      if (text.trim() !== "") parts.push(text.trim())
+    }
+    try tell({ type: "transcriptAnswered", ticket, words: parts.join(" ").slice(0, TRANSCRIPT_MAX) })
+  }
+
+  effect function loadAudio() {
+    const asked = try tell({ type: "audioAsked" })
+    if (asked === undefined) return
+    const { openId, ticket } = asked.opened
+    const id = openId as VoicemailId
+    const row = asked.rows.find((r) => r.id === openId)
+    const fetched = row?.hasAudio === true ? "ready" : try (bridgeCall("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id)) catch () => "failed")
+    const pcm = fetched === "ready" ? try (bridgeCall("voicemailPcm", (c) => c.phone.voicemailPcm(id)) catch () => undefined) : undefined
+    const wav = pcm === undefined ? undefined : try (Effect.try(() => bytesOf(pcm.data)) catch () => undefined)
+    if ((try voicemail.get()).opened.ticket !== ticket) return
+    try Ref.set(audio, wav === undefined ? undefined : { ticket, wav })
+    try tell({ type: "audioAnswered", ticket, ok: wav !== undefined })
+    if (wav !== undefined) try transcribe(ticket, wav)
+  }
+
+  effect function followCalls() {
+    for try (const bar of calls.changes) {
+      try tell({ type: "callChanged", inCall: bar.calls.length > 0 })
+    }
+  }
+
+  return {
+    effect visit() {
+      try whileInFront(front, effect () => {
+        if ((try tell({ type: "voicemailShown" })) === undefined) return
+        const stop = try (bridgeCall("observeVoicemail", (c) => c.phone.observeVoicemail((refreshed) => {
+          runFork(effect { try publish(try promise(() => refreshed)) } catch () => undefined)
+        })) catch () => undefined)
+        try ensuring(effect {
+          try read("AutomaticRead")
+          try followCalls()
+          try Effect.never
+        }, effect {
+          try tell({ type: "readinessLost" })
+          try Ref.set(audio, undefined)
+          try tell({ type: "voicemailHidden" })
+          if (stop !== undefined) try (promise(() => stop()) catch () => undefined)
+        })
+      })
+    },
+    effect refresh() {
+      try read("ExplicitRead")
+    },
+    effect open(id: string) {
+      const opened = try tell({ type: "voicemailOpened", id })
+      try Ref.set(audio, undefined)
+      if (opened !== undefined && opened.opened.openId === id) try loadAudio()
+    },
+    retryAudio: loadAudio,
+    effect play() {
+      const before = try voicemail.get()
+      const row = before.rows.find((r) => r.id === before.opened.openId)
+      if ((try tell({ type: "played" })) === undefined || row === undefined || !row.fresh) return
+      const report = try (bridgeCall("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(row.id as VoicemailId)) catch () => undefined)
+      if (report !== undefined) try publish(report.listing)
+    },
+    effect wav() {
+      const held = try Ref.get(audio)
+      return held !== undefined && held.ticket === (try voicemail.get()).opened.ticket ? held.wav : undefined
+    },
+    effect confirmDelete() {
+      const started = try tell({ type: "deleteStarted" })
+      if (started === undefined) return
+      const { openId, ticket } = started.opened
+      const deferred = try undo.defer({ kind: "voicemail", id: openId as VoicemailId })
+      try tell({ type: "deleteAnswered", ticket, written: deferred.queued ? "VoicemailRemoved" : deferred.refused ? "VoicemailKept" : "VoicemailUnconfirmed" })
+    },
+    effect deleteSelected() {
+      const asked = try tell({ type: "deleteAsked" })
+      if (asked === undefined) return (try voicemail.get()).opened.openId === "" ? "none-selected" : "unavailable"
+      const id = asked.opened.openId
+      const settled = try Stream.runHead(Stream.filter(voicemail.changes, (v) => settledDelete(v, id)))
+      const after = Option.getOrUndefined(settled) ?? (try voicemail.get())
+      return !after.rows.some((r) => r.id === id) ? "deleted" : after.deleteFailed ? "failed" : "cancelled"
+    },
+    effect readSelected() {
+      const v = try voicemail.get()
+      const row = v.rows.find((r) => r.id === v.opened.openId)
+      if (!v.shown || row === undefined) return null
+      const { transcript, engine, words, audio: custody } = v.opened
+      const transcriptState = transcript === "TranscriptDone" ? "ready" : transcript === "TranscriptRunning" || custody === "AudioFetching" ? "pending" : transcript === "TranscriptFailed" ? "failed" : "unavailable"
+      return {
+        caller: row.title === "" ? null : row.title, date: row.date, durationSeconds: row.seconds, transcriptState,
+        engine: transcriptState === "ready" ? (engine === "CarrierEngine" ? "carrier" : "device") : null,
+        transcript: transcriptState === "ready" ? words : null,
+      } satisfies OpenVoicemailRead
+    },
+  }
+})

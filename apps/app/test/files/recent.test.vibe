@@ -1,0 +1,80 @@
+// spec/files/recent.md, "Story: Reopen what I opened recently"; spec/files/recent.md, "Story: Come back to the document I had open"
+import { assert, it } from "@effect/vitest"
+import { Machine as RecentMachine } from "../../gen/files__recent.effect.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesPreview } from "../../src/files/preview.vibe"
+import { type Call, device, files, granted, until } from "./harness.vibe"
+
+/** A phone whose system picker hands over `picked` in turn, and whose registry still holds `held`. */
+function phone(picked: string[], held: Set<string>, calls: Call[]) {
+  return device((plugin, method, args) =>
+    plugin === "AlphaFiles" ? (method === "storageState" ? granted
+      : method === "storageCategory" ? { status: "ready", count: 0 }
+      : method === "storageTrashList" ? { status: "ready", items: [] }
+      : { status: "ready", entries: [], truncated: false })
+    : plugin === "DailyApps" ? (
+      method === "perform" ? { status: "selected", action: "files", selectionId: picked.shift(), name: "lease.txt", mimeType: "text/plain", size: 5 }
+      : method === "readSelected" ? { status: "read", text: "lease", mimeType: "text/plain", bytes: 5 }
+      : method === "describeSelected" ? (held.has(args.selectionId) ? { status: "selected", selectionId: args.selectionId, name: "lease.txt", mimeType: "text/plain" } : { status: "unavailable", message: "Access to this file ended. Select it again." })
+      : method === "restoreSelected" ? { status: "selected", selectionId: [...held][0] }
+      : method === "forgetSelected" ? ((held.delete(args.selectionId)), {})
+      : undefined)
+    : undefined, calls)
+}
+
+it.live("two picked files of the same name stay two rows, and a grant the index no longer names is given back (spec/files/recent.md, \"Story: Reopen what I opened recently\")", () => effect {
+  const calls: Call[] = []
+  const held = new Set(["s1", "s2"])
+  provide files(phone(["s1", "s2"], held, calls), false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      const recent = try RecentMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      const first = try preview.openPicked()
+      const second = try preview.openPicked()
+      const both = try recent.get()
+      try preview.close(true)
+      const forgotten = try recent.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: [first.kind, second.kind], rows: both.rows.map((r) => [r.name, r.selection]), grants: both.grants,
+          afterForget: [forgotten.rows.map((r) => r.selection), forgotten.grants, forgotten.toRelease],
+          released: calls.filter((c) => c.method === "forgetSelected").map((c) => (c.args as { selectionId: string }).selectionId) },
+        { opened: ["shown", "shown"], rows: [["lease.txt", "s2"], ["lease.txt", "s1"]], grants: ["s1", "s2"],
+          afterForget: [["s1"], ["s1"], []], released: ["s2"] },
+      ))
+    })
+  }
+})
+
+it.live("Files reopens the picked document that was open when it last closed, and forgets one whose access ended (spec/files/recent.md, \"Story: Come back to the document I had open\")", () => effect {
+  const calls: Call[] = []
+  const held = new Set(["s1"])
+  provide files(phone(["s1"], held, calls), false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      const recent = try RecentMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      try preview.openPicked()
+      const remembered = (try recent.get()).restoreOpen
+      try preview.leave()
+      try preview.enter()
+      try preview.restoreOpen()
+      const restored = try preview.get()
+      try preview.close(false)
+      held.clear()
+      const row = (try recent.get()).rows[0]!
+      const ended = try preview.openRecent(row)
+      const after = try recent.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { remembered, restored: [restored.shown, restored.doc.selection, restored.content], ended: ended.kind, row: after.rows.map((r) => [r.status, r.selection]) },
+        { remembered: "s1", restored: [true, "s1", "ContentText"], ended: "refused", row: [["Revoked", ""]] },
+      ))
+    })
+  }
+})

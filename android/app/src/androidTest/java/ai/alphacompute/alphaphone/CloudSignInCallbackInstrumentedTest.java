@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.auth.cloud.CloudSignInFlow;
+import ai.alphacompute.alphaphone.cloud.CloudSignInFlow;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;

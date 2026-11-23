@@ -7,8 +7,8 @@ import { androidEnv } from "./toolchain.ts";
 import { verifyPinnedUpstream } from "./pinned-upstream-source.ts";
 import { isAndroidAbi } from "./android-abis.ts";
 
-type Instrumentation = typeof import("../vendor/eliza/packages/app/scripts/lib/instrumentation-result.mjs");
-type DeviceLease = typeof import("../vendor/eliza/packages/app/scripts/lib/device-lease.ts");
+type Instrumentation = typeof import("./os-ported/app/lib/instrumentation-result.mjs");
+type DeviceLease = typeof import("./os-ported/app/lib/device-lease.ts");
 type Phase = (name: string, args?: string[]) => Promise<ReturnType<Instrumentation["requireInstrumentationSuccess"]>>;
 export type IsolatedUserState = {
 	user: number | null;
@@ -94,7 +94,7 @@ export async function runNativeFixture({
 }: FixtureOptions) {
 	verifyPinnedUpstream(path.resolve(import.meta.dirname, ".."));
 	const { runIsolatedAndroidUserTest } = await import(
-		"../vendor/eliza/packages/app/scripts/lib/isolated-android-user-test.mjs"
+		"./os-ported/app/lib/isolated-android-user-test.mjs"
 	);
 	const serial = process.env.ANDROID_SERIAL,
 		avd = process.env.ALPHA_TEST_AVD,

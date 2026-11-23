@@ -1,0 +1,122 @@
+// spec/notes/collection.md, "Earlier notes are part of the collection once the agent imported them, and an unreadable earlier file needs review"; spec/notes/collection.md, "A collection is bound to one owner, and a new owner or a retirement starts over"; spec/notes/collection.md, "Refreshes and change events coalesce, and a mutation in flight defers them"; spec/notes/collection.md, "A read publishes only for its own ticket and owner, and never an older revision"; spec/notes/collection.md, "One mutation runs at a time and cancels a read in flight"; spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"; spec/notes/collection.md, "The editor can raise a review, and a confirmed save or a discard settles it"
+import type { NotesInteractResult } from "@elizaos/plugin-notes/client"
+import type { NotesSnapshot } from "@elizaos/plugin-notes/types"
+import { type Collection, type Event as CollectionEvent, Machine as CollectionMachine, machine as collectionMachine } from "../../gen/notes__collection.effect.vibe"
+import { NotesClient, NotesRefused, type NotesCapability, type NotesFailure } from "./client.vibe"
+
+/** Whether the agent refused a read because the earlier Notes document it imports from cannot be read. */
+export function priorNeedsReview(refusal: NotesRefused): boolean {
+  return refusal.code === "NOTES_STORE_UNAVAILABLE" && /earlier Notes document/i.test(refusal.message)
+}
+
+/** Another Notes change is still saving. */
+export error NotesBusy
+/** The owner the change was made for is no longer the bound owner; nothing of it is shown. */
+export error NotesRetired
+
+/** The canonical collection as published for the owner it was read for. */
+export interface OwnedSnapshot { readonly owner: string; readonly snapshot: NotesSnapshot }
+
+/** The canonical Notes collection of the bound owner: one read and one mutation at a time. */
+export service NotesCollection {
+  readonly snapshots: Stream.Stream<OwnedSnapshot | undefined>
+  current(): OwnedSnapshot | undefined!!
+  bind(owner: string): void!!
+  retire(): void!!
+  refresh(): void!!
+  invalidate(revision?: number): void!!
+  interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!NotesFailure | NotesBusy | NotesRetired
+  needReview(): void!!
+  clearReview(): void!!
+  setClean(clean: boolean): void!!
+}
+
+interface Owners { readonly names: ReadonlyMap<string, number>; readonly current?: string }
+
+const make = effect {
+  const client = try NotesClient
+  const machine = try CollectionMachine
+  const shown = try SubscriptionRef.make<OwnedSnapshot | undefined>(undefined)
+  const owners = try Ref.make<Owners>({ names: new Map() })
+  const clean = try Ref.make(true)
+  const reading = try Ref.make(0)
+
+  effect function send(event: CollectionEvent): Collection | undefined!! {
+    return try (machine.send(event) catch () => undefined)
+  }
+
+  effect function publish(ownerId: number, snapshot: NotesSnapshot): void!! {
+    const { current, names } = try Ref.get(owners)
+    if (current !== undefined && names.get(current) === ownerId) try SubscriptionRef.set(shown, { owner: current, snapshot })
+  }
+
+  effect function read(): void!! {
+    const before = try machine.get()
+    if (before.phase !== "Loading" || (try Ref.get(reading)) === before.ticket) return
+    try Ref.set(reading, before.ticket)
+    const outcome = try (client.readState() catch (error) => error)
+    const reply = "notes" in outcome ? outcome : undefined
+    const priorUnreadable = outcome instanceof NotesRefused && priorNeedsReview(outcome)
+    const after = try send({ type: "finishRead", ownerId: before.owner, ticket: before.ticket, revision: reply?.revision ?? -1,
+      success: reply !== undefined, clean: try Ref.get(clean), priorUnreadable })
+    if (after !== undefined && reply !== undefined && after.revision === reply.revision) try publish(before.owner, reply)
+    if (after?.reload === true) try refresh()
+  }
+
+  effect function refresh(): void!! {
+    if ((try machine.get()).owner === 0) return
+    try send({ type: "refresh" })
+    try read()
+  }
+
+  effect function followUp(): void!! {
+    if ((try machine.get()).reload) try refresh()
+  }
+
+  return {
+    snapshots: SubscriptionRef.changes(shown),
+    current: () => SubscriptionRef.get(shown),
+    effect bind(owner: string) {
+      const known = try Ref.get(owners)
+      const number = known.names.get(owner) ?? known.names.size + 1
+      try Ref.set(owners, { names: new Map([...known.names, [owner, number]]), current: owner })
+      if ((try machine.get()).owner !== number) {
+        try SubscriptionRef.set(shown, undefined)
+        try Ref.set(reading, 0)
+        try send({ type: "bind", ownerId: number })
+      }
+      try read()
+    },
+    effect retire() {
+      try Ref.update(owners, (known) => ({ names: known.names }))
+      try SubscriptionRef.set(shown, undefined)
+      try send({ type: "retire" })
+    },
+    refresh,
+    effect invalidate(revision?: number) {
+      try send({ type: "invalidate", revision: revision !== undefined && Number.isSafeInteger(revision) && revision >= 0 ? revision : -1 })
+      try read()
+    },
+    effect interact(capability: NotesCapability, params: Record<string, unknown>) {
+      const begun = try (machine.send({ type: "beginWrite" }) catch effect () => { throw new NotesBusy() })
+      const finish = (revision: number, success: boolean) =>
+        send({ type: "finishWrite", ownerId: begun.owner, ticket: begun.ticket, revision, success })
+      const reply = try (client.interact(capability, params) catch effect (error) => {
+        try finish(-1, false)
+        try followUp()
+        throw error
+      })
+      const after = try finish(reply.state.revision, true)
+      if (after === undefined) throw new NotesRetired()
+      if (after.revision === reply.state.revision) try publish(begun.owner, reply.state)
+      try followUp()
+      return reply
+    },
+    effect needReview() { try send({ type: "needReview" }) },
+    effect clearReview() { try send({ type: "clearReview" }) },
+    effect setClean(value: boolean) { try Ref.set(clean, value) },
+  }
+}
+
+/** The collection service with its machine, which the Notes screen reads through `useMachine`. */
+export const collectionLayer = Layer.provideMerge(Layer.effect(NotesCollection, make), collectionMachine())

@@ -6,6 +6,11 @@ import assert from 'node:assert/strict';
 import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 import {policyFixture} from './fixtures/device-action-policy.mjs';
 import {selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts';
+import {loadBrowserModule} from './fixtures/browser-source.mjs';
+import {DeviceActions} from './fixtures/device-action-policy.mjs';
+
+const presentation=loadBrowserModule('apps/app/src/runtime/action-message-presentation.ts');
+const coordinator=loadBrowserModule('apps/app/src/ui/device-actions/client-coordinator.ts');
 
 const signal=()=>new AbortController().signal;
 const refused=pattern=>error=>error.name==='BrowserOpenRefused'&&pattern.test(error.message);
@@ -19,7 +24,9 @@ async function browser(run,{native=true,results={}}={}){
  const open=async(address,title,{priv=false,fresh=true,...more}={})=>{if(fresh){priv?host.rendered().openPrivate():host.rendered().newTab();await host.sync();}const id=await type(address);await page(id,address,title,more);return id;};
  const asked=[];
  // `pick` answers the in-card question: an index, or null for "Not now".
- const control=async(operation,{pick=null,observed,proposalId}={})=>{const present=await host.component.browserControl(operation,{signal:signal(),observed,proposalId,choose:async choice=>{asked.push(choice);return pick;}});await host.sync();return async()=>{present();await host.sync();};};
+ // The returned presentation resolves to whether it ran; `raw` is the adapter's own closure (its
+ // `deferred` and `closed` facts).
+ const control=async(operation,{pick=null,observed,proposalId}={})=>{const present=await host.component.browserControl(operation,{signal:signal(),observed,proposalId,choose:async choice=>{asked.push(choice);return pick;}});await host.sync();return Object.assign(async()=>{const ran=present();await host.sync();return ran;},{raw:present});};
  try{host.shellState.view='home';await host.sync();await run({host,sent,type,page,open,control,asked});}finally{await host.teardown();}
 }
 
@@ -160,7 +167,7 @@ test('closing a named tab closes that tab; closing without a name closes the sho
 test('closing every tab closes exactly the tabs its card listed, and nothing once Browser changed',async()=>{
  await browser(async({host,sent,open,page,control})=>{
   const news=await open('https://news.example/','Morning news',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
-  const listed=id=>host.component.browserTabsClosing(id),all={type:'browser_tab_close',all:true};
+  const listed=id=>host.component.browserTabsClosing(id)?.tabs??null,all={type:'browser_tab_close',all:true};
   assert.deepEqual(listed('first'),[{title:'Morning news',host:'news.example'},{title:'Field guide',host:'docs.example.org'}]);
   // A card that was never listed, or an approval without its proposal, closes nothing.
   await assert.rejects(control(all),refused(/changed after you reviewed/));
@@ -194,12 +201,113 @@ test('closing every tab from Browser closes the showing tab when presented, and 
   // A private tab is counted on the card only for a request made from it; from Home it is not closed.
   const bank=await open('https://bank.example/','Bank account',{fresh:false}),secret=await open('https://bank.example/private','Bank statement',{priv:true});
   host.shellState.view='home';await host.sync();
-  assert.deepEqual(host.component.browserTabsClosing('home'),[{title:'Bank account',host:'bank.example'}]);
+  assert.deepEqual(host.component.browserTabsClosing('home'),{tabs:[{title:'Bank account',host:'bank.example'}],privateKept:1});
   await (await control({type:'browser_tab_close',all:true},{proposalId:'home'}))();
   assert.ok(!host.state().tabs.some(tab=>tab.id===bank));assert.ok(host.state().tabs.some(tab=>tab.id===secret));
   assert.ok(!host.state().tabs.find(tab=>tab.id===host.state().cur).priv,'Browser shows a new tab, not the private one');
   host.rendered().tabCards.find(card=>card.id===secret).pick();host.shellState.view='browser';await host.sync();
-  assert.deepEqual(host.component.browserTabsClosing('private').map(line=>line.private??false).sort(),[false,true],'from the private tab itself it is listed, as private');
+  assert.deepEqual(host.component.browserTabsClosing('private').tabs.map(line=>line.private??false).sort(),[false,true],'from the private tab itself it is listed, as private');
+  assert.equal(host.component.browserTabsClosing('private').privateKept,0);
+ });
+});
+// Review finding (browser-close-all 1): "close all the browser tabs" from Home closed only the
+// normal tabs, as intended, but the receipt said "Closed all tabs." and, with only private tabs
+// open, the owner read "No tabs are open to close." Private tabs still close only from a private
+// tab; what the owner and agent read now says they stayed open, naming none of them.
+test('closing every tab from outside a private tab says private tabs stay open, never that all closed',async()=>{
+ const {browserControlSummary}=await presentation;
+ const all={type:'browser_tab_close',all:true};
+ await browser(async({host,open,control})=>{
+  await open('https://bank.example/','Bank account',{fresh:false});const secret=await open('https://bank.example/private','Bank statement',{priv:true});
+  host.shellState.view='home';await host.sync();
+  assert.deepEqual(host.component.browserTabsClosing('home'),{tabs:[{title:'Bank account',host:'bank.example'}],privateKept:1});
+  const present=await control(all,{proposalId:'home'});
+  assert.deepEqual(present.raw.closed,{count:1,privateKept:1});
+  const summary=browserControlSummary(all,present.raw.closed);
+  assert.equal(summary,'Closed 1 tab. Private tabs were left open.');
+  assert.doesNotMatch(summary,/all tabs|statement|bank/i,'the agent learns no private title or site');
+  await present();assert.ok(host.state().tabs.some(tab=>tab.id===secret));
+ });
+ await browser(async({host,open,control})=>{
+  await open('https://bank.example/','Bank account',{fresh:false});const secret=await open('https://bank.example/private','Bank statement',{priv:true});
+  // From the private tab (showing) every tab closes, and the receipt counts them.
+  host.shellState.view='browser';await host.sync();
+  assert.equal(host.component.browserTabsClosing('from-private').privateKept,0);
+  const present=await control(all,{proposalId:'from-private'});
+  assert.deepEqual(present.raw.closed,{count:2,privateKept:0});assert.equal(browserControlSummary(all,present.raw.closed),'Closed 2 tabs.');
+  await present();assert.equal(host.state().tabs.some(tab=>tab.id===secret),false);
+ });
+ await browser(async({host,open,control})=>{
+  const bank=await open('https://bank.example/','Bank account',{fresh:false}),secret=await open('https://bank.example/private','Bank statement',{priv:true});
+  host.shellState.view='browser';await host.sync();
+  await (await control({type:'browser_tab_close',target:'bank'},{pick:0}))();assert.deepEqual(host.state().tabs.map(tab=>tab.id),[secret]);
+  // With only the private tab left, a request from Home lists no tab and counts the private one.
+  host.shellState.view='home';await host.sync();
+  assert.deepEqual(host.component.browserTabsClosing('only'),{tabs:[],privateKept:1});
+  assert.ok(bank);
+ });
+});
+test('a close-every-tab card and its notice say how many private tabs stay open, naming none',async()=>{
+ const {closeAllTabsNotice,TABS_UNLISTED_NOTICE,NO_TABS_TO_CLOSE_NOTICE}=await coordinator;
+ assert.equal(closeAllTabsNotice(null),`Close all tabs: ${TABS_UNLISTED_NOTICE}`);
+ assert.equal(closeAllTabsNotice({tabs:[],privateKept:0}),`Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`);
+ assert.equal(closeAllTabsNotice({tabs:[],privateKept:1}),'Close all tabs: No other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it. Nothing was closed.');
+ assert.equal(closeAllTabsNotice({tabs:[],privateKept:2}),'Close all tabs: No other tabs are open to close. 2 private tabs stay open. Ask from a private tab to close them. Nothing was closed.');
+ const actions=new DeviceActions({sessionId:'session',ownerId:'owner',agentId:'agent',origin:'https://agent.example'},{installationId:'install',enrollmentId:'enrollment'},'c'.repeat(64),async()=>({proposals:[]}),{},async()=>({status:'succeeded',summary:'fixture'}));
+ const proposal={id:'close',digest:'a'.repeat(64),expiresAt:new Date(Date.now()+60_000).toISOString(),operation:{type:'browser_tab_close',all:true}};
+ actions.options.browserTabsClosing=()=>({tabs:[{title:'Bank account',host:'bank.example'}],privateKept:2});
+ const card=actions.card(proposal,{revision:'r'});
+ assert.equal(card.title,'Close 1 tab');
+ assert.match(card.description,/Bank account \(bank\.example\)/);
+ assert.match(card.description,/\n\n2 private tabs stay open\. Ask from a private tab to close them\.$/);
+ actions.options.browserTabsClosing=()=>({tabs:[{title:'Bank account',host:'bank.example'}],privateKept:0});
+ assert.doesNotMatch(actions.card(proposal,{revision:'r'}).description,/private/);
+});
+// Review finding (browser-close-all 2): what a request made in Browser does to the showing tab runs
+// after the receipt, and could be skipped silently while the reply said it was done. The
+// presentation says whether it acted, and a skipped one is followed by a correction.
+test('a presentation that could not act on the showing tab says so, and the owner is told',async()=>{
+ const {runBrowserPresentation}=await presentation;
+ await browser(async({host,open,control})=>{
+  const news=await open('https://news.example/','Morning news',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
+  host.shellState.view='browser';await host.sync();
+  host.component.browserTabsClosing('in-browser');
+  const present=await control({type:'browser_tab_close',all:true},{proposalId:'in-browser'});
+  assert.equal(present.raw.deferred,true);
+  // The screen turns off before the presentation: the tab that was showing is not closed.
+  assert.ok(!host.state().tabs.some(tab=>tab.id===news),'the other tab closed with the action');
+  const said=[];
+  Object.defineProperty(host.page.document,'hidden',{value:true,configurable:true});
+  try{
+   assert.equal(await present(),false);
+   runBrowserPresentation({type:'browser_tab_close',all:true},present.raw,()=>true,text=>said.push(text));
+  }finally{delete host.page.document.hidden;}
+  assert.ok(host.state().tabs.some(tab=>tab.id===docs),'the showing tab stayed open');
+  assert.deepEqual(said,['Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser.']);
+  // Not presented at all (screen off, another request, a changed context): the same correction.
+  const ready=[];runBrowserPresentation({type:'browser_history',action:'back'},Object.assign(()=>true,{deferred:true}),()=>false,text=>ready.push(text));
+  assert.deepEqual(ready,['The page changed or Browser was not on screen, so it did not go back. Ask again.']);
+  // A presentation that throws (its request was cancelled) did not act either.
+  const thrown=[];runBrowserPresentation({type:'browser_tab_switch',target:'news'},Object.assign(()=>{throw Error('aborted');},{deferred:true}),()=>true,text=>thrown.push(text));
+  assert.deepEqual(thrown,['Browser changed or was not on screen, so the tab did not switch. Ask again.']);
+  // What only shows Browser after an effect that already happened needs no correction.
+  const shown=[];runBrowserPresentation({type:'browser_tab_new'},()=>false,()=>false,text=>shown.push(text));assert.deepEqual(shown,[]);
+  // A presentation that acted needs none either.
+  const ok=[];runBrowserPresentation({type:'browser_history',action:'back'},Object.assign(()=>true,{deferred:true}),()=>true,text=>ok.push(text));assert.deepEqual(ok,[]);
+ });
+});
+// Review finding (browser-close-all 3): a listed tab whose page only retitled itself (an unread
+// count, a page that finished loading) refused an approved close-all. The card is bound to the tabs
+// and their pages, not their titles.
+test('a listed tab that only changed its title still closes',async()=>{
+ await browser(async({host,sent,page,open,control})=>{
+  const mail=await open('https://mail.example/','Inbox',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
+  const all={type:'browser_tab_close',all:true};
+  assert.deepEqual(host.component.browserTabsClosing('p').tabs,[{title:'Inbox',host:'mail.example'},{title:'Field guide',host:'docs.example.org'}]);
+  await page(mail,'https://mail.example/','(1) Inbox');
+  assert.deepEqual(host.component.browserTabsClosing('p').tabs.map(line=>line.title),['Inbox','Field guide'],'the card keeps what the owner reviewed');
+  await (await control(all,{proposalId:'p'}))();
+  assert.deepEqual(sent('close').map(input=>input.id).sort(),[mail,docs].sort());
  });
 });
 test('a private tab is never matched, listed or closed for a request made outside a private tab',async()=>{
@@ -253,7 +361,7 @@ test('page history acts on the showing tab once presented, and refuses what the 
   await (await control({type:'browser_history',action:'stop'}))();
   assert.deepEqual(sent('command').map(input=>input.command),['back','reload','forward','stop']);
   // A page that changed between the check and the presentation is left alone.
-  const late=await control({type:'browser_history',action:'reload'});await page(tab,'https://example.com/third','Third');await late();
+  const late=await control({type:'browser_history',action:'reload'});await page(tab,'https://example.com/third','Third');assert.equal(await late(),false,'it says it did not act');assert.equal(late.raw.deferred,true);
   assert.equal(sent('command').length,4);
  });
 });

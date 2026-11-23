@@ -1,8 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Provision one pilot unit from a verified APK build and write its per-unit record.
  *
- *   bun scripts/provision-unit.ts --serial <adb serial> --alias <unit-name> \
+ *   node scripts/provision-unit.ts --serial <adb serial> --alias <unit-name> \
  *     --apk-manifest artifacts/apk-manifest.json [--variant launcher] \
  *     [--build release|debug] [--output test-results/pilot-units] [--home-wait-ms 0]
  *
@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { parseXmlTree, signerDigest } from "./apk.ts";
 import type {ApkMode, ApkVariant} from "./apk.ts";
 import type {ReleaseSigner} from "./build-android.ts";
-import {aaptManifestTree, manifestTreeIsDebuggable, readApkBuildFlags} from "../vendor/eliza/packages/os/scripts/android/image-apk-admission.mjs";
+import {aaptManifestTree, manifestTreeIsDebuggable, readApkBuildFlags} from "./os-ported/os/image-apk-admission.mjs";
 import { readReleaseSigner, releaseAdmission } from "./build-android.ts";
 import { releaseBlockers } from "./release-blockers.ts";
 import { androidEnv, tool } from "./toolchain.ts";

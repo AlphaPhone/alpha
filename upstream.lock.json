@@ -1,7 +1,14 @@
 {
   "url": "https://github.com/elizaOS/eliza.git",
-  "commit": "a3a19afd17e5adce91499aa32e013fa64db7424b",
-  "appSource": "packages/app",
-  "nativeSystemSource": "plugins/plugin-native-system",
-  "osSource": "packages/os"
+  "branch": "vibestack-dp",
+  "commit": "6451775c35a21f41f7eddf428d46826baf2c9194",
+  "appSource": "apps/app",
+  "osSource": "packages/os",
+  "androidSource": "packages/os/android",
+  "aospSource": "packages/os/aosp",
+  "agentSource": "packages/agent",
+  "agentBundle": "@elizaos/agent/bundle",
+  "cloudSource": "packages/cloud",
+  "vibestackSource": "vibestack",
+  "pullRequest": "https://github.com/elizaOS/eliza/pull/40258"
 }

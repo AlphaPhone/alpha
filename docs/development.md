@@ -15,7 +15,7 @@ changes upstream and consume a reviewed commit; never edit the vendor checkout.
 
 Use Bun 1.4.2 (`packageManager` in `package.json`) and JDK 21. The pinned upstream
 source prepares and builds on Bun. Node.js 24+ is needed for LemmaScript and the
-Node-only host tests (`bun run test:node`). The production browser test preview
+Node-only host tests (`pnpm test:node`). The production browser test preview
 also uses genuine Node; its CI job pins Node 26.13.0. Bundle preparation and building
 continue to use Bun.
 Canonical host-test commands automatically cache a hash-pinned Bun 1.4.4 test process on
@@ -30,31 +30,31 @@ and build-tools 36.0.0. Set
 ```sh
 git clone --recurse-submodules "$(gh api repositories/1396333361 --jq .clone_url)"
 cd alpha
-bun install --frozen-lockfile
-bun run verify
-bun run dev
+pnpm install --frozen-lockfile
+pnpm verify
+pnpm dev
 ```
 
-`bun run verify` runs deployment-output checks, source preparation, TypeScript, host tests,
+`pnpm verify` runs deployment-output checks, source preparation, TypeScript, host tests,
 the production web build and its bundle audit.
-Host scripts use native TypeScript. `bun run typecheck:scripts` checks their interfaces.
+Host scripts use native TypeScript. `pnpm typecheck:scripts` checks their interfaces.
 Host contract tests need a JDK and the `sqlite3` command-line tool on `PATH`
 for native Calendar queries. Archive builds check SQLite before verification.
 Tests that load the real SDK require the pinned Bun and a prepared SDK; set
 `ALPHA_REQUIRE_PREPARED_SDK=1` to fail instead of skipping when preparation is missing.
 
-The Quint models and LemmaScript function proofs are not part of `bun run verify`. Run
-`bun run quint:check`, `bun run quint:tests` and `bun run lemma:check` before merging a PR;
+The Quint models and LemmaScript function proofs are not part of `pnpm verify`. Run
+`pnpm quint:check`, `pnpm quint:tests` and `pnpm lemma:check` before merging a PR;
 CI runs them only when `develop` is promoted to `main`. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 Function proofs require Dafny 4.11.0 on `PATH`; `LEMMA_REQUIRE_BACKEND=1` makes a
 missing backend fail. A generation-only run records a skipped proof. Promotion CI installs the
 hash-pinned backend and requires proofs.
 
-A pull request runs one CI job, `bun run verify` (`verify.yml`). The Android build
-(`android.yml`: `bun run android:build:local -- --release`, then the digest restart check) also runs when a
+A pull request runs one CI job, `pnpm verify` (`verify.yml`). The Android build
+(`android.yml`: `pnpm android:build:local -- --release`, then the digest restart check) also runs when a
 pull request changes Android, renderer, script, lockfile or upstream-pin paths; documentation-only
-changes do not run it. The browser tests are not run by PR CI: run `bun run test:browser` and
-`bun run test:browser:production` before finalising a PR and say so in its description. CI runs
+changes do not run it. The browser tests are not run by PR CI: run `pnpm test:browser` and
+`pnpm test:browser:production` before finalising a PR and say so in its description. CI runs
 them with the formal models when `develop` is promoted to `main` (`promotion.yml`).
 
 The remaining lanes do not run on pull requests. `android-emulator.yml` runs nightly on the default branch (`develop`) and
@@ -79,8 +79,8 @@ Each browser test boots the app in a fresh context from the development server, 
 suite's wall time is its total test time divided by the worker count. Locally Playwright
 uses 4 workers; CI (`CI` set) uses 2 per shard. `ALPHA_BROWSER_WORKERS=<n>` or
 `-- --workers=<n>` overrides both. Projected from per-test timings (not yet measured as full
-runs): roughly 75 minutes for `bun run test:browser` and about 10 minutes for
-`bun run test:browser:production` on a quiet 24-CPU host;
+runs): roughly 75 minutes for `pnpm test:browser` and about 10 minutes for
+`pnpm test:browser:production` on a quiet 24-CPU host;
 other sessions' builds, emulators and test runs on the same machine lengthen both and push
 timing-sensitive tests over their timeouts. At 6 workers a quiet host
 runs about a quarter faster again (`ALPHA_BROWSER_WORKERS=6`), but with other sessions loading it
@@ -92,7 +92,7 @@ plus 0.5 GB for the development server):
 
 ```sh
 systemd-run --user --wait --pipe -q -p MemoryMax=10G --working-directory="$PWD" \
-  --setenv=PATH="$PATH" --setenv=HOME="$HOME" bun run test:browser
+  --setenv=PATH="$PATH" --setenv=HOME="$HOME" pnpm test:browser
 ```
 
 A failing test keeps a trace with its actions, their timings and errors, the screencast and
@@ -111,21 +111,21 @@ replace each other's optimized modules.
 ## Development
 
 ```sh
-bun run dev                       # local agent and renderer
-bun run dev:ui                    # renderer only
-bun run dev:cloud                 # genuine account-bound Cloud development
-bun run test:browser              # Chromium, development surfaces enabled
-bun run test:browser:production   # production bundle
+pnpm dev                       # local agent and renderer
+pnpm dev:ui                    # renderer only
+pnpm dev:cloud                 # genuine account-bound Cloud development
+pnpm test:browser              # Chromium, development surfaces enabled
+pnpm test:browser:production   # production bundle
 ```
 
 The web build is a development preview and the payload packaged into the APKs.
 Production builds start with live, empty or unconnected states. Mock data,
 fixtures and developer controls require exactly `ELIZA_DEV_ALLOW_TEST_MOCKS=1`.
-`bun run dev` and Playwright enable this switch; no APK build does.
+`pnpm dev` and Playwright enable this switch; no APK build does.
 Add `?tools=1` to an enabled development server to show developer controls;
 the query cannot enable them in production or on Android.
 
-`bun run dev:cloud` uses a local resident with real Cloud sign-in and service
+`pnpm dev:cloud` uses a local resident with real Cloud sign-in and service
 requests. Its default URL is `http://127.0.0.1:5318`.
 `ALPHA_CLOUD_ENVIRONMENT=staging` explicitly selects staging. Private account and
 resident profiles live under `~/.local/share/alphaphone/`. Existing accounts,
@@ -151,9 +151,9 @@ Distributed builds use the Cloud in `scripts/cloud-deployment-policy.ts` (Eliza 
 today). The product's own Cloud is being prepared; see `docs/standalone-cloud-plan.md`.
 
 ```sh
-bun run cloud:local -- prepare                              # export the pinned upstream source and install it (slow, once per pin)
-ELIZA_DEV_ALLOW_TEST_MOCKS=1 bun run cloud:local -- start   # Steward, Cloud API and a TLS front door on https://127.0.0.1:8787
-ELIZA_DEV_ALLOW_TEST_MOCKS=1 bun run cloud:local -- check   # email-code sign-in, credential, account, entitlement, revocation
+pnpm cloud:local -- prepare                              # export the pinned upstream source and install it (slow, once per pin)
+ELIZA_DEV_ALLOW_TEST_MOCKS=1 pnpm cloud:local -- start   # Steward, Cloud API and a TLS front door on https://127.0.0.1:8787
+ELIZA_DEV_ALLOW_TEST_MOCKS=1 pnpm cloud:local -- check   # email-code sign-in, credential, account, entitlement, revocation
 ```
 
 The local Cloud runs from the pinned `vendor/eliza` source with Alpha's own tenant,
@@ -165,7 +165,7 @@ device result.
 
 `ALPHA_CLOUD_DEPLOYMENT_FILE=<file.json>` points the build and operator tools at a
 candidate Cloud (the same `production` and `staging` rows as the policy). Run
-`bun scripts/cloud-deployment.ts` with it set to regenerate the authorities. A
+`node scripts/cloud-deployment.ts` with it set to regenerate the authorities. A
 candidate build has its own credential namespace, and the production bundle audit
 refuses it.
 
@@ -174,7 +174,7 @@ is built with) and `resources.example.json` (the operator's Cloudflare ids). The
 no route code here.
 
 ```sh
-bun run cloud:worker -- check --policy cloud/policy.example.json --resources cloud/resources.example.json \
+pnpm cloud:worker check --policy cloud/policy.example.json --resources cloud/resources.example.json \
   --upstream <upstream checkout with packages/cloud/deploy> --out <dir>
 ```
 
@@ -185,11 +185,11 @@ tool, which is not merged upstream yet.
 ## Android builds
 
 ```sh
-bun run android:build:inputs       # report missing build inputs
-bun run android:build:local        # prepare, build worker, stage runtime and build (debug only)
-bun run android:build:local -- --release   # the same, also building the release APK (CI)
-bun run android:verify            # inspect APK contents and signatures
-bun run android:build:fast -- --install   # developer rebuild after build:local; never distributable
+pnpm android:build:inputs       # report missing build inputs
+pnpm android:build:local        # prepare, build worker, stage runtime and build (debug only)
+pnpm android:build:local -- --release   # the same, also building the release APK (CI)
+pnpm android:verify            # inspect APK contents and signatures
+pnpm android:build:fast -- --install   # developer rebuild after build:local; never distributable
 ```
 
 `android:build:fast` (scripts/build-android-fast.ts) is an APK build only, with fewer checks:
@@ -242,10 +242,10 @@ Those phones are wiped and installed again, never upgraded in place.
 Qualify the native libraries and APKs for the exact product and SDK revisions.
 
 There is one runtime profile. Every build packages libelizainference with the
-on-device speech models and local embeddings. `bun run android:build:local`
+on-device speech models and local embeddings. `pnpm android:build:local`
 automatically prepares the pinned native inputs before preparing the resident
-source and workflow worker. Run `bun run agent:build-embedding-host` to prepare
-just the voice and embedding inputs; `bun run android:build:inputs` reports their
+source and workflow worker. Run `pnpm agent:build-embedding-host` to prepare
+just the voice and embedding inputs; `pnpm android:build:inputs` reports their
 current state without building them. Build inputs must agree with the staged
 runtime and native libraries.
 
@@ -288,18 +288,18 @@ outputs are unsigned. `ELIZAOS_VERSION_CODE` and `ELIZAOS_VERSION_NAME` override
 versions from `app.config.json`. Keep signing secrets outside the repository.
 
 The upstream consumer-host generator creates the ignored Gradle host from
-`android/consumer-host.json`. Run `bun run android:host` before direct Gradle or
+`android/consumer-host.json`. Run `pnpm android:host` before direct Gradle or
 Android Studio use. Edit the descriptor and `android/app/product.gradle` for
 product build configuration. Dependency checksums remain in
 `android/gradle/verification-metadata.xml`; regenerate and review them with
-`bun run android:deps:write-verification` after dependency changes.
+`pnpm android:deps:write-verification` after dependency changes.
 
 ## Device and image tooling
 
 ```sh
-bun run test:android:instrumentation -- --owned-emulator --avd <avd> --serial emulator-NNNN
-bun run aosp:stage -- --target cuttlefish --aosp-source <aosp-checkout> --apk artifacts/launcher-debug.apk --development
-bun scripts/verify-aosp-listener.ts --serial <serial> --user 0
+pnpm test:android:instrumentation -- --owned-emulator --avd <avd> --serial emulator-NNNN
+pnpm aosp:stage -- --target cuttlefish --aosp-source <aosp-checkout> --apk artifacts/launcher-debug.apk --development
+node scripts/verify-aosp-listener.ts --serial <serial> --user 0
 ```
 
 Instrumentation uses an owned disposable emulator. Image staging takes
@@ -316,7 +316,7 @@ and flashes their own Pixel 10a or Cuttlefish image can add
 locally because it needs a reviewed descriptor and a distributable release.
 
 ```sh
-bun run aosp:stage -- --target pixel10a --aosp-source <aosp-checkout> --factory-image <factory.zip> \
+pnpm aosp:stage -- --target pixel10a --aosp-source <aosp-checkout> --factory-image <factory.zip> \
   --apk <release-launcher-signed-locally.apk> --development --owner-telephony --applied-build-patch soong-memory \
   --output <new-dir>
 ```
@@ -492,7 +492,7 @@ and credentials. The workflow admits passing Cartesia checks for every exact APK
 named in the launcher-only signed output.
 
 Publication reverifies every signed launcher with the normal native verifier
-(`bun run android:verify`). Alpha signs with one key and no signing-key rotation:
+(`pnpm android:verify`). Alpha signs with one key and no signing-key rotation:
 phones still on version 49 (the retired signer) are wiped and installed again,
 never upgraded in place, so no release carries a rotation lineage or a standalone
 APK. `android/release-signer.json` must not carry `apkSigningRotation`; the
@@ -544,11 +544,11 @@ leave Alpha idle in the foreground. Allow one full 15-minute check interval
 plus download time.
 
 ```sh
-bun scripts/verify-wireless-launcher-update.ts before --serial <serial> \
+node scripts/verify-wireless-launcher-update.ts before --serial <serial> \
   --distribution sideload --apk-manifest <baseline>/apk-manifest.json --out <new-before.json>
 # Disconnect USB/ADB, restore the phone's network, and return to idle HOME.
 # Let Alpha discover and install the update. Reconnect after the observed result.
-bun scripts/verify-wireless-launcher-update.ts after --serial <serial> \
+node scripts/verify-wireless-launcher-update.ts after --serial <serial> \
   --before <before.json> --apk-manifest <update>/apk-manifest.json --out <new-after.json>
 ```
 
@@ -584,7 +584,7 @@ After both rounds, compare the eight receipts offline. For each distribution
 supply the first before/after pair followed by the second before/after pair.
 
 ```sh
-bun scripts/verify-wireless-launcher-update.ts matrix \
+node scripts/verify-wireless-launcher-update.ts matrix \
   --sideload stock-1-before.json --sideload stock-1-after.json \
   --sideload stock-2-before.json --sideload stock-2-after.json \
   --image-preinstalled image-1-before.json --image-preinstalled image-1-after.json \
@@ -606,7 +606,7 @@ Complete it in this order:
    exports the verified public certificates and fingerprints under
    `artifacts/release-public-identities/` for enrollment.
 2. Register `ai.alphacompute.alphaphone` in production and staging. Run
-   `bun scripts/cloud-readiness.ts registration --environment <environment>`
+   `node scripts/cloud-readiness.ts registration --environment <environment>`
    to print each environment's operator inputs. Keep the existing
    `/alphaphone/auth/callback` URLs and entitlement audience.
 
@@ -625,15 +625,15 @@ Complete it in this order:
      `STEWARD_GOOGLE_NATIVE_CLIENT_IDS`. Keep any active Android client IDs.
    - Add the new package and its release certificate SHA-256 to the production
      `ELIZA_ANDROID_ASSET_LINKS_JSON`. Generate the merged value with
-     `bun scripts/render-assetlinks.ts --cloud-config --published https://eliza.app/.well-known/assetlinks.json`.
+     `node scripts/render-assetlinks.ts --cloud-config --published https://eliza.app/.well-known/assetlinks.json`.
      Preserve existing grants and other products' entries. Deploy and verify
-     the published file with `bun scripts/render-assetlinks.ts --check <web-origin>/.well-known/assetlinks.json`.
-   - Use `bun scripts/cloud-deployment.ts --pages-registration` to update
+     the published file with `node scripts/render-assetlinks.ts --check <web-origin>/.well-known/assetlinks.json`.
+   - Use `node scripts/cloud-deployment.ts --pages-registration` to update
      Alpha's entry in the protected Cloud release Environment variable
      `ELIZA_NATIVE_AUTH_CALLBACKS_JSON` for production and staging. Keep one
      entry per callback URI and preserve the other products' entries. Verify
      the new Android target in the deployed Pages
-     callback page, run `bun scripts/cloud-readiness.ts probe --environment <environment>`,
+     callback page, run `node scripts/cloud-readiness.ts probe --environment <environment>`,
      then complete sign-in on the intended APK. Test with the new package
      selected to open its supported links if the old package is also installed.
      [Cloud registration #666](https://github.com/alphacompute/alphaphone/issues/666),
@@ -836,8 +836,8 @@ operator does not enable OS enrollment or establish device acceptance.
 Build output belongs in ignored `web-dist/`, `artifacts/`, `test-results/` and
 `.eliza/` directories. Android host and Capacitor sync output are ignored too.
 Cloud deployment source is `scripts/cloud-deployment-policy.ts`; regenerate its
-renderer and Android bindings with `bun scripts/cloud-deployment.ts`.
-`bun scripts/cloud-deployment.ts --pages-registration` prints the public Pages
+renderer and Android bindings with `node scripts/cloud-deployment.ts`.
+`node scripts/cloud-deployment.ts --pages-registration` prints the public Pages
 callback registration for an operator without creating a `config/` directory.
 
 The reviewed pin `1803ea88c9460f2e3cb779abe31cd77cfc6f64c5` includes original-preserving message forks and the corrected Pixel source inventory ([eliza#39808](https://github.com/elizaOS/eliza/pull/39808), [eliza#39810](https://github.com/elizaOS/eliza/pull/39810), [eliza#39813](https://github.com/elizaOS/eliza/pull/39813)). Only the conversation-route catalog hash changed and was checked against the selected Git object; no `plugins/plugin-native-messages` file changed, so the three NativeMessageDeletion sidecar entries kept their hashes. The new upstream `packages/agent/quint/ConversationFork.qnt` and `ConversationFork.cases.json` sidecars behind the fork route are not catalogued in `specs/quint/legacy/core/source-inventory.json`. The mobile builder, dependency lock and 23 UUID package files retain their reviewed bytes. This pin does not itself qualify an APK or image.
@@ -848,35 +848,35 @@ The subsequent reviewed pin `8a5da0e54810ffdb1062ff2f2d4ab30e2db599c0` adds high
 
 The subsequent reviewed pin `9382f650d1644a704e92939d122f1970c46cd11e` adds the chat contact-creation fix ([eliza#39830](https://github.com/elizaOS/eliza/pull/39830)): `PROPOSE_DEVICE_ACTION` is offered under the `contacts` context with address-book guidance for `contacts.write.v1`, and the `plugin-relationships` node entry that the mobile bundle aliases exports the identity-merge engine (a contact save threw `foldIdentity4 is not defined` on the phone). It changes `plugins/plugin-assistant/src/services/device-actions/action.ts`, `plugins/plugin-assistant/src/services/message/context-assembly.ts`, `plugins/plugin-relationships/src/index.node.ts`, `plugins/plugin-relationships/src/index.ts` and two test files. None is in the core source catalog, the mobile build policy or the formal-source inventory, so those move their revision only; the eliza `bun.lock` is unchanged. This does not itself prove the next APK or a contact created on a Pixel.
 
-The subsequent reviewed pin `58ccdf9ff49c4e401bcc30acd959f29f9a4cd0de` adds per-phase `Server-Timing` on Cloud Maps responses, one organization policy read per Maps admission and an early, shared Google tile session ([eliza#39832](https://github.com/elizaOS/eliza/pull/39832)), with the default assistant introduction without a city ([eliza#39826](https://github.com/elizaOS/eliza/pull/39826)) and independent speaker mute in native voice playback ([eliza#39827](https://github.com/elizaOS/eliza/pull/39827)). `bun scripts/verify-upstream.ts` verified the source at this pin. The Maps changes take effect only after a Cloud API deployment. This does not itself prove the next APK or Pixel update.
+The subsequent reviewed pin `58ccdf9ff49c4e401bcc30acd959f29f9a4cd0de` adds per-phase `Server-Timing` on Cloud Maps responses, one organization policy read per Maps admission and an early, shared Google tile session ([eliza#39832](https://github.com/elizaOS/eliza/pull/39832)), with the default assistant introduction without a city ([eliza#39826](https://github.com/elizaOS/eliza/pull/39826)) and independent speaker mute in native voice playback ([eliza#39827](https://github.com/elizaOS/eliza/pull/39827)). `node scripts/verify-upstream.ts` verified the source at this pin. The Maps changes take effect only after a Cloud API deployment. This does not itself prove the next APK or Pixel update.
 
-The subsequent reviewed pin `c6db724d13f25ed39fb26c687788c03a6847e29e` lets chat drive every Alpha app ([eliza#39842](https://github.com/elizaOS/eliza/pull/39842)): Phone, Messages and Contacts as agent destinations behind `views.telephony.v1`, native Inbox and Maps kept navigable, texts to a number and drafts (`sms.compose.v2`), single contact values, contact search and the open-contact read (`contacts.write.v2`, `contacts.show.v1`, `contacts.read.v1`), reviewed Browser search, tabs, find and history (`browser.*.v1`), the camera lens (`camera.capture-lens.v1`), workflow rename, removal and restore, all-day, guest and recurring Calendar edits, Notes restore and move, and Maps locate cards that carry their subject. Of the core source catalog only `plugins/plugin-notes/src/service.ts` changes (the chat delete-by-text title fence and restore); its new digest was reviewed with that change. The mobile build policy and the formal-source inventory move their revision only. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `c6db724d13f25ed39fb26c687788c03a6847e29e` lets chat drive every Alpha app ([eliza#39842](https://github.com/elizaOS/eliza/pull/39842)): Phone, Messages and Contacts as agent destinations behind `views.telephony.v1`, native Inbox and Maps kept navigable, texts to a number and drafts (`sms.compose.v2`), single contact values, contact search and the open-contact read (`contacts.write.v2`, `contacts.show.v1`, `contacts.read.v1`), reviewed Browser search, tabs, find and history (`browser.*.v1`), the camera lens (`camera.capture-lens.v1`), workflow rename, removal and restore, all-day, guest and recurring Calendar edits, Notes restore and move, and Maps locate cards that carry their subject. Of the core source catalog only `plugins/plugin-notes/src/service.ts` changes (the chat delete-by-text title fence and restore); its new digest was reviewed with that change. The mobile build policy and the formal-source inventory move their revision only. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `9ab2bc8c186a774d2b1ef6288f188d131c915c6d` takes the reviewed phone chat routing ([eliza#39882](https://github.com/elizaOS/eliza/pull/39882)): whole-message call and text commands, the dialer and contacts reach the phone's own reviewed operations, a filled-in keypad (`phone.keypad.v1`) opens without review only for a number the owner typed, a chat-requested address can open in a new tab (`browser.open-new-tab.v1`) and Back on Browser stays on the page, "take a picture" takes the photo, directions, travel and nearest-place requests reach Maps, guarded fetch reads the mobile resolver at call time, an applied Notes update fulfils an append, and chat workflows author without the undocumented view mount and say when they cannot notify. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `9ab2bc8c186a774d2b1ef6288f188d131c915c6d` takes the reviewed phone chat routing ([eliza#39882](https://github.com/elizaOS/eliza/pull/39882)): whole-message call and text commands, the dialer and contacts reach the phone's own reviewed operations, a filled-in keypad (`phone.keypad.v1`) opens without review only for a number the owner typed, a chat-requested address can open in a new tab (`browser.open-new-tab.v1`) and Back on Browser stays on the page, "take a picture" takes the photo, directions, travel and nearest-place requests reach Maps, guarded fetch reads the mobile resolver at call time, an applied Notes update fulfils an append, and chat workflows author without the undocumented view mount and say when they cannot notify. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
 The subsequent reviewed pin `4f5de23b6750890ebcb2a292fa4c2982c00f78e7` adds the reviewed latest SMS sender read ([eliza#39883](https://github.com/elizaOS/eliza/pull/39883)): the `sms_latest_sender` device action under `sms.latest-sender.v1`, its telephony contract and the native Messages `latestIncomingSender` read that returns only the last four digits, with Messages planner guidance for it ([eliza#39887](https://github.com/elizaOS/eliza/pull/39887)). None of the changed files is in the core source catalog, the mobile build policy or the formal-source inventory, so those move their revision only; the eliza `bun.lock` and the Android runtime classpath are unchanged. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `f17ac0ccc45a2ceafa404d320ad5e238f6ce08b8` takes the v610 phone chat fixes ([eliza#39898](https://github.com/elizaOS/eliza/pull/39898)): a document-augmented photo request stays bound to the owner's message, lapsed approval reviews close before pending work is listed, a whole-message dialer request opens the Phone keypad (`phone_keypad`), landmark directions plan without asking and "the first one" binds to the open place question, a typed address opens in its new tab, chat workflow create, rename, remove and list route to `WORKFLOW`, and spoken, coded and single-word "go to" places route to Maps. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `f17ac0ccc45a2ceafa404d320ad5e238f6ce08b8` takes the v610 phone chat fixes ([eliza#39898](https://github.com/elizaOS/eliza/pull/39898)): a document-augmented photo request stays bound to the owner's message, lapsed approval reviews close before pending work is listed, a whole-message dialer request opens the Phone keypad (`phone_keypad`), landmark directions plan without asking and "the first one" binds to the open place question, a typed address opens in its new tab, chat workflow create, rename, remove and list route to `WORKFLOW`, and spoken, coded and single-word "go to" places route to Maps. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
 The pin `1a61700e4181757a8c926b0065d82ca084753708` keeps a Maps follow-up tied to the displayed place choices and the original route endpoints and mode. Approval lists expire only reviews that match the requested operations. Workflow changes use the operation and names in the owner’s original message. The same upstream range preserves tracked declarations during provisioning and formats a telephony routing test. [Eliza #39903](https://github.com/elizaOS/eliza/pull/39903), [Eliza #39901](https://github.com/elizaOS/eliza/pull/39901), [Eliza #39906](https://github.com/elizaOS/eliza/pull/39906).
 
-The subsequent reviewed pin `2161a22091e4afb5f0407d38e7d634be91218427` takes the phone Maps directions refusal reason ([eliza#39923](https://github.com/elizaOS/eliza/pull/39923)): a chat directions request that the phone declines now says why instead of "could not complete", and with no location fix it asks for a starting place. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `2161a22091e4afb5f0407d38e7d634be91218427` takes the phone Maps directions refusal reason ([eliza#39923](https://github.com/elizaOS/eliza/pull/39923)): a chat directions request that the phone declines now says why instead of "could not complete", and with no location fix it asks for a starting place. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `ef15433abf531fb6eea9340319f23f1e7671d959` treats a landmark and its same-named area as one place for routes ([eliza#39925](https://github.com/elizaOS/eliza/pull/39925)), so landmark-to-landmark directions plan without a which-one question. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `ef15433abf531fb6eea9340319f23f1e7671d959` treats a landmark and its same-named area as one place for routes ([eliza#39925](https://github.com/elizaOS/eliza/pull/39925)), so landmark-to-landmark directions plan without a which-one question. The 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `807b9db94dba48e2611b9eb694e395d420fb33d5` grounds chat calls, texts and keypad prefills in the owner's own words, including spoken numbers, keeps map coordinates out of the phone-number placeholders, carries transient and dropped-connection failures to clients honestly, and answers tab switches and nearest-place requests without GPS ([eliza#39930](https://github.com/elizaOS/eliza/pull/39930)). `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `807b9db94dba48e2611b9eb694e395d420fb33d5` grounds chat calls, texts and keypad prefills in the owner's own words, including spoken numbers, keeps map coordinates out of the phone-number placeholders, carries transient and dropped-connection failures to clients honestly, and answers tab switches and nearest-place requests without GPS ([eliza#39930](https://github.com/elizaOS/eliza/pull/39930)). `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `de690c72f9b70ec18a5fa70c4192a57327f791d4` loads the calendar context for event create, move and delete requests from any open view, and tells the planner that view contexts are routing hints ([eliza#39936](https://github.com/elizaOS/eliza/pull/39936)). `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `de690c72f9b70ec18a5fa70c4192a57327f791d4` loads the calendar context for event create, move and delete requests from any open view, and tells the planner that view contexts are routing hints ([eliza#39936](https://github.com/elizaOS/eliza/pull/39936)). `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
 The chat email and Messages integration uses Eliza develop at `e66a28c3ea1b09fefaccb85d72486dada8f00758`. It stages the shared spoken-number parser with the telephony contract so an approved reply draft keeps its exact sender and thread. The pin also includes the reviewed message routing and Calendar read boundaries. [SMS](https://github.com/elizaOS/eliza/pull/39920), [email drafts](https://github.com/elizaOS/eliza/pull/39921), [message routing](https://github.com/elizaOS/eliza/pull/39942), [Calendar](https://github.com/elizaOS/eliza/pull/39957).
 
 The subsequent reviewed pin `eb30748a2fcca58acd49910c424541d28a9ab753` keeps a spoken hostname ("open example dot com") behind the owner's review rather than the direct Browser path, refuses ordinary phrases such as "the dot app" as hostnames, and places a spoken "in a new tab" open in a new tab (elizaOS/eliza#39932). It also carries the speech renewal conformance inventory (elizaOS/eliza#39965).
 
-The subsequent reviewed pin `6e2a09477545dcfb4257d4719356b3df858d7143` cuts per-turn agent tokens and turns most of each request into a cache hit (history window, stable references, constant system prompt and tool order, output caps, one re-send after a refusal, reworked device tool) so one phone no longer exhausts the organization rate limit ([eliza#39984](https://github.com/elizaOS/eliza/pull/39984)). The Android launch environment sets stable references and the Stage 1, planner, evaluator and text output caps. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `6e2a09477545dcfb4257d4719356b3df858d7143` cuts per-turn agent tokens and turns most of each request into a cache hit (history window, stable references, constant system prompt and tool order, output caps, one re-send after a refusal, reworked device tool) so one phone no longer exhausts the organization rate limit ([eliza#39984](https://github.com/elizaOS/eliza/pull/39984)). The Android launch environment sets stable references and the Stage 1, planner, evaluator and text output caps. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `c5d440a49d3561caaa3b6d2864d0a408e2cfb941` fixes the verified per-area review findings for chat workflows, messages, calls (including emergency requests), calendar, camera, Maps, notes, contacts and Browser ([eliza#39990](https://github.com/elizaOS/eliza/pull/39990)). `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `c5d440a49d3561caaa3b6d2864d0a408e2cfb941` fixes the verified per-area review findings for chat workflows, messages, calls (including emergency requests), calendar, camera, Maps, notes, contacts and Browser ([eliza#39990](https://github.com/elizaOS/eliza/pull/39990)). `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
-The subsequent reviewed pin `032222c7feaa978c95030f06f7f773b3be3b1735` retries and rejects schema-empty Calendar update extractions instead of reading them as no change ([eliza#40017](https://github.com/elizaOS/eliza/pull/40017)) and ends a dispatched native Browser back, forward, reload or open on the tool's own text, which says the command was sent rather than that it finished, so the turn no longer fails or claims the page finished loading ([eliza#40019](https://github.com/elizaOS/eliza/pull/40019)). It also honors the bound owner request in Notes and Calendar (elizaOS/eliza#39994), reports native Google sign-in readiness for the requested app (elizaOS/eliza#39991) and records native Browser field history from document creation (elizaOS/eliza#39998); the remaining commits change staging and release tooling. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+The subsequent reviewed pin `032222c7feaa978c95030f06f7f773b3be3b1735` retries and rejects schema-empty Calendar update extractions instead of reading them as no change ([eliza#40017](https://github.com/elizaOS/eliza/pull/40017)) and ends a dispatched native Browser back, forward, reload or open on the tool's own text, which says the command was sent rather than that it finished, so the turn no longer fails or claims the page finished loading ([eliza#40019](https://github.com/elizaOS/eliza/pull/40019)). It also honors the bound owner request in Notes and Calendar (elizaOS/eliza#39994), reports native Google sign-in readiness for the requested app (elizaOS/eliza#39991) and records native Browser field history from document creation (elizaOS/eliza#39998); the remaining commits change staging and release tooling. `node scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
 
 The next pin, `617b6a7badc0e063bae2490cf853cc173c9d43ca`, includes the
 location observation contract ([Eliza #39989](https://github.com/elizaOS/eliza/pull/39989)),
@@ -899,3 +899,9 @@ password approval ([eliza#40088](https://github.com/elizaOS/eliza/pull/40088)).
 No model turn, APK or Pixel run is proven by the pin.
 
 The pin after that, `a3a19afd17e5adce91499aa32e013fa64db7424b` (it contains `fe5c02faed`), sends no output cap on any agent call and drops the cap settings ([eliza#40174](https://github.com/elizaOS/eliza/pull/40174)): the planner's 8,192 default, `ELIZA_PLANNER_MAX_TOKENS`, `ELIZA_STAGE1_MAX_TOKENS`, `ELIZA_EVALUATOR_MAX_TOKENS`, the `<TYPE>_MAX_TOKENS` and `DEFAULT_MAX_TOKENS` settings and the SMS reply draft's 160. It keeps secret and contact references stable within a conversation by default, holds a refused model for at most 4 s on the direct Cerebras route, and drafts SMS replies with reasoning off. It also says in a rejected or expired proposal's record that it never ran, so "did that text go out?" is answered from the record ([eliza#40186](https://github.com/elizaOS/eliza/pull/40186)). The launcher therefore no longer sets `ELIZA_SECRET_SWAP_STABLE_REFERENCES` or `OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS`.
+
+The subsequent reviewed pin `7a124190a1dcc3e0a0a9512c240fc6b2ffbe21d3` repairs a duplicate source-backed Stage 1 decision once per turn instead of failing it with "Reply failed" ([eliza#40213](https://github.com/elizaOS/eliza/pull/40213)) and keeps an honest failure report beside another target's success, judging supersession by operation and resource rather than action name ([eliza#40234](https://github.com/elizaOS/eliza/pull/40234)). It also brings the Browser workspace and page-link changes (eliza#40211, eliza#40193), the coarse-position area (eliza#40190) and the remaining upstream merges since `a3a19afd17`. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The subsequent reviewed pin `9222a9e3c61ceee5ec09055e494a6317bfcbb6bd` stops a Maps "directions to" request from sending the phone's opaque selection handle to Cloud as a provider place id, looks the place up by name instead, returns the real provider id from MAPS_SELECT, gives owner-facing text for malformed and refused Maps answers instead of transport text, and has Cloud report a refused place id as a bad request while Google key and configuration faults stay provider faults ([eliza#40265](https://github.com/elizaOS/eliza/pull/40265)). `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The subsequent reviewed pin `ca435030bc5e7b0691e8d005698eaeff8d1aa73f` counts "Sure." as an acknowledgement for an instruction ([eliza#40290](https://github.com/elizaOS/eliza/pull/40290)): "Sure.", "Sure, one sec." and "Yeah, one sec." pass the claim-safe acknowledgement grammar only when the owner's message opens with a command verb and no clause is a question, so "Am I free Friday?" and "Can you text Sam?" are still answered rather than acknowledged, and a bare "Sure." with no tool call after it stays the reply. Only `plugins/plugin-assistant` and the `replyText` description in `packages/core/src/actions/to-tool.ts` change; the 13 core source digests, the mobile builder, the dependency lock and the catalogued Quint sidecars are unchanged. `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.

@@ -375,6 +375,10 @@ public class MainActivity extends BridgeActivity {
    }
   }
   registerPlugin(AlphaSystemPlugin.class);
+  registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
+  registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
+  registerPlugin(ai.eliza.plugins.networkpolicy.NetworkPolicyPlugin.class);
+  registerPlugin(ElizaSecureStorePlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaDeviceAppsPlugin.class);
   registerPlugin(AlphaContactsPlugin.class);
@@ -383,6 +387,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaNetworkLocationPlugin.class);
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
+  // Settings › Network: nearby networks, a reviewed join and the system Internet panel.
+  registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
   registerPlugin(AlphaDeletionsPlugin.class);
@@ -399,11 +405,13 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaBillingAuthorityPlugin.class);
   registerPlugin(AlphaLocalAgentPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
+  registerPlugin(ElizaActionJournalPlugin.class);
   registerPlugin(AlphaVoiceCloudPlugin.class);
   registerPlugin(AlphaVoiceCloudPlugin.Streaming.class);
   registerPlugin(AlphaNoteAudioPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
   registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(ElizaNotificationsPlugin.class);
   registerPlugin(AlphaHostedResultsPlugin.class);
   registerPlugin(AlphaGmailPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);

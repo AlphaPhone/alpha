@@ -1,0 +1,144 @@
+// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/scanDialogs.md, "Story: Keep my scan open while a system picker covers it"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { AccessReply, ExportReply, PhotoReply, PickedImage, PreviewReply, RecordingReply, SourceBytes, VideoReply } from "./bridge.schema.vibe"
+import { browserCamera, pickBrowserImage, readContentImage } from "./browserCamera.ts"
+
+/** A camera, device or picker call failed; `code` is the plugin's code, `UNAVAILABLE` without the plugin, `MALFORMED` for a reply of the wrong shape. */
+export error CameraFailed { method: string; code: string; message: string }
+
+/** Which camera a preview runs on. */
+export type LensDirection = "front" | "back"
+
+/** What a photo capture asks of the camera. */
+export interface CaptureOptions {
+  readonly saveToGallery: boolean
+  readonly thumbnailOnly?: boolean
+  readonly quality?: number
+  readonly width?: number
+  readonly height?: number
+}
+
+/** The limits and sound of a recording. */
+export interface RecordingOptions {
+  readonly audio: boolean
+  readonly maxDuration: number
+  readonly maxFileSize: number
+}
+
+/** The recording limits Camera uses: ten minutes, or 100 MB. */
+export const RECORDING = { quality: "high", maxDuration: 600, maxFileSize: 100_000_000 } as const
+
+/** The phone's camera, its device controls and the system pickers, as Camera and scans reach them. */
+export service CameraBridge {
+  readonly browser: boolean
+  startPreview(lens: LensDirection): PreviewReply!CameraFailed
+  stopPreview(): void!CameraFailed
+  setCaptureMode(mode: "photo" | "video"): void!CameraFailed
+  switchCamera(lens: LensDirection): PreviewReply!CameraFailed
+  capturePhoto(options: CaptureOptions): PhotoReply!CameraFailed
+  startRecording(options: RecordingOptions): void!CameraFailed
+  stopRecording(): VideoReply!CameraFailed
+  recordingState(): RecordingReply!CameraFailed
+  setZoom(zoom: number): void!CameraFailed
+  setFlash(flash: "off" | "auto" | "on" | "torch"): void!CameraFailed
+  /** Write one focus point; true only when the driver confirmed it. */
+  setFocusPoint(x: number, y: number): boolean!CameraFailed
+  checkAccess(): AccessReply!CameraFailed
+  /** Alpha's app info in Android Settings, where camera and microphone access are allowed. */
+  openPrivacySettings(): void!CameraFailed
+  /** One image from the system picker; undefined when the owner cancelled. */
+  pickImage(): Blob | undefined!CameraFailed
+  exportPdf(title: string, dataBase64: string): ExportReply!CameraFailed
+  readPhotoSelected(id: string, revision: string): SourceBytes!CameraFailed
+  /** Android takes the volume keys as Camera's shutter only while this is on; the press arrives as the page event `alpha:volume-shutter`. */
+  setVolumeShutter(enabled: boolean): void!CameraFailed
+}
+
+const CAMERA = "ElizaCamera"
+
+/** Alpha's Android application id. */
+export const APP_ID = "ai.alphacompute.alphaphone"
+
+effect function call<A, I>(native: Native.Shape, plugin: string, method: string, shape: Schema.Codec<A, I>, args?: unknown) {
+  const raw = try mapError(native.invoke(plugin, method, args), (failure) =>
+    new CameraFailed({ method, code: failure._tag === "NativeFailed" ? failure.code ?? "FAILED" : "UNAVAILABLE", message: failure._tag === "NativeFailed" ? failure.message : "" }))
+  return try mapError(Schema.decodeUnknownEffect(shape)(raw), (issue) => new CameraFailed({ method, code: "MALFORMED", message: issue.message }))
+}
+
+effect function run(native: Native.Shape, plugin: string, method: string, args?: unknown) {
+  try mapError(native.invoke(plugin, method, args), (failure) =>
+    new CameraFailed({ method, code: failure._tag === "NativeFailed" ? failure.code ?? "FAILED" : "UNAVAILABLE", message: failure._tag === "NativeFailed" ? failure.message : "" }))
+}
+
+function lifted<A>(method: string, task: () => Promise<A>): A!CameraFailed {
+  return tryPromise({
+    try: task,
+    catch: (cause) => new CameraFailed({ method, code: typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" ? cause.code : "FAILED", message: cause instanceof Error ? cause.message : "" }),
+  })
+}
+
+/** Android's `ElizaCamera`, `ElizaSystem`, `AlphaDevice`, `DailyApps`, `AlphaNoteDocuments` and `AlphaMailAttachments` plugins. */
+export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
+  const native = try Native
+  return {
+    browser: false,
+    startPreview: (lens: LensDirection) => call(native, CAMERA, "startPreview", PreviewReply, { direction: lens, resolution: { width: 1920, height: 1440 }, mirror: lens === "front" }),
+    stopPreview: () => run(native, CAMERA, "stopPreview"),
+    setCaptureMode: (mode: "photo" | "video") => run(native, CAMERA, "setCaptureMode", { mode, quality: RECORDING.quality }),
+    switchCamera: (lens: LensDirection) => call(native, CAMERA, "switchCamera", PreviewReply, { direction: lens }),
+    capturePhoto: (options: CaptureOptions) => call(native, CAMERA, "capturePhoto", PhotoReply, { format: "jpeg", ...options }),
+    startRecording: (options: RecordingOptions) => run(native, CAMERA, "startRecording", { ...options, saveToGallery: true, quality: RECORDING.quality }),
+    stopRecording: () => call(native, CAMERA, "stopRecording", VideoReply),
+    recordingState: () => call(native, CAMERA, "getRecordingState", RecordingReply),
+    setZoom: (zoom: number) => run(native, CAMERA, "setZoom", { zoom }),
+    setFlash: (flash: "off" | "auto" | "on" | "torch") => run(native, CAMERA, "setSettings", { settings: { flash } }),
+    effect setFocusPoint(x: number, y: number) {
+      try run(native, CAMERA, "setFocusPoint", { x, y })
+      return true
+    },
+    checkAccess: () => call(native, CAMERA, "checkPermissions", AccessReply),
+    openPrivacySettings: () => run(native, "ElizaSystem", "openAppInfo", { packageName: APP_ID }),
+    effect pickImage() {
+      const picked = try call(native, "DailyApps", "perform", PickedImage, { action: "photos" })
+      return try ensuring(effect {
+        if (picked.status === "cancelled") return undefined
+        if (picked.status !== "selected" || picked.uri === undefined || !picked.uri.startsWith("content://"))
+          throw new CameraFailed({ method: "pickImage", code: "NOT_SELECTED", message: picked.message ?? "" })
+        const uri = picked.uri
+        return try lifted("pickImage", () => readContentImage(uri, picked.mimeType))
+      }, picked.selectionId === undefined ? Effect.void : ignore(run(native, "DailyApps", "forgetSelected", { selectionId: picked.selectionId })))
+    },
+    exportPdf: (title: string, dataBase64: string) => call(native, "AlphaNoteDocuments", "exportPdf", ExportReply, { title, dataBase64 }),
+    readPhotoSelected: (id: string, revision: string) => call(native, "AlphaMailAttachments", "readPhotoSelected", SourceBytes, { id, revision }),
+    setVolumeShutter: (enabled: boolean) => run(native, "AlphaDevice", "setVolumeShutter", { enabled }),
+  }
+})
+
+/** The browser build's camera: `getUserMedia`, a canvas shutter and `MediaRecorder`, kept on the device. */
+export const browserCameraBridge = Layer.succeed(CameraBridge, {
+  browser: true,
+  startPreview: (lens: LensDirection) => lifted("startPreview", () => browserCamera.startPreview(lens)),
+  stopPreview: () => lifted("stopPreview", () => browserCamera.stopPreview()),
+  setCaptureMode: () => Effect.void,
+  switchCamera: (lens: LensDirection) => lifted("switchCamera", () => browserCamera.switchCamera(lens)),
+  capturePhoto: (options: CaptureOptions) => lifted("capturePhoto", () => browserCamera.capturePhoto(options)),
+  startRecording: (options: RecordingOptions) => lifted("startRecording", () => browserCamera.startRecording(options)),
+  stopRecording: () => lifted("stopRecording", () => browserCamera.stopRecording()),
+  recordingState: () => lifted("getRecordingState", () => browserCamera.recordingState()),
+  setZoom: (zoom: number) => lifted("setZoom", () => browserCamera.setZoom(zoom)),
+  setFlash: (flash: "off" | "auto" | "on" | "torch") => lifted("setSettings", () => browserCamera.setTorch(flash === "on" || flash === "torch")),
+  setFocusPoint: (x: number, y: number) => lifted("setFocusPoint", () => browserCamera.setFocusPoint(x, y)),
+  checkAccess: () => lifted("checkPermissions", () => browserCamera.checkAccess()),
+  openPrivacySettings: () => Effect.void,
+  pickImage: () => lifted("pickImage", () => pickBrowserImage()),
+  exportPdf: (title: string, dataBase64: string) => lifted("exportPdf", () => browserCamera.downloadPdf(title, dataBase64)),
+  readPhotoSelected: () => fail(new CameraFailed({ method: "readPhotoSelected", code: "UNAVAILABLE", message: "" })),
+  setVolumeShutter: () => Effect.void,
+})
+
+/** The camera bridge the build needs: the browser's for the browser build, Android's otherwise. */
+export const cameraBridge = Layer.unwrap(effect {
+  const build = try Build
+  return build.info.variant === "browser" ? browserCameraBridge : nativeCameraBridge
+})

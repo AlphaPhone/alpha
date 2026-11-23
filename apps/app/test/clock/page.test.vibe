@@ -1,0 +1,170 @@
+// spec/clock/reminderPage.md, "Story: Step back out of what I have open in Reminders"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"; spec/clock/handoff.md, "Preparing shows the exact request with the phone's time zone; leaving, Back or hiding retires it"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as PageMachine } from "../../gen/clock__reminderPage.effect.vibe"
+import { Machine as HandoffMachine } from "../../gen/clock__handoff.effect.vibe"
+import { Machine as WorkflowNoticesMachine } from "../../gen/clock__workflowNotices.effect.vibe"
+import { RemindersPage, remindersPageLayer } from "../../src/clock/reminder-page.vibe"
+import { Reminders, remindersLayer } from "../../src/clock/reminders.vibe"
+import { reminderTapsLayer } from "../../src/clock/reminder-taps.vibe"
+import { draftsLayer } from "../../src/clock/drafts.vibe"
+import { ClockHandoff, handoffLayer } from "../../src/clock/handoff.vibe"
+import { WorkflowNotices, workflowNoticesLayer } from "../../src/clock/workflow-notices.vibe"
+import { agentReviewLayer } from "../../src/clock/agent-review.vibe"
+import { operationPorts } from "../../src/clock/operations.vibe"
+import { build, fakeAssistant, fakeHost, fakeNavigation, fakePhone, fakeReminders, fakeRuns, machines, session } from "./phone.vibe"
+
+const target = { sourceId: "s1", sourceRevision: "a".repeat(64), reminderId: "r1", occurrenceId: "o1", revision: "b".repeat(64) }
+const listed = { id: "r1", title: "Call the dentist", body: "", occurrenceId: "o1", target, createdAt: 0, dueAt: 1, alertMinutes: 0, status: "completed" }
+
+const page = Layer.provideMerge(remindersPageLayer, Layer.merge(Layer.provideMerge(reminderTapsLayer, remindersLayer), draftsLayer))
+
+describe("Reminder page (spec/clock/reminderPage.md, \"Story: Step back out of what I have open in Reminders\")", () => {
+  // spec/clock/reminderPage.md, "Back closes the innermost open layer: the Reopen question, then the form, then the detail; with none open it is the shell's"
+  it.effect("close the Reopen question, then the form, then the reminder, and only then leave Back to the shell (spec/clock/reminderPage.md, \"Story: Step back out of what I have open in Reminders\")", () => effect {
+    const phone = fakePhone({
+      "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2, reminderTodoVersion: 1 }),
+      "DailyApps.listReminders": () => ({ reminders: [listed] }),
+    })
+    provide Layer.provideMerge(page, machines), phone.layer, fakeNavigation().layer, fakeAssistant().layer {
+      const pages = try RemindersPage
+      const reminders = try Reminders
+      const machine = try PageMachine
+      try reminders.enter()
+      try pages.show("r1")
+      try pages.askReopen("open")
+      const question = try pages.back()
+      const afterQuestion = try machine.get()
+      try pages.openForm("edit")
+      const form = try pages.back()
+      const afterForm = try machine.get()
+      const detail = try pages.back()
+      const afterDetail = try machine.get()
+      const shell = try pages.back()
+      try Effect.try(() => assert.deepStrictEqual(
+        {
+          question, reopen: afterQuestion.reopen, stillShown: afterQuestion.detail,
+          form, formAfter: afterForm.form, detailKept: afterForm.detail,
+          detail, detailAfter: afterDetail.detail, shell, backs: afterDetail.backs,
+        },
+        {
+          question: true, reopen: "NoReopen", stillShown: "r1",
+          form: true, formAfter: "NoForm", detailKept: "r1",
+          detail: true, detailAfter: "", shell: false, backs: 3,
+        },
+      ))
+    }
+  })
+
+  it.effect("pass over a reminder that is no longer listed (spec/clock/reminderPage.md, \"Back closes the innermost open layer: the Reopen question, then the form, then the detail; with none open it is the shell's\")", () => effect {
+    const phone = fakePhone({
+      "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2 }),
+      "DailyApps.listReminders": () => ({ reminders: [] }),
+    })
+    provide Layer.provideMerge(page, machines), phone.layer, fakeNavigation().layer, fakeAssistant().layer {
+      const pages = try RemindersPage
+      try (try Reminders).enter()
+      try pages.show("gone")
+      const handled = try pages.back()
+      try Effect.try(() => assert.strictEqual(handled, false))
+    }
+  })
+})
+
+describe("Clock Back (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => {
+  it.effect("retire an open Clock review on Back, and leave Back to the shell with none open (spec/clock/handoff.md, \"Preparing shows the exact request with the phone's time zone; leaving, Back or hiding retires it\")", () => effect {
+    const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}) })
+    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("launcher") {
+      const handoff = try ClockHandoff
+      const draft = try HandoffMachine
+      try handoff.prepare()
+      const reviewing = (try draft.get()).phase
+      const first = try handoff.back()
+      const after = (try draft.get()).phase
+      const second = try handoff.back()
+      try Effect.try(() => assert.deepStrictEqual({ reviewing, first, after, second }, { reviewing: "Reviewing", first: true, after: "Drafting", second: false }))
+    }
+  })
+})
+
+describe("Workflow notice questions (spec/clock/workflowNotices.md, \"Story: Return to the run a notice names\")", () => {
+  it.effect("settle a cancelled review, draft nothing for a changed notice, keep an interrupted tap, and consume once at the notice's revision on Add to chat (spec/clock/workflowNotices.md, \"A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it\")", () => effect {
+    let notice = { title: "Approve the weekly digest", text: "Step 2 waits for you", revision: "n1" }
+    let token: string | undefined = "w1"
+    const phone = fakePhone({
+      "ElizaNotifications.pendingWorkflowTap": () => (token === undefined ? {} : { token, ownerId: "org:owner-1", runId: "run-7", retained: true, question: true, notice }),
+      "ElizaNotifications.consumeWorkflowTap": () => {
+        token = undefined
+        return {}
+      },
+      "AlphaHostedResults.pendingResult": () => ({}),
+    })
+    const assistant = fakeAssistant()
+    const runs = fakeRuns()
+    provide Layer.provideMerge(workflowNoticesLayer, machines), phone.layer, runs.layer, fakeNavigation().layer, assistant.layer, session("org:owner-1") {
+      const notices = try WorkflowNotices
+      const machine = try WorkflowNoticesMachine
+      try notices.check()
+      const first = assistant.reviews.at(-1)
+      try notices.reviewShown(undefined)
+      try notices.reviewShown("workflow-tap:w1")
+      try notices.reviewShown(undefined)
+      const cancelled = phone.calls.filter((c) => c.method === "consumeWorkflowTap").map((c) => c.args)
+      token = "w2"
+      try notices.check()
+      notice = { ...notice, text: "Step 2 was withdrawn", revision: "n2" }
+      const stale = try notices.current("workflow-tap:w2")
+      const changed = (try machine.get()).report
+      try notices.check()
+      try notices.interrupt()
+      const kept = token
+      try notices.check()
+      const other = try notices.current("workflow-tap:w1")
+      const fresh = try notices.current("workflow-tap:w2")
+      const consumed = try notices.consume("workflow-tap:w2")
+      const again = try notices.consume("workflow-tap:w2")
+      const last = phone.calls.filter((c) => c.method === "consumeWorkflowTap").at(-1)?.args
+      try Effect.try(() => assert.deepStrictEqual(
+        {
+          first: first === undefined ? undefined : { name: first.name, text: first.text, notice: first.notice }, cancelled, stale, changed, kept,
+          other, fresh, consumed, again, last, reviews: assistant.reviews.length, opened: runs.opened, state: [(try machine.get()).discards, (try machine.get()).composed],
+        },
+        {
+          first: { name: "Alpha Phone notification", text: "Approve the weekly digest\nStep 2 waits for you", notice: { id: "workflow-tap:w1", revision: "n1" } },
+          cancelled: [{ token: "w1", discard: true }], stale: undefined, changed: "QuestionChanged", kept: "w2",
+          other: undefined, fresh: { id: "workflow-tap:w2", revision: "n2" }, consumed: true, again: false,
+          last: { token: "w2", noticeRevision: "n2" }, reviews: 4, opened: [], state: [1, 1],
+        },
+      ))
+    }
+  })
+})
+
+describe("Named reminder changes (spec/clock/reminderPage.md, \"Story: Let the agent change a reminder I name only once I have it open\")", () => {
+  it.effect("change only the reminder open under the name the agent gave, and refuse with none open (spec/clock/reminderPage.md, \"A change the agent names is bound to the reminder shown, and only when its title is that name\")", () => effect {
+    const result = { version: 1, kind: "reminder_update", sourceId: "s1", reminderId: "r1", occurrenceId: "o1", revision: "b".repeat(64), status: "scheduled", at: 1000 }
+    const phone = fakePhone({
+      "AlphaActionJournal.get": () => ({ entry: { digest: "d1" } }),
+      "DailyApps.listReminders": () => ({ reminders: [{ ...listed, status: "scheduled" }] }),
+      "DailyApps.selectedReminder": () => target,
+      "DailyApps.operateReminder": () => ({ status: "succeeded", result }),
+    })
+    const named = { type: "reminder_named", action: "update", name: "call the dentist", fields: { title: "Call the vet", body: "" } }
+    const call = { proposalId: "p9", operationId: "op_9", attemptId: 1 }
+    let unchosen: unknown = undefined
+    let chosen: { kind: string; result?: { basis?: string; operation?: { type: string } } } = { kind: "" }
+    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders().layer {
+      const ports = try operationPorts
+      unchosen = try promise(() => ports.execute(named, call))
+    }
+    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders({ id: "r1", name: "Call the dentist" }).layer {
+      const ports = try operationPorts
+      chosen = (try promise(() => ports.execute(named, call))) as typeof chosen
+    }
+    const sent = phone.calls.filter((c) => c.method === "operateReminder").map((c) => (c.args as { operation: { type: string; target: unknown } }).operation)
+    try Effect.try(() => assert.deepStrictEqual(
+      { unchosen, kind: chosen.kind, basis: chosen.result?.basis, exact: chosen.result?.operation?.type, sent },
+      { unchosen: { kind: "refused", code: "reminder_not_chosen" }, kind: "applied", basis: "owner-chosen", exact: "reminder_update", sent: [{ type: "reminder_update", target, fields: { title: "Call the vet", body: "" } }] },
+    ))
+  })
+})

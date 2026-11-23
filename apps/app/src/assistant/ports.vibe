@@ -1,0 +1,206 @@
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
+import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
+import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
+import type { ChangeSummary } from "../workflows/changes.vibe"
+import type { BrowserPageObservation } from "../browser/page-context.ts"
+
+/** An email the owner reviewed in the chat, under the request id its version sends once. */
+export interface ReviewedEmail {
+  readonly to: string
+  readonly subject: string
+  readonly body: string
+  readonly requestId: string
+}
+
+/** Inbox's delivery of an email card; unprovided, nothing is sent. */
+export service AssistantEmail {
+  /** Send the reviewed email once per request id through the owner's Inbox account. */
+  send(email: ReviewedEmail): SendAnswer!!
+  /** The selected Inbox account's address, which a To of "self", "me" or "myself" shows until the owner edits it. */
+  address(): (string | undefined)!!
+  static readonly defaultValue = () => ({
+    send: () => succeed("Unsent" as const),
+    address: () => succeed(undefined),
+  })
+}
+
+/** One of Alpha's own notifications, as the shade lists it now. */
+export interface OwnNotice {
+  readonly id: string
+  readonly revision: string
+}
+
+/** Clock's own notifications, rechecked and consumed for a question; unprovided, no notice is found. */
+export service OwnNotices {
+  /** The notice `id` as it is listed now, or undefined when it is gone, redacted or not Alpha's own. */
+  current(id: string): OwnNotice | undefined!!
+  /** Consume the retained notice once; false when it was already consumed or is gone. */
+  consume(id: string): boolean!!
+  static readonly defaultValue = () => ({
+    current: () => succeed(undefined),
+    consume: () => succeed(false),
+  })
+}
+
+/** What became of a workflow step decision on the wire: the engine recorded it, the answer was lost, or Workflows is not here. */
+export type StepAnswer = "recorded" | "lost" | "unavailable"
+
+/** The workflow engine's step decisions, owned by Workflows; unprovided, nothing is sent. */
+export service WorkflowStepDecisions {
+  /** Send the owner's decision on the run's pending step once. */
+  decide(runId: string, approved: boolean): StepAnswer!!
+  static readonly defaultValue = () => ({
+    decide: () => succeed("unavailable" as const),
+  })
+}
+
+/** Maps' view of the chat: every message counts once, and a card's map opens only from the newest agent message; unprovided, nothing is counted. */
+export service MapsChatCards {
+  /** An agent reply settled; `question` when it asks the owner a Maps choice. */
+  agentReply(question: boolean): void!!
+  /** The owner sent a message. */
+  ownerMessage(): void!!
+  static readonly defaultValue = () => ({
+    agentReply: () => succeed(undefined),
+    ownerMessage: () => succeed(undefined),
+  })
+}
+
+/** Camera's part of the composer, owned by Camera; unprovided, every message goes to the conversation. */
+export service CameraComposer {
+  /** Take a short scan request or frame question sent over the visible Camera; "none" leaves it to the conversation. */
+  intercept(message: ChatMessage): ChatTaken!!
+  static readonly defaultValue = () => ({
+    intercept: () => succeed("none" as const),
+  })
+}
+
+/** Maps' navigation relay for one resident turn, owned by Maps; unprovided, the turn runs without it. */
+export service MapsRelay {
+  /** Offer this phone's Maps navigation to the agent for the length of `send`, a turn of `conversationId`. */
+  withRelay<A, E, R>(conversationId: string, send: A!E!R): A!E!R
+  static readonly defaultValue = () => ({
+    withRelay: <A, E, R>(_conversationId: string, send: Effect.Effect<A, E, R>) => send,
+  })
+}
+
+/** What one reply's action results changed, as Workflows reads them; unprovided, nothing changed. */
+export service ReplyChanges {
+  /** Read the reply's untrusted action results and refresh the Workflows list once when it shows a changed record. */
+  settle(results: ReadonlyArray<unknown>): ChangeSummary!!
+  static readonly defaultValue = () => ({
+    settle: () => succeed({ workflows: [], automations: false, calendar: false, openWorkflows: false } satisfies ChangeSummary),
+  })
+}
+
+/** The record a turn names, as the turn context's `selectedObject` carries it. */
+export interface TurnRecord {
+  readonly kind: string
+  readonly id: string
+  readonly revision?: string
+}
+
+/** The civil day Calendar shows, as the turn context's `calendarDay` carries it. */
+export interface TurnDay {
+  readonly date: string
+  readonly timeZone: string
+}
+
+/** What the screens before the assistant add to a turn: Calendar's shown day and Notes' list; unprovided, a turn names neither. */
+export service TurnSources {
+  /** The day Calendar shows now, or undefined unless a plain day of the current owner is in front. */
+  calendarDay(): TurnDay | undefined!!
+  /** The Notes list the turn is sent from, or undefined off the list. */
+  notesList(): TurnRecord | undefined!!
+  /** The owner's "Ask before Alpha acts" preference as Notes' list filter reads it, before each turn. */
+  preferReview(reviewFirst: boolean): void!!
+  static readonly defaultValue = () => ({
+    calendarDay: () => succeed(undefined),
+    notesList: () => succeed(undefined),
+    preferReview: () => succeed(undefined),
+  })
+}
+
+/** The tab a turn observes in Browser: its id and revision, as the observation's selected `browser-tab` names it. */
+export interface ObservedTab {
+  readonly id: string
+  readonly revision: string
+}
+
+/** The open page a turn carries beside its observation as `clientDevice.browserPage`, exactly as Browser handed it. */
+export type BrowserPage = BrowserPageObservation
+
+/** The screen a turn is sent from, as Browser's page read checks it. */
+export interface PageObservation {
+  readonly view?: string
+  readonly sensitive?: boolean
+  readonly selectedObject?: { readonly kind: string; readonly id: string; readonly revision?: string }
+}
+
+/** Browser's page for a chat turn, the one model of it (Browser's `BrowserPageContext`), filled from Browser; unprovided, no tab is observed and no page is shared. */
+export service BrowserPages {
+  /** The tab Browser shows in front now, or undefined for a private tab, no tab, or Browser not in front. */
+  selected(): ObservedTab | undefined!!
+  /** The page of the observed tab for one turn to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds, and undefined whenever it may not go. */
+  forTurn(observation: PageObservation, peerTakesIt: boolean): BrowserPage | undefined!!
+  /** Whether `url` is exactly a link of the page the latest turn carried. */
+  carried(url: string): boolean!!
+  static readonly defaultValue = () => ({
+    selected: () => succeed(undefined),
+    forTurn: (_observation: PageObservation, _peerTakesIt: boolean) => succeed(undefined),
+    carried: (_url: string) => succeed(false),
+  })
+}
+
+/** What Maps shows the agent now, as the turn observation's selected object names it. */
+export interface MapsShown {
+  readonly kind: "map-place" | "map-route" | "map-search"
+  readonly id: string
+  readonly revision: string
+}
+
+/** Maps' part of the agent's views, owned by Maps (`MapsAgent`); unprovided, Maps names nothing and delivers no view. */
+export service MapsViews {
+  /** What Maps shows now with its identity and revision; undefined off Maps, on a locked screen, or with nothing shown. */
+  shown(): MapsShown | undefined!!
+  /** Claim and apply a Maps view the agent prepared, under Maps' own delivery: `request` numbers this delivery, `effectKey` what it does, the same across a redelivery; `apply` brings Maps forward. */
+  deliver(request: number, effectKey: number, binding: { readonly [field: string]: unknown }, apply: void!!): void!!
+  static readonly defaultValue = () => ({
+    shown: () => succeed(undefined),
+    deliver: (_request: number, _effectKey: number, _binding: { readonly [field: string]: unknown }, _apply: Effect.Effect<void>) => succeed(undefined),
+  })
+}
+
+/** What Browser answers a view command: its result envelope, a dispatch or a typed refusal before any effect. */
+export type ViewAnswer =
+  | { readonly ok: true; readonly data: unknown }
+  | { readonly ok: false; readonly code: string; readonly message: string }
+
+/** Browser's part of the agent's view commands, owned by Browser (`BrowserAgent`); unprovided, every command is unavailable. */
+export service BrowserViews {
+  /** A back, forward or reload on the page the owner is viewing, claimed once and never repeated. */
+  command(raw: unknown, selection: unknown): ViewAnswer!!
+  /** Any other view interaction in Browser, such as a page-text request, answered with where the page comes from. */
+  interact(capability: string, raw: unknown, selection: unknown): ViewAnswer!!
+  static readonly defaultValue = () => ({
+    command: (_raw: unknown, _selection: unknown) => succeed({ ok: false, code: "UNAVAILABLE", message: "Native view capability is unavailable" } satisfies ViewAnswer),
+    interact: (_capability: string, _raw: unknown, _selection: unknown) => succeed({ ok: false, code: "UNAVAILABLE", message: "Native view capability is unavailable" } satisfies ViewAnswer),
+  })
+}
+
+/** The capabilities this phone advertises in `x-eliza-device-capabilities`: the shell's `DeviceCapabilities` selection of those the agent offered this enrollment in its device registration, filled by the shell once the enrolment and every area are built; unprovided, nothing is advertised and no header is sent. */
+export service AdvertisedCapabilities {
+  /** The capability names to advertise on the next request, read again for each request. */
+  names(): readonly string[]!!
+  static readonly defaultValue = () => ({
+    names: () => succeed([] as readonly string[]),
+  })
+}
+
+/** The workflow step a device operation serves, as its executor learns it. */
+export interface WorkflowStepRef {
+  readonly workflowId: string
+  readonly versionId: string
+  readonly runId: string
+  readonly stepId: string
+}

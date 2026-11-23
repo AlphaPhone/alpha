@@ -1,8 +1,8 @@
 /** Alpha requires its existing Autofill surface and Files all-files access; shared image composition is upstream. */
 import fs from 'node:fs';
 import path from 'node:path';
-import {provisioningComponents as sharedComponents, renderProvisioningOverlay as sharedRender} from '../vendor/eliza/packages/os/scripts/android/launcher-provisioning.mjs';
-export {manifestComponents} from '../vendor/eliza/packages/os/scripts/android/launcher-provisioning.mjs';
+import {provisioningComponents as sharedComponents, renderProvisioningOverlay as sharedRender} from '../vendor/eliza/packages/os/aosp/launcher-provisioning.mjs';
+export {manifestComponents} from '../vendor/eliza/packages/os/aosp/launcher-provisioning.mjs';
 
 /**
  * Files all-files access (decision F1). MANAGE_EXTERNAL_STORAGE is signature|appop|preinstalled:

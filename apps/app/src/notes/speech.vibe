@@ -1,0 +1,27 @@
+// spec/notes/recorder.md, "Segments are transcribed in order while the recording goes on, and never past the audio"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
+import type { RecordingTranscriber } from "../voice/transcription.vibe"
+
+/** The window of a saved voice note's recording a transcript request reads. */
+export interface SavedWindow { readonly savedNoteId: string; readonly savedDurationMs: number; readonly offsetMs: number }
+
+/** A transcription that gave no words: the refusal code the route or the recorder gave, if any. */
+export interface SpeechRefused { readonly code: string | undefined }
+
+/** The first string `code` on an error or the causes it carries. */
+export function refusalCode(error: unknown): string | undefined {
+  let current: unknown = error
+  for (let depth = 0; depth < 4 && typeof current === "object" && current !== null; depth += 1) {
+    if ("code" in current && typeof current.code === "string") return current.code
+    current = "cause" in current ? current.cause : undefined
+  }
+  return undefined
+}
+
+/** Transcribe a live segment or a saved window through voice's recording transcriber; a saved window heard on the phone is refused, since the phone's own path reads no saved window. */
+export effect function transcribeKept(transcriber: RecordingTranscriber.Shape, recordingId: string, saved?: SavedWindow): string | SpeechRefused!! {
+  const details = saved === undefined ? {} : { savedNoteId: saved.savedNoteId, savedDurationMs: saved.savedDurationMs, offsetMs: saved.offsetMs }
+  const heard = try (transcriber.transcribe(recordingId, details) catch (error): SpeechRefused => ({ code: refusalCode(error.cause) ?? refusalCode(error) }))
+  if ("code" in heard) return heard
+  if (saved !== undefined && heard.local) return { code: "unavailable" }
+  return heard.text
+}

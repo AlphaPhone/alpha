@@ -1,7 +1,7 @@
-// Generated from scripts/cloud-deployment-policy.ts. Run bun scripts/cloud-deployment.ts.
+// Generated from cloud/deployment.json by cloud/src/deployment.vibe. Run pnpm cloud:deployment.
 ext.alphaCloudWebHosts = [
  production: "eliza.app",
  staging: "staging.eliza.app",
 ]
-// Alpha Cloud cutover: which Cloud this build uses (in-app billing is on for every Cloud).
+// Alpha Cloud cutover: which Cloud this build uses.
 ext.alphaCloudCutover = false

@@ -1,0 +1,15 @@
+// spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"
+// The managed services Alpha uses, through @elizaos/cloud/client. Cloud hosts no agent.
+
+/** Cloud refused or could not be reached; `status` is 0 when no answer arrived, `retryAfter` is the seconds a 429 asked to wait, and `resetAt` the epoch milliseconds Cloud said an exhausted allowance resets. */
+export error CloudUnavailable { status: number; code?: string; message: string; retryAfter?: number; resetAt?: number }
+/** The owner is not signed in to Cloud, or the session ended. */
+export error CloudSignedOut
+
+/** An authenticated Cloud request on the owner's behalf. */
+export service Cloud {
+  /** The Cloud base the build was configured with. */
+  readonly base: string
+  /** One JSON request; its data is untrusted until a schema decodes it. */
+  json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): unknown!CloudUnavailable | CloudSignedOut
+}

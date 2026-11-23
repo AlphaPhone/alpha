@@ -1,70 +1,42 @@
+// The Cloud deployment a build addresses, read from cloud/deployment.json for Node build tools
+// (bundle audit, APK verification). The flag logic matches cloud/src/deployment.vibe selectDeployment.
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
-/** Installed sign-in routes and browser return namespace, owned by this consumer. */
-export const CLOUD_SIGN_IN_REGISTRATION = Object.freeze({
-  callbackPath: '/alphaphone/auth/callback',
-  /** The Steward app client that carries Alpha's native Google client IDs (AlphaCloudSignInPlugin). */
-  stewardAppClient: 'alpha-phone',
-  browserSignIn: Object.freeze({
-    startPath: '/alphaphone/auth/browser-start',
-    returnPath: '/__alpha-browser-cloud/signin-return',
-    storageKey: 'alpha-browser-sign-in:v1',
-  }),
-});
-
-/**
- * The Cloud every distributed build uses. It stays Eliza Cloud until the product's own Cloud is
- * deployed and the cutover release changes these rows (with a storage namespace migration).
- */
-export const SHIPPED_CLOUD_DEPLOYMENT = Object.freeze({
-  production: Object.freeze({
-    api: 'https://api.eliza.app',
-    web: 'https://eliza.app',
-    services: 'https://cloud.eliza.app',
-    tenant: 'elizacloud',
-    name: 'Eliza Cloud',
-    entitlementAudience: 'eliza-alpha-phone',
-  }),
-  staging: Object.freeze({
-    api: 'https://api-staging.eliza.app',
-    web: 'https://staging.eliza.app',
-    services: 'https://cloud-staging.eliza.app',
-    tenant: 'elizacloud-staging',
-    name: 'Eliza Cloud',
-    entitlementAudience: 'eliza-alpha-phone',
-  }),
-});
-
-/** One Cloud environment's public authorities. `alphaCloud` marks Alpha's own Cloud (cloud/policy.json). */
 export interface CloudDeploymentPolicyRow {
-  readonly api: string; readonly web: string; readonly services: string; readonly tenant: string;
-  readonly name?: string; readonly entitlementAudience?: string;
-  /** Alpha Cloud (docs/alpha-cloud.md): in-app plans, the native billing authority and the billing App Link. */
-  readonly alphaCloud?: boolean;
+  readonly api: string; readonly web: string; readonly services?: string; readonly tenant?: string;
+  readonly name?: string; readonly entitlementAudience?: string; readonly alphaCloud?: boolean;
 }
-export type CloudDeploymentPolicy = Readonly<Record<'production' | 'staging', CloudDeploymentPolicyRow>>;
+export type CloudEnvironment = 'production' | 'staging';
+export type CloudDeploymentPolicy = Readonly<Record<CloudEnvironment, CloudDeploymentPolicyRow>>;
+export const cloudEnvironments: readonly CloudEnvironment[] = ['production', 'staging'];
 
-/** Alpha's own Cloud (alphacompute.cc), deployed by scripts/cloud-worker.ts; dormant in shipped builds. */
-export const ALPHA_CLOUD_POLICY_FILE = fileURLToPath(new URL('../cloud/policy.json', import.meta.url));
+export const DEPLOYMENT_FILE = fileURLToPath(new URL('../cloud/deployment.json', import.meta.url));
+const deployment = JSON.parse(fs.readFileSync(DEPLOYMENT_FILE, 'utf8')) as {
+  signIn: {routePrefix: string; callbackPath: string; billingReturnPath: string; connectReturnPath: string; browserSignIn: {startPath: string; returnPath: string; storageKey: string}};
+  storageNamespaces: string[];
+  shipped: CloudDeploymentPolicy;
+  alphaCloudHosts: Record<CloudEnvironment, {api: string; web: string}>;
+};
 
-/**
- * A candidate Cloud for development and cutover rehearsal: ALPHA_CLOUD_DEPLOYMENT_FILE names a
- * JSON file with the same `production` and `staging` rows. Every build and operator tool then
- * addresses that Cloud instead. A candidate build has its own credential namespace, and the
- * production bundle audit refuses it, so it cannot be distributed by accident.
- *
- * ALPHA_CLOUD_CUTOVER=1 is the Alpha Cloud cutover flag for development, test and validation builds:
- * it selects cloud/policy.json as that candidate (unless ALPHA_CLOUD_DEPLOYMENT_FILE names another
- * Alpha Cloud file). Off, the default, every build keeps the shipped Cloud and its flows.
- */
+/** Installed sign-in, billing and Google connection return paths and the browser return namespace. */
+export const CLOUD_SIGN_IN_REGISTRATION = Object.freeze(deployment.signIn);
+/** Reviewed credential namespaces, oldest first. The last is the one installed phones hold now. */
+export const STORAGE_NAMESPACES: readonly string[] = Object.freeze([...deployment.storageNamespaces]);
+/** The Cloud every distributed build uses until the cutover release. */
+export const SHIPPED_CLOUD_DEPLOYMENT: CloudDeploymentPolicy = Object.freeze(deployment.shipped);
+/** Alpha Cloud's client rows (alphacompute.cc), the same hosts cloud/src/profile.vibe serves. */
+export const ALPHA_CLOUD_DEPLOYMENT: CloudDeploymentPolicy = Object.freeze(Object.fromEntries(cloudEnvironments.map(environment => [environment,
+  {...deployment.alphaCloudHosts[environment], name: 'Alpha Cloud', entitlementAudience: 'ai.alphacompute.alphaphone', alphaCloud: true}])) as Record<CloudEnvironment, CloudDeploymentPolicyRow>);
+
 const cutoverRequested = process.env.ALPHA_CLOUD_CUTOVER === '1';
-const candidateFile = process.env.ALPHA_CLOUD_DEPLOYMENT_FILE?.trim() || (cutoverRequested ? ALPHA_CLOUD_POLICY_FILE : '');
-export const CLOUD_DEPLOYMENT_IS_CANDIDATE = !!candidateFile;
-/** Alpha's public Cloud registration, shared by build and operator tools. */
+const candidateFile = process.env.ALPHA_CLOUD_DEPLOYMENT_FILE?.trim() ?? '';
+/** Whether this build addresses a candidate Cloud (development, test or cutover rehearsal only). */
+export const CLOUD_DEPLOYMENT_IS_CANDIDATE = cutoverRequested || candidateFile !== '';
+/** The deployment this build addresses. */
 export const CLOUD_DEPLOYMENT: CloudDeploymentPolicy = candidateFile
   ? Object.freeze(JSON.parse(fs.readFileSync(candidateFile, 'utf8')))
-  : SHIPPED_CLOUD_DEPLOYMENT;
+  : cutoverRequested ? ALPHA_CLOUD_DEPLOYMENT : SHIPPED_CLOUD_DEPLOYMENT;
 
 /** Whether a deployment is Alpha Cloud: both environments say so, or neither does. */
 export function isAlphaCloudDeployment(config: CloudDeploymentPolicy): boolean {
@@ -73,13 +45,6 @@ export function isAlphaCloudDeployment(config: CloudDeploymentPolicy): boolean {
   return production;
 }
 
-/**
- * The Alpha Cloud cutover flag, the single source of truth for every build output: the generated
- * renderer, Java and Gradle authorities (scripts/cloud-deployment.ts) carry it as
- * `alphaCloudCutover` / `ALPHA_CLOUD_CUTOVER`. Off (the shipped Eliza Cloud policy), the app uses the
- * current Cloud's hosted billing page and the Alpha Cloud surfaces (in-app plans, the native billing
- * authority, the billing App Link, Stripe and referral routes) are inert. The cutover release turns
- * it on by changing SHIPPED_CLOUD_DEPLOYMENT to cloud/policy.json's rows (docs/alpha-cloud.md §8).
- */
+/** The Alpha Cloud cutover flag every build output carries (cloud/src/deployment.vibe writes them). */
 export const ALPHA_CLOUD_CUTOVER = isAlphaCloudDeployment(CLOUD_DEPLOYMENT);
-if (cutoverRequested && !ALPHA_CLOUD_CUTOVER) throw Error('ALPHA_CLOUD_CUTOVER=1 needs an Alpha Cloud deployment file (cloud/policy.json)');
+if (cutoverRequested && !ALPHA_CLOUD_CUTOVER) throw Error('ALPHA_CLOUD_CUTOVER=1 needs an Alpha Cloud deployment file');

@@ -1,6 +1,5 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.plugins.contacts.ContactsCatalog;
 import ai.eliza.plugins.messages.SmsTelephony;
 import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
 import android.Manifest;
@@ -17,9 +16,8 @@ import java.util.function.Consumer;
  * Contacts, Telecom and SMS on the Alpha AOSP image only (issues #420 and #421). The behaviour is
  * {@link AlphaTelephonyBase} (Alpha's fork of the shared TelephonyPlugin, where the approved card or
  * the composer's Send confirms a text): roles and SIMs, dialer and SMS handoffs, bounded SMS/MMS
- * provider reads and confirmed native sends journaled by the shared core. Alpha supplies its
- * installed identity ({@link AlphaTelephony}) and the bounded contact search over
- * {@link ContactsCatalog} (shared plugin-native-contacts).
+ * provider reads and confirmed native sends journaled by the shared core, and deletions staged in the
+ * shared Undo window. Alpha supplies its installed identity ({@link AlphaTelephony}).
  *
  * MainActivity registers this plugin only when {@link AlphaImageCapability} verifies the image, so a
  * sideloaded launcher APK has no such plugin; each method checks the capability
@@ -38,6 +36,8 @@ public class AlphaTelephonyPlugin extends AlphaTelephonyBase {
  private final AtomicLong composerVisit = new AtomicLong();
 
  @Override protected SmsTelephonyConfiguration configuration() { return AlphaTelephony.CONFIGURATION; }
+ /** Message, conversation and voicemail deletions wait in the shared Undo window (NativeDeletionCoordinator) for the installation's owner. */
+ @Override protected DeletionWindow deletionWindow() { return (kind, target) -> NativeDeletionCoordinator.get(getContext()).stageRecord(kind, target); }
 
  /** The origin-checked launcher port captures this guard before queueing a send. */
  void sendComposed(PluginCall call, boolean mms, Consumer<Runnable> queue) {
@@ -87,31 +87,5 @@ public class AlphaTelephonyPlugin extends AlphaTelephonyBase {
   call.resolve();
  }
 
- /**
-  * AP-16 AC-20: the contact a number belongs to, through Android's own number matching (PhoneLookup),
-  * so the approval card names the person whatever the size of the address book. Read-only.
-  */
- @PluginMethod public void contactForNumber(PluginCall call) {
-  if (refused(call)) return;
-  String number = call.getString("number", "");
-  if (number == null || number.isBlank() || number.length() > 64) { call.reject("Invalid number", "invalid"); return; }
-  fencedRead(call, "contacts", "Contacts", cancel -> {
-   String name = AlphaContactLookup.name(getContext(), number, cancel);
-   JSObject value = new JSObject(); value.put("name", name == null ? JSObject.NULL : clip(name));
-   return value;
-  });
- }
 
- /** Bounded same-profile reads, cancelled on background and checked again before publication. */
- @PluginMethod public void searchContacts(PluginCall call) {
-  if (refused(call)) return;
-  String query = call.getString("query", ""); Integer limit = call.getInt("limit", 25);
-  if (query == null || query.length() > 128 || limit == null || limit < 1 || limit > 100) { call.reject("Invalid contact search", "invalid"); return; }
-  fencedRead(call, "contacts", "Contacts", cancel -> {
-   JSObject bounded = new ContactsCatalog(getContext()).list(query, limit, cancel);
-   org.json.JSONArray records = AlphaContactLookup.searchRows(bounded.getJSONArray("contacts"), text -> clip(text));
-   JSObject value = new JSObject(); value.put("contacts", records);
-   return value;
-  });
- }
 }

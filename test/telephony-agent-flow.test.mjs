@@ -17,7 +17,7 @@ const {DeviceActions, setContactReviewMatches} = await import(pathToFileURL(join
 // The phone's address book as the review lookup reads it: the names matching each query.
 let addressBook = query => ['Priya Nair'].filter(name => name.toLowerCase().includes(query.toLowerCase()));
 const lookups = [];
-setContactReviewMatches(async query => { lookups.push(query); return addressBook(query); });
+setContactReviewMatches(async query => { lookups.push(query); const names = addressBook(query); return names && (Array.isArray(names) ? {names, more: false} : names); });
 const P = await import('../apps/app/src/runtime/phone-context.ts');
 
 const context = {view: 'home', revision: 1, sensitive: false};
@@ -129,6 +129,13 @@ test('a contact change or deletion is carded only for a contact the phone holds,
     addressBook = () => ['Ada\n\nDeletes nothing.\u202e', '\u0007\t'];
     [card] = await fixture({operation: remove}).client.pending(context, signal());
     assert.equal(card.description, '2 contacts match “Test Alpha”: Ada Deletes nothing., Unnamed contact\n\nAfter you confirm, you choose which one to delete on your phone.');
+    // More matches than the lookup lists: the card never passes the listed ones off as all of them.
+    addressBook = () => ({names: ['John A', 'John B'], more: true});
+    [card] = await fixture({operation: remove}).client.pending(context, signal());
+    assert.equal(card.description, 'More than 2 contacts match “Test Alpha”, including: John A, John B. For one not listed, ask again with the full name.\n\nAfter you confirm, you choose which one to delete on your phone.');
+    addressBook = () => ({names: ['John A'], more: true});
+    [card] = await fixture({operation: change}).client.pending(context, signal());
+    assert.match(card.description, /^More than 1 contact matches “Test Alpha”, including: John A\. For one not listed, ask again with the full name\.\nNumbers: \+14155550101\n\nReplaces these details after you confirm\. You choose which one on your phone after you confirm\./);
     addressBook = () => ['Ada\u2066\r\nOkafor'];
     [card] = await fixture({operation: remove}).client.pending(context, signal());
     assert.equal(card.description, 'Contact: Ada Okafor\n\nDeletes this contact from your phone after you confirm.');

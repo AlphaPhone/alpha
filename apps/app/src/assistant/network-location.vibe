@@ -1,0 +1,89 @@
+// spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
+import { networkReuseS, networkRetryS, networkUnchangedS } from "../../gen/assistant__context.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { NetworkFix, NetworkLocationReply } from "../platform/native.schema.vibe"
+
+/** A position resolved from the visible Wi-Fi access points and cell towers. */
+export interface NetworkPosition {
+  readonly latitude: number
+  readonly longitude: number
+  readonly accuracyMeters: number
+  /** When the answer was last resolved or confirmed, in epoch milliseconds. */
+  readonly timestamp: number
+}
+
+const plugin = "AlphaNetworkLocation"
+
+/** The phone's Wi-Fi and cell position for when GPS has no fix; looked up only when a caller needs a position now, shared while in flight, and cached. Maps reads the same answers. */
+export service NetworkLocation {
+  /** The last answer while it may still stand for the phone's position; never a lookup. */
+  cached(): NetworkPosition | undefined!!
+  /** A position now: the cached one while it is recent, else one shared lookup; a failure backs off. */
+  locate(): NetworkPosition | undefined!!
+  /** Forget every answer and retire a lookup in flight. */
+  clear(): void!!
+}
+
+function usable(fix: typeof NetworkFix.Type, now: number): boolean {
+  return [fix.latitude, fix.longitude, fix.accuracy, fix.timestamp].every(Number.isFinite) && Math.abs(fix.latitude) <= 90 && Math.abs(fix.longitude) <= 180
+    && fix.accuracy > 0 && fix.timestamp <= now && now - fix.timestamp <= networkUnchangedS * 1000
+}
+
+/** The network position over `AlphaNetworkLocation`, offered wherever the build registers it. */
+export const networkLocationLayer = Layer.effect(NetworkLocation, effect {
+  const native = try Native
+  const lock = try Semaphore.make(1)
+  let last: NetworkPosition | undefined
+  let fingerprint: string | undefined
+  let resolvedAt = Number.NEGATIVE_INFINITY
+  let checkedAt = Number.NEGATIVE_INFINITY
+  let retryAfter = Number.NEGATIVE_INFINITY
+  let generation = 0
+  function standing(now: number): NetworkPosition | undefined {
+    return last !== undefined && now >= last.timestamp && now - resolvedAt <= networkUnchangedS * 1000 ? last : undefined
+  }
+  effect function lookUp() {
+    const now = try Clock.currentTimeMillis
+    const kept = standing(now)
+    if (kept !== undefined && now - checkedAt < networkReuseS * 1000) return kept
+    if (now < retryAfter) return kept
+    if (!(try native.available(plugin))) return undefined
+    const asked = generation
+    const answer = native.invoke(plugin, "locate", kept !== undefined && fingerprint !== undefined ? { unchangedFrom: fingerprint } : {}) catch () => undefined
+    const at = try Clock.currentTimeMillis
+    if (asked !== generation) return undefined
+    checkedAt = at
+    const reply = Schema.decodeUnknownOption(NetworkLocationReply)(answer)
+    if (Option.isNone(reply)) {
+      retryAfter = at + networkRetryS * 1000
+      return standing(at)
+    }
+    const said = reply.value
+    if ("unchanged" in said) {
+      const confirmed = standing(at)
+      if (confirmed !== undefined && said.fingerprint === fingerprint) last = { ...confirmed, timestamp: at }
+      return standing(at)
+    }
+    const fix = said
+    if (!usable(fix, at)) {
+      retryAfter = at + networkRetryS * 1000
+      return standing(at)
+    }
+    last = { latitude: fix.latitude, longitude: fix.longitude, accuracyMeters: fix.accuracy, timestamp: fix.timestamp }
+    fingerprint = fix.fingerprint
+    resolvedAt = fix.timestamp
+    return last
+  }
+  return {
+    cached: () => map(Clock.currentTimeMillis, standing),
+    locate: () => Semaphore.withPermit(lock, lookUp()),
+    clear: () => sync(() => {
+      generation += 1
+      last = undefined
+      fingerprint = undefined
+      resolvedAt = Number.NEGATIVE_INFINITY
+      checkedAt = Number.NEGATIVE_INFINITY
+      retryAfter = Number.NEGATIVE_INFINITY
+    }),
+  }
+})

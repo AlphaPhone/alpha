@@ -15,4 +15,6 @@ public final class AlphaContactsPlugin extends AddressBookPlugin {
  @Override protected boolean admitted(){return AlphaImageCapabilities.aospImage(getContext());}
  @Override protected String unavailableMessage(){return "Contacts is available only in the unlocked Alpha image";}
  @Override protected String closedMessage(){return LateLaunch.CLOSED;}
+ /** A removed contact waits in the shared Undo window (NativeDeletionCoordinator) for the installation's owner. */
+ @Override protected DeletionWindow deletionWindow(){return (kind,target)->NativeDeletionCoordinator.get(getContext()).stageRecord(kind,target);}
 }

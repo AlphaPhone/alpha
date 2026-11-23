@@ -11,8 +11,8 @@
  * (WorkflowNoticeProcessRunner, a helper process of the app), so the test outlives the main
  * process it kills; every other case uses AndroidJUnitRunner. Both are declared by the same
  * admitted instrumentation APK.
- * The archive is `bun scripts/build-archive.ts` output, or for developer APKs the folder
- * `bun scripts/developer-archive.ts` assembles from a verified `artifacts/` build.
+ * The archive is `node scripts/build-archive.ts` output, or for developer APKs the folder
+ * `node scripts/developer-archive.ts` assembles from a verified `artifacts/` build.
  * Emulator-class evidence only: no paired host, live workflow, account or device acceptance. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -55,10 +55,10 @@ type PhaseSummary = {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const repository=path.resolve(import.meta.dirname,'..');
 verifyPinnedUpstream(repository);
-const upstreamTest=await import('../vendor/eliza/packages/app/scripts/lib/isolated-android-test.mjs');
+const upstreamTest=await import('./os-ported/app/lib/isolated-android-test.mjs');
 const runIsolatedAndroidTest=upstreamTest.runIsolatedAndroidTest as unknown as IsolatedAndroidTest;
-const {withIsolatedAndroidUser}=await import('../vendor/eliza/packages/app/scripts/lib/isolated-android-user.mjs');
-const {acquireDeviceLease}=await import('../vendor/eliza/packages/app/scripts/lib/device-lease.ts');
+const {withIsolatedAndroidUser}=await import('./os-ported/app/lib/isolated-android-user.mjs');
+const {acquireDeviceLease}=await import('./os-ported/app/lib/device-lease.ts');
 const PHASES=['workflow','approval-notice','approval-notice-recovery'];
 const options=process.argv.slice(2);
 assert.ok(options.length<=1&&options.every(arg=>/^--phase=.+$/.test(arg)),'Unknown workflow campaign option');

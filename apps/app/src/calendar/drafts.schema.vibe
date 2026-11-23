@@ -1,0 +1,52 @@
+// spec/calendar/drafts.md, "Typing retains the fields under the event revision being edited; under a conflict or storage error they stay only here"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
+// The retained draft slot as storage holds it. Anything else in the slot needs recovery and is never offered.
+
+const Short = Schema.String.check(Schema.isMaxLength(256), Schema.makeFilter((value) => !value.includes("\0")))
+const Title = Schema.String.check(Schema.isMaxLength(2048))
+const Body = Schema.String.check(Schema.isMaxLength(32768))
+const Key = Schema.String.check(Schema.isPattern(/^[-a-zA-Z0-9_]{1,100}$/))
+const Handle = Schema.String.check(Schema.isMaxLength(256), Schema.isPattern(/^(alpha-reminders|native:.+|agent:[a-f0-9]{64}|local)$/))
+
+/** The fields of one Calendar form, as typed. */
+export const DraftFields = Schema.Struct({
+  title: Title,
+  body: Body,
+  location: Title,
+  start: Short,
+  end: Short,
+  zone: Short,
+  allDay: Schema.Boolean,
+  repeat: Schema.Literals(["none", "daily", "weekdays", "weekly", "preserve"]),
+  alert: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 10080 }))),
+  video: Schema.Boolean,
+  who: Schema.Array(Short).check(Schema.isMaxLength(100)),
+  calendar: Handle,
+  creationId: Key,
+  origin: Schema.Literals(["typed", "note", "scan"]),
+  noteLink: Schema.optionalKey(Schema.Struct({
+    version: Schema.Literal(2),
+    noteId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+    revision: Schema.String.check(Schema.isMaxLength(512)),
+  })),
+  recurrenceScope: Schema.optionalKey(Schema.Literals(["instance", "this_and_following", "series"])),
+  expectedProviderVersion: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+})
+
+/** One owner's retained slot for one form target. */
+export const DraftSlot = Schema.Struct({
+  version: Schema.Literal(1),
+  owner: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048)),
+  target: Schema.String.check(Schema.isMaxLength(4096)),
+  eventRevision: Schema.String.check(Schema.isMaxLength(4096)),
+  fields: DraftFields,
+  sequence: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)),
+})
+
+export type DraftFieldsRecord = typeof DraftFields.Type
+export type DraftSlotRecord = typeof DraftSlot.Type
+
+/** The most a retained slot may hold, in UTF-16 units of its JSON. */
+export const MAX_DRAFT_BYTES = 64000
+
+export const decodeDraftFields = Schema.decodeUnknownEffect(DraftFields, { onExcessProperty: "error" })
+export const decodeDraftSlot = Schema.decodeUnknownEffect(DraftSlot, { onExcessProperty: "error" })

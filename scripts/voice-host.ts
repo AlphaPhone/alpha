@@ -199,8 +199,8 @@ function voiceStagingState(root: string) {
     return value;
   };
   for (const relative of [
-    'vendor/eliza/plugins/plugin-local-inference/native/android/native',
-    'vendor/eliza/packages/app/platforms/android/paradee-voice/native',
+    'vendor/eliza/packages/os/android/local-inference/native',
+    'vendor/eliza/packages/os/android/local-inference/paradee-voice/native',
   ]) if (at(relative)) throw Error(`Unrecognized voice staging outside the admitted product output: ${relative}`);
   const checkRawVoiceJni = (rawJni: string) => {
     if (!at(rawJni)) return;
@@ -255,7 +255,7 @@ export function verifyVoiceHost(root: string, {runtime = verifyParadeeRuntime, a
   const record = readVoiceHost(root);
   const native = path.join(root, PARADEE_NATIVE);
   if (staging === 'absent') {
-    throw Error(`On-device voice outputs are not staged in ${PARADEE_NATIVE}; run bun scripts/android-stage-voice-models.ts`);
+    throw Error(`On-device voice outputs are not staged in ${PARADEE_NATIVE}; run node scripts/android-stage-voice-models.ts`);
   }
   runtime(root, {abis: selected});
   const build: ParadeeBuildRecord = JSON.parse(fs.readFileSync(path.join(native, 'build-record.json'), 'utf8'));
@@ -274,7 +274,7 @@ export function verifyVoiceHost(root: string, {runtime = verifyParadeeRuntime, a
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const {rest: args, abis} = abiArguments(process.argv.slice(2));
-  if (args.length !== 1 || args[0] !== '--verify') throw Error('Usage: bun scripts/voice-host.ts --verify');
+  if (args.length !== 1 || args[0] !== '--verify') throw Error('Usage: node scripts/voice-host.ts --verify');
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   console.log(JSON.stringify(verifyVoiceHost(root, {abis})));
 }

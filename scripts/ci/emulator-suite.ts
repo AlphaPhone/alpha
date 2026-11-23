@@ -1,11 +1,11 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * One emulator suite of .github/workflows/android-emulator.yml (nightly and on dispatch), run
  * inside the hosted runner's disposable emulator:
  *
- *   bun scripts/ci/emulator-suite.ts instrumentation | browser-reading
+ *   node scripts/ci/emulator-suite.ts instrumentation | browser-reading
  *
- * instrumentation   `bun run test:android:instrumentation` with its default classes on the
+ * instrumentation   `pnpm test:android:instrumentation` with its default classes on the
  *                   launcher APK.
  * browser-reading   the same runner after the pinned Chromium 157 WebView is installed
  *                   (scripts/prepare-ci-webview.ts): BrowserReadingNavigation. The real
@@ -74,7 +74,7 @@ interface SuiteOptions {
 const node = (...args: string[]) => [process.execPath, ...args];
 const runner = (name: string, ...args: string[]): SuiteStep => ({
   name, kind: "evidence", results: `test-results/android-instrumentation/${name}/results.json`,
-  command: ["bun", "run", "test:android:instrumentation", "--", "--owned-emulator", "--avd", AVD, "--serial", SERIAL,
+  command: ["pnpm", "test:android:instrumentation", "--", "--owned-emulator", "--avd", AVD, "--serial", SERIAL,
     "--output", `test-results/android-instrumentation/${name}`, ...args],
 });
 const prepareEmulator: SuiteStep = { name: "prepare-emulator", kind: "preparation", command: node("scripts/prepare-ci-emulator.ts"), env: { ANDROID_SERIAL: SERIAL } };
@@ -157,7 +157,7 @@ export function summarize(report: SuiteReport) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const suite = process.argv[2];
-  if (process.argv.length !== 3) throw new Error("Run bun scripts/ci/emulator-suite.ts instrumentation|browser-reading");
+  if (process.argv.length !== 3) throw new Error("Run node scripts/ci/emulator-suite.ts instrumentation|browser-reading");
   suitePlan(suite); // Refuse an unknown suite before anything is written.
   requireHostedRunner();
   const output = path.resolve("test-results/emulator-suite", `${suite}.json`);

@@ -1,0 +1,2069 @@
+{
+ "schema": 1,
+ "service": "ai.alphacompute.alphaphone.ElizaAgentService",
+ "notification": {
+  "channel": "Alpha",
+  "title": "Alpha",
+  "text": "Your agent is running on this phone"
+ },
+ "model": {
+  "backend": "none"
+ },
+ "embeddings": "local",
+ "persistMemory": true,
+ "callerRole": "owner",
+ "privacy": {
+  "secretSwap": true,
+  "piiSwap": true
+ },
+ "google": {
+  "gmailChanges": false,
+  "calendarEdits": false
+ },
+ "routes": [
+  {
+   "prefixes": [
+    "/api"
+   ],
+   "id": "[A-Za-z0-9][A-Za-z0-9._:@+-]{0,511}",
+   "routes": [
+    {
+     "method": "GET",
+     "path": "/api/agents"
+    },
+    {
+     "method": "GET",
+     "path": "/api/approvals",
+     "query": [
+      {
+       "key": "state",
+       "accepts": {
+        "kind": "pinned",
+        "value": "all"
+       }
+      },
+      {
+       "key": "limit",
+       "accepts": {
+        "kind": "pinned",
+        "value": "500"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/approvals/{id}/resolve"
+    },
+    {
+     "method": "POST",
+     "path": "/api/asr/local-inference/end-of-turn"
+    },
+    {
+     "method": "POST",
+     "path": "/api/asr/local-inference/live"
+    },
+    {
+     "method": "GET",
+     "path": "/api/asr/local-inference/live/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/auth/me"
+    },
+    {
+     "method": "GET",
+     "path": "/api/auth/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/automations"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/capabilities"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/capabilities"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/context"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/maps-navigation"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/proposals"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/cancel-read-completion"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/claim"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/decision"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/read-completion"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/receipt"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/reconciliation"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/register"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/revoke"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/view-profile"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/view-profile"
+    },
+    {
+     "method": "POST",
+     "path": "/api/cloud/warm"
+    },
+    {
+     "method": "GET",
+     "path": "/api/conversations"
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations"
+    },
+    {
+     "method": "GET",
+     "path": "/api/conversations/messages/search",
+     "query": [
+      {
+       "key": "q",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "limit",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "offset",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/fork"
+    },
+    {
+     "method": "GET",
+     "path": "/api/conversations/{id}/messages",
+     "query": [
+      {
+       "key": "before",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "beforeId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "limit",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "around",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages",
+     "maxBodyBytes": 20971520
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages/stream",
+     "stream": true,
+     "maxBodyBytes": 20971520
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages/{messageId}/heard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages/{messageId}/redact"
+    },
+    {
+     "method": "GET",
+     "path": "/api/health"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/calendars",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "includeHiddenCalendars",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMin",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMax",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeZone",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "forceSync",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/events"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/lifeops/calendar/events/{id}",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "recurrenceScope",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "notifyAttendees",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "expectedProviderVersion",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "idempotencyKey",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "cancellationMode",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "PATCH",
+     "path": "/api/lifeops/calendar/events/{id}",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/feed",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "includeHiddenCalendars",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMin",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMax",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeZone",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "forceSync",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/links",
+     "query": [
+      {
+       "key": "view",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/next-context",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "includeHiddenCalendars",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMin",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMax",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeZone",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "forceSync",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/sync-control"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/sync-control"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/definitions"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/definitions"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/lifeops/definitions/{id}"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/lifeops/definitions/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/occurrences/{id}/snooze"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/reminders"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/scheduled-tasks",
+     "query": [
+      {
+       "key": "ownerVisibleOnly",
+       "accepts": {
+        "kind": "pinned",
+        "value": "1"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/scheduled-tasks/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/acknowledge"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/complete"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/dismiss"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/edit"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/escalate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/fire"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/reopen"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/skip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/snooze"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/local-inference/active"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/active"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/assignments"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/assignments/repair"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/downloads"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/local-inference/downloads/{modelId}"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/local-inference/installed/{modelId}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/local-inference/models"
+    },
+    {
+     "method": "POST",
+     "path": "/api/messages/reply-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/notes/interact"
+    },
+    {
+     "method": "GET",
+     "path": "/api/notes/state"
+    },
+    {
+     "method": "POST",
+     "path": "/api/notes/trash/erase"
+    },
+    {
+     "method": "GET",
+     "path": "/api/notes/trash/recordings"
+    },
+    {
+     "method": "POST",
+     "path": "/api/notes/trash/recordings/complete"
+    },
+    {
+     "method": "GET",
+     "path": "/api/notifications",
+     "query": [
+      {
+       "key": "nativeTransport",
+       "accepts": {
+        "kind": "pinned",
+        "value": "true"
+       }
+      },
+      {
+       "key": "afterSequence",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "nativeEpoch",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/notifications/{id}/read"
+    },
+    {
+     "method": "GET",
+     "path": "/api/personal-assistant/dossier"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/personal-assistant/dossier"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/dossier/activity"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/dossier/refresh"
+    },
+    {
+     "method": "GET",
+     "path": "/api/personal-assistant/routines"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/routines"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/routines/starters/{template}"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/personal-assistant/routines/{id}"
+    },
+    {
+     "method": "PATCH",
+     "path": "/api/personal-assistant/routines/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/routines/{id}/occurrence"
+    },
+    {
+     "method": "GET",
+     "path": "/api/public/service"
+    },
+    {
+     "method": "GET",
+     "path": "/api/scheduled-tasks",
+     "query": [
+      {
+       "key": "ownerVisibleOnly",
+       "accepts": {
+        "kind": "pinned",
+        "value": "1"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/scheduled-tasks/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/acknowledge"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/complete"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/dismiss"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/edit"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/escalate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/fire"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/reopen"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/skip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/snooze"
+    },
+    {
+     "method": "GET",
+     "path": "/api/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/triggers"
+    },
+    {
+     "method": "POST",
+     "path": "/api/triggers"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/triggers/{id}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/triggers/{id}"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/triggers/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/triggers/{id}/execute"
+    },
+    {
+     "method": "GET",
+     "path": "/api/triggers/{id}/runs"
+    },
+    {
+     "method": "POST",
+     "path": "/api/turns/{room}/abort"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/interact-claim"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/interact-result"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/notes/interact"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/{id}/navigate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}/approvals"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/executions/{id}/cancel"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}/events",
+     "stream": true
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}/phone-review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/executions/{id}/signals/{signal}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/generated/mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/cancel"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/complete"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/revocations"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/revoke"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/start"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/status"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/dossier"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/live-accounts"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/live-calendars"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/loops"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/loops"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/results",
+     "query": [
+      {
+       "key": "clientId",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/results/ack"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/sources"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/sources"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/sources/revoke"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/phone/catalog"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/phone/generate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/phone/mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/phone/validate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/phone/workflows"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/removed-workflows"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/generate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/workflow/workflows/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/activate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/deactivate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/executions"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/lifecycle"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/lifecycle-mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/metadata"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/metadata-mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/phone-spec"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/run"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/source"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/submissions/{submissionId}"
+    }
+   ]
+  }
+ ],
+ "nativeRoutes": [
+  {
+   "prefixes": [
+    "/api"
+   ],
+   "id": "[A-Za-z0-9][A-Za-z0-9._:@+-]{0,511}",
+   "routes": [
+    {
+     "method": "GET",
+     "path": "/api/agents"
+    },
+    {
+     "method": "GET",
+     "path": "/api/approvals",
+     "query": [
+      {
+       "key": "state",
+       "accepts": {
+        "kind": "pinned",
+        "value": "all"
+       }
+      },
+      {
+       "key": "limit",
+       "accepts": {
+        "kind": "pinned",
+        "value": "500"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/approvals/{id}/resolve"
+    },
+    {
+     "method": "POST",
+     "path": "/api/asr/local-inference/end-of-turn"
+    },
+    {
+     "method": "POST",
+     "path": "/api/asr/local-inference/live"
+    },
+    {
+     "method": "GET",
+     "path": "/api/asr/local-inference/live/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/auth/me"
+    },
+    {
+     "method": "GET",
+     "path": "/api/auth/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/automations"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/capabilities"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/capabilities"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/context"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/maps-navigation"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/proposals"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/cancel-read-completion"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/claim"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/decision"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/read-completion"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/receipt"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/proposals/{id}/reconciliation"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/register"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/revoke"
+    },
+    {
+     "method": "GET",
+     "path": "/api/client-devices/view-profile"
+    },
+    {
+     "method": "POST",
+     "path": "/api/client-devices/view-profile"
+    },
+    {
+     "method": "POST",
+     "path": "/api/cloud/warm"
+    },
+    {
+     "method": "GET",
+     "path": "/api/conversations"
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations"
+    },
+    {
+     "method": "GET",
+     "path": "/api/conversations/messages/search",
+     "query": [
+      {
+       "key": "q",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "limit",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "offset",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/fork"
+    },
+    {
+     "method": "GET",
+     "path": "/api/conversations/{id}/messages",
+     "query": [
+      {
+       "key": "before",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "beforeId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "limit",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "around",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages",
+     "maxBodyBytes": 20971520
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages/stream",
+     "stream": true,
+     "maxBodyBytes": 20971520
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages/{messageId}/heard"
+    },
+    {
+     "method": "POST",
+     "path": "/api/conversations/{id}/messages/{messageId}/redact"
+    },
+    {
+     "method": "GET",
+     "path": "/api/health"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/host/cloud-credential"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/calendars",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "includeHiddenCalendars",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMin",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMax",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeZone",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "forceSync",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/events"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/lifeops/calendar/events/{id}",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "recurrenceScope",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "notifyAttendees",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "expectedProviderVersion",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "idempotencyKey",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "cancellationMode",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "PATCH",
+     "path": "/api/lifeops/calendar/events/{id}",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/feed",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "includeHiddenCalendars",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMin",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMax",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeZone",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "forceSync",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/links",
+     "query": [
+      {
+       "key": "view",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/next-context",
+     "query": [
+      {
+       "key": "mode",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "side",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "grantId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "calendarId",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "includeHiddenCalendars",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMin",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeMax",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "timeZone",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "forceSync",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/sync-control"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/sync-control"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/definitions"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/definitions"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/lifeops/definitions/{id}"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/lifeops/definitions/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/occurrences/{id}/snooze"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/reminders"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/scheduled-tasks",
+     "query": [
+      {
+       "key": "ownerVisibleOnly",
+       "accepts": {
+        "kind": "pinned",
+        "value": "1"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/scheduled-tasks/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/acknowledge"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/complete"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/dismiss"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/edit"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/escalate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/fire"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/reopen"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/skip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/scheduled-tasks/{id}/snooze"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/local-inference/active"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/active"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/assignments"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/assignments/repair"
+    },
+    {
+     "method": "POST",
+     "path": "/api/local-inference/downloads"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/local-inference/downloads/{modelId}"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/local-inference/installed/{modelId}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/local-inference/models"
+    },
+    {
+     "method": "POST",
+     "path": "/api/messages/reply-draft"
+    },
+    {
+     "method": "POST",
+     "path": "/api/notes/interact"
+    },
+    {
+     "method": "GET",
+     "path": "/api/notes/state"
+    },
+    {
+     "method": "POST",
+     "path": "/api/notes/trash/erase"
+    },
+    {
+     "method": "GET",
+     "path": "/api/notes/trash/recordings"
+    },
+    {
+     "method": "POST",
+     "path": "/api/notes/trash/recordings/complete"
+    },
+    {
+     "method": "GET",
+     "path": "/api/notifications",
+     "query": [
+      {
+       "key": "nativeTransport",
+       "accepts": {
+        "kind": "pinned",
+        "value": "true"
+       }
+      },
+      {
+       "key": "afterSequence",
+       "accepts": {
+        "kind": "any"
+       }
+      },
+      {
+       "key": "nativeEpoch",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/notifications/{id}/read"
+    },
+    {
+     "method": "GET",
+     "path": "/api/personal-assistant/dossier"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/personal-assistant/dossier"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/dossier/activity"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/dossier/refresh"
+    },
+    {
+     "method": "GET",
+     "path": "/api/personal-assistant/routines"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/routines"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/routines/starters/{template}"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/personal-assistant/routines/{id}"
+    },
+    {
+     "method": "PATCH",
+     "path": "/api/personal-assistant/routines/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/personal-assistant/routines/{id}/occurrence"
+    },
+    {
+     "method": "GET",
+     "path": "/api/public/service"
+    },
+    {
+     "method": "GET",
+     "path": "/api/scheduled-tasks",
+     "query": [
+      {
+       "key": "ownerVisibleOnly",
+       "accepts": {
+        "kind": "pinned",
+        "value": "1"
+       }
+      }
+     ]
+    },
+    {
+     "method": "GET",
+     "path": "/api/scheduled-tasks/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/acknowledge"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/complete"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/dismiss"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/edit"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/escalate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/fire"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/reopen"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/skip"
+    },
+    {
+     "method": "POST",
+     "path": "/api/scheduled-tasks/{id}/snooze"
+    },
+    {
+     "method": "GET",
+     "path": "/api/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/triggers"
+    },
+    {
+     "method": "POST",
+     "path": "/api/triggers"
+    },
+    {
+     "method": "DELETE",
+     "path": "/api/triggers/{id}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/triggers/{id}"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/triggers/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/triggers/{id}/execute"
+    },
+    {
+     "method": "GET",
+     "path": "/api/triggers/{id}/runs"
+    },
+    {
+     "method": "POST",
+     "path": "/api/turns/{room}/abort"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/interact-claim"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/interact-result"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/notes/interact"
+    },
+    {
+     "method": "POST",
+     "path": "/api/views/{id}/navigate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}/approvals"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/executions/{id}/cancel"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}/events",
+     "stream": true
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/executions/{id}/phone-review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/executions/{id}/signals/{signal}"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/generated/mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/cancel"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/complete"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/revocations"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/revoke"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/start"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/cloud-delegation/status"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/dossier"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/live-accounts"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/live-calendars"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/loops"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/loops"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/results",
+     "query": [
+      {
+       "key": "clientId",
+       "accepts": {
+        "kind": "any"
+       }
+      }
+     ]
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/results/ack"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/hosted/sources"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/sources"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/hosted/sources/revoke"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/phone/catalog"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/phone/generate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/phone/mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/phone/validate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/phone/workflows"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/removed-workflows"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/status"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/generate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}"
+    },
+    {
+     "method": "PUT",
+     "path": "/api/workflow/workflows/{id}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/activate"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/deactivate"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/executions"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/lifecycle"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/lifecycle-mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/metadata"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/metadata-mutations/{mutationId}"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/phone-spec"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/review"
+    },
+    {
+     "method": "POST",
+     "path": "/api/workflow/workflows/{id}/run"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/source"
+    },
+    {
+     "method": "GET",
+     "path": "/api/workflow/workflows/{id}/submissions/{submissionId}"
+    }
+   ]
+  }
+ ]
+}

@@ -51,6 +51,32 @@ final class NativeDeletionCoordinator {
      return CalendarDeletionIdentity.parse(target.getString("eventId")).eventId==event;
     }
    },
+   new DeferredDeletionCoordinator.Records(){
+    public String refusal(String kind,JSONObject owner,JSONObject target){
+     switch(kind){
+      case "contact":
+       if(!AlphaImageCapabilities.aospImage(context))return "image-unavailable";
+       return granted(android.Manifest.permission.READ_CONTACTS)&&granted(android.Manifest.permission.WRITE_CONTACTS)?null:"contacts-access";
+      case "message":case "thread":
+       if(!AlphaImageCapability.verified(context))return "image-unavailable";
+       return ai.eliza.plugins.messages.MessageDeletion.roleGuard(context).getAsBoolean()?null:"sms-role";
+      case "voicemail":
+       if(!AlphaImageCapability.verified(context))return "image-unavailable";
+       return AlphaTelephonyBase.voicemailDeletable(context)?null:"voicemail-access";
+      default:return "unknown-kind";
+     }
+    }
+    private boolean granted(String permission){return context.checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_GRANTED;}
+    public JSONObject dispatch(String kind,JSONObject target){
+     switch(kind){
+      case "message":return ai.eliza.plugins.messages.MessageDeletion.dispatch(context,target,ai.eliza.plugins.messages.MessageDeletion.roleGuard(context));
+      case "thread":return ai.eliza.plugins.messages.ThreadDeletion.dispatch(context,target,ai.eliza.plugins.messages.MessageDeletion.roleGuard(context));
+      case "voicemail":return ai.eliza.plugins.messages.VoicemailStore.dispatchDeletion(context,target,()->AlphaTelephonyBase.voicemailDeletable(context));
+      case "contact":return ai.eliza.plugins.contacts.ContactsEditor.dispatchRemoval(context,target);
+      default:throw new IllegalArgumentException("Unknown deletion kind");
+     }
+    }
+   },
    delay->WorkManager.getInstance(context).enqueueUniqueWork(WORK,ExistingWorkPolicy.REPLACE,new OneTimeWorkRequest.Builder(DeletionWorker.class).setInitialDelay(delay,TimeUnit.MILLISECONDS).build()));
  }
  private NativeDeletionCoordinator(){}

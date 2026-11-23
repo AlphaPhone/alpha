@@ -1,0 +1,118 @@
+// spec/telephony/index.md; spec/telephony/drafts.md, "What I wrote signed out becomes the account's that signs in, only where that account kept nothing"; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/drafts.md, "Story: Keep what I was asking Alpha"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
+import { machine as actionsMachine } from "../../gen/telephony__actions.effect.vibe"
+import { machine as attentionMachine } from "../../gen/telephony__attention.effect.vibe"
+import { machine as callBarMachine } from "../../gen/telephony__callBar.effect.vibe"
+import { Machine as CommsMachine, decodeSender as commsSender, decodeState as decodeComms, initial as commsInitial, machineOver as commsOver } from "../../gen/telephony__comms.effect.vibe"
+import { machine as contactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { Machine as DraftsMachine, decodeSender as draftsSender, decodeState as decodeDrafts, initial as draftsInitial, machineOver as draftsOver } from "../../gen/telephony__drafts.effect.vibe"
+import { machine as messagesMachine } from "../../gen/telephony__messages.effect.vibe"
+import { machine as phoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { machine as phoneInfoMachine } from "../../gen/telephony__phoneInfo.effect.vibe"
+import { machine as voicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
+import { telephonyActionsLayer } from "./actions.vibe"
+import { homeAttentionLayer } from "./attention.vibe"
+import { telephonyBackLayer } from "./back.vibe"
+import { bridgesLayer, type TelephonyBridges } from "./bridges.vibe"
+import { callWatchLayer } from "./call-bar.vibe"
+import { commsStageLayer } from "./comms.vibe"
+import { contactsViewLayer } from "./contacts.vibe"
+import { draftSendsLayer, pictureSlot } from "./drafts.vibe"
+import { messagesViewLayer } from "./messages.vibe"
+import { ownerKept } from "./owner.vibe"
+import { phoneViewLayer } from "./phone.vibe"
+import { phoneInfoViewLayer } from "./phone-info.vibe"
+import { listAskLayer } from "./list-ask.vibe"
+import { pictureAttachLayer } from "./share.vibe"
+import { deletionUndoLayer } from "./undo.vibe"
+import { voicemailViewLayer } from "./voicemail.vibe"
+
+export { TelephonyBack, type TelephonyApp } from "./back.vibe"
+export { CommsStage, type CardWords, type OpenCard } from "./comms.vibe"
+export { PhoneInfoView } from "./phone-info.vibe"
+export { messagePictureHandoff, messagesShareTarget } from "./share.vibe"
+export { operationPorts, telephonyCapabilities } from "./operations.vibe"
+export { askAlpha, askFromContacts, askFromList, sendRequest } from "./list-ask.vibe"
+export { TelephonyCalls, VoicemailTranscriber } from "./ports.vibe"
+
+/** The picture slots a kept drafts state refers to, which move with it from the phone's namespace to the account that adopts it. */
+export function draftPictures(state: typeof draftsInitial): string[] {
+  return state.slots.flatMap((slot) => slot.pictures.map((picture) => pictureSlot(slot.thread, picture.pictureName)))
+}
+
+/** The owner's drafts and requests, read and written under whoever is signed in now, and shown afresh when that owner changes. */
+export const draftsKept = Layer.effect(DraftsMachine, effect {
+  const kept = try ownerKept("drafts", draftsInitial, decodeDrafts, draftPictures)
+  const inner = try draftsOver(kept.load, kept.keep)
+  const changes = try kept.follow(inner.changes, () => inner.get(), () => inner.get())
+  return { ...inner, changes }
+})
+
+/**
+ * The comms stage and its open proposal, read and written under whoever is signed in now, and shown afresh when that owner changes.
+ * A proposal it holds when it is loaded, at start or for the account that signs in, came from the store: it is marked restored.
+ */
+export const commsKept = Layer.effect(CommsMachine, effect {
+  const kept = try ownerKept("comms", commsInitial, decodeComms)
+  const inner = try commsOver(kept.load, kept.keep)
+  const restore = effect {
+    try (inner.send({ type: "restored" }, "Device") catch () => undefined)
+    return try inner.get()
+  }
+  try restore
+  const changes = try kept.follow(inner.changes, () => inner.get(), () => restore)
+  return { ...inner, changes }
+})
+
+/** One untrusted event and sender through the owner's stored drafts, as the conformance driver reaches them: false where it is refused, the state unchanged. */
+export effect function draftsDispatch(event: unknown, by: unknown) {
+  const drafts = try DraftsMachine
+  return try (effect {
+    try drafts.receive(event, try draftsSender(by))
+    return true
+  } catch () => false)
+}
+
+/** The owner's stored drafts as they are now. */
+export effect function draftsNow() {
+  return try (try DraftsMachine).get()
+}
+
+/** One untrusted event and sender through the owner's stored comms stage, as the conformance driver reaches it: false where it is refused. */
+export effect function commsDispatch(event: unknown, by: unknown) {
+  const comms = try CommsMachine
+  return try (effect {
+    try comms.receive(event, try commsSender(by))
+    return true
+  } catch () => false)
+}
+
+/** The owner's stored comms stage as it is now. */
+export effect function commsNow() {
+  return try (try CommsMachine).get()
+}
+
+/** Every telephony machine: the visit state in memory, and the owner's drafts and stage stored per owner. */
+export const machines = Layer.mergeAll(
+  callBarMachine(), phoneMachine(), phoneInfoMachine(), voicemailMachine(), messagesMachine(), contactsMachine(), actionsMachine(), attentionMachine(),
+  draftsKept, commsKept,
+)
+
+/** The area over a given way to reach the phone's providers: the image's bridges, or a test's. */
+export function telephonyLayer<E, R>(bridges: Layer.Layer<TelephonyBridges, E, R>) {
+  const base = Layer.provideMerge(deletionUndoLayer, Layer.provideMerge(bridges, machines))
+  const views = Layer.provideMerge(
+    Layer.mergeAll(callWatchLayer, phoneViewLayer, phoneInfoViewLayer, voicemailViewLayer, draftSendsLayer, contactsViewLayer, commsStageLayer, homeAttentionLayer, listAskLayer),
+    base,
+  )
+  const conversations = Layer.provideMerge(Layer.mergeAll(messagesViewLayer, pictureAttachLayer), views)
+  return Layer.provideMerge(Layer.mergeAll(telephonyActionsLayer, telephonyBackLayer), conversations)
+}
+
+/**
+ * Phone, Messages, Contacts, voicemail, Settings → Phone, the call bar, the comms stage, Home's cards, in-app Back and the approved actions,
+ * over the platform's Native, Build and KeyValueStore, the shell's Foreground and Navigation, the account's CloudSession and voice's VoiceConversation and Microphone
+ * (Files' FilePicker is needed only when attaching, and the assistant only when a bar question goes to Alpha). `operationPorts`,
+ * `telephonyCapabilities`, `messagesShareTarget` and `messagePictureHandoff` are built over it by the shell; the TelephonyCalls and
+ * VoicemailTranscriber ports fall back to refusing defaults until provided.
+ */
+export const layer = telephonyLayer(bridgesLayer)

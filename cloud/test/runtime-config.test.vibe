@@ -1,0 +1,24 @@
+// spec/agent/host/launch.md, "Story: Start the agent from one launch document"
+import { assert, describe, it } from "@effect/vitest"
+import { alphaDeployment, shippedDeployment } from "../src/deployment.vibe"
+import { checkRuntimeConfig, cloudLaunchDocument, cloudModel } from "../src/runtime-config.vibe"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+
+describe("the resident agent's cloud runtime configuration", () => {
+  it.effect("launches against exactly the configured API with Alpha's model and on-phone embeddings, for both deployments", () => effect {
+    // spec/agent/models/binding.md, "Story: Answer with the backend the host chose"
+    for (const rows of [shippedDeployment, alphaDeployment]) {
+      const reports = try checkRuntimeConfig(rows)
+      try check(() => assert.deepStrictEqual(reports.map((report) => report.cloudBaseUrl), [rows.production.api, rows.staging.api]))
+      try check(() => assert.ok(reports.every((report) => report.embeddings === "local" && report.smallModel === "qwen-3.8-27b" && !report.credentialInDocument)))
+    }
+  })
+
+  it.effect("keeps the credential out of the launch document", () => effect {
+    // spec/agent/host/launch.md, "Story: Keep the credential out of every file and reply"
+    const text = JSON.stringify(cloudLaunchDocument(alphaDeployment, "production"))
+    try check(() => assert.ok(!/apiKey|credential|token/i.test(text)))
+    try check(() => assert.strictEqual(cloudModel(alphaDeployment, "staging").cloudBaseUrl, "https://api-staging.alphacompute.cc"))
+  })
+})

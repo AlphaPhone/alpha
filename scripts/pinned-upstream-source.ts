@@ -1,30 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { verifyCommittedWorkspace } from "../vendor/eliza/packages/app/scripts/lib/immutable-workspace-source.mjs";
-import { readUpstreamPin } from "./upstream-pin.ts";
+import { pinnedCommit } from "./upstream-pin.ts";
 
-/** Authenticate vendor bytes before resolving or compiling consumer source. */
-export function verifyPinnedUpstream(root: string) {
-	const { commit }: {commit?: unknown} = readUpstreamPin(root);
-	if (typeof commit !== "string") throw Error("Exact admitted runtime commit required");
+/** The os native module build directories Gradle writes inside the checkout; tracked files there are still authenticated. */
+export const GENERATED_UPSTREAM_DIRECTORIES = [
+	"system", "camera", "location", "network-policy", "calendar", "reminders", "agent-service", "runtime-files", "sign-in", "secure-store",
+	"browser-surface", "contacts", "action-journal", "notifications", "messages", "phone", "passwords", "media", "filesystem",
+].map((name) => `packages/os/android/${name}/build`);
+
+/** Authenticate vendor bytes at the pinned commit before resolving or compiling consumer source. */
+export async function verifyPinnedUpstream(root: string) {
+	const commit = pinnedCommit(root);
 	const directory = path.join(root, "vendor/eliza");
-	verifyCommittedWorkspace(directory, commit, {
-		// These six Gradle projects are modules of android/consumer-host.json. Tracked
-		// files are always authenticated, including files inside output directories.
-		generatedDirectories: [
-			"system",
-			"camera",
-			"location",
-			"network-policy",
-			"calendar",
-			"reminders",
-		]
-			.map((name) => `plugins/plugin-native-${name}/android/build`)
-			// The pinned voice builder (stage-elizavoice-lib.ts) always writes its untracked
-			// build tree here; the Android build never reads it. Temporary until upstream
-			// takes a build directory outside the checkout.
-			.concat(".cache/elizavoice-android"),
-	});
+	const { verifyCommittedWorkspace } = await import("./upstream-os.ts");
+	await verifyCommittedWorkspace(directory, commit, { generatedDirectories: GENERATED_UPSTREAM_DIRECTORIES });
 	return { directory, commit };
 }
 
@@ -33,8 +22,8 @@ const sha40 = /^[0-9a-f]{40}$/;
 
 /**
  * Judge a recorded GitHub compare of `<base>...<pin>` without the network.
- * The pin is reachable from develop only when the compare is "identical" or
- * "behind" (aheadBy 0): every pinned commit is then already on develop.
+ * The pin is reachable from the upstream branch only when the compare is "identical" or
+ * "behind" (aheadBy 0): every pinned commit is then already on that branch.
  */
 interface ReachabilityRecord {
  schema: number;
@@ -77,7 +66,7 @@ export function assessDevelopReachability(value: unknown, pin: string) {
 	if (head !== pin)
 		return {
 			ok: false, reachable: false, reason: "stale",
-			message: `Recorded ${base} compare is for ${head.slice(0, 12)}, not the pin ${pin.slice(0, 12)}; rerun bun scripts/verify-upstream.ts --record-reachability.`,
+			message: `Recorded ${base} compare is for ${head.slice(0, 12)}, not the pin ${pin.slice(0, 12)}; rerun node --conditions=eliza-source --import vibelang/register scripts/verify-upstream.ts --record-reachability.`,
 		};
 	if (aheadBy === 0)
 		return { ok: true, reachable: true, reason: "reachable", message: `${base} reaches the pin ${pin.slice(0, 12)} (${status}, recorded ${recordedAt ?? "unknown date"}).` };

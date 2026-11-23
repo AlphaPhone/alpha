@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.plugins.agent.connection.OwnerRoutePolicy;
+import ai.alphacompute.alphaphone.connection.OwnerRoutePolicy;
 
 /** Alpha's generated owner-routes.json asset, from the same owner-route table the renderer uses. The interpreter is the shared plugin-native-agent OwnerRoutePolicy. */
 final class OwnerRoutes {

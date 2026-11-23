@@ -1,0 +1,226 @@
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"; spec/cloud/deployment.md, "Story: Answer only the deployment's own callers"
+import deployment from "../deployment.json" with { type: "json" }
+import { alphaAudience, alphaCloudName, alphaHosts } from "./profile.vibe"
+import { sha256Hex } from "./digest.ts"
+
+/** The two Cloud environments every build carries. */
+export const cloudEnvironments = ["production", "staging"] as const
+/** One of the two Cloud environments. */
+export type ClientEnvironment = (typeof cloudEnvironments)[number]
+
+/** One environment's public Cloud authorities as the app is built with them. */
+export interface ClientRow {
+  readonly api: string
+  readonly web: string
+  readonly services?: string
+  readonly tenant?: string
+  readonly name?: string
+  readonly entitlementAudience?: string
+  readonly alphaCloud?: boolean
+}
+/** The app's client deployment: one row per environment. */
+export type ClientDeployment = Readonly<Record<ClientEnvironment, ClientRow>>
+
+/** A deployment row the app's native sign-in client could not register, or a flag without an Alpha Cloud file. */
+export error DeploymentInvalid { problem: string }
+/** A committed build output disagrees with the selected deployment. */
+export error DeploymentStale { problem: string }
+
+/** The Cloud every distributed build uses until the owner approves the cutover release. */
+export const shippedDeployment: ClientDeployment = deployment.shipped
+
+/** Reviewed credential namespaces, oldest first; the last is the one installed phones hold now. */
+export const storageNamespaces: ReadonlyArray<string> = deployment.storageNamespaces
+
+/** Alpha Cloud's client rows, from the same hosts the deployment profile serves. */
+export const alphaDeployment: ClientDeployment = {
+  production: { api: alphaHosts.production.api, web: alphaHosts.production.web, name: alphaCloudName, entitlementAudience: alphaAudience, alphaCloud: true },
+  staging: { api: alphaHosts.staging.api, web: alphaHosts.staging.web, name: alphaCloudName, entitlementAudience: alphaAudience, alphaCloud: true },
+}
+
+const hostName = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+function originProblem(value: unknown, dnsOnly: boolean): string | undefined {
+  if (typeof value !== "string") return "Cloud origins must be strings"
+  const url = URL.parse(value)
+  if (url === null) return `${value} is not a URL`
+  if (url.protocol !== "https:" || url.origin !== value || url.username || url.password || url.port || !url.hostname.includes(".") || url.hostname.endsWith("."))
+    return `${value} must be a canonical HTTPS origin on the default port`
+  if (dnsOnly && !hostName.test(url.hostname)) return `${value} must name a DNS host`
+  return undefined
+}
+
+/** Every reason the app's native sign-in client would refuse the deployment, in the order it checks them. */
+export function deploymentProblems(input: unknown): ReadonlyArray<string> {
+  if (input === null || typeof input !== "object" || Object.keys(input).sort().join(",") !== "production,staging") return ["expected production and staging Cloud rows"]
+  const rows = input as Record<ClientEnvironment, unknown>
+  const problems: string[] = []
+  const marks: boolean[] = []
+  for (const environment of cloudEnvironments) {
+    const candidate = rows[environment]
+    if (candidate === null || typeof candidate !== "object") { problems.push(`${environment} is not a row`); continue }
+    const row = candidate as Record<string, unknown>
+    const unknownKeys = Object.keys(row).filter((key) => !["api", "web", "services", "tenant", "name", "entitlementAudience", "alphaCloud"].includes(key))
+    if (unknownKeys.length > 0) problems.push(`${environment} has unknown fields ${unknownKeys.join(", ")}`)
+    for (const field of ["api", "web"]) {
+      const problem = originProblem(row[field], true)
+      if (problem) problems.push(`${environment}.${field}: ${problem}`)
+    }
+    if (row.services !== undefined) {
+      const problem = originProblem(row.services, false)
+      if (problem) problems.push(`${environment}.services: ${problem}`)
+    }
+    if (row.tenant !== undefined && (typeof row.tenant !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(row.tenant))) problems.push(`${environment}.tenant is not a tenant id`)
+    if (row.name !== undefined && (typeof row.name !== "string" || !row.name.trim() || row.name !== row.name.trim() || row.name.length > 80 || /[\p{Cc}\p{Cf}]/u.test(row.name)))
+      problems.push(`${environment}.name is not a display name`)
+    if (row.entitlementAudience !== undefined && (typeof row.entitlementAudience !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.entitlementAudience)))
+      problems.push(`${environment}.entitlementAudience is not an audience`)
+    if (row.alphaCloud !== undefined && typeof row.alphaCloud !== "boolean") problems.push(`${environment}.alphaCloud must be a boolean`)
+    marks.push(row.alphaCloud === true)
+  }
+  if (marks.length === 2 && marks[0] !== marks[1]) problems.push("Alpha Cloud must be marked on both production and staging, or neither")
+  const production = rows.production as ClientRow | undefined
+  const staging = rows.staging as ClientRow | undefined
+  if (production?.api !== undefined && production.api === staging?.api) problems.push("Cloud environments must use distinct API origins")
+  return problems
+}
+
+/** The deployment, refused when the app's native sign-in client could not register it. */
+export effect function validateDeployment(input: unknown): ClientDeployment!DeploymentInvalid {
+  const problems = deploymentProblems(input)
+  if (problems.length > 0) throw new DeploymentInvalid({ problem: problems.join("; ") })
+  return input as ClientDeployment
+}
+
+/** Whether a deployment is Alpha Cloud: both environments say so. */
+export function isAlphaCloud(rows: ClientDeployment): boolean {
+  return rows.production.alphaCloud === true && rows.staging.alphaCloud === true
+}
+
+/** Both environments feed one credential namespace, so a staging-only change also moves production credentials. */
+export function storageFingerprint(rows: ClientDeployment): string {
+  return sha256Hex(JSON.stringify(cloudEnvironments.map((environment) => {
+    const row = rows[environment]
+    return [row.api, row.web, row.services ?? row.web, row.tenant ?? "", row.entitlementAudience ?? "cloud-subscription"]
+  })))
+}
+
+/** The Cloud base the resident agent's cloud model backend is launched with: exactly the configured API origin. */
+export function agentCloudBase(rows: ClientDeployment, environment: ClientEnvironment): string {
+  return rows[environment].api
+}
+
+/** The versioned API base each environment's Cloud client calls. */
+export function sdkBases(rows: ClientDeployment): Readonly<Record<ClientEnvironment, string>> {
+  return { production: rows.production.api + "/api/v1", staging: rows.staging.api + "/api/v1" }
+}
+
+/** The build's selection: the shipped Cloud, or with the cutover flag a candidate Alpha Cloud deployment. */
+export interface DeploymentSelection {
+  readonly rows: ClientDeployment
+  readonly candidate: boolean
+  readonly cutover: boolean
+}
+
+/** The deployment rows a build uses: ALPHA_CLOUD_CUTOVER=1 selects Alpha Cloud, ALPHA_CLOUD_DEPLOYMENT_FILE names another rows file. */
+export effect function selectDeployment(): DeploymentSelection!DeploymentInvalid!FileSystem.FileSystem {
+  const cutoverFlag = Config.withDefault(Config.String("ALPHA_CLOUD_CUTOVER"), "") catch effect () => {
+    throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_CUTOVER could not be read" })
+  }
+  const requested = cutoverFlag === "1"
+  const deploymentFile = Config.withDefault(Config.String("ALPHA_CLOUD_DEPLOYMENT_FILE"), "") catch effect () => {
+    throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_DEPLOYMENT_FILE could not be read" })
+  }
+  const file = deploymentFile.trim()
+  if (file === "" && !requested) return { rows: try validateDeployment(shippedDeployment), candidate: false, cutover: false }
+  let rows = alphaDeployment
+  if (file !== "") {
+    const fs = try FileSystem.FileSystem
+    const text = fs.readFileString(file) catch effect () => { throw new DeploymentInvalid({ problem: `cannot read ${file}` }) }
+    rows = try validateDeployment(try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new DeploymentInvalid({ problem: `${file} is not JSON` }) }))
+  }
+  rows = try validateDeployment(rows)
+  const cutover = isAlphaCloud(rows)
+  if (requested && !cutover) throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_CUTOVER=1 needs an Alpha Cloud deployment file with alphaCloud on both environments" })
+  return { rows, candidate: true, cutover }
+}
+
+function parts(origin: string): { readonly host: string; readonly hostname: string } {
+  const url = URL.parse(origin)
+  return { host: url?.host ?? origin, hostname: url?.hostname ?? origin }
+}
+
+/** The committed build outputs, by repository path. */
+export type DeploymentOutputs = Readonly<Record<string, string>>
+
+/** The renderer authority path, exported from this package as `./client-deployment`. */
+export const clientDeploymentFile = "cloud/generated/client-deployment.ts"
+
+/** The renderer, Java and Gradle authorities the selected deployment produces for the application id. */
+export function deploymentOutputs(rows: ClientDeployment, appId: string): DeploymentOutputs {
+  const fingerprint = storageFingerprint(rows)
+  const cutover = isAlphaCloud(rows)
+  const generated = "Generated from cloud/deployment.json by cloud/src/deployment.vibe. Run pnpm cloud:deployment."
+  const java = [`package ${appId};`, "", `/** ${generated} */`, "final class CloudDeployment {", " private CloudDeployment() {}"]
+  const ts = [`// ${generated}`]
+  const gradle = [`// ${generated}`, "ext.alphaCloudWebHosts = ["]
+  for (const environment of cloudEnvironments) {
+    const row = rows[environment]
+    const api = parts(row.api)
+    const web = parts(row.web)
+    const services = parts(row.services ?? row.web)
+    const name = row.name ?? api.hostname
+    gradle.push(` ${environment}: ${JSON.stringify(web.host)},`)
+    ts.push(`export const ${environment}Cloud = ${JSON.stringify({ name, entitlementAudience: row.entitlementAudience ?? "cloud-subscription", api: row.api, web: row.web, agents: services.host, tenant: row.tenant ?? "" })} as const;`)
+    const constants: ReadonlyArray<readonly [string, string]> = [
+      ["api", row.api], ["web", row.web], ["services", row.services ?? row.web], ["tenant", row.tenant ?? ""], ["name", name],
+      ["entitlementAudience", row.entitlementAudience ?? "cloud-subscription"], ["apiHost", api.host], ["webHost", web.host], ["servicesHost", services.host],
+    ]
+    for (const [key, value] of constants) java.push(` static final String ${environment.toUpperCase()}_${key.replace(/[A-Z]/g, (c) => "_" + c).toUpperCase()} = ${JSON.stringify(value)};`)
+  }
+  java.push(" /** Alpha Cloud cutover: in-app plans, the native billing authority, Stripe and referral routes. */", ` static final boolean ALPHA_CLOUD_CUTOVER = ${cutover};`)
+  ts.push("/** Alpha Cloud cutover: in-app plans and billing replace the hosted billing page. */", `export const alphaCloudCutover: boolean = ${cutover};`)
+  java.push(` static final String STORAGE_NAMESPACE = "cloud-deployment:${fingerprint}:";`,
+    " static String storageSlot(String name) {",
+    "  return name != null && (name.startsWith(\"cloud:\") || name.startsWith(\"cloud-signin:\") || name.equals(\"local-agent-provider:v1\")) ? STORAGE_NAMESPACE + name : name;",
+    " }", "}")
+  ts.push(`export const cloudStorageNamespace = "cloud-deployment:${fingerprint}:";`,
+    "export function cloudStorageSlot(name: string): string { return name.startsWith(\"cloud:\") || name.startsWith(\"cloud-signin:\") || name === \"local-agent-provider:v1\" ? cloudStorageNamespace + name : name; }")
+  gradle.push("]", "// Alpha Cloud cutover: which Cloud this build uses.", `ext.alphaCloudCutover = ${cutover}`)
+  return {
+    [clientDeploymentFile]: ts.join("\n") + "\n",
+    [`android/app/src/main/java/${appId.replaceAll(".", "/")}/CloudDeployment.java`]: java.join("\n") + "\n",
+    "android/app/cloud-deployment.generated.gradle": gradle.join("\n") + "\n",
+  }
+}
+
+/** Why the selection may not be built: a candidate reusing a shipped namespace, or a shipped deployment moving every phone's credential. */
+export function namespaceProblem(selection: DeploymentSelection, namespaces: ReadonlyArray<string> = storageNamespaces): string | undefined {
+  const fingerprint = storageFingerprint(selection.rows)
+  if (selection.candidate) return namespaces.includes(fingerprint) ? "a candidate Cloud deployment must differ from every shipped deployment" : undefined
+  return fingerprint === namespaces.at(-1) ? undefined
+    : "the Cloud storage namespace would change and every installed phone would lose its production credential; add a tested migration and append the new namespace to cloud/deployment.json storageNamespaces"
+}
+
+/** Writes the selected deployment's outputs under the repository root. */
+export effect function writeOutputs(root: string, outputs: DeploymentOutputs): void!PlatformError.PlatformError!(FileSystem.FileSystem | Path.Path) {
+  const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  for (const [name, contents] of Object.entries(outputs)) {
+    const file = path.join(root, name)
+    try fs.makeDirectory(path.dirname(file), { recursive: true })
+    try fs.writeFileString(file, contents)
+  }
+}
+
+/** Refuses when a committed output is stale or the namespace rule fails for the selection. */
+export effect function checkOutputs(root: string, selection: DeploymentSelection, outputs: DeploymentOutputs): void!DeploymentStale!(FileSystem.FileSystem | Path.Path) {
+  const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  for (const [name, contents] of Object.entries(outputs)) {
+    const current = fs.readFileString(path.join(root, name)) catch () => undefined
+    if (current !== contents) throw new DeploymentStale({ problem: `stale Cloud deployment output ${name}; run pnpm cloud:deployment` })
+  }
+  const problem = namespaceProblem(selection)
+  if (problem !== undefined) throw new DeploymentStale({ problem })
+}

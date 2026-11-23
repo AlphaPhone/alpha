@@ -1,0 +1,111 @@
+// spec/account/sheet.md, "Story: Look after my account in one place"; spec/account/sheet.md, "Story: Notice what needs my attention"
+import { type Mode, type Section, type Sheet, type SheetEffect, Machine as SheetMachine, machine as sheetMachine } from "../../gen/account__sheet.effect.vibe"
+import { type Session, keyExpiringSoon } from "../../gen/account__session.effect.vibe"
+import { deployment } from "./deployment.ts"
+import { Entitlement } from "./entitlement.vibe"
+import { CloudSession, ownerOf } from "./session.vibe"
+
+/** The Account presentation, its sign-out review and the Home plan notice. */
+export service AccountSheet {
+  readonly changes: Stream.Stream<Sheet>
+  current(): Sheet!!
+  run(): void!!
+  show(): void!!
+  openSection(section: Section): void!!
+  /** Back to the account section, ending a sign-out review; whether there was a section or review to leave. */
+  back(): boolean!!
+  close(): void!!
+  /** Android returned Home: the sheet and its panels close. */
+  returnHome(): void!!
+  askSignOut(): void!!
+  cancelSignOut(): void!!
+  confirmSignOut(): void!!
+  toggleCode(): void!!
+  dismissPlan(): void!!
+  /** The AI provider's confirmed route, as the sheet shows it. */
+  switchMode(mode: Mode): void!!
+  /** Another screen covers Home, or Home shows again. */
+  covered(covering: boolean): void!!
+}
+
+/** The sheet service over its in-memory machine. */
+export const sheetService = Layer.effect(AccountSheet, effect {
+  const machine = try SheetMachine
+  const session = try CloudSession
+  const entitlement = try Entitlement
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+    return step !== undefined
+  }
+
+  effect function perform(out: ReadonlyArray<SheetEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when { tag: "SignOut", let signingOut }: {
+          if (signingOut === (try session.owner())) try session.signOut()
+        };
+      }
+    }
+  }
+
+  effect function planFor(owner: number) {
+    const a = try entitlement.current()
+    if (owner === 0 || a.credential !== owner) return
+    const needed = a.notice === "NeedsPlanNotice" || a.notice === "PlanEndedNotice"
+    if (needed !== (try machine.get()).planRequired) try send({ type: "planNeeded", needed })
+  }
+
+  effect function followSession() {
+    for try (const s of session.changes) {
+      const owner = ownerOf(s)
+      const now = try Clock.currentTimeMillis
+      const sheet = try machine.get()
+      if (owner !== sheet.owner) {
+        try send({ type: "ownerChanged", owner })
+        try planFor(owner)
+      }
+      try expiry(s, now)
+    }
+  }
+
+  effect function expiry(s: Session, now: number) {
+    const expiring = ownerOf(s) !== 0 && (s.expiryWarning || keyExpiringSoon(s.account, now))
+    if (expiring !== (try machine.get()).keyExpiring) try send({ type: "keyExpiry", expiring })
+  }
+
+  effect function expiryClock() {
+    while (true) {
+      try sleep("1 hour")
+      try expiry(try session.current(), try Clock.currentTimeMillis)
+    }
+  }
+
+  effect function followPlan() {
+    for try (const _ of entitlement.changes) {
+      try planFor((try machine.get()).owner)
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    current: () => machine.get(),
+    effect run() { try.all [ignore(followSession()), ignore(followPlan()), expiryClock()] },
+    effect show() { try send({ type: "showSheet" }) },
+    effect openSection(section: Section) { try send({ type: "openSection", section, fundsOffered: deployment === "ElizaCloud" }) },
+    effect back() { return try send({ type: "back" }) },
+    effect close() { try send({ type: "closeSheet" }) },
+    effect returnHome() { try send({ type: "returnHome" }) },
+    effect askSignOut() { try send({ type: "askSignOut" }) },
+    effect cancelSignOut() { try send({ type: "cancelSignOut" }) },
+    effect confirmSignOut() { try send({ type: "confirmSignOut" }) },
+    effect switchMode(mode: Mode) { try send({ type: "switchMode", mode }) },
+    effect toggleCode() { try send({ type: "toggleCode" }) },
+    effect dismissPlan() { try send({ type: "dismissPlan" }) },
+    effect covered(covering: boolean) { try send(covering ? { type: "coverScreen" } : { type: "uncover" }) }
+  }
+})
+
+/** The sheet service with its machine in memory. */
+export const sheetLayer = Layer.provideMerge(sheetService, sheetMachine())

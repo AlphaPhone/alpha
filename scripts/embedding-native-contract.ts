@@ -6,42 +6,41 @@ export function embeddingAbiLibraries<T>(record: {abi:string; libraries:T[]; add
 export const embeddingProducerInputPaths=[
  "package.json",
  "packages/agent/package.json",
- "packages/app/package.json",
- "packages/app/scripts/aosp/compile-libllama-paths.ts",
- "packages/app/scripts/aosp/compile-libllama.ts",
- "packages/app/scripts/aosp/compile-shim.ts",
- "packages/app/scripts/aosp/vulkan-source-contract.ts",
- "packages/app/scripts/aosp/zig-toolchain.ts",
- "packages/app/scripts/build-helpers/arm64-simd.ts",
- "packages/app/scripts/build-helpers/elizavoice-build-flags.ts",
- "packages/app/scripts/build-helpers/omnivoice-merged.ts",
- "packages/app/scripts/build-helpers/verify-fused-symbols.ts",
- "packages/app/scripts/lib/repo-root.ts",
- "packages/app/scripts/stage-elizavoice-lib.ts"
+ "packages/os/android/local-inference/package.json",
+ "packages/os/android/local-inference/scripts/aosp/compile-libllama-paths.ts",
+ "packages/os/android/local-inference/scripts/aosp/compile-libllama.ts",
+ "packages/os/android/local-inference/scripts/aosp/compile-shim.ts",
+ "packages/os/android/local-inference/scripts/aosp/vulkan-source-contract.ts",
+ "packages/os/android/local-inference/scripts/aosp/zig-toolchain.ts",
+ "packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts",
+ "packages/os/android/local-inference/scripts/build-helpers/elizavoice-build-flags.ts",
+ "packages/os/android/local-inference/scripts/build-helpers/omnivoice-merged.ts",
+ "packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts",
+ "packages/os/android/local-inference/scripts/lib/repo-root.ts",
+ "packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts"
 ];
 // The native preparation and admission paths share one identity transformation.
 export const nativeInputPaths = [
- 'packages/app/scripts/stage-elizavoice-lib.ts',
- 'packages/app/scripts/build-helpers/arm64-simd.ts',
- 'packages/app/scripts/build-helpers/verify-fused-symbols.ts',
- 'packages/app/platforms/android/app/src/main/elizavoice-jni/CMakeLists.txt',
- 'packages/app/platforms/android/app/src/main/elizavoice-jni/elizavoice-jni.cpp',
+ 'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts',
+ 'packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts',
+ 'packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts',
+ 'packages/os/android/local-inference/elizavoice-jni/CMakeLists.txt',
+ 'packages/os/android/local-inference/elizavoice-jni/elizavoice-jni.cpp',
 ];
-export const nativeJavaPath = 'packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaVoiceNative.java';
+export const nativeJavaPath = 'packages/os/android/local-inference/src/main/java/ai/eliza/voice/VoiceNative.java';
 interface NativeBinding {mode: 'registered'|'exported'; className: string; subset: 'full'}
 export function nativeBinding(cpp: string, cmake: string, identity: string): NativeBinding {
  if(!/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(identity))throw Error('Invalid product identity');
  const registered=/env->RegisterNatives\s*\(/.test(cpp);
  if(registered&&(!/JNI_OnLoad\s*\(/.test(cpp)||!cmake.includes('ELIZA_VOICE_JNI_CLASS')||!cmake.includes('ELIZA_VOICE_JNI_SUBSET')))throw Error('Unsupported native registration contract');
- return {mode:registered?'registered':'exported',className:identity.replaceAll('.','/')+'/ElizaVoiceNative',subset:'full'};
+ return {mode:registered?'registered':'exported',className:'ai/eliza/voice/VoiceNative',subset:'full'};
 }
 export function nativeInputs(binding: NativeBinding){return binding.mode==='registered'?[...nativeInputPaths,nativeJavaPath]:nativeInputPaths;}
-export function nativeGenerated(relative: string, source: string, identity: string, binding: NativeBinding){
- if(relative===nativeJavaPath)return source.replaceAll('ai.elizaos.app',identity);
- if(relative.endsWith('.cpp')&&binding.mode==='exported')return source.replaceAll('Java_ai_elizaos_app_','Java_'+identity.replaceAll('.','_')+'_').replaceAll('ai/elizaos/app/',identity.replaceAll('.','/')+'/');
+/** The upstream JNI source is used verbatim: one bridge, libparadeevoicejni.so bound to ai/eliza/voice/VoiceNative. */
+export function nativeGenerated(relative: string, source: string, _identity: string, _binding: NativeBinding){
  return source;
 }
-export function nativeCmakeOptions(binding: NativeBinding){return binding.mode==='registered'?[`-DELIZA_VOICE_JNI_CLASS=${binding.className}`,'-DELIZA_VOICE_JNI_SUBSET=full','-DELIZA_VOICE_JNI_LIBRARY=elizavoicejni']:[];}
+export function nativeCmakeOptions(binding: NativeBinding){return binding.mode==='registered'?[`-DELIZA_VOICE_JNI_CLASS=${binding.className}`,'-DELIZA_VOICE_JNI_SUBSET=full','-DELIZA_VOICE_JNI_LIBRARY=paradeevoicejni']:[];}
 const clean=(source: string)=>source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,'');
 /** Reject a source pin whose full registration table cannot bind its staged Java class. */
 export function verifyNativeJava(cpp: string,java: string){

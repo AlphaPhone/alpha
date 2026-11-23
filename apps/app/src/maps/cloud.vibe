@@ -1,0 +1,187 @@
+// spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"; spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/connection.md, "A request may start only on the installed provider, for its account and generation, outside a pause"; spec/maps/connection.md, "A rate-limit refusal of the current generation pauses every data request until its wait ends"
+import { type Coverage, type CoverageReply, type MapsConnection, Machine as Connection, mayRequest, mayReturn } from "../../gen/maps__connection.effect.vibe"
+import type { Offer, ProviderKind, Travel } from "../../gen/maps__vocabulary.ts"
+import { noOffer } from "../../gen/maps__vocabulary.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { type CoverageInfo, MapsContent } from "./content.vibe"
+import { type MapsFailure, cloudFailure, decoded, failure, pauseOf } from "./failure.vibe"
+import { place as checkedPlace } from "@elizaos/plugin-maps/client/contracts"
+import { Capabilities, type Coordinate, type Place, PlaceAnswer, PlacesAnswer, type Route, RoutesAnswer, TileAnswer, type TravelMode, ViewportAnswer } from "./maps.schema.vibe"
+import { base64Bytes } from "./tile-bytes.ts"
+
+const GOOGLE_PROVIDER = "eliza-cloud-google"
+const FUTURE_SKEW_MS = 60000
+const MAX_TILE_BYTES = 1024 * 1024
+
+/** The wire mode of a model travel mode. */
+export function wireMode(travel: Travel): TravelMode {
+  return travel === "Drive" ? "drive" : travel === "Walk" ? "walk" : travel === "Bicycle" ? "bicycle" : "transit"
+}
+
+/** The model travel mode of a wire mode. */
+export function modelTravel(mode: TravelMode): Travel {
+  return mode === "drive" ? "Drive" : mode === "walk" ? "Walk" : mode === "bicycle" ? "Bicycle" : "Transit"
+}
+
+/** A Cloud deployment may rename its provider, but Google coverage names Google Maps as its data source. */
+export function providerKind(providerId: string, sourceData?: string): ProviderKind {
+  return providerId === GOOGLE_PROVIDER || sourceData === "Google Maps" ? "GoogleProvider" : "OpenProvider"
+}
+
+/** A tile's image bytes and type. */
+export interface MapsTile {
+  readonly contentType: string
+  readonly bytes: Uint8Array
+}
+
+/** The installed Cloud Maps provider, each request fenced by the account and generation it started under. */
+export service MapsProvider {
+  search(query: string, near?: Coordinate): ReadonlyArray<Place>!MapsFailure
+  details(id: string): Place | undefined!MapsFailure
+  routes(from: Coordinate, to: Coordinate, travel: Travel, alternatives: boolean): ReadonlyArray<Route>!MapsFailure
+  viewport(area: { readonly north: number; readonly south: number; readonly east: number; readonly west: number }, zoom: number): string!MapsFailure
+  tile(z: number, x: number, y: number): MapsTile!MapsFailure
+  /** The coverage read the connection machine asked for, settled into it. */
+  readCoverage(attempt: number): void!!
+}
+
+function offerOf(c: Extract<Capabilities, { available: true }>, tiles: boolean): Offer {
+  const modes = c.capabilities.modes
+  return {
+    drive: modes.includes("drive"), walk: modes.includes("walk"), bicycle: modes.includes("bicycle"),
+    transit: modes.includes("transit") && c.capabilities.transit === "scheduled",
+    alternatives: c.capabilities.alternatives === true, map: c.capabilities.map && tiles, liveTraffic: c.capabilities.traffic === "live",
+  }
+}
+
+function coverageInfo(c: Extract<Capabilities, { available: true }>): CoverageInfo {
+  const kind = providerKind(c.providerId, c.sources?.data)
+  return {
+    providerId: c.providerId, kind, connectionId: c.connectionId, revision: c.revision, attribution: c.attribution,
+    sourceName: kind === "GoogleProvider" ? "Google Maps" : c.sources?.data ?? "Cloud map",
+    recipients: c.disclosure?.recipients ?? [], regions: c.regions.map((r) => ({ name: r.name, bounds: r.bounds })),
+    offer: offerOf(c, c.tiles !== undefined), tiles: c.tiles,
+  }
+}
+
+function replyOf(error: MapsFailure): CoverageReply {
+  return error.code === "unauthorized" ? "CoverageUnauthorized" : error.code === "invalid-response" ? "CoverageInvalid"
+    : error.code === "unconfigured" ? "CoverageNotOffered" : "CoverageUnavailable"
+}
+
+function same(a: Coordinate, b: Coordinate): boolean {
+  return a.latitude === b.latitude && a.longitude === b.longitude
+}
+
+/** The provider over the platform's account-bound Cloud client and the connection machine. */
+export const providerLayer = Layer.effect(MapsProvider, effect {
+  const cloud = try Cloud
+  const connection = try Connection
+  const content = try MapsContent
+
+  effect function admitted() {
+    const now = try Clock.currentTimeMillis
+    const before = try connection.get()
+    const s = now > before.now ? (try connection.send({ type: "tick", now })).state : before
+    if (s.phase !== "Installed") {
+      if (s.account === 0) throw failure("unauthorized", "Sign in to Cloud to use Maps.")
+      throw failure("unconfigured", "Connect a Maps provider to search places and plan routes.")
+    }
+    if (!mayRequest(s)) throw failure("rate-limited", "Maps request limit reached. Try again later.")
+    return s
+  }
+
+  effect function request(method: "GET" | "POST", path: string, body?: unknown) {
+    const s: MapsConnection = try admitted()
+    const raw = cloud.json(method, path, body) catch effect (error) => {
+      const pause = pauseOf(error)
+      if (pause !== undefined) connection.send({ type: "rateLimited", captured: s.generation, retryAfter: pause }) catch () => undefined
+      throw cloudFailure(error, try Clock.currentTimeMillis)
+    }
+    if (!mayReturn(try connection.get(), s.generation, s.account, false))
+      throw failure("unauthorized", "The Maps account changed. Search again after signing in.")
+    return raw
+  }
+
+  effect function installed() {
+    const coverage = (try content.get()).coverage
+    if (coverage === undefined) throw failure("unconfigured", "Connect a Maps provider to search places and plan routes.")
+    return coverage
+  }
+
+  return {
+    effect search(query: string, near?: Coordinate) {
+      const text = query.trim()
+      if (text === "") return []
+      if (text.length > 300) throw failure("unsupported", "Use a search of at most 300 characters.")
+      const coverage = try installed()
+      const answer = try decoded(PlacesAnswer, try request("POST", "/api/v1/maps/places/search", near ? { query: text, near } : { query: text }))
+      const places: Place[] = []
+      for (const raw of answer.places) places.push(try checkedPlace(raw, coverage.providerId))
+      return places
+    },
+    effect details(id: string) {
+      if (id.trim() === "" || id.length > 512) return undefined
+      const coverage = try installed()
+      const answer = try decoded(PlaceAnswer, try request("POST", "/api/v1/maps/places/details", { id }))
+      if (answer.place === null) return undefined
+      const place = try checkedPlace(answer.place, coverage.providerId)
+      if (place.id !== id) throw failure("invalid-response", "The selected place identity changed.")
+      return place
+    },
+    effect routes(from: Coordinate, to: Coordinate, travel: Travel, alternatives: boolean) {
+      const coverage = try installed()
+      const mode = wireMode(travel)
+      const asked = alternatives && coverage.offer.alternatives
+      const answer = try decoded(RoutesAnswer, try request("POST", "/api/v1/maps/routes", asked ? { from, to, mode, alternatives: true } : { from, to, mode }))
+      const now = try Clock.currentTimeMillis
+      const traffic = coverage.offer.liveTraffic ? "live" : "none"
+      const ids = new Set(answer.routes.map((r) => r.id))
+      if (ids.size !== answer.routes.length) throw failure("invalid-response", "The provider returned duplicate routes.")
+      if (!asked && answer.routes.length !== 1) throw failure("invalid-response", "The Maps route response is invalid.")
+      for (const route of answer.routes) {
+        if (route.providerId !== coverage.providerId || route.mode !== mode || !same(route.from, from) || !same(route.to, to)
+          || route.fetchedAt > now + FUTURE_SKEW_MS || (route.traffic !== "none" && route.traffic !== traffic))
+          throw failure("invalid-response", "The provider route is invalid.")
+      }
+      return answer.routes
+    },
+    effect viewport(area, zoom: number) {
+      const coverage = try installed()
+      const answer = try decoded(ViewportAnswer, try request("POST", "/api/v1/maps/tiles/viewport", { zoom: Math.max(0, Math.min(22, Math.round(zoom))), ...area }))
+      return answer.copyright || coverage.tiles?.attribution || coverage.attribution
+    },
+    effect tile(z: number, x: number, y: number) {
+      const coverage = try installed()
+      const tiles = coverage.tiles
+      if (!tiles || !Number.isInteger(z) || z < tiles.minZoom || z > tiles.maxZoom || x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z)
+        throw failure("unsupported", "This map tile is unavailable.")
+      const answer = try decoded(TileAnswer, try request("GET", `/api/v1/maps/tiles/${z}/${x}/${y}`))
+      const bytes = try Effect.try({ try: () => base64Bytes(answer.data), catch: () => failure("invalid-response", "Cloud Maps sent an invalid response.") })
+      if (bytes.length > MAX_TILE_BYTES) throw failure("invalid-response", "Cloud Maps sent an invalid response.")
+      return { contentType: answer.contentType, bytes }
+    },
+    effect readCoverage(attempt: number) {
+      effect function refused(reply: CoverageReply, message: string) {
+        connection.send({ type: "coverageSettles", attempt, reply, coverage: { kind: "NoProvider", offer: noOffer } }) catch () => undefined
+        try content.update((c) => ({ ...c, coverage: undefined, message }))
+      }
+      const raw = cloud.json("GET", "/api/v1/maps/capabilities") catch effect (error) => {
+        const reason = cloudFailure(error, try Clock.currentTimeMillis)
+        try refused(replyOf(reason), reason.message)
+        return undefined
+      }
+      if (raw === undefined) return
+      const read = Schema.decodeUnknownEffect(Capabilities)(raw) catch effect () => {
+        try refused("CoverageInvalid", "Cloud Maps coverage is invalid.")
+        return undefined
+      }
+      if (read === undefined) return
+      if (!read.available) return try refused("CoverageNotOffered", "Cloud Maps is not available yet.")
+      const info = coverageInfo(read)
+      const coverage: Coverage = { kind: info.kind, offer: info.offer }
+      const accepted = connection.send({ type: "coverageSettles", attempt, reply: "ValidCoverage", coverage }) catch () => undefined
+      if (accepted?.state.phase === "Installed") try content.update((c) => ({ ...c, coverage: info, message: "" }))
+    },
+  }
+})

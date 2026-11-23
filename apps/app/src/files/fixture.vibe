@@ -1,0 +1,186 @@
+// spec/files/storage.md, "Story: Browse my files by category, folder and volume"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+import { Documents, FilesStorage, FilesUnavailable } from "./storage.vibe"
+import { baseName, joinPath, parentOf, within } from "./paths.vibe"
+import type * as N from "./native.schema.vibe"
+
+interface FixtureFile { path: string; directory: boolean; mimeType: string; size: number; modified: number; revision: number; text?: string; base64?: string; sha256?: string }
+interface FixtureTrash { id: string; file: FixtureFile; origin: string; deletedAt: number }
+interface FixtureState { files: FixtureFile[]; trash: FixtureTrash[]; next: number }
+
+const NOTE = "Lease renewal: the term starts in March."
+const NOTE_BASE64 = "TGVhc2UgcmVuZXdhbDogdGhlIHRlcm0gc3RhcnRzIGluIE1hcmNoLg=="
+const NOTE_SHA256 = "d5aed6599980ec75b5f8e9c60f80f1ba4424cb894f5d8be841577f9808edf8c6"
+const DAY = 86400000
+const START = 1_763_000_000_000
+
+const folder = (path: string, modified: number): FixtureFile => ({ path, directory: true, mimeType: "", size: 0, modified, revision: 1 })
+const file = (path: string, mimeType: string, size: number, modified: number, extra: Partial<FixtureFile> = {}): FixtureFile =>
+  ({ path, directory: false, mimeType, size, modified, revision: 1, ...extra })
+
+/** The files a development build browses: never present in a production build. */
+export const fixtureFiles: readonly FixtureFile[] = [
+  folder("Download", START), folder("DCIM", START - DAY), folder("DCIM/Camera", START - DAY), folder("Documents", START - 2 * DAY), folder("Music", START - 3 * DAY),
+  file("Download/lease.pdf", "application/pdf", 182_044, START - 3_600_000),
+  file("Download/notes.txt", "text/plain", NOTE.length, START - 7_200_000, { text: NOTE, base64: NOTE_BASE64, sha256: NOTE_SHA256 }),
+  file("DCIM/Camera/IMG_0001.jpg", "image/jpeg", 2_406_118, START - DAY),
+  file("DCIM/Camera/VID_0002.mp4", "video/mp4", 18_220_771, START - 2 * DAY),
+  file("Documents/budget.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 40_112, START - 4 * DAY),
+  file("Music/song.mp3", "audio/mpeg", 4_210_034, START - 5 * DAY),
+]
+
+function entryOf(f: FixtureFile, files: readonly FixtureFile[]): N.StorageEntry {
+  return { path: f.path, name: baseName(f.path), directory: f.directory, mimeType: f.mimeType, size: f.size, modified: f.modified,
+    ...(f.directory ? { children: files.filter((x) => parentOf(x.path) === f.path).length } : {}) }
+}
+
+function token(f: FixtureFile, files: readonly FixtureFile[]): string {
+  const seed = `${files.indexOf(f)}x${f.revision}x${f.path.length}`.replace(/[^A-Za-z0-9]/g, "x")
+  return `${"A".repeat(Math.max(0, 43 - seed.length))}${seed}`.slice(0, 43)
+}
+
+function category(f: FixtureFile, id: string): boolean {
+  if (f.directory) return false
+  if (id === "downloads") return parentOf(f.path) === "Download"
+  if (id === "images") return f.mimeType.startsWith("image/")
+  if (id === "videos") return f.mimeType.startsWith("video/")
+  if (id === "audio") return f.mimeType.startsWith("audio/")
+  return f.mimeType === "application/pdf" || f.mimeType.startsWith("text/") || f.mimeType.includes("officedocument")
+}
+
+function freeName(name: string, taken: readonly string[]): string {
+  if (!taken.includes(name)) return name
+  const dot = name.lastIndexOf(".")
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ""
+  let n = 1
+  while (taken.includes(`${stem} (${n})${ext}`)) n++
+  return `${stem} (${n})${ext}`
+}
+
+/** An in-memory volume and document registry for development builds with test mocks. */
+export const fixtureLayer = Layer.mergeAll(
+  Layer.effect(FilesStorage, effect {
+    const state = try Ref.make<FixtureState>({ files: [...fixtureFiles], trash: [], next: 1 })
+    const ready = { status: "ready" as const }
+    const get = () => Ref.get(state)
+    effect function move(paths: readonly string[], dest: string, copy: boolean) {
+      const s = try get()
+      const outcomes: N.OutcomeRow[] = []
+      let files = [...s.files]
+      for (const path of paths) {
+        const f = files.find((x) => x.path === path)
+        if (f === undefined) { outcomes.push({ path, status: "missing" }); continue }
+        if (!copy && parentOf(path) === dest) { outcomes.push({ path, status: "unchanged" }); continue }
+        if (within(dest, path)) { outcomes.push({ path, status: "invalid" }); continue }
+        const to = joinPath(dest, freeName(baseName(path), files.filter((x) => parentOf(x.path) === dest).map((x) => baseName(x.path))))
+        files = copy ? [...files, { ...f, path: to, revision: 1 }] : files.map((x) => x === f ? { ...x, path: to, revision: x.revision + 1 } : x)
+        outcomes.push({ path, status: copy ? "copied" : "moved", to })
+      }
+      try Ref.set(state, { ...s, files })
+      return { ...ready, outcomes } satisfies N.OutcomesAnswer
+    }
+    return {
+      state: () => succeed({ ...ready, access: "granted", volumes: [{ id: "primary", name: "Internal storage", primary: true, free: 41_000_000_000, total: 128_000_000_000 }] } satisfies N.StateAnswer),
+      requestAccess: () => succeed({ ...ready, access: "granted" } satisfies N.StorageAnswer),
+      list: (path) => map(get(), (s): N.ListAnswer =>
+        path !== "" && !s.files.some((f) => f.directory && f.path === path) ? { status: "missing" }
+          : { ...ready, truncated: false, entries: s.files.filter((f) => parentOf(f.path) === path).map((f) => entryOf(f, s.files)) }),
+      category: (id, countOnly) => map(get(), (s): N.CategoryAnswer => {
+        const rows = s.files.filter((f) => category(f, id))
+        return { ...ready, count: rows.length, bytes: rows.reduce((n, f) => n + f.size, 0), truncated: false, ...(countOnly ? {} : { entries: rows.map((f) => entryOf(f, s.files)) }) }
+      }),
+      query: (input) => map(get(), (s): N.ListAnswer => ({ ...ready, truncated: false, entries: s.files.filter((f) =>
+        (input.folders ? f.directory : !f.directory) && (!input.folder || within(parentOf(f.path), input.folder)) &&
+        (!input.mimePrefix || f.mimeType.startsWith(input.mimePrefix)) && (!input.documents || category(f, "documents")) &&
+        (!input.text || baseName(f.path).toLowerCase().includes(input.text.toLowerCase())) &&
+        (input.from === undefined || f.modified >= input.from) && (input.to === undefined || f.modified <= input.to)).map((f) => entryOf(f, s.files)) })),
+      reviewedIdentities: (paths) => map(get(), (s): N.ReviewedAnswer => {
+        const found = paths.map((p) => s.files.find((f) => f.path === p))
+        return found.every((f) => f !== undefined) ? { ...ready, reviewed: found.map((f) => token(f!, s.files)) } : { status: "missing" }
+      }),
+      transfer: (paths, dest, copy, _volume, reviewed) => effect {
+        const s = try get()
+        if (reviewed && paths.some((p, i) => { const f = s.files.find((x) => x.path === p); return f === undefined || token(f, s.files) !== reviewed[i] }))
+          return { ...ready, outcomes: paths.map((path) => ({ path, status: "changed" as const })) } satisfies N.OutcomesAnswer
+        return try move(paths, dest, copy)
+      },
+      rename: (path, name) => effect {
+        const s = try get()
+        const to = joinPath(parentOf(path), name)
+        if (s.files.some((f) => f.path === to)) return { status: "exists" } satisfies N.PlacedAnswer
+        try Ref.set(state, { ...s, files: s.files.map((f) => f.path === path || f.path.startsWith(`${path}/`) ? { ...f, path: to + f.path.slice(path.length), revision: f.revision + 1 } : f) })
+        return { ...ready, path: to } satisfies N.PlacedAnswer
+      },
+      createFolder: (parent, name) => effect {
+        const s = try get()
+        const path = joinPath(parent, name)
+        if (s.files.some((f) => f.path === path)) return { status: "exists" } satisfies N.PlacedAnswer
+        try Ref.set(state, { ...s, files: [...s.files, folder(path, START)] })
+        return { ...ready, path } satisfies N.PlacedAnswer
+      },
+      trash: (paths, _volume, reviewed) => effect {
+        const s = try get()
+        const now = try Clock.currentTimeMillis
+        const outcomes: N.OutcomeRow[] = []
+        let next = s.next
+        let files = s.files
+        const trash = [...s.trash]
+        paths.forEach((path, i) => {
+          const f = files.find((x) => x.path === path)
+          if (f === undefined) return void outcomes.push({ path, status: "missing" })
+          if (reviewed && token(f, s.files) !== reviewed[i]) return void outcomes.push({ path, status: "changed" })
+          const id = `t${next++}`
+          trash.push({ id, file: f, origin: parentOf(path), deletedAt: now })
+          files = files.filter((x) => x !== f)
+          outcomes.push({ path, status: "trashed", to: id })
+        })
+        try Ref.set(state, { files, trash, next })
+        return { ...ready, outcomes } satisfies N.OutcomesAnswer
+      },
+      trashList: () => map(get(), (s): N.TrashAnswer => ({ ...ready, items: s.trash.map((t) => ({ id: t.id, name: baseName(t.file.path), origin: t.origin,
+        directory: t.file.directory, mimeType: t.file.mimeType, size: t.file.size, deletedAt: t.deletedAt })) })),
+      restore: (ids) => effect {
+        const s = try get()
+        let files = s.files
+        const outcomes: N.OutcomeRow[] = ids.map((id) => {
+          const t = s.trash.find((x) => x.id === id)
+          if (t === undefined) return { path: id, status: "missing" }
+          const to = joinPath(t.origin, freeName(baseName(t.file.path), files.filter((x) => parentOf(x.path) === t.origin).map((x) => baseName(x.path))))
+          files = [...files, { ...t.file, path: to }]
+          return { path: id, status: "restored", to }
+        })
+        try Ref.set(state, { ...s, files, trash: s.trash.filter((t) => !ids.includes(t.id)) })
+        return { ...ready, outcomes } satisfies N.OutcomesAnswer
+      },
+      erase: (ids) => effect {
+        const s = try get()
+        const gone = s.trash.filter((t) => ids.includes(t.id))
+        try Ref.set(state, { ...s, trash: s.trash.filter((t) => !ids.includes(t.id)) })
+        return { ...ready, count: gone.length } satisfies N.ErasedAnswer
+      },
+      share: () => succeed({ status: "unsupported", message: "Sharing is unavailable in this browser." } satisfies N.HandoffAnswer),
+      open: () => succeed({ status: "unsupported" } satisfies N.HandoffAnswer),
+      select: (path) => map(get(), (s): N.SelectionAnswer => {
+        const f = s.files.find((x) => x.path === path && !x.directory)
+        return f === undefined ? { status: "missing" } : { status: "selected", action: "files", selectionId: `fixture:${s.files.indexOf(f)}`, name: baseName(f.path), mimeType: f.mimeType, canRename: true, size: f.size, modified: f.modified }
+      }),
+      watch: () => succeed(ready),
+      unwatch: () => succeed(ready),
+      changes: Stream.never,
+    }
+  }),
+  Layer.succeed(Documents, {
+    pick: () => succeed({ status: "cancelled" } satisfies N.SelectedDocument),
+    restore: () => succeed({ status: "unavailable" } satisfies N.SelectedDocument),
+    describe: (selectionId) => succeed({ status: "selected", selectionId, ...(selectionId === "fixture:6" ? { name: "notes.txt", mimeType: "text/plain", size: NOTE.length } : {}) } satisfies N.SelectedDocument),
+    rename: () => succeed({ status: "unsupported", message: "Rename unavailable" } satisfies N.SelectedDocument),
+    pdf: () => succeed({ status: "unsupported", message: "PDF preview is unavailable here. Open it in Android to view it." } satisfies N.PdfPageAnswer),
+    read: (selectionId) => succeed((selectionId === "fixture:6" ? { status: "read", text: NOTE, mimeType: "text/plain", bytes: NOTE.length } : { status: "unsupported" }) satisfies N.DocumentText),
+    open: () => succeed({ status: "unsupported" } satisfies N.DocumentHandoff),
+    share: () => succeed({ status: "unsupported" } satisfies N.DocumentHandoff),
+    bytes: (selectionId) => selectionId === "fixture:6"
+      ? succeed({ name: "notes.txt", mimeType: "text/plain", dataBase64: NOTE_BASE64, sha256: NOTE_SHA256, size: NOTE.length } satisfies N.AttachmentBytes)
+      : fail(new FilesUnavailable({ method: "readSelected", reason: "fixture" })),
+    forget: () => succeed(undefined),
+  }),
+)

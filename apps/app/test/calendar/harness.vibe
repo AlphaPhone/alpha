@@ -1,0 +1,60 @@
+// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"
+// Calendar's own services over faked platform boundaries, shared by the Calendar journeys.
+import { assert } from "@effect/vitest"
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { services } from "../../src/calendar/layer.vibe"
+import type { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+/** Run a synchronous assertion as an effect. */
+export effect function check(run: () => void) {
+  try Effect.try(run)
+}
+
+/** Assert two values are deeply equal, as an effect. */
+export effect function same<A>(actual: A, expected: A) {
+  try Effect.try(() => assert.deepStrictEqual(actual, expected))
+}
+
+/** The platform boundaries Calendar uses, faked over the agent's routes and the AlphaCalendar plugin. */
+export function fakes(agent: CalendarAgentFake, device: DeviceCalendarFake, testMocks = true) {
+  return Layer.mergeAll(
+    Layer.succeed(Resident, {
+      status: () => succeed("running" as const),
+      ensureRunning: () => Effect.void,
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => Effect.try({
+        try: () => agent.json(method, path, body),
+        catch: (error) => new ResidentRefused({ status: (error as { status?: number }).status ?? 500, message: String(error) }),
+      }),
+      stream: () => Stream.empty,
+    }),
+    Layer.succeed(Native, {
+      available: (plugin: string) => sync(() => device.available(plugin)),
+      invoke: (plugin: string, method: string, args?: unknown) => Effect.try({
+        try: () => device.invoke(plugin, method, (args ?? {}) as Record<string, unknown>),
+        catch: (error) => new NativeFailed({ plugin, method, message: String(error) }),
+      }),
+      listen: () => Stream.empty,
+    }),
+    Layer.succeed(Build, { info: { version: "test", variant: "browser", testMocks } }),
+    memoryStore,
+  )
+}
+
+/** Calendar's services over the fakes. */
+export const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake, testMocks = true) => Layer.provide(services, fakes(agent, device, testMocks))
+
+/** What is in front, fixed for a journey. */
+export function foregroundAt(state: Partial<ForegroundState>) {
+  const shown: ForegroundState = { visible: true, locked: false, screen: "home", view: "calendar", shade: false, chat: "closed", modal: false, ...state }
+  return Layer.succeed(Foreground, { changes: Stream.make(shown), get: () => succeed(shown) })
+}
+
+/** The resident binding of the first account. */
+export const binding = { owner: JSON.stringify(["resident", "owner-1", "agent-1"]), session: 1, agentId: "agent-1", usable: true }
+
+/** The resident binding of another account. */
+export const otherBinding = { owner: JSON.stringify(["resident", "owner-2", "agent-1"]), session: 2, agentId: "agent-1", usable: true }

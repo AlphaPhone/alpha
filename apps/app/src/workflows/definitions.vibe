@@ -1,0 +1,349 @@
+// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import {
+  type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
+  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, workflowSpecDigest, workflowUuid,
+} from "@elizaos/plugin-workflow/client"
+import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
+import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow/scope"
+import { type LifeOp, type LifeReply, Machine as LifecycleMachine, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
+import { type Category, Machine as DraftMachine, keptTextShown, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { WorkflowApi } from "./api.vibe"
+import { WorkflowVersions } from "./runs.vibe"
+
+export const LIFECYCLE_KEY = ownerKey("device", "workflows/lifecycle")
+export const DRAFT_KEY = ownerKey("device", "workflows/draft")
+export const DRAFT_BYTES_KEY = ownerKey("device", "workflows/draft-bytes")
+export const DRAFT_TEXT_KEY = ownerKey("device", "workflows/draft-text")
+
+/** What a definition change ended as, for the screen to word. */
+export type ChangeOutcome = "saved" | "replayed" | "refused" | "unknown" | "busy" | "cancelling"
+
+/** What describing a workflow gave: a draft, or the refusal shown before anything was sent. */
+export type Described =
+  | { readonly kind: "draft"; readonly spec: PhoneWorkflowSpec }
+  | { readonly kind: "refused"; readonly message: string }
+  | { readonly kind: "unavailable" }
+
+const categoryOf: Record<WorkflowScopeCategory, Category> = {
+  calls: "Calls", sms: "Sms", payments: "Payments", contacts: "Contacts", code: "ArbitraryCode", email: "UnnamedEmail",
+}
+
+/** What a draft's review says about when it runs: the missed window, and the next day a clock change skips its time. */
+export interface ScheduleNote {
+  readonly manual: boolean
+  readonly missedAfterMinutes: number
+  readonly clockChange: string
+}
+
+/** A phone trigger as the scheduling rules read it. */
+export function typedTrigger(trigger: PhoneWorkflowTrigger): TypedTrigger {
+  if (trigger.kind === "manual") return { tag: "ManualTrigger" }
+  const [hour, minute] = trigger.localTime.split(":").map(Number)
+  return { tag: "TimeTrigger", days: [...trigger.days], minuteOfDay: (hour ?? -1) * 60 + (minute ?? 0) }
+}
+
+/** The draft kept on the phone until its save is settled. */
+interface KeptDraft {
+  readonly spec: PhoneWorkflowSpec
+  readonly mutation: string
+  readonly specDigest: string
+  readonly compilerRevision: string
+  readonly workflowId?: string
+  readonly versionId?: string
+}
+
+/** Remove, restore and rename workflows, switch them, and describe and save typed drafts. */
+export service WorkflowDefinitions {
+  /** Read the workflow `workflowId` as the lifecycle sees it. */
+  open(workflowId: string): boolean!!
+  /** Start reviewing a removal, restore or rename. */
+  review(op: LifeOp): boolean!!
+  /** Confirm the reviewed change: kept under the agent's mutation id before it is sent. */
+  confirm(name?: string, description?: string): ChangeOutcome!!
+  /** Read the workflow again to settle a kept change. */
+  refresh(): void!!
+  /** Review, then send, a kept change again under its own mutation id. */
+  reviewResend(): boolean!!
+  resend(): ChangeOutcome!!
+  /** Leave a review or a resend review; false when none was open, so Back is someone else's. */
+  back(): boolean!!
+  /** Turn a workflow on or off at its current version; a manual typed workflow is never activated. */
+  setActive(workflowId: string, on: boolean): ChangeOutcome!!
+  /** Describe a phone workflow; a refused description sends nothing. */
+  describe(prompt: string): Described!!
+  /** Save the reviewed draft once: the first tap shows the current draft for review. */
+  save(workflowId?: string): ChangeOutcome!!
+  /** Ask the agent for a kept save after a lost answer. */
+  recover(): ChangeOutcome!!
+  /** Review, then send, a kept save again. */
+  resendSave(): ChangeOutcome!!
+  /** Discard the draft: the first tap asks. */
+  discard(): void!!
+  /** When the reviewed draft runs, as its review discloses it. */
+  scheduleNote(spec: PhoneWorkflowSpec): ScheduleNote!!
+  /** Keep the description the owner is still typing for this owner; false when the phone did not keep it. */
+  keepText(text: string): boolean!!
+  /** The unsent description this owner last typed, or "". */
+  keptText(): string!!
+}
+
+function manualTyped(workflow: RemoteWorkflow): boolean {
+  const spec = workflow.phoneSpec as { trigger?: { kind?: unknown } } | undefined
+  return spec?.trigger?.kind === "manual"
+}
+
+export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(WorkflowDefinitions, effect {
+  const life = try LifecycleMachine
+  const drafts = try DraftMachine
+  const agent = try WorkflowApi
+  const seen = try WorkflowVersions
+  const store = try KeyValueStore.KeyValueStore
+  const client = agent.workflow
+  const catalogRef = try Ref.make<PhoneWorkflowCatalog | undefined>(undefined)
+  const nameRef = try Ref.make({ name: "", description: "" })
+
+  effect function ownerOf() {
+    const scope = try (agent.scope() catch () => undefined)
+    return scope === undefined ? "" : `${scope.origin}|${scope.ownerId}|${scope.agentId}`
+  }
+
+  effect function readDefinition(workflowId: string) {
+    const workflow = try client.detail(workflowId)
+    const executions = try client.executions(workflowId)
+    return {
+      workflow, version: try seen.ordinal(workflow.id, workflow.versionId),
+      ongoing: executions.some((run) => !run.finished && run.reconciliation === undefined),
+      interrupted: executions.some((run) => !run.finished && run.reconciliation?.state === "outcome-unknown"),
+    }
+  }
+
+  effect function open(workflowId: string) {
+    const owner = try ownerOf()
+    if (owner === "") return false
+    if ((try life.get()).owner !== owner) life.send({ type: "switchOwner", owner }) catch () => undefined
+    const read = try (readDefinition(workflowId) catch () => undefined)
+    if (read === undefined) return false
+    life.send({ type: "open", owner, workflowId, version: read.version, removed: read.workflow.removed,
+      cleaned: read.workflow.triggerCleanup === "complete", ongoing: read.ongoing, interrupted: read.interrupted }) catch () => undefined
+    return true
+  }
+
+  /** Send a fresh reviewed change, kept first under the agent's mutation id, or ask after the kept one again. */
+  effect function send(fresh: boolean) {
+    const state = try life.get()
+    const op = fresh ? state.reviewOp : state.intent.op
+    const workflowId = fresh ? state.workflowId : state.intent.workflowId
+    const versionId = try seen.versionId(workflowId, fresh ? state.version : state.intent.fromVersion)
+    const operation = op === "RemoveOp" ? "remove" : "restore"
+    const keep = effect (mutationId: string) => {
+      const kept = try (life.send({ type: "confirmChange", mutation: mutationId }) catch () => undefined)
+      if (kept === undefined || (try life.get()).stage !== "LifeAdmitted") throw new WorkflowResponseInvalid({ message: "Change not kept" })
+      life.send({ type: "dispatched" }) catch () => undefined
+    }
+    const { name, description } = try Ref.get(nameRef)
+    const answer = try (effect {
+      if (op === "RenameOp") {
+        const receipt = fresh ? try client.changeMetadata(workflowId, versionId, name, description, keep) : try client.reconcileMetadata(workflowId, versionId, state.intent.mutation)
+        return { receipt: receipt ?? undefined }
+      }
+      const receipt = fresh ? try client.lifecycle(workflowId, versionId, operation, keep) : try client.reconcileLifecycle(workflowId, versionId, state.intent.mutation, operation)
+      return { receipt: receipt ?? undefined }
+    } catch (error) => ({ error }))
+    const stage = (try life.get()).stage
+    if (stage !== "LifeSent" && stage !== "LifeResending") return fresh ? "busy" : "unknown"
+    if ("error" in answer) {
+      const reply: LifeReply = answer.error instanceof WorkflowLifecycleRejected || answer.error instanceof WorkflowMetadataRejected ? "LifeRefused" : "LifeUnknown"
+      life.send({ type: "replied", reply, toVersion: 0 }) catch () => undefined
+      return reply === "LifeRefused" ? "refused" : "unknown"
+    }
+    if (answer.receipt === undefined) {
+      life.send({ type: "replied", reply: "LifeRefused", toVersion: 0 }) catch () => undefined
+      return "refused" satisfies ChangeOutcome
+    }
+    const toVersion = try seen.ordinal(answer.receipt.workflowId, answer.receipt.versionId)
+    life.send({ type: "replied", reply: fresh ? "LifeSaved" : "LifeReplayed", toVersion }) catch () => undefined
+    return fresh ? "saved" : "replayed"
+  }
+
+  effect function catalog() {
+    const known = try Ref.get(catalogRef)
+    if (known !== undefined) return known
+    const read = try (client.phoneCatalog() catch () => undefined)
+    if (read !== undefined) try Ref.set(catalogRef, read)
+    return read
+  }
+
+  effect function keptDraft() {
+    const raw = try (store.get(DRAFT_BYTES_KEY) catch () => undefined)
+    return raw === undefined ? undefined : try (Effect.try(() => JSON.parse(raw) as KeptDraft) catch () => undefined)
+  }
+
+  function expectation(kept: KeptDraft) {
+    return { mutationId: kept.mutation, specDigest: kept.specDigest, compilerRevision: kept.compilerRevision,
+      ...(kept.workflowId === undefined ? {} : { workflowId: kept.workflowId, versionId: kept.versionId }) }
+  }
+
+  effect function sendSave() {
+    const kept = try keptDraft()
+    const known = try catalog()
+    if (kept === undefined || known === undefined) {
+      drafts.send({ type: "unknownReply", seen: false }) catch () => undefined
+      return "unknown" satisfies ChangeOutcome
+    }
+    const answer = try (effect { try client.savePhone(kept.spec, known, expectation(kept)); return "saved" } catch (error) => error instanceof WorkflowTypedRejected ? "refused" : "unknown")
+    if (answer === "saved") {
+      drafts.send({ type: "agentApplied" }) catch () => undefined
+      drafts.send({ type: "receiptReply" }) catch () => undefined
+      store.remove(DRAFT_BYTES_KEY) catch () => undefined
+      store.remove(DRAFT_TEXT_KEY) catch () => undefined
+      return "saved" satisfies ChangeOutcome
+    }
+    if (answer === "refused") {
+      drafts.send({ type: "agentChange" }) catch () => undefined
+      drafts.send({ type: "refusalReply" }) catch () => undefined
+      return "refused" satisfies ChangeOutcome
+    }
+    drafts.send({ type: "unknownReply", seen: false }) catch () => undefined
+    return "unknown" satisfies ChangeOutcome
+  }
+
+  return {
+    open,
+    effect review(op: LifeOp) {
+      return (try (life.send({ type: "beginReview", op }) catch () => undefined)) !== undefined
+    },
+    effect confirm(name?: string, description?: string) {
+      const before = try life.get()
+      if (!before.reviewing) return "busy" satisfies ChangeOutcome
+      try Ref.set(nameRef, { name: name ?? "", description: description ?? "" })
+      if (before.unknownReview) {
+        life.send({ type: "confirmChange", mutation: try workflowUuid() }) catch () => undefined
+        const executions = try (client.executions(before.workflowId) catch () => [])
+        for (const run of executions.filter((r) => !r.finished)) client.cancel(run.id, run.workflowId) catch () => undefined
+        const after = try (readDefinition(before.workflowId) catch () => undefined)
+        life.send({ type: "cancelSettled", stopped: after !== undefined && !after.interrupted && !after.ongoing }) catch () => undefined
+        return "cancelling" satisfies ChangeOutcome
+      }
+      return try send(true)
+    },
+    effect refresh() {
+      const state = try life.get()
+      if (state.workflowId === "") return
+      const read = try (readDefinition(state.workflowId) catch () => undefined)
+      if (read === undefined) return
+      const kept = state.intent.mutation !== ""
+      const versionId = kept ? try seen.versionId(state.intent.workflowId, state.intent.fromVersion) : ""
+      const receipt = kept ? try (effect {
+        return state.intent.op === "RenameOp"
+          ? try client.reconcileMetadata(state.intent.workflowId, versionId, state.intent.mutation)
+          : try client.reconcileLifecycle(state.intent.workflowId, versionId, state.intent.mutation, state.intent.op === "RemoveOp" ? "remove" : "restore")
+      } catch () => null) : null
+      life.send({ type: "refreshed", version: read.version, removed: read.workflow.removed, cleaned: read.workflow.triggerCleanup === "complete",
+        ongoing: read.ongoing, interrupted: read.interrupted, appliedThis: receipt !== null && read.version > state.intent.fromVersion }) catch () => undefined
+    },
+    effect reviewResend() {
+      return (try (life.send({ type: "reviewResend" }) catch () => undefined)) !== undefined
+    },
+    effect resend() {
+      const sent = try (life.send({ type: "resend" }) catch () => undefined)
+      if (sent === undefined) return "busy" satisfies ChangeOutcome
+      return try send(false)
+    },
+    effect back() {
+      return (try (life.send({ type: "back" }) catch () => undefined)) !== undefined
+    },
+    effect setActive(workflowId: string, on: boolean) {
+      const workflow = try (client.detail(workflowId) catch () => undefined)
+      if (workflow === undefined) return "unknown" satisfies ChangeOutcome
+      if (on && manualTyped(workflow)) return "refused" satisfies ChangeOutcome
+      const answer = try (effect { return try (on ? client.activate(workflowId, workflow.versionId) : client.pause(workflowId, workflow.versionId)) } catch (error) =>
+        error instanceof WorkflowActivationRejected || error instanceof WorkflowPauseRejected ? "refused" : "unknown")
+      if (typeof answer === "string") return answer
+      return answer.id === workflowId && answer.active === on ? "saved" : "unknown"
+    },
+    effect describe(prompt: string) {
+      const known = try catalog()
+      if (known === undefined || known.generationProtocol !== 1) return { kind: "unavailable" } satisfies Described
+      const operations = known.palette.flatMap((group) => group.operations.filter((o) => o.available).map((o) => o.id))
+      const scoped = checkWorkflowScope(prompt, operations)
+      if (scoped.refused && scopeRefused(scoped.categories.map((c) => categoryOf[c]))) return { kind: "refused", message: scoped.message } satisfies Described
+      const kept = try keptDraft()
+      const spec = try (client.generatePhone(prompt, known, operations, kept?.spec) catch () => undefined)
+      if (spec === undefined || !validTrigger(typedTrigger(spec.trigger))) return { kind: "unavailable" } satisfies Described
+      if (kept !== undefined && !generatedKeepsSchedule(typedTrigger(kept.spec.trigger), typedTrigger(spec.trigger))) return { kind: "unavailable" } satisfies Described
+      const edited = try (drafts.send({ type: "edit" }) catch () => undefined)
+      if (edited === undefined) return { kind: "unavailable" } satisfies Described
+      const mutation = kept?.mutation ?? try workflowUuid()
+      const next: KeptDraft = { spec, mutation, specDigest: try workflowSpecDigest(spec), compilerRevision: known.compilerRevision,
+        ...(kept?.workflowId === undefined ? {} : { workflowId: kept.workflowId, versionId: kept.versionId }) }
+      const bytes = JSON.stringify(next)
+      if (bytes.length > 100000) return { kind: "unavailable" } satisfies Described
+      const wrote = try (store.set(DRAFT_BYTES_KEY, bytes) catch () => "failed")
+      if (wrote === "failed") drafts.send({ type: "storageFails" }) catch () => undefined
+      return { kind: "draft", spec } satisfies Described
+    },
+    effect save(workflowId?: string) {
+      const before = try drafts.get()
+      const tapped = try (drafts.send({ type: "saveTap" }) catch () => undefined)
+      if (tapped === undefined || (try drafts.get()).pending === before.pending) return "busy" satisfies ChangeOutcome
+      const kept = try keptDraft()
+      if (kept !== undefined) {
+        const target = workflowId === undefined ? undefined : try (client.detail(workflowId) catch () => undefined)
+        const mutation = try workflowUuid()
+        const next: KeptDraft = { ...kept, mutation, ...(target === undefined ? {} : { workflowId: target.id, versionId: target.versionId }) }
+        store.set(DRAFT_BYTES_KEY, JSON.stringify(next)) catch () => undefined
+      }
+      return try sendSave()
+    },
+    effect recover() {
+      const kept = try keptDraft()
+      if (kept === undefined) return "unknown" satisfies ChangeOutcome
+      const receipt = try (effect { return { found: try client.phoneSaveReceipt(expectation(kept)) } } catch () => undefined)
+      if (receipt === undefined) {
+        drafts.send({ type: "recover", answered: false }) catch () => undefined
+        return "unknown" satisfies ChangeOutcome
+      }
+      if (receipt.found !== null) drafts.send({ type: "agentApplied" }) catch () => undefined
+      drafts.send({ type: "recover", answered: true }) catch () => undefined
+      return receipt.found !== null ? "saved" : "refused"
+    },
+    effect resendSave() {
+      const before = try drafts.get()
+      const tapped = try (drafts.send({ type: "resendTap" }) catch () => undefined)
+      if (tapped === undefined) return "busy" satisfies ChangeOutcome
+      const after = try drafts.get()
+      if (!after.busy || before.busy) return after.committed ? "saved" : "busy"
+      return try sendSave()
+    },
+    effect discard() {
+      drafts.send({ type: "discardTap" }) catch () => undefined
+      if (!(try drafts.get()).draft) {
+        store.remove(DRAFT_BYTES_KEY) catch () => undefined
+        store.remove(DRAFT_TEXT_KEY) catch () => undefined
+      }
+    },
+    effect scheduleNote(spec: PhoneWorkflowSpec) {
+      const now = try Clock.currentTimeMillis
+      const trigger = spec.trigger
+      return {
+        manual: trigger.kind === "manual", missedAfterMinutes: missedWindowMs / 60000,
+        clockChange: trigger.kind === "time" ? phoneTriggerClockChangeNote(trigger, now) : "",
+      } satisfies ScheduleNote
+    },
+    effect keepText(text: string) {
+      const owner = try ownerOf()
+      if (owner === "") return false
+      const wrote = try (store.set(DRAFT_TEXT_KEY, JSON.stringify({ owner, text: text.slice(0, 20000) })) catch () => "failed")
+      return wrote !== "failed"
+    },
+    effect keptText() {
+      const owner = try ownerOf()
+      const raw = try (store.get(DRAFT_TEXT_KEY) catch () => undefined)
+      if (owner === "" || raw === undefined) return ""
+      const kept = try (Effect.try(() => JSON.parse(raw) as { owner?: unknown; text?: unknown }) catch () => undefined)
+      return kept !== undefined && keptTextShown(kept.owner === owner, typeof kept.text === "string") ? String(kept.text) : ""
+    },
+  }
+}), lifecycleStored(LIFECYCLE_KEY)), draftStored(DRAFT_KEY))

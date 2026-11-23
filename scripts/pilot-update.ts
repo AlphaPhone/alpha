@@ -1,8 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Update a provisioned pilot unit in place with a higher-versionCode signed APK.
  *
- *   bun scripts/pilot-update.ts --serial <adb serial> --alias <unit-name> \
+ *   node scripts/pilot-update.ts --serial <adb serial> --alias <unit-name> \
  *     --apk-manifest <new build>/apk-manifest.json [--variant launcher] \
  *     [--build release|debug] [--units test-results/pilot-units] [--stock-home <package/activity>]
  *
@@ -41,7 +41,7 @@ import { signerDigest } from "./apk.ts";
 import { readReleaseSigner } from "./build-android.ts";
 import { claimPilotInstall } from "./owner/pilot-install-lock.ts";
 import { adbFor, admitUnitApk, deviceFacts, installedApkSha256, PACKAGE, packageFacts, parseUnitArgs, requireConsistentApk, snapshotUnitApk } from "./provision-unit.ts";
-import { apkUpdateAdmission, compareDomains, DOMAIN_SCRIPT, inPlaceUpdateFailures, integrityQuery as sharedIntegrityQuery, parseDomainInventory, parseIntegrityExport, readbackInventory } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
+import { apkUpdateAdmission, compareDomains, DOMAIN_SCRIPT, inPlaceUpdateFailures, integrityQuery as sharedIntegrityQuery, parseDomainInventory, parseIntegrityExport, readbackInventory } from "./os-ported/os/apk-release-record.mjs";
 
 type Adb = ReturnType<typeof adbFor>;
 type Apk = ReturnType<typeof admitUnitApk>;
@@ -67,7 +67,7 @@ type Unit = {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 // The comparison, inventory and export parsers are shared with every product
-// (vendor/eliza/packages/os/scripts/android/apk-release-record.mjs); Alpha binds its package.
+// (scripts/os-ported/os/apk-release-record.mjs); Alpha binds its package.
 export { compareDomains, DOMAIN_SCRIPT, parseDomainInventory, parseIntegrityExport, readbackInventory };
 export const updateAdmission = apkUpdateAdmission;
 

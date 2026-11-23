@@ -1,0 +1,193 @@
+// spec/workflows/hostedResults.md, "Story: Be told when my digest is ready, and open exactly that result"; spec/workflows/hostedResults.md, "Story: Ask Alpha about a result from its notice"; spec/workflows/hostedResults.md, "Story: Receive my results while Alpha is in the background"; spec/workflows/hostedResults.md, "A tap that cannot open says why only once the account is known"
+import { Machine, initial, machine, stored, tapNotice, type TapNotice } from "../../gen/workflows__hostedResults.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { type OwnerScope, WorkflowApi } from "./api.vibe"
+import { sha256Hex } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
+import type { DigestResult } from "@elizaos/plugin-workflow/digests"
+import { BackgroundConfigured, PendingResult, PublishedPhase } from "./wire.schema.vibe"
+
+export const RESULTS_KEY = ownerKey("device", "workflows/hosted-results")
+
+const plugin = "AlphaHostedResults"
+
+/** A captured result tap, once resolved for the current owner. */
+export type ResolvedTap =
+  | { readonly kind: "none" }
+  | { readonly kind: "notice"; readonly notice: TapNotice }
+  | { readonly kind: "ready"; readonly runId: string; readonly workflowId: string; readonly question: boolean }
+
+/** Result notices: posted once per retained result, opened only for their owner, and delivered in the background on Android. */
+export service HostedResults {
+  bind(): void!!
+  /** Post a notice for each retained result not yet published. */
+  publish(results: ReadonlyArray<DigestResult>): void!!
+  /** Resolve the tap the notification shade captured, if any. */
+  pendingTap(): ResolvedTap!!
+  /** Open the tapped result: the notice is consumed. */
+  consume(): boolean!!
+  /** Results shown in the panel withdraw their notices. */
+  shown(runIds: ReadonlyArray<string>): void!!
+  /** Ask about the tapped result: review, recheck, then consume into a draft. */
+  askReview(sensitive: boolean): boolean!!
+  askSubmit(valid: boolean): void!!
+  askDismiss(explicit: boolean): void!!
+  /** Recheck the tap and consume it; whether a draft may be composed, which needs the owner who tapped to still be the current one. */
+  askContinue(canCompose: boolean): boolean!!
+  /** Configure background delivery for the current owner, or pause it. */
+  background(on: boolean): void!!
+  setNotifications(on: boolean): void!!
+}
+
+function keyOf(runId: string): string {
+  return runId
+}
+
+export const hostedResults = Layer.unwrap(effect {
+  const build = try Build
+  const native = build.info.variant !== "browser"
+  const mocks = build.info.testMocks
+  const kept = native || mocks ? stored(RESULTS_KEY, { ...initial, android: native }) : machine({ ...initial, android: false })
+  return Layer.provideMerge(Layer.effect(HostedResults, effect {
+    const held = try Machine
+    const agent = try WorkflowApi
+    const bridge = try Native
+    const scopeRef = try Ref.make<{ scope?: OwnerScope; hash: string; owner: string }>({ hash: "", owner: "" })
+    const digests = try Ref.make<ReadonlyMap<string, ReadonlyArray<string>>>(new Map())
+    const tap = try Ref.make<{ token: string; runId: string; workflowId: string; question: boolean }>({ token: "", runId: "", workflowId: "", question: false })
+
+    effect function bind() {
+      const scope = try (agent.scope() catch () => undefined)
+      if (scope === undefined) return (try Ref.get(scopeRef))
+      const hash = try (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+      const owner = `${scope.origin}|${scope.ownerId}|${scope.agentId}`
+      const before = try Ref.get(scopeRef)
+      if (before.owner !== owner) {
+        try Ref.set(scopeRef, { scope, hash, owner })
+        held.send({ type: "bindOwner", owner }) catch () => undefined
+      }
+      return try Ref.get(scopeRef)
+    }
+
+    effect function digestOrdinal(key: string, result: DigestResult) {
+      const bytes = try (tryPromise(() => sha256Hex(JSON.stringify(result))) catch () => "")
+      const known = try Ref.get(digests)
+      const list = known.get(key) ?? []
+      if (list.includes(bytes)) return list.indexOf(bytes) + 1
+      try Ref.set(digests, new Map([...known, [key, [...list, bytes]]]))
+      return list.length + 1
+    }
+
+    effect function readPending() {
+      if (!native) return {}
+      return try (effect { return try Schema.decodeUnknownEffect(PendingResult)(try bridge.invoke(plugin, "pendingResult", {})) } catch () => ({}))
+    }
+
+    return {
+      bind: effect () => { try bind() },
+      effect publish(results: ReadonlyArray<DigestResult>) {
+        if (!native && !mocks) return
+        const bound = try bind()
+        if (bound.scope === undefined) return
+        for (const result of results) {
+          const key = keyOf(result.runId)
+          const digest = try digestOrdinal(key, result)
+          const before = (try held.get()).notices.find((n) => n.key === key)
+          if (before !== undefined && before.digest === digest) continue
+          if (native) {
+            const phase = try (effect {
+              return (try Schema.decodeUnknownEffect(PublishedPhase)(try bridge.invoke(plugin, "publishResult", {
+                scope: bound.hash, origin: bound.scope.origin, ownerId: bound.scope.ownerId, agentId: bound.scope.agentId,
+                runId: result.runId, workflowId: result.workflowId, workflowVersionId: result.workflowVersionId,
+              }))).phase
+            } catch () => "rejected")
+            if (!["posted", "opened", "denied", "uncertain"].includes(phase)) continue
+          }
+          held.send({ type: "publish", key, owner: bound.owner, workflowId: result.workflowId, digest }) catch () => undefined
+        }
+      },
+      effect pendingTap() {
+        const bound = try bind()
+        const pending = try readPending()
+        if (pending.token === undefined || pending.runId === undefined) return { kind: "none" } satisfies ResolvedTap
+        const scope = bound.scope
+        const other = scope === undefined || pending.scope !== bound.hash || pending.ownerId !== scope.ownerId || pending.agentId !== scope.agentId || pending.origin !== scope.origin
+        if (scope === undefined || other || pending.retained !== true) return { kind: "notice", notice: tapNotice(scope !== undefined, other) } satisfies ResolvedTap
+        held.send({ type: "capture", key: keyOf(pending.runId), asks: pending.question === true }) catch () => undefined
+        try Ref.set(tap, { token: pending.token, runId: pending.runId, workflowId: pending.workflowId ?? "", question: pending.question === true })
+        return { kind: "ready", runId: pending.runId, workflowId: pending.workflowId ?? "", question: pending.question === true } satisfies ResolvedTap
+      },
+      effect consume() {
+        const state = try held.get()
+        const captured = try Ref.get(tap)
+        if (state.pending === "" || captured.token === "") return false
+        if (native) {
+          const ok = try (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false)
+          if (!ok) return false
+        }
+        held.send({ type: "consume", token: state.token }) catch () => undefined
+        try Ref.set(tap, { token: "", runId: "", workflowId: "", question: false })
+        return true
+      },
+      effect shown(runIds: ReadonlyArray<string>) {
+        const bound = try bind()
+        for (const runId of runIds) held.send({ type: "shownInPanel", key: keyOf(runId) }) catch () => undefined
+        if (native && runIds.length > 0) bridge.invoke(plugin, "withdrawResult", { scope: bound.hash, runIds: runIds.slice(0, 200) }) catch () => undefined
+      },
+      effect askReview(sensitive: boolean) {
+        return (try (held.send({ type: "reviewQuestion", sensitive }) catch () => undefined)) !== undefined
+      },
+      effect askSubmit(valid: boolean) {
+        held.send({ type: "submitQuestion", valid }) catch () => undefined
+      },
+      effect askDismiss(explicit: boolean) {
+        held.send({ type: "dismissQuestion", explicit }) catch () => undefined
+        const captured = try Ref.get(tap)
+        if (native && !explicit && captured.token !== "") bridge.invoke(plugin, "releaseResultQuestion", { token: captured.token }) catch () => undefined
+      },
+      effect askContinue(canCompose: boolean) {
+        const tappedBy = (try Ref.get(scopeRef)).owner
+        const captured = try Ref.get(tap)
+        const fresh = try readPending()
+        const exact = !native || (fresh.token === captured.token && fresh.runId === captured.runId && fresh.retained === true && fresh.question === true)
+        held.send({ type: "recheckAnswered", exact, canCompose }) catch () => undefined
+        if ((try held.get()).question !== "QuestionConsume") return false
+        const ok = native ? try (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false) : true
+        const current = tappedBy !== "" && (try bind()).owner === tappedBy
+        held.send({ type: "questionConsumed", ok, live: current }) catch () => undefined
+        return ok && current
+      },
+      effect background(on: boolean) {
+        const bound = try bind()
+        if (!on) {
+          held.send({ type: "pauseBackground" }) catch () => undefined
+          if (native) bridge.invoke(plugin, "disableBackground", { sessionId: bound.hash }) catch () => undefined
+          return
+        }
+        const started = try (held.send({ type: "startBackground" }) catch () => undefined)
+        if (started === undefined || !native || bound.scope === undefined) return
+        const attemptId = newId()
+        const begun = try (effect { try bridge.invoke(plugin, "beginBackground", { attemptId }); return true } catch () => false)
+        held.send({ type: "begun", ok: begun }) catch () => undefined
+        if ((try held.get()).background !== "Configuring") {
+          bridge.invoke(plugin, "cancelBackground", { attemptId }) catch () => undefined
+          return
+        }
+        const configured = try (effect {
+          try Schema.decodeUnknownEffect(BackgroundConfigured)(try bridge.invoke(plugin, "configureBackground", {
+            attemptId, mode: "resident", origin: bound.scope.origin, ownerId: bound.scope.ownerId, agentId: bound.scope.agentId, sessionId: bound.hash,
+          }))
+          return true
+        } catch () => false)
+        held.send({ type: "configured", ok: configured }) catch () => undefined
+        if (!configured) bridge.invoke(plugin, "cancelBackground", { attemptId }) catch () => undefined
+      },
+      effect setNotifications(on: boolean) {
+        held.send({ type: "setNotifications", on }) catch () => undefined
+        if (native && on) bridge.invoke(plugin, "enable", {}) catch () => undefined
+      },
+    }
+  }), kept)
+})

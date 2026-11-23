@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {stageAndroidNative, finalizeAndroidNative} from '../vendor/eliza/packages/os/scripts/android/android-native-admission.mjs';
-import type {LauncherDescriptor} from '../vendor/eliza/packages/os/scripts/android/stage-launcher-overlay.ts';
+import {stageAndroidNative, finalizeAndroidNative} from './os-ported/os/android-native-admission.mjs';
+import type {LauncherDescriptor} from '../vendor/eliza/packages/os/aosp/stage-launcher-overlay.ts';
 import {alphaNativeOptions} from './aosp-native-admission.ts';
 
 // Cuttlefish is an explicit x86_64 image target; a fat APK never selects the ABI.

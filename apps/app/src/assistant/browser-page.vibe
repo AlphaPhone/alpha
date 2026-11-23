@@ -1,0 +1,16 @@
+// spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"
+import { asksForPage, sendsBrowserPage } from "../../gen/assistant__context.effect.vibe"
+import type { BrowserPage, BrowserPages, ObservedTab, PageObservation } from "./ports.vibe"
+
+/** The `browser-tab` a turn's observation selects for the tab Browser shows. */
+export function browserTabObject(tab: ObservedTab): { readonly kind: "browser-tab"; readonly id: string; readonly revision: string } {
+  return { kind: "browser-tab", id: tab.id, revision: tab.revision }
+}
+
+/** The page a turn sends: Browser's own read of the observed tab, asked once only for an observed turn on a Browser tab, sent unchanged only to a peer whose fresh status declares `browserPage`. */
+export effect function pageForTurn(pages: BrowserPages.Shape, observed: boolean, observation: PageObservation, tab: ObservedTab | undefined, peerDeclares: boolean) {
+  const onBrowserTab = tab !== undefined && observation.view === "browser"
+  if (!asksForPage(observed, onBrowserTab) || !peerDeclares) return undefined
+  const page: BrowserPage | undefined = try pages.forTurn(observation, peerDeclares)
+  return sendsBrowserPage(observed, onBrowserTab, page !== undefined, peerDeclares) ? page : undefined
+}

@@ -1,0 +1,50 @@
+// spec/account/enrollment.md, "A registration is used only when it names the connected agent as the installation"; spec/account/enrollment.md, "The enabled views are agreed against the profile revision the phone read"; spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
+
+/** The device credential the secure slot keeps: the phone's key, and the installation and enrollment the agent last confirmed for it. */
+export schema DeviceCredential {
+  key: string
+  installationId?: string
+  enrollmentId?: string
+}
+
+/** `POST /api/client-devices/register`: the installation, the enrollment, the capabilities the agent offers and its view profile version. */
+export schema Registered {
+  installationId: string
+  enrollmentId: string
+  capabilities?: Array<string>
+  viewProfileVersion?: number
+  userTextFormatVersion?: number
+}
+
+/** One enabled-view profile as the agent keeps it. */
+export schema ViewProfile {
+  version: number
+  revision: string
+  views: Array<string>
+}
+
+/** `GET /api/client-devices/view-profile`: the views the agent supports and the profile it holds, null for none. */
+export schema ViewDiscovery {
+  version: number
+  supportedViews: Array<string>
+  profile: ViewProfile | null
+}
+
+/** `POST /api/client-devices/view-profile`: the profile the agent now holds. */
+export schema ViewWritten {
+  version: number
+  profile: ViewProfile | null
+}
+
+/** `GET /api/client-devices/context`: the enrollment the agent committed for the headers this request carried. */
+export schema DeviceContext {
+  agentId: string
+  installationId: string
+  enrollmentId: string
+  subjectUserId: string
+}
+
+/** `workflowPresentationCapabilities` of the notification and voice plugins: the presentation protocol their bridge code supports. */
+export schema PresentationAnswer {
+  protocol?: number
+}

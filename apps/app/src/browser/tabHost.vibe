@@ -1,0 +1,59 @@
+// spec/browser/session.md, "A navigation loads the tab's WebView, creating it first when the tab has none"; spec/browser/webSurface.md, "Story: Show a page in a frame I can trust"
+import { Build } from "../platform/build.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../platform/native.vibe"
+import { newId } from "../platform/ids.ts"
+import { WebTabHost } from "./web-surface.ts"
+
+/** The Capacitor name of Alpha's native tab host. */
+export const PLUGIN = "AlphaBrowser"
+
+/** A tab-host call that failed; `unavailable` when this build or device has no tab host. */
+export error BrowserCallFailed { method: string; message: string; unavailable: boolean }
+
+/** The events the tab host sends. */
+export type HostEvent = "stateChanged" | "tabOpened" | "tabClosed" | "notice" | "findResult" | "fullscreen" | "showDownloads"
+
+/** The tab host of this document: the native `AlphaBrowser` plugin, or the browser build's frame surface. */
+export service TabHost {
+  /** This document's host session; every call carries it and every event of another session is dropped. */
+  readonly session: string
+  /** Whether the pages are native WebViews on the device. */
+  readonly onDevice: boolean
+  /** One call with this session; its answer is untrusted until decoded. */
+  call(method: string, args?: Record<string, unknown>): unknown!BrowserCallFailed
+  /** The events the host sends under `name`, of every session. */
+  events(name: HostEvent): Stream.Stream<unknown>
+}
+
+/** Whether an event names this document's session. */
+export function ours(session: string, event: unknown): boolean {
+  return typeof event === "object" && event !== null && "session" in event && event.session === session
+}
+
+/** The tab host this build has. */
+export const tabHostLayer = Layer.effect(TabHost, effect {
+  const native = try Native
+  const { info } = try Build
+  const session = newId()
+  if (info.variant === "browser" || !(try native.available(PLUGIN))) {
+    const host = new WebTabHost(session)
+    return {
+      session,
+      onDevice: false,
+      call: (method: string, args: Record<string, unknown> = {}) =>
+        tryPromise({ try: () => host.call(method, { ...args, session }), catch: (cause) => new BrowserCallFailed({ method, message: cause instanceof Error ? cause.message : String(cause), unavailable: false }) }),
+      events: (name: HostEvent) =>
+        Stream.callback<unknown>((queue) => acquireRelease(sync(() => host.subscribe(name, (event) => { Queue.offerUnsafe(queue, event) })), (off) => sync(() => { off() }))),
+    }
+  }
+  return {
+    session,
+    onDevice: true,
+    call: (method: string, args: Record<string, unknown> = {}) =>
+      native.invoke(PLUGIN, method, { ...args, session }) catch effect (error) => match (error) {
+        when NativeUnavailable: throw new BrowserCallFailed({ method, message: "Unavailable", unavailable: true });
+        when NativeFailed: throw new BrowserCallFailed({ method, message: error.message, unavailable: false });
+      },
+    events: (name: HostEvent) => Stream.catch(native.listen(PLUGIN, name), () => Stream.empty),
+  }
+})

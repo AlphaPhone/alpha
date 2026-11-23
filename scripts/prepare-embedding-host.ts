@@ -15,7 +15,7 @@ const root=path.resolve(import.meta.dirname,'..'),upstream=path.join(root,'vendo
 const args=process.argv.slice(2),option=(name: string)=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
 for(let i=0;i<args.length;i++){if(args[i]==='--build'||args[i]==='--remap-build-path')continue;if(['--fork','--output','--abi','--engine'].includes(args[i])){if(!args[++i]||args[i].startsWith('--'))throw Error('Missing option value');}else throw Error('Unknown option');}
 const abi=option('--abi')||'arm64-v8a',forkInput=option('--fork'),outputInput=option('--output');
-if(!isAndroidAbi(abi)||!forkInput||!outputInput)throw Error('Usage: bun scripts/prepare-embedding-host.ts --fork <existing pinned checkout> --output <new isolated directory> [--abi arm64-v8a|x86_64] [--build] [--remap-build-path]');
+if(!isAndroidAbi(abi)||!forkInput||!outputInput)throw Error('Usage: node scripts/prepare-embedding-host.ts --fork <existing pinned checkout> --output <new isolated directory> [--abi arm64-v8a|x86_64] [--build] [--remap-build-path]');
 const fork=fs.realpathSync(forkInput),output=path.resolve(outputInput);
 const within=(parent: string,child: string)=>{const relative=path.relative(parent,child);return relative===''||!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);};
 for(let p=output;p!==path.dirname(p);p=path.dirname(p))if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())throw Error('Output must not traverse a symlink');
@@ -24,7 +24,7 @@ if(fs.existsSync(output))throw Error('Output already exists; preserve prior arti
 const git=(directory: string,...command: string[])=>execFileSync('git',['-C',directory,...command],{encoding:'utf8'}).trim();
 const pin=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;
 if(git(upstream,'rev-parse','HEAD')!==pin)throw Error('Unexpected Eliza pin');
-const forkPath='plugins/plugin-local-inference/native/llama.cpp';
+const forkPath='packages/os/android/local-inference/llama.cpp';
 const forkPin=git(upstream,'ls-tree',pin,forkPath).match(/^160000 commit ([a-f0-9]{40})\t/)?.[1];
 if(!forkPin||git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact Eliza gitlink');
 if(git(fork,'submodule','status','--recursive').split('\n').some(line=>line&&/^[-+U]/.test(line)))throw Error('Engine nested submodules must already be initialized at their pins; no downloads are performed');
@@ -60,13 +60,13 @@ for(const relative of producerInputPaths){
  producerInputs.push({path:relative,sha256:digest});
 }
 fs.mkdirSync(path.dirname(path.join(staging,forkPath)),{recursive:true});fs.symlinkSync(fork,path.join(staging,forkPath),'dir');
-const nativeSource=path.join(staging,'packages/app/platforms/android/app/src/main/elizavoice-jni');
+const nativeSource=path.join(staging,'packages/os/android/local-inference/elizavoice-jni');
 const suppliedEngine=option('--engine');
-if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(staging,'packages/app/platforms/android/app/src/main/jniLibs',abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
+if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(staging,'packages/os/android/local-inference/jniLibs',abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
 const commands=[
- ...(!suppliedEngine?[[process.execPath,path.join(staging,'packages/app/scripts/stage-elizavoice-lib.ts'),'--abi',abi,'--variant','cpu']]:[]),
+ ...(!suppliedEngine?[[process.execPath,path.join(staging,'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts'),'--abi',abi,'--variant','cpu']]:[]),
  ['cmake','-S',nativeSource,'-B',path.join(output,'jni-build'),'-G','Ninja',`-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DANDROID_ABI=${abi}`,'-DANDROID_PLATFORM=android-23','-DCMAKE_BUILD_TYPE=Release',...nativeCmakeOptions(jniBinding),`-DELIZAVOICE_FFI_INCLUDE_DIR=${path.join(fork,'tools/omnivoice/include')}`],
- ['cmake','--build',path.join(output,'jni-build'),'--target','elizavoicejni','-j','2'],
+ ['cmake','--build',path.join(output,'jni-build'),'--target','paradeevoicejni','-j','2'],
 ];
 // Without a remap the compiler embeds this output directory in the libraries (__FILE__ in the
 // engine's assertions), so the bytes can only be reproduced at the same absolute path.
@@ -79,14 +79,14 @@ fs.writeFileSync(path.join(output,'PREPARATION.json'),JSON.stringify(receipt,nul
 if(args.includes('--build')){
  for(const [executable,...argv] of commands)execFileSync(executable,argv,{cwd:staging,env:{...process.env,...receipt.env},stdio:'inherit'});
  const tools=path.join(ndk,'toolchains/llvm/prebuilt',process.platform==='darwin'?'darwin-x86_64':'linux-x86_64','bin');
- const libraries=[path.join(staging,'packages/app/platforms/android/app/src/main/jniLibs',abi,'libelizainference.so'),path.join(staging,'packages/app/platforms/android/app/src/main/jniLibs',abi,'libc++_shared.so'),path.join(output,'jni-build/libelizavoicejni.so')];
+ const libraries=[path.join(staging,'packages/os/android/local-inference/jniLibs',abi,'libelizainference.so'),path.join(staging,'packages/os/android/local-inference/jniLibs',abi,'libc++_shared.so'),path.join(output,'jni-build/libparadeevoicejni.so')];
  receipt.libraries=libraries.map(file=>{
   const symbols=execFileSync(path.join(tools,'llvm-nm'),['-D','--defined-only',file],{encoding:'utf8',maxBuffer:16*1024*1024});
   const elf=execFileSync(path.join(tools,'llvm-readelf'),['-W','-h','-l','-d',file],{encoding:'utf8'});
   if(!elf.includes(abi==='arm64-v8a'?'AArch64':'Advanced Micro Devices X86-64')||/NEEDED[^\n]*musl/i.test(elf))throw Error('Wrong native engine ABI');
-  const required=path.basename(file)==='libelizainference.so'?['eliza_inference_embed','eliza_inference_embed_with_options','eliza_inference_abi_version']:path.basename(file)==='libelizavoicejni.so'?nativeRequiredSymbols(jniBinding):[];
+  const required=path.basename(file)==='libelizainference.so'?['eliza_inference_embed','eliza_inference_embed_with_options','eliza_inference_abi_version']:path.basename(file)==='libparadeevoicejni.so'?nativeRequiredSymbols(jniBinding):[];
   for(const symbol of required)if(!symbols.split('\n').some(line=>line.trim().endsWith(' '+symbol)))throw Error('Required embedding symbol missing');
-  if(path.basename(file)==='libelizavoicejni.so')verifyNativeSymbols(symbols,jniBinding);
+  if(path.basename(file)==='libparadeevoicejni.so')verifyNativeSymbols(symbols,jniBinding);
   const loads=elf.split('\n').filter(line=>/^\s*LOAD\s/.test(line));
   if(!loads.length||loads.some(line=>parseInt(line.trim().split(/\s+/).at(-1) ?? '',16)<16384))throw Error('Native library is not 16 KiB compatible');
   return {path:file,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),bytes:fs.statSync(file).size,requiredSymbols:required,alignment16KiB:true};

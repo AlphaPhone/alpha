@@ -1,0 +1,85 @@
+// spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"
+import { writtenDigits, photoRequestLimit, photoPrefixLimit, type Target } from "../../gen/assistant__review.effect.vibe"
+
+const numberRun = /\+?\(?\d[\d\s().-]{5,}\d/g
+const controls = /[\u0000-\u001f\u007f‎‏‪-‮⁦-⁩]/
+const photoVerb = /\b(take|snap|capture|shoot)\b[\s\S]{0,40}\b(photo|picture|pic|selfie|shot)\b/i
+const politeAsk = /^(can|could|would|will) you (please )?/i
+
+/** The digits of a phone number, without formatting. */
+export function digitsOf(text: string): string {
+  return text.replace(/\D/g, "")
+}
+
+/** Two numbers are one line when their digits agree, or their last ten do. */
+export function sameLine(a: string, b: string): boolean {
+  const x = digitsOf(a)
+  const y = digitsOf(b)
+  return x !== "" && (x === y || (x.length >= 10 && y.length >= 10 && x.slice(-10) === y.slice(-10)))
+}
+
+/** The owner's message without the text body it asks to send, removed as whole words from its last occurrence. */
+export function withoutBody(text: string, body: string | undefined): string {
+  const words = (body ?? "").trim()
+  if (words === "") return text
+  const at = text.lastIndexOf(words)
+  if (at < 0) return text
+  const before = text.charAt(at - 1)
+  const after = text.charAt(at + words.length)
+  const whole = (at === 0 || /\W/.test(before)) && (after === "" || /\W/.test(after))
+  return whole ? text.slice(0, at) + text.slice(at + words.length) : text
+}
+
+/** The phone numbers the owner wrote, each with at least seven digits. */
+export function writtenNumbers(text: string): readonly string[] {
+  return (text.match(numberRun) ?? []).filter((run) => digitsOf(run).length >= writtenDigits)
+}
+
+/** What a proposal targets, against what the owner wrote, as spec/assistant/review.md models it. */
+export function targetOf(text: string, proposed: { readonly number?: string; readonly contactName?: string }): Target {
+  if (proposed.number !== undefined) return { tag: "NumberTarget", matches: writtenNumbers(text).some((written) => sameLine(written, proposed.number ?? "")) }
+  if (proposed.contactName !== undefined) {
+    const name = proposed.contactName.trim().toLowerCase()
+    return { tag: "ContactTarget", nameWritten: name !== "" && text.toLowerCase().includes(name) }
+  }
+  return { tag: "NoTarget" }
+}
+
+/** Whether a keypad number was typed by the owner in this message. */
+export function keypadTyped(text: string, number: string): boolean {
+  return writtenNumbers(text).some((written) => sameLine(written, number)) || (digitsOf(number) !== "" && digitsOf(text).includes(digitsOf(number)))
+}
+
+/** Whether the owner's own message asks for a photo now. */
+export function ownPhotoRequest(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length === 0 || trimmed.length > photoRequestLimit || controls.test(trimmed)) return false
+  const found = photoVerb.exec(trimmed)
+  if (found === null) return false
+  const prefix = trimmed.slice(0, found.index).replace(politeAsk, "")
+  return prefix.length <= photoPrefixLimit && !prefix.includes("?")
+}
+
+/** Whether the address a proposal opens is one the owner typed. */
+export function addressTyped(text: string, url: string): boolean {
+  const host = hostOf(url)
+  return host !== "" && text.toLowerCase().includes(host.replace(/^www\./, ""))
+}
+
+/** Whether a proposed web search uses the owner's own words. */
+export function searchTyped(text: string, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 0)
+  const said = text.toLowerCase()
+  return words.length > 0 && words.every((word) => said.includes(word))
+}
+
+/** Whether the owner's message is a command to open or search, not a question about a site. */
+export function browserCommand(text: string): boolean {
+  return /^\s*(please\s+)?(open|go to|visit|search( the web)? for|look up|show me)\b/i.test(text) || /\bin (the browser|a new tab)\b/i.test(text)
+}
+
+/** The host of an https address, or nothing. */
+export function hostOf(url: string): string {
+  const found = /^https:\/\/([^/?#:@\s]+)(?::\d+)?(?:[/?#]|$)/i.exec(url)
+  return found === null ? "" : (found[1] ?? "").toLowerCase()
+}

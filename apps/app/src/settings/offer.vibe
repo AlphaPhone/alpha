@@ -1,0 +1,68 @@
+// spec/settings/updates.md, "An offer is for this launcher and signer, newer than the installed version, complete and HTTPS"
+import { admitOffer } from "../../gen/settings__updates.effect.vibe"
+import { UpdateIndex, UpdateRow } from "./native.schema.vibe"
+
+const HEX64 = /^[0-9a-f]{64}$/
+
+/** The update one feed row offers this install. */
+export interface Offer {
+  readonly versionCode: number
+  readonly versionName: string
+  readonly apkUrl: string
+  readonly sha256: string
+  readonly sizeBytes: number
+  readonly notes: string
+}
+
+/** What the installed launcher is, as Android reported it. */
+export interface Installed { readonly versionCode: number; readonly launcher: boolean; readonly signerSha256: string }
+
+function https(url: string): boolean {
+  const parsed = URL.canParse(url) ? new URL(url) : undefined
+  return parsed !== undefined && parsed.protocol === "https:" && parsed.username === "" && parsed.password === ""
+}
+
+function rows(value: unknown): ReadonlyArray<typeof UpdateRow.Type> | undefined {
+  const index = Schema.decodeUnknownOption(UpdateIndex)(value)
+  if (Option.isSome(index)) {
+    const { releases } = index.value
+    const pairs = new Set(releases.map((r) => `${r.variant}:${r.signerSha256}`))
+    const valid = releases.length >= 1 && releases.length <= 16 && pairs.size === releases.length
+      && releases.every((r) => r.variant === "launcher" && HEX64.test(r.signerSha256))
+    return valid ? releases : undefined
+  }
+  const single = Schema.decodeUnknownOption(UpdateRow)(value)
+  return Option.isSome(single) ? [single.value] : undefined
+}
+
+/** The offer a parsed feed holds for this install, or undefined unless it is complete, newer and for this launcher and signer. */
+export function offerFor(feed: unknown, installed: Installed): Offer | undefined {
+  const row = rows(feed)?.find((r) => r.variant === "launcher" && r.signerSha256 === installed.signerSha256)
+  if (row === undefined) return undefined
+  const admitted = admitOffer({
+    launcher: installed.launcher, signerMatches: HEX64.test(row.signerSha256),
+    versionCode: Number.isSafeInteger(row.versionCode) ? row.versionCode : 0,
+    installed: Number.isSafeInteger(installed.versionCode) ? installed.versionCode : Number.MAX_SAFE_INTEGER,
+    https: https(row.apkUrl), digest: HEX64.test(row.sha256),
+    sizeBytes: Number.isSafeInteger(row.sizeBytes) ? row.sizeBytes : 0, urlChars: row.apkUrl.length,
+  })
+  if (!admitted) return undefined
+  return {
+    versionCode: row.versionCode,
+    versionName: typeof row.versionName === "string" && /^[^\u0000-\u001f\u007f]{1,64}$/.test(row.versionName) ? row.versionName : "",
+    apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes,
+    notes: typeof row.notes === "string" && row.notes.length <= 500 ? row.notes : "",
+  }
+}
+
+/** A feed only replaces a saved one when every row in it is complete. */
+export function completeFeed(text: string): unknown {
+  const value = do { try { JSON.parse(text) as unknown } catch { undefined } }
+  const all = rows(value)
+  return all !== undefined && all.every((r) => offerFor(r, { versionCode: 0, launcher: r.variant === "launcher", signerSha256: r.signerSha256 }) !== undefined) ? value : undefined
+}
+
+/** A 64-hex digest Android computed over the raw feed bytes. */
+export function isDigest(value: unknown): value is string {
+  return typeof value === "string" && HEX64.test(value)
+}

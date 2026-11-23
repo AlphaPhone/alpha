@@ -12,13 +12,13 @@ import {generateAndroidConsumerHost} from '../vendor/eliza/packages/app/scripts/
 import {RESIDENT_NOTIFICATION_CLASSES, residentHelperKind, residentHostIdentity, rewriteResidentClass} from '../vendor/eliza/packages/app/scripts/mobile/android/resident-host-sources.mjs';
 import {HOST_DESCRIPTOR, PATCHED_NATIVE_ROOT, hostIdentity, hostProfile, mapReferences, readHostDescriptor, stageOwnerRouteAsset} from '../scripts/android-host.ts';
 
-import {serializeOwnerRouteTable} from '../apps/app/src/product/owner-route-table.ts';
 import {androidIdentity, RETAINED_ANDROID_APP_ID} from '../scripts/android-identity.ts';
 import {verifyAndroidIdentity} from '../scripts/android-identity.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const identity = JSON.parse(fs.readFileSync(path.join(ROOT, 'app.config.json'), 'utf8'));
 const descriptor = readHostDescriptor(ROOT);
+const OWNER_ROUTES = 'apps/app/src/platform/owner-routes.json';
 
 function references(value, found = []) {
  if (Array.isArray(value)) value.forEach(item => references(item, found));
@@ -34,6 +34,8 @@ function consumer(t) {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-android-host-'));
  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
  const staging = path.join(root, '.eliza/patched-native/test');
+ fs.mkdirSync(path.dirname(path.join(root, OWNER_ROUTES)), {recursive: true});
+ fs.copyFileSync(path.join(ROOT, OWNER_ROUTES), path.join(root, OWNER_ROUTES));
  const ownerRouteAsset = stageOwnerRouteAsset(root);
  for (const reference of references(descriptor.profile)) {
   const base = reference.root === 'consumer' ? root : reference.root === PATCHED_NATIVE_ROOT ? staging : null;
@@ -100,11 +102,11 @@ fixtureTest('no test-mocks source set is attached and product admission runs bef
   {source: fs.realpathSync(path.join(staging, '.source.json')), name: 'native-patches.json'},
   {source: fs.realpathSync(path.join(root, '.eliza/generated-android/owner-routes.json')), name: 'owner-routes.json'},
  ]);
- assert.equal(fs.readFileSync(profile.assetFiles[1].source, 'utf8'), serializeOwnerRouteTable());
+ assert.equal(fs.readFileSync(profile.assetFiles[1].source, 'utf8'), fs.readFileSync(path.join(ROOT, OWNER_ROUTES), 'utf8'));
  assert.deepEqual(profile.generatedSources, [{sourceSet: 'main', kind: 'java', path: 'generated/local-agent/java'}]);
  assert.deepEqual(profile.appScripts, [fs.realpathSync(path.join(root, 'android/app/product.gradle'))]);
  assert.deepEqual(profile.generationInputs.map(input => path.relative(fs.realpathSync(root), input.file)).sort(),
-  ['.eliza/generated-android/owner-routes.json', 'android/consumer-host.json', 'android/upstream-native-sources.json', 'app.config.json', 'apps/app/src/product/owner-route-table.ts', 'scripts/android-host.ts', 'scripts/android-identity.ts', 'scripts/prepare-patched-native.ts', 'upstream.lock.json']);
+  ['.eliza/generated-android/owner-routes.json', 'android/consumer-host.json', 'android/upstream-native-sources.json', 'app.config.json', 'apps/app/src/platform/owner-routes.json', 'scripts/android-host.ts', 'scripts/android-identity.ts', 'scripts/prepare-patched-native.ts', 'upstream.lock.json']);
 });
 
 test('the host links its native-only secure store transitively and keeps fixture modules separate', t => {

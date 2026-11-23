@@ -1,0 +1,26 @@
+// spec/telephony/callBar.md, "The bar shows only on a trusted reading, where it may show, while a call is live"; spec/telephony/common.md, "A live call that cannot be ruled out as an emergency call holds the gate"
+const CallId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
+const ConnectedAt = Schema.NullOr(Schema.Finite.check(Schema.isGreaterThan(0)))
+
+/** One call as `AlphaOngoingCall` reports it; a reading with any other field is refused (`exact`). */
+export const OngoingCallRow = Schema.Struct({
+  id: CallId,
+  state: Schema.Literals(["dialing", "ringing", "active", "held"]),
+  connectedAt: ConnectedAt,
+})
+
+/** The whole reading: at most eight calls. */
+export const OngoingCalls = Schema.Struct({ calls: Schema.Array(OngoingCallRow).check(Schema.isMaxLength(8)) })
+
+const Tri = Schema.NullOr(Schema.Boolean)
+
+/** Telecom's call-state reading from `AlphaCallState`; a reading that contradicts the emergency rule is re-derived. */
+export const CallStateReading = Schema.Struct({
+  inCall: Tri,
+  emergency: Tri,
+  emergencyLive: Schema.Boolean,
+  watching: Schema.Boolean,
+})
+
+/** Decoding that refuses a field the shape does not name, as the native readings must be exact. */
+export const exact = { onExcessProperty: "error" } as const

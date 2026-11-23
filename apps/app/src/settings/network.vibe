@@ -1,0 +1,67 @@
+// spec/settings/network.md, "Story: Join a nearby network"; spec/settings/network.md, "Story: See whether I am online"
+import { type JoinPhase, type Nearby, type Scan, type Security, Machine } from "../../gen/settings__network.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { attempt, call } from "./call.vibe"
+import { WifiConnectivity, WifiJoin, WifiScan } from "./native.schema.vibe"
+
+const WIRE: Record<Security, string> = { OpenNet: "open", EnhancedOpen: "owe", Wpa2: "wpa2", Wpa3: "wpa3", Enterprise: "eap", Wep: "wep" }
+const PARSED: Record<string, Security> = { open: "OpenNet", owe: "EnhancedOpen", wpa2: "Wpa2", wpa3: "Wpa3", eap: "Enterprise", wep: "Wep" }
+const ANSWER: Record<string, JoinPhase> = {
+  connected: "Joined", captivePortal: "Portal", declined: "Declined", unverified: "Unverified",
+  notConnected: "NotConnected", wrongPassword: "WrongPassword", savedNetwork: "AlreadySaved",
+}
+
+/** Nearby Wi-Fi, Android's approved join and connectivity, on the ElizaWiFi bridge. */
+export service Wifi {
+  scan(): void!!
+  /** Ask Android to save `name`; `passphrase` goes only to Android's dialog and is not kept. */
+  join(name: string, security: Security, passphrase: string): void!!
+  readConnectivity(): void!!
+  /** Android's Internet panel, where a network it already saved is selected. */
+  openPanel(): void!!
+}
+
+function scanRefusal(reason: string): Scan {
+  return /LOCATION_PERMISSION/.test(reason) ? "NeedsLocation" : /LOCATION_DISABLED/.test(reason) ? "LocationOff" : "ScanUnavailable"
+}
+
+/** Wifi over the network Machine it is given. */
+export const wifi = Layer.effect(Wifi, effect {
+  const held = try Machine
+  const native = try Native
+  const within = <A, E>(program: A!E!Native) => Effect.provideService(program, Native, native)
+  return {
+    scan: () => within(effect {
+      try (held.send({ type: "beginScan" }) catch () => undefined)
+      const found = try (call("ElizaWiFi", "listAvailableNetworks", WifiScan, { joinable: false, limit: 30 }) catch effect (error) => {
+        try (held.send({ type: "scanAnswered", scan: scanRefusal(error.reason), networks: [] }) catch () => undefined)
+        return undefined
+      })
+      if (found === undefined) return
+      const networks: Nearby[] = found.networks.filter((n) => n.ssid.trim() !== "").map((n) => {
+        const security = n.security === undefined ? (n.secured ? "Wpa2" : "OpenNet") : PARSED[n.security]
+        return { name: n.ssid, secured: n.secured, joinable: security !== "Enterprise" && security !== "Wep", strength: Math.round(n.rssi), security }
+      })
+      try (held.send({ type: "scanAnswered", scan: "Found", networks }) catch () => undefined)
+    }),
+    join: (name: string, security: Security, passphrase: string) => within(effect {
+      const characters = passphrase.length
+      const printable = /^[\x20-\x7e]*$/.test(passphrase)
+      const asked = try (held.send({ type: "requestJoin", name: name.trim(), security, characters, printable }) catch () => undefined)
+      if (asked === undefined || asked.join !== "AwaitingAndroid") return
+      const answer = try attempt(call("ElizaWiFi", "addNetworkWithApproval", WifiJoin, {
+        ssid: name.trim(), security: WIRE[security], ...(characters > 0 ? { password: passphrase } : {}),
+      }))
+      try (held.send({ type: "joinAnswered", answer: answer === undefined ? "NotConnected" : ANSWER[answer.status] }) catch () => undefined)
+    }),
+    readConnectivity: () => within(effect {
+      const read = try attempt(call("ElizaWiFi", "getConnectivity", WifiConnectivity))
+      try (held.send({ type: "connectivityRead", answered: read !== undefined, online: read?.online === true, validated: read?.validated === true, portal: read?.captivePortal === true }) catch () => undefined)
+    }),
+    openPanel: () => within(effect {
+      const opened = try attempt(native.invoke("ElizaWiFi", "openInternetPanel"))
+      if (opened !== undefined) try (held.send({ type: "openPanel" }) catch () => undefined)
+    }),
+  }
+})
+

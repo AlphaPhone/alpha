@@ -1,0 +1,41 @@
+// spec/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"
+import { Machine as LandingMachine, machine, type Landing, type Query } from "../../gen/shell__landing.effect.vibe"
+
+const KNOWN = new Set(["state", "code", "error", "error_description"])
+
+/** The validity classes of a return's query, from its raw search string. */
+export function queryOf(search: string): Query {
+  const params = new URLSearchParams(search)
+  const state = params.get("state") ?? ""
+  const code = params.get("code") ?? ""
+  const description = params.get("error_description") ?? ""
+  const keys = [...params.keys()]
+  return {
+    states: params.getAll("state").length,
+    stateValid: /^[-\w]{43}$/.test(state),
+    codes: params.getAll("code").filter((value) => value !== "").length,
+    codeFits: code.length <= 4096,
+    errors: params.getAll("error").filter((value) => value !== "").length,
+    descriptions: params.getAll("error_description").length,
+    descriptionFits: description.length <= 2000,
+    knownKeys: keys.every((key) => KNOWN.has(key)),
+    empty: keys.length === 0,
+  }
+}
+
+/** The landing decision for a return, after its address was cleaned, and the link back into Alpha it offers. */
+export effect function land(search: string, scrub: () => void) {
+  provide machine() {
+    const page = try LandingMachine
+    try page.send({ type: "arrive", q: queryOf(search) })
+    try sync(scrub)
+    try page.send({ type: "scrub" })
+    const decided: Landing = try page.send({ type: "validate" })
+    const params = new URLSearchParams(search)
+    const link = new URL("alphaphone://cloud-delegation")
+    link.searchParams.set("state", params.get("state") ?? "")
+    if (decided.link === "CodeLink") link.searchParams.set("code", params.get("code") ?? "")
+    if (decided.link === "DeniedLink") link.searchParams.set("error", "access_denied")
+    return { landing: decided, href: decided.link === "NoLink" ? "" : link.href }
+  }
+}

@@ -1,0 +1,375 @@
+// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/agent.md, "An applied create or change is read back through the same scoped calendar; only a readback that finds it says saved"; spec/calendar/agent.md, "Story: Return to the event I left Calendar from"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import {
+  type AgentCalendar as AgentState, type FeedReply, type ProviderReply, type Readback, type SourcesReply,
+  type UpcomingReply, type WriteKind, type Event as AgentEvent, type WriteOutcome, type EventReturn, type ReturnFeed, Machine as AgentMachine, eventReturn,
+} from "../../gen/calendar__agent.effect.vibe"
+import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import { namedReadWindow } from "@elizaos/plugin-calendar/client"
+import { Resident, ResidentRefused } from "../platform/resident.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { type CalendarRecord as CalendarSummary, type EventRecord, type FeedRecord, decodeCalendars, decodeFeed, decodeNext } from "./feed.schema.vibe"
+import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
+import { residentClients } from "./client.vibe"
+import { sha256Hex } from "./digest.ts"
+import { type InstantRange, agentEventKey, eventSourceKey, readableSource, windowKey } from "./model.vibe"
+import { isoInstant } from "./time.ts"
+
+/** The agent binding the account area reports: owner key, session, agent id and whether the connection is usable. */
+export interface AgentBinding { readonly owner: string; readonly session: number; readonly agentId: string; readonly usable: boolean }
+
+/** A window Calendar reads, in the zone it is shown in. */
+export interface CalendarWindow { readonly range: InstantRange; readonly timeZone: string }
+
+/** What Calendar shows from the agent: the machine's state and the data its published read returned. */
+export interface AgentView {
+  readonly state: AgentState
+  readonly feed: FeedRecord | undefined
+  readonly calendars: readonly CalendarSummary[]
+  readonly upcoming: EventRecord | undefined
+  readonly savedAt: number | undefined
+  readonly window: CalendarWindow | undefined
+}
+
+/** The fields an owner reviewed for a create, exactly as they are sent. */
+/** A reviewed create: upstream's request, the calendar it goes to, and whether the editor rules admit it. */
+export interface CreateRequest { readonly sourceKey: string; readonly request: CalendarCreateRequest; readonly admitted: boolean }
+
+/** A reviewed change of one event at the version reviewed. */
+export interface UpdateRequest { readonly eventKey: string; readonly request: CalendarUpdateRequest; readonly admitted: boolean }
+
+/** A reviewed deletion or decline of one event at the version reviewed. */
+export interface DeleteRequest { readonly eventKey: string; readonly request: CalendarDeleteRequest; readonly admitted: boolean }
+
+/** The text an agent event's source revision hashes: its calendar's key and selection version, and the event's etag. */
+export function sourceRevisionText(calendar: CalendarSummary, etag: string): string {
+  return JSON.stringify([sourceKeyId(calendar), calendar.selectionVersion ?? null, etag])
+}
+
+/** The source revision Maps' "Back to event" carries for an agent event: the SHA-256 of its calendar's key and selection version and the event's etag; "" when it cannot be worked out. */
+export effect function eventSourceRevision(calendars: readonly CalendarSummary[], event: EventRecord) {
+  const key = eventSourceKey(event)
+  const calendar = calendars.find((candidate) => sourceKeyId(candidate) === key)
+  const etag = typeof event.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+  if (calendar === undefined || etag === "") return ""
+  return try tryPromise({ try: () => sha256Hex(sourceRevisionText(calendar, etag)), catch: () => "" }) catch () => ""
+}
+
+/** The agent's Calendar: reads for the bound account and reviewed writes through it. */
+export service AgentCalendar {
+  readonly changes: Stream.Stream<AgentView>
+  view(): AgentView!!
+  /** Take the account area's binding; a different binding retires what was shown. */
+  bind(binding: AgentBinding): void!!
+  /** Read a window, or queue it behind the read or write in flight. Never fails: the state says how it went. */
+  refresh(window: CalendarWindow): void!!
+  create(request: CreateRequest): WriteOutcome!!
+  update(request: UpdateRequest): WriteOutcome!!
+  remove(request: DeleteRequest): WriteOutcome!!
+  /** Whether an event left for Maps is still the version left, for the same binding; with `sourceRevision`, also from the same calendar selection. */
+  verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string): EventReturn!!
+  /** The key of the event a confirmed create with this idempotency key read back, for the note it came from. */
+  createdEvent(idempotencyKey: string): string | undefined!!
+  /** One complete read of one calendar at an instant, for a review of an event outside the loaded window. */
+  readSourceAt(sourceKey: string, at: number): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined!!
+  /** Drop an ended next event. */
+  upcomingEnded(): void!!
+}
+
+const READ_TIMEOUT = "20 seconds"
+
+function query(path: string, fields: Readonly<Record<string, string>>): string {
+  return `${path}?${Object.entries(fields).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&")}`
+}
+
+interface SavedFeed { readonly version: 1; readonly owner: string; readonly window: string; readonly feed: FeedRecord; readonly calendars: readonly CalendarSummary[]; readonly at: number }
+
+/** The agent Calendar service over the resident agent and the agent machine. */
+export const agentLayer = Layer.effect(AgentCalendar, effect {
+  const machine = try AgentMachine
+  const resident = try Resident
+  const store = try KeyValueStore.KeyValueStore
+  const data = try Ref.make<Map<number, { feed?: FeedRecord; calendars?: readonly CalendarSummary[]; upcoming?: EventRecord | null }>>(new Map())
+  const windows = try Ref.make<Map<string, CalendarWindow>>(new Map())
+  const agent = try Ref.make("")
+  const saved = try Ref.make<SavedFeed | undefined>(undefined)
+  const created = try Ref.make<ReadonlyMap<string, string>>(new Map())
+  const initialState = try machine.get()
+  const shown = try SubscriptionRef.make<AgentView>({ state: initialState, feed: undefined, calendars: [], upcoming: undefined, savedAt: undefined, window: undefined })
+
+  effect function publish() {
+    const state = try machine.get()
+    const replies = try Ref.get(data)
+    const feedData = state.feedEpoch === 0 ? undefined : replies.get(state.feedEpoch)
+    const upcomingData = state.upcomingEpoch === 0 ? undefined : replies.get(state.upcomingEpoch)
+    const kept = try Ref.get(saved)
+    const live = feedData?.feed !== undefined
+    const window = (try Ref.get(windows)).get(state.query)
+    try SubscriptionRef.set(shown, {
+      state,
+      feed: live ? feedData?.feed : kept?.owner === state.portOwner && state.status === "Loading" ? kept?.feed : undefined,
+      calendars: live ? feedData?.calendars ?? [] : kept?.owner === state.portOwner && state.status === "Loading" ? kept?.calendars ?? [] : [],
+      upcoming: upcomingData?.upcoming ?? undefined,
+      savedAt: live ? undefined : kept?.owner === state.portOwner && state.status === "Loading" ? kept?.at : undefined,
+      window,
+    })
+  }
+
+  effect function send(event: AgentEvent) {
+    const after = machine.send(event) catch () => undefined
+    try publish()
+    return after
+  }
+
+  effect function feedFor(window: CalendarWindow, id: number): FeedReply {
+    const expected = { timeMin: isoInstant(window.range.begin), timeMax: isoInstant(window.range.end) }
+    return effect {
+      const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/feed", { side: "owner", ...expected, timeZone: window.timeZone })), READ_TIMEOUT)
+      const feed = try decodeFeed(answer.data)
+      if (feed.timeMin !== expected.timeMin || feed.timeMax !== expected.timeMax) return "FeedWrongWindow" as FeedReply
+      const agentId = try Ref.get(agent)
+      if (agentId !== "" && feed.events.some((event) => event.agentId !== agentId)) return "FeedForeign" as FeedReply
+      try Ref.update(data, (all) => new Map(all).set(id, { ...all.get(id), feed: { ...feed, events: feed.events.filter((event) => event.status !== "cancelled") } }))
+      return (feed.state === "complete" ? "FeedComplete" : feed.state === "partial" ? "FeedPartial" : "FeedUnavailable") as FeedReply
+    } catch (error) => (error instanceof ResidentRefused && (error.status === 401 || error.status === 403) ? "FeedRefused" : "FeedFailed") as FeedReply
+  }
+
+  effect function calendarsFor(id: number): readonly CalendarSummary[] | undefined {
+    return effect {
+      const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/calendars", { side: "owner" })), READ_TIMEOUT)
+      const list = (try decodeCalendars(answer.data)).calendars
+      try Ref.update(data, (all) => new Map(all).set(id, { ...all.get(id), calendars: list }))
+      return list
+    } catch () => undefined
+  }
+
+  effect function upcomingFor(window: CalendarWindow, id: number): EventRecord | null | "failed" {
+    return effect {
+      const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/next-context", { side: "owner", timeZone: window.timeZone })), READ_TIMEOUT)
+      const next = try decodeNext(answer.data)
+      try Ref.update(data, (all) => new Map(all).set(id, { ...all.get(id), upcoming: next.event }))
+      return next.event
+    } catch () => "failed" as const
+  }
+
+  function sourcesReply(calendars: readonly CalendarSummary[] | undefined, events: readonly EventRecord[]): SourcesReply {
+    if (calendars === undefined) return "SourcesFailed"
+    if (calendars.length === 0) return "SourcesNone"
+    const readable = new Set(calendars.filter(readableSource).map((calendar) => sourceKeyId(calendar)))
+    return events.every((event) => readable.has(eventSourceKey(event))) ? "SourcesReadable" : "SourcesHidden"
+  }
+
+  function upcomingReply(next: EventRecord | null | "failed", calendars: readonly CalendarSummary[] | undefined, agentId: string, now: number): UpcomingReply {
+    if (next === "failed") return "UpcomingFailed"
+    if (next === null) return "UpcomingEmpty"
+    if (agentId !== "" && next.agentId !== agentId) return "UpcomingForeign"
+    const readable = new Set((calendars ?? []).filter(readableSource).map((calendar) => sourceKeyId(calendar)))
+    if (!readable.has(eventSourceKey(next))) return "UpcomingForeign"
+    const end = utcInstant(next.endAt)
+    return end !== undefined && end <= now ? "UpcomingEnded" : "UpcomingEvent"
+  }
+
+  effect function persist(state: AgentState) {
+    if (state.status !== "Ready" || state.feedEpoch === 0) return
+    const replies = (try Ref.get(data)).get(state.feedEpoch)
+    if (replies?.feed === undefined) return
+    const entry: SavedFeed = { version: 1, owner: state.owner, window: state.query, feed: replies.feed, calendars: replies.calendars ?? [], at: try Clock.currentTimeMillis }
+    store.set(ownerKey(state.owner, "calendar/feed"), JSON.stringify(entry)) catch () => undefined
+  }
+
+  effect function forget(state: AgentState) {
+    if (state.owner !== "") store.remove(ownerKey(state.owner, "calendar/feed")) catch () => undefined
+  }
+
+  effect function run(id: number) {
+    const started = try machine.get()
+    const window = (try Ref.get(windows)).get(started.read.query)
+    if (started.read.id !== id || window === undefined) return
+    if (started.read.phase === "Reading") {
+      const [feed, calendars, next] = try.all [feedFor(window, id), calendarsFor(id), upcomingFor(window, id)]
+      const events = (try Ref.get(data)).get(id)?.feed?.events ?? []
+      try send({ type: "feedReply", id, reply: feed })
+      try send({ type: "sourcesReply", id, reply: sourcesReply(calendars, events) })
+      const now = try Clock.currentTimeMillis
+      const after = try send({ type: "upcomingReply", id, reply: upcomingReply(next, calendars, try Ref.get(agent), now) })
+      if (after !== undefined) {
+        if (after.error === "AccessRefused") try forget(after)
+        else try persist(after)
+      }
+    }
+    try Ref.update(data, (all) => new Map([...all].filter(([key]) => key >= id - 2)))
+    const next = try machine.get()
+    if (next.read.id !== 0 && next.read.id !== id) try run(next.read.id)
+  }
+
+  effect function restoreSaved(binding: AgentBinding) {
+    const found = store.get(ownerKey(binding.owner, "calendar/feed")) catch () => undefined
+    if (found === undefined) {
+      try Ref.set(saved, undefined)
+      return
+    }
+    const entry = try Effect.try({ try: () => JSON.parse(found) as SavedFeed, catch: () => undefined }) catch () => undefined
+    const valid = entry !== undefined && entry.version === 1 && entry.owner === binding.owner
+    const feed = valid ? decodeFeed(entry.feed) catch () => undefined : undefined
+    const calendars = valid ? decodeCalendars({ calendars: entry.calendars }) catch () => undefined : undefined
+    try Ref.set(saved, valid && feed !== undefined && calendars !== undefined ? { ...entry, feed, calendars: calendars.calendars } : undefined)
+  }
+
+  effect function readbackAt(sourceKey: string, at: number, timeZone: string): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined {
+    return effect {
+      const window = namedReadWindow(at)
+      const range = { timeMin: isoInstant(window.startMs), timeMax: isoInstant(window.endMs) }
+      const [answer, listed] = try.all [
+        timeout(resident.json("GET", query("/api/lifeops/calendar/feed", { side: "owner", ...range, timeZone })), READ_TIMEOUT),
+        timeout(resident.json("GET", query("/api/lifeops/calendar/calendars", { side: "owner" })), READ_TIMEOUT),
+      ]
+      const feed = try decodeFeed(answer.data)
+      const calendars = (try decodeCalendars(listed.data)).calendars
+      if (feed.state !== "complete" || feed.timeMin !== range.timeMin) return undefined
+      return { calendars, events: feed.events.filter((event) => eventSourceKey(event) === sourceKey) }
+    } catch () => undefined
+  }
+
+  const api = residentClients(resident).calendar
+
+  type Sent = CalendarChangeReply | "transport" | "refused"
+
+  function providerReply(reply: Sent, agentId: string): ProviderReply {
+    if (reply === "transport") return "ProviderTransport"
+    if (reply === "refused") return "ProviderRefused"
+    if ("approvalRequestId" in reply) return "ProviderQueued"
+    if ("event" in reply && reply.event !== null && agentId !== "" && reply.event.agentId !== agentId) return "ProviderForeign"
+    return "ProviderApplied"
+  }
+
+  effect function sent(call: () => Promise<CalendarChangeReply>): Sent {
+    return try tryPromise({ try: call, catch: (error) => error }) catch (error) =>
+      (error instanceof ResidentRefused && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 ? "refused" : "transport") as Sent
+  }
+
+  effect function settleWrite(id: number) {
+    const after = try machine.get()
+    if (after.read.id !== 0) try run(after.read.id)
+    const final = try machine.get()
+    return final.outcomeId === id || final.write.id === 0 ? final.outcome : ("WriteUnknown" as WriteOutcome)
+  }
+
+  effect function write(kind: WriteKind, admitted: boolean, call: () => Promise<CalendarChangeReply>,
+    find: (events: readonly EventRecord[], reply: CalendarChangeReply) => Readback, readbackSource: (reply: CalendarChangeReply) => string, at: number, timeZone: string) {
+    const started = try send({ type: "startWrite", kind, eventAdmitted: admitted })
+    const id = started?.lastWrite ?? 0
+    if (started === undefined || started.write.id !== id) return started?.outcome ?? ("WriteBusy" as WriteOutcome)
+    const reply = try sent(call)
+    const afterProvider = try send({ type: "providerReply", id, reply: providerReply(reply, try Ref.get(agent)) })
+    if (afterProvider?.write.id !== id || typeof reply === "string") return try settleWrite(id)
+    const read = try readbackAt(readbackSource(reply), at, timeZone)
+    try send({ type: "readbackReply", id, readback: read === undefined ? "ReadbackFailed" : find(read.events, reply) })
+    return try settleWrite(id)
+  }
+
+  function receiptSource(fallback: string): (reply: CalendarChangeReply) => string {
+    return (reply) => ("receipt" in reply ? sourceKeyId(reply.receipt.source) : fallback)
+  }
+
+  effect function currentEvent(eventKey: string): EventRecord | undefined {
+    const view = try SubscriptionRef.get(shown)
+    return view.savedAt === undefined ? view.feed?.events.find((event) => agentEventKey(event) === eventKey) : undefined
+  }
+
+  return {
+    changes: shown.changes,
+    effect view() { return try SubscriptionRef.get(shown) },
+    effect bind(binding: AgentBinding) {
+      const before = try machine.get()
+      const changed = before.portOwner !== binding.owner || before.portSession !== binding.session || before.portUsable !== binding.usable
+      try Ref.set(agent, binding.agentId)
+      try send({ type: "bindPort", owner: binding.usable ? binding.owner : binding.owner, session: binding.session, usable: binding.usable && binding.owner !== "" })
+      if (changed && (before.owner !== "" || before.read.id !== 0 || before.write.id !== 0)) {
+        try send({ type: "retire" })
+      }
+      if (changed && binding.usable) try restoreSaved(binding)
+      try publish()
+    },
+    effect refresh(window: CalendarWindow) {
+      const key = windowKey(window.range, window.timeZone)
+      try Ref.update(windows, (all) => new Map(all).set(key, window))
+      const before = try machine.get()
+      const after = try send({ type: "request", window: key })
+      if (after === undefined || after.read.id === 0 || after.read.id === before.read.id) return
+      try run(after.read.id)
+    },
+    effect create(write: CreateRequest) {
+      const request = write.request
+      const at = utcInstant(request.startAt) ?? Number.NaN
+      let foundKey = ""
+      const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
+        const made = "event" in reply ? reply.event : null
+        const found = events.find((event) => made !== null && (event.id === made.id || event.externalId === made.externalId)
+          && event.title === request.title && event.startAt === request.startAt && event.endAt === request.endAt)
+        foundKey = found === undefined ? "" : agentEventKey(found)
+        return found !== undefined ? "ReadbackFound" : "ReadbackMissing"
+      }
+      const outcome = try write("CreateEvent", write.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
+        () => api.createLifeOpsCalendarEvent(request), find, receiptSource(write.sourceKey), at, request.timeZone ?? "UTC")
+      if (outcome === "Saved" && foundKey !== "" && request.idempotencyKey !== "") {
+        const entry = [request.idempotencyKey, foundKey] as const
+        try Ref.update(created, (all) => new Map<string, string>([...[...all].slice(-63), entry]))
+      }
+      return outcome
+    },
+    effect update(write: UpdateRequest) {
+      const request = write.request
+      const event = try currentEvent(write.eventKey)
+      const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+      const admitted = write.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
+      const at = utcInstant(request.startAt ?? event?.startAt ?? "") ?? Number.NaN
+      const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
+        const changed = "event" in reply ? reply.event : null
+        return events.some((found) => found.id === event?.id && (changed === null || found.metadata.etag === changed.metadata.etag)
+          && (request.title === undefined || found.title === request.title) && (request.startAt === undefined || found.startAt === request.startAt))
+          ? "ReadbackFound" : "ReadbackMissing"
+      }
+      return try write("UpdateEvent", admitted, () => api.updateLifeOpsCalendarEvent(event?.id ?? "", request), find,
+        receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
+    },
+    effect remove(write: DeleteRequest) {
+      const request = write.request
+      const event = try currentEvent(write.eventKey)
+      const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+      const admitted = write.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
+      const at = utcInstant(event?.startAt ?? "") ?? Number.NaN
+      const find = (events: readonly EventRecord[]): Readback =>
+        events.some((found) => found.id === event?.id && found.status !== "cancelled" && found.metadata.etag === event?.metadata.etag) ? "ReadbackFound" : "ReadbackMissing"
+      const outcome = try write("DeleteEvent", admitted, () => api.deleteLifeOpsCalendarEvent(event?.id ?? "", request), find,
+        receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
+      return outcome
+    },
+    effect createdEvent(idempotencyKey: string) {
+      return (try Ref.get(created)).get(idempotencyKey)
+    },
+    effect verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string) {
+      const before = try machine.get()
+      const event = try currentEvent(eventKey)
+      const source = event === undefined ? "" : eventSourceKey(event)
+      const read = try readbackAt(source, begin, event?.timezone ?? "UTC")
+      const after = try machine.get()
+      const found = read?.events.filter((candidate) => agentEventKey(candidate) === eventKey) ?? []
+      const readable = (read?.calendars ?? []).some((calendar) => sourceKeyId(calendar) === source && readableSource(calendar))
+      const sourceHolds = sourceRevision === undefined || (found.length === 1 && read !== undefined
+        && (try eventSourceRevision(read.calendars, found[0]!)) === sourceRevision)
+      const feed: ReturnFeed = read === undefined ? "ReturnFailed" : found.length === 0 ? "ReturnMoved"
+        : found.length > 1 ? "ReturnForeign"
+        : found[0]!.metadata.etag === revision && utcInstant(found[0]!.startAt) === begin && found[0]!.status !== "cancelled" && sourceHolds ? "ReturnExact" : "ReturnMoved"
+      return eventReturn(
+        after.portOwner === before.portOwner && after.portSession === before.portSession && after.portUsable,
+        after.epoch === before.epoch, after.write.id !== 0, event !== undefined, feed, readable,
+      )
+    },
+    effect readSourceAt(sourceKey: string, at: number) {
+      return try readbackAt(sourceKey, at, "UTC")
+    },
+    effect upcomingEnded() {
+      try send({ type: "upcomingEnded" })
+    },
+  }
+})

@@ -1,0 +1,169 @@
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+import { parseProfile, type CloudEnvironment, type CloudProfile, type EnvironmentProfile, type ProfileInvalid } from "@elizaos/cloud/profile"
+import deployment from "../deployment.json" with { type: "json" }
+
+/** The model Alpha Phone requests for chat on Alpha Cloud. */
+export const alphaModel = "qwen-3.8-27b"
+
+/** Alpha Cloud's display name in both environments. */
+export const alphaCloudName = "Alpha Cloud"
+
+/** The entitlement audience: Alpha Phone's application id. */
+export const alphaAudience = "ai.alphacompute.alphaphone"
+
+/** The environment variable each provider secret is read from; the profile names them and never holds one. */
+export const secretNames = {
+  digest: "CLOUD_DIGEST_KEY",
+  sealing: "CLOUD_SEALING_KEY",
+  entitlement: "CLOUD_ENTITLEMENT_KEY",
+  mail: "RESEND_API_KEY",
+  google: "GOOGLE_CLIENT_SECRET",
+  stripe: "STRIPE_SECRET_KEY",
+  stripeWebhook: "STRIPE_WEBHOOK_SECRET",
+  inference: "CEREBRAS_API_KEY",
+  speech: "CARTESIA_API_KEY",
+  maps: "GOOGLE_MAPS_API_KEY",
+} as const
+
+/** Every secret an Alpha Cloud environment needs at start, in the order `requireSecrets` reads them. */
+export const requiredSecrets: ReadonlyArray<string> = [
+  secretNames.digest, secretNames.entitlement, secretNames.sealing, secretNames.mail, secretNames.google,
+  secretNames.stripe, secretNames.stripeWebhook, secretNames.inference, secretNames.speech, secretNames.maps,
+]
+
+const Paragraphs = Schema.NonEmptyArray(Schema.String)
+const LegalDocument = Schema.Struct({ title: Schema.String, revision: Schema.String, sections: Schema.NonEmptyArray(Schema.Struct({ title: Schema.String, paragraphs: Paragraphs })) })
+const PublicKey = Schema.Struct({ kid: Schema.String, kty: Schema.Literal("EC"), crv: Schema.Literal("P-256"), x: Schema.String, y: Schema.String })
+const PlanIds = Schema.Struct({ priceId: Schema.String, productId: Schema.String })
+const EnvironmentInputs = Schema.Struct({
+  databaseIdentity: Schema.String,
+  documents: Schema.Struct({ terms: LegalDocument, privacy: LegalDocument }),
+  entitlement: Schema.Struct({ keyId: Schema.String, publicKeys: Schema.NonEmptyArray(PublicKey) }),
+  google: Schema.Struct({ clientId: Schema.String, serverClientId: Schema.String, nativeSignIn: Schema.Boolean }),
+  billing: Schema.Struct({ publishableKey: Schema.String, plans: Schema.Struct({ plus_monthly: PlanIds, pro_monthly: PlanIds }) }),
+  speech: Schema.Struct({
+    defaultVoiceId: Schema.String, defaultModelId: Schema.String, voiceIds: Schema.NonEmptyArray(Schema.String), modelIds: Schema.NonEmptyArray(Schema.String),
+    microsPerCharacter: Schema.Int, microsPerSecond: Schema.Int, languageCodes: Schema.Array(Schema.String),
+  }),
+  maps: Schema.Struct({ coverage: Schema.String, datasetRevision: Schema.String }),
+  worker: Schema.optionalKey(Schema.Struct({
+    plan: Schema.Literals(["plus_monthly", "pro_monthly"]),
+    embeddingModel: Schema.String, embeddingUpstreamModel: Schema.String,
+    chatInputMicrosPer1k: Schema.Int, chatOutputMicrosPer1k: Schema.Int, embeddingInputMicrosPer1k: Schema.Int,
+    maxCompletionTokens: Schema.Int, speechDailySessionLimit: Schema.Int,
+  })),
+})
+
+/** The reviewed public values an operator records per environment: database receipt, documents, public keys and provider ids. */
+export const OperatorInputs = Schema.Struct({ schema: Schema.Literal(1), production: EnvironmentInputs, staging: EnvironmentInputs })
+/** The decoded operator inputs. */
+export type OperatorInputs = typeof OperatorInputs.Type
+/** One environment's operator inputs. */
+export type EnvironmentInputs = typeof EnvironmentInputs.Type
+
+/** The operator inputs file is missing, unreadable or not the recorded shape. */
+export error OperatorInputsInvalid { problem: string }
+
+/** Alpha Cloud's public API and web origins per environment, shared with the app's client deployment. */
+export const alphaHosts: Readonly<Record<CloudEnvironment, { readonly api: string; readonly web: string }>> = deployment.alphaCloudHosts
+
+function environmentProfile(environment: CloudEnvironment, inputs: EnvironmentInputs): EnvironmentProfile {
+  const hosts = alphaHosts[environment]
+  return {
+    name: alphaCloudName,
+    api: hosts.api,
+    web: hosts.web,
+    entitlementAudience: alphaAudience,
+    mailSender: "noreply@alphacompute.cc",
+    databaseIdentity: inputs.databaseIdentity,
+    firstPartyOrigins: [hosts.web],
+    capabilities: ["inference", "speech", "maps", "managedGoogle", "billing"],
+    documents: inputs.documents,
+    signIn: { smsCountries: [], smsHourlyBudget: 0 },
+    mail: { kind: "https", url: "https://api.resend.com/emails", apiKeyEnv: secretNames.mail },
+    sms: { kind: "none" },
+    digestKeyEnv: secretNames.digest,
+    sealing: { currentKeyId: `alpha-${environment}-seal-1`, keys: [{ keyId: `alpha-${environment}-seal-1`, env: secretNames.sealing }] },
+    entitlement: { keyId: inputs.entitlement.keyId, signingKeyEnv: secretNames.entitlement, publicKeys: inputs.entitlement.publicKeys },
+    google: {
+      clientId: inputs.google.clientId,
+      serverClientId: inputs.google.serverClientId,
+      clientSecretEnv: secretNames.google,
+      nativeSignIn: inputs.google.nativeSignIn,
+      accountsUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      revokeUrl: "https://oauth2.googleapis.com/revoke",
+      jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
+      apiUrl: "https://www.googleapis.com",
+      issuers: ["https://accounts.google.com", "accounts.google.com"],
+    },
+    billing: {
+      apiUrl: "https://api.stripe.com",
+      secretKeyEnv: secretNames.stripe,
+      webhookSecretEnv: secretNames.stripeWebhook,
+      publishableKey: inputs.billing.publishableKey,
+      plans: inputs.billing.plans,
+    },
+    inference: {
+      providers: [{ id: "cerebras", baseUrl: "https://api.cerebras.ai/v1", apiKeyEnv: secretNames.inference }],
+      models: [{ id: alphaModel, provider: "cerebras", upstreamModel: alphaModel, vision: false }],
+    },
+    speech: {
+      provider: "cartesia",
+      baseUrl: "https://api.cartesia.ai",
+      realtimeUrl: "wss://api.cartesia.ai/stt/websocket",
+      apiKeyEnv: secretNames.speech,
+      tts: {
+        defaultVoiceId: inputs.speech.defaultVoiceId,
+        defaultModelId: inputs.speech.defaultModelId,
+        voiceIds: inputs.speech.voiceIds,
+        modelIds: inputs.speech.modelIds,
+        microsPerCharacter: inputs.speech.microsPerCharacter,
+      },
+      stt: { languageCodes: inputs.speech.languageCodes, microsPerSecond: inputs.speech.microsPerSecond },
+    },
+    maps: { provider: "google", baseUrl: "https://maps.googleapis.com", apiKeyEnv: secretNames.maps, coverage: inputs.maps.coverage, datasetRevision: inputs.maps.datasetRevision },
+  }
+}
+
+/** Alpha Cloud's whole profile for the operator's reviewed inputs, before the upstream deployment rules judge it. */
+export function alphaCloudProfile(inputs: OperatorInputs): CloudProfile {
+  return {
+    version: 1,
+    name: alphaCloudName,
+    environments: { production: environmentProfile("production", inputs.production), staging: environmentProfile("staging", inputs.staging) },
+  }
+}
+
+/** Decodes the operator inputs and returns the profile only when upstream's deployment rules accept it. */
+export effect function alphaProfile(inputs: unknown): CloudProfile!(OperatorInputsInvalid | ProfileInvalid) {
+  const decoded = Schema.decodeUnknownEffect(OperatorInputs, { onExcessProperty: "error" })(inputs) catch effect (failure) => {
+    throw new OperatorInputsInvalid({ problem: failure.message })
+  }
+  return try parseProfile(alphaCloudProfile(decoded))
+}
+
+/** Reads the operator inputs file and builds the accepted profile from it. */
+export effect function readAlphaProfile(file: string): CloudProfile!(OperatorInputsInvalid | ProfileInvalid)!FileSystem.FileSystem {
+  const fs = try FileSystem.FileSystem
+  const text = fs.readFileString(file) catch effect () => { throw new OperatorInputsInvalid({ problem: `cannot read ${file}` }) }
+  const parsed = try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new OperatorInputsInvalid({ problem: `${file} is not JSON` }) })
+  return try alphaProfile(parsed)
+}
+
+/** The staging environment as a loopback development Cloud serves it: loopback mail and the given loopback first-party origins. */
+export function localProfile(profile: CloudProfile, loopbackOrigins: ReadonlyArray<string>): CloudProfile {
+  const staging = profile.environments.staging
+  return {
+    ...profile,
+    environments: {
+      ...profile.environments,
+      staging: { ...staging, mail: { kind: "loopback" }, firstPartyOrigins: [...staging.firstPartyOrigins, ...loopbackOrigins.filter((origin) => !staging.firstPartyOrigins.includes(origin))] },
+    },
+  }
+}
+
+/** Whether the profile still carries a database receipt that no operator reviewed (all zeros with a final digit). */
+export function pendingDatabaseIdentity(settings: EnvironmentProfile): boolean {
+  return /^0{63}[0-9a-f]$/.test(settings.databaseIdentity)
+}

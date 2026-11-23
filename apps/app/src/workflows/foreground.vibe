@@ -1,0 +1,30 @@
+// spec/workflows/deviceSteps.md, "Leaving Alpha suspends the step; the agent may change the steps, move the anchor, cancel or expire meanwhile"; spec/workflows/clockDraft.md, "Only the current, visible, idle Workflows visit opens the draft; the browser build shows it without a handoff"; spec/workflows/digestSources.md, "Leaving Alpha refuses a consent still being answered, and another session forgets every request"; spec/workflows/recovery.md, "Opening a review retires the one before it; leaving, hiding or another session blocks every review"; spec/workflows/simulatedTriggers.md, "A position is read only in front; the background drops it and checks nothing"
+import { Foreground } from "../shell/foreground.vibe"
+import { WorkflowClockDraft } from "./clock-draft.vibe"
+import { Digests } from "./digests.vibe"
+import { PhoneSteps } from "./notices.vibe"
+import { RequestRecovery } from "./recovery.vibe"
+import { SimulatedTriggers } from "./simulator.vibe"
+import { DigestSourcesService } from "./sources.vibe"
+
+/** Tells each Workflows review whether Alpha is in front and whether Workflows is the open app, for as long as the layer lives. */
+export effect function followForeground() {
+  const foreground = try Foreground
+  const steps = try PhoneSteps
+  const clock = try WorkflowClockDraft
+  const sources = try DigestSourcesService
+  const digests = try Digests
+  const triggers = try SimulatedTriggers
+  const recovery = try RequestRecovery
+  for try (const state of foreground.changes) {
+    const front = state.visible && !state.locked
+    try steps.foreground(front)
+    try clock.visibility(!front)
+    if (state.view !== "workflows") try clock.leave()
+    try sources.foreground(front)
+    try digests.visibility(!front)
+    triggers.foreground(front) catch () => undefined
+    if (front) try recovery.allow()
+    else try recovery.block()
+  }
+}

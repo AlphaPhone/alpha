@@ -131,7 +131,7 @@ GraphHopper setup is superseded for production.
 
 5. **Verify the real integration with a signed-in plan account.**
 
-   Use the existing private operator harness, or `bun run dev:cloud` with
+   Use the existing private operator harness, or `pnpm dev:cloud` with
    `ALPHA_CLOUD_ENVIRONMENT=staging`, for staging service checks. Keep credentials
    in that harness's private store. Record HTTP status, bounded error code,
    provider identity, source/deployment version and pass/fail, without recording
@@ -167,9 +167,9 @@ GraphHopper setup is superseded for production.
 
 6. **Run the Pixel check on the reviewed APK.**
 
-   Complete `bun run verify` and `bun run android:build:local` with admitted native
+   Complete `pnpm verify` and `pnpm android:build:local` with admitted native
    inputs and inspect the launcher outputs with
-   `bun run android:verify`. Record the exact signed APK digest used
+   `pnpm android:verify`. Record the exact signed APK digest used
    on the Pixel.
 
    Install the launcher APK through the owner-controlled installation

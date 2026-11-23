@@ -1,0 +1,196 @@
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"
+import { createCloudClient } from "@elizaos/cloud/client"
+import { Build } from "../../src/platform/build.vibe"
+import { elizaCloud } from "../../src/platform/build-flags.ts"
+import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { CloudServices } from "../../src/platform/cloud-services.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { initial as appStart, type Net } from "../../gen/platform__lifecycle.ts"
+import { initial as connectionStart } from "../../gen/platform__resident.ts"
+import { AppLifecycle } from "../../src/platform/lifecycle.vibe"
+import { Resident, ResidentRefused, type ResidentHeaders } from "../../src/platform/resident.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { enrollmentLayer } from "../../src/account/enrollment.vibe"
+import { services } from "../../src/account/layer.vibe"
+
+/** What the fakes were asked, in order: `plugin.method` for native calls, `METHOD path` for Cloud and the resident, with the device headers a resident request carried. */
+export type Calls = Array<{ readonly name: string; readonly args: unknown; readonly headers?: ResidentHeaders }>
+
+/** A native refusal with the plugin's code, as `PluginCall.reject(message, code)` gives it. */
+export interface Refusal { readonly refuse: string }
+
+/** A fixed answer, or one computed from the call's arguments. */
+export type Answer = unknown
+
+/** The test's clock origin and a key that expires in 30 days. */
+export const now = Date.now()
+export const expiresAt = now + 30 * 86400000
+
+/** The provider status the native host reports. */
+export function providerStatus(mode: "cloud" | "own", text: boolean, voice: boolean, revision: string) {
+  return {
+    configured: mode === "own" ? text : true, provider: mode === "own" ? "cerebras" : "elizacloud", mode, revision,
+    persistence: "native-secure-store", keys: { text: { configured: text }, voice: { configured: voice } }
+  }
+}
+
+/** A native host with a saved, confirmed key on Cloud inference. */
+export const signedInNative: Record<string, Answer> = {
+  "AlphaCloudSignIn.credentialIdentity": { credentialId: "key-1", expiresAt },
+  "AlphaCloudSignIn.status": { inApp: true, methodsKnown: true, google: true, email: true, phone: false },
+  "AlphaCloudSignIn.renewSignIn": { status: "current", expiryWarning: false, expiresAt, credentialId: "key-1" },
+  "AlphaCloudSignIn.clearCredentialState": {},
+  "AlphaCloudSignIn.cancel": {},
+  "Agent.providerStatus": providerStatus("cloud", false, false, "r1"),
+  "Agent.residentAttachment": { attachable: false },
+  "Agent.configureCloudProvider": { configured: true, bindingGuard: "a".repeat(64) },
+  "Agent.clearProvider": { configured: false },
+  "Agent.prepareProviderConfiguration": { requestId: "lease-1" },
+  "Agent.cancelProviderConfiguration": {},
+  "Agent.setGoogleAgentAccess": {},
+  "AlphaConnection.prepareGoogleWorkspaceReturn": { supported: false },
+  "AlphaBillingAuthority.clear": {},
+  "AlphaBillingAuthority.status": { status: "required" },
+  "ElizaSystem.getNetworkStatus": { connected: true, internetValidated: true }
+}
+
+/** A billing snapshot of an account on organization credits. */
+export function snapshot(usdMicros: number) {
+  return {
+    data: {
+      schemaVersion: 3, observedAt: now, account: { status: "active" }, balance: { usdMicros, revision: 1 },
+      plan: { key: "free", source: "free", effectiveUntil: null }, subscription: null, grant: null, allowance: null,
+      funding: usdMicros > 0 ? { inference: "creditsOnly", speech: "creditsOnly", maps: "creditsOnly" } : { inference: "refused", speech: "refused", maps: "refused" }
+    }
+  }
+}
+
+/** Cloud's answers for the signed-in account. */
+export const cloudAnswers: Record<string, Answer> = {
+  "DELETE /api/v1/api-keys/current": { success: true },
+  "GET /api/v1/user": { success: true, data: { id: "user-1", organization_id: "org-1", email: "owner@example.com" } },
+  "GET /api/v1/billing/limits": snapshot(5000000)
+}
+
+/** The resident's answers, by `METHOD path`. */
+export type ResidentAnswers = Record<string, Answer>
+
+function answer(table: Record<string, Answer>, key: string, args: unknown): Answer {
+  const found = table[key]
+  return typeof found === "function" ? (found as (args: unknown) => unknown)(args) : found
+}
+
+function refused(value: Answer): value is Refusal {
+  return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
+}
+
+/** The platform at its boundary: the native host, Cloud and the resident answer from tables (a resident answer that is a `ResidentRefused` refuses), the resident is connected to `connected`, the app's network is `network`, and a Cloud page opened is recorded as `CloudServices.openExternal`; nothing leaves the test. */
+export function platform(calls: Calls, native: Record<string, Answer>, cloud: Record<string, Answer>, options: {
+  readonly events?: Record<string, ReadonlyArray<unknown>>
+  readonly resident?: ResidentAnswers
+  readonly variant?: "launcher" | "aosp" | "browser"
+  readonly testMocks?: boolean
+  readonly network?: Net
+  readonly connected?: { readonly owner: string; readonly agent: string }
+} = {}) {
+  const network = options.network ?? "NetOnline"
+  const app = { ...appStart, network }
+  const verified = options.connected ?? { owner: "owner-1", agent: "agent-1" }
+  return Layer.mergeAll(
+    Layer.succeed(Native, {
+      available: () => Effect.succeed(true),
+      invoke: (plugin: string, method: string, args?: unknown) => {
+        calls.push({ name: `${plugin}.${method}`, args })
+        const found = answer(native, `${plugin}.${method}`, args)
+        if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
+        if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
+        return Effect.succeed(found)
+      },
+      listen: (plugin: string, event: string) => Stream.fromIterable(options.events?.[`${plugin}.${event}`] ?? [])
+    }),
+    Layer.succeed(Cloud, {
+      base: "https://api.eliza.app",
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => {
+        calls.push({ name: `${method} ${path}`, args: body })
+        const found = answer(cloud, `${method} ${path}`, body)
+        return found === undefined ? Effect.fail(new CloudUnavailable({ status: 404, message: "absent" })) : Effect.succeed(found)
+      }
+    }),
+    Layer.succeed(CloudServices, {
+      client: createCloudClient({ baseUrl: "https://api.eliza.app", credential: () => undefined, fetch: () => Promise.reject(new Error("absent")) }),
+      authority: elizaCloud.production,
+      openExternal: (url: string) => Effect.sync(() => { calls.push({ name: "CloudServices.openExternal", args: { url } }) })
+    }),
+    Layer.succeed(Resident, {
+      status: () => Effect.succeed("running" as const),
+      ensureRunning: () => Effect.sync(() => { calls.push({ name: "Resident.ensureRunning", args: undefined }) }),
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: ResidentHeaders) => {
+        calls.push({ name: `${method} ${path}`, args: body, ...(headers === undefined ? {} : { headers }) })
+        const found = answer(options.resident ?? {}, `${method} ${path}`, body)
+        if (found instanceof ResidentRefused) return Effect.fail(found)
+        return Effect.succeed({ status: 200, data: found ?? { method, path } })
+      },
+      stream: () => Stream.empty
+    }),
+    Layer.succeed(ResidentControl, {
+      changes: Stream.make({ ...connectionStart, phase: "Connected" as const, generation: 1, owner: verified.owner, agent: verified.agent }),
+      session: () => Effect.succeed({ owner: verified.owner, agent: verified.agent, generation: 1, epoch: 1 }),
+      refreshAccount: () => Effect.void,
+      stop: () => Effect.void,
+      recovered: () => Effect.void
+    }),
+    Layer.succeed(AppLifecycle, {
+      changes: Stream.make(app),
+      get: () => Effect.succeed(app),
+      refreshNetwork: () => Effect.succeed(network),
+      metered: () => Effect.succeed(null),
+      turnSent: () => Effect.void,
+      turnSettled: () => Effect.void
+    }),
+    Layer.succeed(Build, { info: { version: "test", variant: options.variant ?? "launcher", testMocks: options.testMocks ?? false } }),
+    memoryStore
+  )
+}
+
+/** The account services over the fake platform. */
+export function account(calls: Calls, native: Record<string, Answer> = signedInNative, cloud: Record<string, Answer> = cloudAnswers, options: Parameters<typeof platform>[3] = {}) {
+  return Layer.provide(services, platform(calls, native, cloud, options))
+}
+
+/** The account services with the device enrollment over the fake platform. */
+export function enrolling(calls: Calls, native: Record<string, Answer> = signedInNative, cloud: Record<string, Answer> = cloudAnswers, options: Parameters<typeof platform>[3] = {}) {
+  return Layer.provide(Layer.provideMerge(enrollmentLayer, services), platform(calls, native, cloud, options))
+}
+
+/** A native secure store kept in `slots`, answering `ElizaSecureStore.get` and `compareAndExchange` as the phone does. */
+export function secureStore(slots: Map<string, string>): Record<string, Answer> {
+  return {
+    "ElizaSecureStore.get": (args: unknown) => ({ value: slots.get((args as { key: string }).key) ?? null }),
+    "ElizaSecureStore.compareAndExchange": (args: unknown) => {
+      const { key, expected, value } = args as { key: string; expected: string | null; value: string | null }
+      if ((slots.get(key) ?? null) !== expected) return { exchanged: false }
+      if (value === null) slots.delete(key)
+      else slots.set(key, value)
+      return { exchanged: true }
+    }
+  }
+}
+
+/** The names of the calls, in order. */
+export const names = (calls: Calls) => calls.map((c) => c.name)
+
+/** The first state of a stream the predicate holds for, within five seconds. */
+export effect function until<A>(changes: Stream.Stream<A>, ok: (a: A) => boolean) {
+  const found = try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+  return found
+}
+
+/** A journey ended before the state it waited for. */
+export error NotReached
+
+/** The value of a found state, or fails the test. */
+export effect function found<A>(value: Option.Option<A>) {
+  if (value._tag === "None") throw new NotReached()
+  return value.value
+}

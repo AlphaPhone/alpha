@@ -1,0 +1,70 @@
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"; spec/voice/listener.md, "Story: See and stop what the listener is doing"
+
+/** A recording the native recorder started. */
+export schema RecordingStarted { readonly recordingId: string; readonly maxDurationMs: number }
+
+/** A recording the native recorder stopped, with its length. */
+export schema RecordingClip { readonly recordingId: string; readonly durationMs: number }
+
+/** The recorder's own stop: its limit, a lost capture or a call. */
+export schema RecordingStopped { readonly recordingId: string; readonly durationMs?: number; readonly interrupted?: string }
+
+/** A transcript and whether the phone made it. */
+export schema TranscriptReply { readonly text: string; readonly local: boolean; readonly execution?: string }
+
+/** Whether on-device speech is ready, and where it would run. */
+export schema LocalSpeechStatus { readonly ready: boolean; readonly execution: string; readonly playback?: boolean }
+
+/** A synthesized passage waiting to play. */
+export schema PreparedSpeech { readonly playbackId: string; readonly execution?: string }
+
+/** A playback's end, failure or stop. */
+export schema PlaybackEvent { readonly playbackId?: string; readonly reason?: string; readonly message?: string }
+
+/** A recording's level, in the range 0 to 1. */
+export schema RecordingMetrics { readonly recordingId: string; readonly peak: number; readonly rms?: number }
+
+/** What a native refusal says beyond its code: a 429's retry facts. */
+export schema RefusalData { readonly retryAfterSeconds?: number; readonly limitCode?: string; readonly resetAt?: number }
+
+/** A native refusal as the bridge rejects it, or a stream error as it reports it with its HTTP status. */
+export schema NativeRefusal { readonly code?: string; readonly name?: string; readonly data?: unknown; readonly status?: number }
+
+/** A live capture the bridge opened, and whether its segments go straight to the owner's agent. */
+export schema LiveCaptureStarted { readonly captureId: string; readonly sampleRate: number; readonly echoCancelled: boolean; readonly nativeAsr?: boolean }
+
+/** Whether the bridge can run a live capture. */
+export schema LiveCaptureStatus { readonly available?: boolean; readonly nativeTransport?: boolean }
+
+/** A live capture that ended, and the code it ended with: a call, a pause of Alpha, a cancellation or a capture failure. */
+export schema LiveCaptureEnded { readonly captureId: string; readonly error?: string }
+
+/** A Cloud speech relay session that opened: its id, its audio rate and whether its capture cancels Alpha's own voice. */
+export schema CloudSpeechStarted { readonly sessionId: string; readonly sampleRate: number; readonly echoCancelled?: boolean }
+
+/** Whether the listener's settings opened. */
+export schema SettingsOpened { readonly opened: boolean }
+
+/** The resident's end-of-turn answer. */
+export schema EndOfTurnScore { readonly available: boolean; readonly complete?: boolean }
+
+/** The label of the last action a voice turn ran, as the resident answers it: the action's name, whether the reply carries a validated card, and whether the owner asked for exact wording. */
+export schema ReplyActionLabel { readonly kind: string; readonly validatedCard: boolean; readonly verbatimAsked: boolean }
+
+/** The resident's answer to a voice turn. */
+export schema VoiceTurnReply { readonly messageId: string; readonly text: string; readonly awaitingReview?: boolean; readonly action?: ReplyActionLabel }
+
+/** The resident's answer to a heard report. */
+export schema HeardRecorded { readonly ok: boolean; readonly messageId: string; readonly changed: boolean }
+
+/** One finished trial of the phone: its turn id, its outcome and its marks in milliseconds on the phone's monotonic clock, by native mark name. */
+export schema NativeTimingRecord { readonly turnId: string; readonly outcome?: string; readonly marks: Record<string, number> }
+
+/** The phone's timing document: every trial it finished. */
+export schema NativeTimingExport { readonly format?: string; readonly records: readonly NativeTimingRecord[] }
+
+/** A renderer stage the phone stamped, and the id of the phone's trial it was bound to. */
+export schema NativeTurnMarked { readonly marked: boolean; readonly voiceTurnId?: string }
+
+/** Clef's answer to whether a turn is complete, from Cloud. */
+export schema ClefTurnAnswer { readonly status: "ok" | "unavailable"; readonly kind?: "turn"; readonly complete?: boolean }

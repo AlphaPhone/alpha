@@ -1,0 +1,184 @@
+// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"
+import type { ExecutorCall } from "@elizaos/agent/client"
+import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
+import type { Result } from "../../gen/assistant__receipts.effect.vibe"
+import type { Settled } from "../../gen/telephony__actions.effect.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { AlreadyRan, grounded, NotATelephonyOperation, telephonyOperationOf, TelephonyActions, type Present, type TelephonyOperation } from "./actions.vibe"
+import { TelephonyBridges } from "./bridges.vibe"
+import { TelephonyCalls } from "./ports.vibe"
+
+const APPLIED: ReadonlySet<Settled> = new Set(["Applied", "EmergencyHandoff"])
+const CODES: Record<Settled, string> = {
+  Applied: "applied", EmergencyHandoff: "emergency-handoff", NothingFound: "not-found", OwnerCancelled: "cancelled", Unavailable: "unavailable",
+  NotDone: "failed", Unconfirmed: "unknown", Refused: "refused", Busy: "busy", Occupied: "occupied", NoneSelected: "none-selected", Stale: "stale",
+}
+
+const TITLES: Record<string, string> = {
+  phone_call: "Call", phone_dial: "Open the dialer", sms_send: "Send a text", mms_send: "Send pictures", sms_compose: "Draft a text",
+  sms_reply_selected: "Draft a reply", contact_create: "Add a contact", contact_update: "Change a contact", contact_delete: "Remove a contact",
+  messages_read_selected: "Read this conversation", voicemail_read_selected: "Read this voicemail", voicemail_delete_selected: "Delete this voicemail",
+  sms_latest_sender: "Check who texted last", phone_keypad: "Open the keypad", contact_show: "Show contacts", contact_read_selected: "Read this contact",
+}
+
+const DONE: Record<string, string> = {
+  phone_call: "Call started.", phone_dial: "Number opened in the dialer.", sms_send: "Message sent.", mms_send: "Pictures sent.",
+  sms_compose: "Draft added to the conversation, not sent.", sms_reply_selected: "Draft added to the conversation, not sent.",
+  contact_create: "Contact saved.", contact_update: "Contact saved.", contact_delete: "Contact deleted.",
+  messages_read_selected: "Read the open conversation.", voicemail_read_selected: "Read the open voicemail.", voicemail_delete_selected: "Voicemail deleted.",
+  sms_latest_sender: "Checked the latest text.", phone_keypad: "Keypad opened.", contact_show: "Contacts shown.", contact_read_selected: "Read the open contact.",
+}
+
+const SAID: Record<Exclude<Settled, "Applied">, string> = {
+  EmergencyHandoff: "Emergency number opened in the dialer.", NothingFound: "No matching contact was found.", OwnerCancelled: "Cancelled.",
+  Unavailable: "Not available on this phone right now.", NotDone: "It did not go through.", Unconfirmed: "The phone could not confirm it.",
+  Refused: "Nothing was done.", Busy: "Another call is in progress.", Occupied: "A message is already being sent there.",
+  NoneSelected: "Nothing is open to act on.", Stale: "The contact changed, so it was left as is.",
+}
+
+/** The direct-pass class of a telephony operation: only a bare keypad and a filtered Contacts list are views; every call, text, read and contact change is a reviewed comms act. */
+export function classOf(op: TelephonyOperation | undefined): Op {
+  if (op?.type === "contact_show" || (op?.type === "phone_keypad" && op.number === undefined)) return "OpenView"
+  return "CommsAct"
+}
+
+const READS: ReadonlySet<string> = new Set(["messages_read_selected", "voicemail_read_selected", "contact_read_selected", "sms_latest_sender"])
+
+/** Whether an unknown outcome of the operation may stay unresolved in action history: every telephony action that is not a read. */
+export function handoffOf(op: TelephonyOperation | undefined): boolean {
+  return op === undefined || !READS.has(op.type)
+}
+
+/**
+ * Of the capabilities the agent `offered`, those this phone advertises in `x-eliza-device-capabilities`: only what the device
+ * runs (`own`, none off the image) and the agent offered, and the latest-sender v2 form only with v1 itself.
+ */
+export function advertisedOf(own: readonly string[], offered: readonly string[]): readonly string[] {
+  const kept = own.filter((capability) => offered.includes(capability))
+  return kept.includes("sms.latest-sender.v1") ? kept : kept.filter((capability) => capability !== "sms.latest-sender.v2")
+}
+
+/** Telephony's part of the device capability header, read when a turn is sent, for the shell's DeviceCapabilities. */
+export effect function telephonyCapabilities(offered: readonly string[]) {
+  const actions = try TelephonyActions
+  return advertisedOf(try (actions.capabilities() catch () => [] as readonly string[]), offered)
+}
+
+/** What a telephony operation targets against the owner's words: a written number, a contact name, or nothing. */
+export function targetOf(op: TelephonyOperation | undefined, text: string): Target {
+  if (op === undefined) return { tag: "NoTarget" }
+  if (op.type === "sms_send") return { tag: "NumberTarget", matches: (op.recipients as readonly string[]).every((n) => grounded(text, { kind: "number", number: n }, op.body)) }
+  if (op.type === "phone_keypad" && typeof op.number === "string") return { tag: "NumberTarget", matches: grounded(text, { kind: "number", number: op.number }) }
+  if (op.type === "contact_create" && (op.contact.phoneNumbers as readonly string[]).length > 0)
+    return { tag: "NumberTarget", matches: (op.contact.phoneNumbers as readonly string[]).some((n) => grounded(text, { kind: "number", number: n })) }
+  if (op.target?.kind === "number") return { tag: "NumberTarget", matches: grounded(text, op.target) }
+  const query: unknown = op.target?.kind === "contact" ? op.target.query : op.query
+  if (typeof query === "string" && op.type !== "contact_show") return { tag: "ContactTarget", nameWritten: text.toLowerCase().includes(query.toLowerCase()) }
+  return { tag: "NoTarget" }
+}
+
+/** The card's detail line: who or what the operation names, never more than the proposal itself carries. */
+export function detailOf(op: TelephonyOperation): string {
+  if (op.type === "sms_send") return `To ${(op.recipients as readonly string[]).join(", ")}: ${op.body}`
+  if (op.type === "sms_compose") return `To ${op.query}: ${op.body}`
+  if (op.type === "sms_reply_selected") return op.body
+  if (op.type === "contact_create") return op.contact.displayName
+  if (op.target?.kind === "number") return op.target.number
+  if (op.target?.kind === "contact") return op.target.query
+  if (typeof op.query === "string") return op.query
+  if (op.type === "phone_keypad" && typeof op.number === "string") return op.number
+  return ""
+}
+
+/** The receipt sentence for a settled run, from what the phone answered where it is known, else from the outcome alone. */
+export function sentenceOf(type: string, settled: Settled | undefined, result: Result): string {
+  if (settled !== undefined) return settled === "Applied" ? DONE[type] ?? "Done." : SAID[settled]
+  return match (result) {
+    when "Applied": DONE[type] ?? "Done.";
+    when "Unknown": SAID.Unconfirmed;
+    when "Failed": SAID.NotDone;
+    when "NotStarted": SAID.Refused;
+    default: "";
+  }
+}
+
+const KEPT = 32
+
+/**
+ * The telephony family of the assistant's device executors: each approved operation runs once through TelephonyActions under
+ * its operation ID, grounded by the owner's own words, and a view change that shows the outcome follows once its journal entry and
+ * receipt settled and the reply carrying it ended.
+ */
+export const operationPorts = effect {
+  const actions = try TelephonyActions
+  const bridges = try TelephonyBridges
+  const calls = try TelephonyCalls
+  const navigation = try Navigation
+  const settled = new Map<string, Settled>()
+  const shows = new Map<string, Present>()
+
+  function remember(operation: unknown, outcome: Settled) {
+    const key = JSON.stringify(operation)
+    settled.delete(key)
+    settled.set(key, outcome)
+    if (settled.size > KEPT) settled.delete(settled.keys().next().value!)
+  }
+
+  function hold(operationId: string, present: Present) {
+    shows.delete(operationId)
+    shows.set(operationId, present)
+    if (shows.size > KEPT) shows.delete(shows.keys().next().value!)
+  }
+
+  effect function showAfterReply(call: ExecutorCall, present: Present) {
+    try calls.settled(call)
+    try (navigation.open(present.app, present.route) catch () => false)
+  }
+
+  effect function run(operation: unknown, call: ExecutorCall) {
+    const facts = try calls.of(call)
+    const done = try (actions.run(operation, call.operationId, { text: facts.ownerText }) catch (failure) => failure)
+    if (done instanceof AlreadyRan) return undefined
+    if (done instanceof NotATelephonyOperation) return { kind: "refused" as const, code: "unsupported" }
+    remember(operation, done.settled)
+    if (done.settled === "Unconfirmed") return undefined
+    if (done.present !== undefined) hold(call.operationId, done.present)
+    return APPLIED.has(done.settled)
+      ? { kind: "applied" as const, result: done.result }
+      : { kind: "refused" as const, code: CODES[done.settled], result: done.result }
+  }
+
+  effect function readBack(operation: unknown, call: ExecutorCall) {
+    const found = try actions.readBack(operation, call.operationId)
+    if (found === undefined) return undefined
+    remember(operation, found.settled)
+    return APPLIED.has(found.settled)
+      ? { kind: "found" as const, result: found.result }
+      : { kind: "refused" as const, code: CODES[found.settled], result: found.result }
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => bridges.offered ? telephonyOperationOf(operation) : undefined,
+    execute: (operation, call) => runPromise(run(operation, call)),
+    readBack: (operation, call) => runPromise(readBack(operation, call)),
+    describe: (operation) => {
+      const op = telephonyOperationOf(operation)
+      return op === undefined ? { title: "Action", detail: "" } : { title: TITLES[op.type] ?? "Action", detail: detailOf(op) }
+    },
+    classOf: (operation) => classOf(telephonyOperationOf(operation)),
+    target: (operation, text) => targetOf(telephonyOperationOf(operation), text),
+    summarize: (operation, result) => {
+      const op = telephonyOperationOf(operation)
+      return op === undefined ? "" : sentenceOf(op.type, settled.get(JSON.stringify(operation)), result)
+    },
+    handoff: (operation) => handoffOf(telephonyOperationOf(operation)),
+    present: (_operation, call) => {
+      const present = shows.get(call.operationId)
+      if (present === undefined) return
+      shows.delete(call.operationId)
+      runFork(showAfterReply(call, present))
+    },
+  }
+  return ports
+}

@@ -1,0 +1,116 @@
+// spec/notes/folders.md, "Story: Keep my notes in folders I name"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/folders.md, "Renaming keeps the folder's ID, so every note stays in it"; spec/notes/folders.md, "Deleting a folder removes it first, and its notes then read as in no folder"
+import { notesFolderName } from "@elizaos/plugin-notes/organize"
+import { type Event as FolderEvent, type FolderList, Rejected, apply } from "../../gen/notes__folders.effect.vibe"
+import { decodeFolders, type FoldersDocument } from "./notes.schema.vibe"
+import { randomId } from "./platform.ts"
+import { SlotUnavailable, compareExchangeSlot, readSlot, slots } from "./slots.vibe"
+
+/** A folder as the owner named it. */
+export interface NotesFolder { readonly id: string; readonly name: string; readonly createdAt: number }
+
+/** The folder name is not 1 to 40 characters without NUL, or the change is not allowed. */
+export error FolderRefused { reason: "invalid-name" | "name-in-use" | "not-found" | "limit" }
+/** Another writer changed the folder list first; nothing was written. */
+export error FoldersChanged
+/** The stored folder list does not read back; it is never written over. */
+export error FoldersUnreadable
+
+/** The owner's folder list on this phone. */
+export service NotesFolders {
+  readonly changes: Stream.Stream<readonly NotesFolder[]>
+  list(): readonly NotesFolder[]!FoldersUnreadable | SlotUnavailable
+  create(name: string): NotesFolder!FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable
+  rename(id: string, name: string): NotesFolder!FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable
+  remove(id: string): void!FolderRefused | FoldersChanged | FoldersUnreadable | SlotUnavailable
+  findByName(name: string): NotesFolder | undefined!FoldersUnreadable | SlotUnavailable
+  /** One folders event as the machine names it, applied to the stored list; false when the rules refuse it. */
+  dispatch(event: FolderEvent): boolean!FoldersChanged | FoldersUnreadable | SlotUnavailable
+  /** The stored list as the folders machine sees it. */
+  state(): FolderList!FoldersUnreadable | SlotUnavailable
+}
+
+/** The key two folder names are compared by. */
+export function folderKey(name: string): string {
+  return name.normalize("NFKC").toLowerCase()
+}
+
+/** The folder list as the folders machine sees it. */
+export function folderState(document: FoldersDocument): FolderList {
+  return { folders: document.folders.map((folder) => ({ id: folder.id, key: folderKey(folder.name) })), revision: document.revision ?? 0 }
+}
+
+effect function load(): { raw: string | undefined; document: FoldersDocument }!FoldersUnreadable | SlotUnavailable {
+  const raw = try readSlot(slots.folders)
+  if (raw === undefined) return { raw, document: { version: 1, folders: [] } }
+  return { raw, document: try (decodeFolders(raw) catch effect () => { throw new FoldersUnreadable() }) }
+}
+
+/** The folder service over the device's folder slot. */
+export const foldersLayer = Layer.effect(NotesFolders, effect {
+  const shown = try SubscriptionRef.make<readonly NotesFolder[]>([])
+
+  effect function change(event: FolderEvent, named: ReadonlyMap<string, string>, refusal: FolderRefused["reason"]) {
+    const { raw, document } = try load()
+    const next = try (apply(folderState(document), event) catch effect (error) => match (error) {
+      when Rejected: throw new FolderRefused({ reason: refusal });
+    })
+    const created = new Map(document.folders.map((folder) => [folder.id, folder]))
+    const folders = next.folders.map((folder) => {
+      const before = created.get(folder.id)
+      const name = named.get(folder.id) ?? before?.name ?? folder.key
+      return { id: folder.id, name, createdAt: before?.createdAt ?? Date.now() }
+    })
+    const stored: FoldersDocument = { version: 1, folders, revision: next.revision }
+    if (next.revision !== folderState(document).revision && !(try compareExchangeSlot(slots.folders, raw, JSON.stringify(stored)))) throw new FoldersChanged()
+    try SubscriptionRef.set(shown, folders)
+    return folders
+  }
+
+  effect function list() {
+    const folders = (try load()).document.folders
+    try SubscriptionRef.set(shown, folders)
+    return folders
+  }
+
+  effect function findByName(name: string) {
+    const wanted = notesFolderName(name)
+    if (wanted === undefined) return undefined
+    return (try list()).find((folder) => folderKey(folder.name) === folderKey(wanted))
+  }
+
+  return {
+    changes: SubscriptionRef.changes(shown),
+    list,
+    effect dispatch(event: FolderEvent) {
+      const named = event.type === "deleteFolder" ? new Map<string, string>() : new Map([[event.id, event.key]])
+      return try (effect { try change(event, named, "not-found"); return true } catch effect (error) => match (error) {
+        when FolderRefused: false;
+        default: throw error;
+      })
+    },
+    effect state() { return folderState((try load()).document) },
+    findByName,
+    effect create(name: string) {
+      const named = notesFolderName(name)
+      if (named === undefined) throw new FolderRefused({ reason: "invalid-name" })
+      const existing = try findByName(named)
+      if (existing !== undefined) return existing
+      const id = `f-${randomId()}`
+      const folders = try change({ type: "createFolder", id, key: folderKey(named) }, new Map([[id, named]]), "limit")
+      const made = folders.find((folder) => folder.id === id)
+      if (made === undefined) throw new FoldersChanged()
+      return made
+    },
+    effect rename(id: string, name: string) {
+      const named = notesFolderName(name)
+      if (named === undefined) throw new FolderRefused({ reason: "invalid-name" })
+      const folders = try change({ type: "renameFolder", id, key: folderKey(named) }, new Map([[id, named]]), "name-in-use")
+      const renamed = folders.find((folder) => folder.id === id)
+      if (renamed === undefined || renamed.name !== named) throw new FoldersChanged()
+      return renamed
+    },
+    effect remove(id: string) {
+      try change({ type: "deleteFolder", id }, new Map(), "not-found")
+    },
+  }
+})

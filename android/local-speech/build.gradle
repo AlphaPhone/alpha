@@ -1,29 +1,24 @@
+// Alpha's local speech bridge (AlphaVoiceCloud) over the upstream os local-inference module (:eliza-local-inference,
+// vendor/eliza/packages/os/android/local-inference): one JNI bridge, libparadeevoicejni.so bound to ai/eliza/voice/VoiceNative.
+// The module's engine, native and speech-bridge properties are set by android/app/product.gradle, which :app applies before
+// :eliza-local-inference is configured.
+apply plugin: 'com.android.library'
 def paradeeAbiArgs = ['arm64-v8a', 'x86_64'].collectMany { ['--abi', it] }
-// Shared native speech API and build policy come from the exact reviewed pin.
-def preparedSpeech = new groovy.json.JsonSlurper().parseText(providers.exec {
- workingDir rootProject.projectDir.parentFile
- commandLine 'bun', 'scripts/prepare-patched-native.ts'
-}.standardOutput.asText.get())
-def paradee = new File(preparedSpeech.root.toString(), 'plugins/plugin-local-inference/native/android')
-if (!paradee.isDirectory()) paradee = file('../../vendor/eliza/plugins/plugin-local-inference/native/android')
-if (!paradee.isDirectory()) {
- ext.elizaSpeechSourceDir = file('../../vendor/eliza/packages/app/platforms/android/local-speech')
- apply from: new File(ext.elizaSpeechSourceDir, 'consumer.gradle')
-} else {
- // Alpha's AlphaVoiceCloud bridge subclasses the shared LocalSpeechBridgePlugin.
- ext.elizaSpeechBridgeCapacitor = 'true'
- ext.elizaParadeeSourceDir = paradee
- ext.elizaParadeeNativeDir = file('../../.eliza/paradee-voice/native')
- // The nested engine header is authenticated by verifySpeechInputs, outside the patched Java tree.
- ext.elizaParadeeFfiIncludeDir = file('../../vendor/eliza/plugins/plugin-local-inference/native/llama.cpp/tools/omnivoice/include')
- ext.elizaParadeePackageInference = false
- apply from: new File(paradee, 'consumer.gradle')
- def verifySpeechInputs = tasks.register('verifySpeechInputs', Exec) {
-  workingDir rootProject.projectDir.parentFile
-  commandLine(['bun', 'scripts/paradee-runtime.ts'] + paradeeAbiArgs)
- }
- tasks.named('preBuild').configure { dependsOn verifySpeechInputs }
+android {
+ namespace 'ai.alphacompute.alphaphone.speech'
+ compileSdk rootProject.ext.compileSdkVersion
+ defaultConfig { minSdk 29; targetSdk rootProject.ext.targetSdkVersion }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
 }
-
-// Shared relay compiles against the same pinned OkHttp API implemented by the app.
-dependencies { compileOnly 'com.squareup.okhttp3:okhttp:5.3.2' }
+dependencies {
+ api project(':eliza-local-inference')
+ api project(':eliza-voice-io')
+ implementation project(':capacitor-android')
+ // Shared relay compiles against the same pinned OkHttp API implemented by the app.
+ compileOnly 'com.squareup.okhttp3:okhttp:5.3.2'
+}
+def verifySpeechInputs = tasks.register('verifySpeechInputs', Exec) {
+ workingDir rootProject.projectDir.parentFile
+ commandLine(['node', 'scripts/paradee-runtime.ts'] + paradeeAbiArgs)
+}
+tasks.named('preBuild').configure { dependsOn verifySpeechInputs }

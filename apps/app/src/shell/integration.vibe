@@ -1,0 +1,98 @@
+// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
+import { AccountBindings } from "../account/bindings.vibe"
+import { AccountSheet } from "../account/sheet.vibe"
+import { Entitlement } from "../account/entitlement.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
+import { Conversations } from "../assistant/conversations.vibe"
+import { DeviceFacts } from "../settings/facts.vibe"
+import { CallWatch } from "../telephony/call-bar.vibe"
+import { VoiceConversation } from "../voice/conversation.vibe"
+import { executorsLive } from "./compose/executors.vibe"
+import { fillsLive, idleFill } from "./compose/fills.vibe"
+import { Foreground } from "./foreground.vibe"
+import { handoffsLive } from "./handoffs.vibe"
+import { Navigation } from "./navigation.vibe"
+import { pageEvents, pageHidden } from "./page.ts"
+
+/**
+ * What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, and the assistant's
+ * dock; an invocation is taken at start, on every return, on each warm `alpha:assist-invocation`, and once the account settles the
+ * protected power launch's reference, with Android's keyguard as the foreground last read it.
+ */
+export const integrationLive = Layer.effectDiscard(effect {
+  const facts = try DeviceFacts
+  const entitlement = try Entitlement
+  const sheet = try AccountSheet
+  const voice = try VoiceConversation
+  const conversations = try Conversations
+  const assistant = try Assistant
+  const calls = try CallWatch
+  const navigation = try Navigation
+  const foreground = try Foreground
+  const bindings = try AccountBindings
+
+  effect function invocation() {
+    const nav = try navigation.get()
+    const front = try foreground.get()
+    const launch = try bindings.powerLaunchNow()
+    const signIn = (try bindings.idle()).signInOpen
+    const latest = (conversations.list() catch () => [])[0] as { readonly id: string; readonly roomId?: string } | undefined
+    const screen = {
+      unlocked: !front.locked, visible: !nav.hidden, dialogOpen: nav.layers.length > 0,
+      connectionPrompt: signIn || nav.layers.some((layer) => layer.id.startsWith("account")), voiceActive: nav.voice,
+      ...(launch.initialRestorePending || launch.accountRef === null ? {} : { powerAccountRef: launch.accountRef }),
+    }
+    const callActive = !(try calls.allowed())
+    const start = {
+      admitted: !nav.hidden && nav.holds.length === 0, callActive,
+      conversationId: latest?.id ?? "", roomId: latest?.roomId ?? latest?.id ?? "",
+      chatCurrent: () => true,
+    }
+    if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
+  }
+
+  fork.scoped assistant.follow()
+  fork.scoped (effect {
+    let callAtHide = false
+    for try (const _ of pageEvents("visibilitychange", "document")) {
+      const visible = !pageHidden()
+      try entitlement.foreground(visible)
+      if (visible) {
+        const callSeen = callAtHide || (try calls.live())
+        callAtHide = false
+        try voice.returned(callSeen)
+        try facts.resume()
+        try invocation()
+      } else {
+        callAtHide = try calls.live()
+        try voice.hidden()
+      }
+    }
+  })
+  fork.scoped (effect { for try (const _ of pageEvents("launcher-home")) try sheet.returnHome() })
+  fork.scoped (effect { for try (const _ of pageEvents("alpha:assist-invocation")) try invocation() })
+  fork.scoped (effect {
+    for try (const launch of Stream.drop(Stream.changesWith(bindings.powerLaunch, (a, b) => a.initialRestorePending === b.initialRestorePending && a.accountRef === b.accountRef), 1)) {
+      if (!launch.initialRestorePending) try invocation()
+    }
+  })
+  fork.scoped (effect {
+    let covering = false
+    let speaking = false
+    for try (const nav of navigation.changes) {
+      const next = nav.app !== "" || nav.library || nav.shade
+      if (next !== covering) try sheet.covered(next)
+      covering = next
+      if (speaking && !nav.voice && !(try voice.claimed())) try voice.stop()
+      speaking = nav.voice
+    }
+  })
+  try entitlement.foreground(!pageHidden())
+  try invocation()
+})
+
+/**
+ * The last step of the runtime: the late ports filled from their providers, the idle facts of Telephony and Account, every
+ * area's device executors, Notes' hand-overs and the shell's followers.
+ */
+export const shellIntegration = Layer.mergeAll(fillsLive, idleFill, executorsLive, handoffsLive, integrationLive)

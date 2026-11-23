@@ -1,16 +1,16 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Scores which phone operation the resident agent proposes for a fixed set of requests,
  * so a change to what the agent's model is sent can be compared before and after.
  *
- * It talks to a loopback resident runtime (for example `bun run dev`) that has a hosted
+ * It talks to a loopback resident runtime (for example `pnpm dev`) that has a hosted
  * text model. It enrolls one synthetic phone with the capabilities an Alpha-image phone
  * negotiates, sends each case in its own conversation with the screen the case names, and
  * reads the durable device proposals the turn created. Every proposal is rejected at
  * once: nothing is approved or executed, and no phone effect can occur. The synthetic
  * phone is revoked when the run ends; its conversations stay in the runtime's history.
  *
- *   bun scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
+ *   node scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
  *     --token-file <paired-machine-token> --output test-results/phone-actions.json \
  *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--ask-before] [--stream] [--only <case id>[,...]]
  *     [--database <resident .elizadb>]
@@ -40,12 +40,39 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AGENT_MODEL } from './agent-model.ts';
 import { audit, loadCalls } from './agent-context-audit.ts';
-import { selectDeviceCapabilities } from '../apps/app/src/runtime/phone-context.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** An Alpha-image phone: every reviewed surface the launcher can run. */
 export const DEVICE_PROFILE = Object.freeze({ android: true, native: true, camera: true, foregroundReview: true, canonicalNotes: true, photoLibrary: true, files: true, clockRepeatDays: true, aospImage: true });
 const CASESET_REVISION = 8;
+
+const always = ['calendar.local-event.v1', 'notes.local-record.v1'] as const;
+const whenOffered = ['notes.list-filter.v1', 'reminders.create.v1', 'calendar.create.v1', 'calendar.next-read.v1', 'maps.selected-read.v1', 'files.browser.v1',
+  'browser.search.v1', 'browser.tabs.v1', 'browser.history.v1', 'browser.find.v1', 'browser.open-new-tab.v1', 'gmail.local-compose.v1', 'calendar.availability-read.v1',
+  'photos.library.v1', 'calendar.named-read.v1', 'clock.handoff.v1', 'clock.handoff.v2', 'views.telephony.v1', 'sms.send.v1', 'phone.dial.v1',
+  'sms.latest-sender.v1', 'phone.call.v1', 'contacts.write.v1', 'contacts.show.v1', 'contacts.read.v1', 'sms.compose.v1', 'messages.read.v1',
+  'voicemail.read.v1', 'voicemail.delete.v1', 'phone.keypad.v1'] as const;
+/** A capability offered only beside the one it extends: [extension, extended]. */
+const extensions = [['camera.capture-lens.v1', 'camera.capture-photo.v1'], ['browser.tabs.close-all.v1', 'browser.tabs.v1'], ['sms.latest-sender.v2', 'sms.latest-sender.v1'],
+  ['sms.compose.v2', 'sms.compose.v1'], ['contacts.write.v2', 'contacts.write.v1']] as const;
+
+/**
+ * What a phone of DEVICE_PROFILE negotiates over what the agent offered, as the phone selects it:
+ * calendar and Notes records always; Camera, reminders (the newest record format only), Notes
+ * filters, Calendar, Maps, Files, Browser, Gmail drafts, Photos, the Clock handoff and, on the
+ * image, Phone, Messages and Contacts only where offered; an extension only beside what it extends.
+ * Never the browser-only agenda read, the retired Notes query, alarms or the on-device contact lookup.
+ */
+export function alphaImageCapabilities(offered: readonly unknown[]): string[] {
+  const agent = new Set(offered.filter((value): value is string => typeof value === 'string'));
+  const selected: string[] = [...always];
+  if (agent.has('camera.capture-photo.v1')) selected.push('camera.capture-photo.v1');
+  if (agent.has('reminders.local-record.v2')) selected.push('reminders.local-record.v2');
+  else if (agent.has('reminders.local-record.v1')) selected.push('reminders.local-record.v1');
+  for (const capability of whenOffered) if (agent.has(capability)) selected.push(capability);
+  for (const [extension, extended] of extensions) if (agent.has(extension) && selected.includes(extended)) selected.push(extension);
+  return selected;
+}
 
 /**
  * `expect` lists what the turn must propose: each entry is a set of acceptable operation
@@ -195,13 +222,13 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
   origin: string; token: string; cases?: readonly PhoneCase[]; followUps?: readonly PhoneCase[]; runs?: number; pauseMs?: number; oneConversation?: boolean; askBefore?: boolean; streamMode?: boolean; now?: () => Date;
 }) {
   const base = loopback(origin), installationId = randomUUID();
-  const device: Record<string, string> = { 'X-Eliza-Device-Id': installationId, 'X-Eliza-Device-Key': randomBytes(32).toString('hex'), 'X-Eliza-Device-Capabilities': selectDeviceCapabilities([], DEVICE_PROFILE).join(',') };
+  const device: Record<string, string> = { 'X-Eliza-Device-Id': installationId, 'X-Eliza-Device-Key': randomBytes(32).toString('hex'), 'X-Eliza-Device-Capabilities': alphaImageCapabilities([]).join(',') };
   const call = async <T = unknown>(pathname: string, body?: unknown): Promise<T> => {
     const response = await fetch(base + pathname, { method: body === undefined ? 'GET' : 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...device }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     if (!response.ok) throw Error(`${pathname.split('/').slice(0, 4).join('/')} returned HTTP ${response.status}`);
     return response.json() as Promise<T>;
   };
-  // Like the phone (apps/app/src/runtime/local-agent-stream.ts): status labels are the transient
+  // Like the phone's resident stream: status labels are the transient
   // acknowledgement ('thinking') and activity ('running_tool'); the done frame carries the reply.
   const streamTurn = async (pathname: string, body: unknown, row: CaseRun): Promise<{ text?: string }> => {
     const sent = Date.now();
@@ -243,7 +270,7 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
   const registered = await call<{ installationId: string; capabilities: string[] }>('/api/client-devices/register', { label: 'Alpha phone-action eval', workflowProtocol: 0 });
   if (registered.installationId !== installationId) throw Error('Device registration was not verified');
   // The phone's own selection over what the agent offered.
-  const negotiated = selectDeviceCapabilities(registered.capabilities, DEVICE_PROFILE);
+  const negotiated = alphaImageCapabilities(Array.isArray(registered.capabilities) ? registered.capabilities : []);
   device['X-Eliza-Device-Capabilities'] = negotiated.join(',');
   const startedAt = now();
   let revoked = false;
@@ -296,7 +323,7 @@ export async function evaluate({ origin, token, cases = CASES, followUps = FOLLO
   }
 }
 
-if (import.meta.main) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2), flag = (name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
   const origin = flag('--origin'), tokenFile = flag('--token-file'), output = flag('--output');
   const runs = Number(flag('--runs') ?? 1), pauseMs = Number(flag('--pause-ms') ?? 0);

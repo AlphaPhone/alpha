@@ -1,0 +1,266 @@
+// spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"; spec/camera/libraryReview.md, "Story: Share only reviewed identities with the assistant"
+import { Machine as HostMachine, type Event as HostEvent, type Host, type RequestKind } from "../../gen/camera__agentLibrary.effect.vibe"
+import { Machine as ReviewMachine, readRefusal, type Event as ReviewEvent, type Reviews } from "../../gen/camera__libraryReview.effect.vibe"
+import type { PhotosOperation } from "./bridge.schema.vibe"
+import { PhotoLibrary } from "./library.vibe"
+import { photosText } from "./messages.vibe"
+import { CameraNotices } from "./notices.vibe"
+import { PhotosFailed, PhotoStore, type Reviewed } from "./photos.vibe"
+
+/** A Photos request the phone refused, in Alpha's words; nothing was changed. */
+export error PhotosRefused { message: string }
+
+/** An open review over the grid, for the owner to confirm or cancel. */
+export interface ReviewCard {
+  readonly kind: "album" | "share" | "library"
+  readonly title: string
+  readonly detail: string
+  readonly count: number
+  readonly missing: number
+}
+
+/** The assistant's Photos requests and reviews over the Photos the owner sees. */
+export service AgentPhotos {
+  readonly host: Stream.Stream<Host>
+  readonly reviews: Stream.Stream<Reviews>
+  /** Photos shows or stops showing; the page hides or shows. */
+  visit(inPhotos: boolean): void!!
+  page(hidden: boolean): void!!
+  run(operation: PhotosOperation, offersSelected: boolean): unknown!PhotosRefused
+  card(): ReviewCard | undefined!!
+  confirm(): void!!
+  cancel(): void!!
+  /** Back while the assistant's review card shows: the card is cancelled; false when no card shows. */
+  back(): boolean!!
+}
+
+const n = (count: number) => count === 1 ? "1 item" : `${count} items`
+
+/** The library change review's card text: the change itself, and what Android does with it. */
+export function reviewText(action: "trash" | "share" | "favorite" | "unfavorite", count: number): { readonly title: string; readonly detail: string } {
+  if (action === "trash") return { title: `Move ${n(count)} to trash?`, detail: "Android asks you to confirm. Items stay in Android trash until it empties them; other apps see them removed." }
+  if (action === "share") return { title: `Share ${n(count)}?`, detail: "Android opens its share sheet with read-only access to exactly these items. Nothing is sent until you choose an app there." }
+  if (action === "favorite") return { title: `Favorite ${n(count)}?`, detail: "Android asks you to confirm marking these items as favorites for every gallery app." }
+  return { title: `Remove ${n(count)} from favorites?`, detail: "Android asks you to confirm." }
+}
+
+/** The assistant's Photos service over the request and review Machines. */
+export const agentPhotos = Layer.effect(AgentPhotos, effect {
+  const host = try HostMachine
+  const reviews = try ReviewMachine
+  const library = try PhotoLibrary
+  const store = try PhotoStore
+  const notices = try CameraNotices
+  const session = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(36).padStart(2, "0")).join("").slice(0, 12)
+  const issued = new Map<string, { readonly id: string; readonly revision: string }>()
+  let serial = 0
+  let pending: { action: "trash" | "share" | "favorite" | "unfavorite"; items: Reviewed[] } | undefined
+  let opened: { kind: "album" | "share"; name: string; ids: string[]; missing: number } | undefined
+
+  function modelRevision(id: string, revision: string): string {
+    const existing = [...issued.entries()].find(([, value]) => value.id === id && value.revision === revision)
+    if (existing !== undefined) return existing[0]
+    const issuedRevision = `rev-${session}-${++serial}`
+    issued.set(issuedRevision, { id, revision })
+    return issuedRevision
+  }
+
+  effect function hostSend(event: HostEvent) {
+    return host.send(event) catch () => undefined
+  }
+
+  effect function reviewSend(event: ReviewEvent) {
+    return reviews.send(event) catch () => undefined
+  }
+
+  effect function readable() {
+    const scope = store.deviceScope() catch () => undefined
+    const refusal = readRefusal(scope !== undefined, scope !== undefined && scope.scope !== "denied" && scope.scope !== "owned", scope?.locked === true)
+    if (refusal === "ReadUnavailable") throw new PhotosRefused({ message: "The device library is available only in the Android app." })
+    if (refusal === "ReadNoAccess") throw new PhotosRefused({ message: "Alpha is not allowed to read the photo library." })
+    if (refusal === "ReadLocked") throw new PhotosRefused({ message: "Nothing was shared because the phone is locked." })
+    return scope!
+  }
+
+  function summary(item: { readonly id: string; readonly revision: string; readonly kind: "image" | "video"; readonly date: number; readonly width: number; readonly height: number; readonly duration?: number; readonly favorite?: boolean; readonly taken?: number; readonly takenAt?: number; readonly mutationRevision?: string }) {
+    return {
+      id: item.id, revision: modelRevision(item.id, item.mutationRevision ?? item.revision), kind: item.kind, takenAt: item.takenAt ?? item.taken ?? item.date,
+      width: item.width, height: item.height, ...(item.kind === "video" && item.duration !== undefined ? { duration: Math.round(item.duration) } : {}),
+      ...(item.favorite === true ? { favorite: true as const } : {}),
+    }
+  }
+
+  effect function itemsRequest(kind: RequestKind, ids: readonly string[], target: string, selectedForm: boolean, offersSelected: boolean) {
+    const rows = try library.rows()
+    const known = (try host.get()).library
+    for (const row of rows) if (!known.includes(row.id)) try hostSend({ type: "restore", media: row.id })
+    try hostSend({ type: "windowLoaded", loadedIds: rows.map((row) => row.id) })
+    const shown = try library.shown()
+    if (shown !== undefined) try hostSend({ type: "viewerOpens", media: shown.id })
+    const before = try host.get()
+    const asked = try hostSend({ type: "request", kind, ids: [...ids], target, selectedForm, offersSelected })
+    if (asked === undefined) throw new PhotosRefused({ message: (try host.get()).albumReview.length > 0 || before.libraryReview ? "Finish the open review first." : "Open Photos, then ask again." })
+    if (asked.ask.phase === "AskReading") {
+      for (const id of asked.ask.ids.filter((id) => !asked.ask.found.includes(id))) {
+        const found = try library.find(id)
+        if (found === undefined) try hostSend({ type: "remove", media: id })
+        else if (!asked.library.includes(id)) try hostSend({ type: "restore", media: id })
+      }
+      try hostSend({ type: "settleAsk" })
+    }
+    const after = try host.get()
+    if (after.refusedLeft > before.refusedLeft) throw new PhotosRefused({ message: "Open Photos, then ask again." })
+    if (after.refusedBusy > before.refusedBusy) throw new PhotosRefused({ message: "Photos is busy right now." })
+    if (after.refusedNone > before.refusedNone) throw new PhotosRefused({ message: kind === "SelectItems" ? "None of those items are in Photos." : "Those items are not in Photos." })
+    if (after.refusedReview > before.refusedReview) throw new PhotosRefused({ message: "Finish the open review first." })
+    if (after.refusedForm > before.refusedForm) throw new PhotosRefused({ message: "Open the photo in Photos, then ask again." })
+    return after.answers[after.answers.length - 1]!
+  }
+
+  effect function cancelNow() {
+    if ((try reviews.get()).review !== 0) {
+      try reviewSend({ type: "cancel" })
+      try hostSend({ type: "libraryReviewEnds" })
+      pending = undefined
+    }
+    if (opened !== undefined) {
+      try hostSend({ type: "cancelReview" })
+      opened = undefined
+    }
+  }
+
+  return {
+    host: host.changes,
+    reviews: reviews.changes,
+    effect visit(inPhotos: boolean) {
+      try hostSend({ type: inPhotos ? "enter" : "leave" })
+      try reviewSend({ type: inPhotos ? "show" : "leave" })
+      if (!inPhotos) {
+        pending = undefined
+        opened = undefined
+      }
+    },
+    effect page(hidden: boolean) {
+      try hostSend({ type: hidden ? "hide" : "show" })
+      try reviewSend({ type: hidden ? "hidePage" : "showPage" })
+      if (hidden) opened = undefined
+    },
+    effect run(operation: PhotosOperation, offersSelected: boolean) {
+      if (operation.type === "photo_library_search") {
+        const scope = try readable()
+        const limit = operation.limit ?? 20
+        const page = try mapError(store.devicePage({ limit, kind: operation.kind ?? "all", ...(operation.from === undefined ? {} : { from: operation.from }), ...(operation.to === undefined ? {} : { to: operation.to }), ...(operation.favorites === true ? { favorites: true } : {}) }), (failure) => new PhotosRefused({ message: photosText(failure.message, "Failed") }))
+        return { kind: "photo_library_search", scope: scope.scope === "partial" ? "partial" : scope.scope === "selected" ? "selected" : "full", items: page.items.slice(0, limit).map(summary), more: page.next !== null && page.next !== "" }
+      }
+      if (operation.type === "photo_library_inspect") {
+        try readable()
+        const item = try mapError(store.deviceInspect(operation.id), (failure) => new PhotosRefused({ message: failure.code === "LIBRARY_MISSING" ? "That item is no longer in the library." : photosText(failure.message, "Failed") }))
+        return { kind: "photo_library_inspect", item: summary(item) }
+      }
+      if (operation.type === "photo_library_select") {
+        const answer = try itemsRequest("SelectItems", operation.ids, "", false, offersSelected)
+        return { kind: "photo_library_select", selected: answer.selected, missing: answer.missing }
+      }
+      if (operation.type === "photos_open") {
+        const answer = try itemsRequest("OpenItem", [], operation.id, false, offersSelected)
+        try library.openViewer(operation.id)
+        return { kind: "photos_open", opened: answer.selected > 0 }
+      }
+      if (operation.type === "photos_filter") {
+        const shown = try library.setFilter(operation)
+        if (shown < 0) throw new PhotosRefused({ message: "Open Photos, then ask again." })
+        return { kind: "photos_filter", shown, more: false }
+      }
+      if (operation.type === "photos_album_create" || operation.type === "photos_share") {
+        const kind: RequestKind = operation.type === "photos_share" ? "ShareItems" : "AlbumItems"
+        const answer = try itemsRequest(kind, operation.ids ?? [], "", operation.selected === true, offersSelected)
+        const state = try host.get()
+        opened = { kind: kind === "ShareItems" ? "share" : "album", name: operation.type === "photos_album_create" ? operation.name : "", ids: [...(kind === "ShareItems" ? state.shareReview : state.albumReview)], missing: answer.missing }
+        return { kind: operation.type, status: "review_opened", count: answer.selected, missing: answer.missing }
+      }
+      const items = operation.items.map((entry) => ({ id: entry.id, revision: issued.get(entry.revision)?.id === entry.id ? issued.get(entry.revision)!.revision : "" }))
+      if (items.some((entry) => entry.revision === "")) throw new PhotosRefused({ message: "Nothing changed because an item changed since the assistant read it." })
+      const asked = try reviewSend({ type: "request", slot: 1, read: (try reviews.get()).revision, askAction: operation.action, count: items.length })
+      if (asked === undefined) throw new PhotosRefused({ message: "Finish the open review first." })
+      const validated = store.deviceValidate(items) catch () => undefined
+      const current = validated !== undefined && validated.items.length === items.length && validated.items.every((row) => row.status === "current")
+      if (!current) try reviewSend({ type: "sourceChanges" })
+      const opening = try reviewSend({ type: "validated", slot: 1 })
+      if (opening === undefined || opening.review === 0) throw new PhotosRefused({ message: current ? "Finish the open review first." : "Nothing changed because an item changed or left the library." })
+      pending = { action: operation.action, items }
+      try hostSend({ type: "libraryReviewOpens" })
+      return { kind: "photo_library_review", status: "review_opened", action: operation.action, count: items.length }
+    },
+    effect card() {
+      const r = try reviews.get()
+      if (r.review !== 0 && pending !== undefined) return { kind: "library", ...reviewText(pending.action, pending.items.length), count: pending.items.length, missing: 0 } as ReviewCard
+      if (opened !== undefined) {
+        const h = try host.get()
+        const live = opened.kind === "album" ? h.albumReview.length > 0 : h.shareReview.length > 0
+        if (!live) return undefined
+        return { kind: opened.kind, title: opened.kind === "album" ? `Create album “${opened.name.trim()}”?` : `Share ${n(opened.ids.length)}?`, detail: opened.kind === "share" ? "Android share sheet" : n(opened.ids.length), count: opened.ids.length, missing: opened.missing } as ReviewCard
+      }
+      return undefined
+    },
+    effect confirm() {
+      const r = try reviews.get()
+      if (r.review !== 0 && pending !== undefined) {
+        const change = pending
+        try reviewSend({ type: "confirmPress", slot: 1 })
+        const validated = store.deviceValidate(change.items) catch () => undefined
+        if (validated === undefined || !validated.items.every((row) => row.status === "current")) try reviewSend({ type: "sourceChanges" })
+        const after = try reviewSend({ type: "confirmValidated", slot: 1 })
+        pending = undefined
+        try hostSend({ type: "libraryReviewEnds" })
+        if (after === undefined || after.acting === 0) return try notices.say("Items changed", false)
+        const settled = change.action === "share"
+          ? (store.deviceShare(change.items) catch (failure) => failure)
+          : (store.deviceRequestChange(change.action, change.items) catch (failure) => failure)
+        const approved = !(settled instanceof PhotosFailed)
+        try reviewSend({ type: "androidSettles", approved })
+        if (settled instanceof PhotosFailed) try notices.say(settled.code === "LIBRARY_DECLINED" ? "Nothing changed." : settled.code === "LIBRARY_STALE" ? "Item changed" : photosText(settled.message, "Failed"), false)
+        else if ("outcomes" in settled) {
+          const verified = settled.outcomes.filter((row) => ["favorited", "unfavorited", "trashed", "restored", "unchanged"].includes(row.status)).length
+          if (!(settled.status === "complete" && verified === change.items.length)) try notices.say(`${verified}/${change.items.length} ✓`, false)
+        }
+        try library.refresh()
+        return
+      }
+      if (opened !== undefined) {
+        const review = opened
+        opened = undefined
+        if (review.kind === "album") {
+          const confirmed = try hostSend({ type: "confirmAlbum" })
+          if (confirmed !== undefined) {
+            const rows = (try library.rows()).filter((row) => review.ids.includes(row.id))
+            const created = store.changeAlbum({ operation: "create", name: review.name.trim(), ...(rows[0] === undefined ? {} : { mediaId: rows[0].id, mediaRevision: rows[0].revision }) }) catch (failure) => failure
+            if (created instanceof PhotosFailed) return try notices.say(photosText(created.message, "The album couldn’t be saved."), false)
+            let revision: string = created.revision
+            for (const row of rows.slice(1)) {
+              const added = store.changeAlbum({ operation: "add", id: created.id, revision, mediaId: row.id, mediaRevision: row.revision }) catch () => undefined
+              if (added !== undefined) revision = added.revision
+            }
+            try notices.say("Album created", false)
+            try library.refresh()
+          }
+        } else {
+          const confirmed = try hostSend({ type: "confirmShare" })
+          if (confirmed !== undefined) {
+            const rows = (try library.rows()).filter((row) => review.ids.includes(row.id)).map((row) => ({ id: row.id, revision: row.revision }))
+            const shared = store.shareMany(rows) catch (failure) => failure
+            if (shared instanceof PhotosFailed) try notices.say(photosText(shared.message, "Share failed"), false)
+          }
+        }
+      }
+    },
+    cancel: cancelNow,
+    effect back() {
+      const r = try reviews.get()
+      const h = try host.get()
+      const shown = (r.review !== 0 && pending !== undefined) || (opened !== undefined && (opened.kind === "album" ? h.albumReview.length > 0 : h.shareReview.length > 0))
+      if (!shown) return false
+      try cancelNow()
+      return true
+    },
+  }
+})

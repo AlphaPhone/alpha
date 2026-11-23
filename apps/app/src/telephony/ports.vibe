@@ -1,0 +1,37 @@
+// spec/telephony/voicemail.md, "A transcript is made on this phone or not at all"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
+import type { ExecutorCall } from "@elizaos/agent/client"
+
+/** The on-device recognizer did not transcribe a window. */
+export error TranscriptFailed { reason: string }
+
+/** The voice area's on-device recognizer, for voicemail windows only; unprovided, no voicemail is transcribed beyond the carrier's own text. */
+export service VoicemailTranscriber {
+  /** Whether the on-device recognizer is ready now. */
+  ready(): boolean!!
+  /** One complete mono 16 kHz PCM16 WAV window, base64, transcribed on this phone; empty text is silence. */
+  transcribe(wavBase64: string): string!TranscriptFailed
+  static readonly defaultValue = () => ({
+    ready: () => succeed(false),
+    transcribe: () => fail(new TranscriptFailed({ reason: "No on-device recognizer" })),
+  })
+}
+
+/** What the assistant knows about one approved telephony operation call. */
+export interface TelephonyCallFacts {
+  /** The owner approved the operation on its card. */
+  readonly reviewed: boolean
+  /** The owner's own words in the message the proposal came from, for a card as for a direct run; "" when that message is unknown. */
+  readonly ownerText: string
+}
+
+/** The assistant's facts about each executor call; unprovided, no owner words ground a written number, so a call or text to one is refused. */
+export service TelephonyCalls {
+  /** What the assistant knows of the call: whether it was reviewed and the owner's own words. */
+  of(call: ExecutorCall): TelephonyCallFacts!!
+  /** Ends once the chat request carrying this call's reply has settled, so a view change after it never cuts that reply short (#1433). */
+  settled(call: ExecutorCall): void!!
+  static readonly defaultValue = () => ({
+    of: () => succeed({ reviewed: false, ownerText: "" }),
+    settled: () => Effect.void,
+  })
+}

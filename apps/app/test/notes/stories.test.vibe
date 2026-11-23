@@ -1,0 +1,691 @@
+// spec/notes/list.md, "Story: See my notes newest first with pinned notes on top"; spec/notes/list.md, "Story: Read each note as what it is"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"; spec/notes/list.md, "Story: Start a note with a title I can tell apart"; spec/notes/list.md, "Story: Open a note by saying its title"; spec/notes/list.md, "Story: Turn text into a checklist and back"; spec/notes/list.md, "Story: Edit a checklist row by row"; spec/notes/editor.md, "Story: Leave a note the way Back does"; spec/notes/editor.md, "Story: Delete and restore a note from the editor"; spec/notes/collection.md, "Story: Change my notes one confirmed step at a time"; spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/trash.md, "Story: Never be told an erase happened when it may not have"; spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/recorder.md, "Story: Record only while the phone can hear me safely"; spec/notes/recordingJournal.md, "Story: Keep every finished segment of a recording through a crash"; spec/notes/recordingJournal.md, "Story: Keep a stopped recording until it is claimed for its note"; spec/notes/recordingOpen.md, "Story: Return to my recording from its notification"; spec/notes/audio.md, "Story: Hear the recording of the note I opened"; spec/notes/audio.md, "Story: Generate a transcript of a saved recording when I ask"; spec/notes/audio.md, "Story: Keep a finished recording with its note"; spec/notes/audioCustody.md, "Story: Change only the exact reviewed recording and keep its receipt"; spec/notes/organize.md, "Story: Let the agent organise my notes after I review the change"; spec/notes/organize.md, "Story: Keep the agent's own notes with the agent"; spec/notes/listFilter.md, "Story: Let the agent narrow my Notes list only on the list I am looking at"; spec/notes/origins.md, "Story: Turn a note into an event or a reminder I review in Calendar"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/notes/share.md, "Story: Share the note I have open"; spec/notes/share.md, "Story: Save a note as a file, with the result shown where I asked for it"; spec/notes/webSource.md, "Story: Visit or remove the web page a note came from"; spec/notes/attachment.md, "Story: Open the document a note came from"
+import { assert, describe, it } from "@effect/vitest"
+import { recordNoteOriginFor } from "@elizaos/plugin-notes/client"
+import type { NoteFormat, StickyNote } from "@elizaos/plugin-notes/types"
+import { releasesSource, Machine as AttachmentMachine } from "../../gen/notes__attachment.effect.vibe"
+import { retainPlan, retentionResult, windowCount, windowEnd, playbackAllowed } from "../../gen/notes__audio.effect.vibe"
+import { Machine as CustodyMachine, machine as custodyMachine } from "../../gen/notes__audioCustody.effect.vibe"
+import { Machine as CollectionMachine, statusLabel } from "../../gen/notes__collection.effect.vibe"
+import { itemName, rowAdded, rowRemoved } from "../../gen/notes__list.effect.vibe"
+import { Machine as ListFilterMachine } from "../../gen/notes__listFilter.effect.vibe"
+import { deviceNoteOpRuns } from "../../gen/notes__organize.effect.vibe"
+import { scheduleSource, scheduleStart } from "../../gen/notes__origins.effect.vibe"
+import { Machine as RecorderMachine, serviceStopAdmitted, startAdmitted } from "../../gen/notes__recorder.effect.vibe"
+import { Machine as JournalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
+import { Machine as RecordingOpenMachine } from "../../gen/notes__recordingOpen.effect.vibe"
+import { Machine as TransferMachine, voiceExport } from "../../gen/notes__share.effect.vibe"
+import { askDialogName, eraseDialogName, Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
+import { copyDraftAllowed } from "../../gen/notes__editor.effect.vibe"
+import { Machine as SourceDialogMachine } from "../../gen/notes__webSource.effect.vibe"
+import { NotesAudio } from "../../src/notes/audio.vibe"
+import { NotesCollection } from "../../src/notes/collection.vibe"
+import { NotesEditor } from "../../src/notes/editor.vibe"
+import { NotesFolders } from "../../src/notes/folders.vibe"
+import { checklistItems, checklistText, filterRows, folderOf, namedNoteOpenRequest, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
+import { NotesListFilter } from "../../src/notes/listFilter.vibe"
+import { NotesOrganize } from "../../src/notes/organize.vibe"
+import { NotesOrigins } from "../../src/notes/origins.vibe"
+import { NotesRecorder } from "../../src/notes/recorder.vibe"
+import { NotesRecordingOpen } from "../../src/notes/recordingOpen.vibe"
+import { NotesShare } from "../../src/notes/share.vibe"
+import { NotesSources } from "../../src/notes/sources.vibe"
+import { NotesTrash } from "../../src/notes/trash.vibe"
+import { bound, check, home, inNotes, notesOver, until } from "./harness.vibe"
+import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
+
+const start = Date.parse("2026-11-20T10:00:00.000Z")
+const at = (minutes: number) => new Date(start + minutes * 60000).toISOString()
+const sha = "a".repeat(64)
+
+function note(id: string, title: string, body: string, minutes: number, format?: NoteFormat): StickyNote {
+  return { id, title, body, color: "yellow", createdAt: at(minutes), updatedAt: at(minutes), ...(format === undefined ? {} : { format }) }
+}
+
+function seeded(...notes: StickyNote[]): NotesAgentFake {
+  const agent = new NotesAgentFake()
+  agent.notes.push(...notes)
+  agent.revision = notes.length
+  return agent
+}
+
+describe("Notes stories", () => {
+  it.effect("Pinned notes first, then newest first, untimed notes where they were stored (spec/notes/list.md, \"Story: See my notes newest first with pinned notes on top\")", () => effect {
+    // spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"
+    const untimed = { ...note("untimed", "Loose", "", 0), createdAt: "", updatedAt: "" }
+    const rows = [note("older", "Older", "", 1), note("pinned", "Pinned", "", 0, { kind: "text", data: { pinned: true } }), note("newest", "Newest", "", 5), untimed].map(rowOf)
+    const shown = shownRows(rows).map((row) => row.id)
+    try check(() => assert.deepStrictEqual(shown, ["pinned", "newest", "older", "untimed"]))
+  })
+
+  it.effect("A record reads as its kind only with that kind's data (spec/notes/list.md, \"Story: Read each note as what it is\")", () => effect {
+    // spec/notes/list.md, "A record is shown as its kind only when it carries that kind's data"
+    const empty = rowOf(note("v-empty", "Voice note", "", 1, { kind: "voice", data: { lines: [], summary: [], actions: [] } }))
+    const list = rowOf(note("groceries", "Groceries", "", 1, { kind: "list", data: { items: [{ t: "Milk", done: true }] } }))
+    const link = rowOf(note("article", "Article", "", 1, { kind: "link", data: { url: "https://example.com/a/b" } }))
+    // spec/notes/list.md, "A row carries only an opaque recording handle, checked against its own recording"
+    const foreign = rowOf(note("v-foreign", "Voice note", "", 1, { kind: "voice", data: { recordingId: "rec_1", audio: { audioId: "rec_2", durationMs: 1000 }, lines: [{ at: 0, t: "Hello" }] } }))
+    const extra = rowOf(note("v-extra", "Voice note", "", 1, { kind: "voice", data: { recordingId: "rec_3", audio: { audioId: "rec_3", durationMs: 1000, path: "/data/rec_3.m4a" } } }))
+    const own = rowOf(note("v-own", "Voice note", "", 1, { kind: "voice", data: { recordingId: "rec_4", audio: { audioId: "rec_4", durationMs: 1000 } } }))
+    try check(() => assert.deepStrictEqual(
+      { empty: empty.kind, list: [list.kind, list.items], link: [link.kind, link.domain], foreign: [foreign.kind, foreign.audio], extra: extra.audio, own: own.audio },
+      { empty: "text", list: ["list", [{ t: "Milk", done: true }]], link: ["link", "example.com"], foreign: ["voice", undefined], extra: undefined, own: { audioId: "rec_4", durationMs: 1000 } },
+    ))
+  })
+
+  it.effect("A filter keeps rows matching every part, and a deleted folder reads as none (spec/notes/list.md, \"Story: Narrow the list to what I am looking for\")", () => effect {
+    // spec/notes/list.md, "A row is shown when it matches every part of the filter"
+    const rows = [
+      note("budget", "Budget", "\nQ4 numbers", 1, { kind: "text", data: { folderId: "f-work" } }),
+      note("memo", "Voice note", "", 2, { kind: "voice", data: { lines: [{ at: 0, t: "Budget review" }], folderId: "f-gone" } }),
+      note("trip", "Trip", "\nPack", 3),
+    ].map(rowOf)
+    const folders = new Set(["f-work"])
+    const kept = filterRows(rows, { text: "BUDGET", folder: "f-work" }, folders).map((row) => row.id)
+    const voices = filterRows(rows, { kind: "voice", text: "budget" }, folders).map((row) => row.id)
+    const all = filterRows(rows, undefined, folders).length
+    const memo = rows.find((row) => row.id === "memo")
+    try check(() => assert.deepStrictEqual({ kept, voices, all, memoFolder: memo === undefined ? "?" : folderOf(memo, folders) }, { kept: ["budget"], voices: ["memo"], all: 3, memoFolder: "" }))
+  })
+
+  it.live("A new note takes the next default number, Trash included (spec/notes/list.md, \"Story: Start a note with a title I can tell apart\")", () => effect {
+    // spec/notes/list.md, "A default title takes the next number after the highest one in use, Trash included"
+    const pure = [nextDefaultTitle(["New note", "new note 3", "Shopping"], "New note"), nextDefaultTitle([], "Voice note"), nextDefaultTitle(["Voice note"], "Voice note")]
+    const agent = seeded(note("first", "New note", "", 1))
+    agent.trash.push({ note: note("gone", "New note 2", "", 0), deletedAt: at(2) })
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      try bound()
+      try editor.newNote("text")
+      const draft = try editor.draft()
+      try check(() => assert.deepStrictEqual({ pure, title: draft?.title, written: agent.notes.length }, { pure: ["New note 4", "Voice note", "Voice note 2"], title: "New note 3", written: 1 }))
+    }
+  })
+
+  it.effect("A named note opens on the phone and a relative one stays with the agent (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
+    // spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"
+    const asked = [
+      "Open the note called Groceries.", "Hey Alpha, could you show my groceries note", "open “Most Recent Recipes” in Notes",
+      "Open my most recent note", "open the note I just created", "open a new note",
+    ].map(namedNoteOpenRequest)
+    try check(() => assert.deepStrictEqual(asked, ["Groceries", "groceries", "Most Recent Recipes", undefined, undefined, undefined]))
+  })
+
+  it.effect("A checklist written as text reads back with every item and tick (spec/notes/list.md, \"Story: Turn text into a checklist and back\")", () => effect {
+    // spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
+    const items = [{ t: "Milk", done: true }, { t: "[x] on the label", done: false }, { t: "Eggs", done: false }]
+    const text = checklistText(items)
+    try check(() => assert.deepStrictEqual({ text, back: checklistItems(text) }, { text: "[x] Milk\n[ ] [x] on the label\nEggs", back: items }))
+  })
+
+  it.effect("Removing a checklist row keeps every other row in its place, and a blank row is named by position (spec/notes/list.md, \"Story: Edit a checklist row by row\")", () => effect {
+    // spec/notes/list.md, "Each checklist row keeps its own place and a name a screen reader can say"
+    const three = rowAdded(rowAdded(rowAdded({ keys: [], nextKey: 0 })))
+    const removed = rowRemoved(three, 1)
+    const added = rowAdded(removed)
+    try check(() => assert.deepStrictEqual(
+      { removed: removed.keys, added: added.keys, blank: itemName(true), named: itemName(false) },
+      { removed: [0, 2], added: [0, 2, 3], blank: "NamedByPosition", named: "NamedByText" },
+    ))
+  })
+
+  it.live("Back saves an edited note, drops an untouched new one and otherwise just closes (spec/notes/editor.md, \"Story: Leave a note the way Back does\")", () => effect {
+    const agent = seeded(note("kept", "Kept", "\nAs it was", 1))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      try bound()
+      // spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"
+      try editor.newNote("text")
+      const dropped = try editor.leave()
+      const afterDrop = agent.notes.length
+      try editor.newNote("text")
+      try editor.edit({ body: "Call Sam" })
+      const saved = try editor.leave()
+      const afterSave = agent.notes.map((item) => item.body)
+      const revision = agent.revision
+      try editor.openNote("kept")
+      const closed = try editor.leave()
+      try check(() => assert.deepStrictEqual(
+        { dropped, afterDrop, saved, afterSave, closed, unchanged: agent.revision === revision, open: (try editor.draft()) === undefined },
+        { dropped: true, afterDrop: 1, saved: true, afterSave: ["\nCall Sam", "\nAs it was"], closed: true, unchanged: true, open: true },
+      ))
+    }
+  })
+
+  it.live("Deleting an edited note saves my last words first, and a restore brings back that note (spec/notes/editor.md, \"Story: Delete and restore a note from the editor\")", () => effect {
+    const agent = seeded(note("plan", "Plan", "\nFirst draft", 1))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      try bound()
+      try editor.openNote("plan")
+      // spec/notes/editor.md, "A delete of an edited note waits for its save, and a changed draft cancels it"
+      try editor.edit({ body: "Final words" })
+      const removed = try editor.remove("plan")
+      const trashed = agent.trash.find((entry) => entry.note.id === "plan")?.note.body ?? ""
+      // spec/notes/editor.md, "A delete or restore is confirmed only when the reply moves exactly that note"
+      try timeout(Stream.runHead(Stream.filter((try NotesCollection).snapshots, (owned) => (owned?.snapshot.trash ?? []).some((entry) => entry.note.id === "plan"))), "5 seconds")
+      const restored = try editor.restore("plan")
+      try check(() => assert.deepStrictEqual(
+        { removed: removed.deleted, trashed: trashed.includes("Final words"), restored, live: agent.notes.some((item) => item.id === "plan"), inTrash: agent.trash.length },
+        { removed: true, trashed: true, restored: true, live: true, inTrash: 0 },
+      ))
+    }
+  })
+
+  it.live("An unconfirmed change stays under review and is never replayed (spec/notes/collection.md, \"Story: Change my notes one confirmed step at a time\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const collection = try NotesCollection
+      const machine = try CollectionMachine
+      try bound()
+      // spec/notes/collection.md, "One mutation runs at a time and cancels a read in flight"
+      const confirmed = try (collection.interact("create-note", { content: "Errands\nPost office", creationId: "c-errands" }) catch () => undefined)
+      const ready = (try machine.get()).phase
+      // spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"
+      agent.failNextWrite = true
+      const lost = try (collection.interact("create-note", { content: "Second\nnote", creationId: "c-second" }) catch () => undefined)
+      const review = try machine.get()
+      // spec/notes/collection.md, "The status line says what is wrong in one word"
+      const label = statusLabel(false, review)
+      const dirtyLabel = statusLabel(true, review)
+      // spec/notes/collection.md, "The editor can raise a review, and a confirmed save or a discard settles it"
+      try collection.clearReview()
+      const settled = try machine.get()
+      try check(() => assert.deepStrictEqual(
+        { confirmed: confirmed !== undefined, ready, lost, uncertain: review.uncertain, phase: review.phase, label, dirtyLabel, settled: [settled.phase, settled.uncertain], notes: agent.notes.length },
+        { confirmed: true, ready: "Ready", lost: undefined, uncertain: true, phase: "Review", label: "Unconfirmed", dirtyLabel: "Unsaved", settled: ["Ready", false], notes: 1 },
+      ))
+    }
+  })
+
+  it.live("Recently deleted opens with rows, names its dialogs by what they offer, and closes once empty (spec/notes/trash.md, \"Story: Recover a deleted note\")", () => effect {
+    const agent = seeded(note("old", "Old plan", "\nSteps", 1))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const trash = try NotesTrash
+      const machine = try TrashMachine
+      try bound()
+      // spec/notes/trash.md, "Recently deleted opens while it has rows, one action runs at a time, and it closes once empty"
+      try trash.open()
+      const emptyOpen = (try machine.get()).opened
+      try editor.remove("old")
+      try until(machine.changes, (state) => state.rows === 1)
+      try trash.open()
+      const opened = (try machine.get()).opened
+      const row = try trash.entryFor("old")
+      if (row !== undefined) try trash.ask(row)
+      const restored = row === undefined ? "gone" : try trash.restore(row)
+      const closed = try until(machine.changes, (state) => state.rows === 0 && state.busy === "TrashIdle")
+      // spec/notes/trash.md, "Every Trash dialog is named by the actions it offers and the note it reviews"
+      try check(() => assert.deepStrictEqual(
+        { emptyOpen, opened, restored, closed: closed.opened, names: [askDialogName(false), askDialogName(true), eraseDialogName(true), eraseDialogName(false)] },
+        { emptyOpen: false, opened: true, restored: "restored", closed: false, names: ["RecoverOnlyName", "RecoverOrDeleteName", "DeleteAllName", "DeleteOneName"] },
+      ))
+    }
+  })
+
+  it.live("Only a clean draft at the current revision is offered to the agent, and Copy draft needs the same draft (spec/notes/editor.md, \"Story: Edit a note without losing a word\")", () => effect {
+    const agent = seeded(note("plan", "Plan", "\nSteps", 1))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      try bound()
+      // spec/notes/editor.md, "A draft opens from a note at the current revision, or starts as a new note"
+      const opened = try editor.openNote("plan")
+      const draft = try editor.draft()
+      // spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"
+      const clean = try editor.selection()
+      try editor.edit({ body: "Steps and more" })
+      const dirty = try editor.selection()
+      // spec/notes/editor.md, "Copy draft copies the draft on screen only while it is the same reviewed draft"
+      try check(() => assert.deepStrictEqual(
+        { opened, title: draft?.title, clean: clean?.id, revision: clean?.revision, dirty, copy: copyDraftAllowed(true, true, true, true, true), other: copyDraftAllowed(true, true, false, true, true) },
+        { opened: true, title: "Plan", clean: "plan", revision: "1", dirty: undefined, copy: true, other: false },
+      ))
+    }
+  })
+
+  it.live("An erase that conflicts changes nothing, and one whose outcome is lost is never reported done (spec/notes/trash.md, \"Story: Never be told an erase happened when it may not have\")", () => effect {
+    const agent = seeded(note("draft", "Draft", "\nOld", 1))
+    const device = new DeviceFake()
+    const answer = agent.json.bind(agent)
+    let lose = false
+    agent.json = (method, path, body) => lose && path === "/api/notes/trash/erase" ? { status: 503, data: { error: "Notes is unavailable." } } : answer(method, path, body)
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const trash = try NotesTrash
+      const machine = try TrashMachine
+      try bound()
+      try editor.remove("draft")
+      try trash.open()
+      // spec/notes/trash.md, "A saved erase leaves its recordings' cleanup pending, a conflict changes nothing, and an unknown outcome reopens the store"
+      const first = try trash.entryFor("draft")
+      if (first !== undefined) try trash.ask(first)
+      try trash.askErase(false)
+      agent.revision += 1
+      const conflict = try trash.erase(first)
+      const afterConflict = agent.trash.length
+      try trash.closeAsk()
+      try until(machine.changes, (state) => state.revision === agent.revision)
+      const second = try trash.entryFor("draft")
+      if (second !== undefined) try trash.ask(second)
+      try trash.askErase(false)
+      lose = true
+      const unknown = try trash.erase(second)
+      const view = try machine.get()
+      try check(() => assert.deepStrictEqual(
+        { conflict, afterConflict, unknown, left: agent.trash.length, busy: view.busy, reported: view.reportedSuccess },
+        { conflict: "erase-conflict", afterConflict: 1, unknown: "erase-unconfirmed", left: 1, busy: "TrashIdle", reported: false },
+      ))
+    }
+  })
+
+  it.live("Record, pause, resume, leave Notes and come back to the same recording (spec/notes/recorder.md, \"Story: Record a voice note\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const shown = try SubscriptionRef.make(home)
+    provide notesOver(agent, device, shown) {
+      const recorder = try NotesRecorder
+      const machine = try RecorderMachine
+      try bound()
+      // spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"
+      const started = try recorder.begin(null, false)
+      const again = try recorder.begin(null, false)
+      // spec/notes/recorder.md, "Pause, resume and stop act only on the owner's open recording"
+      try recorder.pause()
+      const paused = (try machine.get()).phase
+      try recorder.resume()
+      const resumed = (try machine.get()).phase
+      // spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"
+      try recorder.leave()
+      const left = (try machine.get()).phase
+      try SubscriptionRef.set(shown, inNotes)
+      const adopted = try until(machine.changes, (state) => state.phase !== "RecClosed")
+      try check(() => assert.deepStrictEqual(
+        { started, again, paused, resumed, left, adopted: adopted.phase, native: (device.status as { state?: string }).state },
+        { started: "started", again: "already", paused: "RecPaused", resumed: "RecRecording", left: "RecClosed", adopted: "RecRecording", native: "recording" },
+      ))
+    }
+  })
+
+  it.live("A start refused during a call opens nothing and says why (spec/notes/recorder.md, \"Story: Record only while the phone can hear me safely\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    device.refuseStart = "call-active"
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const machine = try RecorderMachine
+      try bound()
+      const started = try recorder.begin(null, false)
+      const state = try machine.get()
+      // spec/notes/recorder.md, "The native recorder admits a start or resume only in the foreground, outside a call, with permission"
+      try check(() => assert.deepStrictEqual(
+        { started, phase: state.phase, error: state.error, native: (device.status as { state?: string }).state,
+          inCall: startAdmitted(true, false, true, "PermissionGranted", true), prompt: startAdmitted(true, false, false, "PermissionPrompt", true),
+          staleStop: serviceStopAdmitted(1, 2, false), currentStop: serviceStopAdmitted(2, 2, false) },
+        { started: "failed", phase: "RecFailed", error: "CallPaused", native: "idle", inCall: false, prompt: false, staleStop: false, currentStop: true },
+      ))
+    }
+  })
+
+  it.live("Every finished segment and its words survive a restart (spec/notes/recordingJournal.md, \"Story: Keep every finished segment of a recording through a crash\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    device.segmentText = undefined
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const journal = try JournalMachine
+      try bound()
+      try recorder.begin(null, false)
+      try recorder.stop()
+      // spec/notes/recordingJournal.md, "Finished segments are journaled as a prefix, with text only for journaled segments"
+      const written = try until(journal.changes, (state) => state.texts >= 1)
+      const restarted = try journal.send({ type: "restarted" })
+      try check(() => assert.deepStrictEqual(
+        { segments: written.segments, durable: written.durable, texts: written.texts, phase: restarted.phase, recovered: restarted.recovered, kept: restarted.segments },
+        { segments: 1, durable: 1, texts: 1, phase: "PendingStopped", recovered: true, kept: 1 },
+      ))
+    }
+  })
+
+  it.live("A stopped recording is claimed once and committed to its one voice note (spec/notes/recordingJournal.md, \"Story: Keep a stopped recording until it is claimed for its note\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const journal = try JournalMachine
+      try bound()
+      try recorder.begin(null, false)
+      // spec/notes/recordingJournal.md, "A stopped recording is claimed once and committed only to its canonical note"
+      const finished = try recorder.finish()
+      const after = try journal.get()
+      const again = try recorder.finish()
+      try check(() => assert.deepStrictEqual(
+        { finished, again, claims: device.claims, completed: after.completed, phase: after.phase, voices: agent.notes.filter((item) => item.format?.kind === "voice").length },
+        { finished: true, again: false, claims: 1, completed: 1, phase: "PendingEmpty", voices: 1 },
+      ))
+    }
+  })
+
+  it.live("A tap on the recording notification opens Notes once, only when it can be shown, and Home forgets it (spec/notes/recordingOpen.md, \"Story: Return to my recording from its notification\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const shown = try SubscriptionRef.make(home)
+    provide notesOver(agent, device, shown) {
+      const opens = try NotesRecordingOpen
+      const machine = try RecordingOpenMachine
+      // spec/notes/recordingOpen.md, "A read starts only while Notes can be shown and none is in flight, and opens Notes at most once per tap"
+      const launch = try until(machine.changes, (state) => state.reads === 1 && !state.reading)
+      device.recordingOpen = true
+      try opens.tapped()
+      const tapped = try machine.get()
+      try SubscriptionRef.set(shown, { ...home, locked: true })
+      try until(machine.changes, (state) => !state.showable)
+      device.recordingOpen = true
+      try opens.tapped()
+      const held = try machine.get()
+      // spec/notes/recordingOpen.md, "Going Home forgets a tap that was not taken yet"
+      try opens.goneHome()
+      const cleared = device.recordingOpen
+      try SubscriptionRef.set(shown, home)
+      const after = try until(machine.changes, (state) => state.showable)
+      try check(() => assert.deepStrictEqual(
+        { launch: launch.opened, tapped: [tapped.opened, tapped.reads], held: [held.reads, held.owed], cleared, after: [after.reads, after.opened, after.unanswered] },
+        { launch: 0, tapped: [1, 2], held: [2, true], cleared: false, after: [2, 1, 0] },
+      ))
+    }
+  })
+
+  it.live("Play plays only this note's live recording (spec/notes/audio.md, \"Story: Hear the recording of the note I opened\")", () => effect {
+    const voice = (id: string, audioId: string) => note(id, "Voice note", "", 1, { kind: "voice", data: { recordingId: audioId, audio: { audioId, durationMs: 4000 }, lines: [{ at: 0, t: "Hi" }] } })
+    const agent = seeded(voice("memo", "rec_1"), voice("other", "rec_2"))
+    const device = new DeviceFake()
+    device.saved.set("rec_1", { noteId: "memo", durationMs: 4000, transcript: "Hi" })
+    device.saved.set("rec_2", { noteId: "memo", durationMs: 4000, transcript: "Hi" })
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const owned = try bound()
+      const rows = (owned?.snapshot.notes ?? []).map(rowOf)
+      const memo = rows.find((row) => row.id === "memo")
+      const other = rows.find((row) => row.id === "other")
+      // spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
+      const foreign = other === undefined ? true : try recorder.play(other)
+      const own = memo === undefined ? false : try recorder.play(memo)
+      const playing = device.playing
+      const stopped = try recorder.stopPlayback()
+      try check(() => assert.deepStrictEqual(
+        { foreign, own, playing, stopped, after: device.playing, deleted: playbackAllowed(true, true, true, true) },
+        { foreign: false, own: true, playing: "rec_1", stopped: true, after: undefined, deleted: false },
+      ))
+    }
+  })
+
+  it.live("A transcript is made only on request, from 25-second windows, and silence keeps the recording (spec/notes/audio.md, \"Story: Generate a transcript of a saved recording when I ask\")", () => effect {
+    const agent = seeded(note("long", "Voice note", "", 1, { kind: "voice", data: { recordingId: "rec_5", audio: { audioId: "rec_5", durationMs: 60000 }, lines: [] } }))
+    const device = new DeviceFake()
+    device.saved.set("rec_5", { noteId: "long", durationMs: 60000, transcript: "" })
+    const offsets: unknown[] = []
+    device.speech = (args) => {
+      offsets.push(args.offsetMs)
+      return { text: args.offsetMs === 25000 ? "" : `part ${String(args.offsetMs)}`, local: false }
+    }
+    provide notesOver(agent, device) {
+      const audio = try NotesAudio
+      const owned = try bound()
+      const row = (owned?.snapshot.notes ?? []).map(rowOf)[0]
+      // spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
+      const said = row === undefined ? "unavailable" : try audio.transcribe(row)
+      const lines = agent.notes[0]?.format?.data.lines
+      device.speech = () => ({ text: "", local: false })
+      const refreshed = (try (try NotesCollection).current())?.snapshot.notes.map(rowOf)[0]
+      const silent = refreshed === undefined ? "unavailable" : try audio.transcribe(refreshed)
+      try check(() => assert.deepStrictEqual(
+        { said, offsets: offsets.slice(0, 3), lines, silent, kept: device.saved.has("rec_5"), windows: windowCount(60000), last: windowEnd(50000, 60000) },
+        { said: "saved", offsets: [0, 25000, 50000], lines: [{ s: "me", at: 0, t: "part 0\npart 50000" }], silent: "no-speech", kept: true, windows: 3, last: 60000 },
+      ))
+    }
+  })
+
+  it.effect("A finished recording's audio and metadata are kept together, and a retired recording is never reattached (spec/notes/audio.md, \"Story: Keep a finished recording with its note\")", () => effect {
+    // spec/notes/audio.md, "Audio and its confirmed metadata are separate parts of retention, and a retired ID is never reattached"
+    const facts = { nativeSource: true, validIds: true, filePresent: true, bytes: 48000, durationMs: 3000, transcriptPresent: true,
+      transcriptUnits: 10, targetAudio: false, metadata: "NoMetadata" as const, ownerExact: true }
+    const plan = retainPlan(facts)
+    try check(() => assert.deepStrictEqual(
+      { plan, saved: retentionResult(plan, true, true), lostReadback: retentionResult(plan, true, false), retired: retainPlan({ ...facts, metadata: "RetiredMetadata" }),
+        update: retainPlan({ ...facts, targetAudio: true, metadata: "CurrentMetadata" }), otherOwner: retainPlan({ ...facts, targetAudio: true, metadata: "CurrentMetadata", ownerExact: false }) },
+      { plan: "ImportAudio", saved: "RetentionSaved", lostReadback: "RetentionUnknown", retired: "RetainRefused", update: "UpdateTranscript", otherOwner: "RetainRefused" },
+    ))
+  })
+
+  it.effect("Trash, restore and erase change only the reviewed recording, once, with a receipt (spec/notes/audioCustody.md, \"Story: Change only the exact reviewed recording and keep its receipt\")", () => effect {
+    provide custodyMachine() {
+      const custody = try CustodyMachine
+      // spec/notes/audioCustody.md, "One current operation controls the trash, and an erased recording never comes back"
+      const otherOwner = try (custody.send({ type: "trashAudio", noteOwner: 2, operation: 1, metadataConfirmed: true }) catch () => undefined)
+      const trashed = try custody.send({ type: "trashAudio", noteOwner: 1, operation: 1, metadataConfirmed: true })
+      const competing = try (custody.send({ type: "trashAudio", noteOwner: 1, operation: 2, metadataConfirmed: true }) catch () => undefined)
+      const purged = try custody.send({ type: "purgeAudio", noteOwner: 1, operation: 1, bytesGone: true, metadataConfirmed: true })
+      const restore = try (custody.send({ type: "restoreAudio", noteOwner: 1, operation: 1, metadataConfirmed: true }) catch () => undefined)
+      try check(() => assert.deepStrictEqual(
+        { otherOwner, trashedOp: trashed.activeOp, competing, purged: purged.hasAudio, restore, receipts: purged.receiptCount },
+        { otherOwner: undefined, trashedOp: 1, competing: undefined, purged: false, restore: undefined, receipts: 1 },
+      ))
+    }
+  })
+
+  it.live("The agent moves, creates folders and restores only what I reviewed (spec/notes/organize.md, \"Story: Let the agent organise my notes after I review the change\")", () => effect {
+    const plan = note("plan", "Plan", "\nSteps", 1)
+    const agent = seeded(plan, note("old", "Old", "\nGone soon", 2))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const organize = try NotesOrganize
+      const editor = try NotesEditor
+      try bound()
+      // spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"
+      const made = try organize.execute({ type: "notes_folder_create", name: "Work" })
+      const exists = try organize.execute({ type: "notes_folder_create", name: "work" })
+      // spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"
+      const revision = try tryPromise(() => recordNoteOriginFor(plan))
+      const target = { sourceId: "notes", sourceRevision: sha, noteId: "plan", revision: revision?.revision ?? sha }
+      const admitted = try organize.admit({ type: "notes_move", target, folder: "Work" }, { view: "notes" }, true, false, false)
+      const moved = admitted === undefined ? undefined : try organize.execute(admitted.operation)
+      const stale = try organize.execute({ type: "notes_move", target, folder: null })
+      const missing = try organize.execute({ type: "notes_move", target, folder: "Nowhere" })
+      // spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"
+      try editor.remove("old")
+      try timeout(Stream.runHead(Stream.filter((try NotesCollection).snapshots, (owned) => (owned?.snapshot.trash ?? []).length === 1)), "5 seconds")
+      const restored = try organize.execute({ type: "notes_restore", noteId: "old" })
+      const live = try organize.execute({ type: "notes_restore", noteId: "old" })
+      try check(() => assert.deepStrictEqual(
+        { made: made.status, exists: exists.summary, direct: admitted?.direct, moved: moved?.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
+          stale: [stale.status, stale.summary], missing: missing.status, restored: restored.status, live: live.summary },
+        { made: "succeeded", exists: "“work” exists", direct: false, moved: "succeeded", folder: "string",
+          stale: ["failed", "Note changed"], missing: "failed", restored: "succeeded", live: "The note is already in Notes." },
+      ))
+    }
+  })
+
+  it.effect("The phone holds no notes record of its own (spec/notes/organize.md, \"Story: Keep the agent's own notes with the agent\")", () => effect {
+    // spec/notes/organize.md, "The phone holds no notes record of its own, so its record operations always refuse"
+    const ops = ["CreateNoteOp", "QueryOp", "ReadSelectedOp", "UpdateOp", "DeleteOp"] as const
+    try check(() => assert.deepStrictEqual(ops.flatMap((op) => [deviceNoteOpRuns(op, true), deviceNoteOpRuns(op, false)]).some(Boolean), false))
+  })
+
+  it.live("The agent's filter shows only on the list in front, and is refused once a note is open (spec/notes/listFilter.md, \"Story: Let the agent narrow my Notes list only on the list I am looking at\")", () => effect {
+    const agent = seeded(note("budget", "Budget", "\nQ4", 1), note("trip", "Trip", "\nPack", 2))
+    const device = new DeviceFake()
+    const shown = try SubscriptionRef.make(inNotes)
+    provide notesOver(agent, device, shown) {
+      const filter = try NotesListFilter
+      const machine = try ListFilterMachine
+      const editor = try NotesEditor
+      try bound()
+      try until(machine.changes, (state) => state.visit >= 1 && state.revision >= 1)
+      // spec/notes/listFilter.md, "A turn names the list only while the plain list is in front, owned and settled"
+      const context = try filter.context()
+      // spec/notes/listFilter.md, "Only a negotiated agent naming the list is admitted, and only the owner's own message skips the card"
+      const admitted = try filter.propose({ text: "budget" }, true, false)
+      // spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"
+      const ran = try filter.run()
+      const applied = try until(filter.shown, (value) => value !== undefined)
+      try filter.clear()
+      try editor.openNote("trip")
+      try until(machine.changes, (state) => !state.onList)
+      const named = try filter.context()
+      const refused = try filter.propose({ text: "trip" }, true, false)
+      try check(() => assert.deepStrictEqual(
+        { context: context?.revision, admitted, ran, applied, named, refused },
+        { context: "2", admitted: "direct", ran: "succeeded", applied: { text: "budget" }, named: undefined, refused: "refused" },
+      ))
+    }
+  })
+
+  it.live("A note's open items become a Calendar draft I review (spec/notes/origins.md, \"Story: Turn a note into an event or a reminder I review in Calendar\")", () => effect {
+    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("blank", "", "", 2))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const origins = try NotesOrigins
+      try bound()
+      // spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"
+      const ready = try origins.scheduleDraft("call", "event")
+      const empty = try origins.scheduleDraft("blank", "reminder")
+      const unknown = try origins.scheduleDraft("nobody", "event")
+      try check(() => assert.deepStrictEqual(
+        { ready, empty, unknown, first: scheduleSource(1, 2, false), long: scheduleStart("NoteBody", 4001, true) },
+        { ready: "ready", empty: "empty", unknown: "invalid", first: "OpenActions", long: "DraftTooLong" },
+      ))
+    }
+  })
+
+  it.live("A saved event names its note and opens it, and a deleted note's link is kept until a durable receipt (spec/notes/origins.md, \"Story: Go from a saved event or reminder back to its note\")", () => effect {
+    const call = note("call", "Clinic", "\nCall the clinic", 1)
+    const agent = seeded(call)
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const origins = try NotesOrigins
+      const collection = try NotesCollection
+      try bound()
+      const link = try tryPromise(() => recordNoteOriginFor(call))
+      // spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"
+      const unsaved = try origins.remember("event", "evt-1", link, false)
+      const stored = try origins.remember("event", "evt-1", link, true)
+      // spec/notes/origins.md, "A link resolves only against the open collection it belongs to"
+      const view = try origins.view("event", "evt-1")
+      const opened = try origins.open("event", "evt-1")
+      const target = agent.notes.find((item) => item.id === "call")
+      if (target !== undefined) Object.assign(target, { body: "\nCall the clinic tomorrow" })
+      agent.revision += 1
+      try collection.refresh()
+      try until(collection.snapshots, (owned) => owned?.snapshot.revision === agent.revision)
+      const edited = try origins.open("event", "evt-1")
+      try origins.forget("event", "evt-1", false)
+      const kept = (try origins.view("event", "evt-1")) !== undefined
+      try origins.forget("event", "evt-1", true)
+      const retired = try origins.view("event", "evt-1")
+      try check(() => assert.deepStrictEqual(
+        { unsaved, stored, label: view?.label, title: view?.title, opened, edited, kept, retired },
+        { unsaved: false, stored: true, label: "FromNoteTitled", title: "Clinic", opened: "opened", edited: "edited", kept: true, retired: undefined },
+      ))
+    }
+  })
+
+  it.live("A share acts on the open note's own words, never on a changed one (spec/notes/share.md, \"Story: Share the note I have open\")", () => effect {
+    const agent = seeded(note("memo", "Voice note", "\nPick up the parcel", 1, { kind: "voice", data: { lines: [{ at: 0, t: "Pick up the parcel" }] } }), note("plain", "Plain", "\nText", 2))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const share = try NotesShare
+      const collection = try NotesCollection
+      try bound()
+      // spec/notes/share.md, "The export text is the note's own words by kind, and a voice note says its audio is not included"
+      const voiceText = (try share.snapshotOf("memo")) ?? ""
+      // spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"
+      const snapshot = (try share.snapshotOf("plain")) ?? ""
+      const drafted = try share.share("plain", snapshot, "email")
+      const plain = agent.notes.find((item) => item.id === "plain")
+      if (plain !== undefined) Object.assign(plain, { body: "\nChanged elsewhere" })
+      agent.revision += 1
+      try collection.refresh()
+      try until(collection.snapshots, (owned) => owned?.snapshot.revision === agent.revision)
+      const changed = try share.share("plain", snapshot, "email")
+      try check(() => assert.deepStrictEqual(
+        { audio: voiceText.includes("audio not included"), drafted, changed, parts: voiceExport(true, false, true) },
+        { audio: true, drafted: "drafted", changed: "changed", parts: ["AudioNotIncluded", "TranscriptPart", "ActionsPart"] },
+      ))
+    }
+  })
+
+  it.live("Saving a note as a file runs once and shows its receipt in the visit it came from (spec/notes/share.md, \"Story: Save a note as a file, with the result shown where I asked for it\")", () => effect {
+    const agent = seeded(note("plain", "Plain", "\nText", 1))
+    const device = new DeviceFake()
+    const shown = try SubscriptionRef.make(inNotes)
+    provide notesOver(agent, device, shown) {
+      const share = try NotesShare
+      const transfer = try TransferMachine
+      try bound()
+      // spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"
+      const snapshot = (try share.snapshotOf("plain")) ?? ""
+      const saved = try share.share("plain", snapshot, "save")
+      const after = try transfer.get()
+      try SubscriptionRef.set(shown, home)
+      const left = try until(transfer.changes, (state) => !state.active)
+      try check(() => assert.deepStrictEqual(
+        { saved, exported: device.exported.map((row) => row.title), shown: after.shown, visit: after.lastShownVisit === after.visit, busy: after.busy, leftVisit: left.visit > after.visit },
+        { saved: "saved", exported: ["Plain"], shown: 1, visit: true, busy: false, leftVisit: true },
+      ))
+    }
+  })
+
+  it.live("The source dialog takes one action over the exact note it opened on (spec/notes/webSource.md, \"Story: Visit or remove the web page a note came from\")", () => effect {
+    const summary = note("summary", "Summary", "\nKey points", 1, { kind: "text", data: { webSource: { name: "Planning the week", url: "https://example.com/plan" } } })
+    const agent = seeded(summary)
+    const device = new DeviceFake()
+    const shown = try SubscriptionRef.make(inNotes)
+    provide notesOver(agent, device, shown) {
+      const sources = try NotesSources
+      const dialog = try SourceDialogMachine
+      try bound()
+      // spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"
+      const opened = try sources.openDialog("summary")
+      const visited = try sources.visit()
+      const twice = try sources.visit()
+      try sources.openDialog("summary")
+      const removed = try sources.removeWebSource()
+      const state = try dialog.get()
+      try check(() => assert.deepStrictEqual(
+        { opened, visited, twice, removed, link: agent.notes[0]?.format?.data.webSource, navigations: state.navigations, removals: state.removals },
+        { opened: true, visited: "opened", twice: "stale", removed: "removed", link: undefined, navigations: 1, removals: 1 },
+      ))
+    }
+  })
+
+  it.live("An attachment opens only the exact file the note came from (spec/notes/attachment.md, \"Story: Open the document a note came from\")", () => effect {
+    const source = { name: "Lease.pdf", mimeType: "application/pdf", sha256: "b".repeat(64), size: 2048 }
+    const agent = seeded(note("lease", "Lease", "\nSummary", 1, { kind: "text", data: { documentSource: source } }))
+    const device = new DeviceFake()
+    const shown = try SubscriptionRef.make(inNotes)
+    provide notesOver(agent, device, shown) {
+      const sources = try NotesSources
+      const attachment = try AttachmentMachine
+      const owned = try bound()
+      const row = (owned?.snapshot.notes ?? []).map(rowOf)[0]
+      // spec/notes/attachment.md, "A retained reference opens directly; a fingerprint opens only the exact file picked"
+      device.picked = { ...source, size: 4096 }
+      const wrong = row === undefined ? "failed" : try sources.openAttachment(row)
+      device.picked = { ...source }
+      const right = row === undefined ? "failed" : try sources.openAttachment(row)
+      const state = try attachment.get()
+      // spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"
+      const released = try sources.releaseUnused()
+      try check(() => assert.deepStrictEqual(
+        { wrong, right, opened: device.opened, mismatches: state.mismatches, released, keep: device.released.at(-1),
+          trashKeeps: releasesSource(true, false, true, 259200001), unread: releasesSource(false, false, false, 259200001) },
+        { wrong: "mismatch", right: "opened", opened: ["b".repeat(64)], mismatches: 1, released: 0, keep: [], trashKeeps: false, unread: false },
+      ))
+    }
+  })
+})

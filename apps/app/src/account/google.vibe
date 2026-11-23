@@ -1,0 +1,199 @@
+// spec/account/google.md, "Story: Connect my Google account with the access I choose"; spec/account/google.md, "Story: Use and remove my Google access"
+import {
+  type Capability, type Google, type GoogleEffect, type GrantRead, type Panel, type WorkspaceResult,
+  Machine as GoogleMachine, consentPageAllowed, machine as googleMachine
+} from "../../gen/account__google.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
+import { Native } from "../platform/native.vibe"
+import { authorityOf, consentPageOf, deployment, googleWorkspaceCallback } from "./deployment.ts"
+import { Entitlement } from "./entitlement.vibe"
+import { CloudSession, ownerOf } from "./session.vibe"
+import { ConsentStart, GoogleAccountList, WorkspaceConsumed, WorkspaceOffer } from "./google.schema.vibe"
+
+/** One connected Google account as other areas use it: its connection, its grant and what it may do. */
+export type GoogleAccount = GoogleAccountList["accounts"][number]
+
+const known = new Set(["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage", "google.gmail.drafts", "google.gmail.mailbox", "google.calendar.read", "google.calendar.write"])
+const wire = {
+  GmailRead: ["google.gmail.triage"], GmailModify: ["google.gmail.manage"], GmailSend: ["google.gmail.send"],
+  CalendarRead: ["google.calendar.read"], CalendarWrite: ["google.calendar.write"]
+} as const satisfies Record<Capability, ReadonlyArray<string>>
+
+/** The Cloud capabilities a consent asks for: the requested ones, identity, and every known one the account already holds. */
+export function consentCapabilities(requested: ReadonlyArray<Capability>, held: ReadonlyArray<string>): Array<string> {
+  const asked = new Set<string>(["google.basic_identity", ...requested.flatMap((capability) => wire[capability])])
+  for (const capability of held) if (known.has(capability)) asked.add(capability)
+  return [...asked]
+}
+
+/** What the accounts read shows of the grants, for spec/account/google.md. */
+export function grantReadOf(rows: ReadonlyArray<GoogleAccount> | undefined): GrantRead {
+  const row = rows?.[0]
+  if (row === undefined) return { account: 0, gmailRead: false, gmailModify: false, gmailSend: false, calendar: false, calendarEdit: false, readOk: rows !== undefined }
+  const has = (capability: string) => row.grantedCapabilities.includes(capability)
+  return {
+    account: 1, gmailRead: has("google.gmail.triage"), gmailModify: has("google.gmail.manage"), gmailSend: has("google.gmail.send"),
+    calendar: has("google.calendar.read"), calendarEdit: has("google.calendar.write"), readOk: true
+  }
+}
+
+/** The managed Google connection of the signed-in Cloud account. */
+export service GoogleAccounts {
+  readonly changes: Stream.Stream<Google>
+  /** The connected accounts as last read for the account signed in now. */
+  readonly accounts: Stream.Stream<ReadonlyArray<GoogleAccount>>
+  list(): ReadonlyArray<GoogleAccount>!!
+  current(): Google!!
+  run(): void!!
+  open(panel: Panel): void!!
+  close(): void!!
+  reload(): void!!
+  /** Ask Google for these capabilities, such as Gmail read, Gmail changes or Calendar edits, after reading the accounts. */
+  connect(capabilities: ReadonlyArray<Capability>): void!!
+  allowCalendar(): void!!
+  cancel(): void!!
+  disconnect(): void!!
+  showCache(): void!!
+  prepareReview(): void!!
+}
+
+/** The Google service over its in-memory machine. */
+export const googleService = Layer.effect(GoogleAccounts, effect {
+  const machine = try GoogleMachine
+  const cloud = try Cloud
+  const native = try Native
+  const services = try CloudServices
+  const build = try Build
+  const session = try CloudSession
+  const entitlement = try Entitlement
+  const environment = buildCloudEnvironment(build.info)
+  const authority = authorityOf(deployment, environment)
+  const rows = try SubscriptionRef.make<ReadonlyArray<GoogleAccount>>([])
+  const workspaceState = try Ref.make("")
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+  }
+
+  effect function listAccounts() {
+    const list = try Schema.decodeUnknownEffect(GoogleAccountList)(try cloud.json("GET", "/api/v1/eliza/google/accounts?side=owner"))
+    return list.accounts
+  }
+
+  effect function binding() {
+    const s = try session.current()
+    return { environment: environmentName(environment), userId: s.account.userId, organizationId: s.account.organizationId, credentialId: s.account.credentialId, sessionId: String(s.generation) }
+  }
+
+  effect function readAccounts() {
+    const owner = try session.owner()
+    const g = try machine.get()
+    const found = listAccounts() catch () => undefined
+    if (owner !== (try session.owner())) return
+    if (found !== undefined) try SubscriptionRef.set(rows, found)
+    try send({ type: "accountsRead", readId: g.reads, read: grantReadOf(found) })
+  }
+
+  effect function startConsent() {
+    const g = try machine.get()
+    const held = (try SubscriptionRef.get(rows))[0]?.grantedCapabilities ?? []
+    const offer = environment === "Production" ? (Effect.flatMap(native.invoke("AlphaConnection", "prepareGoogleWorkspaceReturn", try binding()), Schema.decodeUnknownEffect(WorkspaceOffer)) catch () => undefined) : undefined
+    const callback = googleWorkspaceCallback(authority)
+    const redirectUrl = offer?.supported === true && offer.state !== undefined && offer.redirectUrl === `${callback}?state=${offer.state}` && /^[A-Za-z0-9_-]{43}$/.test(offer.state) ? offer.redirectUrl : undefined
+    if (redirectUrl !== undefined && offer?.state !== undefined) try Ref.set(workspaceState, offer.state)
+    const started = Effect.flatMap(cloud.json("POST", "/api/v1/eliza/google/connect/initiate", {
+      side: "owner", capabilities: consentCapabilities(g.requested, held), ...(redirectUrl === undefined ? {} : { redirectUrl })
+    }), Schema.decodeUnknownEffect(ConsentStart)) catch () => undefined
+    if (started === undefined || !consentPageAllowed(consentPageOf(started.authUrl, authority))) {
+      try send({ type: "cancelWait" })
+      return
+    }
+    services.openExternal(started.authUrl) catch effect () => { try send({ type: "cancelWait" }) }
+  }
+
+  effect function revoke() {
+    const connectionId = (try SubscriptionRef.get(rows))[0]?.connectionId
+    const sent = connectionId !== undefined && ((cloud.json("POST", "/api/v1/eliza/google/disconnect", { side: "owner", connectionId }) catch () => undefined) !== undefined)
+    const after = listAccounts() catch () => undefined
+    if (after !== undefined) try SubscriptionRef.set(rows, after)
+    const still = after?.some((row) => row.connectionId === connectionId) ?? false
+    const outcome = after === undefined || !sent ? "DisconnectUnconfirmed" : still ? "StillConnected" : "Disconnected"
+    try send({ type: "disconnectRead", disconnected: outcome, rowsKnown: after !== undefined })
+  }
+
+  effect function perform(out: ReadonlyArray<GoogleEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when "ReadAccounts": readAccounts() catch () => undefined;
+        when "StartConsent": startConsent() catch () => undefined;
+        when "CancelConsent": {
+          const state = try Ref.get(workspaceState)
+          if (state !== "") native.invoke("AlphaConnection", "cancelGoogleWorkspaceReturn", { state }) catch () => undefined
+          try Ref.set(workspaceState, "")
+        };
+        when "RevokeGrant": revoke() catch () => undefined;
+      }
+    }
+  }
+
+  effect function followSession() {
+    for try (const owner of Stream.changesWith(Stream.map(session.changes, ownerOf), (a, b) => a === b)) {
+      try SubscriptionRef.set(rows, [])
+      try send({ type: "ownerChanged", owner })
+      if (owner !== 0) {
+        const found = listAccounts() catch () => undefined
+        if (found !== undefined && owner === (try session.owner())) try SubscriptionRef.set(rows, found)
+      }
+    }
+  }
+
+  effect function followForeground() {
+    for try (const visible of Stream.changesWith(Stream.map(entitlement.changes, (a) => a.recheck.visible), (a, b) => a === b)) {
+      const g = try machine.get()
+      if (g.phase !== "GWaiting") continue
+      if (!visible) try send({ type: "backgrounded" })
+      else try send({ type: "browserResumed" })
+    }
+  }
+
+  effect function followWorkspace() {
+    for try (const _ of native.listen("AlphaConnection", "googleWorkspaceReturn")) {
+      const consumed = Effect.flatMap(native.invoke("AlphaConnection", "consumeGoogleWorkspaceReturn", try binding()), Schema.decodeUnknownEffect(WorkspaceConsumed)) catch () => undefined
+      const valid = consumed !== undefined && (consumed.result !== "connected" || /^[A-Za-z0-9_-]{1,128}$/.test(consumed.connectionId ?? ""))
+      const result: WorkspaceResult = !valid ? "ReturnInvalid" : consumed.result === "connected" ? "ReturnConnected" : consumed.result === "denied" ? "ReturnDenied" : consumed.result === "failed" ? "ReturnFailed" : "ReturnNone"
+      try Ref.set(workspaceState, "")
+      try send({ type: "workspaceReturn", result })
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    accounts: SubscriptionRef.changes(rows),
+    list: () => SubscriptionRef.get(rows),
+    current: () => machine.get(),
+    effect run() { try.all [ignore(followSession()), ignore(followForeground()), ignore(followWorkspace())] },
+    effect open(panel: Panel) { try send({ type: "openPanel", panel }) },
+    effect close() { try send({ type: "closePanel" }) },
+    effect reload() { try send({ type: "reload" }) },
+    effect connect(capabilities: ReadonlyArray<Capability>) {
+      const g = try machine.get()
+      if (g.panel === "PanelClosed") {
+        try send({ type: "openPanel", panel: "SettingsPanel" })
+        timeout(Stream.runHead(Stream.filter(machine.changes, (x) => !x.readPending)), "30 seconds") catch () => undefined
+      }
+      try send({ type: "connect", capabilities: [...capabilities] })
+    },
+    effect allowCalendar() { try send({ type: "allowCalendar" }) },
+    effect cancel() { try send({ type: "cancelWait" }) },
+    effect disconnect() { try send({ type: "disconnect" }) },
+    effect showCache() { try send({ type: "showCache" }) },
+    effect prepareReview() { try send({ type: "prepareReview" }) }
+  }
+})
+
+/** The Google service with its machine in memory. */
+export const googleLayer = Layer.provideMerge(googleService, googleMachine())

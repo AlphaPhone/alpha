@@ -1,0 +1,124 @@
+// spec/calendar/device.md, "Story: Edit or delete exactly the event I reviewed"; spec/calendar/device.md, "Story: Read my device calendars over a range that makes sense"; spec/calendar/selection.md, "Story: Let the assistant act only on the event I have open"; spec/calendar/selection.md, "Story: Let the assistant fill in a new event on the calendar I chose"; spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "Story: Delete only after I answered yes"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"
+import { assert, describe, it } from "@effect/vitest"
+import type { NamedCalendarReadContext } from "@elizaos/plugin-calendar/client"
+import { DeviceCalendar } from "../../src/calendar/device.vibe"
+import { readWindow } from "../../src/calendar/model.vibe"
+import { AgentRequests } from "../../src/calendar/requests.vibe"
+import { calendarOver, same } from "./harness.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+const expected = { title: "Run", body: "", location: "", begin: 1_800_000_000_000, end: 1_800_003_600_000, revision: "r1" }
+
+/** The plugin, answering an inspection with the revision it read now. */
+class InspectingPhone extends DeviceCalendarFake {
+  inspection: Record<string, unknown> = { status: "ready", eventId: "7", revision: "r2", sourceId: "3", sourceRevision: "s1" }
+  deletion: Record<string, unknown> = { status: "conflict" }
+  truncate = false
+
+  override invoke(plugin: string, method: string, args: Record<string, unknown>): unknown {
+    if (method === "inspect") {
+      this.calls.push(method)
+      return this.inspection
+    }
+    if (method === "inspectDeletion") {
+      this.calls.push(method)
+      return this.deletion
+    }
+    if (method === "list" && this.truncate) {
+      this.calls.push(method)
+      return { status: "ready", events: [], calendars: [{ id: "1", name: "On this phone", account: "Alpha Phone", writable: true, local: true }], truncated: true }
+    }
+    return super.invoke(plugin, method, args)
+  }
+}
+
+describe("The phone's calendars and the agent's requests on them (spec/calendar/device.md, spec/calendar/selection.md, spec/calendar/deviceActions.md)", () => {
+  it.effect("nothing is removed unless the inspection says the reviewed event is still current (spec/calendar/device.md, \"Story: Edit or delete exactly the event I reviewed\")", () => effect {
+    const phone = new InspectingPhone()
+    provide calendarOver(new CalendarAgentFake(), phone) {
+      const device = try DeviceCalendar
+      try device.open("7", "3", "r1", expected)
+      const changed = try device.remove("7", "3", expected, false, false)
+      try same([changed, phone.calls.includes("removeScoped")], ["changed", false])
+    }
+  })
+
+  it.effect("a read covers the months around the one shown and a truncated read is limited (spec/calendar/device.md, \"Story: Read my device calendars over a range that makes sense\")", () => effect {
+    // spec/calendar/device.md, "A read covers the month before through the month after next, and its first instant is never negative"
+    const range = readWindow(0, 0, Date.UTC(2026, 10, 20), "UTC")
+    try same([range.begin, range.end, readWindow(0, 0, 0, "UTC").begin >= 0], [Date.UTC(2026, 9, 1), Date.UTC(2027, 0, 1), true])
+    const phone = new InspectingPhone()
+    phone.truncate = true
+    provide calendarOver(new CalendarAgentFake(), phone) {
+      // spec/calendar/device.md, "A read of more than two thousand events is shown as limited, never as complete"
+      const read = try (try DeviceCalendar).read(range, true, false)
+      try same([read.status, read.truncated], ["limited", true])
+    }
+  })
+
+  it.effect("the assistant gets the open event at the revision the phone read, and nothing once it closes (spec/calendar/selection.md, \"Story: Let the assistant act only on the event I have open\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new InspectingPhone()) {
+      const device = try DeviceCalendar
+      try device.open("7", "3", "r1", expected)
+      const open = try device.selected()
+      try device.close()
+      const closed = try device.selected()
+      try same([open?.kind, open?.id, open?.revision, closed], ["calendar-event", "7", "r2", undefined])
+    }
+  })
+
+  it.effect("a new form offers the phone's own calendar only while it targets it (spec/calendar/selection.md, \"Story: Let the assistant fill in a new event on the calendar I chose\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const device = try DeviceCalendar
+      try device.openForm("new", false)
+      const target = try device.selected()
+      try device.closeForm()
+      try same([target?.kind, target?.id, try device.selected()], ["calendar-source", "native:1", undefined])
+    }
+  })
+
+  it.effect("an operation runs only from the owner's card on its bound screen (spec/calendar/deviceActions.md, \"Story: Let the agent change my phone's calendar only through my reviews\")", () => effect {
+    const phone = new DeviceCalendarFake()
+    provide calendarOver(new CalendarAgentFake(), phone) {
+      const requests = try AgentRequests
+      try requests.scene("OtherScreen", false, "", true)
+      const proposed = try requests.propose("DeleteSelected")
+      const elsewhere = try requests.approve({ operation: { kind: "calendar_delete" }, operationId: "op-1" })
+      try requests.scene("CalendarScreen", true, "7", true)
+      const sensitive = try requests.approve({ operation: { kind: "calendar_delete" }, operationId: "op-2" })
+      try same([proposed, elsewhere.action.authority, sensitive.action.authority, phone.calls.includes("executeAgent")], [true, "NoAuthority", "NoAuthority", false])
+    }
+  })
+
+  it.effect("a deletion question counts only the first reply, and only a yes or the title (spec/calendar/deviceActions.md, \"Story: Delete only after I answered yes\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const requests = try AgentRequests
+      try same([
+        try requests.confirmsDelete(true, "yes", true, true),
+        try requests.confirmsDelete(true, "title", true, true),
+        try requests.confirmsDelete(false, "yes", true, true),
+        try requests.confirmsDelete(true, "question", true, true),
+        try requests.confirmsDelete(true, "yes", true, false),
+      ], [true, true, false, false, false])
+    }
+  })
+
+  it.effect("a named read off the selected event says it shared nothing (spec/calendar/namedRead.md, \"Story: Be told plainly what a named read shared\")", () => effect {
+    const phone = new DeviceCalendarFake()
+    provide calendarOver(new CalendarAgentFake(), phone) {
+      const context: NamedCalendarReadContext = { view: "home", owner: "owner-1" }
+      const read = try (try AgentRequests).namedRead({ kind: "calendar_named" }, "op-1", context, () => context)
+      try same([read.outcome.status, read.sentence.length > 0, phone.calls.includes("executeAgent")], ["failed", true, false])
+    }
+  })
+
+  it.effect("availability reads nothing until the owner ticked calendars (spec/calendar/availability.md, \"Story: Choose the calendars and see the answer before it is shared\")", () => effect {
+    const phone = new DeviceCalendarFake()
+    provide calendarOver(new CalendarAgentFake(), phone) {
+      const requests = try AgentRequests
+      const sheet = try Stream.runCollect(Stream.take(requests.sheets, 1))
+      const answered = requests.availability({ kind: "calendar_availability", start: "2026-11-20T10:00:00.000Z", end: "2026-11-20T11:00:00.000Z", timeZone: "UTC" }, "UTC", () => true) catch () => undefined
+      try same([Array.from(sheet)[0]?.kind, answered === undefined || typeof answered === "object", phone.calls.includes("readAvailability")], ["none", true, false])
+    }
+  })
+})

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import type {LauncherDescriptor} from '../vendor/eliza/packages/os/scripts/android/stage-launcher-overlay.ts';
+import type {LauncherDescriptor} from '../vendor/eliza/packages/os/aosp/stage-launcher-overlay.ts';
 
 /** The caller has already admitted the APK and descriptor together. Shared native staging
  * renders its exact expected blueprint from that descriptor, never from mutable output. */

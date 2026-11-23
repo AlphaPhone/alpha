@@ -1,0 +1,36 @@
+// spec/assistant/withdrawal.md, "A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
+import { Machine as BridgeMachine, type Event as BridgeEvent } from "../../gen/assistant__withdrawal.effect.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { AdvertisedCapabilities } from "./ports.vibe"
+import { AgentUnreachable, ask } from "./transport.vibe"
+
+/** Requests the assistant may give up on: interrupting one stops the wait at once, and the resident withdraws the call by its id. */
+export service WithdrawableRequests {
+  /** One JSON request; interrupting it withdraws it and its late answer is dropped. */
+  ask(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): unknown!AgentUnreachable
+}
+
+/** Withdrawable requests over the resident's local API, which withdraws an interrupted call by its id. */
+export const withdrawableLayer = Layer.effect(WithdrawableRequests, effect {
+  const resident = try Resident
+  const advertised = try AdvertisedCapabilities
+  const bridge = try BridgeMachine
+  const quiet = (event: BridgeEvent) => map(bridge.send(event), () => true) catch () => false
+  return {
+    ask: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => effect {
+      try quiet({ type: "request" })
+      const id = (try bridge.get()).nextId - 1
+      try quiet({ type: "takeUp", id })
+      try quiet({ type: "dispatch", id })
+      const answered = try onInterrupt(
+        Effect.provideService(Effect.provideService(ask(method, path, body), Resident, resident), AdvertisedCapabilities, advertised),
+        () => effect {
+          try quiet({ type: "abort", id })
+          try quiet({ type: "cancelRequest", id })
+        },
+      )
+      try quiet({ type: "transportAnswers", id })
+      return answered
+    },
+  }
+})

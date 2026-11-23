@@ -1,0 +1,169 @@
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"; spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
+import { Machine as JournalMachine } from "../../gen/clock__reminderJournal.effect.vibe"
+import { Machine as DraftsMachine } from "../../gen/clock__reminderDrafts.effect.vibe"
+import { Reminders, remindersLayer } from "../../src/clock/reminders.vibe"
+import { ReminderDrafts, draftsLayer } from "../../src/clock/drafts.vibe"
+import { fakeNavigation, fakePhone, machines, refuse } from "./phone.vibe"
+
+interface StoreRow {
+  id: string
+  title: string
+  body: string
+  occurrenceId: string
+  target: { sourceId: string; sourceRevision: string; reminderId: string; occurrenceId: string; revision: string }
+  createdAt: number
+  at: number
+  dueAt: number
+  alertMinutes: number | null
+  status: string
+  history: unknown[]
+  pendingDeletion?: string
+}
+
+/** The phone's reminder store: it applies a change even when its answer is lost, and with `loseCreations` loses a creation's answer too. */
+function reminderStore(loseCreations = false) {
+  const rows: StoreRow[] = []
+  let revision = 1
+  const bump = (row: StoreRow) => {
+    revision += 1
+    row.target = { ...row.target, revision: `v${revision}` }
+  }
+  const phone = fakePhone({
+    "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2, reminderTodoVersion: 1 }),
+    "DailyApps.listReminders": () => ({ reminders: rows.map((r) => ({ ...r, target: { ...r.target } })), notificationsEnabled: true }),
+    "DailyApps.scheduleReminder": (args) => {
+      const a = args as { id: string; title: string; body: string; at: number; dueAt: number; alertMinutes: number | null }
+      rows.push({ id: a.id, title: a.title, body: a.body, occurrenceId: "o1", target: { sourceId: "device", sourceRevision: "s1", reminderId: a.id, occurrenceId: "o1", revision: `v${revision}` },
+        createdAt: 0, at: a.at, dueAt: a.dueAt, alertMinutes: a.alertMinutes, status: "scheduled", history: [] })
+      return loseCreations ? refuse("The answer was lost") : { id: a.id, status: "scheduled" }
+    },
+    "DailyApps.selectedReminder": (args) => rows.find((r) => r.id === (args as { id: string }).id)?.target ?? refuse("gone"),
+    "DailyApps.operateReminder": (args) => {
+      const op = (args as { operation: { type: string; target: { reminderId: string } } }).operation
+      const row = rows.find((r) => r.id === op.target.reminderId)
+      if (row !== undefined && op.type === "reminder_complete") {
+        row.status = "completed"
+        bump(row)
+      }
+      return refuse("The answer was lost")
+    },
+    "DailyApps.reminderOperationReceipt": (args) => {
+      const op = (args as { operation: { target: { reminderId: string } } }).operation
+      const row = rows.find((r) => r.id === op.target.reminderId)
+      return row === undefined ? { status: "unknown" } : { status: "succeeded", result: { version: 1, reminderId: row.id, occurrenceId: row.occurrenceId, revision: row.target.revision, status: row.status } }
+    },
+    "AlphaDeletions.reviewReminder": () => ({ status: "queued" }),
+  })
+  return { rows, phone }
+}
+
+describe("Reminders (spec/clock/reminders.md, \"Story: Change a reminder exactly once\")", () => {
+  it.effect("create a reminder, complete it through a lost answer once, and delete it through the review (spec/clock/reminders.md, \"Story: Change a reminder exactly once\")", () => effect {
+    const store = reminderStore()
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(remindersLayer, machines), store.phone.layer, navigator.layer {
+      const reminders = try Reminders
+      const screen = try RemindersMachine
+      const journal = try JournalMachine
+      try reminders.enter()
+      try reminders.create({ title: "Call the dentist", body: "", dayOffset: 2, minuteOfDay: 9 * 60, repeat: "none", alertMinutes: 0 }, "")
+      const created = (try screen.get()).outcome
+      const id = store.rows[0]!.id
+      try reminders.show(id)
+      const shown = (try screen.get()).rows.find((r) => r.id === id)?.revision ?? ""
+      try reminders.decide(id, shown, "done")
+      const completed = (try screen.get()).outcome
+      const operated = store.phone.calls.filter((c) => c.method === "operateReminder").length
+      const kept = try journal.get()
+      const done = (try screen.get()).rows.find((r) => r.id === id)?.revision ?? ""
+      try reminders.decide(id, done, "done")
+      const again = store.phone.calls.filter((c) => c.method === "operateReminder").length
+      try reminders.remove(id, done)
+      const removed = (try screen.get()).outcome
+      try Effect.try(() => assert.deepStrictEqual(
+        { created, completed, operated, journaled: [kept.changes.length, kept.creations.map((c) => c.state)], again, removed },
+        { created: { tag: "Saved", delivery: "Alerting" }, completed: { tag: "Completed", delivery: "Alerting" }, operated: 1, journaled: [0, ["CreationFound"]], again: 1, removed: { tag: "DeletionPaused" } },
+      ))
+    }
+  })
+
+  // spec/clock/reminders.md, "A failed refresh keeps the reminders last read, marked out of date, and says so once"
+  it.effect("keep the reminders last read when the store cannot be read (spec/clock/reminders.md, \"Story: See my reminders as the phone holds them\")", () => effect {
+    let readable = true
+    const phone = fakePhone({
+      "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2 }),
+      "DailyApps.listReminders": () => readable ? { reminders: [] } : refuse("Reminder store unavailable"),
+    })
+    provide Layer.provideMerge(remindersLayer, machines), phone.layer, fakeNavigation().layer {
+      const reminders = try Reminders
+      const screen = try RemindersMachine
+      try reminders.refresh()
+      readable = false
+      try reminders.refresh()
+      const first = try screen.get()
+      try reminders.refresh()
+      const second = try screen.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { stale: second.stale, loaded: second.loaded, first: first.outcome, reports: second.reports },
+        { stale: true, loaded: true, first: { tag: "RefreshFailed" }, reports: 1 },
+      ))
+    }
+  })
+})
+
+describe("Reminder journal (spec/clock/reminderJournal.md, \"Story: Never create or change a reminder twice\")", () => {
+  it.effect("settle a creation whose answer was lost by reading what the phone saved, never by sending it again (spec/clock/reminderJournal.md, \"Story: Never create or change a reminder twice\")", () => effect {
+    const store = reminderStore(true)
+    provide Layer.provideMerge(remindersLayer, machines), store.phone.layer, fakeNavigation().layer {
+      const reminders = try Reminders
+      const screen = try RemindersMachine
+      const journal = try JournalMachine
+      try reminders.enter()
+      try reminders.create({ title: "Water plants", body: "", dayOffset: 1, minuteOfDay: 8 * 60, repeat: "none", alertMinutes: 0 }, "")
+      const outcome = (try screen.get()).outcome
+      try reminders.refresh()
+      const kept = try journal.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { outcome, scheduled: store.phone.calls.filter((c) => c.method === "scheduleReminder").length, rows: store.rows.length, creations: kept.creations.map((c) => [c.state, c.sent]) },
+        { outcome: { tag: "AlertUnconfirmed" }, scheduled: 1, rows: 1, creations: [["CreationFound", true]] },
+      ))
+    }
+  })
+})
+
+describe("Reminder drafts (spec/clock/reminderDrafts.md, \"Story: Find my unsaved reminder where I left it\")", () => {
+  it.effect("keep an unsaved reminder under its creation id, save it under that id, and discard only after asking (spec/clock/reminderDrafts.md, \"Story: Find my unsaved reminder where I left it\")", () => effect {
+    const store = reminderStore()
+    provide Layer.provideMerge(Layer.mergeAll(remindersLayer, draftsLayer), machines), store.phone.layer, fakeNavigation().layer {
+      const reminders = try Reminders
+      const drafts = try ReminderDrafts
+      const kept = try DraftsMachine
+      const form = { title: "Book the vet", body: "Saturday", dayOffset: 1, minuteOfDay: 9 * 60, repeat: "none" as const, alertMinutes: 0 }
+      try reminders.enter()
+      try drafts.keep("new", "", "", { ...form, title: "Book" })
+      try drafts.keep("new", "", "", form)
+      const resumed = try drafts.resume("new")
+      const unsaved = store.phone.calls.filter((c) => c.method === "scheduleReminder").length
+      try reminders.create(resumed!.draft, resumed!.id)
+      try drafts.settle("new", resumed!.id, resumed!.version)
+      const created = store.rows.map((r) => [r.id === resumed!.id, r.title, r.body])
+      const afterSave = (try kept.get()).creation.tag
+      try drafts.keep("new", "", "", { ...form, title: "Pay rent" })
+      try drafts.confirmDiscard()
+      const unasked = (try kept.get()).creation.tag
+      try drafts.askDiscard("new")
+      try drafts.keep("new", "", "", { ...form, title: "Pay the rent" })
+      try drafts.confirmDiscard()
+      const newer = (try drafts.kept("new"))?.draft.title
+      try drafts.askDiscard("new")
+      try drafts.confirmDiscard()
+      const discarded = (try kept.get()).creation.tag
+      try Effect.try(() => assert.deepStrictEqual(
+        { resumed: [resumed?.draft.title, resumed?.draft.dayOffset, resumed?.draft.body], unsaved, created, afterSave, unasked, newer, discarded },
+        { resumed: ["Book the vet", 1, "Saturday"], unsaved: 0, created: [[true, "Book the vet", "Saturday"]], afterSave: "Empty", unasked: "Held", newer: "Pay the rent", discarded: "Empty" },
+      ))
+    }
+  })
+})

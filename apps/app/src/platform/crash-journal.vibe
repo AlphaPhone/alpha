@@ -1,0 +1,96 @@
+// spec/platform/crashJournal.md, "Story: Tell support what went wrong without telling them what I wrote"; spec/platform/crashJournal.md, "A renderer failure is recorded once a minute for each kind and class"; spec/platform/crashJournal.md, "A Cloud inference failure is taken once, and only while it is recent"; spec/platform/crashJournal.md, "The log keeps at most 50 entries in time order and drops what is older than 30 days"
+import { Machine as Journal, retentionMs, stored as storedJournal, throttled, type FailureKind, type Entry } from "../../gen/platform__crashJournal.effect.vibe"
+import { Native } from "./native.vibe"
+import { Build } from "./build.vibe"
+import { CrashEntry, CrashLogReply, InferenceFailure } from "./native.schema.vibe"
+
+/** The kinds of renderer failure the log keeps. */
+export type RendererFailureKind = "render" | "startup" | "uncaught"
+
+/** The problem log as Settings shows it: entries in time order, and whether Android's exit history could be read. */
+export interface CrashLog {
+  readonly entries: readonly CrashEntry[]
+  readonly exitHistory: boolean
+}
+
+/** Clearing the log could not be confirmed. */
+export error CrashLogUnconfirmed
+
+/** The problem log: record a failure, take an inference failure, read and clear. Recording never fails. */
+export service CrashJournal {
+  record(kind: RendererFailureKind, error: unknown): void!!
+  recordInference(failure: unknown): void!!
+  read(): CrashLog!!
+  clear(): void!CrashLogUnconfirmed
+}
+
+const JOURNAL_KEY = "alpha/device/crash-log"
+const PLAIN_CLASS = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/
+const kinds = { render: "Render", startup: "Startup", uncaught: "Uncaught" } as const satisfies Record<RendererFailureKind, FailureKind>
+const kindNames = { Render: "render", Startup: "startup", Uncaught: "uncaught", NoKind: undefined } as const
+
+/** The class of a failure, never its message: a plain identifier, or `Error`. */
+export function errorClassOf(error: unknown): string {
+  if (typeof error === "object" && error !== null && "name" in error) return typeof error.name === "string" && PLAIN_CLASS.test(error.name) ? error.name : "Error"
+  return error === null ? "null" : typeof error
+}
+
+/** The detail of a decoded Cloud inference failure: its stage, reason, HTTP status, parameter and keyword, each from a fixed list. */
+export function inferenceDetail(failure: InferenceFailure): string {
+  return [failure.stage, failure.reason, failure.status === undefined ? "" : `HTTP ${failure.status}`, failure.parameter ?? "", failure.keyword ?? ""]
+    .filter((part) => part !== "").join(" · ")
+}
+
+function withoutDetail(entry: CrashEntry): CrashEntry {
+  return Object.fromEntries(Object.entries(entry).filter(([name]) => name !== "detail")) as CrashEntry
+}
+
+function shown(entry: Entry): CrashEntry {
+  if (entry.source === "InferenceSource") return { at: entry.at, source: "inference", ...(entry.detail === "" ? {} : { detail: entry.detail }) }
+  const kind = kindNames[entry.kind]
+  return { at: entry.at, source: "renderer", ...(kind === undefined ? {} : { kind }), errorClass: entry.errorClass }
+}
+
+/** The log over the page's stored journal and, on the phone, the native log the agent service keeps. */
+export const crashJournalLive = Layer.effect(CrashJournal, effect {
+  const native = try Native
+  const build = try Build
+  const journal = try Effect.provide(effect { return try Journal }, storedJournal(JOURNAL_KEY))
+  const onDevice = build.info.variant !== "browser"
+  return {
+    effect record(kind: RendererFailureKind, error: unknown) {
+      const now = try Clock.currentTimeMillis
+      const errorClass = errorClassOf(error)
+      const repeated = throttled((try journal.get()).recent, kinds[kind], errorClass, now)
+      const after = journal.send({ type: "record", now, kind: kinds[kind], errorClass }) catch () => undefined
+      if (after === undefined || repeated) return
+      if (onDevice) native.invoke("ElizaSystem", "recordRendererFailure", { kind, errorClass }) catch () => undefined
+    },
+    effect recordInference(failure: unknown) {
+      const now = try Clock.currentTimeMillis
+      const read = Schema.decodeUnknownEffect(InferenceFailure)(failure) catch () => undefined
+      if (read === undefined || (read.status !== undefined && (read.status < 400 || read.status > 599))) return
+      journal.send({ type: "inferenceFailed", at: read.at, now, detail: inferenceDetail(read) }) catch () => undefined
+    },
+    effect read() {
+      const now = try Clock.currentTimeMillis
+      journal.send({ type: "prune", now }) catch () => undefined
+      const kept = (try journal.get()).entries.filter((entry) => !onDevice || entry.source === "InferenceSource").map(shown)
+      if (!onDevice) return { entries: kept, exitHistory: false }
+      const said = native.invoke("ElizaSystem", "crashLog", {}) catch () => undefined
+      const reply = Schema.decodeUnknownEffect(CrashLogReply)(said) catch () => undefined
+      const raw: unknown[] = Array.isArray(reply?.entries) ? reply.entries : []
+      const natives: CrashEntry[] = []
+      for (const item of raw) {
+        const entry = Schema.decodeUnknownEffect(CrashEntry)(item) catch () => undefined
+        if (entry === undefined || entry.at <= now - retentionMs || entry.at > now + retentionMs) continue
+        natives.push({ ...withoutDetail(entry), ...(entry.errorClass !== undefined && !PLAIN_CLASS.test(entry.errorClass) && !/^[A-Za-z_$][\w$.]{0,255}$/.test(entry.errorClass) ? { errorClass: "Error" } : {}) })
+      }
+      return { entries: [...natives, ...kept].sort((a, b) => a.at - b.at).slice(-50), exitHistory: reply?.exitHistory === true }
+    },
+    effect clear() {
+      if (onDevice) try mapError(native.invoke("ElizaSystem", "clearCrashLog", {}), () => new CrashLogUnconfirmed())
+      try mapError(journal.send({ type: "clear" }), () => new CrashLogUnconfirmed())
+    },
+  }
+})

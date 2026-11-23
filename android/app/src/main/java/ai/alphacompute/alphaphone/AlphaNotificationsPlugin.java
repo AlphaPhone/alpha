@@ -33,8 +33,83 @@ public class AlphaNotificationsPlugin extends NotificationsHostPlugin {
    requireNoticeForeground();call.resolve(new JSObject().put("ok",true));
   });
  }
- @Override public void load(){super.load();canonicalLive=new java.lang.ref.WeakReference<>(this);}
- @Override protected void handleOnDestroy(){if(canonicalLive.get()==this)canonicalLive.clear();super.handleOnDestroy();}
+ /** One own row as the renderer was last shown it: its post time and title, under the id the shared list gave it. */
+ private static final class Shown {
+  final long at;final String title;
+  Shown(long at,String title){this.at=at;this.title=title;}
+ }
+ /** Own rows of the latest listing by id, and the ids a question already consumed; both forgotten on pause, as the shared ids are. */
+ private final java.util.Map<String,Shown> shown=new java.util.concurrent.ConcurrentHashMap<>();
+ private final java.util.Set<String> consumedOwn=java.util.concurrent.ConcurrentHashMap.newKeySet();
+ /** A listing call that remembers the own rows it answers before passing the answer on. */
+ private final class ListingCall extends PluginCall {
+  private final PluginCall original;
+  ListingCall(PluginCall original){super(null,original.getPluginId(),original.getCallbackId(),original.getMethodName(),original.getData());this.original=original;}
+  @Override public void resolve(JSObject value){remember(value);original.resolve(value);}
+  @Override public void resolve(){original.resolve();}
+  @Override public void reject(String message,String code,Exception cause,JSObject data){original.reject(message,code,cause,data);}
+ }
+ private void remember(JSObject listing){
+  org.json.JSONArray items=listing==null?null:listing.optJSONArray("items");
+  if(items==null)return;
+  java.util.Set<String> current=new java.util.HashSet<>();
+  for(int i=0;i<items.length();i++){
+   org.json.JSONObject item=items.optJSONObject(i);
+   if(item==null||!"own".equals(item.optString("source")))continue;
+   String id=item.optString("id","");if(id.isEmpty())continue;
+   current.add(id);shown.put(id,new Shown(item.optLong("at"),item.optString("title","")));
+  }
+  shown.keySet().retainAll(current);consumedOwn.retainAll(current);
+ }
+ /** The shared list, remembering each own row so a notice question can consume it once. */
+ @Override @PluginMethod public void list(PluginCall call){super.list(new ListingCall(call));}
+ /**
+  * Consumes one of Alpha's own notices for the assistant's notice question, at most once per listing: `consumed` the first time,
+  * `already-consumed` after, `changed` when the revision is not the listed one, `gone` when the row is no longer posted, and
+  * `unavailable` when the posted row cannot be told apart.
+  */
+ @PluginMethod public void consumeOwnNotice(PluginCall call){
+  String id=call.getString("id"),revision=call.getString("revision");
+  noticeWork(call,"The notice could not be confirmed.",()->{
+   requireNoticeForeground();
+   String status;
+   Shown row=id==null?null:shown.get(id);
+   if(row==null)status="gone";
+   else if(!id.equals(revision))status="changed";
+   else if(consumedOwn.contains(id))status="already-consumed";
+   else{
+    int matches=0;
+    for(android.service.notification.StatusBarNotification active:manager().getActiveNotifications()){
+     if(active.getPostTime()!=row.at)continue;
+     android.app.Notification n=active.getNotification();
+     if(n.visibility==android.app.Notification.VISIBILITY_SECRET)continue;
+     String title=ai.eliza.plugins.notifications.NotificationMirrorPolicy.bounded(n.extras.getCharSequence(android.app.Notification.EXTRA_TITLE),ai.eliza.plugins.notifications.NotificationMirrorPolicy.TITLE_LIMIT);
+     if(row.title.equals(title))matches++;
+    }
+    status=matches==0?"gone":matches>1?"unavailable":consumedOwn.add(id)?"consumed":"already-consumed";
+   }
+   requireNoticeForeground();
+   call.resolve(new JSObject().put("status",status));
+  });
+ }
+ @Override protected void handleOnPause(){shown.clear();consumedOwn.clear();super.handleOnPause();}
+ private AutoCloseable storeChanges;
+ /** Posts `notificationsChanged` when one of Alpha's own rows is posted or removed, and `mirrorChanged` when a mirrored row or the mirror's access changes. */
+ @Override public void load(){
+  super.load();canonicalLive=new java.lang.ref.WeakReference<>(this);
+  storeChanges=StoreChanges.observe(store->{
+   String event=store==StoreChanges.Store.NOTIFICATIONS?"notificationsChanged":store==StoreChanges.Store.MIRROR?"mirrorChanged":null;
+   if(event!=null)noticeMain().post(()->{if(!noticeHostDestroyed())notifyListeners(event,new JSObject(),false);});
+  });
+ }
+ /** The live bridge, for the workflow taps {@link ElizaNotificationsPlugin} serves under the upstream name. */
+ static AlphaNotificationsPlugin live(){return canonicalLive.get();}
+ /** A workflow tap change also reaches the renderer's ElizaNotifications listeners. */
+ @Override protected void notifyListeners(String event,JSObject data,boolean retain){
+  super.notifyListeners(event,data,retain);
+  if(PENDING_WORKFLOW_TAP_EVENT.equals(event))ElizaNotificationsPlugin.forward(event,data);
+ }
+ @Override protected void handleOnDestroy(){if(canonicalLive.get()==this)canonicalLive.clear();try{if(storeChanges!=null)storeChanges.close();}catch(Exception ignored){/* Already detached. */}super.handleOnDestroy();}
 
  @Override protected String appLabel(){return "Alpha Phone";}
  @Override protected String scope(){return "alpha-phone";}

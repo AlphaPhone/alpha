@@ -3,17 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {sha256, sha256File} from './sha256.ts';
 import {verifyAndroidIdentity} from './android-identity.ts';
-const roots=['apps/app/src','apps/app/public','android/app/src/main/java','android/app/src/main/res','android/app/src/androidTest','android/app/src/main/AndroidManifest.xml','android/app/build.gradle','android/settings.gradle','capacitor.config.ts','vite.config.ts','package.json','bun.lock','app.config.json'];
+const roots=['apps/app/src','apps/app/spec','apps/app/public','apps/app/package.json','apps/app/vite.config.ts','cloud/src','cloud/deployment.json','cloud/generated','android/app/src/main/java','android/app/src/main/res','android/app/src/androidTest','android/app/src/main/AndroidManifest.xml','android/app/build.gradle','android/settings.gradle','capacitor.config.ts','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','app.config.json'];
 // Record flavor manifests and build policy as well as renderer/bridge sources.
 // Generated web assets and Gradle output remain outputs, not source inputs.
 roots.push('android/app/src/launcher','android/app/src/release',
  // The Gradle host the pinned upstream generator writes from android/consumer-host.json.
  'android/consumer-host.json','android/app/product.gradle','scripts/android-host.ts','scripts/android-identity.ts',
- 'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment.ts','scripts/cloud-deployment-policy.ts',
+ 'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment-policy.ts','scripts/upstream-os.ts',
  'android/.eliza-consumer-profile.json','android/eliza-consumer-host',
- 'vendor/eliza/packages/app/scripts/mobile/android/consumer-host.mjs',
- 'vendor/eliza/packages/app/scripts/mobile/android/consumer-host',
- 'vendor/eliza/packages/app/scripts/mobile/android/resident-host-sources.mjs',
+ 'vendor/eliza/packages/os/src/build','vendor/eliza/packages/os/android/host-templates',
  'android/build.gradle','android/gradle.properties',
  // Which dependency and plugin artifacts Gradle accepts (SHA-256); absent means unverified.
  'android/gradle/verification-metadata.xml',
@@ -37,19 +35,9 @@ roots.push('android/app/src/main/assets/agent','android/app/src/main/jniLibs',
  'android/app/build/generated/local-agent/java',
  'android/app/build/generated/local-agent/source-manifest.json',
  'upstream.lock.json',
- 'android/upstream-native-sources.json',
- 'scripts/prepare-local-agent.ts','scripts/local-agent-source.ts','scripts/copy-file-clone.ts',
- 'scripts/stage-local-agent-runtime.ts','scripts/stage-local-agent-sources.ts','scripts/native-view-policy.ts',
- 'scripts/build-mobile-agent.ts','scripts/mobile-uuid-adapter.ts','scripts/mobile-bundle-smoke.ts','scripts/upstream-mobile-build.ts',
- 'scripts/build-policy-source.ts','scripts/core-state-patch.ts','scripts/core-state-preload.ts','scripts/combined-agent-source.ts',
- 'scripts/upstream-core-sources.ts',
- 'scripts/prepare-patched-native.ts','scripts/upstream-native-source.ts',
- 'scripts/prepare-client-features.ts','.eliza/client-features/.source.json',
- 'vendor/eliza/packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts',
- 'scripts/build-workflow-worker.ts','scripts/prepared-workflow-worker.ts',
- 'scripts/stage-workflow-worker.ts','scripts/workflow-worker-artifact.ts',
- 'vendor/eliza/packages/app/platforms/android/app/src/main/java/ai/elizaos/app',
- 'vendor/eliza/plugins/plugin-native-browser-surface/android/src/main/java/ai/eliza/plugins/browsersurface/ChromiumBrowserIdentity.java');
+ 'scripts/build-agent-bundle.ts','scripts/stage-agent-runtime.ts','scripts/native-view-policy.ts','scripts/upstream-native-source.ts',
+ 'vendor/eliza/packages/agent/src/bundle','vendor/eliza/packages/os/src/build/runtime-payload.vibe',
+ 'vendor/eliza/packages/os/android/browser-surface/src/main/java/ai/eliza/plugins/browsersurface/ChromiumBrowserIdentity.java');
 const files: string[]=[];
 const profileFile = 'android/.eliza-consumer-profile.json';
 if (fs.existsSync(profileFile)) {

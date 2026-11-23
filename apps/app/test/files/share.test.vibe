@@ -1,0 +1,121 @@
+// spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/files/emailDraft.md, "Story: Email a file from Files without touching the draft I was writing"; spec/files/downloads.md, "Story: Download exactly the files I selected"
+import { assert, it } from "@effect/vitest"
+import { Machine as PanelMachine } from "../../gen/files__share.effect.vibe"
+import { Machine as ExportMachine } from "../../gen/files__downloads.effect.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesChanges } from "../../src/files/changes.vibe"
+import { FilesDownloads } from "../../src/files/downloads.vibe"
+import { FilesPreview } from "../../src/files/preview.vibe"
+import { FileShareTargets, FilesShare, type EmailAnswer } from "../../src/files/share.vibe"
+import type { AttachmentBytes } from "../../src/files/native.schema.vibe"
+import { rowKey, toRow } from "../../src/files/paths.vibe"
+import { files, noNative, until } from "./harness.vibe"
+
+const notes = toRow("", { path: "Download/notes.txt", name: "notes.txt", directory: false, mimeType: "text/plain", size: 40, modified: 1 })
+
+it.live("a share sends once from the panel on screen, even when its destination hides Files, a stale selection sends nothing, and a folder or a missing file is refused before the share sheet (spec/files/share.md, \"Story: Share the files I selected, to the place I chose\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      const share = try FilesShare
+      const panels = try PanelMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try browser.navigate({ tag: "InFolder", path: "", volume: "" })
+      try until((s) => s.listing === "Complete")
+      // spec/files/share.md, "A selection reaches Android's share sheet only when it is one to 100 files that are all still there"
+      const folder = try changes.share([rowKey("", "Download")])
+      const missing = try changes.share([rowKey("", "Download/none.pdf")])
+      let delivered = 0
+      const deliver = effect {
+        delivered++
+        return "DeliveryFailed" as const
+      }
+      const first = try share.open(false, false, succeed(true))
+      const sent = try share.choose(first, "SystemSheet", deliver)
+      const again = try share.choose(first, "SystemSheet", deliver)
+      const second = try share.open(false, false, succeed(false))
+      const stale = try share.choose(second, "SystemSheet", deliver)
+      const panel = try panels.get()
+      // spec/files/share.md, "The owner's choice sends once, from the panel on screen, after it closed"
+      const third = try share.open(false, false, succeed(true))
+      const covered = try share.choose(third, "SystemSheet", effect {
+        try share.hidden(true)
+        return "Delivered" as const
+      })
+      try share.hidden(false)
+      const after = try panels.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { folder: folder.kind === "refused" ? folder.status : folder.kind, missing: missing.kind === "refused" ? missing.status : missing.kind,
+          sent, again, stale, delivered, effects: panel.effects.length, alerts: panel.alerts, notice: panel.notice, reported: panel.reported.length,
+          covered, coveredEffects: after.effects.map((e) => e.panel), coveredReported: after.reported, active: after.active },
+        { folder: "folders", missing: "missing", sent: false, again: false, stale: false, delivered: 1, effects: 1, alerts: 1, notice: true, reported: 1,
+          covered: true, coveredEffects: [first, third], coveredReported: [first, third], active: 0 },
+      ))
+    })
+  }
+})
+
+it.live("Email starts a new draft with the file read twice the same, and stops when the account changed between the reads (spec/files/emailDraft.md, \"Story: Email a file from Files without touching the draft I was writing\")", () => effect {
+  const inserted: AttachmentBytes[] = []
+  let token = "o1"
+  const targets: FileShareTargets.Shape = {
+    emailAccount: () => succeed({ ready: true, token }),
+    email: (file: AttachmentBytes, at: string) => effect {
+      if (at !== token) return { kind: "refused", reason: "The account changed." } satisfies EmailAnswer
+      inserted.push(file)
+      return { kind: "inserted" } satisfies EmailAnswer
+    },
+    messages: false,
+    message: () => succeed(false),
+    ask: false,
+    attachToChat: () => succeed(false),
+  }
+  provide files(noNative) {
+    try scoped(effect {
+      provide FileShareTargets = targets {
+        const browser = try FilesBrowser
+        const preview = try FilesPreview
+        const share = try FilesShare
+        try Effect.forkScoped(browser.visit())
+        try until((s) => s.access === "AccessGranted")
+        try preview.enter()
+        try preview.openRow(notes)
+        const file = (try preview.sharedFile())!
+        const serial = (try preview.get()).serial
+        const first = try share.email(file, preview.stillShowing(serial))
+        const changing: typeof file = { ...file, read: effect {
+          token = "o2"
+          return try file.read
+        } }
+        const second = try share.email(changing, preview.stillShowing(serial))
+        try Effect.try(() => assert.deepStrictEqual(
+          { first: first.kind, second: second.kind === "failed" ? second.reason : second.kind, inserted: inserted.map((f) => [f.name, f.mimeType, f.size]) },
+          { first: "inserted", second: "account", inserted: [["notes.txt", "text/plain", 40]] },
+        ))
+      }
+    })
+  }
+})
+
+it.live("a download reads the selected files and their identities again, and is never handed over while the page is not on screen (spec/files/downloads.md, \"Story: Download exactly the files I selected\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const downloads = try FilesDownloads
+      const exports = try ExportMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const none = try downloads.download([])
+      const notesOnly = [rowKey("", "Download/notes.txt")]
+      const one = try downloads.download(notesOnly)
+      const single = try exports.get()
+      const twice = try downloads.download([notesOnly[0]!, notesOnly[0]!])
+      try Effect.try(() => assert.deepStrictEqual(
+        { none, one, single: [single.phase, single.kind, single.count, single.handed], twice },
+        { none: "busy", one: "refused", single: ["ExportRefused", "SingleFile", 1, false], twice: "busy" },
+      ))
+    })
+  }
+})

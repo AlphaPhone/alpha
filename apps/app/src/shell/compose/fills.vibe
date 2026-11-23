@@ -1,0 +1,127 @@
+// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/browser/egress.md, "Story: Share or keep the page I am looking at"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"; spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/camera/scan.md, "Only a complete, bounded scan request starts a scan, and only over the visible Camera"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
+import { AccountBindings } from "../../account/bindings.vibe"
+import { askAlphaTarget } from "../../assistant/files-bridge.vibe"
+import { CameraComposer, MapsChatCards, MapsRelay, ReplyChanges } from "../../assistant/ports.vibe"
+import { CameraChat, type ChatMessage } from "../../camera/chat.vibe"
+import { PageMail } from "../../browser/ports.vibe"
+import { CalendarMaps, type CalendarEventOrigin } from "../../calendar/ports.vibe"
+import { ownNotices } from "../../clock/notifications.vibe"
+import { FileShareTargets } from "../../files/share.vibe"
+import { assistantEmail } from "../../inbox/handoffs.vibe"
+import { MailComposer, type ComposerRefusal } from "../../inbox/composer.vibe"
+import { emailShareTarget } from "../../inbox/shareTarget.vibe"
+import { mapsRelayPort } from "../../maps/agent.vibe"
+import { MapsHandoff } from "../../maps/handoff.vibe"
+import { CallWatch } from "../../telephony/call-bar.vibe"
+import { messagesShareTarget } from "../../telephony/share.vibe"
+import { replyChanges } from "../../workflows/layer.vibe"
+import { WorkflowClockPort } from "../../workflows/ports.vibe"
+import { deviceCapabilities } from "../assistantHost.vibe"
+import { Navigation } from "../navigation.vibe"
+import { IdleSources } from "../ports.vibe"
+import { PortCells, fillCell } from "./slots.vibe"
+
+const PAGE_MAIL_REFUSED: Partial<Record<ComposerRefusal, string>> = {
+  "no-account": "Connect a Gmail account in Inbox first. Nothing was added.",
+  "drafts-full": "Local drafts are full. Delete one in Inbox, then try again. Nothing was added.",
+  "not-ready": "Open Inbox to check Gmail access first. Nothing was added.",
+}
+
+/** Why Inbox did not start a page's email draft, in the owner's words. */
+export function pageMailRefusal(refusal: ComposerRefusal): string {
+  return PAGE_MAIL_REFUSED[refusal] ?? "Inbox couldn’t start the email. Nothing was added."
+}
+
+/** The idle facts of the areas after the shell: a call from Telephony, connection work and the sign-in card from Account. */
+export const idleFill = Layer.effectDiscard(effect {
+  const idle = try IdleSources
+  const calls = try CallWatch
+  const bindings = try AccountBindings
+  try idle.fill(() => effect {
+    const account = try bindings.idle()
+    return { call: try calls.live(), ...account }
+  })
+})
+
+effect function mapsRelayBuilt() {
+  provide mapsRelayPort {
+    return try MapsRelay
+  }
+}
+
+effect function replyChangesBuilt() {
+  provide replyChanges {
+    return try ReplyChanges
+  }
+}
+
+/**
+ * Fills every slot of ./slots.vibe from its provider, once the last of them is built: Files' share targets, Browser's page mail,
+ * Calendar's Maps, Workflows' Clock, the assistant's email, Clock's own notices, Maps' chat and relay, Camera's composer requests,
+ * Workflows' reply changes and the phone's device capabilities.
+ */
+export const fillsLive = Layer.effectDiscard(effect {
+  const cells = try PortCells
+  const navigation = try Navigation
+
+  const email = try emailShareTarget
+  const messages = try messagesShareTarget
+  const ask = try askAlphaTarget()
+  const share: FileShareTargets.Shape = {
+    emailAccount: () => email.emailAccount(),
+    email: (...args: Parameters<FileShareTargets.Shape["email"]>) => email.email(...args),
+    get messages() { return messages.messages },
+    message: (...args: Parameters<FileShareTargets.Shape["message"]>) => messages.message(...args),
+    get ask() { return ask.ask },
+    attachToChat: (...args: Parameters<FileShareTargets.Shape["attachToChat"]>) => ask.attachToChat(...args),
+  }
+  try sync(() => fillCell(cells, cells.fileShare, share))
+
+  const composer = try MailComposer
+  const pageMail: PageMail.Shape = {
+    effect compose(subject: string, body: string) {
+      const refusal = try composer.compose({ toList: [], subject, body, files: [] })
+      if (refusal !== undefined) return pageMailRefusal(refusal)
+      try navigation.open("inbox")
+      return undefined
+    },
+  }
+  try sync(() => fillCell(cells, cells.pageMail, pageMail))
+
+  const maps = try MapsHandoff
+  const calendarMaps: CalendarMaps.Shape = {
+    effect enterFromEvent(origin: CalendarEventOrigin, where: string) {
+      try maps.enterFromEvent(origin, where)
+      return true
+    },
+  }
+  try sync(() => fillCell(cells, cells.calendarMaps, calendarMaps))
+
+  const mapsChat: MapsChatCards.Shape = {
+    agentReply: (question: boolean) => maps.agentReply(question),
+    ownerMessage: () => maps.ownerMessage(),
+  }
+  try sync(() => fillCell(cells, cells.mapsChat, mapsChat))
+
+  const relay = try mapsRelayBuilt()
+  try sync(() => fillCell(cells, cells.mapsRelay, relay))
+
+  const clock = try WorkflowClockPort
+  try sync(() => fillCell(cells, cells.workflowClock, clock))
+
+  const mail = try assistantEmail
+  try sync(() => fillCell(cells, cells.assistantEmail, mail))
+
+  const notices = try ownNotices
+  try sync(() => fillCell(cells, cells.ownNotices, notices))
+
+  const camera = try CameraChat
+  const cameraComposer: CameraComposer.Shape = { intercept: (message: ChatMessage) => camera.intercept(message) }
+  try sync(() => fillCell(cells, cells.cameraComposer, cameraComposer))
+
+  const changes = try replyChangesBuilt()
+  try sync(() => fillCell(cells, cells.replyChanges, changes))
+
+  const capabilities = try deviceCapabilities
+  try sync(() => fillCell(cells, cells.deviceCapabilities, capabilities))
+})

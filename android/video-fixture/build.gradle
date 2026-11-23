@@ -23,11 +23,7 @@ android {
 // configuration verbatim; the editor itself is the shared native media module, compiled from the
 // admitted native source. Bind the exact compiled editor sources and the configuration into the
 // witness APK.
-def preparedNative=new groovy.json.JsonSlurper().parseText(providers.exec {
- workingDir rootProject.projectDir.parentFile
- commandLine 'bun', 'scripts/prepare-patched-native.ts'
-}.standardOutput.asText.get())
-def nativeMediaRoot={ new File(preparedNative.root.toString(), 'plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media') }
+def nativeMediaRoot={ file('../../vendor/eliza/packages/os/android/media/src/main/java/ai/eliza/plugins/media') }
 def stageVideoSources=tasks.register('stageVideoSources',Copy){
  from('../app/src/main/java'){include '**/AlphaMediaConfig.java'}
  into layout.buildDirectory.dir('generated/video-source')

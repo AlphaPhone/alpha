@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "customConditions": ["eliza-source"],
+    "rootDir": ".",
+    "rootDirs": [".", ".vibe/declarations"],
+    "plugins": [{ "name": "@effect/language-service" }]
+  },
+  "include": ["src", "test", "generated/*.ts", "*.config.ts"],
+  "vibe": { "sidecarDir": ".vibe/declarations" }
+}

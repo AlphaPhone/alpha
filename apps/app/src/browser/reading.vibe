@@ -1,0 +1,202 @@
+// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Back closes the excerpt review the owner sees: Ask about page is closed, and a local reading is stopped"; spec/browser/reading.md, "Story: Ask about a page once I approve the excerpt"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"
+import { type Event, type ReadPage, type Reading, type ReadingEffect, Machine, machine, reviewShown } from "../../gen/browser__reading.effect.vibe"
+import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
+import { isSettled } from "../../gen/browser__page.effect.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { Toasts } from "../shell/toasts.vibe"
+import { READING_NOTICES, refusalText } from "./messages.ts"
+import { MAX_EXCERPT, publicPageText, sensitiveAddress } from "./page-text.ts"
+import { sensitiveText } from "../platform/sensitive.ts"
+import { ReadingVoice } from "./ports.vibe"
+import { BrowserTabs } from "./session.vibe"
+import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
+import { Excerpt, ReadingToken, Support } from "./tabHost.schema.vibe"
+
+/** Read aloud and Ask about page for the selected tab. */
+export service BrowserReading {
+  readonly changes: Stream.Stream<Reading>
+  readAloud(): void!!
+  askAboutPage(): void!!
+  stop(): void!!
+  /** The owner edits the question's excerpt. */
+  editQuestion(text: string): void!!
+  approveQuestion(): void!!
+  closeQuestion(): void!!
+  /** The browser build's local reading review. */
+  readLocally(): void!!
+  editLocal(text: string): void!!
+  readLocal(): void!!
+  stopLocal(): void!!
+  /** Hardware or gesture Back: closes the excerpt review that shows; false when none does. */
+  back(): boolean!!
+  /** Asks the device once whether it can read privately, and ends a reading whose page or foreground changed; never returns. */
+  follow(): void!!
+}
+
+const MENU_CLOSING = "150 millis"
+const ISOLATED_WORLD_UNAVAILABLE = "isolated-world-unavailable"
+
+/** The question the assistant's editor opens with: a prompt the owner edits, the page's name and address, and the approved excerpt. */
+export function questionDraft(name: string, url: string, excerpt: string): string {
+  const source = name === "" || name === url ? url : `${name}\n${url}`
+  return `Summarize this excerpt.\n\nSource: ${source}\n\n${excerpt.trim()}`
+}
+
+/** The selected tab's page as a reading reads it. */
+export function readPageOf(s: Session, shown: boolean): ReadPage {
+  const tab = curTab(s)
+  return { tab: s.cur, url: tab.page.url, navigation: tab.page.navigation, revision: tab.revision, shown, settled: tab.stage === "Live" && isSettled(tab.page), secure: tab.page.secure }
+}
+
+function readingShown(state: ForegroundState): boolean {
+  return state.visible && !state.locked && state.screen === "home" && state.view === "browser" && state.chat === "closed" && !state.shade
+}
+
+/** BrowserReading over its machine in memory. */
+export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effect {
+  const reading = try Machine
+  const tabs = try BrowserTabs
+  const host = try TabHost
+  const voice = try ReadingVoice
+  const assistant = try Assistant
+  const foreground = try Foreground
+  const toasts = try Toasts
+  const token = try Ref.make("")
+  const question = try Ref.make("")
+
+  effect function page() {
+    return readPageOf(try tabs.get(), readingShown(try foreground.get()))
+  }
+
+  effect function perform(out: ReadingEffect) {
+    match (out) {
+      when { tag: "QuerySupport" }: {
+        if (host.onDevice) {
+          const answer = effect { return try Schema.decodeUnknownEffect(Support)(try host.call("readingSupport")) } catch () => undefined
+          try send({ type: "supportAnswered", available: answer?.available === true, definite: answer !== undefined })
+        } else try send({ type: "supportAnswered", available: true, definite: true })
+      }
+      when { tag: "RequestReading", let tab, let url, let navigation }: {
+        const binding = try voice.binding()
+        const read = effect {
+          return try Schema.decodeUnknownEffect(ReadingToken)(try host.call("reviewReading", { id: tab, url, navigation, ...binding }))
+        } catch (error) => error
+        if (read instanceof BrowserCallFailed || read instanceof Error) {
+          if (read instanceof BrowserCallFailed) try toasts.show(refusalText(read.message))
+          try send({ type: "readingReturned", ok: false, sensitive: read instanceof BrowserCallFailed && /sensitive/i.test(read.message) })
+        } else {
+          try Ref.set(token, read.readingToken)
+          try send({ type: "readingReturned", ok: true, sensitive: false })
+        }
+      }
+      when { tag: "SpendToken", let generation }: {
+        const spent = try Ref.getAndSet(token, "")
+        fork.detached effect {
+          const ok = (voice.speakToken(spent) catch () => false) !== false
+          try send({ type: "speechEnded", generation, ok })
+        }
+      }
+      when { tag: "CancelReading" }: {
+        try Ref.set(token, "")
+        host.call("cancelReading") catch () => undefined
+      }
+      when { tag: "RequestExcerpt", let tab, let url, let navigation }: {
+        if (host.onDevice) {
+          const asked = effect {
+            return try Schema.decodeUnknownEffect(Excerpt)(try host.call("reviewQuestion", { id: tab, url, navigation }))
+          } catch (error) => error
+          const unavailable = asked instanceof BrowserCallFailed && asked.message.includes(ISOLATED_WORLD_UNAVAILABLE)
+          const text = asked instanceof BrowserCallFailed || asked instanceof Error ? "" : (asked.text ?? "").slice(0, MAX_EXCERPT)
+          const sensitive = (asked instanceof BrowserCallFailed && /sensitive/i.test(asked.message)) || (text !== "" && sensitiveText(text))
+          try send({ type: "excerptReturned", readable: !unavailable && text !== "", empty: text === "", sensitive, page: try page(), body: text })
+        } else {
+          const source = tryPromise((signal) => publicPageText(url, signal)) catch () => undefined
+          const text = source !== undefined && "text" in source ? source.text : ""
+          try send({ type: "excerptReturned", readable: text !== "", empty: text === "", sensitive: source !== undefined && "blocked" in source, page: try page(), body: text })
+        }
+      }
+      when { tag: "ComposeQuestion", let url }: {
+        const approved = try Ref.getAndSet(question, "")
+        const title = curTab(try tabs.get()).page.title
+        try assistant.openWith(questionDraft(title, url, approved))
+      }
+      when { tag: "FetchSource", let url }: {
+        const source = tryPromise((signal) => publicPageText(url, signal)) catch () => undefined
+        const bound = (try reading.get()).bound
+        const now = try page()
+        const current = now.tab === bound.tab && now.navigation === bound.navigation && now.revision === bound.revision
+        try send({ type: "sourceSettled", found: source !== undefined && "text" in source, blockedText: source !== undefined && "blocked" in source, present: current, body: source !== undefined && "text" in source ? source.text : "" })
+      }
+      when { tag: "SpeakLocally", let generation }: {
+        const text = (try reading.get()).text
+        fork.detached effect {
+          const ok = (voice.speakText(text) catch () => false) !== false
+          try send({ type: "localSpeechEnded", generation, ok })
+        }
+      }
+      when { tag: "StopLocalSpeech" }: try voice.stop()
+      when { tag: "Note", let problem }: try toasts.show(READING_NOTICES[problem])
+    }
+  }
+
+  effect function send(event: Event) {
+    const change = reading.send(event) catch () => undefined
+    if (change !== undefined) for (const out of change.out) try perform(out)
+  }
+
+  effect function current() {
+    const now = try page()
+    const bound = (try reading.get()).bound
+    return now.shown && now.tab === bound.tab && now.navigation === bound.navigation && now.revision === bound.revision
+  }
+
+  return {
+    changes: reading.changes,
+    effect readAloud() {
+      if ((try reading.get()).phase !== "NotReading") {
+        try send({ type: "stopReading" })
+        return
+      }
+      try tabs.dispatch({ type: "closeMenu" })
+      const hasVoice = (try voice.binding()) !== undefined && (try voice.ready())
+      try send({ type: "readAloud", page: try page(), voice: hasVoice })
+      if ((try reading.get()).phase !== "Preparing") return
+      try sleep(MENU_CLOSING)
+      try send({ type: "readingPrepared", page: try page() })
+    },
+    effect askAboutPage() {
+      try tabs.dispatch({ type: "closeMenu" })
+      try sleep(MENU_CLOSING)
+      try send({ type: "askAboutPage", page: try page() })
+    },
+    stop: () => send({ type: "stopReading" }),
+    editQuestion: (text: string) => send({ type: "questionEdited", empty: text.trim() === "", sensitive: sensitiveText(text), body: text.slice(0, MAX_EXCERPT) }),
+    effect approveQuestion() {
+      try Ref.set(question, (try reading.get()).text)
+      try send({ type: "questionApproved", page: try page() })
+    },
+    closeQuestion: () => send({ type: "questionClosed" }),
+    effect readLocally() {
+      try tabs.dispatch({ type: "closeMenu" })
+      const now = try page()
+      try send({ type: "readLocally", page: now, sensitiveAddress: sensitiveAddress(now.url) })
+    },
+    editLocal: (text: string) => send({ type: "localTyped", sensitive: sensitiveText(text), empty: text.trim() === "", body: text.slice(0, MAX_EXCERPT) }),
+    effect readLocal() { try send({ type: "localRead", present: try current() }) },
+    stopLocal: () => send({ type: "localStopped" }),
+    effect back() {
+      const now = try reading.get()
+      if (!reviewShown(now)) return false
+      try send(now.kind === "AskAboutPage" ? { type: "questionClosed" } : { type: "stopReading" })
+      return true
+    },
+    effect follow() {
+      try send({ type: "supportNeeded" })
+      try.all [
+        effect { for try (const _ of tabs.changes) { if ((try reading.get()).phase !== "NotReading") try send({ type: "pageChanged", page: try page() }) } },
+        effect { for try (const state of foreground.changes) { if (!readingShown(state) && (try reading.get()).phase !== "NotReading") try send({ type: "stopReading" }) } },
+      ]
+    },
+  }
+}), machine())

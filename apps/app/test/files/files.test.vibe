@@ -1,0 +1,234 @@
+// spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/mutations.md, "Story: Change many files and be told truthfully what changed"; spec/files/proposal.md, "Story: Review the actual files before anything changes"; spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"
+import { assert, it } from "@effect/vitest"
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { layer } from "../../src/files/layer.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesChanges } from "../../src/files/changes.vibe"
+import { FilesAgent } from "../../src/files/agent.vibe"
+import { FilePicker } from "../../src/files/picker.vibe"
+import { FilesPreview } from "../../src/files/preview.vibe"
+import { rowKey } from "../../src/files/paths.vibe"
+import type { Browser } from "../../gen/files__browser.ts"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { filesWithNavigation } from "./harness.vibe"
+
+const build = (testMocks: boolean) => Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks } })
+
+/** No native plugin: the development volume answers. */
+const noNative = Layer.succeed(Native, {
+  available: () => succeed(false),
+  invoke: (plugin, method) => fail(new NativeUnavailable({ plugin, method })),
+  listen: () => Stream.empty,
+})
+
+/** A files bridge that answers each call with `answer`. */
+const bridge = (answer: (method: string) => unknown) => Layer.succeed(Native, {
+  available: (plugin) => succeed(plugin === "AlphaFiles"),
+  invoke: (plugin, method) => plugin === "AlphaFiles" ? succeed(answer(method)) : fail(new NativeUnavailable({ plugin, method })),
+  listen: () => Stream.empty,
+})
+
+const files = (native: Layer.Layer<Native>, mocks = true) => Layer.provide(layer, Layer.mergeAll(native, build(mocks), memoryStore))
+
+effect function until(ok: (s: Browser) => boolean) {
+  const browser = try FilesBrowser
+  try timeout(Stream.runHead(Stream.filter(browser.changes, ok)), "5 seconds")
+}
+
+it.live("walk the Download folder, trash two files and undo it (spec/files/browser.md, \"Story: Walk my folders and categories\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted" && s.counts.length > 0)
+      const counted = try browser.get()
+
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      try until((s) => s.listing === "Complete")
+      const listed = try browser.get()
+      const pdf = rowKey("", "Download/lease.pdf")
+      const text = rowKey("", "Download/notes.txt")
+      // spec/files/browser.md, "A press starts a selection with its row, a tap adds or removes a row, and an empty selection ends"
+      try browser.dispatch({ type: "toggle", key: pdf })
+      try browser.dispatch({ type: "toggle", key: text })
+      const chosen = (try browser.get()).selected
+
+      // spec/files/mutations.md, "A confirmed chunk adds its receipts; a refused one stops; an unknown one claims nothing and stops"
+      try changes.trash(chosen)
+      const trashed = try changes.batch()
+      try until((s) => s.listing === "Complete" && !s.rows.some((r) => r.key === pdf))
+      const after = try browser.get()
+
+      try changes.undo()
+      const undone = try changes.batch()
+      try until((s) => s.rows.some((r) => r.key === pdf))
+
+      // spec/files/browser.md, "Back walks up the folders entered, then returns to where the walk began"
+      try browser.goUp()
+      const up = try browser.get()
+
+      try Effect.try(() => assert.deepStrictEqual({
+        counts: counted.counts.find((c) => c.category === "Downloads")?.count,
+        listed: listed.rows.map((r) => r.name).sort(),
+        chosen: chosen.length,
+        trashed: [trashed.op, trashed.phase, trashed.done, trashed.undo],
+        selectionEnded: [after.selecting, after.selected.length],
+        undone: [undone.op, undone.done],
+        up: up.place.tag,
+      }, {
+        counts: 2,
+        listed: ["lease.pdf", "notes.txt"],
+        chosen: 2,
+        trashed: ["TrashFiles", "Finished", 2, 2],
+        selectionEnded: [false, 0],
+        undone: ["RestoreFiles", 2],
+        up: "Browse",
+      }))
+    })
+  }
+})
+
+it.live("a device answer that leaves a row without its receipt is never claimed (spec/files/mutations.md, \"A row is done only when its answer is the operation's result and names the result\")", () => effect {
+  const listing = { status: "ready", truncated: true, entries: [
+    { path: "Download/a.pdf", name: "a.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: 1 },
+    { path: "Download/b.pdf", name: "b.pdf", directory: false, mimeType: "application/pdf", size: 20, modified: 2 },
+  ] }
+  const native = bridge((method) =>
+    method === "storageState" ? { status: "ready", access: "granted", volumes: [{ id: "primary", name: "Internal storage", primary: true, free: 1, total: 2 }] }
+    : method === "storageList" ? listing
+    : method === "storageCategory" ? { status: "ready", count: 0 }
+    : method === "storageTrashList" ? { status: "ready", items: [] }
+    : method === "storageTrash" ? { status: "ready", outcomes: [{ path: "Download/a.pdf", status: "trashed", to: "t1" }] }
+    : { status: "ready" })
+  provide files(native, false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      try until((s) => s.listing !== "Unread")
+      // spec/files/storage.md, "Only a complete read with no rows is empty; a partial read keeps its rows"
+      const partial = try browser.get()
+      try changes.trash(partial.rows.map((r) => r.key))
+      const batch = try changes.batch()
+      try Effect.try(() => assert.deepStrictEqual(
+        { listing: partial.listing, rows: partial.rows.length, batch: [batch.phase, batch.done, batch.undo] },
+        { listing: "Partial", rows: 2, batch: ["Uncertain", 0, 0] },
+      ))
+    })
+  }
+})
+
+it.live("the agent trashes the file it named by its position only after the owner's card bound it (spec/files/proposal.md, \"Story: Review the actual files before anything changes\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const context = { view: "files", sensitive: false, foreground: true } as const
+
+      // spec/files/proposal.md, "The phone advertises the browser operations to an agent that negotiates them, and positions only beside them"
+      const baseOnly = try agent.advertise(["files.browser.v1"])
+      const unnegotiated = try agent.prepare({ type: "files_trash", shown: [1] }, context)
+      const both = try agent.advertise(["files.browser.v1", "files.shown-target.v1"])
+
+      // spec/files/filter.md, "Only the newest filter's own query shows rows, and only rows of its kind"
+      const shown = try agent.run({ type: "files_filter", kind: "pdf" }, context, succeed(true))
+      const prepared = try agent.prepare({ type: "files_trash", shown: [1] }, context)
+      const ran = prepared.kind === "ready" ? try agent.run(prepared.op, context, succeed(true)) : { status: "failed", summary: "" }
+      // spec/files/proposal.md, "A proposal the phone cannot take is not available, and is never shown for approval"
+      const unresolved = try agent.prepare({ type: "files_share", shown: [9] }, context)
+
+      try Effect.try(() => assert.deepStrictEqual({
+        baseOnly, unnegotiated: unnegotiated.kind, both,
+        shown: shown.status,
+        prepared: prepared.kind === "ready" && prepared.op.type === "files_trash" && "paths" in prepared.op ? [prepared.op.paths, prepared.op.reviewed?.length] : prepared.kind,
+        ran: ran.status,
+        unresolved: unresolved.kind,
+      }, {
+        baseOnly: ["files.browser.v1"], unnegotiated: "notAvailable", both: ["files.browser.v1", "files.shown-target.v1"],
+        shown: "succeeded",
+        prepared: [["Download/lease.pdf"], 1],
+        ran: "succeeded",
+        unresolved: "failed",
+      }))
+    })
+  }
+})
+
+it.live("another area chooses a file, which is read again when attached (spec/files/picker.md, \"Story: Choose a file from my phone for another app on Alpha\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const picker = try FilePicker
+      const waiting = try Effect.forkScoped(picker.choose(2, () => true))
+      try timeout(Stream.runHead(Stream.filter(picker.changes, (p) => p.open && !p.loading)), "5 seconds")
+      try picker.browse("Download")
+      try timeout(Stream.runHead(Stream.filter(picker.changes, (p) => p.path === "Download" && !p.loading)), "5 seconds")
+      // spec/files/picker.md, "A tapped file is chosen only after its identity and its listing agree"
+      try picker.review(rowKey("", "Download/notes.txt"))
+      try picker.attach()
+      const chosen = join waiting
+      // spec/files/preview.md, "One open is asked for at a time, and its selection is shown only in the visit that asked"
+      const preview = try FilesPreview
+      try preview.enter()
+      const opened = try preview.openRow({ key: rowKey("", "Download/notes.txt"), path: "Download/notes.txt", folder: "Download", name: "notes.txt", kind: "KindDocument", mimeType: "text/plain", size: 40, modified: 1, children: -1 })
+      const shown = try preview.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { chosen: chosen.map((f) => [f.name, f.mimeType, f.size]), opened: opened.kind, content: [shown.content, shown.body] },
+        { chosen: [["notes.txt", "text/plain", 40]], opened: "shown", content: ["ContentText", "Lease renewal: the term starts in March."] },
+      ))
+    })
+  }
+})
+
+it.live("Back over the picker dismisses it, and its caller gets no files (spec/files/picker.md, \"Story: Choose a file from my phone for another app on Alpha\")", () => effect {
+  provide filesWithNavigation(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const picker = try FilePicker
+      const navigation = try Navigation
+      const waiting = try Effect.forkScoped(picker.choose(1, () => true))
+      try timeout(Stream.runHead(Stream.filter(navigation.changes, (n) => n.layers.some((l) => l.id === "files-picker"))), "5 seconds")
+      const listed = (try navigation.get()).layers.map((l) => [l.id, l.kind, l.covers])
+      try navigation.back()
+      const chosen = join waiting
+      try timeout(Stream.runHead(Stream.filter(picker.changes, (p) => !p.open)), "5 seconds")
+      const after = try navigation.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { listed, chosen: chosen.length, layers: after.layers.length },
+        { listed: [["files-picker", "SheetLayer", true]], chosen: 0, layers: 0 },
+      ))
+    })
+  }
+})
+
+it.live("an attached picker closes its own layer (spec/files/picker.md, \"Attaching reads the chosen files again and answers the caller once\")", () => effect {
+  provide filesWithNavigation(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const picker = try FilePicker
+      const navigation = try Navigation
+      const waiting = try Effect.forkScoped(picker.choose(1, () => true))
+      try timeout(Stream.runHead(Stream.filter(navigation.changes, (n) => n.layers.some((l) => l.id === "files-picker"))), "5 seconds")
+      try picker.browse("Download")
+      try timeout(Stream.runHead(Stream.filter(picker.changes, (p) => p.path === "Download" && !p.loading)), "5 seconds")
+      try picker.review(rowKey("", "Download/notes.txt"))
+      try picker.attach()
+      const chosen = join waiting
+      try timeout(Stream.runHead(Stream.filter(navigation.changes, (n) => n.layers.length === 0)), "5 seconds")
+      try Effect.try(() => assert.deepStrictEqual(chosen.map((f) => f.name), ["notes.txt"]))
+    })
+  }
+})

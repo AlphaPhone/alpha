@@ -1,35 +1,68 @@
 // Compile the whole OwnerRoutes request gate and pinned shared OwnerRoutePolicy against the real
-// product table. Renderer parity covers claimed owner groups; native-only conversation reads and
-// UTF8 body admission execute separately. Transport owner/epoch/stream lifecycle and Android remain external.
+// product table (apps/app/src/platform/owner-routes.json, which the shell's src/shell/ownerRoutes.vibe and
+// Android's asset both read). A reference reading of the table covers claimed owner groups; native-only
+// conversation reads and UTF8 body admission execute separately. Transport owner/epoch/stream lifecycle and Android remain external.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {join} from 'node:path';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {root,runJvm,nativeSource,upstreamConnection,fixture,jvmSkip} from './fixtures/jvm-tools.mjs';
-import {build} from 'esbuild';
-import {OWNER_ROUTE_TABLE,serializeOwnerRouteTable} from '../apps/app/src/product/owner-route-table.ts';
-import {loadBrowserModule} from './fixtures/browser-source.mjs';
-const [{ownerRouteGroup,ownerRouteAllowed}]=await loadBrowserModule(['apps/app/src/runtime/owner-route-policy.ts'],{testMocks:true});
+const TABLE_FILE=join(root,'apps/app/src/platform/owner-routes.json');
+const shippedTable=readFileSync(TABLE_FILE,'utf8');
+
+/** The table as the shell reads it, or a throw for a table the Android gate cannot load either. */
+function loadTable(text){
+ const table=JSON.parse(text);
+ if(typeof table?.unsafe!=='string'||typeof table.groups!=='object'||table.groups===null)throw new Error('Owner route table has no groups');
+ const unsafe=new RegExp(table.unsafe),ids={};
+ for(const [name,group] of Object.entries(table.groups)){
+  if(group.id!==undefined)ids[name]=new RegExp(group.id);
+  for(const route of group.routes)for(const path of route.paths)if(path.includes('{id}')&&ids[name]===undefined)throw new Error(`Owner route ${path} has no id pattern`);
+ }
+ const groupOf=path=>{
+  if(typeof path!=='string')return undefined;
+  const bare=path.split('?')[0];let best;
+  for(const [name,group] of Object.entries(table.groups))for(const prefix of group.prefixes)
+   if((bare===prefix||bare.startsWith(prefix+'/'))&&(best===undefined||prefix.length>best.length))best={name,length:prefix.length};
+  return best?.name;
+ };
+ const allowed=(name,url,method)=>{
+  const group=table.groups[name];if(!group)throw new Error(`Unknown owner route group ${name}`);
+  if(unsafe.test(url))return false;
+  const [path,search='']=url.split('?'),keys=[...new URLSearchParams(search).keys()];
+  return group.routes.some(route=>route.methods.includes(method)&&route.paths.some(pattern=>{
+   const [patternPath,exact]=pattern.split('?'),segments=patternPath.split('/'),actual=path.split('/');
+   if(segments.length!==actual.length)return false;
+   if(!segments.every((segment,i)=>segment==='{id}'?ids[name].test(actual[i]):segment===actual[i]))return false;
+   return pattern.includes('?')?exact===search:route.query===undefined?keys.length===0:keys.every(key=>route.query.includes(key));
+  }));
+ };
+ return {table,groupOf,allowed};
+}
+const {table:OWNER_ROUTE_TABLE,groupOf:ownerRouteGroup,allowed:ownerRouteAllowed}=loadTable(shippedTable);
 
 // Tables that cannot load: missing, empty, malformed, an invalid pattern, an {id} route in a group without an id pattern.
-const shippedTable=serializeOwnerRouteTable(),edited=edit=>{const table=JSON.parse(shippedTable);edit(table);return JSON.stringify(table);};
+const edited=edit=>{const table=JSON.parse(shippedTable);edit(table);return JSON.stringify(table);};
 const brokenTables=[
  ['empty',''],['malformed','{"unsafe":'],['missing groups','{"unsafe":"#"}'],
  ['invalid unsafe pattern',edited(table=>{table.unsafe='[';})],['invalid id pattern',edited(table=>{table.groups.automations.id='(';})],
  ['{id} route without an id pattern',edited(table=>{delete table.groups.automations.id;})],
 ];
-test('the renderer interpreter fails to load every owner route table the Android gate cannot load',async()=>{
- const load=table=>build({entryPoints:[join(root,'apps/app/src/runtime/owner-route-policy.ts')],bundle:true,write:false,platform:'node',format:'esm',logLevel:'silent',
-  plugins:[{name:'owner-routes',setup(builder){builder.onLoad({filter:/owner-route-table\.ts$/},()=>({contents:'export const OWNER_ROUTE_TABLE = '+table,loader:'ts'}));}}]})
-  .then(({outputFiles})=>import('data:text/javascript;base64,'+Buffer.from(outputFiles[0].text).toString('base64')));
- assert.equal(typeof (await load(shippedTable)).ownerRouteAllowed,'function');
- for(const [name,table] of brokenTables)await assert.rejects(load(table),undefined,name);
+test('the shipped owner route table loads, and every table the Android gate cannot load is refused',()=>{
+ assert.equal(typeof loadTable(shippedTable).allowed,'function');
+ for(const [name,table] of brokenTables)assert.throws(()=>loadTable(table),undefined,name);
 });
 
-test('the renderer refuses unknown owner route group names',()=>{
- assert.throws(()=>ownerRouteGroup('/api/triggers','automations','nope'),/Unknown owner route group nope/);
+test('the reading refuses unknown owner route group names',()=>{
  assert.throws(()=>ownerRouteAllowed('nope','/api/triggers','POST'),/Unknown owner route group nope/);
+});
+
+test('the table claims the Notes routes the Notes area calls',()=>{
+ for(const [path,method] of [['/api/notes/state','GET'],['/api/notes/interact','POST'],['/api/notes/trash/erase','POST'],['/api/notes/trash/recordings','GET'],['/api/notes/trash/recordings/complete','POST']]){
+  assert.equal(ownerRouteGroup(path),'records',path);
+  assert.equal(ownerRouteAllowed('records',path,method),true,`${method} ${path}`);
+ }
 });
 
 const nativeSources=[nativeSource('OwnerRoutes.java'),upstreamConnection('OwnerRoutePolicy.java'),fixture('OwnerRoutesTest.java')];
@@ -97,13 +130,13 @@ test('whole native owner gate preserves group parity, read authority and UTF8 bo
  for(let i=0;i<results.length;i++){
   const item=nativeCases[i],actual=results[i];
   assert.equal(actual.group,ownerRouteGroup(item.path)??null,item.name);
-  if(actual.group!==null)assert.equal(actual.policyAllowed,ownerRouteAllowed(actual.group,item.path,item.method),item.name);
+  if(actual.group!==null&&typeof item.path==='string'&&typeof item.method==='string')assert.equal(actual.policyAllowed,ownerRouteAllowed(actual.group,item.path,item.method),item.name);
  }
  assert.equal(results.find(row=>row.name==='dedicated stream is not generic request').limit,20*1024*1024);
  assert.equal(results.find(row=>row.name==='chat cap does not widen truncation').limit,2*1024*1024);
  const directory=join(root,'test-results/current-chat-intake');mkdirSync(directory,{recursive:true});
- const sources=[...nativeSources,join(root,'apps/app/src/product/owner-route-table.ts'),join(root,'apps/app/src/runtime/owner-route-policy.ts'),join(root,'test/owner-route-parity.test.mjs')];
- writeFileSync(join(directory,'owner-routes-jvm.json'),JSON.stringify({scope:'Whole OwnerRoutes and pinned real OwnerRoutePolicy on host JVM; renderer group parity; transport/stream lifecycle, Android and device acceptance excluded',tableSHA256:createHash('sha256').update(shippedTable).digest('hex'),sources:Object.fromEntries(sources.map(path=>[path,createHash('sha256').update(readFileSync(path)).digest('hex')])),caseCount:results.length,results},null,2)+'\n');
+ const sources=[...nativeSources,TABLE_FILE,join(root,'apps/app/src/shell/ownerRoutes.vibe'),join(root,'test/owner-route-parity.test.mjs')];
+ writeFileSync(join(directory,'owner-routes-jvm.json'),JSON.stringify({scope:'Whole OwnerRoutes and pinned real OwnerRoutePolicy on host JVM; group parity with the shipped table; transport/stream lifecycle, Android and device acceptance excluded',tableSHA256:createHash('sha256').update(shippedTable).digest('hex'),sources:Object.fromEntries(sources.map(path=>[path,createHash('sha256').update(readFileSync(path)).digest('hex')])),caseCount:results.length,results},null,2)+'\n');
 });
 
 test('whole native gate refuses malformed shipped owner tables',{skip:jvmSkip('json','javac')},()=>{

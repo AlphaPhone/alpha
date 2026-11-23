@@ -1,0 +1,91 @@
+// spec/camera/viewfinder.md, "Only the answer to the current start makes the preview ready"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"
+
+const Finite = Schema.Finite
+const Positive = Schema.Finite.check(Schema.isGreaterThan(0))
+
+/** A pixel size a preview reports. */
+export schema PixelSize { width: number; height: number }
+
+/** What `ElizaCamera.startPreview` and `switchCamera` report about the bound lens. */
+export schema PreviewReply {
+  width: number
+  height: number
+  deviceId: string
+  captureSize?: PixelSize
+  minZoom?: number
+  maxZoom?: number
+  zoom?: number
+  hasFlash?: boolean
+  flash?: string
+}
+
+/** A photo `ElizaCamera.capturePhoto` answered with: a thumbnail or the bytes, and its media-store identity. */
+export schema PhotoReply {
+  base64?: string
+  thumbnail?: string
+  format: string
+  width: number
+  height: number
+  path?: string
+}
+
+/** A recording `ElizaCamera.stopRecording` answered with. */
+export schema VideoReply { path: string; duration: number; width: number; height: number; fileSize: number; mimeType?: string; dataBase64?: string }
+
+/** A live recording's length and size, read by the poll. */
+export schema RecordingReply { isRecording: boolean; duration: number; fileSize: number }
+
+/** A read of the camera grant that never prompts. */
+export schema AccessReply { camera?: string }
+
+/** One image the system picker returned. */
+export schema PickedImage { status: string; uri?: string; mimeType?: string; selectionId?: string; message?: string }
+
+/** A document export's answer from `AlphaNoteDocuments.exportPdf`. */
+export schema ExportReply { status: string; message: string }
+
+/** The exact source bytes `AlphaMailAttachments.readPhotoSelected` read for a reviewed photo. */
+export schema SourceBytes { name: string; mimeType: string; size: number; sha256: string; dataBase64: string }
+
+/** A Keep or edit-receipt answer that may carry only a status and a message. */
+export schema StatusReply { status: string; id?: string; message?: string }
+
+/** The assistant's camera request: the camera it names, if any. */
+export schema CameraOperation { type: "camera_capture_photo"; lens?: "front" | "back" }
+
+const MediaIds = Schema.Array(Schema.String.check(Schema.isMinLength(1))).check(Schema.isMaxLength(200))
+
+/** One of the assistant's Photos operations, as the phone admits it before it runs. */
+export const PhotosOperation = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("photo_library_search"), kind: Schema.optionalKey(Schema.Literals(["image", "video", "all"])), from: Schema.optionalKey(Finite), to: Schema.optionalKey(Finite), favorites: Schema.optionalKey(Schema.Boolean), limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))) }),
+  Schema.Struct({ type: Schema.Literal("photo_library_inspect"), id: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("photo_library_select"), ids: MediaIds.check(Schema.isMaxLength(20)) }),
+  Schema.Struct({ type: Schema.Literal("photo_library_review"), action: Schema.Literals(["trash", "share", "favorite", "unfavorite"]), items: Schema.Array(Schema.Struct({ id: Schema.String, revision: Schema.String })).check(Schema.isMinLength(1), Schema.isMaxLength(20)) }),
+  Schema.Struct({ type: Schema.Literal("photos_filter"), from: Schema.optionalKey(Finite), to: Schema.optionalKey(Finite), kind: Schema.optionalKey(Schema.Literals(["image", "video"])), favorite: Schema.optionalKey(Schema.Boolean), text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(80))), album: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ type: Schema.Literal("photos_open"), id: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("photos_album_create"), name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)), ids: Schema.optionalKey(MediaIds), selected: Schema.optionalKey(Schema.Literal(true)) }),
+  Schema.Struct({ type: Schema.Literal("photos_share"), ids: Schema.optionalKey(MediaIds.check(Schema.isMaxLength(100))), selected: Schema.optionalKey(Schema.Literal(true)) }),
+])
+
+/** A decoded Photos operation. */
+export type PhotosOperation = typeof PhotosOperation.Type
+
+/** A media-store photo identity, never a file path: `content://media/external/images/media/<n>` on Android, `browser-photo:///<n>` in the browser. */
+export function photoReceiptId(path: string | undefined, browser: boolean): string | undefined {
+  if (path === undefined) return undefined
+  const pattern = browser ? /^browser-photo:\/\/\/([1-9][0-9]{0,24})$/ : /^content:\/\/media\/(?:external|external_primary)\/images\/media\/([1-9][0-9]{0,18})$/
+  return pattern.exec(path)?.[1]
+}
+
+/** A media-store video identity from a recording receipt. */
+export function videoReceiptId(path: string): string | undefined {
+  return /^(?:content:\/\/media\/|browser-video:\/\/\/)(?:.*\/)?([0-9]+)$/.exec(path)?.[1]
+}
+
+/** Whether a positive finite number: a recording receipt's duration and size. */
+export function positive(value: number): boolean {
+  return Number.isFinite(value) && value > 0
+}
+
+/** The decoded positive dimensions a photo receipt must carry. */
+export const PhotoDimensions = Schema.Struct({ width: Positive, height: Positive })

@@ -1,0 +1,81 @@
+// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "A shared text file is asked about as a reviewed excerpt, a file that cannot be attached goes as its name, and anything else is attached"
+import { FilePicker } from "../files/picker.vibe"
+import { FilesAgent } from "../files/agent.vibe"
+import type { FileShareTargets } from "../files/share.vibe"
+import { Assistant } from "./assistant.vibe"
+import { AssistantHost } from "./host.vibe"
+import { copy } from "./presentation.vibe"
+import type { ChatFile } from "./transcript.vibe"
+import { imageIntakeBytes, maxAttachments, mediaBase64Cap, rawCap } from "../../gen/assistant__attachments.effect.vibe"
+import { AssistantDraft, excerptLimit } from "./draft.vibe"
+
+const chatTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"])
+
+/** Whether a picked type may go into a chat message. */
+export function chatAccepts(mimeType: string): boolean {
+  return chatTypes.has(mimeType) || mimeType.startsWith("image/")
+}
+
+const excerptTypes = new Set(["text/plain", "text/markdown", "text/csv", "application/json"])
+
+function utf8Of(base64: string): string | undefined {
+  try {
+    const binary = atob(base64)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+  } catch {
+    return undefined
+  }
+}
+
+/** The Ask Alpha target of Files' share sheet, for the shell to merge into `FileShareTargets`: a text file opens the reviewed excerpt, a file too large to attach is named as the source, any other is attached; nothing is sent. */
+export effect function askAlphaTarget() {
+  const assistant = try Assistant
+  const draft = try AssistantDraft
+  const target: Pick<FileShareTargets.Shape, "ask" | "attachToChat"> = {
+    ask: true,
+    attachToChat: (file, question) => effect {
+      const asked = question.trim() === "" ? copy.explainFile : question
+      const cap = file.mimeType.startsWith("image/") ? imageIntakeBytes : rawCap(mediaBase64Cap)
+      if (file.size > cap || !chatAccepts(file.mimeType)) {
+        try draft.askAbout({ name: file.name, text: "", question: asked, file: "SourceAsk" })
+        return true
+      }
+      const bytes = file.read catch () => undefined
+      if (bytes === undefined) return false
+      const text = excerptTypes.has(bytes.mimeType) ? utf8Of(bytes.dataBase64) : undefined
+      if (text !== undefined && text.trim() !== "") {
+        try draft.askAbout({ name: bytes.name, text: text.slice(0, excerptLimit + 1), question: asked, file: "ExcerptAsk" })
+        return true
+      }
+      const encoded: ChatFile = { id: `files-${bytes.sha256}`, name: bytes.name, mimeType: bytes.mimeType, data: bytes.dataBase64 }
+      const attached = map(assistant.attach({ kind: "encoded", files: [encoded] }), () => true) catch () => false
+      if (attached) try assistant.openWith(asked)
+      else try draft.askAbout({ name: bytes.name, text: "", question: asked, file: "SourceAsk" })
+      return true
+    },
+  }
+  return target
+}
+
+/** Let the owner pick files for the next message with Files' picker; refusals become a toast. */
+export effect function pickForChat(waiting: number) {
+  const picker = try FilePicker
+  const assistant = try Assistant
+  const host = try AssistantHost
+  const room = maxAttachments - waiting
+  if (room <= 0) {
+    try host.toast(copy.attachmentFull)
+    return
+  }
+  const picked = try picker.choose(room, chatAccepts)
+  if (picked.length === 0) return
+  const encoded = picked.map((file, at): ChatFile => ({ id: `picked-${file.name}-${file.size}-${at}`, name: file.name, mimeType: file.mimeType, data: file.dataBase64 }))
+  assistant.attach({ kind: "encoded", files: encoded }) catch effect (error) => { try host.toast(error.message) }
+}
+
+/** The capabilities the phone advertises for Files to an agent that offers `peer`. */
+export effect function filesCapabilities(peer: readonly string[]) {
+  const files = try FilesAgent
+  return try files.advertise(peer)
+}

@@ -1,0 +1,131 @@
+// spec/files/storage.md, "Story: Browse my files by category, folder and volume"; spec/files/pdf.md, "Story: Read a PDF page by page on the phone"; spec/files/preview.md, "The document viewer opens over the preview and closes exactly once"; spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"
+import { FilesVolume, LibraryStore, VolumeRefused, importLibraryFile, importLibraryFolder, indexedLibrary, libraryVolume, librarySelections, type FilesFilter, type RowOutcome } from "@elizaos/plugin-files/client"
+import { Documents, FilesStorage, FilesUnavailable, type QueryInput } from "./storage.vibe"
+import { type ChosenFile, chooseFromComputer, objectUrl, renderPdfPage, sha256 } from "./library-glue.ts"
+import { handOver } from "./download.ts"
+import type * as N from "./native.schema.vibe"
+
+/** The browser library's database: the same one an earlier Alpha web build kept its files in. */
+export const LIBRARY_DATABASE = "alpha.browser.files.v1"
+const IMPORT_FOLDER = "Download"
+
+const refusedAnswer = (error: VolumeRefused) => ({ status: error.status, message: error.message })
+const answered = <A, B>(work: A!VolumeRefused, ok: (value: A) => B): B!! => Effect.catch(map(work, ok), (error) => succeed(refusedAnswer(error) as B))
+
+/** The selections of the browser library, shared by the storage and documents services so a file selected by one is read by the other. */
+export service LibraryPicks {
+  readonly picks: Effect.Success<ReturnType<typeof librarySelections>>
+}
+
+/** Bringing a folder from this computer into Files, where the browser keeps its own library; none elsewhere. */
+export service LibraryImport {
+  folder(): string | undefined!!
+  static readonly defaultValue = () => ({ folder: () => succeed(undefined) })
+}
+
+function filterOf(input: QueryInput): FilesFilter {
+  const kind = input.folders ? "folder" : input.documents ? "document" : input.mimePrefix === "application/pdf" ? "pdf"
+    : input.mimePrefix === "image/" ? "image" : input.mimePrefix === "video/" ? "video" : input.mimePrefix === "audio/" ? "audio" : undefined
+  return {
+    ...(input.text ? { text: input.text } : {}), ...(kind ? { kind } : {}), ...(input.folder !== undefined ? { folder: input.folder } : {}),
+    ...(input.from !== undefined ? { from: new Date(input.from).toISOString() } : {}), ...(input.to !== undefined ? { to: new Date(input.to).toISOString() } : {}),
+  } as FilesFilter
+}
+
+const outcomes = (rows: readonly RowOutcome[]): N.OutcomesAnswer =>
+  ({ status: "ready", outcomes: rows.flatMap((row) => row.status === "unknown" ? [] : [{ path: row.path, status: row.status, ...(row.to === undefined ? {} : { to: row.to }) }]) })
+
+/** The owner's files kept in this browser's library, through the Files storage and documents services. */
+export const browserLibrary = Layer.provide(Layer.mergeAll(
+  Layer.effect(FilesStorage, effect {
+    const volume = try FilesVolume
+    const selections = (try LibraryPicks).picks
+    return {
+      state: () => answered(volume.state(), (s): N.StateAnswer => ({ status: "ready", access: s.access, ...(s.legacy === undefined ? {} : { legacy: s.legacy }),
+        volumes: s.volumes.map((v) => ({ id: v.id, name: v.name, primary: v.primary, free: v.free, total: v.total })) })),
+      requestAccess: (settings) => answered(volume.requestAccess(settings), (access): N.StorageAnswer => ({ status: "ready", access })),
+      list: (path) => answered(volume.list(path), (l): N.ListAnswer => ({ status: "ready", entries: [...l.entries], truncated: !l.complete })),
+      category: (category, countOnly) => answered(volume.category(category), (l): N.CategoryAnswer => ({
+        status: "ready", count: l.count ?? l.entries.length, bytes: l.entries.reduce((n, e) => n + Math.max(0, e.size), 0), truncated: !l.complete,
+        ...(countOnly ? {} : { entries: [...l.entries] }), ...(l.folders ? { folders: [...l.folders] } : {}) })),
+      query: (input) => answered(volume.query(filterOf(input)), (l): N.ListAnswer => ({ status: "ready", entries: [...l.entries], truncated: !l.complete })),
+      reviewedIdentities: (paths) => answered(volume.reviewedIdentities(paths), (reviewed): N.ReviewedAnswer => ({ status: "ready", reviewed: [...reviewed] })),
+      transfer: (paths, dest, copy, _volume, reviewed) => answered(volume.transfer({ paths, dest, copy, ...(reviewed ? { reviewed } : {}) }), outcomes),
+      rename: (path, name) => answered(volume.rename(path, name), (placed): N.PlacedAnswer => ({ status: "ready", path: placed })),
+      createFolder: (parent, name) => answered(volume.createFolder(parent, name), (placed): N.PlacedAnswer => ({ status: "ready", path: placed })),
+      trash: (paths, _volume, reviewed) => answered(volume.trash({ paths, ...(reviewed ? { reviewed } : {}) }), outcomes),
+      trashList: () => answered(volume.trashList(), (items): N.TrashAnswer => ({ status: "ready", items: [...items] })),
+      restore: (ids) => answered(volume.restore(ids), outcomes),
+      erase: (ids) => answered(volume.emptyTrash(ids, true), (count): N.ErasedAnswer => ({ status: "ready", count })),
+      share: (paths) => answered(volume.share(paths), (count): N.HandoffAnswer => ({ status: "opened", count })),
+      open: (path) => answered(volume.open(path), (count): N.HandoffAnswer => ({ status: "opened", count })),
+      select: (path) => answered(selections.select(path), (selected): N.SelectionAnswer => ({ status: "selected", action: "files", selectionId: selected.selectionId,
+        name: selected.name, mimeType: selected.mimeType, canRename: false, size: selected.size })),
+      watch: () => succeed({ status: "ready" } satisfies N.StorageAnswer),
+      unwatch: () => succeed({ status: "ready" } satisfies N.StorageAnswer),
+      changes: Stream.never,
+    }
+  }),
+  Layer.effect(Documents, effect {
+    const selections = (try LibraryPicks).picks
+    const store = try LibraryStore
+    const unavailable = (method: string) => new FilesUnavailable({ method, reason: "library" })
+    effect function blob(selectionId: string) {
+      return try mapError(selections.bytes(selectionId), () => unavailable("bytes"))
+    }
+    effect function pick() {
+      const chosen = try (tryPromise(() => chooseFromComputer()) catch () => ({ folder: "", files: [] }))
+      const [file] = chosen.files
+      if (file === undefined) return { status: "cancelled" } satisfies N.SelectedDocument
+      const path = try mapError(provideService(importLibraryFile(IMPORT_FOLDER, { name: file.name, mimeType: file.mimeType, bytes: file.bytes }), LibraryStore, store), () => unavailable("pick"))
+      const selected = try mapError(selections.select(path), () => unavailable("pick"))
+      return { status: "selected", action: "files", selectionId: selected.selectionId, name: selected.name, mimeType: selected.mimeType, size: selected.size } satisfies N.SelectedDocument
+    }
+    return {
+      pick,
+      restore: () => succeed({ status: "unavailable" } satisfies N.SelectedDocument),
+      effect describe(selectionId: string) {
+        const file = blob(selectionId) catch () => undefined
+        if (file === undefined) return { status: "unavailable" } satisfies N.SelectedDocument
+        return { status: "selected", action: "files", selectionId, name: file.name, mimeType: file.mimeType, size: file.blob.size, uri: objectUrl(file.blob) } satisfies N.SelectedDocument
+      },
+      rename: () => succeed({ status: "unsupported" } satisfies N.SelectedDocument),
+      effect pdf(selectionId: string, page: number) {
+        const file = try blob(selectionId)
+        return try mapError(tryPromise(() => renderPdfPage(file.blob, page)), () => unavailable("pdf"))
+      },
+      effect read(selectionId: string) {
+        const text = selections.readText(selectionId) catch () => undefined
+        if (text === undefined) return { status: "unavailable" } satisfies N.DocumentText
+        return (text.kind === "read" ? { status: "read", text: text.text, mimeType: text.mimeType, bytes: text.bytes }
+          : text.kind === "large" ? { status: "too-large" } : { status: "unsupported", mimeType: text.mimeType, bytes: text.bytes }) satisfies N.DocumentText
+      },
+      effect open(selectionId: string) {
+        const file = blob(selectionId) catch () => undefined
+        if (file === undefined) return { status: "unavailable" } satisfies N.DocumentHandoff
+        const bytes = try mapError(tryPromise(() => file.blob.arrayBuffer()), () => unavailable("open"))
+        const handed = Effect.try(() => { handOver(file.name, file.mimeType, new Uint8Array(bytes)); return true }) catch () => false
+        return { status: handed ? "opened" : "failed" } satisfies N.DocumentHandoff
+      },
+      share: () => succeed({ status: "unsupported", message: "Sharing is unavailable in this browser." } satisfies N.DocumentHandoff),
+      effect bytes(selectionId: string) {
+        const file = try mapError(selections.attachment(selectionId, "mail"), () => unavailable("bytes"))
+        const digest = try mapError(tryPromise(() => sha256(file.dataBase64)), () => unavailable("bytes"))
+        const size = Math.floor((file.dataBase64.length * 3) / 4) - (file.dataBase64.endsWith("==") ? 2 : file.dataBase64.endsWith("=") ? 1 : 0)
+        return { name: file.name, mimeType: file.mimeType, dataBase64: file.dataBase64, sha256: digest, size } satisfies N.AttachmentBytes
+      },
+      forget: (selectionId: string) => selections.forget(selectionId),
+    }
+  }),
+  Layer.effect(LibraryImport, effect {
+    const store = try LibraryStore
+    return {
+      effect folder() {
+        const chosen = try (tryPromise(() => chooseFromComputer({ folder: true })) catch () => ({ folder: "", files: [] as ChosenFile[] }))
+        if (!chosen.folder || chosen.files.length === 0) return undefined
+        const imported = provideService(importLibraryFolder(chosen.folder, chosen.files.map((f) => ({ path: f.path, mimeType: f.mimeType, bytes: f.bytes }))), LibraryStore, store) catch () => undefined
+        return imported
+      },
+    }
+  }),
+), Layer.provideMerge(Layer.effect(LibraryPicks, map(librarySelections(), (picks) => ({ picks }))), Layer.provideMerge(libraryVolume("Alpha files.zip"), indexedLibrary(LIBRARY_DATABASE))))

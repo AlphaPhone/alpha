@@ -326,6 +326,16 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
     call.resolve();
   }
 
+  /** The owner's review of a recorded video copy Android removed before its save was confirmed; it settles only by this review. */
+  @PluginMethod
+  public void reviewRemovedVideoCopy(PluginCall call) {
+    try {
+      videoCopies().reviewRemovedCopy(call.getString("operationId"), call);
+    } catch (Exception unavailable) {
+      call.reject("Video copy review could not be confirmed");
+    }
+  }
+
   @PluginMethod
   public void list(PluginCall call) {
     submitRead(call, () -> {

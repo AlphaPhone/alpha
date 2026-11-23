@@ -1,0 +1,196 @@
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/notifications.md, "The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"
+import type { AskKind } from "../../gen/assistant__noticeQuestion.ts"
+import { AssistantFlows } from "../assistant/flows.vibe"
+import { OwnNotices, type OwnNotice } from "../assistant/ports.vibe"
+import { type ConsumeAnswer, Machine as ShadeMachine, type NoticeKind, type NoticeRow, type NoticeSource, consumeAccepted } from "../../gen/clock__notifications.effect.vibe"
+import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
+import { ClearOutcomes, NoticeListing, NoticeRecord, OwnNoticeConsumed } from "./native.schema.vibe"
+import { MalformedReply, NOTIFICATIONS, call, command } from "./plugins.vibe"
+import { NativeUnavailable } from "../platform/native.vibe"
+import { WorkflowNotices, asksAboutTap } from "./workflow-notices.vibe"
+import { opaqueId, pageVisible } from "./page.ts"
+
+type Listed = typeof NoticeRecord.Type
+
+const SOURCE: Readonly<Record<Listed["source"], NoticeSource>> = { own: "OwnNotice", external: "ExternalNotice", hosted: "HostedNotice" }
+
+/** A listed row's kind: Android names it; otherwise its id prefix does. */
+export function kindOf(row: Pick<Listed, "id" | "kind" | "source">): NoticeKind {
+  const kind = row.kind ?? (/^(workflow|focus):/.test(row.id) ? "workflow" : row.id.startsWith("calendar:") ? "calendar" : row.source === "own" ? "reminder" : "other")
+  return kind === "reminder" ? "ReminderKind" : kind === "calendar" ? "CalendarKind" : kind === "navigation" ? "NavigationKind" : kind === "workflow" ? "WorkflowKind" : "OtherKind"
+}
+
+/** A listed notification as the shade shows it; only an own row with an opaque id may become agent context. */
+export function noticeRowOf(row: Listed): NoticeRow {
+  return {
+    id: row.id,
+    revision: row.revision,
+    source: SOURCE[row.source],
+    kind: kindOf(row),
+    appLabel: row.appLabel,
+    title: row.redacted === true ? row.appLabel : row.title,
+    text: row.redacted === true ? "" : row.text,
+    at: Math.max(0, Math.round(row.at)),
+    clearable: row.clearable,
+    canOpen: row.canOpen && row.redacted !== true,
+    redacted: row.redacted === true,
+    opaque: row.source === "own" && opaqueId(row.id),
+  }
+}
+
+/** How the assistant's notice question sees a row: only an own reminder, calendar or navigation row that is not hidden may be asked about. */
+export function askKindOf(row: NoticeRow): AskKind {
+  if (row.redacted) return "PrivateNotice"
+  if (row.source === "HostedNotice") return "SummaryNotice"
+  const askable = row.source === "OwnNotice" && row.opaque && (row.kind === "ReminderKind" || row.kind === "CalendarKind" || row.kind === "NavigationKind")
+  return askable ? "ValidNotice" : "OrdinaryNotice"
+}
+
+const CONSUMED: Readonly<Record<typeof OwnNoticeConsumed.Type["status"], ConsumeAnswer>> = {
+  consumed: "ConsumedNow", "already-consumed": "AlreadyConsumed", changed: "NoticeChanged", gone: "NoticeGone", unavailable: "ConsumeUnavailable",
+}
+
+const WIRE_SOURCE: Readonly<Record<NoticeSource, Listed["source"]>> = { OwnNotice: "own", ExternalNotice: "external", HostedNotice: "hosted" }
+const refOf = (row: NoticeRow) => ({ id: row.id, revision: row.revision, source: WIRE_SOURCE[row.source] })
+
+/** The current notifications, read and acted on row by row. */
+export service Notifications {
+  open(): void!!
+  close(): void!!
+  /** Reads the rows for the current visit. */
+  refresh(): void!!
+  /** Opens the row the owner saw; a changed row says so. */
+  press(id: string, revision: string): void!!
+  /** Dismisses the row the owner saw; an ongoing row says so. */
+  swipe(id: string, revision: string): void!!
+  /** Dismisses exactly the clearable rows of the listing. */
+  clearAll(): void!!
+  /** Makes one of Alpha's own rows the agent's context for this visit. */
+  select(id: string, revision: string): void!!
+  /** Opens the question review of one own row. */
+  ask(id: string, revision: string): void!!
+  /** Continues the review through the assistant's notice question at the revision reviewed; none closes it. */
+  answer(draft: string | undefined): void!!
+  /** The own rows listed now, for the agent's inspection; other apps' rows never leave the phone. */
+  own(): ReadonlyArray<NoticeRow>!!
+  /** The own notice `id` as the phone lists it now, read again; undefined when it is gone, hidden, not askable or its text changed under the same revision. */
+  current(id: string): OwnNotice | undefined!!
+  /** Consumes the notice once through the phone at the revision listed now, or once for this session where the phone cannot; false when it was already consumed, changed or is no longer listed. */
+  consume(id: string): boolean!!
+}
+
+/** Notifications over `AlphaNotifications`. */
+export const notificationsLayer = Layer.effect(Notifications, effect {
+  const shade = try ShadeMachine
+  const notices = try NoticesMachine
+  const flows = try AssistantFlows
+  const consumed = new Set<string>()
+  const step = (event: Parameters<typeof shade.send>[0]) => shade.send(event) catch () => undefined
+
+  effect function read() {
+    return call(NOTIFICATIONS, "list", NoticeListing) catch () => undefined
+  }
+
+  effect function refresh() {
+    const begun = step({ type: "beginList" })
+    if (begun === undefined) return
+    const listing = try read()
+    if (listing === undefined) step({ type: "listFailed", visit: begun.visit })
+    else step({ type: "listedNotices", visit: begun.visit, rows: listing.items.slice(0, 100).map(noticeRowOf), alertsFailed: listing.calendarStatus === "unavailable" })
+  }
+
+  effect function act(method: "open" | "dismiss", id: string, revision: string, start: "press" | "swipe") {
+    const before = try shade.get()
+    const acting = step(start === "press" ? { type: "press", id, revision } : { type: "swipe", id, revision })
+    if (acting === undefined || !acting.acting) return
+    const lease = (notices.send({ type: "beginAction" }) catch () => undefined)?.lease
+    const row = before.rows.find((r) => r.id === id && r.revision === revision)
+    const ok = row !== undefined && (command(NOTIFICATIONS, method, refOf(row)) catch () => false) !== false
+    step({ type: "actionSettled", ok })
+    if (ok && method === "open" && lease !== undefined) notices.send({ type: "actionNavigates", lease }) catch () => undefined
+    try refresh()
+  }
+
+  return {
+    effect open() {
+      step({ type: "openShade" })
+      try refresh()
+    },
+    effect close() {
+      step({ type: "closeShade" })
+      notices.send({ type: "retireActions" }) catch () => undefined
+    },
+    refresh,
+    press: (id: string, revision: string) => act("open", id, revision, "press"),
+    swipe: (id: string, revision: string) => act("dismiss", id, revision, "swipe"),
+    effect clearAll() {
+      const state = try shade.get()
+      const keys = state.rows.filter((r) => r.clearable).map((r) => ({ id: r.id, revision: r.revision, source: r.source }))
+      if (step({ type: "clearAll", keyList: keys }) === undefined) return
+      const result = call(NOTIFICATIONS, "clear", ClearOutcomes, { items: state.rows.filter((r) => r.clearable).map(refOf) }) catch () => undefined
+      step({ type: "clearSettled", unavailable: result === undefined || result.outcomes.some((o) => o.status === "unavailable") })
+      try refresh()
+    },
+    select: (id: string, revision: string) => step({ type: "selectNotice", id, revision }),
+    ask: (id: string, revision: string) => step({ type: "ask", id, revision }),
+    effect answer(draft: string | undefined) {
+      const state = try shade.get()
+      const question = state.question
+      if (question.tag !== "QuestionReview") return
+      if (draft === undefined || draft.trim() === "") {
+        step({ type: "askClosed" })
+        return
+      }
+      const reviewed = state.rows.find((r) => r.id === question.id && r.revision === question.revision)
+      step({ type: "askContinue" })
+      const composed = pageVisible() && reviewed !== undefined
+        ? try flows.askAboutNotice(reviewed.id, reviewed.revision, askKindOf(reviewed), draft.trim())
+        : false
+      step({ type: "askChecked", visit: state.visit, unchanged: composed })
+    },
+    effect own() {
+      return (try shade.get()).rows.filter((r) => r.source === "OwnNotice" && !r.redacted)
+    },
+    effect current(id: string) {
+      const fresh = (try read())?.items.map(noticeRowOf).find((r) => r.id === id && r.source === "OwnNotice")
+      if (fresh === undefined || askKindOf(fresh) !== "ValidNotice") return undefined
+      const shown = (try shade.get()).rows.find((r) => r.id === id && r.revision === fresh.revision)
+      if (shown !== undefined && (shown.kind !== fresh.kind || shown.title !== fresh.title || shown.text !== fresh.text)) return undefined
+      return { id: fresh.id, revision: fresh.revision } satisfies OwnNotice
+    },
+    effect consume(id: string) {
+      const fresh = (try read())?.items.find((r) => r.id === id && r.source === "own")
+      if (fresh === undefined) return false
+      const reply = call(NOTIFICATIONS, "consumeOwnNotice", OwnNoticeConsumed, { id: fresh.id, revision: fresh.revision }) catch (error) => error
+      const answer: ConsumeAnswer = reply instanceof NativeUnavailable ? "ConsumeUnsupported"
+        : reply instanceof MalformedReply || reply instanceof Error ? "ConsumeUnavailable"
+        : CONSUMED[reply.status]
+      const accepted = consumeAccepted(answer, consumed.has(id))
+      if (accepted) consumed.add(id)
+      return accepted
+    },
+  }
+})
+
+/** Clock's own notices for the assistant's notice question, over Notifications and the tapped workflow notice under question; the shell integration fills the assistant's OwnNotices with it. */
+export const ownNotices = effect {
+  const notifications = try Notifications
+  const workflow = try WorkflowNotices
+  const port: OwnNotices.Shape = {
+    current: (id: string) => (asksAboutTap(id) ? workflow.current(id) : notifications.current(id)),
+    consume: (id: string) => (asksAboutTap(id) ? workflow.consume(id) : notifications.consume(id)),
+  }
+  return port
+}
+
+/** Reads the shade again every second while it is open and the page visible. Never returns. */
+export effect function followShade() {
+  const shade = try ShadeMachine
+  const notifications = try Notifications
+  while (true) {
+    const state = try shade.get()
+    if (state.open && !pageVisible()) try notifications.close()
+    else if (state.open && !state.busy && !state.acting) try notifications.refresh()
+    try sleep("1 second")
+  }
+}

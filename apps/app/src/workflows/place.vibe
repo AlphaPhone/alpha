@@ -1,0 +1,251 @@
+// spec/workflows/place.md, "Story: Move inside Workflows and come back with Back"; spec/workflows/place.md, "Story: Have a notice reread when the run view moves"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
+import { parseWorkflowRunDeepLink } from "@elizaos/plugin-workflow/client"
+import { Machine, type Overlay, type PlaceView, machine } from "../../gen/workflows__place.effect.vibe"
+import { Machine as ClockDraftMachine } from "../../gen/workflows__clockDraft.effect.vibe"
+import { Machine as RunsMachine } from "../../gen/workflows__runs.effect.vibe"
+import { placeOf } from "../../gen/shell__navigation.effect.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { WorkflowClockDraft } from "./clock-draft.vibe"
+import { WorkflowDefinitions } from "./definitions.vibe"
+import { Digests } from "./digests.vibe"
+import { instant } from "./ids.ts"
+import { PhoneSteps, type StepReview } from "./notices.vibe"
+import { HostedResults } from "./results.vibe"
+import { WorkflowRuns } from "./runs.vibe"
+import { DigestSourcesService, type ImpactRow, removalGrantOf } from "./sources.vibe"
+
+/** A saved phone source the sources sheet offers to renew or revoke. */
+export interface SavedPhoneSource { readonly id: string; readonly label: string; readonly expiresAt: number; readonly revoked: boolean }
+
+/** What the open sheets of the place show, beside the place itself. */
+export interface PlaceSheet {
+  /** The saved phone sources, newest first, as the sources sheet last read them. */
+  readonly phoneSources: ReadonlyArray<SavedPhoneSource>
+  /** The phone source a renewal reminder opened the sources sheet for. */
+  readonly renewing: string | undefined
+  /** What removing Google access would stop, while its review is open. */
+  readonly impact: ReadonlyArray<ImpactRow> | undefined
+  /** The grant Account named for removal, or undefined for this session's own grant. */
+  readonly removalGrant: string | undefined
+  /** The selected run's waiting phone step, reread each time the run's receipt is. */
+  readonly step: StepReview | undefined
+}
+
+const emptySheet: PlaceSheet = { phoneSources: [], renewing: undefined, impact: undefined, removalGrant: undefined, step: undefined }
+
+/** Where the owner is inside Workflows, the one overlay open over it, and Android's Back inside the app. */
+export service WorkflowsPlace {
+  /** The run view's generation, once for each refresh or reset. */
+  readonly moves: Stream.Stream<number>
+  /** What the open sheets show, now and after each change. */
+  readonly sheets: Stream.Stream<PlaceSheet>
+  /** What the open sheets show now. */
+  sheet(): PlaceSheet!!
+  /** Apply a route the shell or a notice opened: a run deep link, `digests`, `digests:<runId>`, `renew:<sourceId>`, `google-removal/<grantId>`, or "" for the list. */
+  go(route: string): void!!
+  /** Show a view and read what it shows; false where the place refuses it. */
+  show(view: PlaceView, target: string): boolean!!
+  /** Open an overlay over the view; the sources sheet and the Google removal review have their own openers. */
+  open(overlay: Overlay): boolean!!
+  /** Close the open overlay; a closed Google removal review leaves the sources sheet open. */
+  close(): void!!
+  /** Open the sources sheet, reading the saved phone sources, for renewing `renews` when one is named. */
+  openSources(renews?: string): void!!
+  /** Re-read the saved phone sources the open sheet shows. */
+  refreshSources(): void!!
+  /** Open the Google removal review over the sources sheet: for the grant Account named, or this session's own. */
+  reviewRemoval(grantId?: string): void!!
+  /** Show the removal review's list again after it changed. */
+  setImpact(impact: ReadonlyArray<ImpactRow> | undefined): void!!
+  /** Select one run of the open workflow, review its waiting phone step and follow its receipt. */
+  selectRun(runId: string): void!!
+  /** Keep reading the shown run's receipt while it is unfinished, rereading the selected run's phone step each time. */
+  follow(): void!!
+  /** Android's Back inside Workflows: true when Workflows took it, false when Back is the shell's. */
+  back(): boolean!!
+  /** Reset to the list with nothing open. */
+  leave(): void!!
+}
+
+function phoneSourcesOf(sources: ReadonlyArray<{ id: string; label: string; expiresAt: string; revoked: boolean; live?: { provider: string } }>): ReadonlyArray<SavedPhoneSource> {
+  return sources.filter((s) => s.live?.provider === "native").map((s) => ({ id: s.id, label: s.label, expiresAt: instant(s.expiresAt), revoked: s.revoked }))
+    .sort((a, b) => b.expiresAt - a.expiresAt)
+}
+
+/** WorkflowsPlace over its machine and Workflows' own services. */
+export const place = Layer.provideMerge(Layer.effect(WorkflowsPlace, effect {
+  const held = try Machine
+  const clockHeld = try ClockDraftMachine
+  const runsHeld = try RunsMachine
+  const clock = try WorkflowClockDraft
+  const definitions = try WorkflowDefinitions
+  const digests = try Digests
+  const results = try HostedResults
+  const runs = try WorkflowRuns
+  const steps = try PhoneSteps
+  const sources = try DigestSourcesService
+  const sheet = try SubscriptionRef.make<PlaceSheet>(emptySheet)
+  const sent = (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
+
+  effect function reviewStep(runId: string, workflowId: string) {
+    const step = runId === "" || workflowId === "" ? undefined : try steps.review(runId, workflowId)
+    try SubscriptionRef.update(sheet, (s) => ({ ...s, step }))
+  }
+
+  effect function moveTo(view: PlaceView, target: string, read: boolean) {
+    const before = try held.get()
+    if ((try sent({ type: "show", view, target })) === undefined) return false
+    try SubscriptionRef.update(sheet, (s) => ({ ...s, renewing: undefined, impact: undefined, removalGrant: undefined, step: undefined }))
+    if (before.view === "DigestsView" && view !== "DigestsView") try digests.close()
+    if (view === "DigestsView") {
+      if (before.view !== "DigestsView") try digests.open()
+      if (target !== "") try results.shown([target])
+    }
+    if (view === "WorkflowView" && read) {
+      try runs.openWorkflow(target)
+      try definitions.open(target)
+    }
+    return true
+  }
+
+  effect function readSources(renews: string | undefined) {
+    try sources.bind()
+    try digests.poll(true)
+    const catalog = try digests.catalog()
+    try SubscriptionRef.update(sheet, (s) => ({ ...s, phoneSources: phoneSourcesOf(catalog.sources), renewing: renews }))
+  }
+
+  effect function openSources(renews?: string) {
+    const now = try held.get()
+    if (now.overlay !== "SourcesOverlay" && (try sent({ type: "openOverlay", overlay: "SourcesOverlay" })) === undefined) return
+    try readSources(renews)
+  }
+
+  effect function reviewRemoval(grantId?: string) {
+    if ((try held.get()).overlay !== "SourcesOverlay") try openSources()
+    const impact = try sources.reviewRemoval(grantId ?? "")
+    if ((try sent({ type: "openOverlay", overlay: "RemovalOverlay" })) === undefined) return
+    try SubscriptionRef.update(sheet, (s) => ({ ...s, impact, removalGrant: grantId }))
+  }
+
+  effect function close() {
+    const before = try held.get()
+    if ((try sent({ type: "closeOverlay" })) === undefined) return
+    if (before.overlay === "RemovalOverlay") try SubscriptionRef.update(sheet, (s) => ({ ...s, impact: undefined, removalGrant: undefined }))
+    if (before.overlay === "SourcesOverlay") try SubscriptionRef.update(sheet, (s) => ({ ...s, renewing: undefined }))
+  }
+
+  effect function leave() {
+    const before = try held.get()
+    if (before.view === "DigestsView") try digests.close()
+    try sent({ type: "leave" })
+    try SubscriptionRef.set(sheet, { ...emptySheet, phoneSources: (try SubscriptionRef.get(sheet)).phoneSources })
+  }
+
+  effect function follow() {
+    let first = true
+    while (true) {
+      const delay = try runs.refreshRun(first)
+      first = false
+      const r = try runsHeld.get()
+      const runId = r.selected !== "" ? r.selected : r.shown.runId
+      if (runId !== "") try reviewStep(runId, r.workflowId)
+      if ((try held.get()).view === "WorkflowView") try sent({ type: "refresh" })
+      if (delay === 0) return
+      try sleep(Duration.millis(delay))
+    }
+  }
+
+  return {
+    moves: Stream.changes(Stream.map(held.changes, (p) => p.generation)),
+    sheets: SubscriptionRef.changes(sheet),
+    sheet: () => SubscriptionRef.get(sheet),
+    effect go(route: string) {
+      if (route === "") return try leave()
+      if (route === "digests" || route.startsWith("digests:")) {
+        try moveTo("DigestsView", route.startsWith("digests:") ? route.slice("digests:".length) : "", true)
+        return
+      }
+      if (route.startsWith("renew:")) {
+        try moveTo("ListView", "", true)
+        try openSources(route.slice("renew:".length))
+        return
+      }
+      const grant = removalGrantOf(route)
+      if (grant !== undefined) {
+        try moveTo("ListView", "", true)
+        try reviewRemoval(grant)
+        return
+      }
+      const linked = parseWorkflowRunDeepLink(route)
+      const opened = linked === undefined ? "" : try (runs.openRoute(route) catch () => "")
+      if (linked === undefined || opened === "") {
+        try moveTo("ListView", "", true)
+        return
+      }
+      try moveTo("WorkflowView", linked.workflowId, false)
+      try definitions.open(linked.workflowId)
+      try reviewStep(linked.runId, linked.workflowId)
+      fork.detached follow()
+    },
+    show: (view: PlaceView, target: string) => moveTo(view, target, true),
+    effect open(overlay: Overlay) {
+      if (overlay === "SourcesOverlay" || overlay === "RemovalOverlay") return false
+      return (try sent({ type: "openOverlay", overlay })) !== undefined
+    },
+    close,
+    openSources,
+    effect refreshSources() {
+      try readSources((try SubscriptionRef.get(sheet)).renewing)
+    },
+    reviewRemoval,
+    effect setImpact(impact: ReadonlyArray<ImpactRow> | undefined) {
+      if (impact === undefined && (try held.get()).overlay === "RemovalOverlay") return try close()
+      try SubscriptionRef.update(sheet, (s) => ({ ...s, impact }))
+    },
+    effect selectRun(runId: string) {
+      const r = try runsHeld.get()
+      if ((try (runsHeld.send({ type: "selectRun", runId }) catch () => undefined)) === undefined) return
+      try reviewStep(runId, r.workflowId)
+      try follow()
+    },
+    follow,
+    effect back() {
+      if ((try clockHeld.get()).shown) {
+        try clock.close()
+        return true
+      }
+      const now = try held.get()
+      if (now.overlay !== "NoOverlay") {
+        try close()
+        return true
+      }
+      if (now.view === "WorkflowView") {
+        if (try definitions.back()) return true
+        if ((try runsHeld.get()).custody === "ConfirmingResend" && (try (runsHeld.send({ type: "leaveResend" }) catch () => undefined)) !== undefined) return true
+      }
+      if (now.view === "ListView") return false
+      return try moveTo("ListView", "", true)
+    },
+    leave,
+  }
+}), machine())
+
+/** Applies each route the shell opens Workflows at once, then hands the shell back the bare route so the same route opened again is applied again, for as long as the layer lives. */
+export effect function followRoute() {
+  const navigation = try Navigation
+  const at = try WorkflowsPlace
+  let last: string | undefined = undefined
+  for try (const nav of navigation.changes) {
+    if (nav.app !== "workflows") continue
+    const route = placeOf(nav, "workflows").route
+    if (route === last) continue
+    const first = last === undefined
+    last = route
+    if (first && route === "") continue
+    try at.go(route)
+    if (route === "") continue
+    last = ""
+    if ((try navigation.get()).app === "workflows") navigation.send({ type: "setRoute", route: "" }) catch () => false
+  }
+}

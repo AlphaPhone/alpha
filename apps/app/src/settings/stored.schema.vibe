@@ -1,0 +1,7 @@
+// spec/settings/appearance.md, "A choice applies at once, and one whose save failed still applies for the session"; spec/settings/updates.md, "A check is due fifteen minutes after the last answer, or at once for an unknown or future clock"
+
+/** What is kept of the appearance: the choice and legible text. */
+export schema SavedAppearance { choice: "FollowSystem" | "Light" | "Dark"; legible: boolean }
+
+/** The last feed answer kept on the phone: when it came, the feed, and Android's digest of it. */
+export schema SavedFeed { checkedAt: number; feed: unknown; digest?: string }

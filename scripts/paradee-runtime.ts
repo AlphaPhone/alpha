@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-export const PARADEE_SOURCE='vendor/eliza/plugins/plugin-local-inference/native/android';
+export const PARADEE_SOURCE='vendor/eliza/packages/os/android/local-inference';
 export const PARADEE_NATIVE='.eliza/paradee-voice/native';
 interface RuntimeVerificationOptions {abis?: readonly string[]}
 export interface ParadeeAsset {path: string; sha256: string; bytes: number}
@@ -27,8 +27,8 @@ function checkedFile(root: string, entry: ParadeeAsset){
 }
 /** Gradle compiles JNI against this exact nested source even when engine binaries are staged. */
 export function verifyParadeeFfi(root: string){
- const vendor=path.join(root,'vendor/eliza'),relative='plugins/plugin-local-inference/native/llama.cpp',fork=path.join(vendor,relative),header='tools/omnivoice/include/eliza-inference-ffi.h';
- const guidance='Initialize the pinned FFI source: git -C vendor/eliza submodule update --init plugins/plugin-local-inference/native/llama.cpp';
+ const vendor=path.join(root,'vendor/eliza'),relative='packages/os/android/local-inference/llama.cpp',fork=path.join(vendor,relative),header='tools/omnivoice/include/eliza-inference-ffi.h';
+ const guidance='Initialize the pinned FFI source: git -C vendor/eliza submodule update --init packages/os/android/local-inference/llama.cpp';
  const git=(directory: string,...args: string[])=>execFileSync('git',['-C',directory,...args],{stdio:['ignore','pipe','pipe'],maxBuffer:4*1024*1024});
  try{
   const pin=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;

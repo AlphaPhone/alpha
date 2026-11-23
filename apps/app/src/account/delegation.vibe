@@ -1,0 +1,230 @@
+// spec/account/delegation.md, "Story: Let Cloud run my hosted results"; spec/account/delegation.md, "The authorization page is the deployment's own"; spec/account/delegation.md, "Removing the grant is reviewed with what reads through it, and only a pending disconnect is retried as it is"
+import {
+  type CloudSide, type Delegation, type DelegationEffect, type Retained,
+  Machine as DelegationMachine, authorizePageOpens, machine as delegationMachine
+} from "../../gen/account__delegation.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment } from "../platform/build-live.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
+import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { authorityOf, delegationSlot, deployment, freshKey } from "./deployment.ts"
+import { CallbackSlot, PendingRecord, Revocations, SecureValue, Started, Status, SwapAnswer } from "./delegation.schema.vibe"
+import { CloudSession, ownerOf } from "./session.vibe"
+
+/** What the panel shows beside the machine's state. */
+export interface DelegationDetails {
+  readonly grantId: string | undefined
+  readonly pendingRevocations: ReadonlyArray<string>
+  readonly email: boolean
+  readonly calendar: boolean
+}
+
+/** The Cloud delegation for hosted results, its browser return and its revocations. */
+export service CloudDelegation {
+  readonly changes: Stream.Stream<Delegation>
+  readonly details: Stream.Stream<DelegationDetails>
+  run(): void!!
+  /** Start an authorization for the kinds the owner chose. */
+  start(email: boolean, calendar: boolean): void!!
+  checkStatus(): void!!
+  cancel(): void!!
+  /** Retry the Cloud disconnect of a grant whose revocation is pending; removing a live grant goes through the digest sources' review. */
+  retryDisconnect(grantId: string): void!!
+}
+
+const secureStore = "ElizaSecureStore"
+
+const cloudSides = { waiting: "CloudWaiting", finishing: "CloudFinishing", complete: "CloudComplete", failed: "CloudFailed" } as const satisfies Record<string, CloudSide>
+
+/** The delegation service over its in-memory machine, restored from the account's secure slot. */
+export const delegationService = Layer.effect(CloudDelegation, effect {
+  const machine = try DelegationMachine
+  const native = try Native
+  const services = try CloudServices
+  const resident = try Resident
+  const session = try CloudSession
+  const build = try Build
+  const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
+  const details = try SubscriptionRef.make<DelegationDetails>({ grantId: undefined, pendingRevocations: [], email: true, calendar: true })
+  const slot = try Ref.make("")
+  const scope = try Scope.Scope
+  const watched = try Ref.make("")
+
+  effect function call(path: string, body: unknown) {
+    const answer = try resident.json("POST", `/api/workflow/hosted/cloud-delegation/${path}`, body)
+    return answer.data
+  }
+
+  effect function readRecord() {
+    const key = try Ref.get(slot)
+    if (key === "") return undefined
+    const read = try Schema.decodeUnknownEffect(SecureValue)(try native.invoke(secureStore, "get", { key }))
+    const value = read.value
+    if (value === undefined || value === null) return undefined
+    const record = try Schema.decodeUnknownEffect(PendingRecord)(try Effect.try(() => JSON.parse(value) as unknown))
+    try watchDeadline(record)
+    return record
+  }
+
+  effect function swapRecord(expected: PendingRecord | undefined, next: PendingRecord | undefined) {
+    const key = try Ref.get(slot)
+    if (key === "") return false
+    const answer = try Schema.decodeUnknownEffect(SwapAnswer)(try native.invoke(secureStore, "compareAndExchange", {
+      key, expected: expected === undefined ? null : JSON.stringify(expected), value: next === undefined ? null : JSON.stringify(next)
+    }))
+    return answer.exchanged
+  }
+
+  effect function readCallback() {
+    const slotted = try Schema.decodeUnknownEffect(CallbackSlot)(try native.invoke("AlphaConnection", "readDelegationCallback"))
+    return slotted.callback
+  }
+
+  effect function deadlineAt(record: PendingRecord, owner: number) {
+    const now = try Clock.currentTimeMillis
+    const at = Date.parse(record.expiresAt)
+    if (Number.isFinite(at) && at > now) try sleep(Duration.millis(at - now))
+    const d = try machine.get()
+    if (d.owner === owner && d.record !== "NoRecord" && !d.recordExpired) try send({ type: "deadlinePasses" })
+  }
+
+  effect function watchDeadline(record: PendingRecord) {
+    if ((try Ref.get(watched)) === record.state) return
+    try Ref.set(watched, record.state)
+    const owner = (try machine.get()).owner
+    fork.in(scope) deadlineAt(record, owner)
+  }
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined) try perform(step.out)
+  }
+
+  effect function status(record: PendingRecord) {
+    const raw = call("status", { state: record.state }) catch () => undefined
+    return raw === undefined ? undefined : (Schema.decodeUnknownEffect(Status)(raw) catch () => undefined)
+  }
+
+  effect function settle(found: Status | undefined, record: PendingRecord | undefined) {
+    if (found?.status === "complete" && found.grantId !== undefined) try SubscriptionRef.update(details, (d) => ({ ...d, grantId: found.grantId }))
+    if ((found?.status === "complete" || found?.status === "failed") && record !== undefined) {
+      swapRecord(record, undefined) catch () => false
+      native.invoke("AlphaConnection", "clearDelegationCallback", { state: record.state }) catch () => undefined
+    }
+  }
+
+  effect function perform(out: ReadonlyArray<DelegationEffect>): void!! {
+    const d = try machine.get()
+    const record = readRecord() catch () => undefined
+    for (const effectOf of out) {
+      match (effectOf) {
+        when "StartAuthorization": {
+          const kinds = try SubscriptionRef.get(details)
+          const started = effect {
+            return try Schema.decodeUnknownEffect(Started)(try call("start", { confirmed: true, mutationId: freshKey(), kinds: [...(kinds.email ? ["email"] : []), ...(kinds.calendar ? ["calendar"] : [])] }))
+          } catch () => undefined
+          const state = started === undefined || !URL.canParse(started.authUrl) ? null : new URL(started.authUrl).searchParams.get("state")
+          const page = started === undefined || !URL.canParse(started.authUrl) ? undefined : new URL(started.authUrl)
+          const valid = page !== undefined && authorizePageOpens(page.origin === authority.web, page.pathname === "/app-auth/authorize",
+            state !== null && /^[-\w]{43}$/.test(state), !!page.username || !!page.password || !!page.hash)
+          if (valid && started !== undefined && state !== null) {
+            const record: PendingRecord = { state, authUrl: started.authUrl, expiresAt: started.expiresAt, phase: "waiting" }
+            const saved = swapRecord(undefined, record) catch () => false
+            if (saved) try watchDeadline(record)
+            if (saved) services.openExternal(started.authUrl) catch () => undefined
+          }
+          try send({ type: "startEnds" })
+        };
+        when "ReadReturn": {
+          const callback = readCallback() catch () => undefined
+          let after: CloudSide = "CloudWaiting"
+          if (callback !== undefined && record !== undefined && record.state === callback.state && callback.code !== undefined && Date.parse(record.expiresAt) > (try Clock.currentTimeMillis)) {
+            const next = { ...record, phase: "finishing" as const, code: callback.code }
+            const saved = swapRecord(record, next) catch () => false
+            if (saved) {
+              const found = try status(next)
+              if (found?.status === "waiting") call("complete", { state: next.state, code: callback.code }) catch () => undefined
+              const again = found?.status === "waiting" ? try status(next) : found
+              after = again === undefined ? "CloudWaiting" : cloudSides[again.status]
+              try settle(again, next)
+            }
+          }
+          try send({ type: "callbackEnds", failed: callback === undefined && d.retained !== "OtherReturn", cloudAfter: after })
+        };
+        when "ReadStatus": {
+          const found = record === undefined ? undefined : try status(record)
+          if (found?.status === "waiting" && record?.code !== undefined && d.record === "FinishingRecord") call("complete", { state: record.state, code: record.code }) catch () => undefined
+          const again = found?.status === "waiting" && record?.code !== undefined && record !== undefined ? try status(record) : found
+          if (record !== undefined) try settle(again, record)
+          const running = (try machine.get()).running
+          if (running === "StatusStep") try send({ type: "statusEnds", failed: again === undefined, cloudAfter: again === undefined ? "CloudWaiting" : cloudSides[again.status] })
+          if (running === "CancelStep") try send({ type: "cancelEnds", failed: again === undefined })
+        };
+        when "CompleteAuthorization": undefined;
+        when "CancelAuthorization": {
+          if (record !== undefined) {
+            call("cancel", { state: record.state, confirmed: true }) catch () => undefined
+            swapRecord(record, undefined) catch () => false
+          }
+          if ((try machine.get()).running === "CancelStep") try send({ type: "cancelEnds", failed: false })
+        };
+        when "ReleaseReturn": {
+          if (record !== undefined) native.invoke("AlphaConnection", "clearDelegationCallback", { state: record.state }) catch () => undefined
+        };
+      }
+    }
+  }
+
+  effect function refreshRevocations() {
+    const raw = call("revocations", {}) catch () => undefined
+    const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(Revocations)(raw) catch () => undefined)
+    if (read !== undefined) try SubscriptionRef.update(details, (d) => ({ ...d, pendingRevocations: read.grants.map((g) => g.grantId) }))
+  }
+
+  effect function followSession() {
+    for try (const s of session.changes) {
+      const owner = ownerOf(s)
+      if (owner === (try machine.get()).owner) continue
+      try SubscriptionRef.set(details, { grantId: undefined, pendingRevocations: [], email: true, calendar: true })
+      const key = owner === 0 ? "" : (tryPromise(() => delegationSlot(`${s.environment}:${s.account.userId}:${s.account.organizationId}`)) catch () => "")
+      try Ref.set(slot, key)
+      try send({ type: "ownerChanged", owner })
+      if (owner === 0) continue
+      try refreshRevocations()
+      const record = readRecord() catch () => undefined
+      if (record !== undefined) try send({ type: "restoreRecord", finishing: record.phase === "finishing" })
+    }
+  }
+
+  effect function followReturns() {
+    for try (const _ of native.listen("AlphaConnection", "cloudDelegationCallback")) {
+      const record = readRecord() catch () => undefined
+      const callback = readCallback() catch () => undefined
+      if (callback === undefined) continue
+      const kind: Retained = record === undefined || record.state !== callback.state ? "OtherReturn" : callback.error !== undefined ? "DenialReturn" : callback.code === undefined ? "EmptyReturn" : "CodeReturn"
+      try send({ type: "nativeReturn", kind })
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    details: SubscriptionRef.changes(details),
+    effect run() { try.all [ignore(followSession()), ignore(followReturns())] },
+    effect start(email: boolean, calendar: boolean) {
+      if (!email && !calendar) return
+      try SubscriptionRef.update(details, (d) => ({ ...d, email, calendar }))
+      try send({ type: "startAuthorization" })
+    },
+    effect checkStatus() { try send({ type: "checkStatus" }) },
+    effect cancel() { try send({ type: "cancelTap" }) },
+    effect retryDisconnect(grantId: string) {
+      if (!(try SubscriptionRef.get(details)).pendingRevocations.includes(grantId)) return
+      call("revoke", { grantId, confirmed: true }) catch () => undefined
+      try refreshRevocations()
+    }
+  }
+})
+
+/** The delegation service with its machine in memory; the pending record lives in the native secure slot. */
+export const delegationLayer = Layer.provideMerge(delegationService, delegationMachine())

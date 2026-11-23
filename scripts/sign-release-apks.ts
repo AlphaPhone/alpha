@@ -1,17 +1,17 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Sign Alpha's unsigned release APKs with the application key held outside Gradle
  * through a reviewed signing ceremony.
  *
- *   bun scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
- *   bun scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
- *   bun scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
+ *   node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
+ *   node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
+ *   node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
  *   OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--no-verify] [--dry-run]
  *
  * Gradle signs a release only from a keystore file (ELIZAOS_KEYSTORE_*). Alpha's application key
  * instead comes from the upstream offline ceremony (android/signing/alpha-key-manifest.json) as
  * <name>.pk8 + <name>.x509.pem, decrypted into tmpfs for one signing job by
- * vendor/eliza/packages/os/scripts/android/decrypt-release-keys.ts, or is held in an HSM or managed
+ * scripts/os-ported/os/decrypt-release-keys.ts, or is held in an HSM or managed
  * key service that exposes PKCS#11 (decision P-16). Build without the ELIZAOS_KEYSTORE_* variables
  * (ELIZAOS_VERSION_CODE and ELIZAOS_VERSION_NAME still set), then run this. By default it signs
  * artifacts/launcher-release-unsigned.apk into
@@ -72,9 +72,9 @@ interface SigningOptions {
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const USAGE = [
-  "Usage: bun scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]",
-  "       bun scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]",
-  "       bun scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]",
+  "Usage: node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]",
+  "       node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]",
+  "       node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]",
   "OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--no-verify] [--dry-run]",
 ].join("\n");
 
@@ -144,7 +144,7 @@ export function signingTargets({ artifacts = "artifacts", apk, out }: {artifacts
   return VARIANTS.map(variant => {
     const input = path.join(artifacts, `${variant}-release-unsigned.apk`), output = path.join(artifacts, `${variant}-release.apk`);
     if (fs.existsSync(output)) throw new Error(`${output} already exists: that release is already signed (Gradle signing or an earlier run)`);
-    if (!fs.existsSync(input)) throw new Error(`${input} is missing; build the release without ELIZAOS_KEYSTORE_* first (bun run android:build:local -- --release)`);
+    if (!fs.existsSync(input)) throw new Error(`${input} is missing; build the release without ELIZAOS_KEYSTORE_* first (pnpm android:build:local -- --release)`);
     return { input, output, removeInput: true };
   });
 }
@@ -258,7 +258,7 @@ export async function main(argv: readonly string[], { root = process.cwd(), env 
     log(`Signed ${path.relative(root, target.output)} with the release certificate ${signer}.`);
   }
   if (!options.verify || options.apk) {
-    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run bun scripts/verify-apks.ts before using these APKs.");
+    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run node scripts/verify-apks.ts before using these APKs.");
     return 0;
   }
   const runner = run ?? ((command, args) => execFileSync(command, args, { cwd: root, stdio: "inherit" }));

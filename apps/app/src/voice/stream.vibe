@@ -1,0 +1,41 @@
+// spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
+import { createCloudStreamingSpeech, type CloudSpeechListenerHandle, type CloudSpeechStarted as RelayStarted, type CloudStreamEvent, type CloudStreamPort, type CredentialId, type EnvironmentName, type SpeechSessionId } from "@elizaos/os/bridges/voice"
+import { Native, NativeFailed } from "../platform/native.vibe"
+import { currentness } from "./cloud-stream.ts"
+import { CloudSpeechStarted } from "./native.schema.vibe"
+
+const RELAY = "AlphaCloudSpeechStream"
+const decodeStarted = Schema.decodeUnknownOption(CloudSpeechStarted)
+
+/** The Cloud speech relay's native bridge, `AlphaCloudSpeechStream`, reached through Native for the os package's shared streaming speech. */
+export effect function cloudStreamPort() {
+  const native = try Native
+  const call = (method: string, args: object) => runPromise(native.invoke(RELAY, method, args))
+  const port: CloudStreamPort = {
+    async startCloudSpeech(input) {
+      const started = Option.getOrUndefined(decodeStarted(await call("startCloudSpeech", input)))
+      if (started === undefined) throw new NativeFailed({ plugin: RELAY, method: "startCloudSpeech", message: "The relay did not open a usable session.", code: "cloud-stream" })
+      const opened: RelayStarted = { sessionId: started.sessionId as SpeechSessionId, sampleRate: started.sampleRate, echoCancelled: started.echoCancelled === true }
+      return opened
+    },
+    stopCloudSpeech: (input) => call("stopCloudSpeech", input),
+    setCloudSpeechOutputMuted: (input) => call("setCloudSpeechOutputMuted", input),
+    setCloudSpeechMuted: (input) => call("setCloudSpeechMuted", input),
+    speakCloudSpeech: (input) => call("speakCloudSpeech", input),
+    cancelCloudSpeech: (input) => call("cancelCloudSpeech", input),
+    addListener: (_event, callback) => runPromise(effect {
+      const events = Stream.runForEach(native.listen(RELAY, "cloudSpeechEvent"), (value: unknown) => sync(() => callback(value as CloudStreamEvent)))
+      const listening = fork.detached effect { events catch () => undefined }
+      try Effect.yieldNow
+      const handle: CloudSpeechListenerHandle = { remove: () => runPromise(Fiber.interrupt(listening)).then(() => undefined) }
+      return handle
+    }),
+  }
+  return port
+}
+
+/** One shared Cloud streaming speech session for the signed-in account, live while `current` holds; `onInterim` hears the words of a turn still being spoken. */
+export effect function cloudStreaming(environment: string, credentialId: string, current: () => boolean, onInterim: (text: string) => void) {
+  const port = try cloudStreamPort()
+  return createCloudStreamingSpeech({ environment: environment as EnvironmentName, credentialId: credentialId as CredentialId, assertCurrent: currentness(current), onInterim }, port)
+}

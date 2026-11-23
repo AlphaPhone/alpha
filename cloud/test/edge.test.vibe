@@ -1,0 +1,53 @@
+// spec/cloud/returnPages.md, "Story: Bring me back to the app when its link did not open"
+import { assert, describe, it } from "@effect/vitest"
+import { edgeRoute, edgeWorker, forwardedHeaders, type EdgeEnv } from "../src/edge.vibe"
+import { EdgeRequest, EdgeResponse } from "../src/edge-platform.ts"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+const address = (text: string): URL => URL.parse(text) ?? URL.parse("https://invalid.invalid")!
+const refusingApi = { fetch: () => Promise.reject(new Error("the route tests never reach the API Worker")) }
+const env: EdgeEnv = { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: "https://api.alphacompute.cc", WEB_ORIGIN: "https://cloud.alphacompute.cc", API: refusingApi }
+
+describe("Alpha Cloud's web host", () => {
+  it.effect("forwards a web-origin address to the same path and query on the API origin", () => effect {
+    // spec/cloud/returnPages.md, "A return URL on the web origin shows ReturnToApp only for the one enabled registration of the served environment that holds it"
+    const signIn = edgeRoute(address("https://cloud.alphacompute.cc/alphaphone/auth/callback?state=x"), env)
+    try check(() => assert.strictEqual(signIn.tag === "Forward" ? signIn.target.href : signIn.tag, "https://api.alphacompute.cc/alphaphone/auth/callback?state=x"))
+    const links = edgeRoute(address("https://cloud.alphacompute.cc/.well-known/assetlinks.json"), env)
+    try check(() => assert.strictEqual(links.tag === "Forward" ? links.target.pathname : links.tag, "/.well-known/assetlinks.json"))
+    try check(() => assert.strictEqual(edgeRoute(address("https://cloud.alphacompute.cc/health"), env).tag, "Health"))
+  })
+
+  it.effect("refuses an address off the web origin, without https or with credentials", () => effect {
+    // spec/cloud/returnPages.md, "An address that shows no page is a final 404, and a web-origin address whose registry cannot be read is a retryable 503"
+    try check(() => assert.strictEqual(edgeRoute(address("https://other.alphacompute.cc/alphaphone/auth/callback"), env).tag, "NotFound"))
+    try check(() => assert.strictEqual(edgeRoute(address("http://cloud.alphacompute.cc/alphaphone/auth/callback"), env).tag, "NotFound"))
+    try check(() => assert.strictEqual(edgeRoute(address("https://user:pass@cloud.alphacompute.cc/"), env).tag, "NotFound"))
+    const escaped = edgeRoute(address("https://cloud.alphacompute.cc//evil.example/x"), env)
+    try check(() => assert.ok(escaped.tag === "NotFound" || (escaped.tag === "Forward" && escaped.target.origin === env.PUBLIC_API_ORIGIN)))
+  })
+
+  it.effect("names the web host it was asked for and drops earlier forwarding and hop-by-hop headers", () => effect {
+    // spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
+    const incoming = new Headers({ host: "cloud.alphacompute.cc", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive", accept: "text/html" })
+    const sent = forwardedHeaders(incoming, "cloud.alphacompute.cc")
+    try check(() => assert.strictEqual(sent.get("x-forwarded-host"), "cloud.alphacompute.cc"))
+    try check(() => assert.strictEqual(sent.get("x-forwarded-proto"), "https"))
+    try check(() => assert.strictEqual(sent.get("forwarded"), null))
+    try check(() => assert.strictEqual(sent.get("connection"), null))
+    try check(() => assert.strictEqual(sent.get("host"), null))
+    try check(() => assert.strictEqual(sent.get("accept"), "text/html"))
+  })
+
+  it.effect("reaches the API Worker only through its service binding, naming the web host", () => effect {
+    // spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
+    const seen: string[] = []
+    const api = { fetch: (request: Request) => { seen.push(`${request.url} ${request.headers.get("x-forwarded-host") ?? ""}`); return Promise.resolve(EdgeResponse.json({ ok: true })) } }
+    const answer = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://cloud.alphacompute.cc/.well-known/assetlinks.json"), { ...env, API: api }))
+    try check(() => assert.strictEqual(answer.status, 200))
+    try check(() => assert.deepStrictEqual(seen, ["https://api.alphacompute.cc/.well-known/assetlinks.json cloud.alphacompute.cc"]))
+    const down = { fetch: () => Promise.reject(new Error("binding unavailable")) }
+    const refused = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://cloud.alphacompute.cc/alphaphone/auth/callback"), { ...env, API: down }))
+    try check(() => assert.strictEqual(refused.status, 503))
+  })
+})

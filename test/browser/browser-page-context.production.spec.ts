@@ -13,8 +13,8 @@ import { residentStub, stub } from './resident-stub';
 const PAGE = 'https://harbour-fixture.test/report?day=2';
 const READ = { text: '# Harbour report\nTwelve boats came in before noon.', truncated: false, links: [{ text: 'Tide table', url: 'https://harbour-fixture.test/tides' }] };
 
-async function nativeBrowser(page: Page, read: unknown = READ) {
-  await page.addInitScript(({ read }) => {
+async function nativeBrowser(page: Page, read: unknown = READ, slowAfterFirstMs = 0) {
+  await page.addInitScript(({ read, slowAfterFirstMs }) => {
     const w = window as any, bridge = w.Capacitor, previous = bridge.nativePromise;
     const stub = w.browserStub = { reads: [] as any[], sequence: 0, navigation: 0 };
     const promise = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
@@ -28,10 +28,14 @@ async function nativeBrowser(page: Page, read: unknown = READ) {
         setTimeout(() => w.flagOff.emit('AlphaBrowser', 'stateChanged', { session: input.session, id: input.id, private: false, sequence: ++stub.sequence, navigation: String(navigation), url: input.url, title: 'Harbour report', loading: false, committed: true, error: '', canBack: false, canForward: false }), 0);
         return {};
       }
-      if (method === 'pageContext') { stub.reads.push(input); return { url: input.url, title: 'Harbour report', ...read }; }
+      if (method === 'pageContext') {
+        stub.reads.push(input);
+        if (slowAfterFirstMs && stub.reads.length > 1) await new Promise(resolve => setTimeout(resolve, slowAfterFirstMs));
+        return { url: input.url, title: 'Harbour report', ...read };
+      }
       return {};
     };
-  }, { read });
+  }, { read, slowAfterFirstMs });
 }
 const composer = (page: Page) => page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
 async function openPage(page: Page) {
@@ -67,15 +71,33 @@ test('a turn with Browser open carries the page, bound to the observed tab and r
   });
   // The authored text is unchanged: the page rides in metadata, never in the message.
   expect(body.text).toBe('Summarize this page');
-  const [read] = await reads(page);
-  expect(read).toEqual(expect.objectContaining({ url: PAGE, navigation: '1' }));
+  const onBrowser = await reads(page);
+  expect(onBrowser.length).toBeGreaterThan(0);
+  for (const read of onBrowser) expect(read).toEqual(expect.objectContaining({ url: PAGE, navigation: '1' }));
   // Away from Browser no page is read or sent.
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   const home = await ask(page, 'And now?', 2);
   expect(home.metadata.clientDevice.browserPage).toBeUndefined();
-  expect(await reads(page)).toHaveLength(1);
+  expect(await reads(page)).toHaveLength(onBrowser.length);
   expect(await harness(page, f => f.unexpected)).toEqual([]);
   expect(foreign).toEqual([]);
+});
+
+test('Browser captures a loaded page ahead of the turn, so a slow read never holds the message', async ({ page }) => {
+  test.setTimeout(120_000);
+  await fenceNetwork(page);
+  await flagOffAndroid(page);
+  // Every read after the first takes 8 s, far over the turn's budget.
+  await nativeBrowser(page, READ, 8_000);
+  await residentStub(page, { observationSupport: ['browserPage'] });
+  await residentHome(page);
+  await openPage(page);
+  // The settled page is captured without any turn.
+  await expect.poll(() => reads(page).then(list => list.length), { timeout: 10_000 }).toBe(1);
+  const started = Date.now();
+  const body = await ask(page, 'Summarize this page', 1);
+  expect(Date.now() - started).toBeLessThan(8_000);
+  expect(body.metadata.clientDevice.browserPage).toEqual(expect.objectContaining({ url: PAGE, text: READ.text }));
 });
 
 test('an agent that does not declare browserPage gets the observation without the page', async ({ page }) => {

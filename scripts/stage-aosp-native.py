@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SHARED = ROOT / 'vendor/eliza/packages/os/scripts/android/stage-android-native.py'
+SHARED = ROOT / 'scripts/os-ported/os/stage-android-native.py'
 spec = importlib.util.spec_from_file_location('eliza_android_native', SHARED)
 shared = importlib.util.module_from_spec(spec)
 # Keep the pinned upstream checkout immutable when importing its adapter.
@@ -26,50 +26,24 @@ CLOUD_OMITTED_MODEL = shared.CLOUD_OMITTED_MODEL
 REQUIRED_AGENT_ASSETS = shared.REQUIRED_AGENT_ASSETS
 
 
-def bun_identity(apk):
-    # The APK's own provenance names its Bun build; upstream still checks its hashes.
-    entry = 'assets/agent/android-agent-runtime-provenance.json'
-    with zipfile.ZipFile(apk) as archive:
-        if entry not in archive.namelist():
-            return 'linux-musl', 'stable'
-        provenance = shared.read_json(archive, entry)
-    if not isinstance(provenance, dict) or provenance.get('schema') != 'eliza.android_agent_runtime_provenance.v1':
-        raise ValueError('Unknown runtime provenance schema')
-    bun = provenance.get('bun', {})
-    if not isinstance(bun, dict):
-        raise ValueError('Invalid runtime Bun identity')
-    target, channel = bun.get('target', 'linux-musl'), bun.get('channel', 'stable')
-    if target not in ('linux-musl', 'android') or not isinstance(channel, str):
-        raise ValueError('Unsupported Bun target')
-    return target, channel
-
-
 def admission(root, apk):
+    """The Alpha-owned contract for the @elizaos/os runtime payload (scripts/stage-agent-runtime.ts)."""
     digest = lambda data: hashlib.sha256(data).hexdigest()
     lock_bytes = (root / 'upstream.lock.json').read_bytes()
     stamp = {
-        'lockSha256': digest(lock_bytes),
-        'preparerSha256': digest((root / 'scripts/prepare-local-agent.ts').read_bytes()),
-        'guardSha256': digest((root / 'scripts/local-agent-source.ts').read_bytes()),
-        'copySha256': digest((root / 'scripts/copy-file-clone.ts').read_bytes()),
         'base': json.loads(lock_bytes)['commit'], 'patches': [],
+        'lockSha256': digest(lock_bytes),
+        'stagerSha256': digest((root / 'scripts/stage-agent-runtime.ts').read_bytes()),
     }
-    bun_target, channel = bun_identity(apk)
-    bun_lock = json.loads((root / 'vendor/eliza/packages/app/scripts/lib/android-bun-artifacts.lock.json').read_text())
-    pins = bun_lock.get('targets', {}).get('android', {}) if bun_target == 'android' else bun_lock.get('channels', {})
-    if not isinstance(pins.get(channel), dict):
-        raise ValueError('No pinned ' + bun_target + ' Bun for channel: ' + str(channel))
-    declarations = subprocess.check_output(
-        ['bun', root / 'scripts/native-view-policy.ts'], timeout=30)
+    node_lock = json.loads((root / 'vendor/eliza/packages/os/aosp/runtime/node.lock.json').read_text())
+    declarations = subprocess.check_output(['node', str(root / 'scripts/native-view-policy.ts')], timeout=30)
     return {
-        'schemaVersion': 1,
-        'bunTarget': bun_target,
-        'bunPin': pins[channel],
+        'schemaVersion': 2,
+        'nodeLock': node_lock,
         'profileEntry': 'assets/agent/alpha-runtime-profile.json',
         'rendererFlagsEntry': 'assets/public/build-flags.json',
         'source': {'kind': 'exact-json', 'entry': 'assets/agent/alpha-source.json', 'commit': stamp['base'], 'commitField': 'base', 'expected': stamp},
         'fileBindings': {'assets/agent/native-view-declarations.json': digest(declarations)},
-        'worker': {'prefix': 'assets/agent/workflow-worker/', 'lockSha256': digest((root / 'vendor/eliza/bun.lock').read_bytes())},
     }
 
 

@@ -70,7 +70,7 @@ from a phone you own, then audit the copy:
 ```sh
 adb exec-out "su 0 tar -cf - -C /data/data/ai.alphacompute.alphaphone/files/.eliza/workspace .elizadb" > elizadb.tar
 mkdir phone-db && tar -xf elizadb.tar -C phone-db
-bun scripts/agent-context-audit.ts phone-db/.elizadb --since 2026-11-18T12:00:00Z --tpm 150000 --json audit.json
+node scripts/agent-context-audit.ts phone-db/.elizadb --since 2026-11-18T12:00:00Z --tpm 150000 --json audit.json
 ```
 
 The copy holds the owner's conversations. Keep it out of the repository and delete it
@@ -103,7 +103,7 @@ key. It sends about 40 synthetic requests and fails if the unit, the order, the 
 the refill rate no longer match what the audit assumes:
 
 ```sh
-bun scripts/agent-cache-probe.ts
+node scripts/agent-cache-probe.ts
 ```
 
 On three local resident runs that ended in refusals (section 2) the audit's allowance
@@ -354,8 +354,8 @@ a hosted model, as an enrolled synthetic Alpha-image phone, and scores which dev
 operation each turn proposes. Every proposal is rejected at once; nothing runs.
 
 ```sh
-bun run dev    # or another loopback resident with a provider key
-bun scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 --token-file <paired machine token file> \
+pnpm dev    # or another loopback resident with a provider key
+node scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 --token-file <paired machine token file> \
   --output test-results/phone-actions.json --runs 3 --pause-ms 4000 [--one-conversation] \
   --database ~/.local/share/alphaphone/<profile>/.eliza/workspace/.elizadb
 ```

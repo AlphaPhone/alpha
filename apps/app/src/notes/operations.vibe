@@ -1,0 +1,207 @@
+// spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"; spec/notes/organize.md, "A workflow read shares the selected notes only while each still holds the text the owner reviewed"; spec/notes/organize.md, "A workflow's note is saved once, into the agent's collection, only from the open run in front"
+import {
+  decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeOffered, type NotesDeviceContext, type NotesOrganizeOperation,
+} from "@elizaos/plugin-notes/organize"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
+import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import { projectNoteForModel } from "@elizaos/plugin-notes/types"
+import { noteSaveResult, notesReadResult } from "../../gen/notes__organize.effect.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { NotesFolders } from "./folders.vibe"
+import { contentOf } from "./list.vibe"
+import { NotesOrganize, type OrganizeReceipt } from "./organize.vibe"
+import { pageVisible, sha256Hex } from "./platform.ts"
+
+const refused = (code: string, result?: unknown) => (result === undefined ? { kind: "refused", code } : { kind: "refused", code, result })
+const unresolved = { kind: "unresolved" }
+
+type SelectedRead = Extract<DeviceOperation, { type: "read_selected_notes" }>
+type NoteSave = Extract<DeviceOperation, { type: "create_note" }>
+
+/** A workflow's reviewed read of selected notes, or undefined for every other operation. */
+export function selectedRead(operation: unknown): SelectedRead | undefined {
+  const op = readOperation(operation)?.operation
+  return op?.type === "read_selected_notes" ? op as SelectedRead : undefined
+}
+
+/** A workflow's reviewed note to save, or undefined for every other operation. */
+export function noteSave(operation: unknown): NoteSave | undefined {
+  const op = readOperation(operation)?.operation
+  return op?.type === "create_note" ? op as NoteSave : undefined
+}
+
+/** The creation id of a workflow's note, the same on every attempt of one operation. */
+export function noteSaveCreationId(operationId: string): string {
+  return `workflow-note-${operationId}`
+}
+
+function savedTitle(op: NoteSave): string {
+  const title = op.title.trim()
+  return title === "" ? "Saved the note." : `Saved note “${title}”.`
+}
+
+function notesCount(op: SelectedRead): string {
+  return `${op.notes.length} selected note${op.notes.length === 1 ? "" : "s"}`
+}
+
+/** The executors of the agent's Notes organisation operations and a workflow's note reads and saves, for the shell to compose into DeviceExecutors. */
+export const operationPorts = effect {
+  const organize = try NotesOrganize
+  const collection = try NotesCollection
+  const folders = try NotesFolders
+  const host = try AssistantHost
+  const offered = try organize.capabilities()
+
+  function owned(operation: unknown): NotesOrganizeOperation | undefined {
+    const decoded = Effect.runSync(Effect.option(decodeNotesOrganizeOperation(operation)))
+    return Option.isSome(decoded) && notesOrganizeOffered(decoded.value.type, offered) ? decoded.value : undefined
+  }
+
+  effect function contextNow(): NotesDeviceContext!! {
+    const screen = try host.screen()
+    const view = screen.observation.view
+    const sensitive = !pageVisible() || screen.exposure.hidden || screen.exposure.locked || screen.exposure.privateView
+    const revision = view === "notes" ? (try collection.current())?.snapshot.revision : undefined
+    return { view, sensitive, ...(revision === undefined ? {} : { selectedObject: { kind: "canonical-note-source", id: "notes", revision: String(revision) } }) }
+  }
+
+  effect function screenAllows(): boolean!! {
+    const exposure = (try host.screen()).exposure
+    return pageVisible() && !exposure.hidden && !exposure.locked && !exposure.privateView
+  }
+
+  effect function readSelected(op: SelectedRead): unknown!! {
+    const screen = try screenAllows()
+    const before = try collection.current()
+    const rows: { id: string; revision: string; title: string; text: string }[] = []
+    let allPresent = before !== undefined
+    let allReviewed = true
+    for (const selected of screen ? op.notes : []) {
+      const matches = (before?.snapshot.notes ?? []).filter((note) => note.id === selected.id)
+      const [note] = matches
+      if (matches.length !== 1 || note === undefined) { allPresent = false; break }
+      const { title, body } = projectNoteForModel(note)
+      const revision = try (tryPromise(() => sha256Hex(JSON.stringify([title, body]))) catch () => "")
+      if (revision !== selected.revision) { allReviewed = false; break }
+      rows.push({ id: selected.id, revision: selected.revision, title, text: body })
+    }
+    const after = try collection.current()
+    const steady = before !== undefined && after !== undefined && after.owner === before.owner && after.snapshot.revision === before.snapshot.revision
+    const checked = screen && allPresent && allReviewed && steady ? readResult(op, { kind: "notes", notes: rows }) : undefined
+    switch (notesReadResult(screen, allPresent, allReviewed, steady, checked !== undefined)) {
+      case "NotesReadShared": return { kind: "applied", result: checked }
+      case "NotesReadNotHere": return refused(NOT_DISPATCHED)
+      case "NotesReadMissing": return refused("note_missing")
+      case "NotesReadChanged": return refused("note_changed")
+      default: return refused("notes_unverified")
+    }
+  }
+
+  effect function saveNote(op: NoteSave, call: ExecutorCall): unknown!! {
+    const fromRun = (try host.screen()).observation.view === "workflows"
+    const screen = try screenAllows()
+    const before = try collection.current()
+    const attempt = fromRun && screen && before !== undefined
+      ? try (effect {
+          const reply = try collection.interact("create-note", {
+            content: contentOf(op.title, op.body === "" ? "" : "\n", op.body), forceNew: true, creationId: noteSaveCreationId(call.operationId),
+          })
+          return { busy: false, confirmed: reply.note !== undefined }
+        } catch (error) => ({ busy: error._tag === "NotesBusy", confirmed: false }))
+      : { busy: false, confirmed: false }
+    const after = try collection.current()
+    const sameOwner = before !== undefined && after !== undefined && after.owner === before.owner
+    switch (noteSaveResult(fromRun, screen, before !== undefined, attempt.busy, attempt.confirmed, sameOwner)) {
+      case "NoteSaveSaved": return { kind: "applied" }
+      case "NoteSaveNotHere": return refused(NOT_DISPATCHED)
+      case "NoteSaveNotReady": return refused("notes_not_ready")
+      case "NoteSaveBusy": return refused("notes_busy")
+      default: return { kind: "lost" }
+    }
+  }
+
+  effect function run(op: NotesOrganizeOperation): unknown!! {
+    const admitted = try organize.admit(op, try contextNow(), false, false, true)
+    if (admitted === undefined) return refused("not_here")
+    const receipt: OrganizeReceipt = try organize.execute(admitted.operation)
+    if (receipt.status === "succeeded") return { kind: "applied", result: receipt }
+    if (receipt.status === "failed") return refused("notes_failed", receipt)
+    return { kind: "lost", result: receipt }
+  }
+
+  effect function readBack(op: NotesOrganizeOperation): unknown!! {
+    if (op.type === "notes_folder_create") {
+      const found = try (folders.findByName(op.name) catch () => null)
+      return found === null ? unresolved : found === undefined ? refused("folder_missing") : { kind: "found", result: { folderId: found.id } }
+    }
+    const current = try collection.current()
+    if (current === undefined) return unresolved
+    if (op.type === "notes_restore") {
+      return current.snapshot.notes.some((note) => note.id === op.noteId) ? { kind: "found", result: { noteId: op.noteId } } : unresolved
+    }
+    if (op.type === "notes_move") {
+      const note = current.snapshot.notes.find((item) => item.id === op.target.noteId)
+      const folder = op.folder === null ? null : try (folders.findByName(op.folder) catch () => undefined)
+      if (note === undefined || folder === undefined) return unresolved
+      const held = note.format?.data.folderId
+      const folderId = typeof held === "string" ? held : ""
+      return folderId === (folder === null ? "" : folder.id) ? { kind: "found", result: { noteId: note.id } } : unresolved
+    }
+    return unresolved
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => owned(operation) ?? selectedRead(operation) ?? noteSave(operation),
+    execute: (operation, call) => {
+      const read = selectedRead(operation)
+      if (read !== undefined) return runPromise(readSelected(read))
+      const save = noteSave(operation)
+      if (save !== undefined) return runPromise(saveNote(save, call))
+      const op = owned(operation)
+      return op === undefined ? Promise.resolve(refused("unsupported")) : runPromise(run(op))
+    },
+    readBack: (operation) => {
+      if (selectedRead(operation) !== undefined || noteSave(operation) !== undefined) return Promise.resolve(unresolved)
+      const op = owned(operation)
+      return op === undefined ? Promise.resolve(refused("unsupported")) : runPromise(readBack(op))
+    },
+    describe: (operation) => {
+      const read = selectedRead(operation)
+      if (read !== undefined) return { title: "Share selected notes", detail: `${notesCount(read)}: their titles and text only, as you reviewed them.`, destination: "notes" as const }
+      const save = noteSave(operation)
+      if (save !== undefined) return { title: "Save a note", detail: `Save one note “${save.title}” on this phone:\n${save.body}`, destination: "notes" as const }
+      const op = owned(operation)
+      if (op === undefined) return { title: "Action", detail: "" }
+      const card = describeNotesOrganizeOperation(op)
+      return { title: card.title, detail: card.description, destination: "notes" as const }
+    },
+    classOf: (operation) => {
+      if (selectedRead(operation) !== undefined) return "NotesRead"
+      if (noteSave(operation) !== undefined) return "CreateNote"
+      const op = owned(operation)
+      if (op === undefined) return "NotesRead"
+      return op.type === "notes_record" ? "CreateNote" : op.type === "notes_filter" || op.type === "notes_list_filter" ? "OpenView" : "NotesRead"
+    },
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (operation, result) => {
+      const read = selectedRead(operation)
+      if (read !== undefined) {
+        return result === "Applied" ? `Shared ${notesCount(read)}.` : result === "Failed" ? "No notes were shared."
+          : result === "NotStarted" ? "Nothing was shared." : "Alpha can’t tell whether the notes were shared."
+      }
+      const save = noteSave(operation)
+      if (save !== undefined) {
+        return result === "Applied" ? savedTitle(save) : result === "Failed" ? "Nothing was saved because Notes isn’t ready."
+          : result === "NotStarted" ? "Nothing was saved." : "The note save is unconfirmed."
+      }
+      const op = owned(operation)
+      if (op === undefined) return ""
+      if (result === "Applied") return op.type === "notes_record" ? (op.action === "start" ? "Recording" : "Saved the voice note.") : "Done in Notes."
+      if (result === "Failed" || result === "NotStarted") return "Not done in Notes."
+      return "Unconfirmed"
+    },
+  }
+  return ports
+}

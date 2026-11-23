@@ -1,0 +1,119 @@
+// spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"
+import { approvalComplete, targetVerified } from "../../gen/calendar__approvals.effect.vibe"
+import type { ApprovalRecord, CalendarRecord as CalendarSummary, EventRecord } from "./feed.schema.vibe"
+import { formatDateTime, validZone } from "./time.ts"
+
+/** The current event a change or cancellation targets, as one read of its calendar found it. */
+export interface ApprovalTarget {
+  readonly calendar?: string
+  readonly account?: string
+  readonly event?: string
+  readonly startsAt?: number
+  readonly endsAt?: number
+  readonly allDay?: boolean
+  readonly verified: boolean
+}
+
+/** One labelled line of a review. */
+export interface ApprovalField { readonly label: string; readonly value: string }
+
+/** What a review shows: its heading, its lines, and whether Approve may be offered. */
+export interface ApprovalPresentation { readonly heading: string; readonly fields: readonly ApprovalField[]; readonly complete: boolean }
+
+const COMMON = ["action", "side", "grantId", "calendarId", "notifyAttendees", "editorRequestSha256"]
+const SCHEDULE = [...COMMON, "title", "startsAtMs", "endsAtMs", "attendees", "location", "description", "timeZone", "allDay", "durationMinutes", "windowPreset", "recurrence", "sourceNote", "travelBuffer"]
+const MODIFY = [...COMMON, "eventId", "expectedProvider", "expectedProviderVersion", "expectedEventUpdatedAt", "expectedEventStartAtMs", "seriesMaster", "recurrenceScope", "patch"]
+const CANCEL = [...COMMON, "eventId", "expectedProvider", "expectedProviderVersion", "expectedEventUpdatedAt", "expectedEventStartAtMs", "seriesMaster", "recurrenceScope", "cancellationMode"]
+const PATCH = ["title", "startsAtMs", "endsAtMs", "attendees", "location", "description", "timeZone", "recurrence", "allDay"]
+const SCOPES: Readonly<Record<string, string>> = { instance: "This occurrence", this_and_following: "This and following", series: "Entire series" }
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function instant(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 8.64e15
+}
+
+/** The calendar and current event a request names, verified only when exactly one of each matches its version and start. */
+export function approvalTarget(payload: Readonly<Record<string, unknown>>, calendars: readonly CalendarSummary[], events: readonly EventRecord[]): ApprovalTarget {
+  const matches = (value: { calendarId: string; side: string; grantId?: string; provider?: string }) =>
+    value.calendarId === payload.calendarId && value.side === "owner" && String(value.grantId ?? "") === String(payload.grantId ?? "")
+    && (!payload.expectedProvider || value.provider === payload.expectedProvider)
+  const sources = calendars.filter(matches)
+  const found = events.filter((event) => matches(event) && (event.externalId === payload.eventId || event.id === payload.eventId)
+    && (payload.expectedEventStartAtMs == null || Date.parse(event.startAt) === payload.expectedEventStartAtMs))
+  const event = found.length === 1 ? found[0] : undefined
+  const startsAt = Date.parse(event?.startAt ?? "")
+  const endsAt = Date.parse(event?.endAt ?? "")
+  const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : undefined
+  const versionMatches = payload.expectedProviderVersion == null || etag === payload.expectedProviderVersion
+  return {
+    calendar: sources[0]?.summary, account: sources[0]?.accountEmail ?? undefined, event: event?.title, startsAt, endsAt, allDay: event?.isAllDay === true,
+    verified: targetVerified(sources.length, found.length, payload.expectedEventStartAtMs == null || startsAt === payload.expectedEventStartAtMs, versionMatches)
+      && Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt > startsAt,
+  }
+}
+
+/** The lines a review shows: only effect fields; versions and request ids stay authority, never prose. */
+export function approvalPresentation(row: ApprovalRecord, target: ApprovalTarget, zone: string): ApprovalPresentation {
+  const p = row.payload
+  const fields: ApprovalField[] = []
+  const add = (label: string, value: string) => fields.push({ label, value })
+  const heading = row.action === "schedule_event" ? "Add event" : row.action === "modify_event" ? "Change event"
+    : p.cancellationMode === "decline_invitation" ? "Decline invitation" : p.cancellationMode === "remove_private_copy" ? "Remove event from your calendar" : "Cancel event"
+  const allowed = row.action === "schedule_event" ? SCHEDULE : row.action === "modify_event" ? MODIFY : CANCEL
+  let known = Object.keys(p).every((key) => allowed.includes(key))
+  let valid = true
+  add("Calendar", target.calendar ?? (p.calendarId === "primary" ? "Primary calendar" : String(p.calendarId ?? "")))
+  if (target.account) add("Account", target.account)
+  if (row.action !== "schedule_event") {
+    if (!target.verified || !target.event?.trim()) valid = false
+    else {
+      add("Event", target.event)
+      if (target.allDay) add("Current time", "All day")
+      else {
+        add("Current start", formatDateTime(target.startsAt ?? 0, zone, true))
+        add("Current end", formatDateTime(target.endsAt ?? 0, zone, true))
+      }
+    }
+  }
+  const value = row.action === "modify_event" ? p.patch : p
+  if (!isObject(value)) valid = false
+  else if (row.action !== "cancel_event") {
+    if (row.action === "modify_event" && Object.keys(value).some((key) => !PATCH.includes(key))) known = false
+    if (row.action === "schedule_event" && (typeof value.title !== "string" || value.title.trim() === "")) valid = false
+    if (typeof value.title === "string") add("Title", value.title || "No title")
+    if (isObject(value.allDay)) {
+      if (typeof value.allDay.startDate !== "string" || typeof value.allDay.endDateExclusive !== "string") valid = false
+      else add("Date", `${value.allDay.startDate} – ${value.allDay.endDateExclusive}`)
+      add("Time", "All day")
+    } else {
+      if (row.action === "schedule_event" && (!instant(value.startsAtMs) || !instant(value.endsAtMs) || value.endsAtMs <= value.startsAtMs)) valid = false
+      if (value.startsAtMs != null) { if (!instant(value.startsAtMs)) valid = false; else add("Starts", formatDateTime(value.startsAtMs, zone, true)) }
+      if (value.endsAtMs != null) { if (!instant(value.endsAtMs)) valid = false; else add("Ends", formatDateTime(value.endsAtMs, zone, true)) }
+      if (instant(value.startsAtMs) && instant(value.endsAtMs) && value.endsAtMs <= value.startsAtMs) valid = false
+    }
+    if (value.timeZone != null) { if (typeof value.timeZone !== "string" || !validZone(value.timeZone)) valid = false; else add("Event time zone", value.timeZone) }
+    if (value.location != null) add("Location", typeof value.location === "string" && value.location !== "" ? value.location : "No location")
+    if (value.description != null) add("Notes", typeof value.description === "string" && value.description !== "" ? value.description : "No notes")
+    if (value.attendees != null) {
+      if (!Array.isArray(value.attendees)) valid = false
+      else add("Guests", value.attendees.length === 0 ? "No guests" : value.attendees.map((person) =>
+        typeof person === "string" ? person : isObject(person) && typeof person.email === "string" ? `${typeof person.displayName === "string" && person.displayName ? `${person.displayName} · ` : ""}${person.email}${person.optional === true ? " (optional)" : ""}` : "").join("\n"))
+    }
+    if (value.recurrence != null) {
+      if (!Array.isArray(value.recurrence) || value.recurrence.some((rule) => typeof rule !== "string")) valid = false
+      else add("Repeat", value.recurrence.length === 0 ? "Does not repeat" : (value.recurrence as string[]).map((rule) => rule.replace(/^RRULE:/, "")).join("\n"))
+    }
+  } else if (p.cancellationMode != null && !["organizer_cancel", "decline_invitation", "remove_private_copy"].includes(String(p.cancellationMode))) valid = false
+  if (p.recurrenceScope != null) {
+    if (typeof p.recurrenceScope !== "string" || SCOPES[p.recurrenceScope] === undefined) valid = false
+    else add("Applies to", SCOPES[p.recurrenceScope]!)
+  }
+  if (p.notifyAttendees !== undefined && typeof p.notifyAttendees !== "boolean") valid = false
+  if (row.action === "cancel_event" && typeof p.notifyAttendees !== "boolean") valid = false
+  add("Notify guests", p.notifyAttendees === true ? "Yes" : "No")
+  const action = row.action === "schedule_event" ? "ScheduleEvent" : row.action === "modify_event" ? "ModifyEvent" : "CancelEvent"
+  return { heading, fields, complete: approvalComplete(action, known, target.verified, valid) }
+}

@@ -1,0 +1,78 @@
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { EmailShelfRecord, type ShelvedEmail } from "./payloads.schema.vibe"
+import type { Row } from "./transcript.vibe"
+
+/** One email card row of the transcript. */
+export type EmailRow = Extract<Row, { readonly kind: "email" }>
+
+const SHELF_LIMIT = 20
+
+/** The shelf key of one conversation binding: `inbox-drafts:v1:chat:` and a hash of its origin, owner, agent and conversation. */
+export function shelfKey(binding: readonly string[]): string {
+  let hash = 0x811c9dc5
+  for (const char of JSON.stringify(binding)) {
+    hash ^= char.charCodeAt(0)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return `inbox-drafts:v1:chat:${hash.toString(16).padStart(8, "0")}`
+}
+
+function shelvedOf(row: EmailRow): ShelvedEmail {
+  return {
+    id: row.id, messageId: row.messageId ?? "", ...(row.ownerTurn === undefined ? {} : { ownerTurn: row.ownerTurn }),
+    to: row.to, subject: row.subject, text: row.body, card: { ...row.card },
+  }
+}
+
+function rowOf(kept: ShelvedEmail): EmailRow {
+  return {
+    kind: "email", id: kept.id, card: { ...kept.card }, to: kept.to, subject: kept.subject, body: kept.text,
+    ...(kept.messageId === "" ? {} : { messageId: kept.messageId }), ...(kept.ownerTurn === undefined ? {} : { ownerTurn: kept.ownerTurn }),
+  }
+}
+
+/** The email cards of each conversation, kept so they stay with it after a reload or a decline. */
+export service EmailShelf {
+  /** Stage the card of a turn once: the card already on the shelf under that id when there is one, else this one, now kept. */
+  stage(binding: readonly string[], row: EmailRow): EmailRow!!
+  /** Keep a card's fields and state as last shown. */
+  keep(binding: readonly string[], row: EmailRow): void!!
+  /** The cards kept for a conversation, in the order they were staged; none when the shelf cannot be read. */
+  shelved(binding: readonly string[]): readonly EmailRow[]!!
+}
+
+/** The email shelf over the owner's key-value store. */
+export const emailShelfLayer = Layer.effect(EmailShelf, effect {
+  const store = try KeyValueStore.KeyValueStore
+
+  effect function read(binding: readonly string[]) {
+    const raw = store.get(shelfKey(binding)) catch () => undefined
+    if (raw === undefined) return [] as readonly ShelvedEmail[]
+    const parsed = Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined
+    const decoded = Schema.decodeUnknownOption(EmailShelfRecord)(parsed)
+    return Option.isSome(decoded) ? decoded.value.cards : [] as readonly ShelvedEmail[]
+  }
+
+  effect function write(binding: readonly string[], cards: readonly ShelvedEmail[]) {
+    store.set(shelfKey(binding), JSON.stringify({ v: 1, cards: cards.slice(-SHELF_LIMIT) })) catch () => undefined
+  }
+
+  return {
+    effect stage(binding: readonly string[], row: EmailRow) {
+      const cards = try read(binding)
+      const known = cards.find((kept) => kept.id === row.id)
+      if (known !== undefined) return rowOf(known)
+      try write(binding, [...cards, shelvedOf(row)])
+      return row
+    },
+    effect keep(binding: readonly string[], row: EmailRow) {
+      const cards = try read(binding)
+      if (!cards.some((kept) => kept.id === row.id)) return
+      try write(binding, cards.map((kept) => kept.id === row.id ? shelvedOf(row) : kept))
+    },
+    effect shelved(binding: readonly string[]) {
+      return (try read(binding)).map(rowOf)
+    },
+  }
+})

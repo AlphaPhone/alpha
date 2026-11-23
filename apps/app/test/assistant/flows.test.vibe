@@ -1,0 +1,122 @@
+// spec/assistant/suggestion.md, "Story: Use a suggested wording exactly as I reviewed it"; spec/assistant/firstSend.md, "Story: Start a new chat without losing or duplicating my draft"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/withdrawal.md, "Story: Give up on a request without it happening later"
+import { assert, it } from "@effect/vitest"
+import { Machine as DraftsMachine, machine as draftsMachine, slotOf } from "../../gen/assistant__draft.effect.vibe"
+import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vibe"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { moveFirstDraft } from "../../src/assistant/first-send.vibe"
+import { AssistantFlows } from "../../src/assistant/flows.vibe"
+import { copy } from "../../src/assistant/presentation.vibe"
+import { Suggestions } from "../../src/assistant/suggestion.vibe"
+import { emptyTranscript } from "../../src/assistant/transcript.vibe"
+import { textOf, unitsOf } from "../../src/assistant/units.vibe"
+import { WithdrawableRequests } from "../../src/assistant/withdrawable.vibe"
+import { assistantOver, countingExecutors, fakeHost, fakeResident, homeScreen, silentResident, wireProposal, type Seen } from "./fakes.vibe"
+
+const quietResident = (proposals: readonly unknown[] = []) => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals })
+
+effect function transcriptNow() {
+  const composer = try Composer
+  const head = try Stream.runHead(composer.transcript)
+  return Option.isSome(head) ? head.value : emptyTranscript
+}
+
+it.effect("Use a suggested wording exactly as I reviewed it (spec/assistant/suggestion.md, \"Insert places the reviewed text once, into the reviewed target, only when everything still matches\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const suggestions = try Suggestions
+    const inserted: string[] = []
+    const insert = (text: string) => { inserted.push(text); return true }
+    try suggestions.propose("See you at 6", "See you at 6")
+    try suggestions.target({ token: 1, front: "NormalFront", ready: true, room: true, appendMode: false })
+    try suggestions.render(1)
+    try suggestions.open(1)
+    try suggestions.render(1)
+    const first = try suggestions.confirm(1, insert)
+    const second = try suggestions.confirm(1, insert)
+    try suggestions.propose("See you at 6", "See you at 7")
+    try suggestions.render(1)
+    try suggestions.open(1)
+    try suggestions.render(1)
+    try suggestions.target({ token: 2, front: "NormalFront", ready: true, room: true, appendMode: false })
+    const moved = try suggestions.confirm(1, insert)
+    try Effect.try(() => assert.deepStrictEqual({ first, second, moved, inserted }, { first: true, second: false, moved: false, inserted: ["See you at 6"] }))
+  }
+})
+
+it.effect("Start a new chat without losing or duplicating my draft (spec/assistant/firstSend.md, \"Story: Start a new chat without losing or duplicating my draft\")", () => effect {
+  provide draftsMachine() {
+    const drafts = try DraftsMachine
+    const source = JSON.stringify(["https://agent.local", "o1", "a1", null])
+    const destination = JSON.stringify(["https://agent.local", "o1", "a1", "c1"])
+    try drafts.send({ type: "selectDraft", binding: source })
+    try drafts.send({ type: "edit", text: unitsOf("Keep draft A") })
+    try drafts.send({ type: "selectDraft", binding: destination })
+    const moving = fork moveFirstDraft(source, destination)
+    try TestClock.adjust("3 seconds")
+    const moved = join moving
+    const state = try drafts.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { moved, source: textOf(slotOf(state, source).text), destination: textOf(slotOf(state, destination).text) },
+      { moved: true, source: "", destination: "Keep draft A" },
+    ))
+  }
+})
+
+it.effect("Send an email my agent drafted, from the chat (spec/assistant/emailCard.md, \"Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version\")", () => effect {
+  const emails: unknown[] = []
+  provide assistantOver(quietResident(), fakeHost([], homeScreen, emails), countingExecutors({ count: 0 })) {
+    const flows = try AssistantFlows
+    const fields = { to: "ann@example.com", subject: "Lunch", body: "Noon?" }
+    const edited = try flows.editEmail("email:m1", emailStart, true, true)
+    const sent = try flows.sendEmail("email:m1", edited, fields)
+    const again = try flows.sendEmail("email:m1", sent, fields)
+    const declined = try flows.declineEmail("email:m2", emailStart)
+    const afterDecline = try flows.sendEmail("email:m2", declined, fields)
+    try Effect.try(() => assert.deepStrictEqual(
+      { version: edited.version, sent: sent.state, again: again.state, declined: afterDecline.state, deliveries: emails.length },
+      { version: 2, sent: "SentEmail", again: "SentEmail", declined: "DeclinedEmail", deliveries: 1 },
+    ))
+  }
+})
+
+it.effect("Decline or let a card expire (spec/assistant/approvals.md, \"A card whose review time passed reads \\\"Review expired\\\" and can only be asked for again\")", () => effect {
+  const proposal = wireProposal("p9", "e".repeat(64), { type: "create_note" }, undefined, "1970-01-01T00:01:00.000Z")
+  provide assistantOver(quietResident([proposal]), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.open("c1", false)
+    const before = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    try TestClock.adjust("61 seconds")
+    try yieldNow
+    const after = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    try Effect.try(() => assert.deepStrictEqual(
+      { before: before?.kind === "card" ? before.card.state : "none", after: after?.kind === "card" ? after.card.state : "none" },
+      { before: "RecoveredCard", after: "ExpiredCard" },
+    ))
+  }
+})
+
+it.effect("A proposal this phone cannot review is named, not carded (spec/assistant/review.md, \"Story: Let my agent act only with my say-so\")", () => effect {
+  const proposal = wireProposal("p7", "f".repeat(64), { type: "fax" }, "u1")
+  const seen: Seen = { calls: [] }
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Trying." }, proposals: [proposal] }), fakeHost([]), countingExecutors({ count: 0 }, "CreateNote", false)) {
+    const composer = try Composer
+    try composer.edit("Fax this to the office")
+    try composer.send()
+    const rows = (try transcriptNow()).rows
+    const notices = rows.flatMap((row) => row.kind === "notice" ? [row.text] : [])
+    try Effect.try(() => assert.deepStrictEqual(
+      { notices, cards: rows.filter((row) => row.kind === "card").length },
+      { notices: [`${copy.notShownHere}: ${copy.notAvailableHere}`], cards: 0 },
+    ))
+  }
+})
+
+it.effect("Give up on a request without it happening later (spec/assistant/withdrawal.md, \"A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once\")", () => effect {
+  const withdrawn: string[] = []
+  provide assistantOver(silentResident(withdrawn), fakeHost([]), countingExecutors({ count: 0 })) {
+    const requests = try WithdrawableRequests
+    const asking = fork requests.ask("GET", "/api/client-devices/proposals")
+    try yieldNow
+    try Fiber.interrupt(asking)
+    try Effect.try(() => assert.deepStrictEqual(withdrawn, ["GET /api/client-devices/proposals"]))
+  }
+})

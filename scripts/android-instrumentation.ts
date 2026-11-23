@@ -1,9 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Install the launcher debug APK with its instrumentation APK on an owned,
  * disposable emulator and run a named class list or the whole androidTest suite.
  *
- *   bun run test:android:instrumentation -- --owned-emulator --avd <name> \
+ *   pnpm test:android:instrumentation -- --owned-emulator --avd <name> \
  *     [--serial emulator-5554] [--classes NoMockProduct,Shell,StartupReadiness | --all] \
  *     [--apk-dir artifacts] \
  *     [--output test-results/android-instrumentation/<run>] [--timeout-ms 900000] \
@@ -41,7 +41,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { instrumentationClassResults, listedInstrumentationTests, writeInstrumentationRecord } from "./instrumentation-result.ts";
 import type {ClassOutcome} from "./instrumentation-result.ts";
-import type {acquireDeviceLease} from "../vendor/eliza/packages/app/scripts/lib/device-lease.ts";
+import type {acquireDeviceLease} from "./os-ported/app/lib/device-lease.ts";
 
 export const PACKAGE = "ai.alphacompute.alphaphone";
 const RUNNER = "androidx.test.runner.AndroidJUnitRunner";
@@ -137,13 +137,13 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   BrowserInstalledResolver: { note: "Real installed generic HTTPS filter visibility only; no external launch or network request" },
   Shell: {},
   StartupReadiness: { args: { startupReadiness: "1" } },
-  TextScale: { note: "Display and Notes require a phone its owner already signed in; a signed-out APK is inconclusive. Run textScaleProcessRestartPhase separately with bun scripts/test-native-restart.ts text-scale." },
+  TextScale: { note: "Display and Notes require a phone its owner already signed in; a signed-out APK is inconclusive. Run textScaleProcessRestartPhase separately with node scripts/test-native-restart.ts text-scale." },
   CloudSignInCallback: { args: { cloudSignInNative: "1" }, note: "Synthetic in-app sign-in returns through MainActivity; a matching return is never delivered, so nothing reaches Steward or Cloud. Not App Link verification (adb shell pm get-app-links) or real-account sign-in" },
   BrowserExternalHandoff: { note: "Synthetic committed HTTPS child and resolver fixture; intercepts chooser dispatch, no external page is opened" },
   BrowserDownloads: { note: "Scoped MediaStore download fixture; the view intent is intercepted, so no app opens" },
   ResetPolicy: { note: "Non-destructive cancellation, migration refusal and isolated marker checks; not a system reset proof" },
   BrowserCookiePolicy: { note: "Synthetic intercepted HTTPS origins; private method requires scoped WebView deletion support" },
-  BrowserSignins: { note: "signinProcessRestartPhase is skipped here; run bun scripts/test-native-restart.ts signin" },
+  BrowserSignins: { note: "signinProcessRestartPhase is skipped here; run node scripts/test-native-restart.ts signin" },
   BrowserFlow: { liveArgs: { browserFlowLive: "1" }, note: "the loopback fixture methods skip (they assume a mock build); the search method asserts the submitted www.google.com/search URL and the javascript: refusal offline; only --live-network (browserFlowLive=1) needs live HTTPS to www.google.com and records INSTRUMENTATION_STATUS browserFlowSearch=results or provider-check (the provider's own check page for that exact search)" },
   RealClock: { args: { realClock: "1", clockExclusive: "1" }, requires: "--clock-exclusive", grantOther: { "com.android.deskclock": ["POST_NOTIFICATIONS"] },
     note: "fixture qualified for API 35 only (it asserts the SDK level); the runner grants AOSP Clock its notification permission, which the class requires for real firing evidence" },
@@ -169,7 +169,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   DailyApps: {},
   ReminderLifecycle: { note: "the re-post method skips unless notifications are enabled for the app" },
   ClockHandoff: { args: { clockHandoff: "1" }, note: "Clock intents are intercepted; not ringing evidence" },
-  HostedResultNotice: { note: "builders only here; the posted and denied notices need the notification permission set first: bun scripts/test-native-permissions.ts notice|notice-denied APP.apk TEST.apk OUTPUT" },
+  HostedResultNotice: { note: "builders only here; the posted and denied notices need the notification permission set first: node scripts/test-native-permissions.ts notice|notice-denied APP.apk TEST.apk OUTPUT" },
   WorkflowApprovalNotice: { args: { workflowApprovalNotice: "1" }, grant: ["POST_NOTIFICATIONS"], note: "the runner grants the notification permission the class requires after clearing app data" },
   BrowserReadingNavigation: { args: { browserIsolatedReading: "1" }, note: "one method per provider: the stale-document method needs isolated-world injection; without it only the reading-unavailable method runs and the other is listed as skipped (INSTRUMENTATION_STATUS browserReadingProvider says which)" },
   MailAttachment: { args: { mailAttachmentNative: "1" } },
@@ -183,7 +183,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   RendererRecovery: { note: "ends the host WebView renderer (WebViewRenderProcess.terminate, else chrome://crash in a debuggable build); LauncherHome repeats it while Alpha is HOME" },
   ConnectionRoutes: { note: "ConnectionRoutes policy inside the APK" },
   ChatContinuity: { note: "real soft keyboard, KEYCODE_BACK and HOME through UiAutomation; HOME is delivered to Alpha only when it holds the role, otherwise the app is backgrounded and resumed" },
-  SelectedDocument: { note: "documentProcessRestartPhase is skipped here; run bun scripts/test-native-restart.ts document" },
+  SelectedDocument: { note: "documentProcessRestartPhase is skipped here; run node scripts/test-native-restart.ts document" },
   PasswordVaultSettings: { args: { passwordVault: "1" }, note: "sets and clears a fixture screen-lock PIN: an owned emulator with no screen lock of its own; the inactivity step waits out the 60 s unlock window" },
   PasswordVaultFill: { args: { passwordVaultFill: "1" }, note: "sets and clears a fixture screen-lock PIN and selects Alpha as the Autofill service, restoring the previous service; the other package is Alpha's own (the instrumentation APK holds one package)" },
   PasswordEditor: { note: "synthetic UI grant over MainActivity; covers it with Android Settings to check the plugin closes the editor on stop; no vault key or device setting" },
@@ -199,7 +199,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   NoteRecorder: { secondaryUser: true, note: "uses the microphone and recovers an owned synthetic segmented recording in a disposable user; refuses existing audio" },
   NoteRecordingSave: { secondaryUser: true, note: "synthetic audio store and repeatable save in a disposable user" },
   StorageCategories: { secondaryUser: true, note: "synthetic storage categories and isolated MediaStore queries in a disposable user" },
-  NotesSecureStorage: { args: { notesSecureStorage: "1" }, note: "the legacy-layout migration runs across a process restart in bun scripts/test-native-restart.ts notes-secure-migration; its in-process variant (notesSecureMigration=1) is skipped here" },
+  NotesSecureStorage: { args: { notesSecureStorage: "1" }, note: "the legacy-layout migration runs across a process restart in node scripts/test-native-restart.ts notes-secure-migration; its in-process variant (notesSecureMigration=1) is skipped here" },
   PdfViewer: { args: { isolatedPdfNative: "1" } },
   PhotosBatch: { args: { photosBatch: "1" } },
   PhotoLibrary: { args: { photoLibrary: "1" }, note: "grants READ_MEDIA_IMAGES/VIDEO (Android 13+), creates and deletes only its own uniquely named fixtures; permission revoke, selected-only grants and reboot need separate campaigns" },
@@ -231,18 +231,18 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   ReminderCapacity: {},
   ReminderHeadsUp: { note: "skips unless notifications are enabled for the app and Do Not Disturb is off" },
   ReminderStale: {},
-  SettingsFlow: { note: "themeProcessRestartPhase is skipped here; run bun scripts/test-native-restart.ts theme" },
+  SettingsFlow: { note: "themeProcessRestartPhase is skipped here; run node scripts/test-native-restart.ts theme" },
   Video: {},
   VoiceWorkerSettlement: {},
-  ResidentEgressRedaction: { campaign: "ALPHA_RESIDENT_DISPOSABLE_EMULATOR=1 bun scripts/android-resident-instrumentation.ts <app.apk> <androidTest.apk> (owner-only provider key fixture, ARM64)" },
-  WorkflowApprovalNoticeProcessDeath: { campaign: "ALPHA_BUILD_ARCHIVE=<archive> bun scripts/android-workflow-native.ts --phase=approval-notice-recovery (the WorkflowNoticeProcessRunner helper process, in an owned secondary user)" },
-  NotificationChannels: { campaign: "bun scripts/test-native-permissions.ts channels APP.apk TEST.apk OUTPUT (permission-restoring runner)" },
-  VoicePermissionDenied: { campaign: "bun scripts/test-native-permissions.ts voice APP.apk TEST.apk OUTPUT (RECORD_AUDIO revoked before the app starts)" },
-  VoicePermissionRevoke: { campaign: "bun scripts/test-native-permissions.ts voice-revoke APP.apk TEST.apk OUTPUT (RECORD_AUDIO revoked while recording; the process is killed)" },
-  LocalVoiceRecordingLimit: { campaign: "bun scripts/test-native-permissions.ts voice-limit APP.apk TEST.apk OUTPUT (RECORD_AUDIO granted before the app starts)" },
-  WorkflowLegacyReminderUpgrade: { campaign: "bun scripts/test-installed-upgrade.ts reminder (installed-upgrade campaign; runs upgradedLegacyOneOffReminderIsIncludedInNativeDigest after the candidate verify phase)" },
-  SettingsCrashLog: { campaign: "bun scripts/test-native-restart.ts crash-log APP.apk TEST.apk OUTPUT (the crash phase kills the process; readback in a new one)" },
-  NativeVoiceLatency: { campaign: "bun scripts/native-voice-latency-emulator.ts --serial <owned emulator> --avd <name> --python <grpc venv python> --wav <speech.wav> --out <dir> (issue #395; injects speech into the virtual microphone while the harness runs)" },
+  ResidentEgressRedaction: { campaign: "ALPHA_RESIDENT_DISPOSABLE_EMULATOR=1 node scripts/android-resident-instrumentation.ts <app.apk> <androidTest.apk> (owner-only provider key fixture, ARM64)" },
+  WorkflowApprovalNoticeProcessDeath: { campaign: "ALPHA_BUILD_ARCHIVE=<archive> node scripts/android-workflow-native.ts --phase=approval-notice-recovery (the WorkflowNoticeProcessRunner helper process, in an owned secondary user)" },
+  NotificationChannels: { campaign: "node scripts/test-native-permissions.ts channels APP.apk TEST.apk OUTPUT (permission-restoring runner)" },
+  VoicePermissionDenied: { campaign: "node scripts/test-native-permissions.ts voice APP.apk TEST.apk OUTPUT (RECORD_AUDIO revoked before the app starts)" },
+  VoicePermissionRevoke: { campaign: "node scripts/test-native-permissions.ts voice-revoke APP.apk TEST.apk OUTPUT (RECORD_AUDIO revoked while recording; the process is killed)" },
+  LocalVoiceRecordingLimit: { campaign: "node scripts/test-native-permissions.ts voice-limit APP.apk TEST.apk OUTPUT (RECORD_AUDIO granted before the app starts)" },
+  WorkflowLegacyReminderUpgrade: { campaign: "node scripts/test-installed-upgrade.ts reminder (installed-upgrade campaign; runs upgradedLegacyOneOffReminderIsIncludedInNativeDigest after the candidate verify phase)" },
+  SettingsCrashLog: { campaign: "node scripts/test-native-restart.ts crash-log APP.apk TEST.apk OUTPUT (the crash phase kills the process; readback in a new one)" },
+  NativeVoiceLatency: { campaign: "node scripts/native-voice-latency-emulator.ts --serial <owned emulator> --avd <name> --python <grpc venv python> --wav <speech.wav> --out <dir> (issue #395; injects speech into the virtual microphone while the harness runs)" },
 };
 
 /**
@@ -399,7 +399,7 @@ export function secondaryUserLifecycle({ serial, lease, avd, adb, env = process.
   serial: string; lease: Awaited<ReturnType<typeof acquireDeviceLease>>; avd: string; adb: Adb; env?: NodeJS.ProcessEnv;
 }): SecondaryUserLifecycle {
   return async ({ name, record, run }) => {
-    const { withIsolatedAndroidUser } = await import("../vendor/eliza/packages/app/scripts/lib/isolated-android-user.mjs");
+    const { withIsolatedAndroidUser } = await import("./os-ported/app/lib/isolated-android-user.mjs");
     return withIsolatedAndroidUser({ serial, deviceLease: lease, env, expectedAvdName: avd, homePackage: env.ALPHA_TEST_HOME_PACKAGE ?? "com.android.launcher3",
       name, record, run, signal: undefined, execute: (args: string[]) => adb(args) });
   };
@@ -523,7 +523,7 @@ async function main() {
 
   // The shared device lease is held before the emulator is inspected, so another
   // runner cannot install between the admission checks and this run's installs.
-  const { acquireDeviceLease, deviceLeaseStateDir } = await import("../vendor/eliza/packages/app/scripts/lib/device-lease.ts");
+  const { acquireDeviceLease, deviceLeaseStateDir } = await import("./os-ported/app/lib/device-lease.ts");
   const lease = await acquireDeviceLease(`android:${serial}`, { waitMs: 0, ttlMs: Number.MAX_SAFE_INTEGER, stateDir: deviceLeaseStateDir(process.env) });
   try { process.exitCode = (await runLeased({ options, serial, adb, withSecondaryUser: secondaryUserLifecycle({ serial, lease, avd: options.avd, adb }) })).passed ? 0 : 1; } finally { lease.release(); }
 }

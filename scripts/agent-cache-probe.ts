@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Measures how the hosted text model treats a request: the size of the unit its prompt
  * cache reuses, the order in which it reads tool definitions, the system prompt and the
@@ -7,7 +7,7 @@
  * scripts/agent-context-audit.ts applies those facts to recorded requests
  * (CEREBRAS_QWEN), so run this again when the provider or the model changes.
  *
- *   bun scripts/agent-cache-probe.ts [--key-file <path>] [--model <id>] [--base <url>]
+ *   node scripts/agent-cache-probe.ts [--key-file <path>] [--model <id>] [--base <url>]
  *
  * It sends about 40 synthetic requests, roughly 115K tokens in all, with the key in the
  * owner-only file ~/.config/alphaphone/cerebras-key, and takes about three minutes because

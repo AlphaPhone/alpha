@@ -1,0 +1,48 @@
+// spec/calendar/agent.md, "Story: Return to the event I left Calendar from"; spec/calendar/approvals.md, "Story: Read where a Calendar request stands"
+import { describe, it } from "@effect/vitest"
+import { AgentCalendar, eventSourceRevision } from "../../src/calendar/agent.vibe"
+import { approvalPresentation } from "../../src/calendar/approvalFields.vibe"
+import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
+import type { ApprovalRecord } from "../../src/calendar/feed.schema.vibe"
+import { agentEventKey } from "../../src/calendar/model.vibe"
+import { binding, calendarOver, otherBinding, same } from "./harness.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+const schedule: ApprovalRecord = {
+  id: "0f0f0f0f-1111-4222-8333-444455556666", state: "pending", action: "schedule_event", reason: "Add lunch", expiresAt: null,
+  payload: { action: "schedule_event", side: "owner", calendarId: "primary", title: "Lunch", startsAtMs: 1_800_000_000_000, endsAtMs: 1_800_003_600_000,
+    attendees: [], location: "", description: "", notifyAttendees: false },
+}
+
+describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.md)", () => {
+  it.effect("an event comes back only unchanged, for the same account (spec/calendar/agent.md, \"Story: Return to the event I left Calendar from\")", () => effect {
+    const agent = new CalendarAgentFake()
+    agent.add("event-a", "Dentist", 1, 10)
+    provide calendarOver(agent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const calendar = try AgentCalendar
+      const event = (try calendar.view()).feed!.events[0]!
+      const begin = Date.parse(event.startAt)
+      const found = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin)
+      const moved = try calendar.verifyReturn(agentEventKey(event), "etag-2", begin)
+      const sourceRevision = try eventSourceRevision((try calendar.view()).calendars, event)
+      const sameSource = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin, sourceRevision)
+      const otherSource = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin, "0".repeat(64))
+      try bindCalendar(otherBinding)
+      const foreign = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin)
+      try same([found, moved, /^[a-f0-9]{64}$/.test(sourceRevision), sameSource, otherSource, foreign === "ReturnFound"],
+        ["ReturnFound", "ReturnMissing", true, "ReturnFound", "ReturnMissing", false])
+    }
+  })
+
+  it.effect("a change whose target is not verified is shown but never complete (spec/calendar/approvals.md, \"Story: Read where a Calendar request stands\")", () => effect {
+    // spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"
+    const created = approvalPresentation(schedule, { verified: false }, "UTC")
+    const modify: ApprovalRecord = { ...schedule, action: "modify_event", payload: { action: "modify_event", side: "owner", calendarId: "primary", eventId: "event-a",
+      expectedProviderVersion: "etag-1", patch: { title: "Lunch later" }, notifyAttendees: false } }
+    const unverified = approvalPresentation(modify, { verified: false }, "UTC")
+    const unknownField = approvalPresentation({ ...schedule, payload: { ...schedule.payload, secret: "x" } }, { verified: true }, "UTC")
+    try same([created.complete, created.fields.length > 0, unverified.complete, unknownField.complete], [true, true, false, false])
+  })
+})

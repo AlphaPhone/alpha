@@ -1,0 +1,65 @@
+// spec/maps/selectedRead.md, "Story: Let the agent see only what the Maps screen shows now"; spec/maps/selectedRead.md, "A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown"; spec/maps/selectedRead.md, "The context revision changes exactly when what is shown changes, and clears when Maps is not in front"
+import { NOT_DISPATCHED } from "@elizaos/agent/client"
+import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { MapsAgent } from "./agent.vibe"
+
+type SelectedRead = Extract<DeviceOperation, { type: "maps_read_selected" }>
+
+const notDispatched = { kind: "refused", code: NOT_DISPATCHED }
+
+/** The agent's reviewed read of the place or route Maps shows, or undefined for every other operation. */
+export function selectedRead(operation: unknown): SelectedRead | undefined {
+  const op = readOperation(operation)?.operation
+  return op?.type === "maps_read_selected" ? op as SelectedRead : undefined
+}
+
+function what(op: SelectedRead): string {
+  return op.target.kind === "map-route" ? "route" : "place"
+}
+
+/** The Maps family of agent device operations for `DeviceExecutors`: the selected read, run once only for the selection and revision its card named and only while Maps still shows it. */
+export const operationPorts = effect {
+  const agent = try MapsAgent
+
+  effect function read(op: SelectedRead) {
+    const shown = try agent.context()
+    if (shown === undefined || shown.kind !== op.target.kind || shown.id !== op.target.id || shown.revision !== op.target.revision) return notDispatched
+    if (!(try agent.review())) return notDispatched
+    if (!(try agent.approve())) return notDispatched
+    const text = try agent.readSelected()
+    if (text === undefined) return notDispatched
+    const fields = Effect.try(() => JSON.parse(text) as unknown) catch () => undefined
+    const result = { kind: "maps_read_selected", version: 1, target: op.target, fields }
+    return readResult(op, result) === undefined ? { kind: "refused", code: "maps_read_invalid" } : { kind: "applied", result }
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => selectedRead(operation),
+    execute: (operation) => {
+      const op = selectedRead(operation)
+      return op === undefined ? Promise.resolve({ kind: "refused", code: "unsupported" }) : runPromise(read(op))
+    },
+    readBack: async () => ({ kind: "refused", code: "no_readback" }),
+    describe: (operation) => {
+      const op = selectedRead(operation)
+      if (op === undefined) return { title: "Action", detail: "" }
+      return {
+        title: `Share the ${what(op)} shown in Maps`,
+        detail: op.target.kind === "map-route"
+          ? "Its two ends, travel mode, distance, time and provider credit, only while Maps still shows this route."
+          : "Its name, position and provider credit, only while Maps still shows this place.",
+      }
+    },
+    classOf: () => "MapsRead",
+    target: () => ({ tag: "NoTarget" }),
+    handoff: () => false,
+    summarize: (operation, result) => {
+      const op = selectedRead(operation)
+      const noun = op === undefined ? "selection" : what(op)
+      return result === "Applied" ? `Shared the ${noun} shown in Maps.` : result === "NotStarted" ? `Nothing was shared: Maps no longer shows that ${noun}.`
+        : result === "Failed" ? "Nothing was shared from Maps." : `Alpha can’t tell whether the ${noun} was shared.`
+    },
+  }
+  return ports
+}

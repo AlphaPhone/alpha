@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {sha256} from './sha256.ts';
-import {assertPixel10aSourceLayout, composePixel10aProduct} from '../vendor/eliza/packages/os/scripts/android/pixel10a-product.ts';
-import {placeholderFields, releaseDescriptorProblems} from '../vendor/eliza/packages/os/scripts/android/pixel10a-release.mjs';
-import {assertStockVendorApi} from '../vendor/eliza/packages/os/scripts/android/vendor-api.mjs';
+import {assertPixel10aSourceLayout, composePixel10aProduct} from './os-ported/os/pixel10a-product.ts';
+import {placeholderFields, releaseDescriptorProblems} from './os-ported/os/pixel10a-release.mjs';
+import {assertStockVendorApi} from './os-ported/os/vendor-api.mjs';
 import type {SenseImageActivation} from './aosp-sense-image.ts';
-import {stageAndroidNative, finalizeAndroidNative} from '../vendor/eliza/packages/os/scripts/android/android-native-admission.mjs';
+import {stageAndroidNative, finalizeAndroidNative} from './os-ported/os/android-native-admission.mjs';
 import {alphaNativeOptions} from './aosp-native-admission.ts';
 
 export {placeholderFields};
@@ -27,7 +27,7 @@ export function pixel10aSourceLayout({root = process.cwd(), source}: {root?: str
 export const PIXEL10A_RELEASE = Object.freeze({
   productName: 'alpha_stallion_phone',
   descriptorFile: PIXEL10A_PRODUCT,
-  sourceLockPath: 'vendor/eliza/packages/os/android/sources/pixel10a-stallion.json',
+  sourceLockPath: 'vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json',
   applicationSignerFile: 'android/release-signer.json',
 });
 
@@ -72,7 +72,7 @@ export function pixel10aProductProblems(root = process.cwd()) {
  * A mismatch is refused, never rewritten.
  */
 export function pixel10aVendorApi({root = process.cwd(), source}: {root?: string; source: string}) {
-  const profile = JSON.parse(fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/android/aosp.lock.json'), 'utf8')).profiles.pixel10a;
+  const profile = JSON.parse(fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/aosp/aosp.lock.json'), 'utf8')).profiles.pixel10a;
   const product = readPixel10aComposition(root);
   return assertStockVendorApi(source, {codename: profile.device.codename, releaseConfig: product.releaseConfig, vendorApiLevel: profile.device.vendorApiLevel});
 }

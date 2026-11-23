@@ -1,0 +1,84 @@
+// spec/shell/navigation.md, "Booting brings back the app and its history without the old page's layers"; spec/shell/shade.md, "Android's answer settles its own request; a late one changes nothing on the page"; spec/shell/geometry.md, "The composer is released only by a keyboard that covered it"; spec/shell/toasts.md, "The newest timeout reading wins, and a failed reading keeps the last good one"; spec/shell/permissions.md, "A step's request is the owner's tap, made once, and settled only by its own generation's reply"; spec/shell/favorites.md, "An earlier record is imported once, and only into a list that was never stored"; spec/shell/permissions.md, "An earlier Alpha's walkthrough record is read once, when this one has none"
+
+/** `Agent.launchSurface`, or `ElizaSystem.getLaunchInfo` without it: whether this activity is the assistant surface. */
+export schema LaunchFacts { readonly assistant: boolean }
+
+/** `ElizaSystem.getBuildInfo`: whether this build is the launcher. */
+export schema BuildFacts { readonly launcher: boolean }
+
+/** One Android role as `ElizaSystem.getStatus` reports it. */
+export schema RoleRow { readonly role: string; readonly held: boolean }
+
+/** `ElizaSystem.getStatus`: the roles Android reports, of which Home matters here. */
+export schema StatusFacts { readonly roles: RoleRow[] }
+
+/** `AlphaDevice.openNotificationShade`: what Android did with the request. */
+export schema ShadeAnswer { readonly status: "opened" | "standalone" | "permission-missing" | "unsupported" | "not-in-front" }
+
+/** The `alpha-keyboard-visibility` event MainActivity dispatches from its window insets. */
+export schema KeyboardVisibility { readonly visible: boolean; readonly handoff: boolean }
+
+/** `AlphaDevice.recommendedTimeout` for a five-second base. */
+export schema TimeoutAnswer { readonly timeoutMs: number }
+
+/** The `alpha-back-preview` event of a held predictive Back gesture. */
+export schema BackPreview { readonly phase: "start" | "progress" | "cancel"; readonly progress: number; readonly edge: "left" | "right" }
+
+/** `AlphaNotifications.status`. */
+export schema NotificationAccess { readonly permissionGranted: boolean; readonly appEnabled: boolean }
+
+/** A Capacitor permission state (`checkPermissions` of the camera, microphone, calendar and location plugins). */
+export schema PermissionState = "granted" | "denied" | "prompt" | "prompt-with-rationale"
+
+/** `AlphaVoiceCloud.checkPermissions`. */
+export schema MicrophoneAccess { readonly microphone: PermissionState }
+
+/** `DailyApps.checkPermissions`. */
+export schema CameraAccess { readonly camera: PermissionState }
+
+/** `AlphaCalendar.checkPermissions`. */
+export schema CalendarAccess { readonly calendar: PermissionState }
+
+/** `ElizaLocation.checkPermissions`. */
+export schema LocationAccess { readonly location: PermissionState; readonly accuracy?: "precise" | "approximate" | "none" }
+
+/** `AlphaPhotoLibrary.scope`: how much of the library Android lets Alpha see, and whether a profile lock hides it. */
+export schema PhotoAccess { readonly scope: "full" | "partial" | "selected" | "denied"; readonly locked: boolean }
+
+/** `AlphaFiles.storageState`: all-files access. */
+export schema FilesAccess { readonly access: "granted" | "denied" | "unsupported" }
+
+/** The favorites record an earlier Alpha kept under `alpha.launcher.favorites.v1`. */
+export schema LegacyFavorites {
+  readonly version: 1 | 2
+  readonly keys: string[]
+  readonly defaultPolicy?: string
+  readonly previousDefaults?: string[]
+}
+
+/** The walkthrough progress this shell keeps: the prompts already shown, the saved step and completion. */
+export schema SavedProgress {
+  readonly attempted: ("PermNotifications" | "PermMicrophone" | "PermCamera" | "PermLocation" | "PermCalendar" | "PermPhotos" | "PermFiles")[]
+  readonly saved: number
+  readonly done: boolean
+  readonly touched?: boolean
+}
+
+/** The walkthrough position an earlier Alpha kept under `alpha:startup-permission-walkthrough:v1`. */
+export schema LegacyWalkthroughProgress {
+  readonly version: 1 | 2 | 3 | 4
+  readonly status: "pending" | "completed"
+  readonly step: number
+  readonly choices?: ("allowed" | "continued" | "skipped")[]
+}
+
+/** The prompts an earlier Alpha already showed, kept under `alpha.startup-permissions.v1`. */
+export schema LegacyWalkthroughMemory {
+  readonly attempted?: Record<string, boolean>
+}
+
+/** Android's platform capabilities: whether the Alpha image granted startup access at first boot. */
+export schema PlatformCapabilities { readonly startupPermissionDefaults?: boolean }
+
+/** `Agent.keyguard`, its `keyguardChanged` event, or `Agent.takeInvocation`: whether Android's keyguard shows now; unknown counts as locked natively. */
+export schema KeyguardFacts { readonly locked: boolean }

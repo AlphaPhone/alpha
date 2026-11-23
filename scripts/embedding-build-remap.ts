@@ -11,7 +11,7 @@ export function embeddingBuildRemap(_productRoot: string, {sdk, staging, fork, b
  const target='/alphaphone-embedding-host';
  return {CCC_OVERRIDE_OPTIONS:['#',...[
   [staging,target],
-  [fork,target+'/plugins/plugin-local-inference/native/llama.cpp'],
+  [fork,target+'/packages/os/android/local-inference/llama.cpp'],
   [build,target+'/jni-build'],
   [sdk,'/work/android-sdk'],
  ].map(([from,to])=>`+-ffile-prefix-map=${from}=${to}`)].join(' ')};

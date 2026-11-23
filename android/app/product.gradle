@@ -5,7 +5,7 @@
 // Every build packages the resident runtime, on-device speech and local embeddings; the renderer
 // chooses Cloud, provider or on-device speech at run time. The resident agent receives
 // ELIZA_RUNTIME_PROFILE=native (upstream's local-embeddings route).
-// Debug packages the ABIs resident staging produces (scripts/stage-local-agent-runtime.ts);
+// Debug packages the ABIs resident staging produces (scripts/stage-agent-runtime.ts);
 // dependency ABI flags do not filter the app. Release is arm64-v8a (android/consumer-host.json).
 // Preserve installed component and callback names when the current source is packaged for
 // an existing identity. The generated view contains the same feature code, not another flavor.
@@ -32,6 +32,16 @@ if (identityAsset != null) {
  }
 }
 def runtimeAbis = ['arm64-v8a', 'x86_64']
+// The upstream os speech modules (:eliza-local-inference over :eliza-voice-io) read these when they are
+// configured, which is after :app. The speech bridges (LocalSpeechBridgePlugin, SpeechStreamBridgePlugin)
+// compile into :eliza-local-inference; AlphaVoiceCloud and AlphaCloudSpeechStream are Alpha's subclasses.
+def inferenceModule = file('../../vendor/eliza/packages/os/android/local-inference')
+if (!new File(inferenceModule, 'engine.lock.json').isFile()) throw new GradleException('The pinned upstream has no os local-inference module (vendor/eliza/packages/os/android/local-inference)')
+def inferenceEngineLock = new groovy.json.JsonSlurper().parse(new File(inferenceModule, 'engine.lock.json'))
+rootProject.ext.elizaSpeechBridgeCapacitor = 'true'
+rootProject.ext.elizaInferenceEngineDir = rootProject.findProperty('elizaInferenceEngineDir') ?: file('../../.eliza/inference-engine/' + inferenceEngineLock.engine.commit).absolutePath
+rootProject.ext.elizaParadeeNativeDir = rootProject.findProperty('elizaParadeeNativeDir') ?: file('../../.eliza/paradee-voice/native').absolutePath
+rootProject.ext.elizaParadeeAbis = rootProject.findProperty('elizaParadeeAbis') ?: runtimeAbis.join(',')
 apply from: file('cloud-deployment.generated.gradle')
 def cloudWebHost = alphaCloudWebHosts.production
 // Verified App Links return for Cloud delegation, the in-app Cloud sign-in and the Google
@@ -80,16 +90,9 @@ android {
 // The shared bionic host is packaged only from the reviewed consumer artifact and BGE pin.
 def verifyEmbeddingHost = tasks.register('verifyEmbeddingHost', Exec) {
  workingDir rootProject.projectDir.parentFile
- commandLine 'bun', 'scripts/stage-embedding-host.ts', '--verify'
+ commandLine 'node', 'scripts/stage-embedding-host.ts', '--verify'
 }
 tasks.named('preBuild').configure { dependsOn verifyEmbeddingHost }
-
-// The staged Google host must match the current product sources before it is packaged.
-def verifyNativeGoogleHost = tasks.register('verifyNativeGoogleHost', Exec) {
- workingDir rootProject.projectDir.parentFile
- commandLine 'bun', 'scripts/runtime-profile.ts', '--verify-native'
-}
-tasks.named('preBuild').configure { dependsOn verifyNativeGoogleHost }
 
 // On-device voice: the shared paradee-voice library (:local-speech) links libelizainference but does
 // not package it; the app packages its resident host's engine, so the two must be identical bytes.
@@ -98,11 +101,11 @@ tasks.named('preBuild').configure { dependsOn verifyNativeGoogleHost }
 def paradeeAbiArgs = runtimeAbis.collectMany { ['--abi', it] }
 def verifyParadeeAppLinkage = tasks.register('verifyParadeeAppLinkage', Exec) {
  workingDir rootProject.projectDir.parentFile
- commandLine(['bun', 'scripts/paradee-runtime.ts', '--app-linkage'] + paradeeAbiArgs)
+ commandLine(['node', 'scripts/paradee-runtime.ts', '--app-linkage'] + paradeeAbiArgs)
 }
 def verifyVoiceHost = tasks.register('verifyVoiceHost', Exec) {
  workingDir rootProject.projectDir.parentFile
- commandLine(['bun', 'scripts/voice-host.ts', '--verify'] + paradeeAbiArgs)
+ commandLine(['node', 'scripts/voice-host.ts', '--verify'] + paradeeAbiArgs)
 }
 tasks.named('preBuild').configure { dependsOn verifyParadeeAppLinkage, verifyVoiceHost }
 

@@ -1,0 +1,85 @@
+// spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"
+import { Machine as DraftsMachine, type Kept, type Slot } from "../../gen/clock__reminderDrafts.effect.vibe"
+import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
+import type { Reminders as ReminderScreen } from "../../gen/clock__reminders.ts"
+import { KeptReminderForm } from "./drafts.schema.vibe"
+import { draftOfKept, keptFormOf, type ReminderDraft } from "./schedule.ts"
+import { freshId } from "./page.ts"
+
+/** Which form a draft belongs to: a new reminder, or an edit of a listed one. */
+export type DraftForm = "new" | "edit"
+
+const SLOT: Readonly<Record<DraftForm, Slot>> = { new: "CreationSlot", edit: "EditSlot" }
+
+const CONFIRMED: ReadonlySet<string> = new Set(["Saved", "Updated", "Rescheduled", "AlreadyExists", "AlertUnconfirmed"])
+
+const outcomeTag = (outcome: ReminderScreen["outcome"]): string => (typeof outcome === "object" ? outcome.tag : outcome)
+
+/** Whether the last write is over and the store confirmed the save of a form: a submitted form is then no longer shown. */
+export function confirmedSave(screen: ReminderScreen): boolean {
+  return screen.stage === "WIdle" && CONFIRMED.has(outcomeTag(screen.outcome))
+}
+
+/** A kept form as it resumes today, with the identity and version it was kept under. */
+export interface KeptDraft {
+  readonly id: string
+  readonly revision: string
+  readonly version: number
+  readonly draft: ReminderDraft
+}
+
+/** The unsaved reminder forms, kept across reloads until a confirmed save or a confirmed discard. */
+export service ReminderDrafts {
+  /** The form kept for a new reminder or an edit, as of today; none when nothing readable is kept. */
+  kept(form: DraftForm): KeptDraft | undefined!!
+  /** Fills the form from what is kept; nothing is saved. */
+  resume(form: DraftForm): KeptDraft | undefined!!
+  /** Keeps the form as the owner left it: a new reminder under its creation id (a fresh one when `id` is ""), an edit under its reminder and revision. */
+  keep(form: DraftForm, id: string, revision: string, draft: ReminderDraft): void!!
+  /** After a Save of the draft kept at `version`: clears it only when the store confirmed the save. */
+  settle(form: DraftForm, id: string, version: number): void!!
+  /** Asks to discard a kept draft. */
+  askDiscard(form: DraftForm): void!!
+  /** Keeps the draft after all. */
+  cancelDiscard(): void!!
+  /** Discards the draft the owner chose, unless a newer one replaced it meanwhile. */
+  confirmDiscard(): void!!
+}
+
+/** Drafts over the stored drafts machine, settled by what the Reminders write reports. */
+export const draftsLayer = Layer.effect(ReminderDrafts, effect {
+  const drafts = try DraftsMachine
+  const screen = try RemindersMachine
+  const step = (event: Parameters<typeof drafts.send>[0]) => drafts.send(event) catch () => undefined
+
+  effect function kept(form: DraftForm) {
+    const slot: Kept = form === "new" ? (try drafts.get()).creation : (try drafts.get()).edit
+    if (slot.tag !== "Held") return undefined
+    const parsed = Effect.try(() => JSON.parse(slot.fields) as unknown) catch () => undefined
+    if (parsed === undefined) return undefined
+    const decoded = Schema.decodeUnknownEffect(KeptReminderForm)(parsed) catch () => undefined
+    if (decoded === undefined) return undefined
+    return { id: slot.id, revision: slot.revision, version: slot.version, draft: draftOfKept(decoded, try Clock.currentTimeMillis) } as KeptDraft
+  }
+
+  return {
+    kept,
+    effect resume(form: DraftForm) {
+      const found = try kept(form)
+      if (found !== undefined) step({ type: "resume", slot: SLOT[form] })
+      return found
+    },
+    effect keep(form: DraftForm, id: string, revision: string, draft: ReminderDraft) {
+      const fields = JSON.stringify(keptFormOf(draft, try Clock.currentTimeMillis))
+      const held = (try drafts.get()).creation
+      const under = form === "new" && id === "" ? (held.tag === "Held" ? held.id : freshId()) : id
+      step({ type: "keep", slot: SLOT[form], id: under, revision, edits: fields })
+    },
+    effect settle(form: DraftForm, id: string, version: number) {
+      if (CONFIRMED.has(outcomeTag((try screen.get()).outcome))) step({ type: "saved", slot: SLOT[form], id, version })
+    },
+    askDiscard: (form: DraftForm) => step({ type: "askDiscard", slot: SLOT[form] }),
+    cancelDiscard: () => step({ type: "cancelDiscard" }),
+    confirmDiscard: () => step({ type: "confirmDiscard" }),
+  }
+})

@@ -1,0 +1,53 @@
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+import { assert, describe, it } from "@effect/vitest"
+import { alphaCloudProfile } from "../src/profile.vibe"
+import { environmentRegistration } from "../src/registration.vibe"
+import { fillTemplate, leakedElizaHost, provisioned, renderEnvironment, renderProblems } from "../src/wrangler.vibe"
+import { sha256Hex } from "../src/digest.ts"
+import { identity, operatorInputs, rotatedSigner, testResources } from "./support.ts"
+
+const check = (assertion: () => void) => Effect.try(assertion)
+const templates = {
+  api: { name: "{{workerName}}", assets: { directory: "{{assetsDirectory}}", binding: "ASSETS", run_worker_first: true }, routes: [{ pattern: "{{apiHost}}", custom_domain: true }], hyperdrive: [{ binding: "HYPERDRIVE", id: "{{hyperdriveId}}" }], vars: "{{vars}}" },
+  edge: { name: "{{workerName}}-edge", routes: [{ pattern: "{{webHost}}", custom_domain: true }], services: [{ binding: "API", service: "{{workerName}}" }], vars: "{{vars}}" },
+}
+
+describe("Alpha Cloud's Wrangler configuration", () => {
+  it.effect("renders the API and web host Workers of a provisioned environment from the profile and registration", () => effect {
+    // spec/cloud/deployment.md, "An instance starts only for an accepted profile, on its environment's own readable database, seeded only in staging, with loopback delivery only on PGlite"
+    const profile = alphaCloudProfile(operatorInputs)
+    const client = try environmentRegistration(profile, "production", identity, rotatedSigner)
+    const rendered = try renderEnvironment(templates, profile, "production", testResources.production, operatorInputs.production, client)
+    const api = rendered.api as { name: string; assets?: { directory: string }; routes: ReadonlyArray<{ pattern: string }>; vars: Record<string, string> }
+    const edge = rendered.edge as { name: string; routes: ReadonlyArray<{ pattern: string }>; services?: ReadonlyArray<{ binding: string; service: string }>; vars: Record<string, string> }
+    try check(() => assert.strictEqual(api.routes[0]?.pattern, "api.alphacompute.cc"))
+    try check(() => assert.strictEqual(edge.routes[0]?.pattern, "cloud.alphacompute.cc"))
+    try check(() => assert.strictEqual(api.vars.CLOUD_IDENTITY_DIGEST, operatorInputs.production.databaseIdentity))
+    try check(() => assert.strictEqual(api.vars.CLOUD_PROFILE, undefined))
+    try check(() => assert.strictEqual(rendered.profile, JSON.stringify(profile)))
+    try check(() => assert.strictEqual(api.vars.CLOUD_PROFILE_SHA256, sha256Hex(rendered.profile)))
+    try check(() => assert.strictEqual(api.assets?.directory, "./assets.production"))
+    try check(() => assert.deepStrictEqual(edge.services, [{ binding: "API", service: api.name }]))
+    try check(() => assert.strictEqual(edge.vars.PUBLIC_API_ORIGIN, api.vars.PUBLIC_API_ORIGIN))
+    try check(() => assert.strictEqual(edge.vars.NATIVE_CLIENT_REGISTRY, undefined))
+    try check(() => assert.strictEqual(api.vars.STRIPE_PRICE_ID, operatorInputs.production.billing.plans.plus_monthly.priceId))
+    try check(() => assert.ok(!JSON.stringify(rendered).includes("STRIPE_SECRET_KEY\":")))
+  })
+
+  it.effect("refuses an environment whose resources are still placeholders", () => effect {
+    // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+    const profile = alphaCloudProfile(operatorInputs)
+    try check(() => assert.strictEqual(provisioned(testResources.staging.hyperdriveId), false))
+    try check(() => assert.ok(renderProblems(profile, "staging", testResources.staging, operatorInputs.staging).some((problem) => problem.includes("hyperdriveId is not provisioned"))))
+    const client = try environmentRegistration(profile, "staging", identity, rotatedSigner)
+    const outcome = renderEnvironment(templates, profile, "staging", testResources.staging, operatorInputs.staging, client) catch (failure) => failure._tag
+    try check(() => assert.strictEqual(outcome, "RenderRefused"))
+  })
+
+  it.effect("replaces whole-string tokens with values and detects a leaked Eliza Cloud host", () => effect {
+    // spec/cloud/deployment.md, "Story: Answer only the deployment's own callers"
+    try check(() => assert.deepStrictEqual(fillTemplate({ vars: "{{vars}}", name: "x-{{name}}" }, { vars: { A: "1" }, name: "y" }), { vars: { A: "1" }, name: "x-y" }))
+    try check(() => assert.strictEqual(leakedElizaHost("https://api.eliza.app/x"), "api.eliza.app"))
+    try check(() => assert.strictEqual(leakedElizaHost("https://api.alphacompute.cc"), undefined))
+  })
+})

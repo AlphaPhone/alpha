@@ -1,0 +1,95 @@
+// spec/clock/mirror.md, "Story: Choose which apps Alpha may mirror"; spec/clock/mirror.md, "Story: Know whether Alpha's own notices can reach me"
+import { Machine as MirrorMachine } from "../../gen/clock__mirror.effect.vibe"
+import { DeliveryRecord, MirrorChoices, MirrorHistory, MirrorRecord } from "./native.schema.vibe"
+import { NOTIFICATIONS, call, command } from "./plugins.vibe"
+
+type Status = typeof MirrorRecord.Type
+
+/** A change to the mirror, reviewed against the revision it was made on. */
+export interface MirrorChange {
+  readonly enabled?: boolean
+  readonly history?: boolean
+  readonly apps?: ReadonlyArray<{ readonly packageName: string; readonly preview: boolean }>
+}
+
+/** The notification mirror's settings, history and Alpha's own delivery state. */
+export service Mirror {
+  /** Reads the mirror and delivery status again. */
+  refresh(): void!!
+  /** The apps the owner may choose. */
+  choices(): ReadonlyArray<{ readonly packageName: string; readonly label: string }>!!
+  /** Saves a change made on the revision shown; a change made elsewhere meanwhile is refused. */
+  save(change: MirrorChange): void!!
+  /** Resumes a paused mirror on the revision shown. */
+  resume(): void!!
+  /** Opens Android's notification access settings; the grant is read on the next status. */
+  openAccess(): void!!
+  /** The private one-day history: app, time and state only. */
+  history(): ReadonlyArray<{ readonly id: string; readonly appLabel: string; readonly at: number; readonly state: string }>!!
+  /** Clears the history, reported cleared only when the phone confirms it. */
+  clearHistory(): void!!
+}
+
+/** The mirror over `AlphaNotifications`. */
+export const mirrorLayer = Layer.effect(Mirror, effect {
+  const mirror = try MirrorMachine
+  const step = (event: Parameters<typeof mirror.send>[0]) => mirror.send(event) catch () => undefined
+
+  effect function read(status: Status | undefined) {
+    if (status === undefined) {
+      step({ type: "statusFailed" })
+      return
+    }
+    step({
+      type: "statusRead", revision: status.revision, isOn: status.enabled, history: status.history, paused: status.paused, granted: status.accessGranted,
+      apps: status.apps.slice(0, 20).map((a) => ({ packageName: a.packageName, preview: a.preview, available: a.available !== false })),
+    })
+  }
+
+  effect function refresh() {
+    try read(call(NOTIFICATIONS, "crossAppStatus", MirrorRecord) catch () => undefined)
+    const delivery = call(NOTIFICATIONS, "status", DeliveryRecord) catch () => undefined
+    if (delivery !== undefined) {
+      const reminders = delivery.channels.find((c) => c.id === "reminders")
+      step({ type: "deliveryRead", appEnabled: delivery.appEnabled && delivery.permissionGranted, channelBlocked: reminders?.blocked === true, groupBlocked: reminders?.groupBlocked === true })
+    }
+  }
+
+  effect function settle(expected: string, reply: Status | undefined) {
+    step({ type: "saveAnswered", stale: reply === undefined })
+    if (reply === undefined || reply.revision === expected) try refresh()
+    else try read(reply)
+  }
+
+  return {
+    refresh,
+    effect choices() {
+      return (call(NOTIFICATIONS, "notificationApps", MirrorChoices) catch () => undefined)?.apps ?? []
+    },
+    effect save(change: MirrorChange) {
+      const shown = try mirror.get()
+      const apps = (change.apps ?? shown.apps).map((a) => ({ packageName: a.packageName, preview: a.preview, available: true }))
+      if (step({ type: "saveRequested", expectedRevision: shown.revision, apps }) === undefined) return
+      const reply = call(NOTIFICATIONS, "setNotificationPolicy", MirrorRecord, { expectedRevision: shown.revision, ...change }) catch () => undefined
+      try settle(shown.revision, reply)
+    },
+    effect resume() {
+      const shown = try mirror.get()
+      if (step({ type: "resumeRequested", expectedRevision: shown.revision }) === undefined) return
+      const reply = call(NOTIFICATIONS, "resumeCrossApp", MirrorRecord, { expectedRevision: shown.revision }) catch () => undefined
+      try settle(shown.revision, reply)
+    },
+    effect openAccess() {
+      command(NOTIFICATIONS, "openNotificationAccess") catch () => undefined
+    },
+    effect history() {
+      return (call(NOTIFICATIONS, "notificationHistory", MirrorHistory) catch () => undefined)?.items ?? []
+    },
+    effect clearHistory() {
+      const cleared = (command(NOTIFICATIONS, "clearNotificationHistory") catch () => false) !== false
+      const after = cleared ? (call(NOTIFICATIONS, "notificationHistory", MirrorHistory) catch () => undefined) : undefined
+      step({ type: "historyClearAnswered", cleared: cleared && after !== undefined && after.items.length === 0 })
+      try refresh()
+    },
+  }
+})
