@@ -159,9 +159,11 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
           setTranscribing(true);
           void call(NotesAudio, (service) => service.transcribe(openRow)).then((said) => {
             setTranscribing(false);
-            tell(said === "saved" ? "" : said === "no-speech" ? "No speech was found. Your recording is kept." : said === "unavailable" ? "Recording unavailable" : "Not saved");
+            tell(said === "saved" ? "" : said === "no-speech" ? "No speech was found. Your recording is kept."
+              : said === "cancelled" ? "Transcript cancelled. Your recording is kept." : said === "unavailable" ? "Recording unavailable" : "Not saved");
           });
         }}
+        onCancelTranscript={() => void call(NotesAudio, (service) => service.cancel())}
         onWebSource={() => void call(NotesSources, (service) => service.openDialog(editor.draftId))}
         onAttachment={() => { if (openRow) void call(NotesSources, (service) => service.openAttachment(openRow)).then((said) => tell(said === "mismatch" ? "That file doesn’t match this attachment." : said === "opened" ? "" : "Couldn’t open the linked file.")); }} />
     );

@@ -31,6 +31,8 @@ export type NoteEditorProps = {
   onPlay: () => void;
   onStopPlayback: () => void;
   onTranscribe: () => void;
+  /** Stop the transcript being generated; the recording is kept. */
+  onCancelTranscript?: () => void;
   onWebSource: () => void;
   onAttachment: () => void;
 };
@@ -44,7 +46,7 @@ function items(format: NoteFormat | undefined): CheckItem[] {
  * One note open for editing: title and body, a checklist's items, or a voice note's recording and transcript, with the note's actions.
  * @model spec/notes/editor.md
  */
-export function NoteEditor({ draft, row, status, saved, playing, positionMs, transcribing, onEdit, onBack, onDelete, onShare, onSchedule, onPlay, onStopPlayback, onTranscribe, onWebSource, onAttachment }: NoteEditorProps) {
+export function NoteEditor({ draft, row, status, saved, playing, positionMs, transcribing, onEdit, onBack, onDelete, onShare, onSchedule, onPlay, onStopPlayback, onTranscribe, onCancelTranscript, onWebSource, onAttachment }: NoteEditorProps) {
   const [newItem, setNewItem] = useState("");
   const [rowKeys, setRowKeys] = useState<ChecklistRows>({ keys: [], nextKey: 0 });
   const kind = draft.format?.kind ?? "text";
@@ -122,6 +124,7 @@ export function NoteEditor({ draft, row, status, saved, playing, positionMs, tra
               </div>
             )}
             {row.audio && row.lines.length === 0 && <Button variant="outline" loading={transcribing} onClick={onTranscribe}><Sparkles aria-hidden />Generate transcript</Button>}
+            {row.audio && transcribing && onCancelTranscript && <Button variant="ghost" onClick={onCancelTranscript}>Cancel transcript</Button>}
             {row.summary.length > 0 && <p className="text-sm">{row.summary.join(" ")}</p>}
             {row.actions.length > 0 && (
               <ul className="flex flex-col gap-1">{row.actions.map((action, index) => <li key={index} className={action.done ? "text-muted-foreground line-through" : undefined}>{action.t}</li>)}</ul>
