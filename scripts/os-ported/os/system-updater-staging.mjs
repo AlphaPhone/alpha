@@ -4,9 +4,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const source = fs.realpathSync(
-  fileURLToPath(new URL("../../android/system-updater/", import.meta.url)),
-);
 const inputs = [
   "Android.bp",
   "AndroidManifest.xml",
@@ -41,6 +38,9 @@ export function admitSystemUpdater(product) {
     );
   if (!/^[a-z][a-z0-9_]*$/.test(product.vendorDirectory))
     throw new Error("Invalid updater vendor directory");
+  const source = fs.realpathSync(
+    fileURLToPath(new URL("../../../vendor/eliza/packages/os/aosp/system-updater/", import.meta.url)),
+  );
   const files = inputs.map((name) => {
     const file = path.join(source, name);
     if (fs.realpathSync(file) !== file || !fs.lstatSync(file).isFile())

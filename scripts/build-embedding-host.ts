@@ -105,7 +105,7 @@ export async function preparePortableNativeInputs(root:string) {
   if([source,cache,sdk].some(file=>/[\s=\0]/.test(file)))throw Error('Native compiler path remapping requires build/cache/SDK paths without whitespace');
   const remap=['#',`+-ffile-prefix-map=${source}=/alpha-native-source`,`+-ffile-prefix-map=${cache}=/alpha-native-build`,`+-ffile-prefix-map=${cacheRoot}=/alpha-native-cache`,`+-ffile-prefix-map=${sdk}=/android-sdk`].join(' ');
   const nativeEnv={...process.env,TURBO_TELEMETRY_DISABLED:'1',CI:process.env.CI??'1'};
-  const env:NodeJS.ProcessEnv={...nativeEnv,...nativeModelEnvironment(),PATH:`${path.join(venv,'bin')}${path.delimiter}${nativeEnv.PATH}`,ANDROID_HOME:sdk,ANDROID_SDK_ROOT:sdk,ELIZA_NDK_VERSION:toolchain.ndk,CMAKE_BUILD_PARALLEL_LEVEL:'2',PYTHONPATH:path.join(fork,'gguf-py'),ELIZA_INFERENCE_ENGINE_DIR:fork,CCC_OVERRIDE_OPTIONS:remap};
+  const env:NodeJS.ProcessEnv={...nativeEnv,...nativeModelEnvironment(),PATH:`${path.join(venv,'bin')}${path.delimiter}${nativeEnv.PATH}`,ANDROID_HOME:sdk,ANDROID_SDK_ROOT:sdk,ELIZA_NDK_VERSION:toolchain.ndk,CMAKE_BUILD_PARALLEL_LEVEL:nativeEnv.CMAKE_BUILD_PARALLEL_LEVEL||'2',PYTHONPATH:path.join(fork,'gguf-py'),ELIZA_INFERENCE_ENGINE_DIR:fork,CCC_OVERRIDE_OPTIONS:remap};
     const {assertAndroidVoiceLibrary}=createRequire(import.meta.url)(path.join(source,nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
     // The upstream builder verifies each download, converted GGUF and native ABI/symbol contract.
     // It runs in an isolated source checkout; it never writes into vendor/eliza.
