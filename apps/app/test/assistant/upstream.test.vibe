@@ -1,6 +1,6 @@
 // spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import { assert, it } from "@effect/vitest"
-import { decodeObservation } from "@elizaos/agent/client"
+import { decodeObservation, decodeVoiceUiContext } from "@elizaos/agent/client"
 import { Composer } from "../../src/assistant/composer.vibe"
 import type { ScreenFacts } from "../../src/assistant/host.vibe"
 import { spokenCue } from "../../src/assistant/cue.vibe"
@@ -216,12 +216,17 @@ it.effect(`A turn tells the agent direct requests are allowed only with review-f
       const composer = try Composer
       try composer.edit("Open Settings")
       try composer.send()
-      return (turnBodies(seen)[0] as { readonly metadata?: { readonly voiceUi?: unknown } } | undefined)?.metadata?.voiceUi
+      const metadata = (turnBodies(seen)[0] as { readonly metadata?: { readonly viewClientId?: string; readonly voiceUi?: unknown } } | undefined)?.metadata
+      const ui = metadata?.voiceUi === undefined ? undefined : try decodeVoiceUiContext(metadata.voiceUi)
+      return { delivery: ui?.viewDelivery, sameRenderer: metadata?.viewClientId !== undefined && ui?.uiClientId === metadata.viewClientId, direct: ui?.agentActionMode }
     }
   }
   const direct = try sent(false)
   const asking = try sent(true)
-  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: { agentActionMode: "direct-request-v1" }, asking: undefined }))
+  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, {
+    direct: { delivery: "completed-action", sameRenderer: true, direct: "direct-request-v1" },
+    asking: { delivery: "completed-action", sameRenderer: true, direct: undefined },
+  }))
 })
 
 it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
