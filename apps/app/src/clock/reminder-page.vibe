@@ -36,7 +36,7 @@ export service RemindersPage {
   /** Hardware or gesture Back: closes the innermost dialog, form or detail; false when nothing was open and Back is the shell's. */
   back(): boolean!!
   /** The reminder shown whose listed title is `name`, the only one a change the agent names may apply to. */
-  chosen(name: string): string | undefined!!
+  chosen(name: string): (string | undefined)!!
 }
 
 /** The page over its machine, closing the creation consent, the discard question and a tapped reminder's question first. */

@@ -1,6 +1,7 @@
 // spec/shell/shade.md, "Story: Pull down for my notifications"; spec/shell/navigation.md, "The stand-in shade opens only over Home"
 import { Machine as ShadeMachine, WaitMs, type Fallback, type ShadeReply, type ShadeSurface } from "../../gen/shell__shade.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { Foreground } from "./foreground.vibe"
 import { Native } from "../platform/native.vibe"
 import { ShadeAnswer } from "./native.schema.vibe"
 import { Navigation } from "./navigation.vibe"
@@ -33,6 +34,7 @@ export const shadeLive = Layer.effect(Shade, effect {
   const build = try Build
   const navigation = try Navigation
   const notices = try Notices
+  const foreground = try Foreground
   const machine = try ShadeMachine
   const scope = try Scope.Scope
   const surface: ShadeSurface = build.info.variant === "browser" ? (build.info.testMocks ? "StandInShade" : "NoShade") : "AndroidShade"
@@ -54,6 +56,11 @@ export const shadeLive = Layer.effect(Shade, effect {
       try notices.show(FALLBACKS[state.fallback])
       machine.send({ type: "dismissFallback" }) catch () => undefined
     }
+  })
+  // A locked Home shows no notifications: a pull under Android's keyguard says to unlock instead.
+  machine.send({ type: "lock", secure: (try foreground.get()).locked }) catch () => undefined
+  fork.scoped (effect {
+    for try (const front of foreground.changes) machine.send({ type: "lock", secure: front.locked }) catch () => undefined
   })
   fork.scoped (effect {
     for try (const nav of navigation.changes) {

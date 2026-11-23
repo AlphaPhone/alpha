@@ -2,6 +2,7 @@
 import { Effect, Stream } from "effect";
 import { ArrowLeft, MessageSquarePlus, RotateCcw } from "lucide-react";
 import { useState } from "react";
+import { DeviceEnrollment } from "../../account/enrollment.vibe";
 import { Composer } from "../../assistant/composer.vibe";
 import { Conversations } from "../../assistant/conversations.vibe";
 import { copy } from "../../assistant/presentation.vibe";
@@ -30,6 +31,13 @@ function once<A, E, R>(work: Effect.Effect<A | undefined, E, R>): Effect.Effect<
   ), context)));
 }
 
+/** Whether the phone is chat only: its enrollment with the agent failed for this connection (spec/account/enrollment.md). */
+const chatOnlyStream = Effect.map(Effect.service(DeviceEnrollment), (enrollment) =>
+  Stream.map(Stream.concat(Stream.fromEffect(enrollment.current()), enrollment.changes), (now) => now.phase === "ChatOnly"));
+
+/** Legacy's reason for a phone the agent cannot act on, with what brings phone actions back. */
+const CHAT_ONLY = "Chat only. Phone actions come back when your agent reconnects.";
+
 const outcomeLabels = { happened: "Happened", didnt: "Didn’t happen", unresolved: "Leave unresolved" } as const satisfies Record<HistoryOutcome, string>;
 
 /**
@@ -45,6 +53,7 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
   const pending = useServiceStream(`assistant/activity/pending/${round}`,
     once(Effect.flatMap(Effect.service(DeviceReview), (review) => Effect.map(review.pending(), (found) => found.ok ? found.cards : undefined))), loading);
   const restartOffered = useServiceStream("assistant/restart", restartStream, false);
+  const chatOnly = useServiceStream("assistant/activity/chat-only", chatOnlyStream, false);
   const restartBusy = useServiceStream("assistant/restart-busy", restartBusyStream, false);
   const again = () => setRound((n) => n + 1);
   const openConversation = (id: string | null) => {
@@ -88,6 +97,7 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
           <Separator />
           <section aria-label="Waiting for you" className="flex flex-col gap-2">
             <h3 className="font-mono text-xs uppercase text-muted-foreground">Waiting for you</h3>
+            {chatOnly && <p role="status" className="text-sm text-muted-foreground">{CHAT_ONLY}</p>}
             {pending.kind === "ready" && pending.value.length === 0 && <p className="text-sm text-muted-foreground">Nothing waits for your review.</p>}
             {pending.kind === "ready" && pending.value.map((card) => (
               <ActionCardView key={card.proposalId} card={card} emergency={emergencyNow()} busy={false} now={Date.now()}

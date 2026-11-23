@@ -263,7 +263,10 @@ pure def stepHomeLeavesNothingOpen(before: Nav, via: str, after: Nav): bool =
 The library opens over Home, not in an app or on the assistant surface, and never while Home is
 being edited; closing it clears its search and menu. Searching closes an entry's menu. An entry's
 menu belongs to an entry the library shows now: one that leaves the list takes its menu with it.
-The Add sheet opens only in edit mode.
+The entry menu is a keyboard menu: focus moves into it as it opens, the arrows, Home and End move
+between its items, and Escape closes it and gives focus back to the entry's tile. A library that
+could not read the installed apps offers Try again, which reads them again. The Add sheet opens
+only in edit mode.
 
 ```quint
 pure def canOpenLibrary(s: Nav): bool = unblocked(s) and s.host != AssistantSurface and s.app == "" and not(s.editing)

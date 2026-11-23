@@ -3,6 +3,7 @@ import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
 import type { ChangeSummary } from "../workflows/changes.vibe"
 import type { BrowserPageObservation } from "../browser/page-context.ts"
+import type { ResidentHeaders } from "../platform/resident.vibe"
 
 /** An email the owner reviewed in the chat, under the request id its version sends once. */
 export interface ReviewedEmail {
@@ -192,8 +193,11 @@ export service BrowserViews {
 export service AdvertisedCapabilities {
   /** The capability names to advertise on the next request, read again for each request. */
   names(): readonly string[]!!
+  /** The confirmed enrollment's `x-eliza-device-id` and `x-eliza-device-key`, read again for each request; none while the phone is chat only (spec/account/enrollment.md). */
+  device(): ResidentHeaders!!
   static readonly defaultValue = () => ({
     names: () => succeed([] as readonly string[]),
+    device: () => succeed({} as ResidentHeaders),
   })
 }
 

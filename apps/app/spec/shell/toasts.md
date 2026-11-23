@@ -118,9 +118,11 @@ pure def sometimesQueuedBehindFailure(s: Toasts): bool = s.queued.length() > 0 a
 pure def sometimesFullQueue(s: Toasts): bool = s.queued.length() == QueueLimit
 ```
 
-### A toast leaves when its time is up or its Undo ran, and the next one takes its place
+### A toast leaves when its time is up, its Undo ran or the owner dismissed it, and the next one takes its place
 
-Expiry belongs to the toast it was set for. A held toast never expires.
+Expiry belongs to the toast it was set for. A held toast never expires. A tap on the toast's
+message, or Enter or Space on it, dismisses the toast shown then without running its Undo, and
+focus that was in the toast returns to where it came from.
 
 ```quint
 pure def closed(queue: List[Toast], s: Toasts): Toasts =
@@ -130,12 +132,14 @@ pure def canExpire(s: Toasts, seq: int): bool = s.shown.message != "" and not(s.
 pure def expire(s: Toasts, seq: int): Toasts = closed(s.queued, s)
 pure def canTakeAction(s: Toasts, seq: int): bool = s.shown.undo != "" and seq == s.seq
 pure def takeAction(s: Toasts, seq: int): Toasts = closed(s.queued, s)
+pure def canDismissShown(s: Toasts, seq: int): bool = s.shown.message != "" and seq == s.seq
+pure def dismissShown(s: Toasts, seq: int): Toasts = closed(s.queued, s)
 pure def canHold(s: Toasts): bool = s.shown.message != "" and not(s.held)
 pure def hold(s: Toasts): Toasts = { ...s, held: true, delay: 0 }
 pure def canResume(s: Toasts): bool = s.held
 pure def resume(s: Toasts): Toasts = { ...s, held: false, delay: armed(s) }
 pure def stepExpiryOnlyForItsToast(before: Toasts, via: str, after: Toasts): bool =
-  (via == "expire" or via == "takeAction") implies (after.seq > before.seq)
+  (via == "expire" or via == "takeAction" or via == "dismissShown") implies (after.seq > before.seq)
 pure def sometimesHeldWithQueue(s: Toasts): bool = s.held and s.queued.length() > 0
 ```
 

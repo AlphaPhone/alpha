@@ -71,7 +71,7 @@ export function Transcript(props: TranscriptProps) {
   if (rows.length === 0) return <EmptyState title={props.emptyText} className="py-12" />;
   const newestAgent = rows.findLast((row) => row.kind === "agent")?.id;
   return (
-    <ol className="flex flex-col gap-3" aria-live="polite">
+    <ol data-alpha-transcript className="flex flex-col gap-3" aria-live="polite">
       {rows.map((row) => {
         switch (row.kind) {
           case "user": {

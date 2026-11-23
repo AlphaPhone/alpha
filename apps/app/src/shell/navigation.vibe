@@ -127,12 +127,13 @@ effect function followEnd(machine: NavigationMachine.Shape, native: Native.Shape
   }
 }
 
-effect function followVisibility(machine: NavigationMachine.Shape, admitted: string[]) {
+/** Follows the page leaving and returning; each return reads the admitted apps again from what the build offers now. */
+effect function followVisibility(machine: NavigationMachine.Shape, admittedNow: () => string[]) {
   for try (const _ of pageEvents("visibilitychange", "document")) {
     if (pageHidden()) try sendTo(machine, { type: "hidePage" })
     else {
       try sendTo(machine, { type: "show" })
-      try sendTo(machine, { type: "refreshAdmission", admitted })
+      try sendTo(machine, { type: "refreshAdmission", admitted: admittedNow() })
     }
   }
 }
@@ -164,7 +165,7 @@ export const navigationLive = Layer.effect(Navigation, effect {
   fork.scoped publishBack(machine)
   fork.scoped followBack(machine)
   fork.scoped followHome(machine)
-  fork.scoped followVisibility(machine, admitted)
+  fork.scoped followVisibility(machine, () => admittedApps(build.info))
   fork.scoped followEnd(machine, try Native)
   if (build.info.testMocks) fork.scoped followDevCommands(machine)
   const send = (event: NavigationEvent) => sendTo(machine, event)

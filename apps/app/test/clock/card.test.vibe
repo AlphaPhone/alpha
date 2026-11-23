@@ -1,0 +1,47 @@
+// spec/clock/agentReview.md, "A reminder card names the time, alert and repeat it saves, and its receipt says when its alert could not be arranged"
+import { assert, describe, it } from "@effect/vitest"
+import { describeOwned, ownedOperation, summarizeOwned } from "../../src/clock/operations.vibe"
+
+const zone = "America/Los_Angeles"
+const dueAt = Date.parse("2026-10-29T05:52:17.581Z")
+const schedule = { at: dueAt, dueAt, alertMinutes: 0, recurrence: null }
+
+error NotClock
+
+effect function owned(operation: unknown) {
+  const op = ownedOperation(operation)
+  if (op === undefined) throw new NotClock()
+  return op
+}
+
+describe("Reminder cards (spec/clock/agentReview.md)", () => {
+  it.effect("a reminder card names its due time, alert and repeat to the minute, and the receipt keeps the exact instant", () => effect {
+    const created = try owned({ type: "reminder_create", fields: { title: "Stretch", body: "", schedule } })
+    const card = describeOwned(created, zone)
+    const applied = summarizeOwned(created, "Applied", "scheduled", zone)
+    try Effect.try(() => assert.deepStrictEqual(card.detail.split("\n"), [
+      "“Stretch”",
+      "Due October 28, 2026 at 10:52 PM PDT (America/Los_Angeles).",
+      "Alert October 28, 2026 at 10:52 PM PDT. Notification delivery may be approximate.",
+      "Does not repeat.",
+    ]))
+    try Effect.try(() => assert.match(applied, /10:52:17\.581 PM PDT/))
+    try Effect.try(() => assert.doesNotMatch(card.detail, /:\d\d:\d\d|\.\d{3}/))
+  })
+
+  it.effect("a body that only repeats the title is dropped, and an update that keeps the timing says so", () => effect {
+    const repeated = try owned({ type: "reminder_create", fields: { title: "Stretch", body: " stretch ", schedule } })
+    try Effect.try(() => assert.strictEqual(describeOwned(repeated, zone).detail.split("\n")[1], "Due October 28, 2026 at 10:52 PM PDT (America/Los_Angeles)."))
+    const target = { sourceId: "s1", sourceRevision: "r1", reminderId: "rem1", occurrenceId: "o1", revision: "v1" }
+    const kept = try owned({ type: "reminder_update", target, fields: { title: "Stretch", body: "Stretch" } })
+    try Effect.try(() => assert.strictEqual(describeOwned(kept, zone).detail, "“Stretch”\nTiming unchanged."))
+  })
+
+  it.effect("a saved reminder whose alert the phone could not arrange is never a plain success", () => effect {
+    const created = try owned({ type: "reminder_create", fields: { title: "Stretch", body: "", schedule } })
+    try Effect.try(() => assert.deepStrictEqual(
+      [summarizeOwned(created, "Applied", "permission-denied", zone), summarizeOwned(created, "Applied", "scheduling-failed", zone)],
+      ["Reminder saved, but notifications are disabled.", "Reminder saved, but notification scheduling failed."],
+    ))
+  })
+})
