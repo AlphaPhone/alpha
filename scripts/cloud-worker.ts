@@ -193,7 +193,16 @@ export async function smoke(environment: CloudEnvironment, fetchImpl: typeof fet
     const plans: unknown = json(text)?.plans;
     return Array.isArray(plans) && ['plus_monthly', 'pro_monthly'].every(key => plans.some(plan => plan?.key === key)) ? null : 'expected the Plus and Pro plans';
   });
-  await probe('sign-in methods', `${row.api}/api/v1/auth/methods`, (_response, text) => json(text) ? null : 'expected the sign-in methods');
+  // Upstream answers {email, sms, google} (spec/cloud/deployment.md, MethodsAnswer). Alpha's profile delivers mail and
+  // configures Google, and has no SMS delivery (cloud/src/profile.vibe), so the phone's email and Google sign-in must be
+  // offered; SMS is reported, not required.
+  await probe('sign-in methods', `${row.api}/api/v1/auth/methods`, (_response, text) => {
+    const methods = json(text);
+    const shaped = ['email', 'sms', 'google'].every(name => typeof methods?.[name] === 'boolean');
+    if (!shaped) return 'expected the sign-in methods {email, sms, google}';
+    const missing = ['email', 'google'].filter(name => methods[name] !== true);
+    return missing.length ? `${missing.join(' and ')} sign-in not offered` : null;
+  });
   await probe('asset links', `${row.web}/.well-known/assetlinks.json`, (response, text) => {
     if (!/^application\/json\b/i.test(response.headers.get('content-type') ?? '')) return 'not application/json';
     const signer = loadJson<{signerSha256: string}>(path.join(root, 'android/release-signer.json')).signerSha256;
