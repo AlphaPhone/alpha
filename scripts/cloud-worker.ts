@@ -230,7 +230,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const inputs = () => { if (!o.inputs) usage(); return path.resolve(o.inputs!); };
   const resources = () => loadJson<Record<CloudEnvironment, CloudResources>>(o.resources!);
   const reconcile = (env: CloudEnvironment, databaseUrl?: string, create = false) =>
-    reconcileCloudResources({ids: resources()[env], sibling: resources()[env === 'staging' ? 'production' : 'staging'], apiHost: new URL(ALPHA_CLOUD_DEPLOYMENT[env].api).host,
+    reconcileCloudResources({ids: resources()[env], sibling: resources()[env === 'staging' ? 'production' : 'staging'],
+      apiHost: new URL(ALPHA_CLOUD_DEPLOYMENT[env].api).host, webHost: new URL(ALPHA_CLOUD_DEPLOYMENT[env].web).host,
       databaseUrl, accountId: process.env.CLOUDFLARE_ACCOUNT_ID, token: process.env.CLOUDFLARE_API_TOKEN, create});
   const render = (env: CloudEnvironment) => alphaCloud(['render', '--inputs', inputs(), '--environment', env, '--resources', o.resources!, ...(o.out ? ['--out', path.resolve(o.out)] : [])]) as {api: string; edge: string};
   try {

@@ -138,9 +138,10 @@ environment's profile at `alpha-cloud/profile.json`, whose SHA-256 is the `CLOUD
 variable. `deploy` uploads the API Worker's secrets with its version using
 `wrangler deploy --secrets-file`, then deploys the web Worker, whose `API` service binding names the
 API Worker. `secrets --apply` pushes the secrets alone for a rotation. `provision` verifies the
-account's zone, KV namespace, Hyperdrive configuration, R2 bucket and proxied DNS for the API and
-blob hosts. It creates missing resources and confirms them by readback. If a previous run stopped
-partway, rerun with the same account and environment to recover the resources by name. Resolve
+account's zone, KV namespace, Hyperdrive configuration, R2 bucket, proxied DNS for the blob host,
+and ownership of the API and web hostnames. It creates missing resources and confirms them by
+readback. If a previous run stopped partway, rerun with the same account and environment to
+recover the resources by name. Resolve
 conflicts in the account or resource configuration before continuing. With `--write`, commit the
 updated `cloud/resources.json`. The API and web hosts are Worker custom domains created on
 deployment.

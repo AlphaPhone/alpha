@@ -22,7 +22,7 @@ The web, API and blob hostnames are on the apex or one level below it in the
 | Role | Production | Staging | Created by |
 |---|---|---|---|
 | Web / App Link host (`cloud/src/edge.vibe` Worker) | `alphaphone.dev` | `staging.alphaphone.dev` | Worker custom domain, on `deploy` |
-| API (`cloud/src/worker.vibe`, upstream's Cloud Worker) | `api.alphaphone.dev` | `api-staging.alphaphone.dev` | Worker custom domain, on `deploy`; DNS checked by `provision` |
+| API (`cloud/src/worker.vibe`, upstream's Cloud Worker) | `api.alphaphone.dev` | `api-staging.alphaphone.dev` | Worker custom domain, on `deploy`; hostname checked by `provision` |
 | Blob storage (R2, same account) | `blob.alphaphone.dev` | `blob-staging.alphaphone.dev` | Proxied DNS, on `provision` |
 | Sign-in email sender | `noreply@alphacompute.cc` | same | Resend domain verification |
 
@@ -147,9 +147,10 @@ pnpm cloud:worker provision --environment staging --env-file ~/.config/alpha-clo
 ```
 
 This verifies the zone, then creates (or finds by name, if a previous run stopped partway) the KV
-namespace, the Hyperdrive configuration for `DATABASE_URL`, the R2 bucket, and proxied DNS records
-for `api-staging.` and `blob-staging.`. It confirms each one by reading it back. `--write` records
-the account and resource IDs in `cloud/resources.json`. **Commit that file** (IDs only, no
+namespace, the Hyperdrive configuration for `DATABASE_URL`, the R2 bucket, and the proxied DNS record
+for `blob-staging.`. It confirms each one by reading it back. The API and web hostnames must be
+available or already attached to the expected Workers. Cloudflare manages their DNS on deploy.
+`--write` records the account and resource IDs in `cloud/resources.json`. **Commit that file** (IDs only, no
 secrets) and open a PR, or send it to the owner. If it reports a conflict (a resource with that
 name owned or configured differently), stop and resolve it in the Cloudflare dashboard. Do not
 rename resources to get past it.

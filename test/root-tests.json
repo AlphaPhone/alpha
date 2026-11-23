@@ -30,6 +30,7 @@
   "test/avatar-initials-audit.test.mjs",
   "test/ci-pin-bound-scripts.test.mjs",
   "test/ci-ruleset-readback.test.mjs",
+  "test/cloud-provision.test.mjs",
   "test/cloud-worker.test.mjs",
   "test/cuttlefish-launcher-postboot.test.mjs",
   "test/deliver-app-update.test.mjs",
@@ -233,13 +234,6 @@
    ],
    "reason": "It imports apps/app/src/runtime/aosp-image.ts, a legacy renderer module.",
    "movedTo": "The platform area (scripts/legacy-retirement.json maps the AOSP image capability to apps/app/spec/platform)."
-  },
-  {
-   "files": [
-    "test/cloud-provision.test.mjs"
-   ],
-   "reason": "cloud-provision reads the removed cloud/policy.json.",
-   "movedTo": "Not moved yet: port cloud-provision to cloud/deployment.json (docs/vibestack-open-items.md, Tooling)."
   },
   {
    "files": [
