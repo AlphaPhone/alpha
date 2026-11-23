@@ -50,6 +50,8 @@ export type TranscriptProps = {
   onPlan: (row: Extract<Row, { kind: "agent" }>) => void;
   /** Open a workflow run a reply announced. */
   onOpenRun: (workflowId: string, runId: string) => void;
+  /** Open Calendar's review of a change the agent queued for approval. */
+  onReviewApproval?: (requestId: string) => void;
   /** Open the map of a Maps card in the agent message counted `ordinal`. */
   onOpenMap?: (card: MapsCard, ordinal: number) => void;
   /** The selected Inbox account's address, shown for an email card's "me". */
@@ -95,7 +97,7 @@ export function Transcript(props: TranscriptProps) {
                 {row.reply.status === "Planning" || (row.reply.status === "Working" && row.text === "")
                   ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" aria-hidden />{row.label ?? "Thinking"}</p>
                   : <ReplyText segments={row.segments} onChoose={(value) => props.onChoose(value, row.id === newestAgent ? row.ordinal : undefined)} onOpenRun={props.onOpenRun}
-                      live={row.id === newestAgent && row.ordinal !== undefined && !typing}
+                      live={row.id === newestAgent && row.ordinal !== undefined && !typing} onReviewApproval={props.onReviewApproval}
                       onOpenMap={props.onOpenMap === undefined || row.ordinal === undefined ? undefined : (card) => props.onOpenMap?.(card, row.ordinal ?? 0)} />}
                 {row.notices.map((notice) => <p key={notice} className="text-sm text-muted-foreground">{notice}</p>)}
                 {row.cutOff !== "NotCutOff" && <p className="font-mono text-xs uppercase text-muted-foreground">{cutOffText(row.cutOff)}</p>}

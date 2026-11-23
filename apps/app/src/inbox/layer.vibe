@@ -14,7 +14,7 @@ import { layer as saved } from "./saved.vibe"
 import { layer as accounts } from "./accounts.vibe"
 import { layer as reader } from "./reader.vibe"
 import { layer as mailbox } from "./mailbox.vibe"
-import { layer as operations } from "./operations.vibe"
+import { JournalKept, layer as operations } from "./operations.vibe"
 import { layer as composer } from "./composer.vibe"
 import { layer as selection } from "./selection.vibe"
 import { layer as notices } from "./notices.vibe"
@@ -39,11 +39,13 @@ export { inboxCapabilities } from "./handoffs.vibe"
 export { keepPreviousDrafts } from "./previous.vibe"
 export type { ComposerBack } from "./composer.vibe"
 
-/** The drafts and operation journal kept in the phone's mail store, each held for review and started fresh where what is kept is not a state. */
+/** The drafts and operation journal kept in the phone's mail store, each held for review and started fresh where what is kept is not a state; a journal only in memory says so, and nothing is dispatched from it. */
 export const mailMachines = Layer.provide(
   Layer.mergeAll(
     storedOrHeld(keys.drafts, decodeDrafts, storedDrafts(keys.drafts), draftsMachine()),
-    storedOrHeld(keys.operations, decodeJournal, storedJournal(keys.operations), journalMachine()),
+    storedOrHeld(keys.operations, decodeJournal,
+      Layer.merge(storedJournal(keys.operations), Layer.succeed(JournalKept, { kept: true })),
+      Layer.merge(journalMachine(), Layer.succeed(JournalKept, { kept: false }))),
   ),
   Layer.provideMerge(mailHeld, mailStore),
 )

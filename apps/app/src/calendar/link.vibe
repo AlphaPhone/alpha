@@ -1,0 +1,238 @@
+// spec/calendar/googleLink.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"; spec/calendar/googleLink.md, "Story: See whether my agent's Calendar reaches Google"; spec/calendar/googleLink.md, "Story: Disconnect Google from Calendar without leaving sync running"
+import {
+  type GoogleLink, type GoogleRow, type LinksReply, type PauseReport, type Event as LinkEvent,
+  Machine as LinkMachine, accessContinuation, googleRow, grantOf, pauseNeeded, pauseReport,
+} from "../../gen/calendar__googleLink.effect.vibe"
+import { controlOperationKey, type LinkedCalendarCandidate, type LinkedCalendarDestination } from "@elizaos/plugin-calendar/linked-sync"
+import type { LinkedCalendarControlView } from "@elizaos/plugin-calendar/client"
+import { type GoogleAccount, GoogleAccounts } from "../account/google.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { AgentCalendar } from "./agent.vibe"
+import { residentClients } from "./client.vibe"
+import { CalendarDrafts } from "./drafts.vibe"
+
+/** What Calendar's Google Calendar row shows: the account read's row, the setup and its result, the linked calendar and the last disconnect's pause. */
+export interface CalendarLinkView {
+  readonly row: GoogleRow
+  readonly link: GoogleLink
+  /** The linked Google calendar's account, when one was read back. */
+  readonly destination: string
+  /** Linked events held as conflicted or quarantined on the destination, from the last readback. */
+  readonly held: number
+  readonly running: boolean
+  readonly pause: PauseReport | undefined
+}
+
+const WRITE = "google.calendar.write"
+const READ = "google.calendar.read"
+
+function granted(rows: ReadonlyArray<GoogleAccount>, capability: string): ReadonlyArray<GoogleAccount> {
+  return rows.filter((row) => row.grantedCapabilities.includes(capability))
+}
+
+/** The row a Google account read gives Calendar, from its grants alone. */
+export function rowOf(rows: ReadonlyArray<GoogleAccount>, readOk: boolean): GoogleRow {
+  return googleRow(readOk, granted(rows, READ).length > 0, granted(rows, WRITE).length > 0)
+}
+
+function same(left: LinkedCalendarDestination | null, right: LinkedCalendarDestination): boolean {
+  return left !== null && left.connectorAccountId === right.connectorAccountId && left.providerCalendarId === right.providerCalendarId
+}
+
+/** Calendar's link to Google: setup from the Google Calendar row, its status, and a disconnect that pauses sync first. */
+export service CalendarLink {
+  readonly changes: Stream.Stream<CalendarLinkView>
+  view(): CalendarLinkView!!
+  /** Links the agent's Calendar from a write grant, or opens Google's Calendar consent when the grant cannot write. */
+  link(): void!!
+  /** Stops the setup in progress; a write already sent stays unconfirmed. */
+  cancel(): void!!
+  /** Opens the account area's Google panel with its Calendar intent. */
+  connect(): void!!
+  /** Pauses the agent's Calendar sync through its control, then revokes Google's access whatever the pause answered. */
+  disconnect(): void!!
+}
+
+/** The link service over the resident's linked-sync control, the account area's Google accounts and the link machine. */
+export const linkLayer = Layer.effect(CalendarLink, effect {
+  const machine = try LinkMachine
+  const google = try GoogleAccounts
+  const navigation = try Navigation
+  const agent = try AgentCalendar
+  const drafts = try CalendarDrafts
+  const linked = residentClients(try Resident).linked
+  const destination = try Ref.make("")
+  const held = try Ref.make(0)
+  const running = try Ref.make(false)
+  const pause = try Ref.make<PauseReport | undefined>(undefined)
+
+  effect function snapshot(): CalendarLinkView {
+    const rows = try google.list()
+    const g = try google.current()
+    return {
+      row: rowOf(rows, !g.unverified), link: try machine.get(), destination: try Ref.get(destination), held: try Ref.get(held),
+      running: try Ref.get(running), pause: try Ref.get(pause),
+    }
+  }
+
+  const shown = try SubscriptionRef.make<CalendarLinkView>(try snapshot())
+  effect function publish() { try SubscriptionRef.set(shown, try snapshot()) }
+  effect function send(event: LinkEvent) {
+    const after = machine.send(event) catch () => undefined
+    try publish()
+    return after
+  }
+
+  effect function fence(owner: string) {
+    const view = try agent.view()
+    const draft = try drafts.get()
+    try send({ type: "setFence", stillCurrent: view.state.portOwner === owner && owner !== "", mayChange: !draft.alive })
+    try send({ type: "setCalendar", ready: view.state.status === "Ready" || view.state.status === "Partial" || view.state.status === "Unavailable",
+      busy: view.state.read.id !== 0 || view.state.write.id !== 0 })
+  }
+
+  effect function control(): LinkedCalendarControlView | undefined {
+    return try tryPromise({ try: () => linked.getLinkedCalendarControl(), catch: () => undefined }) catch () => undefined
+  }
+
+  effect function candidates(): ReadonlyArray<LinkedCalendarCandidate> | undefined {
+    const answer = tryPromise({ try: () => linked.getLinkedCalendarDestinations(), catch: () => undefined }) catch () => undefined
+    return answer?.candidates
+  }
+
+  effect function write(operation: "select" | "resume" | "pause", owner: string, revision: number, target: LinkedCalendarDestination | null): LinkedCalendarControlView | undefined {
+    return effect {
+      const idempotencyKey = try controlOperationKey(owner, operation, revision, target)
+      const request = operation === "select" ? { operation, destination: target, expectedRevision: revision, idempotencyKey } : { operation, expectedRevision: revision, idempotencyKey }
+      return try tryPromise({ try: () => linked.updateLinkedCalendarControl(request), catch: () => undefined })
+    } catch () => undefined
+  }
+
+  effect function linksReply(target: LinkedCalendarDestination | null): LinksReply {
+    const answer = tryPromise({ try: () => linked.listLinkedCalendarEvents(), catch: () => undefined }) catch () => undefined
+    if (answer === undefined) return "LinksFailed"
+    const count = answer.links.filter((entry) => (entry.state === "conflicted" || entry.state === "quarantined") && target !== null && entry.destination !== null && same(entry.destination, target)).length
+    try Ref.set(held, count)
+    return count === 0 ? "LinksClean" : count === 1 ? "LinksConflictHeld" : "LinksConflictMany"
+  }
+
+  effect function runLink() {
+    const view = try agent.view()
+    const owner = view.state.portOwner
+    const rows = try google.list()
+    const writers = granted(rows, WRITE)
+    const emails = new Set(writers.map((row) => (row.email ?? "").toLowerCase()).filter((email) => email !== ""))
+    try Ref.set(pause, undefined)
+    try Ref.set(held, 0)
+    try fence(owner)
+    let state = try send({ type: "start", grant: grantOf(granted(rows, READ).length > 0, writers.length > 0) })
+    let reviewed: LinkedCalendarControlView | undefined = undefined
+    let choices: ReadonlyArray<LinkedCalendarCandidate> = []
+    let waits = 0
+    while (state !== undefined && state.phase !== "LinkDone" && state.phase !== "LinkIdle") {
+      try fence(owner)
+      state = try machine.get()
+      if (state.phase === "WaitReview" || state.phase === "WaitWrite") {
+        try sleep("250 millis")
+        try fence(owner)
+        const waited = try machine.get()
+        if (waited.phase === "WaitReview" || waited.phase === "WaitWrite") {
+          waits += 1
+          if (waited.calendarBusy && waits < 120) continue
+          if (waited.calendarBusy) try send({ type: "abort" })
+          state = try machine.get()
+          continue
+        }
+        state = waited
+        continue
+      }
+      if (state.phase === "ReviewingControl") {
+        const read = try control()
+        const listed = read === undefined ? undefined : try candidates()
+        if (read === undefined || listed === undefined) {
+          state = try send({ type: "reviewFailed" })
+          continue
+        }
+        reviewed = read
+        choices = listed
+        const saved = read.destination
+        const savedCandidate = saved === null ? undefined : listed.find((candidate) => same(saved, candidate))
+        const approved = (candidate: LinkedCalendarCandidate) => emails.has((candidate.accountEmail ?? "").toLowerCase())
+        const primaries = listed.filter((candidate) => candidate.primary && approved(candidate))
+        try Ref.set(destination, savedCandidate?.accountEmail ?? "")
+        state = try send({
+          type: "reviewReply", revision: read.revision, hasDestination: saved !== null, listed: savedCandidate !== undefined,
+          authorized: savedCandidate !== undefined && approved(savedCandidate), paused: read.paused,
+          pendingId: read.pendingDispatch === null ? "" : read.pendingDispatch.reference ?? read.pendingDispatch.linkId, onePrimary: primaries.length === 1,
+        })
+        continue
+      }
+      if (state.phase === "CheckingWrite") {
+        try fence(owner)
+        state = try send({ type: "authorize" })
+        continue
+      }
+      if (state.phase === "WritingControl") {
+        const select = state.planned === "SelectDestination"
+        const primary = choices.filter((candidate) => candidate.primary && emails.has((candidate.accountEmail ?? "").toLowerCase()))[0]
+        const target = select && primary !== undefined ? { connectorAccountId: primary.connectorAccountId, providerCalendarId: primary.providerCalendarId } : null
+        const answer = try write(select ? "select" : "resume", owner, reviewed?.revision ?? 0, target)
+        if (select && primary !== undefined) try Ref.set(destination, primary.accountEmail ?? "")
+        state = answer === undefined ? try send({ type: "writeFailed" }) : try send({ type: "writeReply", revision: answer.revision })
+        continue
+      }
+      if (state.phase === "ListingLinks") {
+        state = try send({ type: "linksReply", links: try linksReply(reviewed?.destination ?? null) })
+        continue
+      }
+      return
+    }
+  }
+
+  effect function connect() {
+    try google.close()
+    try google.open("CalendarPanel")
+    try navigation.open("account", "google")
+  }
+
+  fork.scoped Stream.runForEach(google.accounts, () => publish())
+  fork.scoped Stream.runForEach(google.changes, () => publish())
+
+  return {
+    changes: SubscriptionRef.changes(shown),
+    view: () => SubscriptionRef.get(shown),
+    effect link() {
+      const rows = try google.list()
+      const grant = grantOf(granted(rows, READ).length > 0, granted(rows, WRITE).length > 0)
+      if (accessContinuation(grant) === "ContinueConsent") {
+        try connect()
+        return
+      }
+      if (try Ref.get(running)) return
+      try Ref.set(running, true)
+      try ensuring(runLink(), effect { try Ref.set(running, false); try publish() })
+    },
+    effect cancel() { try send({ type: "abort" }) },
+    connect,
+    effect disconnect() {
+      const view = try agent.view()
+      const owner = view.state.portOwner
+      const read = try control()
+      const reviewed = read !== undefined
+      const hasDestination = read?.destination !== null && read?.destination !== undefined
+      const paused = read?.paused ?? true
+      let answer: LinkedCalendarControlView | undefined = undefined
+      if (read !== undefined && pauseNeeded(reviewed, hasDestination, paused) && owner !== "") {
+        answer = try write("pause", owner, read.revision, null)
+      }
+      try Ref.set(pause, pauseReport(reviewed, hasDestination, paused, answer !== undefined, answer?.paused === true, answer !== undefined && read !== undefined && answer.revision > read.revision))
+      if ((try google.current()).account === 0) {
+        try google.open("CalendarPanel")
+        timeout(Stream.runHead(Stream.filter(google.changes, (g) => !g.readPending)), "30 seconds") catch () => undefined
+      }
+      try google.disconnect()
+      try publish()
+    },
+  }
+})

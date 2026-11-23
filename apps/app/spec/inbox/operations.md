@@ -15,6 +15,9 @@ value, and is never written over.
 
 ### An account holds at most one operation, and a kind is offered only when the account allows it
 
+A settled receipt (succeeded or rejected, and not held for a restored send's cleanup) is closed by
+the next change the owner starts, so one archive or send never blocks the next.
+
 Send needs send access, Gmail drafts need draft access, archive and Trash need mailbox changes, star
 changes need stars and read changes need read state; a forward with original attachments also needs
 forwarding of originals. A proposal over 7.5 MiB is refused before it is recorded.
@@ -182,8 +185,11 @@ pure val receiptValues = Set(prepared1)
 ### Confirming records the dispatch before Gmail is asked, and only for the email the composer still shows
 
 Confirmation needs a prepared review, the kind still allowed and, for a send or Gmail draft save,
-the composer still showing exactly the reviewed draft. The operation is stored as dispatching before
-the request leaves, so a lost answer can never lead to a second dispatch.
+the composer still showing exactly the reviewed draft, read again once Gmail's review is back: an
+email edited while Gmail reviewed it has that review discarded and is not sent. The operation is
+stored as dispatching before the request leaves, so a lost answer can never lead to a second
+dispatch; a journal running only in memory, because the kept one could not be read or set apart,
+confirms nothing.
 
 ```quint
 pure def canConfirm(s: Journal, requestId: str, shown: ComposerRef): bool = {
@@ -240,7 +246,8 @@ selected account and the exact content, so a retry of the same version continues
 and reads the same receipt, while an edited version is sent as its own. It needs at most twenty
 distinct literal recipients, a one-line subject and a body of at most 64,000 characters. Saved
 accounts, an account not checked for this session, or another operation not settled yet leave it
-unsent.
+unsent. An unsent review of another email is not an operation in flight: as with Send, the chat's
+version replaces it, so an edited version prepared but never dispatched does not block the next.
 
 ```quint
 type ChatEmail = { recipients: List[str], literal: bool, subjectOneLine: bool, bodyChars: int }

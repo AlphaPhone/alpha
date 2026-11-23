@@ -10,6 +10,19 @@ claim from a Calendar read.
 > As the owner, I want Home to show my next event from the calendar I chose in Calendar, and to say
 > my day is empty only when Calendar checked it.
 
+### Calendar reads the current window when its agent binding becomes usable and when the page returns, so Home has a read before Calendar opens
+
+Home never waits for Calendar to be opened: binding a usable agent and the page coming back to the
+front each read the window Calendar would show, behind any read or write in flight.
+
+```quint
+pure def homeReads(usableNow: bool, usableBefore: bool, visibleNow: bool, visibleBefore: bool, hasOwner: bool): bool =
+  hasOwner and usableNow and ((not(usableBefore)) or (visibleNow and not(visibleBefore)))
+pure def lawNoReadWithoutAnOwner(usableNow: bool, usableBefore: bool, visibleNow: bool, visibleBefore: bool): bool =
+  not(homeReads(usableNow, usableBefore, visibleNow, visibleBefore, false))
+pure def lawANewBindingReads(visibleNow: bool, visibleBefore: bool): bool = homeReads(true, false, visibleNow, visibleBefore, true)
+```
+
 ### Home stays quiet without an owner, while Calendar is changing, or from an incomplete read
 
 A saved copy from before the agent connected may show its event, marked saved, never an empty day.

@@ -62,6 +62,15 @@
             "GET"
           ],
           "paths": [
+            "/api/lifeops/calendar/sync-control/destinations"
+          ],
+          "query": []
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "paths": [
             "/api/lifeops/calendar/links"
           ],
           "query": [

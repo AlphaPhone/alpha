@@ -2,7 +2,7 @@
 import type { CameraHandoffs, ReviewedFile } from "../camera/ports.vibe"
 import type { AssistantEmail } from "../assistant/ports.vibe"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
-import { chatEmailSendable, chatBodyLimit, inboxAdvertised } from "../../gen/inbox__operations.ts"
+import { chatEmailSendable, chatBodyLimit, inboxAdvertised, sendStep } from "../../gen/inbox__operations.effect.vibe"
 import { ShellMail, type ReviewedEmail } from "../shell/ports.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { InboxAccounts } from "./accounts.vibe"
@@ -36,15 +36,16 @@ export const assistantEmailSender = effect {
         if (existing.phase === "Reviewing") return answerOf(try operations.confirm(existing.composer))
         return answerOf(existing.phase === "Preparing" ? try operations.retry() : try operations.refresh())
       }
-      const busy = existing !== undefined && existing.receipt.receiptState !== "SucceededReceipt" && existing.receipt.receiptState !== "RejectedReceipt"
-      if (!chatEmailSendable(email, a.phase === "Checked" && !a.fromDisk, busy) || draft.body.length > chatBodyLimit) return "Unsent" as SendAnswer
-      if (existing !== undefined) try operations.clear()
       const mail = {
         mode: "ComposeMail" as const, toList, ccList: [], bccList: [], subject: oneLineSubject(draft.subject), body: draft.body,
         files: [], forwardMessage: "", forwardHistory: "", forwardParts: [], replyMessage: ""
       }
       const draftId = `assistant-email:${requestId}`
       const composer = { draftId, content: JSON.stringify(mail) }
+      const step = existing === undefined ? "PrepareNew" : sendStep(true, existing, composer)
+      const busy = step === "ShowReview" || step === "ReadReceipt"
+      if (!chatEmailSendable(email, a.phase === "Checked" && !a.fromDisk, busy) || draft.body.length > chatBodyLimit) return "Unsent" as SendAnswer
+      if (existing !== undefined) try operations.clear()
       const prepared = try operations.prepare("SendKind", { tag: "MessageProposal", mail, draftId: "", expectedDigest: "" }, composer, { localDraft: draftId, revision: 1, gmailDraft: "", gmailDigest: "" }, requestId)
       const reviewing = try operations.current()
       const outcome = prepared === undefined && reviewing !== undefined && reviewing.requestId === requestId && reviewing.phase === "Reviewing" ? try operations.confirm(composer) : prepared
