@@ -121,12 +121,15 @@ pure val revisionValues = Set(1, 2)
 pure val levelValues = Set(0, 1, 8, 9)
 pure val attemptValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3, 4)
-pure val weight_loaded = 4
-pure val weight_startEdit = 4
-pure val weight_trim = 4
-pure val weight_previewed = 6
+pure val startValues = Set(0, 1)
+pure val endValues = Set(2, 3)
+pure val weight_openItem = 4
+pure val weight_loaded = 20
+pure val weight_startEdit = 6
+pure val weight_trim = 10
+pure val weight_previewed = 12
 pure val weight_save = 6
-pure val weight_saved = 6
+pure val weight_saved = 20
 ```
 
 ## Story: Look at a photo or video

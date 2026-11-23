@@ -111,7 +111,7 @@ pure val itemsValues = Set(Set(1), Set(1, 2), Set(3))
 pure val doneValues = Set(Set(), Set(1))
 pure val staleValues = Set(Set(), Set(2))
 pure val onlyValues = Set(Set(1), Set(2, 3))
-pure val ticketValues = Set(1, 2, 3, 4)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val attemptValues = Set(1, 2, 3)
 pure val revisionValues = Set(1, 2)
 pure val basisValues = Set(1, 2)
@@ -119,12 +119,13 @@ pure val queryValues = Set("", "beach")
 pure val personValues = Set(0, 4)
 pure val nameValues = Set("", "Trip")
 pure val lettersValues = Set(0, 4, 81)
-pure val weight_listed = 4
-pure val weight_showTab = 3
-pure val weight_startSelect = 3
-pure val weight_toggle = 3
-pure val weight_chooseAlbum = 4
-pure val weight_addTo = 4
+pure val weight_accessIs = 3
+pure val weight_listed = 12
+pure val weight_showTab = 5
+pure val weight_startSelect = 5
+pure val weight_toggle = 6
+pure val weight_chooseAlbum = 8
+pure val weight_addTo = 12
 ```
 
 ## Story: Give Photos access
