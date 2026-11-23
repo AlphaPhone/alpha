@@ -92,6 +92,7 @@ type Moved = { state: Files, out: List[Effect] }
 
 ```quint
 pure val ticketValues = Set(1, 2, 3)
+pure val lookValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 pure val requestValues = Set(7, 8)
 pure val targetValues = Set(1, 4)
 pure val folderValues = Set(1)
@@ -342,9 +343,9 @@ pure def refresh(s: Files, by: Actor): Moved =
   val listing = R::ask(s.listing)
   { state: { ...s, listing: listing }, out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })) }
 
-pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
+pure def canListed(s: Files, look: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, look)
 
-pure def listed(s: Files, ticket: int, ok: bool, gone: bool, entries: List[F::Item], by: Actor): Moved =
+pure def listed(s: Files, look: int, ok: bool, gone: bool, entries: List[F::Item], by: Actor): Moved =
   val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => i.kind == s.category) else entries
   val picked = s.picked.select(id => has(items, id))
   val same = chosen(s) == items.select(i => picked.includes(i.id))
