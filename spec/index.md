@@ -8,3 +8,4 @@ Calendar and Maps, and never hosts the agent.
 
 - [App](./app/): the phone's interface, in `apps/app`
 - [Kit](./kit/): rules several areas keep
+- [Agent](./agent/): the agent pack the phone runs, in `apps/agent`
