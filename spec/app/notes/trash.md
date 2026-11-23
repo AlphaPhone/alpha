@@ -95,7 +95,7 @@ pure val revisionValues = Set(1, 2)
 pure val recordingValues = Set(0, 7)
 pure val askedValues = Set(1, 2)
 pure val nowValues = Set(0, 1, retention, retention + 1)
-pure val ticketValues = Set(1, 2, 3, 4, 5, 6)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 pure val ownerValues = Set(0, 1, 2)
 pure val entriesValues = Set(
   List(), List({ id: 1, at: 0, revision: 1, recording: 0 }),
