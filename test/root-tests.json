@@ -24,6 +24,7 @@
   "test/sign-release-apks.test.mjs",
   "test/upstream-native-source.test.mjs",
   "test/upstream-pin-guard.test.mjs",
+  "test/upstream-reachability.test.mjs",
   "test/wallet-disabled.test.mjs"
  ],
  "held": [
@@ -177,11 +178,10 @@
   },
   {
    "files": [
-    "test/cloud-provision.test.mjs",
-    "test/upstream-reachability.test.mjs"
+    "test/cloud-provision.test.mjs"
    ],
-   "reason": "cloud-provision reads the removed cloud/policy.json; upstream-reachability needs the reachability record refreshed for the vibestack-dp pin.",
-   "movedTo": "Not moved yet: port cloud-provision to cloud/deployment.json and re-record scripts/ci/upstream-reachability.json (docs/vibestack-open-items.md, Tooling)."
+   "reason": "cloud-provision reads the removed cloud/policy.json.",
+   "movedTo": "Not moved yet: port cloud-provision to cloud/deployment.json (docs/vibestack-open-items.md, Tooling)."
   }
  ]
 }

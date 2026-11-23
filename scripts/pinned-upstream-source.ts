@@ -7,11 +7,18 @@ export const GENERATED_UPSTREAM_DIRECTORIES = [
 	"system", "camera", "location", "network-policy", "calendar", "reminders", "agent-service", "runtime-files", "sign-in", "secure-store",
 	"browser-surface", "contacts", "action-journal", "notifications", "messages", "phone", "passwords", "media", "filesystem",
 ].map((name) => `packages/os/android/${name}/build`).concat(
-	// The upstream root's own build and spec tools (pnpm build:upstream): vibestack's dist, its VibeLang and spec caches.
-	[".cache", ".vibe", "dist", ".spec-cache", "vibestack/studio/.spec-cache", "vibestack/studio/.vibe"],
+	// The upstream root's own build and spec tools (pnpm build:upstream): vibestack's dist, its generated root modules, its VibeLang and spec caches.
+	[".cache", ".vibe", "dist", "gen", ".spec-cache", "vibestack/studio/.spec-cache", "vibestack/studio/.vibe"],
+	// The design system's build writes its token stylesheets here.
+	["packages/design-system/generated"],
 );
-/** The upstream root's turbo logs from pnpm build:upstream. */
-export const GENERATED_UPSTREAM_FILES = [".turbo/turbo-build.log", ".turbo/turbo-gen.log"];
+/**
+ * The upstream root's turbo logs from pnpm build:upstream, and the single-file outputs upstream's own
+ * package builds write outside a build directory (the os build writes the browser control channel).
+ */
+export const GENERATED_UPSTREAM_FILES = [
+	".turbo/turbo-build.log", ".turbo/turbo-gen.log", "packages/os/android/browser-surface/resources/control-channel.js",
+];
 
 /** Authenticate vendor bytes at the pinned commit before resolving or compiling consumer source. */
 export async function verifyPinnedUpstream(root: string) {
