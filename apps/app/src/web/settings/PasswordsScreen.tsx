@@ -44,7 +44,7 @@ export function PasswordsScreen({ vault, acts, onClose }: PasswordsScreenProps) 
     <div className="flex h-full flex-col bg-background text-foreground">
       <header className="flex items-center gap-2 px-2 py-3">
         <Button variant="ghost" size="icon" aria-label={entry ? "Back to passwords" : "Close Passwords"} onClick={() => (entry ? acts.closeEntry() : onClose())}><ArrowLeft aria-hidden className="size-5" /></Button>
-        <h1 className="font-serif text-2xl">{entry ? entry.label : "Passwords"}</h1>
+        <h1 className="font-display text-2xl">{entry ? entry.label : "Passwords"}</h1>
       </header>
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-6 px-3 pb-8">

@@ -16,7 +16,7 @@ export function RecoveryScreen({ diagnostics, homeEscape = false, onReload, onSw
   return (
     <div role="alertdialog" aria-labelledby="alpha-recovery-title" className="fixed inset-0 z-[100] flex overflow-auto bg-background p-6 text-foreground">
       <div className="m-auto flex w-full max-w-sm flex-col gap-4">
-        <h1 id="alpha-recovery-title" className="font-serif text-3xl">Something went wrong</h1>
+        <h1 id="alpha-recovery-title" className="font-display text-3xl">Something went wrong</h1>
         <Button size="lg" autoFocus onClick={onReload}>Reload</Button>
         {homeEscape && <Button size="lg" variant="secondary" onClick={onSwitchHome}>Switch Home</Button>}
         <details>

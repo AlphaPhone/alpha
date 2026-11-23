@@ -76,7 +76,7 @@ export function MessagesScreen({ route }: MessagesScreenProps) {
       <header className="flex items-center gap-2 px-4 pt-4 pb-2">
         {(open || m.view.tag === "Composing") && <Button variant="ghost" size="icon" aria-label="Back" onClick={back}><ArrowLeft aria-hidden /></Button>}
         {open && <Avatar name={title} />}
-        <h1 className="min-w-0 flex-1 truncate font-serif text-2xl">{open ? title : m.view.tag === "Composing" ? "New message" : "Messages"}</h1>
+        <h1 className="min-w-0 flex-1 truncate font-display text-2xl">{open ? title : m.view.tag === "Composing" ? "New message" : "Messages"}</h1>
         {sole && (
           <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={async () => {
             const outcome = await perform(MessagesView.use((v) => v.callThread()));

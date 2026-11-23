@@ -80,7 +80,7 @@ export function NoteEditor({ draft, row, status, saved, playing, positionMs, tra
         </DropdownMenu>
       </header>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-24">
-        <Input aria-label="Title" className="border-0 px-0 font-serif text-2xl" value={draft.title} onChange={(event) => onEdit({ title: event.target.value })} />
+        <Input aria-label="Title" className="border-0 px-0 font-display text-2xl" value={draft.title} onChange={(event) => onEdit({ title: event.target.value })} />
         {kind === "list" ? (
           <ul className="flex flex-col gap-1">
             {list.map((item, index) => (

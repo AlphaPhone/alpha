@@ -124,7 +124,7 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifica
         <Button variant="ghost" size="icon" aria-label={nav.page === "Root" ? "Close Settings" : "Back"} onClick={() => (nav.page === "Root" ? onClose() : act.back())}>
           <ArrowLeft aria-hidden className="size-5" />
         </Button>
-        <h1 className="font-serif text-2xl">{TITLES[nav.page]}</h1>
+        <h1 className="font-display text-2xl">{TITLES[nav.page]}</h1>
       </header>
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-6 px-3 pb-8">
@@ -275,7 +275,7 @@ function Display({ model, act, native }: { readonly model: SettingsModel; readon
             {[...textScales].sort((a, b) => a - b).map((percent) => (
               <button key={percent} type="button" role="radio" aria-checked={facts.read.textScale === percent}
                 aria-label={`Text size: ${SIZES[percent]}${facts.read.textScale === percent ? ", selected" : ""}`}
-                className={cn("flex min-h-12 flex-1 items-center justify-center rounded-lg font-serif", facts.read.textScale === percent ? "bg-primary text-primary-foreground" : "bg-secondary")}
+                className={cn("flex min-h-12 flex-1 items-center justify-center rounded-lg font-display", facts.read.textScale === percent ? "bg-primary text-primary-foreground" : "bg-secondary")}
                 style={{ fontSize: `${percent}%` }} onClick={() => act.textScale(percent)}>Aa</button>
             ))}
           </div>

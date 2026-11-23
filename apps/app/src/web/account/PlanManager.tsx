@@ -76,7 +76,7 @@ export function PlanManager({ billing, details, onSubscribe, onChange, onCancel,
             <li key={offer.key}>
               <Card className="flex items-center justify-between gap-3 p-4">
                 <div>
-                  <CardTitle className="font-serif text-xl">{offer.name}</CardTitle>
+                  <CardTitle className="font-display text-xl">{offer.name}</CardTitle>
                   <p className="text-muted-foreground">{money(offer.amountCents)}/mo · ${offer.allowance.amountUsd} AI</p>
                   {mine && current && (
                     <p className={current.paymentDue || current.endsAtPeriodEnd ? "text-warn" : "text-ok"}>
@@ -96,7 +96,7 @@ export function PlanManager({ billing, details, onSubscribe, onChange, onCancel,
       {current?.endsAtPeriodEnd && <Button variant="outline" disabled={!canRequestKeep(billing)} onClick={onKeep}>Keep plan</Button>}
       {billing.pending.tag !== "NoPending" && billing.authority !== "Authorized" && (
         <Card className="flex flex-col gap-3 p-4" aria-label="Confirm it’s you">
-          <CardTitle className="font-serif text-xl">Confirm it’s you</CardTitle>
+          <CardTitle className="font-display text-xl">Confirm it’s you</CardTitle>
           {billing.authority === "SessionRequired" ? (
             <Button disabled={!canSendAuthorityCode(billing)} onClick={onSendCode}>Email me a code</Button>
           ) : (

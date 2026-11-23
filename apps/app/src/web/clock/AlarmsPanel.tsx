@@ -49,7 +49,7 @@ export function AlarmsPanel({ clock, now, onAdd, onSnooze, onDismiss, onSwitch, 
             return (
               <li key={alarm.id} className={cn("flex flex-col gap-2 py-3", ringing && "text-primary")}>
                 <div className="flex items-center gap-3">
-                  <span className="font-serif text-4xl tabular-nums">{wall(alarm.hour, alarm.minute)}</span>
+                  <span className="font-display text-4xl tabular-nums">{wall(alarm.hour, alarm.minute)}</span>
                   <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{[alarm.label, describeDays(alarm.days)].filter(Boolean).join(" · ")}</span>
                   {!ringing && (
                     <Switch

@@ -30,7 +30,7 @@ export function RingingCard({ ringer, alarms, timers, onSilence, onSnooze, onDis
         <div key={alarm.id} className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
             <AlarmClock aria-hidden className="size-6 text-primary" />
-            <span className="font-serif text-4xl tabular-nums">{wall(alarm.hour, alarm.minute)}</span>
+            <span className="font-display text-4xl tabular-nums">{wall(alarm.hour, alarm.minute)}</span>
             <span className="truncate text-sm text-muted-foreground">{alarm.label}</span>
           </div>
           <div className="flex gap-2">

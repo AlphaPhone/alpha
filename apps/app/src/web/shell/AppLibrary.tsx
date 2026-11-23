@@ -57,7 +57,7 @@ export function AppLibrary({
       style={{ paddingBottom: "var(--alpha-dock-clearance, 7rem)" }}
     >
       <div className="flex items-center justify-between gap-3 px-4" data-alpha-header>
-        <h1 className="font-serif text-3xl">Apps</h1>
+        <h1 className="font-display text-3xl">Apps</h1>
         <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X aria-hidden className="size-5" /></Button>
       </div>
       <label className="relative mx-4 flex items-center">

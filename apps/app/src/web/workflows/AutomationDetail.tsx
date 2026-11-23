@@ -72,7 +72,7 @@ export function AutomationDetail({ row, canChange, history, report, onSwitch, on
     <article aria-label={name} className="flex flex-col gap-4 px-4">
       <header className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate font-serif text-2xl">{name}</h2>
+          <h2 className="truncate font-display text-2xl">{name}</h2>
           <p className="text-sm text-muted-foreground">{scheduleText(row.schedule)}</p>
         </div>
         {switchable && (
