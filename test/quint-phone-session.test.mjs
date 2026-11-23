@@ -67,7 +67,7 @@ function create() {
   // The image executor's side-effect ports behind the real guard; each run counts only if a port acted.
   const sideEffects = [];
   const basePorts = {
-    current() {}, normalize: value => value.replace(/[^+\d]/g, '') || null, ask: async () => 0, searchContacts: async () => [],
+    current() {}, normalize: value => value.replace(/[^+\d]/g, '') || null, ask: async () => 0, searchContacts: async () => [], contactForNumber: async () => null,
     placeCall: async number => { sideEffects.push(['call', number]); return {status: 'placed'}; },
     sendSms: async () => { sideEffects.push(['sms']); return 'submitted'; },
     getContact: async () => { throw Error('unused'); },

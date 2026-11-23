@@ -4,7 +4,7 @@ import {loadBrowserModule} from './fixtures/browser-source.mjs';
 // The open Browser page rides a chat turn beside the observation: only while the owner's setting is
 // on, only for the observed tab and revision, never longer than the turn budget, and only to a peer
 // that declares the browserPage field.
-const [{browserPageForTurn,observedBrowserTab,registerBrowserPageSource,BROWSER_PAGE_WAIT_MS,pageAddress,agentPageTitle},{ClientObservationSupportSession}]=await loadBrowserModule(['apps/app/src/runtime/browser-page-context.ts','apps/app/src/runtime/client-observation-support.ts']);
+const [{browserPageForTurn,observedBrowserTab,registerBrowserPageSource,BROWSER_PAGE_WAIT_MS,BROWSER_PAGE_FRESH_WAIT_MS,BROWSER_PAGE_CACHE_MAX_AGE_MS,BrowserPageCache,pageAddress,agentPageTitle},{ClientObservationSupportSession}]=await loadBrowserModule(['apps/app/src/runtime/browser-page-context.ts','apps/app/src/runtime/client-observation-support.ts']);
 
 const context={view:'browser',revision:3,sensitive:false,selectedObject:{kind:'browser-tab',id:'session-1:tab-1',revision:'2'}};
 const page={tabId:'session-1:tab-1',revision:'2',url:'https://example.com/story?id=1',title:'A story',capturedAt:1_795_000_000_000,text:'A story\nIt happened.',truncated:false,links:[{text:'More',url:'https://example.com/more'}]};
@@ -97,4 +97,59 @@ test('the address the agent sees is HTTPS without credentials or fragment',()=>{
  assert.equal(agentPageTitle('  Two\nlines\u0007 here '),'Two lines here');
  assert.equal(agentPageTitle('t'.repeat(400)).length,300);
  assert.equal(agentPageTitle(undefined),'');
+});
+
+// Browser captures the page ahead of the turn, so a send rarely waits on a read.
+test('a turn takes a kept capture of the same tab and revision when no fresher read lands in time',async()=>{
+ let reads=0,release;
+ const slow=()=>{reads++;return new Promise(resolve=>{release=()=>resolve({...page,title:'Fresher'});});};
+ const cache=new BrowserPageCache(async()=>{reads++;return page;});
+ assert.equal(await cache.refresh({id:'session-1:tab-1',revision:'2'}),page);
+ assert.deepEqual(cache.cached({id:'session-1:tab-1',revision:'2'}),page);
+ assert.equal(cache.cached({id:'session-1:tab-1',revision:'3'}),undefined,'another revision is another page');
+ // A slow fresh read: the turn returns the kept capture after the short wait, not the full budget.
+ const kept=new BrowserPageCache(slow);kept.entry={key:'session-1:tab-1\n2',page,at:Date.now()};
+ const started=Date.now();
+ assert.deepEqual(await kept.forTurn({id:'session-1:tab-1',revision:'2'},signal(),40),page);
+ assert.ok(Date.now()-started<BROWSER_PAGE_WAIT_MS);
+ // The read keeps running and its result replaces the capture for the next turn.
+ release();await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(kept.cached({id:'session-1:tab-1',revision:'2'}).title,'Fresher');
+ // A fresh read that lands in time wins.
+ const quick=new BrowserPageCache(async()=>({...page,title:'Now'}));quick.entry={key:'session-1:tab-1\n2',page,at:Date.now()};
+ assert.equal((await quick.forTurn({id:'session-1:tab-1',revision:'2'},signal())).title,'Now');
+ assert.ok(BROWSER_PAGE_FRESH_WAIT_MS<=300);
+});
+
+test('captures of one page share one read, and an old or foreign capture is never used',async()=>{
+ let reads=0;const cache=new BrowserPageCache(()=>{reads++;return new Promise(resolve=>setTimeout(()=>resolve(page),20));});
+ const tab={id:'session-1:tab-1',revision:'2'};
+ await Promise.all([cache.refresh(tab),cache.refresh(tab),cache.forTurn(tab,signal())]);
+ assert.equal(reads,1);
+ // A read for a different page is not kept under this tab.
+ const wrong=new BrowserPageCache(async()=>({...page,revision:'9'}));await wrong.refresh(tab);assert.equal(wrong.cached(tab),undefined);
+ // Too old, or cleared: not used.
+ let now=0;const aged=new BrowserPageCache(async()=>page,()=>now);await aged.refresh(tab);now=BROWSER_PAGE_CACHE_MAX_AGE_MS+1;assert.equal(aged.cached(tab),undefined);
+ const cleared=new BrowserPageCache(async()=>page);await cleared.refresh(tab);cleared.clear();assert.equal(cleared.cached(tab),undefined);
+ // A failed read keeps nothing and is not an error for the turn.
+ const failing=new BrowserPageCache(async()=>{throw Error('Browser page changed');});assert.equal(await failing.forTurn(tab,signal()),undefined);
+});
+
+test('the status a turn compares can be read beside its other reads, with the same result',async()=>{
+ const binding={origin:'https://agent.example',ownerId:'owner',agentId:'agent',sessionId:'session',connectionEpoch:2,serverInstanceId:'11111111-1111-4111-8111-111111111111'};
+ const {serverInstanceId,...session}=binding;
+ let calls=0;const status=async()=>{calls++;return {serverInstanceId,clientTurnObservationSupport:{version:1,optionalFields:['browserPage']}};};
+ const peer=new ClientObservationSupportSession(session,()=>true,status);
+ await peer.handshake(signal());calls=0;
+ const fresh=peer.freshStatus(signal());
+ assert.deepEqual((await peer.turn(context,page,signal(),fresh)).browserPage,page);
+ assert.equal(calls,1,'the early read is the turn\'s only status read');
+ // An early read showing the field withdrawn sends no page.
+ const withdrawn=new ClientObservationSupportSession(session,()=>true,async()=>({serverInstanceId,clientTurnObservationSupport:{version:1,optionalFields:['browserPage']}}));
+ await withdrawn.handshake(signal());
+ assert.equal((await withdrawn.turn(context,page,signal(),Promise.resolve({serverInstanceId,clientTurnObservationSupport:{version:1,optionalFields:[]}}))).browserPage,undefined);
+ // A failed early read sends the ordinary observation.
+ const offline=new ClientObservationSupportSession(session,()=>true,status);await offline.handshake(signal());
+ const failed=Promise.reject(Error('offline'));failed.catch(()=>{});
+ assert.deepEqual(await offline.turn(context,page,signal(),failed),{context});
 });

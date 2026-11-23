@@ -13,9 +13,9 @@ import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
 // boundaries (scripts/fixtures/native-telephony.ts plus the host below). No model, SIM or radio is
 // involved, and this is not a device acceptance test.
 
-async function setup(page: Page, reply: string, from: 'home' | 'settings' = 'home', holdReceipt = false) {
+async function setup(page: Page, reply: string, from: 'home' | 'settings' = 'home', holdReceipt = false, navTarget: 'phone' | 'contacts' | null = null) {
   await page.addInitScript(installTelephonyFixture, {});
-  await page.addInitScript(({reply, holdReceipt}) => {
+  await page.addInitScript(({reply, holdReceipt, navTarget}) => {
     const w = window as any, fixture = w.keypadFixture = {
       proposal: null as any, decisions: [] as string[], receipts: [] as any[], journal: new Map<string, any>(), cancels: 0,
       release: null as null | (() => void),
@@ -63,10 +63,16 @@ async function setup(page: Page, reply: string, from: 'home' | 'settings' = 'hom
         // As the service binds it in direct-request mode: the owner's own message requested this keypad.
         fixture.proposal = {id: 'fixture-proposal', digest: 'a'.repeat(64), state: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(), subjectUserId: 'fixture-owner', requestedBy: agentId, action: 'device_action',
           payload: {action: 'device_action', version: 1, installationId: w.keypadInstallation, enrollmentId: 'fixture-enrollment', operation: {type: 'phone_keypad'}, requestMessageId: userMessageId}};
-        return ok({text: reply, agentName: 'Keypad fixture', userMessageId, actionResults: [{actionName: 'PROPOSE_DEVICE_ACTION', success: true, effectReceipts: [{receiptId: 'fixture-proposal', operation: 'device.phone_keypad', resource: {kind: 'device.approval', id: 'fixture-proposal'}, artifacts: [], idempotency: {key: 'device:fixture-proposal', replayed: false}, observedAt: new Date().toISOString(), outcome: 'preview'}]}]});
+        // Asked for, the same turn also prepared a screen change (VIEWS) before the keypad, as the
+        // upstream planner does when it replans after a prepared navigation.
+        const views = navTarget ? [{actionName: 'VIEWS_SHOW', success: true, values: {mode: 'show', viewId: navTarget, viewPath: '/' + navTarget, viewType: 'gui', completedActionDelivered: false, completedActionHandoffId: 'nav-handoff', navigationPrepared: true, navigationBinding: {requestId: 'nav-handoff', clientId: posted.metadata.viewClientId, viewId: navTarget, viewType: 'gui', installationId: w.keypadInstallation}}}] : [];
+        return ok({text: reply, agentName: 'Keypad fixture', userMessageId, actionResults: [...views, {actionName: 'PROPOSE_DEVICE_ACTION', success: true, effectReceipts: [{receiptId: 'fixture-proposal', operation: 'device.phone_keypad', resource: {kind: 'device.approval', id: 'fixture-proposal'}, artifacts: [], idempotency: {key: 'device:fixture-proposal', replayed: false}, observedAt: new Date().toISOString(), outcome: 'preview'}]}]});
       }
       if (pathname === '/api/client-devices/proposals') return ok({proposals: fixture.proposal ? [fixture.proposal] : []});
       const sent = input.body ? JSON.parse(input.body) : {};
+      if (pathname === '/api/views/interact-claim') { (fixture.claims ||= []).push(sent.requestId); return ok({claimId: 'claim-' + sent.requestId}); }
+      if (pathname === '/api/views/interact-result') { (fixture.acks ||= []).push({success: sent.success, switched: sent.result?.switched}); return ok({accepted: true}); }
+      if (pathname.startsWith('/api/views/')) return ok({navigationBinding: {clientId: sent.clientId, viewId: pathname.split('/')[3], viewType: 'gui', requestId: sent.completedActionHandoffId, installationId: w.keypadInstallation}});
       if (pathname.startsWith('/api/client-devices/proposals/fixture-proposal/')) {
         if (sent.digest !== fixture.proposal.digest) throw Error('Review digest changed');
         if (pathname.endsWith('/decision')) { fixture.decisions.push(sent.decision); fixture.proposal = {...fixture.proposal, state: sent.decision === 'approve' ? 'approved' : 'rejected'}; return ok({proposal: fixture.proposal, digest: fixture.proposal.digest}); }
@@ -77,7 +83,7 @@ async function setup(page: Page, reply: string, from: 'home' | 'settings' = 'hom
       }
       throw Error('Unexpected fixture route ' + pathname);
     };
-  }, {reply, holdReceipt});
+  }, {reply, holdReceipt, navTarget});
   await page.route('https://**/*', route => route.abort());
   await page.goto('/?mode=dev');
   await page.getByText('Local development agent', {exact: true}).click();
@@ -133,3 +139,27 @@ test('the owner\'s Stop still ends the reply while a requested keypad is being r
   await expect(replies(page).filter({hasText: /^Opening the keypad\.$/})).toHaveCount(0);
   expect(await page.evaluate(() => ((window as any).telephonyCalls as string[]).filter(m => m === 'dial' || m === 'placeCall'))).toEqual([]);
 });
+
+// Review (nav-lease): one direct-mode turn that both prepared a screen change and opened the keypad.
+// The keypad step ran on a timer once the request settled, racing the turn's own VIEWS delivery:
+// after the switch was claimed, the keypad's context check failed and it never opened, though the
+// receipt said "The keypad is open". The turn now runs its held keypad step after its own
+// navigation is delivered, and that step still counts the turn's own switch as current.
+for (const target of ['phone', 'contacts'] as const)
+  test(`a turn that switches to ${target} and opens the keypad shows the keypad after the switch`, async ({page}) => {
+    await setup(page, 'Opening the phone keypad.', 'home', false, target);
+    await expect.poll(() => page.evaluate(() => (window as any).keypadFixture.receipts.map((r: any) => r.outcome))).toEqual(['applied']);
+    // The screen change is delivered and acknowledged as switched, never cancelled as stale.
+    await expect.poll(() => page.evaluate(() => (window as any).keypadFixture.acks?.length ?? 0)).toBeGreaterThan(0);
+    expect(new Set((await page.evaluate(() => (window as any).keypadFixture.acks)).map(JSON.stringify))).toEqual(new Set([JSON.stringify({success: true, switched: true})]));
+    expect(await page.evaluate(() => (window as any).keypadFixture.claims)).toContain('nav-handoff');
+    // The keypad the receipt names is what the owner sees, after the switch.
+    await expect(page.locator('html')).toHaveAttribute('data-active-view', 'phone');
+    await expect(page.locator('[data-alpha-phone-keypad]')).toBeVisible();
+    await expect(replies(page).filter({hasText: /^The keypad is open\. Nothing was dialed\.$/})).toHaveCount(1);
+    await expect(replies(page).filter({hasText: /^Opening the phone keypad\.$/})).toHaveCount(1);
+    await page.waitForTimeout(500);
+    await expect(page.getByText(/Navigation cancelled|Could not confirm the screen change|May still finish/)).toHaveCount(0);
+    expect(await page.evaluate(() => ((window as any).telephonyCalls as string[]).filter(m => m === 'dial' || m === 'placeCall'))).toEqual([]);
+    expect(await page.evaluate(() => (window as any).keypadFixture.cancels)).toBe(0);
+  });
