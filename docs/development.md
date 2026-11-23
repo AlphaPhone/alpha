@@ -887,3 +887,13 @@ The core catalog records the updated Notes source bytes. The mobile policy
 records the lock change for the Maps plugin's contracts dependency.
 
 The subsequent reviewed pin `17e742d454e5f9cc7692397016ce1524cd3f5288` adds the itemized close-all Browser tabs review negotiated as `browser.tabs.close-all.v1` ([eliza#40059](https://github.com/elizaOS/eliza/pull/40059)), leased navigation claims so a lost claim no longer blocks navigation for 120 s ([eliza#40025](https://github.com/elizaOS/eliza/pull/40025)), recovered-reply grounding that accepts an honest failure report ([eliza#40026](https://github.com/elizaOS/eliza/pull/40026)), unfenced tool-owned card blocks such as the Maps nearby list ([eliza#40030](https://github.com/elizaOS/eliza/pull/40030)), acknowledgement cues ([eliza#40028](https://github.com/elizaOS/eliza/pull/40028)), the agent-context follow-ups ([eliza#40037](https://github.com/elizaOS/eliza/pull/40037)) and Calendar delete read evidence ([eliza#40038](https://github.com/elizaOS/eliza/pull/40038)). `bun scripts/verify-upstream.ts` verified the source at this pin. No model turn, APK or Pixel run is proven by the pin.
+
+The next pin, `fe5c02faed8568a45194ea635ecfe73c084e6882`, is the develop merge of
+[eliza#40067](https://github.com/elizaOS/eliza/pull/40067): the open Browser page
+travels beside the current-turn observation (`clientDevice.browserPage`) and the
+agent sees it once per turn, inside the shared untrusted-content envelope (see
+[browser-page-context.md](browser-page-context.md)). The pin also brings the
+develop merges since `17e742d454`, among them photo card reviews
+([eliza#40090](https://github.com/elizaOS/eliza/pull/40090)) and scoped native
+password approval ([eliza#40088](https://github.com/elizaOS/eliza/pull/40088)).
+No model turn, APK or Pixel run is proven by the pin.
