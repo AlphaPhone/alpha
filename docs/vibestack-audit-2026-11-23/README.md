@@ -77,6 +77,7 @@ checked it against the tree it will ship from.
 ## Ledgers and counts
 
 - [`alpha-develop-drift.md`](alpha-develop-drift.md): alpha `develop` commits not on `vibestack`, by owner, with commit pointers.
+- [`device/`](device/RUNBOOK.md): the device lane for the first Vibestack build on the Pixel: the build, sign, stage, image and flash steps with their scripts, the on-device equivalence checks, and the open questions. Written by reading; none of the steps has been run.
 - [`eliza-pr-ledger.md`](eliza-pr-ledger.md): eliza `develop` PR merges since 2026-11-13 with no recorded port disposition.
 - [`formal-alpha-static.md`](formal-alpha-static.md), [`formal-eliza-static.md`](formal-eliza-static.md): stories, rules, Quint blocks, proof files and conformance drivers per area, counted without running anything.
 - [`tool-sync.md`](tool-sync.md): which lalalune/vibestack tool revision upstream `vibestack` carried.
