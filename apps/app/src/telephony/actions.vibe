@@ -59,6 +59,8 @@ export interface ReadBack { readonly settled: Settled; readonly result: unknown 
 /** What a review card shows beside its candidates. */
 export interface ReviewDetails {
   readonly body?: string
+  /** More contacts matched than the review lists, which shows this many. */
+  readonly more?: number
   readonly changes?: Readonly<Record<string, { readonly before: ContactDetail; readonly after?: ContactDraft }>>
 }
 
@@ -225,11 +227,17 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     return { result, settled } satisfies ActionExecution
   }
 
-  /** Every dialable number of every matching contact, one candidate per number. */
+  /** More contacts matched than the review lists: the review says so (#1453). */
+  effect function more(found: boolean) {
+    if (found) try Ref.update(review, (details) => ({ ...details, more: LOOKUP_LIMIT }))
+  }
+
+  /** Every dialable number of every matching contact, one candidate per number; at most `LOOKUP_LIMIT` contacts, one more read to tell whether more matched. */
   effect function numbersOf(query: string) {
-    const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT, kind: "ExplicitRead" }))
+    const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT + 1, kind: "ExplicitRead" }))
+    try more(page.contacts.length > LOOKUP_LIMIT || page.next != null)
     const out: Candidate[] = []
-    for (const row of page.contacts) {
+    for (const row of page.contacts.slice(0, LOOKUP_LIMIT)) {
       if ("incomplete" in row) continue
       for (const raw of row.phones) {
         const number = normalizePhoneNumber(raw)
@@ -241,9 +249,10 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
 
   /** The matching contacts read whole: the only ones a change or removal is offered for. */
   effect function contactsMatching(query: string) {
-    const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT, kind: "ExplicitRead" }))
+    const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT + 1, kind: "ExplicitRead" }))
+    try more(page.contacts.length > LOOKUP_LIMIT || page.next != null)
     const out: ContactDetail[] = []
-    for (const row of page.contacts) {
+    for (const row of page.contacts.slice(0, LOOKUP_LIMIT)) {
       if ("incomplete" in row) continue
       const detail = try (bridgeCall("get", (c) => c.contacts.get(row.id, "ExplicitRead")) catch () => undefined)
       if (detail !== undefined) out.push(detail)
@@ -371,7 +380,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
         }
       }
       if (options.length === 0) return try finishEarly(runId, result("not-found"), "NothingFound")
-      try Ref.set(review, { changes: Object.fromEntries(options.map((o) => [o.candidate.candidateId, { before: o.before, after: o.after }])) })
+      try Ref.update(review, (details) => ({ ...details, changes: Object.fromEntries(options.map((o) => [o.candidate.candidateId, { before: o.before, after: o.after }])) }))
       const chosenNumber = try choose(runId, options.map((o) => o.candidate))
       const now = try actions.get()
       if (chosenNumber === undefined || now.ongoing.tag !== "Guarding") return try cancelled(runId, result("cancelled"))

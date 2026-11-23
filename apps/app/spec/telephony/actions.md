@@ -91,7 +91,9 @@ Every dialable number of every matching contact is one candidate. No match finis
 A new contact whose name or any of whose numbers is already in Contacts shows that contact as the
 one candidate, "Add anyway"; a change shows each matching contact before and after, with its `set`
 fields replaced (or added beside the existing values) and its explicit `add` and `remove` values
-applied; a change that would leave a contact exactly as it is is never offered. A removal the
+applied; a change that would leave a contact exactly as it is is never offered. A name is looked
+up in at most ten contacts, reading one more to tell whether more matched; when more did, the review
+says that only the first ten are listed. A removal the
 phone stages in its Undo window is the deletion the owner approved, and reads as deleted.
 
 ```quint
