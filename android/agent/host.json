@@ -528,6 +528,10 @@
     },
     {
      "method": "GET",
+     "path": "/api/lifeops/calendar/sync-control/destinations"
+    },
+    {
+     "method": "GET",
      "path": "/api/lifeops/definitions"
     },
     {
@@ -1550,6 +1554,10 @@
     {
      "method": "POST",
      "path": "/api/lifeops/calendar/sync-control"
+    },
+    {
+     "method": "GET",
+     "path": "/api/lifeops/calendar/sync-control/destinations"
     },
     {
      "method": "GET",
