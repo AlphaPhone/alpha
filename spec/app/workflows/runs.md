@@ -405,7 +405,7 @@ pure def sometimesAStopIsRefused(r: Runs): bool = running(r) and r.stop.outcome 
 
 ```quint
 pure def restart(r: Runs): Runs = {
-  ...r, reading: R::unread, review: V::dismiss(r.review), request: Q::restart(r.request),
+  ...r, reading: { ...r.reading, status: R::Idle }, review: V::dismiss(r.review), request: Q::restart(r.request),
   stop: if (r.stop.outcome == A::Sent) A::conclude(r.stop, false, false) else r.stop,
 }
 ```

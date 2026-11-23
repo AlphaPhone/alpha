@@ -62,7 +62,8 @@ pure val lastReceiptValues = Set(NoReceipt, ClockOpened, Unclear, ClockDenied)
 
 ### Opening the page reads the last handoff and whether this phone carries repeat days, where there is a Clock to hand over to
 
-A read that failed can be tried again.
+A read that failed can be tried again. Where there is no Clock nothing is
+read, and a read still awaited from an earlier visit no longer counts.
 
 ```quint
 pure def busy(c: Clock): bool = c.handoff.outcome == A::Recorded or c.handoff.outcome == A::Sent
@@ -72,7 +73,7 @@ pure def canOpenClock(c: Clock, available: bool): bool = not(c.open)
 pure def openClock(c: Clock, available: bool): Moved =
   val asked = R::ask(c.history)
   if (available) { state: { ...c, open: true, clock: true, history: asked }, out: List(ReadHistory({ ticket: asked.ticket })) }
-  else { state: { ...c, open: true, clock: false }, out: List() }
+  else { state: { ...c, open: true, clock: false, history: { ...c.history, status: R::Idle } }, out: List() }
 
 pure def canRetryHistory(c: Clock): bool = c.open and c.clock and c.history.status == R::Failed
 

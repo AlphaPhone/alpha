@@ -271,7 +271,7 @@ pure def sometimesALostDecisionIsSettled(a: Approvals): bool = a.decision.outcom
 
 ```quint
 pure def restart(a: Approvals): Approvals = {
-  ...a, sheet: false, asking: V::dismiss(a.asking), check: R::unread, opened: NotOpening,
+  ...a, sheet: false, asking: V::dismiss(a.asking), check: { ...a.check, status: R::Idle }, opened: NotOpening,
   decision: if (a.decision.outcome == A::Sent) A::conclude(a.decision, false, false) else a.decision,
   approval: if (a.approval == Deciding) Unsettled else a.approval,
 }

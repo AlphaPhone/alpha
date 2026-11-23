@@ -294,14 +294,15 @@ pure def sometimesAGeneratedDraftIsUsed(b: Builder): bool = b.steps.length() >= 
 
 ### The draft is kept on the phone after each change, one write at a time, and only the newest write's answer counts
 
-A write that failed keeps the edits in memory, says so, and is tried
-again.
+A write that failed keeps the edits in memory and says so until it is
+tried again.
 
 ```quint
 pure def canKeepDraft(b: Builder): bool = D::canSave(b.draft) and b.owner >= 1
 
 pure def keepDraft(b: Builder): Moved =
-  { state: { ...b, draft: D::save(b.draft), write: b.write + 1 }, out: List(KeepDraft({ write: b.write + 1, owner: b.owner })) }
+  { state: { ...b, draft: D::save(b.draft), write: b.write + 1, unwritable: false },
+    out: List(KeepDraft({ write: b.write + 1, owner: b.owner })) }
 
 pure def canDraftKept(b: Builder, write: int): bool = D::canLand(b.draft) and write == b.write
 
@@ -509,7 +510,7 @@ pure def sometimesASaveIsLetGo(b: Builder): bool = b.save.attempt.outcome == A::
 
 ```quint
 pure def restart(b: Builder): Builder = {
-  ...b, open: false, offer: R::unread, choices: R::unread, discarding: false, review: V::dismiss(b.review),
+  ...b, open: false, offer: { ...b.offer, status: R::Idle }, choices: { ...b.choices, status: R::Idle }, discarding: false, review: V::dismiss(b.review),
   save: Q::restart(b.save), draft: if (b.draft.sync == D::Saving) D::keepMine(b.draft) else b.draft,
 }
 
