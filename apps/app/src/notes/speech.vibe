@@ -1,4 +1,4 @@
-// spec/notes/recorder.md, "Segments are transcribed in order while the recording goes on, and never past the audio"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
+// spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
 import type { RecordingTranscriber } from "../voice/transcription.vibe"
 
 /** The window of a saved voice note's recording a transcript request reads. */
